@@ -1,10 +1,12 @@
 # Sinnix hub — the operator's browser front door to the estate, reachable from
 # the tailnet and nowhere else.
 #
-# Two units, both in the user manager, both default-off until a host opts in:
+# One unit of its own, in the user manager, default-off until a host opts in:
 #
 #   sinnix-hub.service          Caddy: static serving + reverse proxying
-#   sinnix-hub-feedback.service append-only spool for report annotations
+#
+# Everything the hub serves that is not a file on disk -- the pages, the action
+# API, the annotation spool -- comes from the ops-reducer over its Unix socket.
 #
 # ── Why the user manager ────────────────────────────────────────────────────
 # The dashboard's whole value is the ops-reducer's current-state snapshot, and
@@ -20,6 +22,14 @@
 # to be a `sinnix-hub-render` timer writing the same pages to static files every
 # 60 seconds; a page is now as current as the moment it was asked for, and there
 # is no window in which the hub describes an estate that has since moved on.
+#
+# ── Where annotations go ────────────────────────────────────────────────────
+# `/feedback` is a route on that same reducer, writing the same append-only
+# JSONL the retired `sinnix-hub-feedback` daemon wrote (same envelope, same
+# file-per-UTC-day, same fsync per line -- agents read those files directly).
+# Arrival of a `sinnix-elicit-v1` record starts the drain that a 120s timer used
+# to run, coalesced so a comparison session refits the model once rather than
+# once per tap.
 #
 # Auth is unchanged by that move. The reducer treats its Unix socket as
 # authorized (it is 0600 in the operator's runtime dir) and still demands a
@@ -239,7 +249,6 @@ mkServiceModule {
       # config text, so the units hand the same directory to both and neither
       # side needs the uid at evaluation time.
       opsSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/ops.sock";
-      feedbackSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/hub-feedback.sock";
       terminalSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/terminal-view.sock";
       phoneSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/phone-dispatcher.sock";
 
@@ -310,8 +319,11 @@ mkServiceModule {
             reverse_proxy unix/${opsSocket}
           }
 
-          handle_path /feedback* {
-            reverse_proxy unix/${feedbackSocket}
+          # Not handle_path: the reducer routes on `/feedback` itself, and
+          # the CORS answer it gives this route (reports are opened off disk
+          # as file://, Origin null) is deliberately not given to /ops/*.
+          handle /feedback* {
+            reverse_proxy unix/${opsSocket}
           }
 
           # Read-only kitty terminal contents + scrollback history
@@ -436,8 +448,27 @@ mkServiceModule {
       ];
 
       # The pages are rendered by the reducer, which needs the manifest this
-      # module owns the content of.
-      sinnix.services.ops-reducer.hubManifest = manifest;
+      # module owns the content of; so is /feedback, which needs the spool
+      # directory and the drain to run when an elicit record lands.
+      #
+      # The drain runs as a transient unit rather than a child of the reducer:
+      # `sinnix-elicit` writes under /realm/data/notes/preferences, which the
+      # reducer's own ProtectSystem=strict sandbox has no business opening, and
+      # a named transient unit keeps the run visible in the journal under the
+      # name the timer used to have.
+      sinnix.services.ops-reducer = {
+        hubManifest = manifest;
+        feedbackDir = cfg.feedbackDir;
+        elicitCommand = lib.concatStringsSep " " [
+          "systemd-run"
+          "--user"
+          "--quiet"
+          "--collect"
+          "--unit=sinnix-elicit-autoingest"
+          "${scriptPkgs.sinnix-elicit}/bin/sinnix-elicit"
+          "autoingest"
+        ];
+      };
 
       # Per-interface, not networking.firewall.allowedTCPPorts: tailscale0 is
       # not a trusted interface under useRoutingFeatures = "none", so this is
@@ -464,21 +495,11 @@ mkServiceModule {
       ];
 
       environment.systemPackages = [
-        scriptPkgs.sinnix-hub-feedback
         scriptPkgs.sinnix-terminal-view
         scriptPkgs.sinnix-phone-dispatcher
       ];
 
       sinnix.runtime.surfaces = {
-        hub-feedback = {
-          unit = "sinnix-hub-feedback.service";
-          manager = "user";
-          resourceClass = "interactive-agent";
-          observe = {
-            enable = true;
-            restartable = true;
-          };
-        };
         phone-dispatcher = {
           unit = "sinnix-phone-dispatcher.service";
           manager = "user";
@@ -548,21 +569,10 @@ mkServiceModule {
             restartable = true;
           };
         };
-        elicit-autoingest = {
-          unit = "sinnix-elicit-autoingest.timer";
-          kind = "timer";
-          manager = "user";
-          resourceClass = "background-maintenance";
-          observe = {
-            enable = true;
-            restartable = true;
-          };
-        };
       };
 
       home-manager.users.${userName} = {
         home.packages = [
-          scriptPkgs.sinnix-hub-feedback
           scriptPkgs.sinnix-terminal-view
           scriptPkgs.sinnix-elicit
         ];
@@ -570,16 +580,11 @@ mkServiceModule {
         systemd.user.services.sinnix-hub = {
           Unit = {
             Description = "Sinnix tailnet hub (Caddy)";
-            After = [
-              "sinnix-hub-feedback.service"
-              "sinnix-ops-reducer.socket"
-            ];
-            # The reducer renders every page Caddy does not serve off disk, so
-            # its socket has to exist before the proxy takes a request.
-            Wants = [
-              "sinnix-hub-feedback.service"
-              "sinnix-ops-reducer.socket"
-            ];
+            After = [ "sinnix-ops-reducer.socket" ];
+            # The reducer renders every page Caddy does not serve off disk and
+            # takes the annotation posts, so its socket has to exist before the
+            # proxy takes a request.
+            Wants = [ "sinnix-ops-reducer.socket" ];
           };
           Service = {
             Type = "simple";
@@ -603,23 +608,6 @@ mkServiceModule {
             RestartSec = "5s";
             NoNewPrivileges = true;
             UMask = "0077";
-          };
-          Install.WantedBy = [ "default.target" ];
-        };
-
-        systemd.user.services.sinnix-hub-feedback = {
-          Unit.Description = "Sinnix hub annotation spool endpoint";
-          Service = {
-            Type = "simple";
-            ExecStart = lib.concatStringsSep " " [
-              "${scriptPkgs.sinnix-hub-feedback}/bin/sinnix-hub-feedback"
-              "--socket %t/sinnix/hub-feedback.sock"
-              "--spool-dir ${cfg.feedbackDir}"
-            ];
-            Restart = "on-failure";
-            RestartSec = "5s";
-            NoNewPrivileges = true;
-            UMask = "0022";
           };
           Install.WantedBy = [ "default.target" ];
         };
@@ -673,31 +661,6 @@ mkServiceModule {
           Install.WantedBy = [ "default.target" ];
         };
 
-        # sinnix-elicit's comparison sessions (sinnix-eb9c) post to this same
-        # feedback spool. The operator's own question -- "why does this
-        # require a separate step?" after tapping through comparisons --
-        # is answered by draining and refitting on a short timer, not a
-        # manual `ingest`+`explain`.
-        # `autoingest` is a no-op safe to run this often: `ingest` dedups by
-        # comparison id, and a refit only happens when something new landed.
-        systemd.user.services.sinnix-elicit-autoingest = {
-          Unit.Description = "Drain the hub feedback spool into every sinnix-elicit domain and refit";
-          Service = {
-            Type = "oneshot";
-            ExecStart = "${scriptPkgs.sinnix-elicit}/bin/sinnix-elicit autoingest";
-            NoNewPrivileges = true;
-          };
-        };
-
-        systemd.user.timers.sinnix-elicit-autoingest = {
-          Unit.Description = "Periodic sinnix-elicit spool drain + refit";
-          Timer = {
-            OnStartupSec = "10s";
-            OnUnitActiveSec = "120s";
-            AccuracySec = "10s";
-          };
-          Install.WantedBy = [ "timers.target" ];
-        };
       };
     };
 } args

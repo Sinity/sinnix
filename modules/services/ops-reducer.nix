@@ -83,7 +83,7 @@ mkServiceModule {
             Type = "simple";
             # --agent-controller: dotsRoot-direct, not the
             # ~/.config/hermes/skills linkFarm hop.
-            ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --ambient-product /realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json --anchor-events %t/sinnix/afk-resume.json --hyprland-events %t/sinnix/hyprland-events --agent-controller ${config.sinnix.paths.dotsRoot}/_ai/skills/agent-orchestration/scripts/agent_job_control.sh --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds}${lib.optionalString (cfg.hubManifest != null) " --hub-manifest ${cfg.hubManifest}"}";
+            ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --ambient-product /realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json --anchor-events %t/sinnix/afk-resume.json --hyprland-events %t/sinnix/hyprland-events --agent-controller ${config.sinnix.paths.dotsRoot}/_ai/skills/agent-orchestration/scripts/agent_job_control.sh --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds} --feedback-dir ${cfg.feedbackDir}${lib.optionalString (cfg.hubManifest != null) " --hub-manifest ${cfg.hubManifest}"}${lib.optionalString (cfg.elicitCommand != null) " --elicit-command '${cfg.elicitCommand}'"}";
             # nvidia-smi, journalctl, systemctl and hyprctl are what the pages
             # probe the live host with; /run/current-system/sw/bin is where
             # they are, and the pages render on request rather than from a
@@ -97,6 +97,9 @@ mkServiceModule {
             ReadWritePaths = [
               "%t/sinnix"
               stateDir
+              # The annotation spool the /feedback route appends to. Nothing
+              # else under /realm/data is writable from here.
+              cfg.feedbackDir
             ];
             UMask = "0077";
           };
@@ -109,6 +112,26 @@ mkServiceModule {
       type = lib.types.int;
       default = 10;
       description = "Minimum interval between bounded sinnix-observe reads.";
+    };
+
+    feedbackDir = lib.mkOption {
+      type = lib.types.str;
+      default = "/realm/data/derived/hub-feedback";
+      description = ''
+        Spool directory for annotations posted to the reducer's /feedback
+        route: one append-only JSONL file per UTC day, which agents read
+        directly. Set by `sinnix.services.hub`, which owns the route's clients.
+      '';
+    };
+
+    elicitCommand = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = ''
+        Command run, coalesced, when a `sinnix-elicit-v1` record lands in the
+        feedback spool — replacing the 120s drain timer with the arrival that
+        made it necessary. Null means nothing is triggered.
+      '';
     };
 
     hubManifest = lib.mkOption {

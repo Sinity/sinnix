@@ -395,7 +395,7 @@ function render(){
     stage.style.display = "none";
     const d = document.getElementById("done");
     d.style.display = "block";
-    d.textContent = "Done — " + log.filter(r=>!r.undone).length + " judgments recorded. They'll be ingested and the ranking refit automatically within ~2 minutes (sinnix-elicit-autoingest) — check with: sinnix elicit rank " + SESSION.domain;
+    d.textContent = "Done — " + log.filter(r=>!r.undone).length + " judgments recorded. They'll be ingested and the ranking refit automatically a few seconds after you stop (sinnix-elicit-autoingest) — check with: sinnix elicit rank " + SESSION.domain;
     document.getElementById("progress").textContent = "complete";
     return;
   }
