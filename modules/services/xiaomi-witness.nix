@@ -1,0 +1,88 @@
+# Xiaomi cloud vendor witness: the band's data read from Xiaomi's servers,
+# beside (not through) the phone's Health Connect lane.
+#
+# Why it exists (sinnix-ogll, measured 2026-08-17): Mi Fitness writes to
+# Health Connect only when its on-screen Sync button is pressed -- the forced
+# SyncJobService was tested and writes nothing -- but it syncs Xiaomi's cloud
+# silently, so the cloud held heart rate two hours fresher than HC on the
+# night this was built. The cloud sleep summaries also carry sleep_score,
+# REM duration and per-segment naps that the HC write path never gets. This
+# service polls that cloud with a QR-established token (one browser-session
+# confirmation, agent-drivable; token refresh sustains it) and appends
+# write-on-change envelopes to the lane.
+#
+# No BLE contention by construction: this never talks to the band, so it can
+# never fight Mi Fitness for the bond the way Gadgetbridge does.
+{
+  mkServiceModule,
+  lib,
+  pkgs,
+  helpers,
+  ...
+}@args:
+let
+  scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+  stateDir = "/realm/state/xiaomi-witness";
+  laneDir = "/realm/data/captures/xiaomi-cloud";
+in
+mkServiceModule {
+  name = "xiaomi-witness";
+  description = "Xiaomi cloud health witness (band data via Xiaomi's servers)";
+  extraOptions = {
+    intervalSec = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 1800;
+      description = "Seconds between cloud sync passes. The cloud itself lags the band by Mi Fitness's own sync cadence (hours), so this bounds our half of the latency, not the total.";
+    };
+  };
+  surface = {
+    unit = "sinnix-xiaomi-witness.service";
+    manager = "user";
+    resourceClass = "capture-runtime";
+    observe = {
+      enable = true;
+      restartable = true;
+    };
+    captures = [
+      {
+        name = "xiaomi-cloud";
+        path = laneDir;
+        cadenceSeconds = 1800;
+        # Write-on-change means a quiet pass appends nothing, and the cloud
+        # side goes genuinely quiet when the phone is off. Sleep lands every
+        # morning and daily aggregates revise through the day, so half a day
+        # with zero changed envelopes is evidence of a broken link (dead
+        # token, shard move), not an ordinary gap.
+        staleAfterSeconds = 43200;
+      }
+    ];
+  };
+  configFn =
+    { cfg, ... }:
+    {
+      # Token + write-on-change hash state. 0700: the token file is a live
+      # Xiaomi account credential.
+      systemd.tmpfiles.rules = [
+        "d ${stateDir} 0700 sinity users -"
+        "d ${laneDir} 0755 sinity users -"
+      ];
+
+      systemd.user.services.sinnix-xiaomi-witness = {
+        description = "Xiaomi cloud health witness sync pass";
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = lib.getExe scriptPkgs.sinnix-xiaomi-witness;
+        };
+      };
+
+      systemd.user.timers.sinnix-xiaomi-witness = {
+        description = "Periodic trigger for the Xiaomi cloud witness";
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnBootSec = "3min";
+          OnUnitActiveSec = "${toString cfg.intervalSec}s";
+          AccuracySec = "5min";
+        };
+      };
+    };
+} args
