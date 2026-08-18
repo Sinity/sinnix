@@ -392,7 +392,8 @@ internal differences.
 - **Notifications.** A `NotificationListenerService` logs post and dismiss into
   the events plane: the inbound comms timeline nothing else here can
   produce. MIUI may revoke the binding silently, so connect and disconnect are
-  written as events and a gap explains itself.
+  written as events and a gap explains itself. See "Continuity" below for the
+  grant that binds it and the desktop mirror built on top of it.
 
 ## The lanes it now carries
 
@@ -445,6 +446,76 @@ it, which is the condition under test.
 - **The steering ready queue is approximated.** Until the steering store grows
   its own queue table, the dispatcher's `build_steering` treats open
   commitments whose window ends today as the ready set.
+
+## Continuity: clipboard and notifications
+
+The desktop already runs `sinnix-capture-clipboard` and `sinnix-capture-primary`
+(CLIPBOARD and PRIMARY, respectively). Phone continuity feeds those existing
+lanes and the events plane rather than opening a second writer to the lake --
+see sinnix-uyvt.5 for the sizing decision (KDE Connect evaluated and rejected;
+a bespoke tailnet-only path chosen instead, to avoid opening LAN ports
+1714-1764).
+
+**Clipboard, desktop -> phone: live.** `sinnix-phone clip-push` reads the
+desktop CLIPBOARD (`wl-paste`, text/\* only) and sets it on the phone via
+`termux-clipboard-set`; `sinnix-phone clip-watch` (wired as
+`sinnix-phone-clip-watch.service`) does this on every change. Reading the
+desktop clipboard this way triggers no new lake write -- `wl-paste` is a read,
+not a write, so `sinnix-capture-clipboard` (which watches the same selection)
+is unaffected and there is no feedback loop to guard against.
+
+**Clipboard, phone -> desktop: structurally blocked, not merely undone.**
+Android has refused clipboard reads from a backgrounded app since Android 10;
+`termux-clipboard-get` measured live returns empty unless Termux is the
+foreground app. Closing this needs an `AccessibilityService` reader (see
+sinnix-uyvt.6, which already has a bound accessibility service to build on) or
+keeping Termux foregrounded, which is a UX regression this design rejects. The
+share sheet (docs/phone.md, "Ingress") is the sanctioned workaround for a
+*deliberate* phone->desktop transfer -- share a URL or text and it lands in
+the outbox like anything else -- but that is push-shaped by the operator, not
+a live mirror of whatever sits in the clipboard.
+
+**PRIMARY has no Android equivalent.** Not a gap to close; Android's clipboard
+model has exactly one clipboard, selection-on-highlight is an X11/Wayland-only
+concept.
+
+**Notifications, phone -> desktop: grant live, mirror ships pending a restart.**
+`PhoneNotificationListener` has shipped in the app since 7h7o and logs
+`notification_posted`/`notification_removed`/`grant_transition` into the
+events plane, but Android never binds a `NotificationListenerService` just
+because it is declared -- it has to be named in
+`enabled_notification_listeners`, which `adb shell cmd notification
+allow_listener <component>` sets with no GUI dialog. That call is now inside
+`ensure_app_grants` in `scripts/sinnix-phone` (re-asserted on `app-install`,
+`app-grants`, and `adb-restore`, the same way every other grant here is,
+because MIUI can silently revoke a listener binding). On the arrival side,
+`sinnix_phone_dispatcher.uploads.append_events` -- the same arrival hook
+`external.trigger_score` uses for traces -- hands every newly-landed
+`notification_posted` line to a small consumer
+(`sinnix_phone_dispatcher.notifications.mirror_new_events`) that pops it as a
+desktop notification via the shared `sinnix_lib.notify.notify_desktop` helper,
+dropping `ongoing: true` posts first -- measured live 2026-08-18, 230 of 240
+`notification_posted` events that day were Termux's own persistent session
+notification reposting on every content tick, and an unfiltered relay would
+have buried the phone's real notifications (Gmail, SMS, Twitter, all
+`ongoing: false`) under that noise. No new daemon: this runs inline in the
+existing dispatcher process, on the existing write path. The grant itself is
+confirmed live on the device (`settings get secure
+enabled_notification_listeners` lists
+`dev.sinnix.phone/dev.sinnix.phone.ingress.PhoneNotificationListener`) and the
+lane is actively producing events; the mirror code ships in this change and
+takes effect on the next `sinnix-phone-dispatcher` restart (deferred -- see
+the mission report).
+
+**Notifications, desktop -> phone: the route exists; nothing calls it yet.**
+`sinnix-phone-dispatcher notify TITLE BODY [--route R]` queues a receipt in
+`inbox/notify/`; the app fetches, confirms, and shows it as an Android
+notification (`inbox/notify/*.json` in the contracts table above) -- this is
+already a complete, tested round trip, just not one anything invokes
+automatically. The parent bead's open question -- "is unfiltered mirroring of
+a desktop that runs agent fleets miserable" -- is still open; wiring a curated
+subset (agent-completion, build-failure, sentinel alarms) into this verb is
+follow-up work, not done here.
 
 ## Keeping the phone reachable
 
