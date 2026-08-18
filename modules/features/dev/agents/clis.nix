@@ -36,7 +36,6 @@ mkFeatureModule {
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       agentRuntimePackages = [
         scriptPkgs.beads
-        scriptPkgs.sinnix-egress-scan
       ]
       ++ (with pkgs; [
         nodejs_22
