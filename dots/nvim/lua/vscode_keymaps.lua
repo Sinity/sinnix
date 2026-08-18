@@ -51,11 +51,9 @@ map("<leader>ra", "editor.action.codeAction",                "Code Action")
 map("<leader>rr", "rust-analyzer.run",                       "Rust Analyzer: Run")
 map("<leader>rt", "testing.runAll",                          "Run All Tests")
 map("<leader>nc", "workbench.action.tasks.runTask",          "Run Task… (Nix)")
-map("<leader>ns", "workbench.action.tasks.runTask",          "Run Task… (Nix Switch)")
 
--- Notes / Markdown / Foam
+-- Notes / Markdown
 map("<leader>mp", "markdown.showPreviewToSide",              "Markdown Preview to Side")
-map("<leader>mg", "foam-vscode.show-graph",                  "Foam: Show Graph")
 
 -- Layout
 map("<leader>sv", "workbench.action.splitEditorRight",       "Split Right")
