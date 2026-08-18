@@ -8,6 +8,13 @@ in
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
+      # The packaged binary, not a copy of the source with a hand-patched
+      # shebang: the wrapper and the withPackages interpreter that discovery
+      # builds are part of what these fixtures are testing, and a fixture that
+      # rebuilds them itself passes while the real command is broken.
+      scriptRegistry = import ../scripts.nix { inherit inputs pkgs; };
+      vacuitySampler = "${scriptRegistry.packageSet.sinnix-vacuity-sampler}/bin/sinnix-vacuity-sampler";
+      claudeJudge = "${scriptRegistry.packageSet.sinnix-claude-judge}/bin/sinnix-claude-judge";
       runtimeDefaults = import ../data/runtime-defaults.nix { inherit lib; };
       mcpRegistry = import ../data/mcp-registry.nix { inherit lib; };
       launch = import ../launch.nix { inherit lib pkgs runtimeDefaults; };
@@ -851,13 +858,11 @@ in
             ];
           }
           ''
-            judge="$TMPDIR/sinnix-claude-judge"
             review="$TMPDIR/run-review.sh"
-            cp ${../../scripts/sinnix-claude-judge} "$judge"
             cp ${../../dots/_ai/skills/adversarial-loop/scripts/run-review.sh} "$review"
-            chmod +x "$judge" "$review"
-            patchShebangs "$judge" "$review"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/claude-judge.sh} "$judge" "$review"
+            chmod +x "$review"
+            patchShebangs "$review"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/claude-judge.sh} ${claudeJudge} "$review"
             touch "$out"
           '';
       vacuitySamplerFixture =
@@ -867,15 +872,10 @@ in
               pkgs.bash
               pkgs.coreutils
               pkgs.jq
-              pkgs.python3
             ];
           }
           ''
-            sampler="$TMPDIR/sinnix-vacuity-sampler"
-            cp ${../../scripts/sinnix-vacuity-sampler} "$sampler"
-            chmod +x "$sampler"
-            patchShebangs "$sampler"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/vacuity-sampler.sh} "$sampler"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/vacuity-sampler.sh} ${vacuitySampler}
             touch "$out"
           '';
       recoverySkillsFixture =
@@ -906,6 +906,9 @@ in
               pkgs.coreutils
               pkgs.gnused
               pkgs.jq
+              # The hooks under test call python3 themselves; the sampler no
+              # longer needs it here, since it arrives as a built package with
+              # its own interpreter.
               pkgs.python3
               pkgs.shellcheck
             ];
@@ -913,16 +916,12 @@ in
           ''
             hooks="$TMPDIR/hooks"
             settings="$TMPDIR/settings.json"
-            sampler="$TMPDIR/sinnix-vacuity-sampler"
             mkdir -p "$hooks"
             cp ${../../dots/claude/hooks}/*.sh "$hooks/"
             cp ${../../dots/claude/managed-settings.json} "$settings"
-            cp ${../../scripts/sinnix-vacuity-sampler} "$sampler"
             chmod +x "$hooks"/*.sh
-            chmod +x "$sampler"
             patchShebangs "$hooks"
-            patchShebangs "$sampler"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/hooks-harness.sh} "$hooks" "$settings" "$sampler"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/hooks-harness.sh} "$hooks" "$settings" ${vacuitySampler}
             touch "$out"
           '';
       agentDefinitionsFixture =
