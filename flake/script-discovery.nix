@@ -191,7 +191,18 @@ let
             ];
           }
           ''
-            install -Dm755 ${filePath} "$out"
+            install -Dm755 ${
+              # A bare ${filePath} references the file INSIDE the whole
+              # flake-source store copy, so the derivation hash was a
+              # function of the entire tree: every packaged script rebuilt
+              # on any tracked-file edit, and none ever hit cache across
+              # commits. builtins.path copies just this file, pinning the
+              # hash to the script's own bytes.
+              builtins.path {
+                path = filePath;
+                name = "${name}-source";
+              }
+            } "$out"
             patchShebangs "$out"
           '';
       pkg = pkgs.writeShellApplication {
