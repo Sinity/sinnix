@@ -36,7 +36,10 @@ retry loop, which would be abusive and would risk the account the unlock
 depends on.
 
 TWO ENDPOINTS, TWO QUESTIONS. `apply/bl-auth` answers "did I get a slot in
-this window" (apply_result 1 granted, 3 pool exhausted, 4 blocked).
+this window" (apply_result 1 granted, 3 pool exhausted, 4 blocked; 6 observed
+once 2026-08-18 on a request whose server ts landed exactly on the boundary
+second, with deadline 0 -- meaning unknown, no public decode, and the account
+state stayed "may apply" afterwards, so it registered nothing).
 `user/bl-switch/state` answers "may this account apply at all" (button_state
 1 may apply, 2 blocked until a date, 3 account under 30 days old). They are
 independent: an eligible account still loses a full pool, and reading the
@@ -377,6 +380,41 @@ async def run(args: argparse.Namespace) -> int:
     rtt_min = min(c[2] for c in conns)
     log(f"{len(conns)} warm connections, rtts "
         + "/".join(f"{c[2] * 1000:.0f}" for c in conns) + " ms")
+
+    # A handshake that needed retransmits (2026-08-18: 2535ms next to three
+    # ~110ms peers) marks a lossy path whose shot may arrive late, while the
+    # release offset below assumes the fleet's best RTT. Rebuild such
+    # connections while there is still comfortable lead; keep the old one
+    # whenever the rebuild does not finish healthy in time, so this can only
+    # ever improve the fleet, never shrink it.
+    slow_cutoff = max(3 * rtt_min, 0.5)
+    for i, (r, w, rtt) in enumerate(conns):
+        if rtt <= slow_cutoff:
+            continue
+        lead_left = target - (time.time() + off)
+        if lead_left < 5.0:
+            log(f"conn{i}: rtt {rtt * 1000:.0f} ms is pathological but only "
+                f"{lead_left:.1f}s to target; keeping it")
+            continue
+        try:
+            r2, w2, rtt2 = await asyncio.wait_for(open_warm(ctx), timeout=min(3.0, lead_left - 2.0))
+        except Exception as exc:  # noqa: BLE001 - per-connection news, old conn still fires
+            log(f"conn{i}: rebuild failed ({exc}); keeping the slow connection")
+            continue
+        if rtt2 <= slow_cutoff:
+            log(f"conn{i}: rebuilt, rtt {rtt * 1000:.0f} -> {rtt2 * 1000:.0f} ms")
+            conns[i] = (r2, w2, rtt2)
+            try:
+                w.close()
+            except Exception:
+                pass
+        else:
+            log(f"conn{i}: rebuild also slow ({rtt2 * 1000:.0f} ms); keeping the original")
+            try:
+                w2.close()
+            except Exception:
+                pass
+    rtt_min = min(c[2] for c in conns)
 
     # Send early by half the RTT so the packet ARRIVES at the boundary.
     release = target - rtt_min / 2 - args.lead_ms / 1000.0
