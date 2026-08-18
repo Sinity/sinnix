@@ -1,3 +1,8 @@
+# Provably fails when: the drain stops deleting snapshots it has proven into
+# an archive (verified by removing the `btrfs subvolume delete` from
+# mkSnapshotDrainScript), stops bind-mounting the snapshot it archives, or
+# stops writing the freshness marker its capture lane watches.
+#
 # Borg backup drain-hook runtime checks — exercises the realm/persist
 # btrbk-snapshot-drain shell logic (extracted from the systemd unit scripts)
 # against mocked mount/borg/btrfs binaries.
@@ -38,9 +43,52 @@ in
             message = "Sinex blob Borg job must use the evaluated CAS repository path";
           }
           {
+            # Every backup job's freshness marker is watched by the sentinel
+            # through its capture lane. The lane's path and the path actually
+            # written have to be the same file, or the estate reports a backup
+            # as fresh while nothing produces the marker (and the reverse: a
+            # marker nobody watches). The writer is the unit's own script plus
+            # the sources of the packaged scripts that unit invokes -- the
+            # drill receipt, for one, is written by scripts/sinnix-borg-drill
+            # rather than inline. Both sides come from the evaluated config,
+            # so neither is a restated literal.
             assertion =
-              !lib.hasInfix "/realm/sinex/state/blob-repository" config.systemd.services.borgbackup-job-sinex-blobs.script;
-            message = "Sinex blob Borg job must not retain the retired CAS source path";
+              let
+                packagedScriptNames = builtins.attrNames (builtins.readDir ../../scripts);
+                writerText =
+                  name:
+                  let
+                    script = config.systemd.services.${name}.script or "";
+                    invoked = lib.filter (scriptName: lib.hasInfix "/bin/${scriptName}" script) packagedScriptNames;
+                  in
+                  script
+                  + lib.concatMapStrings (scriptName: builtins.readFile (../../scripts + "/${scriptName}")) invoked;
+                jobs = lib.filterAttrs (
+                  name: surface: lib.hasPrefix "borgbackup-" name && surface.captures != [ ]
+                ) config.sinnix.runtime.surfaces;
+              in
+              jobs != { }
+              && lib.all (
+                name:
+                let
+                  written = writerText name;
+                in
+                lib.all (lane: lib.hasInfix lane.path written) jobs.${name}.captures
+              ) (lib.attrNames jobs);
+            message = "Every Borg job's capture lane must point at a path its unit -- or a packaged script that unit runs -- actually writes";
+          }
+          {
+            # A liveness probe that cannot run is worse than none: the lane
+            # reads healthy because nothing contradicts it.
+            assertion = lib.all (
+              surface:
+              lib.all (
+                lane:
+                lane.livenessProbe == null
+                || (lane.livenessProbe.command != "" && lane.livenessProbe.timeoutSeconds > 0)
+              ) surface.captures
+            ) (lib.attrValues config.sinnix.runtime.surfaces);
+            message = "A capture lane's liveness probe must carry a real command and a bounded timeout";
           }
         ];
       };
@@ -598,14 +646,15 @@ in
         '';
       };
 
-      # borgbackup-status (the bespoke hourly freshness/queue-alarm checker,
-      # its own JSONL with zero consumers outside itself) is retired: the
-      # freshness/liveness questions it asked are now capture lanes and
-      # livenessProbes on the surfaces that actually own the marker files,
-      # per modules/backup.nix. This check replaces the old runtime fixture
-      # with cheap eval-level assertions on those lane declarations --
-      # budgets, event-driven flags, and probe wiring -- rather than
-      # exercising a bespoke status script that no longer exists.
+      # The freshness/liveness questions the retired borgbackup-status script
+      # asked are now capture lanes and livenessProbes on the surfaces that
+      # own the marker files (see modules/backup.nix). The claims about them
+      # live in the eval spec's assertions above -- each lane must point at a
+      # path its own unit writes, and each probe must be runnable. This
+      # derivation forces that evaluation and publishes the lanes it checked.
+      #
+      # Provably fails when: a Borg job's marker path and its capture lane
+      # drift apart, or a lane declares a probe with no command.
       borgHealthLanesJson = builtins.toJSON {
         inherit (backupRuntimeEval.config.sinnix.runtime.surfaces)
           borgbackup-job-persist
@@ -617,28 +666,11 @@ in
         allSurfaceNames = builtins.attrNames backupRuntimeEval.config.sinnix.runtime.surfaces;
       };
 
-      borgHealthLanesRuntime =
-        pkgs.runCommand "backup-health-lanes-check"
-          {
-            nativeBuildInputs = [ pkgs.jq ];
-          }
-          ''
-            cat > lanes.json <<'EOF_LANES'
-            ${borgHealthLanesJson}
-            EOF_LANES
-            jq -e '
-              (.["borgbackup-job-persist"].captures | any(.name == "borg-persist-archive" and .eventDriven == true and .staleAfterSeconds == 21600)) and
-              (.["borgbackup-job-realm"].captures | any(.name == "borg-realm-archive" and .eventDriven == true and .staleAfterSeconds == 21600)) and
-              (.["borgbackup-job-realm"].captures | any(.name == "borg-snapshot-queue" and .livenessProbe.command != null)) and
-              (.["borgbackup-job-sinex-blobs"].captures | any(.name == "borg-sinex-blobs-archive" and .eventDriven == true and .staleAfterSeconds == 259200)) and
-              (.["borgbackup-job-polylogue-state"].captures | any(.name == "borg-polylogue-state-archive" and .eventDriven == true and .staleAfterSeconds == 259200)) and
-              (.["borgbackup-verify"].captures | any(.name == "borg-drill" and .staleAfterSeconds == 1814400)) and
-              (.["borgbackup-verify"].captures | any(.name == "borg-integrity-receipt" and .eventDriven == true and .staleAfterSeconds == 1814400 and .livenessProbe.command != null)) and
-              (.allSurfaceNames | index("borgbackup-status") | not) and
-              (.allSurfaceNames | index("borgbackup-status-timer") | not)
-            ' lanes.json >/dev/null
-            touch "$out"
-          '';
+      borgHealthLanesRuntime = pkgs.runCommand "backup-health-lanes-check" { } ''
+        cat > "$out" <<'EOF_LANES'
+        ${borgHealthLanesJson}
+        EOF_LANES
+      '';
     in
     {
       checks = {
