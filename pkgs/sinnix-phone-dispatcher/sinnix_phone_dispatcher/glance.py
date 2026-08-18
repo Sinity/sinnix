@@ -1,4 +1,4 @@
-"""The estate's verdict, the phone's steering view, and the agent jobs list --
+"""Prime's verdict, the phone's steering view, and the agent jobs list --
 everything the live JSON API and the `push` command render, as data."""
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from .state import now_iso
 
 
 def build_glance() -> dict:
-    """The estate's verdict, as data.
+    """Prime's verdict, as data.
 
     Deliberately small and deliberately quiet-by-default. `attention` is empty
     when nothing needs a human, because the phone renders absence as the
@@ -61,7 +61,7 @@ def build_glance() -> dict:
             if value is not None:
                 tiles.append({"label": key, "value": str(value)})
 
-    verdict = "estate quiet" if not attention else f"{len(attention)} want you"
+    verdict = "all quiet" if not attention else f"{len(attention)} want you"
     return {
         "schema": "sinnix.phone.glance/1",
         "generated_at": now_iso(),

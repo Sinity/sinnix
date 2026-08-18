@@ -94,7 +94,7 @@ def store_upload(lane: str, name: str, body: bytes, declared_sha: str | None) ->
     ok, which is why the answer has to be trustworthy in both directions. A
     false ok costs the only copy of that audio.
 
-    So the write is the same shape as every durable write in this estate --
+    So the write is the same shape as every durable write on this host --
     into a sibling `.part`, fsynced, renamed -- and the hash is verified
     BEFORE the rename rather than trusted. The adb transport this replaces
     had to carry explicit truncated-transfer repair logic; a checksum the

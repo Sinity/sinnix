@@ -98,7 +98,7 @@ generations at once and only one is live:
 | Lane    | Path                                             | In a default pass  |
 | ------- | ------------------------------------------------ | ------------------ |
 | `phone` | `captures/phone/ambient`                         | yes                |
-| `voice` | `captures/phone/estate/outbox`                   | yes                |
+| `voice` | `captures/phone/outbox`                         | yes                |
 | `src-*` | `captures/audio/src-…` (microphones)             | yes                |
 | `snk-*` | `captures/audio/snk-…` (what the machine played) | no                 |
 | —       | `captures/audio/{mic,sink-monitor}`              | retired 2026-08-13 |
