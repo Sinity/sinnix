@@ -45,6 +45,12 @@ def request(
     }
 
 
+def fake_unit_state_prober(unit: str, manager: str) -> dict[str, str]:
+    """Stand-in for ActionService._live_unit_state_prober so receipt tests
+    never shell out to the live systemd manager for a fixture unit."""
+    return {"LoadState": "loaded", "ActiveState": "active", "SubState": "running"}
+
+
 def test_action_fixtures_are_attested_and_idempotent_across_restart(
     tmp_path: Path,
 ) -> None:
@@ -79,7 +85,13 @@ def test_action_fixtures_are_attested_and_idempotent_across_restart(
         return {"name": value["action"], "status": "fixture"}
 
     receipts = tmp_path / "receipts.json"
-    actions = ActionService(reducer.snapshot, inventory_path, receipts, adapter=adapter)
+    actions = ActionService(
+        reducer.snapshot,
+        inventory_path,
+        receipts,
+        adapter=adapter,
+        unit_state_prober=fake_unit_state_prober,
+    )
     first = actions.execute(request("focus", {"job_id": "job-1"}))
     assert first["schema"] == "sinnix-ops-action-v1"
     assert actions.execute(request("focus", {"job_id": "job-1"})) == first
@@ -97,7 +109,13 @@ def test_action_fixtures_are_attested_and_idempotent_across_restart(
             actions.execute(request(action, target, key=key))["adapter"]["status"]
             == "fixture"
         )
-    resumed = ActionService(reducer.snapshot, inventory_path, receipts, adapter=adapter)
+    resumed = ActionService(
+        reducer.snapshot,
+        inventory_path,
+        receipts,
+        adapter=adapter,
+        unit_state_prober=fake_unit_state_prober,
+    )
     assert resumed.lookup("k1") == first
 
 
@@ -115,6 +133,7 @@ def test_action_rejects_unknown_pid_stale_revision_and_unsafe_unit(
         inventory_path,
         tmp_path / "receipts.json",
         adapter=lambda *_: {},
+        unit_state_prober=fake_unit_state_prober,
     )
     with pytest.raises(ActionError):
         validate_request(
@@ -162,6 +181,7 @@ def test_policy_properties_and_rebuild_override_are_enumerated(tmp_path: Path) -
         inventory_path,
         tmp_path / "receipts.json",
         adapter=lambda value, _resolved: calls.append(value) or {"status": "accepted"},
+        unit_state_prober=fake_unit_state_prober,
     )
     assert (
         actions.execute(
@@ -196,6 +216,7 @@ def test_valid_rejected_action_leaves_a_receipt(tmp_path: Path) -> None:
         inventory_path,
         tmp_path / "receipts.json",
         adapter=lambda *_: {},
+        unit_state_prober=fake_unit_state_prober,
     )
     with pytest.raises(ActionError, match="not in the inventory"):
         actions.execute(request("thaw", {"unit": "missing.service"}, key="rejected"))
@@ -238,6 +259,7 @@ def test_orphan_reap_requires_two_identical_cold_observations(tmp_path: Path) ->
         inventory_path,
         tmp_path / "receipts.json",
         adapter=lambda *_: {"status": "fixture-reaped"},
+        unit_state_prober=fake_unit_state_prober,
     )
     reap_request = request(
         "interrupt", {"job_id": "orphan-1"}, key="reap-before-second"
@@ -280,6 +302,7 @@ def test_scope_targets_admit_only_name_shaped_live_units_and_only_stop(
         tmp_path / "receipts.json",
         adapter=adapter,
         scope_prober=lambda unit: live_units.get(unit),
+        unit_state_prober=fake_unit_state_prober,
     )
     # A name that does not match the sinnix-scope launcher convention at all.
     with pytest.raises(ActionError, match="does not match"):
@@ -314,6 +337,20 @@ def test_scope_targets_admit_only_name_shaped_live_units_and_only_stop(
         )
     )
     assert accepted["adapter"]["manager"] == "user"
+    # previous_state/resulting_state carry the scope's own {kind, unit,
+    # manager, systemd} shape, not the resolved orphan/job dict from
+    # unrelated targets.
+    assert accepted["previous_state"] == {
+        "kind": "scope",
+        "unit": "sinnix-build-cargo-test-1786566375240889502-2296063.scope",
+        "manager": "user",
+        "systemd": {
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "SubState": "running",
+        },
+    }
+    assert accepted["resulting_state"] == accepted["previous_state"]
     assert commands == ["stop"]
     # Targeting both a unit and a scope at once is rejected at validation.
     with pytest.raises(ActionError, match="exactly one"):
@@ -327,6 +364,71 @@ def test_scope_targets_admit_only_name_shaped_live_units_and_only_stop(
                 "parameters": {},
             }
         )
+
+
+def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_estate(
+    tmp_path: Path,
+) -> None:
+    """sinnix-rd69: a stop-scope receipt used to embed the ENTIRE reducer
+    snapshot (every agent-gateway job's full lifecycle history, per-process
+    chrome IO, blocked tasks) twice over, in previous_state and
+    resulting_state, because both copied `snapshot["state"]` wholesale. A
+    live receipt measured 25KB+ for a single-scope action. previous_state
+    and resulting_state must be trimmed to the resolved target's own state;
+    reverting `_target_state` to `lambda resolved: snapshot.get("state")`
+    (the pre-fix behavior) blows the bound below."""
+    inventory_path = tmp_path / "inventory.json"
+    inventory(inventory_path)
+    # An oversized state report standing in for the live estate: many
+    # unrelated jobs with bulky per-process telemetry, none of them the
+    # action's own target.
+    bloat_jobs = [
+        {
+            "job_id": f"unrelated-{i}",
+            "schema_version": 3,
+            "worktree": f"/realm/worktrees/unrelated-{i}",
+            "launcher": {
+                "pid": 1000 + i,
+                "proc_start": "1",
+                "scope_unit": f"unrelated-{i}.scope",
+                "cgroup": f"/unrelated-{i}",
+            },
+            "history": ["x" * 200] * 20,
+        }
+        for i in range(50)
+    ]
+    state = {
+        "jobs": bloat_jobs,
+        "agent_gateway": {"jobs": bloat_jobs, "orphaned_jobs": []},
+        "chrome": {"processes": [{"pid": i, "io": "y" * 500} for i in range(50)]},
+    }
+    reducer = Reducer(
+        tmp_path / "status.json",
+        tmp_path / "token",
+        lambda: state,
+        tmp_path / "reducer.json",
+    )
+    reducer.refresh()
+    assert len(json.dumps(reducer.snapshot()["state"])) > 20_000, (
+        "fixture must reproduce the estate-sized snapshot the bug embedded"
+    )
+    actions = ActionService(
+        reducer.snapshot,
+        inventory_path,
+        tmp_path / "receipts.json",
+        adapter=lambda *_: {"status": "accepted"},
+        unit_state_prober=fake_unit_state_prober,
+    )
+    receipt = actions.execute(request("restart", {"unit": "safe"}, key="bounded"))
+    serialized = json.dumps(receipt, sort_keys=True, separators=(",", ":"))
+    assert len(serialized) < 4096, (
+        f"receipt grew to {len(serialized)} bytes -- previous_state/"
+        "resulting_state must stay scoped to the resolved target, not the "
+        "whole reducer snapshot"
+    )
+    # The full pre-action snapshot is not lost -- its sequence number stays
+    # on the receipt so it is reachable via the snapshot store separately.
+    assert receipt["preconditions"]["revision"] == reducer.sequence
 
 
 def test_scope_pattern_matches_live_identity_shape():
