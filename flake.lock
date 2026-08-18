@@ -871,11 +871,11 @@
     "phone-app": {
       "flake": false,
       "locked": {
-        "lastModified": 1787003929,
-        "narHash": "sha256-GI01PAkHlcQQuhtPIUSdjFYTyYQfMWiTjIB18lQ8pT8=",
+        "lastModified": 1787025508,
+        "narHash": "sha256-O8HhBwkpNJVfI2bWoQj5sTJCbGAolPPu2GrGECLSDaE=",
         "owner": "Sinity",
         "repo": "sinnix-phone-app",
-        "rev": "821b4384709ef60e28a0400a1b3cc506c10c4a30",
+        "rev": "6ab5f6623fa28a1cf64eafb7fb7b3f1effaa0269",
         "type": "github"
       },
       "original": {
@@ -1076,11 +1076,11 @@
     "steering": {
       "flake": false,
       "locked": {
-        "lastModified": 1787002153,
-        "narHash": "sha256-xtpP2JQkCQYxxe+GANnxAkiz9TihZ6CFt8YRaKbzpZI=",
+        "lastModified": 1787023524,
+        "narHash": "sha256-92SDO5vlBxlfNXWcjhls/VjLnFVDFo8V950safRWRiQ=",
         "ref": "master",
-        "rev": "0a1350d75aa268006a1a23b6c9278cef392cb40d",
-        "revCount": 2,
+        "rev": "f137f7f405828464339fa6ef1ab085ab4bc1419c",
+        "revCount": 3,
         "type": "git",
         "url": "file:///realm/project/steering"
       },
