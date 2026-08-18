@@ -363,9 +363,8 @@ def test_notification_rules(world) -> None:
     # A first-ever healthy reading is startup, not a recovery.
     assert not any("ed-fresh" in title for title in urgencies)
     assert urgencies["fixture.service stopped working"] == "critical"
-    assert "Look: journalctl -u fixture.service -e" in dict(
-        (title, body) for _, title, body in notifications
-    )["fixture.service stopped working"]
+    bodies = {title: body for _, title, body in notifications}
+    assert "Look: journalctl -u fixture.service -e" in bodies["fixture.service stopped working"]
 
     # A recovery is announced only because the outage was.
     world["recorder"].notifications.clear()

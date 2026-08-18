@@ -1,3 +1,6 @@
+# Provably fails when: find_dormant_hosts in scripts/sinnix-capability-manifest
+# stops requiring a `<host> = mkHost` entry (the fixture's OpenWrt sinnix-gw
+# then surfaces as a dormant NixOS host) -- verified.
 { inputs, ... }:
 {
   perSystem =
