@@ -132,22 +132,23 @@ endpoint, activation, backendKind, requiresCuda, ... }` wraps
   activation, and the `meta.ai` block. Used by `stt`, `tts`, `kokoro`,
   `open-webui`. Reach for it for anything that is a model endpoint; reach for
   `mkServiceModule` for everything else.
-- **Scheduled oneshots use the factory's `job` argument** — execStart,
-  timer, manager, unitName (for pre-prefix unit names), resourceClass
-  (user-manager class application), serviceConfig/unit passthroughs. One
-  idiom for every oneshot-on-a-timer service; no hand-written
+- **Every scheduled oneshot renders through one renderer**,
+  `lib.sinnix.mkScheduledJob` (`modules/lib/scheduled-job.nix` — the spec-key
+  reference lives in its header: execStart or script, timer, manager,
+  resourceClass for user-manager jobs, serviceConfig/unit passthroughs).
+  Single-job service modules use the factory's `job` argument, which is sugar
+  over it (adds unitName defaulting to sinnix-<name>); multi-job services
+  (steering), feature modules, and infrastructure modules call it directly in
+  their config (`runtime.nix`'s config-drift, `diagnostics.nix`'s three,
+  `backup.nix`'s eleven through one local `mkBackupJob`). No hand-written
   systemd.services/timers pairs and no HM-format user units for scheduled
-  jobs. `surface` and `job` may be attrsets or functions of the module args
+  jobs; the one exception is mi-unlock's deadline-waiting simple service.
+  `surface` and `job` may be attrsets or functions of the module args
   (function form: the module FILE must name `pkgs` in its own pattern for a
-  job that uses it — \_module.args inject only named formals). Documented
-  structural exceptions only: mi-unlock's deadline-waiting simple service,
-  second units inside sandbox-audit/machine-telemetry/stt.
-  Infrastructure modules that own several units and no service namespace call
-  the same renderer directly — `lib.sinnix.mkScheduledJob`
-  (`modules/lib/scheduled-job.nix`), which the factory's `job` argument is
-  sugar over: `runtime.nix`'s config-drift job, and `backup.nix`'s eleven
-  through one local `mkBackupJob`. A system-manager job resolves its resource
-  class from the unit's registered surface, so the surface comes first.
+  job that uses it — \_module.args inject only named formals). A
+  system-manager job resolves its resource class from the unit's registered
+  surface, so the surface comes first; pass that surface to the renderer so
+  failure-notify is not attached twice.
 - **Capture lanes use `mkCaptureLane`** (`modules/lib/capture-lane.nix`,
   composed as `mkServiceModule (mkCaptureLane { ... }) args`): poll and
   stream modes, lane/tmpfiles/captures/surface synthesis, shared hardening.
