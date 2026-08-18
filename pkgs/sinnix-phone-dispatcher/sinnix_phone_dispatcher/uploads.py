@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 from http import HTTPStatus
 from pathlib import Path
 
+from .notifications import mirror_new_events
 from .state import (
     EVENTS_DAY_RE,
     EVENTS_DIR,
@@ -265,6 +267,19 @@ def append_events(
         os.chmod(target, 0o660)
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
+
+    # Only the bytes this write actually added, not the whole batch -- an
+    # overlapping batch (the branch above already resolved it) repeats bytes
+    # already scanned, and rescanning them would pop a duplicate desktop
+    # notification for every retry. Advisory: a mirroring failure must never
+    # turn a landed upload into one the phone believes it has to resend.
+    try:
+        mirror_new_events(day, body[max(0, size - offset) :])
+    except Exception as exc:  # noqa: BLE001 - the upload above already landed
+        print(
+            f"phone-dispatcher: notifications: mirror_new_events failed: {exc}",
+            file=sys.stderr,
+        )
 
     return HTTPStatus.OK, {
         "ok": True,

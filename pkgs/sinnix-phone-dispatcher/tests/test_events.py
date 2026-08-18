@@ -136,3 +136,56 @@ def test_cursor_rejects_a_malformed_day(isolated_state_dirs) -> None:
     status, payload = uploads_mod.events_cursor("2026-08-18")
     assert status == HTTPStatus.BAD_REQUEST
     assert payload["ok"] is False
+
+
+def test_a_landed_batch_is_mirrored_with_only_its_new_bytes(
+    isolated_state_dirs, monkeypatch
+) -> None:
+    """A batch that arrives is scanned for notification_posted lines, but only
+    the part of it this write actually added -- an overlapping retry must not
+    re-scan bytes that were already forwarded on the first landing."""
+    mirrored = []
+    monkeypatch.setattr(
+        uploads_mod,
+        "mirror_new_events",
+        lambda day, new_bytes: mirrored.append((day, new_bytes)),
+    )
+    first = b'{"kind":"mark"}\n'
+    uploads_mod.append_events("20260818", 0, first, _sha(first))
+    overlapping = first + b'{"kind":"notification_posted","app":"x"}\n'
+
+    uploads_mod.append_events("20260818", 0, overlapping, _sha(overlapping))
+
+    assert mirrored[-1] == ("20260818", b'{"kind":"notification_posted","app":"x"}\n')
+
+
+def test_a_pure_replay_mirrors_nothing(isolated_state_dirs, monkeypatch) -> None:
+    mirrored = []
+    monkeypatch.setattr(
+        uploads_mod,
+        "mirror_new_events",
+        lambda day, new_bytes: mirrored.append((day, new_bytes)),
+    )
+    first = b'{"kind":"notification_posted","app":"x"}\n'
+    uploads_mod.append_events("20260818", 0, first, _sha(first))
+    mirrored.clear()
+
+    uploads_mod.append_events("20260818", 0, first, _sha(first))
+
+    assert mirrored == []
+
+
+def test_a_mirroring_failure_does_not_fail_the_upload(
+    isolated_state_dirs, monkeypatch
+) -> None:
+    def _boom(day, new_bytes):
+        raise RuntimeError("notify-send is not installed")
+
+    monkeypatch.setattr(uploads_mod, "mirror_new_events", _boom)
+    body = b'{"kind":"notification_posted","app":"x"}\n'
+
+    status, payload = uploads_mod.append_events("20260818", 0, body, _sha(body))
+
+    assert status == HTTPStatus.OK
+    assert payload["duplicate"] is False
+    assert _day_file(isolated_state_dirs).read_bytes() == body
