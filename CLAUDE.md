@@ -142,6 +142,12 @@ endpoint, activation, backendKind, requiresCuda, ... }` wraps
   job that uses it — \_module.args inject only named formals). Documented
   structural exceptions only: mi-unlock's deadline-waiting simple service,
   second units inside sandbox-audit/machine-telemetry/stt.
+  Infrastructure modules that own several units and no service namespace call
+  the same renderer directly — `lib.sinnix.mkScheduledJob`
+  (`modules/lib/scheduled-job.nix`), which the factory's `job` argument is
+  sugar over: `runtime.nix`'s config-drift job, and `backup.nix`'s eleven
+  through one local `mkBackupJob`. A system-manager job resolves its resource
+  class from the unit's registered surface, so the surface comes first.
 - **Capture lanes use `mkCaptureLane`** (`modules/lib/capture-lane.nix`,
   composed as `mkServiceModule (mkCaptureLane { ... }) args`): poll and
   stream modes, lane/tmpfiles/captures/surface synthesis, shared hardening.
