@@ -41,6 +41,7 @@ in
     ./tests/host-build.nix
     ./tests/runtime.nix
     ./tests/script-suites.nix
+    ./tests/pkg-suites.nix
     ./tests/capability-manifest.nix
     ./tests/ops-reducer.nix
     ./tests/quota.nix
