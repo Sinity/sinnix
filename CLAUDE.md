@@ -110,7 +110,12 @@ Boundary rules:
   `/var/cache/nix-build`), `runtime.nix` (runtime inventory — see below),
   `persistence.nix` (impermanence collector), `backup.nix` (btrbk→Borg
   pipeline), `secrets.nix` (agenix auto-discovery), `dotfiles-sweep.nix`,
-  `introspection.nix` (`/etc/sinnix/config.json`). Desktop resource
+  `introspection.nix` (`/etc/sinnix/config.json`), `capability-index.nix`
+  (`/etc/sinnix/capability-index.json` — every declared capability with
+  description/invoke/owner, DERIVED from the existing registries, never a
+  second hand-list; builder in `modules/lib/capability-index.nix`, rendered
+  by the hub's `/capabilities/`, `sinnix capabilities`, and the cheatsheet
+  joined with census usage). Desktop resource
   governance (slices, sysctls, earlyoom, io.cost init) lives in
   `profiles/workstation.nix`, not a top-level module.
 
@@ -410,7 +415,8 @@ config in `secrets.nix` (repo root).
   other path to the ops-reducer, which renders every hub page on request
   from state it already holds — the system dashboard, `/work/` (semantic
   workload view over scopes, the project ledger and gateway jobs),
-  `/services/`, `/ai/`, `/shaders/` — and whose buttons post to that same
+  `/services/`, `/ai/`, `/shaders/`, `/capabilities/` (the capability index
+  joined with live health and census usage) — and whose buttons post to that same
   reducer's bounded action API. No second control plane: where the action
   API cannot express a target the page says so rather than growing a private
   kill path — `/shaders/` is entirely buttonless for exactly that reason,
