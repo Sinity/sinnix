@@ -41,8 +41,6 @@ mkFeatureModule {
       repoRoot = config.sinnix.paths.projectRoot;
     in
     {
-      systemd.tmpfiles.rules = [ "d /realm/cache/browser 0700 ${user} users -" ];
-
       home-manager.users.${user} =
         {
           pkgs,
