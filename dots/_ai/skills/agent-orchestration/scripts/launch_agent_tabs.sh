@@ -232,155 +232,26 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# State classification (log-generation grouping, fuser-based writer-PID
+# liveness, RUNNING/DONE/FAILED/STALE verdicts, tty color/tail formatting)
+# lives in the sibling launch_agent_tabs_status.py (sinnix-3pjj); this stays
+# a thin dispatcher so the launch-orchestration half below stays shell-only.
 if [[ ${status_only} -eq 1 || ${tails_mode} -eq 1 ]]; then
   if [[ -z ${output_dir} || ! -d ${output_dir} ]]; then
     echo "--status/--tails require an existing --output-dir" >&2
     exit 2
   fi
-  # Colors: on for a tty unless NO_COLOR; FORCE_COLOR overrides.
-  if [[ (-t 1 && -z ${NO_COLOR:-}) || -n ${FORCE_COLOR:-} ]]; then
-    c_grn=$'\e[32m' c_red=$'\e[31m' c_yel=$'\e[33m' c_cyn=$'\e[36m'
-    c_dim=$'\e[2m' c_bld=$'\e[1m' c_off=$'\e[0m'
-  else
-    c_grn='' c_red='' c_yel='' c_cyn='' c_dim='' c_bld='' c_off=''
-  fi
-  fmt_dur() {
-    local s=$1
-    ((s < 0)) && s=0
-    if ((s >= 3600)); then
-      printf '%dh%02dm' $((s / 3600)) $((s % 3600 / 60))
-    elif ((s >= 60)); then
-      printf '%dm%02ds' $((s / 60)) $((s % 60))
-    else printf '%ds' "${s}"; fi
-  }
-  # One row per canonical task. Relaunch generations (<task>.resume-N.log,
-  # <task>.headless-N.log, <task>.review-N.log) collapse onto the base task
-  # name; the newest log generation represents the task. RUNNING requires a
-  # live process holding the log open (evidence), never inferred from marker
-  # absence. A log with no writer and no exit marker is STALE.
-  writer_pid=""
-  log_writer_pid() {
-    writer_pid=""
-    local pids target fd
-    if command -v fuser >/dev/null 2>&1; then
-      pids="$(fuser "$1" 2>/dev/null)" || return 1
-      writer_pid="$(awk '{print $1; exit}' <<<"${pids}")"
-      [[ -n ${writer_pid} ]]
-    else
-      target="$(readlink -f "$1")" || return 1
-      for fd in /proc/[0-9]*/fd/*; do
-        if [[ "$(readlink "${fd}" 2>/dev/null)" == "${target}" ]]; then
-          writer_pid="$(cut -d/ -f3 <<<"${fd}")"
-          return 0
-        fi
-      done
-      return 1
-    fi
-  }
-  declare -A newest_log newest_mtime task_state task_run task_idle task_detail
-  for log_file in "${output_dir}"/*.log; do
-    [[ -e ${log_file} ]] || continue
-    base="$(basename "${log_file%.log}")"
-    task_name="${base%.headless-*}"
-    task_name="${task_name%.resume-*}"
-    task_name="${task_name%.phase-*}"
-    task_name="${task_name%.review-*}"
-    mtime="$(stat -c %Y "${log_file}" 2>/dev/null || echo 0)"
-    if [[ -z ${newest_mtime[${task_name}]:-} || ${mtime} -gt ${newest_mtime[${task_name}]} ]]; then
-      newest_mtime[${task_name}]="${mtime}"
-      newest_log[${task_name}]="${log_file}"
-    fi
-  done
-  for exit_file in "${output_dir}"/*.exit; do
-    [[ -e ${exit_file} ]] || continue
-    task_name="$(basename "${exit_file%.exit}")"
-    [[ -n ${newest_log[${task_name}]:-} ]] || newest_log[${task_name}]=""
-  done
-  if [[ ${#newest_log[@]} -eq 0 ]]; then
-    echo "(no task artifacts in ${output_dir})"
-    exit 0
-  fi
-  now="$(date +%s)"
-  classify() { # sets task_state/task_run/task_idle/task_detail for $1
-    local task="$1" log exit_f run='-' idle='-' etimes
-    log="${newest_log[${task}]}"
-    exit_f="${output_dir}/${task}.exit"
-    if [[ -n ${log} ]] && log_writer_pid "${log}"; then
-      etimes="$(ps -o etimes= -p "${writer_pid}" 2>/dev/null | tr -d ' ')"
-      [[ -n ${etimes} ]] && run="$(fmt_dur "${etimes}")"
-      idle="$(fmt_dur $((now - ${newest_mtime[${task}]:-now})))"
-      task_state[${task}]="RUNNING"
-      task_detail[${task}]="log $(du -h "${log}" 2>/dev/null | cut -f1) ($(basename "${log}"))"
-    elif [[ -e ${exit_f} ]]; then
-      local ec finished_ago
-      ec="$(<"${exit_f}")"
-      finished_ago="$(fmt_dur $((now - $(stat -c %Y "${exit_f}"))))"
-      idle="${finished_ago}"
-      if [[ ${ec} == "0" ]]; then
-        task_state[${task}]="DONE"
-        task_detail[${task}]="${output_dir}/${task}.last.md"
-      else
-        task_state[${task}]="FAILED"
-        task_detail[${task}]="exit=${ec} ${log:-${output_dir}/${task}.log}"
-      fi
-    else
-      task_state[${task}]="STALE"
-      idle="$(fmt_dur $((now - ${newest_mtime[${task}]:-now})))"
-      task_detail[${task}]="no live process, no exit marker ($(basename "${log:-none}"))"
-    fi
-    task_run[${task}]="${run}"
-    task_idle[${task}]="${idle}"
-  }
-  state_color() {
-    case "$1" in
-    RUNNING) printf '%s' "${c_cyn}" ;;
-    DONE) printf '%s' "${c_grn}" ;;
-    FAILED) printf '%s' "${c_red}" ;;
-    *) printf '%s' "${c_yel}" ;;
-    esac
-  }
-  mapfile -t all_tasks < <(printf '%s\n' "${!newest_log[@]}" | sort)
-  for t in "${all_tasks[@]}"; do classify "${t}"; done
+  status_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+  status_helper="${status_script_dir}/launch_agent_tabs_status.py"
+  declare -a status_py_args=(--output-dir "${output_dir}")
   if [[ ${tails_mode} -eq 1 ]]; then
-    # Positional args (task names) limit the tail set.
-    tail_tasks=("${all_tasks[@]}")
-    if [[ $# -gt 0 ]]; then tail_tasks=("$@"); fi
-    shown=0
-    for t in "${tail_tasks[@]}"; do
-      state="${task_state[${t}]:-}"
-      [[ -z ${state} ]] && {
-        echo "unknown task: ${t}" >&2
-        continue
-      }
-      if [[ ${state} != RUNNING && ${tails_all} -ne 1 ]]; then continue; fi
-      log="${newest_log[${t}]}"
-      src="${log}"
-      [[ ${state} == DONE && -e "${output_dir}/${t}.last.md" ]] && src="${output_dir}/${t}.last.md"
-      printf '%s── %s%s %s%s(%s, run %s, idle %s — %s)%s\n' \
-        "${c_bld}" "$(state_color "${state}")" "${t}" "${c_off}" "${c_dim}" \
-        "${state}" "${task_run[${t}]}" "${task_idle[${t}]}" "$(basename "${src:-none}")" "${c_off}"
-      [[ -n ${src} && -e ${src} ]] && tail -n "${tails_n}" "${src}" | sed 's/^/  /'
-      echo
-      shown=$((shown + 1))
-    done
-    [[ ${shown} -eq 0 ]] && echo "(no matching tasks to tail; use --tails-all for finished ones)"
-    exit 0
+    status_py_args+=(--tails --tails-n "${tails_n}")
+    [[ ${tails_all} -eq 1 ]] && status_py_args+=(--tails-all)
+    status_py_args+=(-- "$@")
+  else
+    status_py_args+=(--status)
   fi
-  printf '%s%-34s %-8s %8s %8s  %s%s\n' "${c_bld}" TASK STATE RUN IDLE DETAIL "${c_off}"
-  declare -A state_counts
-  for t in "${all_tasks[@]}"; do
-    state="${task_state[${t}]}"
-    state_counts[${state}]=$((${state_counts[${state}]:-0} + 1))
-    printf '%-34s %s%-8s%s %8s %8s  %s%s%s\n' \
-      "${t}" "$(state_color "${state}")" "${state}" "${c_off}" \
-      "${task_run[${t}]}" "${task_idle[${t}]}" "${c_dim}" "${task_detail[${t}]}" "${c_off}"
-  done
-  summary=""
-  for s in RUNNING DONE FAILED STALE; do
-    [[ -n ${state_counts[${s}]:-} ]] && summary+="${s,,} ${state_counts[${s}]}  "
-  done
-  printf '%s%s%s\n' "${c_dim}" "${summary}" "${c_off}"
-  exit 0
+  exec python3 "${status_helper}" "${status_py_args[@]}"
 fi
 
 if [[ -z ${workdir} && -z ${per_task_workdir_base} ]] || [[ -z ${prompt_dir} || -z ${output_dir} ]]; then
