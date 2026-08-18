@@ -12,6 +12,8 @@ test_only_voice_note_and_trace_trigger_scoring.
 
 from __future__ import annotations
 
+import json
+
 import sinnix_phone_dispatcher.execute as execute_mod
 
 
@@ -73,6 +75,33 @@ def test_only_voice_note_and_trace_trigger_scoring(monkeypatch) -> None:
         execute_mod.execute({"kind": kind, "send_token": f"tok-{kind}"})
 
     assert len(triggered) == 2
+
+
+def test_steering_resolve_leaves_a_real_receipt_on_disk(
+    monkeypatch, isolated_state_dirs
+) -> None:
+    """No emit_receipt monkeypatch here: execute() must run the actual
+    state.py -> sinnix_lib.phone_inbox write and land a real file, not just
+    call something named emit_receipt."""
+    monkeypatch.setattr(execute_mod, "steer", lambda *a: (0, "ok"))
+
+    execute_mod.execute(
+        {
+            "kind": "steering_resolve",
+            "id": "item-1",
+            "outcome": "done",
+            "send_token": "tok-disk",
+        }
+    )
+
+    receipts = list(isolated_state_dirs["receipts_dir"].iterdir())
+    assert len(receipts) == 1
+    payload = json.loads(receipts[0].read_text())
+    assert payload["kind"] == "steering_resolve"
+    assert payload["title"] == "Resolved"
+    assert payload["body"] == "item-1: done"
+    assert payload["send_token"] == "tok-disk"
+    assert payload["route"] == "home"
 
 
 def test_shared_text_emits_no_receipt(monkeypatch) -> None:
