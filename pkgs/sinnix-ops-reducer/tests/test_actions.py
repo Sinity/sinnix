@@ -267,7 +267,7 @@ def test_scope_targets_admit_only_name_shaped_live_units_and_only_stop(
         tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
     )
     reducer.refresh()
-    live_units = {"sinnix-build-1786566375240889502-2296063.scope": "user"}
+    live_units = {"sinnix-build-cargo-test-1786566375240889502-2296063.scope": "user"}
     commands: list[list[str]] = []
 
     def adapter(value, resolved):
@@ -292,7 +292,7 @@ def test_scope_targets_admit_only_name_shaped_live_units_and_only_stop(
         actions.execute(
             request(
                 "stop",
-                {"scope": "sinnix-build-1-2.scope"},
+                {"scope": "sinnix-build-cargo-1-2.scope"},
                 key="not-live",
             )
         )
@@ -301,7 +301,7 @@ def test_scope_targets_admit_only_name_shaped_live_units_and_only_stop(
         validate_request(
             request(
                 "restart",
-                {"scope": "sinnix-build-1786566375240889502-2296063.scope"},
+                {"scope": "sinnix-build-cargo-test-1786566375240889502-2296063.scope"},
                 key="wrong-verb",
             )
         )
@@ -309,7 +309,7 @@ def test_scope_targets_admit_only_name_shaped_live_units_and_only_stop(
     accepted = actions.execute(
         request(
             "stop",
-            {"scope": "sinnix-build-1786566375240889502-2296063.scope"},
+            {"scope": "sinnix-build-cargo-test-1786566375240889502-2296063.scope"},
             key="stop-scope",
         )
     )
@@ -320,10 +320,22 @@ def test_scope_targets_admit_only_name_shaped_live_units_and_only_stop(
         validate_request(
             {
                 "action": "stop",
-                "target": {"unit": "safe", "scope": "sinnix-build-1-2.scope"},
+                "target": {"unit": "safe", "scope": "sinnix-build-cargo-1-2.scope"},
                 "expected_revision": 1,
                 "idempotency_key": "both",
                 "operator_reason": "x",
                 "parameters": {},
             }
         )
+
+
+def test_scope_pattern_matches_live_identity_shape():
+    """Live scopes carry the command-identity segment since 2026-08-13; the
+    pattern without it admitted nothing for five days. Mutation: dropping the
+    identity group from SCOPE_UNIT_PATTERN fails the first assert."""
+    from sinnix_ops_reducer.actions import SCOPE_UNIT_PATTERN
+
+    assert SCOPE_UNIT_PATTERN.match("sinnix-build-cargo-test-1786566375240889502-2296063.scope")
+    assert SCOPE_UNIT_PATTERN.match("sinnix-nix-build-nix-1-2.scope")
+    assert not SCOPE_UNIT_PATTERN.match("sinnix-build-1786566375240889502-2296063.scope")
+    assert not SCOPE_UNIT_PATTERN.match("sinnix-evil-x-1-2.scope")
