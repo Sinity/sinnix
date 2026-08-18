@@ -1562,6 +1562,10 @@ in
     # Persist it under /persist so backups are truly incremental.
     systemd.tmpfiles.rules = lib.mkAfter [
       "d ${realmSnapshots} 0750 root users -"
+      # polylogue-sqlite-backup runs as the operator while db-dumps' parent
+      # is root:root -- pre-create its subdir or the first run dies on mkdir
+      # (exactly how it announced itself, 2026-08-18).
+      "d ${polylogueBackupRoot} 0700 sinity users -"
       "d ${persistSnapshots} 0750 root users -"
       "d ${borgSnapshotBindRoot} 0700 root root -"
       "d ${borgPersistSnapshotBind} 0700 root root -"

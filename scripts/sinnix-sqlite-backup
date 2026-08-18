@@ -94,9 +94,14 @@ def backup_database(source_path: Path, output_path: Path) -> None:
         subprocess.run(["cp", "--sparse=always", str(source_path), str(raw_path)], check=True)
         wal_path = Path(f"{source_path}-wal")
         raw_wal_path = Path(f"{raw_path}-wal")
-        try:
+        # A missing -wal sidecar is the CLEAN state (a parked/checkpointed
+        # database has none -- polylogue's dbs, 2026-08-18). The old handler
+        # caught FileNotFoundError, which cp never raises for a missing
+        # SOURCE (it exits 1 -> CalledProcessError), so the "handled" branch
+        # was unreachable and the first WAL-less backup failed.
+        if wal_path.exists():
             subprocess.run(["cp", "--sparse=always", str(wal_path), str(raw_wal_path)], check=True)
-        except FileNotFoundError:
+        else:
             raw_wal_path.unlink(missing_ok=True)
         target = sqlite3.connect(raw_path, timeout=5.0)
         target.execute("PRAGMA busy_timeout=5000")
