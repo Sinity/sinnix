@@ -62,8 +62,9 @@ id_rsa*
 id_dsa*
 id_ecdsa*
 id_ed25519*
-/secret/
+/secret
 /secrets/
+/secrets.nix
 
 # Data-lake shapes must never take root in the repo
 /data/
