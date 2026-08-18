@@ -24,9 +24,33 @@ let
   # live-drift tripwire. Fall back to the store copy only as a last resort,
   # and warn loudly when that happens.
   resolveFlakeDir = ''
-    _flake_dir="''${SINNIX_FLAKE_DIR:-''${NH_FLAKE:-''${FLAKE:-''${PRJ_ROOT:-}}}}"
+    # Precedence: explicit override; then the checkout you are STANDING IN
+    # when it is the SAME repository as the ambient default (a linked
+    # worktree shares its --git-common-dir with the main checkout, an
+    # unrelated repo does not); then the ambient nh defaults. NH_FLAKE/FLAKE
+    # are set globally so `nix run <sinnix>#switch` works from anywhere --
+    # but letting them outrank a sinnix worktree's own tree made every
+    # worktree check/lint silently evaluate the main checkout instead
+    # (caught 2026-08-18 when a renamed check kept its old name through a
+    # "green" worktree run).
+    _flake_dir="''${SINNIX_FLAKE_DIR:-}"
+    _ambient="''${NH_FLAKE:-''${FLAKE:-''${PRJ_ROOT:-}}}"
     if [ -z "$_flake_dir" ]; then
-      _flake_dir="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || true)"
+      _toplevel="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || true)"
+      if [ -n "$_toplevel" ]; then
+        if [ -z "$_ambient" ]; then
+          _flake_dir="$_toplevel"
+        else
+          _top_common="$(${pkgs.git}/bin/git -C "$_toplevel" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+          _amb_common="$(${pkgs.git}/bin/git -C "$_ambient" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+          if [ -n "$_top_common" ] && [ "$_top_common" = "$_amb_common" ]; then
+            _flake_dir="$_toplevel"
+          fi
+        fi
+      fi
+    fi
+    if [ -z "$_flake_dir" ]; then
+      _flake_dir="$_ambient"
     fi
     if [ -z "$_flake_dir" ]; then
       _flake_dir=${inputs.self}
