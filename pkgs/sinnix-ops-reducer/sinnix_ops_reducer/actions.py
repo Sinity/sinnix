@@ -9,9 +9,15 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
+from sinnix_lib.ledger import append_jsonl, iter_jsonl
 from sinnix_lib.systemd import show_units
 
-from .reducer import atomic_json, now_iso
+from .reducer import now_iso
+
+# Schema of the one-time marker record written to the receipts ledger the
+# first time it is created. Its presence (not its content) is what makes
+# migration idempotent -- see ActionService._migrate_legacy_receipts.
+RECEIPTS_MIGRATION_SCHEMA = "sinnix-ops-action-receipts-migration-v1"
 
 # Properties captured for a receipt's previous_state/resulting_state on
 # unit and scope targets -- the target's own live systemd shape, not the
@@ -257,19 +263,70 @@ class ActionService:
     ) -> None:
         self.snapshot = snapshot
         self.inventory_path = inventory_path
+        # The retired whole-file dict: left in place untouched, read once by
+        # the migration and never written again.
         self.receipts_path = receipts_path
+        # The store of record: append-only, same directory and stem as
+        # receipts_path, ".jsonl" instead of ".json" (see
+        # state.StateLayer.receipts_ledger_path, which this mirrors so a
+        # caller that only has receipts_path -- every existing one -- still
+        # gets the right ledger file without threading a second parameter
+        # through cli.py).
+        self.receipts_ledger_path = receipts_path.with_name(
+            receipts_path.stem + ".jsonl"
+        )
         self.adapter = adapter or self._live_adapter
         self.controller = controller
         self.scope_prober = scope_prober or self._live_scope_prober
         self.unit_state_prober = unit_state_prober or self._live_unit_state_prober
         self.receipts: dict[str, dict[str, Any]] = self._load_receipts()
 
-    def _load_receipts(self) -> dict[str, dict[str, Any]]:
+    def _migrate_legacy_receipts(self) -> None:
+        """Fold the old whole-file receipts dict into the ledger once.
+
+        The ledger's mere existence is the marker: a first start with no
+        ledger yet creates one, writing a migration record even when there
+        was nothing to fold (so the marker itself proves this ran and is not
+        inferred from row count), and every later start sees the ledger
+        already there and does nothing. ``receipts_path`` is read here and
+        never touched again -- no deletion, no rewrite.
+        """
+        if self.receipts_ledger_path.exists():
+            return
         try:
-            value = json.loads(self.receipts_path.read_text(encoding="utf-8"))
-            return value if isinstance(value, dict) else {}
+            legacy = json.loads(self.receipts_path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            return {}
+            legacy = None
+        folded = legacy if isinstance(legacy, dict) else {}
+        append_jsonl(
+            self.receipts_ledger_path,
+            {
+                "schema": RECEIPTS_MIGRATION_SCHEMA,
+                "migrated_from": str(self.receipts_path),
+                "count": len(folded),
+                "migrated_at": now_iso(),
+            },
+        )
+        for record in folded.values():
+            if isinstance(record, dict):
+                append_jsonl(self.receipts_ledger_path, record)
+
+    def _load_receipts(self) -> dict[str, dict[str, Any]]:
+        self._migrate_legacy_receipts()
+        receipts: dict[str, dict[str, Any]] = {}
+        for record in iter_jsonl(self.receipts_ledger_path):
+            if not isinstance(record, dict):
+                continue
+            if record.get("schema") == RECEIPTS_MIGRATION_SCHEMA:
+                continue
+            key = record.get("idempotency_key")
+            if isinstance(key, str):
+                # Last write wins on replay -- a key is in practice written
+                # exactly once (execute() short-circuits on a prior receipt),
+                # so this is a no-op today and a correctness net if that ever
+                # changes.
+                receipts[key] = record
+        return receipts
 
     def _inventory(self) -> dict[str, Any]:
         try:
@@ -480,7 +537,7 @@ class ActionService:
                 "created_at": now_iso(),
             }
             self.receipts[request["idempotency_key"]] = rejected
-            atomic_json(self.receipts_path, self.receipts)
+            append_jsonl(self.receipts_ledger_path, rejected)
             raise
         receipt = {
             "schema": "sinnix-ops-action-v1",
@@ -506,7 +563,7 @@ class ActionService:
             "created_at": now_iso(),
         }
         self.receipts[request["idempotency_key"]] = receipt
-        atomic_json(self.receipts_path, self.receipts)
+        append_jsonl(self.receipts_ledger_path, receipt)
         return receipt
 
     def lookup(self, key: str) -> dict[str, Any] | None:
