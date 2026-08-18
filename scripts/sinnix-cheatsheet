@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Regenerate the maximalist OS cheatsheet (Hyprland binds, sinnix CLI, skills, qutebrowser, beads/git essentials, agent-dispatch idioms) as a searchable HTML page
-# runtimeInputs: python3 coreutils hyprland
+# description: Regenerate the maximalist OS cheatsheet (Hyprland binds, the whole capability index, qutebrowser, beads/git essentials, agent-dispatch idioms) as a searchable HTML page
+# runtimeInputs: python3 coreutils hyprland @sinnix-ops-reducer
 
 """The cheatsheet as a program, not a document.
 
 Every section is queried fresh at generation time -- Hyprland binds via
 `hyprctl binds -j` (live compositor state, so it reflects whatever is
 actually bound right now, not what bindings.nix said at the last switch),
-the sinnix CLI surface via `sinnix help`, the shared skill list via each
-SKILL.md's own frontmatter, and qutebrowser's custom binds via a regex over
-its config.py. Only the beads/git-protocol essentials and the agent-dispatch
+every declared capability via `sinnix-ops-reducer capabilities --json` (the
+eval-time capability index at /etc/sinnix/capability-index.json, joined with
+the weekly usage census), and qutebrowser's custom binds via a regex over its
+config.py. Only the beads/git-protocol essentials and the agent-dispatch
 idioms are curated by hand -- that content isn't queryable, it's judgment
 about what's worth surfacing.
+
+The capability sections replaced a regex over `sinnix help`: the same
+descriptions, taken as structured data from the index that also carries
+features, services, capture lanes, skills, MCP servers and agent lanes, none
+of which `sinnix help` has ever known about.
 
 Bound to SUPER SHIFT+Slash (modules/features/desktop/hyprland/bindings.nix),
 which regenerates this file and opens it via the browser-inversion launcher
@@ -93,74 +99,37 @@ def human_modmask(mask: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Section 2: sinnix CLI surface
+# Section 2: every declared capability, from the capability index
 # ---------------------------------------------------------------------------
 
 
-def collect_sinnix_cli() -> list[dict]:
+def collect_capabilities() -> dict:
+    """The merged capability index, from the process that owns the merge.
+
+    `sinnix-ops-reducer capabilities --json` reads the eval-time index at
+    /etc/sinnix/capability-index.json, adds the hub's own routes (declared in
+    Python, so Nix cannot see them), and joins the weekly usage census. Asking
+    it here rather than re-reading those files keeps one implementation of the
+    join: the hub page and this page cannot disagree about what exists.
+    """
     try:
-        out = subprocess.run(["sinnix", "help"], capture_output=True, text=True, timeout=10, check=True).stdout
-    except Exception:
-        return []
-    rows = []
-    for line in out.splitlines():
-        m = re.match(r"^  (\S+)\s+—\s+(.+)$", line)
-        if m:
-            rows.append({"cmd": m.group(1), "desc": m.group(2).strip()})
-    return rows
+        out = subprocess.run(
+            ["sinnix-ops-reducer", "capabilities", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout
+    except Exception as exc:
+        return {"error": str(exc), "groups": []}
+    try:
+        return json.loads(out)
+    except json.JSONDecodeError as exc:
+        return {"error": str(exc), "groups": []}
 
 
 # ---------------------------------------------------------------------------
-# Section 3: shared skills
-# ---------------------------------------------------------------------------
-
-
-def collect_skills() -> list[dict]:
-    skills_dir = REPO_ROOT / "dots" / "_ai" / "skills"
-    rows = []
-    if not skills_dir.is_dir():
-        return rows
-    for skill_md in sorted(skills_dir.glob("*/SKILL.md")):
-        text = skill_md.read_text(errors="replace")
-        fm = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
-        if not fm:
-            continue
-        block = fm.group(1)
-        name_m = re.search(r"^name:\s*(.+)$", block, re.MULTILINE)
-        name = name_m.group(1).strip() if name_m else skill_md.parent.name
-        desc = extract_yaml_scalar(block, "description")
-        if desc:
-            rows.append({"name": name, "desc": desc})
-    rows.sort(key=lambda r: r["name"])
-    return rows
-
-
-def extract_yaml_scalar(block: str, key: str) -> str:
-    """Handle `key: value` and folded `key: >` / `key: |` scalars, good enough
-    for this repo's SKILL.md frontmatter shapes -- not a general YAML parser."""
-    lines = block.splitlines()
-    for i, line in enumerate(lines):
-        m = re.match(rf"^{key}:\s*(.*)$", line)
-        if not m:
-            continue
-        rest = m.group(1).strip()
-        if rest and rest not in (">", "|", ">-", "|-"):
-            return rest.strip('"')
-        # folded/literal block: collect indented continuation lines
-        collected = []
-        for cont in lines[i + 1 :]:
-            if cont.startswith("  ") and cont.strip():
-                collected.append(cont.strip())
-            elif not cont.strip():
-                continue
-            else:
-                break
-        return " ".join(collected)
-    return ""
-
-
-# ---------------------------------------------------------------------------
-# Section 4: qutebrowser custom binds
+# Section 3: qutebrowser custom binds
 # ---------------------------------------------------------------------------
 
 
@@ -176,7 +145,7 @@ def collect_qutebrowser_binds() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Section 5 & 6: curated (not queryable -- judgment, not data)
+# Section 4 & 5: curated (not queryable -- judgment, not data)
 # ---------------------------------------------------------------------------
 
 BEADS_ESSENTIALS = [
@@ -295,10 +264,48 @@ def render_table(headers: list[str], rows: list[list[str]]) -> str:
     return f"<table><thead><tr>{thead}</tr></thead><tbody>{body}</tbody></table>"
 
 
+def render_capability_sections(view: dict) -> tuple[str, int]:
+    """One section per capability kind, in the index's own order."""
+    if view.get("error"):
+        return (
+            "<section id='capabilities'><h2>Capabilities</h2>"
+            f"<p><em>Could not read the capability index: {esc(view['error'])}</em></p>"
+            "</section>",
+            0,
+        )
+    html = ""
+    counted = 0
+    for group in view.get("groups", []):
+        rows = []
+        for entry in group["rows"]:
+            verdict = (entry.get("census") or {}).get("verdict") or ""
+            if entry.get("enabled") is False:
+                verdict = f"off · {verdict}" if verdict else "off"
+            rows.append(
+                [
+                    entry.get("name") or "",
+                    entry.get("invoke") or "",
+                    entry.get("description") or "",
+                    verdict,
+                    entry.get("owner") or "",
+                ]
+            )
+        counted += len(rows)
+        html += (
+            f"<section id='cap-{esc(group['kind'])}'>"
+            f"<h2>{esc(group['label'])} "
+            f"<span class='count'>({len(rows)}, {esc(group['note'])})</span></h2>"
+            + render_table(
+                ["Name", "Invoke", "Description", "Usage", "Declared in"], rows
+            )
+            + "</section>"
+        )
+    return html, counted
+
+
 def build_html(now_iso: str) -> str:
     hypr = collect_hypr_binds()
-    cli = collect_sinnix_cli()
-    skills = collect_skills()
+    capabilities = collect_capabilities()
     qb = collect_qutebrowser_binds()
 
     total_rows = 0
@@ -312,13 +319,8 @@ def build_html(now_iso: str) -> str:
         hypr_count = len(rows)
     total_rows += hypr_count
 
-    cli_rows = [[c["cmd"], c["desc"]] for c in cli]
-    cli_html = render_table(["Command", "Description"], cli_rows)
-    total_rows += len(cli_rows)
-
-    skill_rows = [[s["name"], s["desc"]] for s in skills]
-    skill_html = render_table(["Skill", "Description"], skill_rows)
-    total_rows += len(skill_rows)
+    capability_html, capability_count = render_capability_sections(capabilities)
+    total_rows += capability_count
 
     qb_rows = [[q["key"], q["action"]] for q in qb]
     qb_html = render_table(["Key", "Action"], qb_rows)
@@ -351,14 +353,7 @@ def build_html(now_iso: str) -> str:
   <h2>Hyprland binds <span class="count">({hypr_count} described, live from <code>hyprctl binds -j</code>)</span></h2>
   {hypr_html}
 </section>
-<section id="cli">
-  <h2>sinnix CLI <span class="count">({len(cli_rows)} commands, live from <code>sinnix help</code>)</span></h2>
-  {cli_html}
-</section>
-<section id="skills">
-  <h2>Shared skills <span class="count">({len(skill_rows)}, live from dots/_ai/skills/*/SKILL.md)</span></h2>
-  {skill_html}
-</section>
+{capability_html}
 <section id="qutebrowser">
   <h2>qutebrowser custom binds <span class="count">({len(qb_rows)}, live from dots/qutebrowser/config.py)</span></h2>
   {qb_html}
@@ -377,8 +372,10 @@ def build_html(now_iso: str) -> str:
 </section>
 </main>
 <footer>
-  Regenerated on demand (SUPER SHIFT+Slash) by <code>scripts/sinnix-cheatsheet</code> (sinnix-v034). Every section above
-  except Beads/Git/Agent-dispatch is queried fresh each run, not cached.
+  Regenerated on demand (SUPER SHIFT+Slash) by <code>scripts/sinnix-cheatsheet</code>. Every section above
+  except Beads/Git/Agent-dispatch is queried fresh each run, not cached: binds from the live compositor,
+  capabilities from <code>sinnix-ops-reducer capabilities</code> over the eval-time capability index.
+  The same rows, with live unit state, are at <a href="/capabilities/">the hub's capabilities page</a>.
 </footer>
 <script>{JS}</script>
 </body>

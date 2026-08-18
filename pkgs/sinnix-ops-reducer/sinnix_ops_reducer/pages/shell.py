@@ -410,21 +410,38 @@ async function act(verb, kind, id, button){
 """
 
 
+# The hub's own surface, in one table: the nav renders it, and the capability
+# index takes its `hub-page` rows from it (capabilities.py). Routes are declared
+# in Python, so this is the only place that can describe them -- a second list in
+# Nix would be a drift class with nothing to gain.
 PAGES = (
-    ("/", "sinnix"),
-    ("/work/", "work"),
-    ("/services/", "services"),
-    ("/ai/", "ai"),
-    ("/shaders/", "shaders"),
-    ("/reports/", "reports"),
-    ("/terminals/", "terminals"),
+    ("/", "sinnix", "The three-second read: one verdict, then tiles, then detail"),
+    (
+        "/work/",
+        "work",
+        "What is running right now, as named workloads rather than a process list",
+    ),
+    (
+        "/services/",
+        "services",
+        "Every attested runtime surface, with lifecycle controls",
+    ),
+    ("/ai/", "ai", "Local AI backends, their endpoints and activation semantics"),
+    ("/shaders/", "shaders", "The Hyprland screen-shader library, and what is applied"),
+    (
+        "/capabilities/",
+        "capabilities",
+        "Everything this machine can do and how to invoke it, with usage verdicts",
+    ),
+    ("/reports/", "reports", "Generated HTML reports, served off disk by Caddy"),
+    ("/terminals/", "terminals", "Live kitty windows and their captured scrollback"),
 )
 
 
 def nav(active: str) -> str:
     items = "".join(
         f'<a href="{esc(href)}" class="{"on" if href == active else ""}">{esc(label)}</a>'
-        for href, label in PAGES
+        for href, label, _ in PAGES
     )
     return f'<nav class="tabs">{items}</nav>'
 

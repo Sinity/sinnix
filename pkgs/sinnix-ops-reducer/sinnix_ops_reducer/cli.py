@@ -8,7 +8,7 @@ import socket
 import sys
 from pathlib import Path
 
-from . import health
+from . import capabilities, health, pages
 from .actions import ActionService
 from .ambient import product_source
 from .feedback import CoalescingTrigger, FeedbackSpool
@@ -87,9 +87,67 @@ def emit_failure_command(argv: list[str]) -> int:
     return 0
 
 
+def capabilities_command(argv: list[str]) -> int:
+    """`sinnix-ops-reducer capabilities` -- the merged capability index.
+
+    The same view the hub's /capabilities/ page renders, on stdout, so a
+    consumer that is not a browser (`sinnix cheatsheet`, an agent, a shell) gets
+    it from the process that owns the merge rather than re-implementing the join
+    against the raw files.
+    """
+    parser = argparse.ArgumentParser(prog="sinnix-ops-reducer capabilities")
+    parser.add_argument(
+        "--index",
+        type=Path,
+        default=capabilities.DEFAULT_INDEX,
+        help="capability index JSON",
+    )
+    parser.add_argument(
+        "--census",
+        type=Path,
+        default=capabilities.DEFAULT_CENSUS,
+        help="usage census JSONL joined onto the rows",
+    )
+    parser.add_argument(
+        "--kind", action="append", help="restrict to one kind (repeatable)"
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the merged view as JSON instead of a table",
+    )
+    args = parser.parse_args(argv)
+    view = pages.capability_view(args.index, args.census)
+    if args.kind:
+        wanted = set(args.kind)
+        view["groups"] = [group for group in view["groups"] if group["kind"] in wanted]
+        view["rows"] = [row for row in view["rows"] if row.get("kind") in wanted]
+    if args.json:
+        json.dump(view, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+        return 0
+    if not view["groups"]:
+        print(
+            f"no capability index at {args.index}; this host was built before it existed",
+            file=sys.stderr,
+        )
+        return 1
+    for group in view["groups"]:
+        print(f"\n{group['label']} ({len(group['rows'])}) — {group['note']}")
+        for row in group["rows"]:
+            invoke = row.get("invoke") or ""
+            verdict = (row.get("census") or {}).get("verdict") or ""
+            print(
+                f"  {row['name']:<34} {invoke:<34} {verdict:<18} {row['description']}"
+            )
+    return 0
+
+
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "emit-failure":
         raise SystemExit(emit_failure_command(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "capabilities":
+        raise SystemExit(capabilities_command(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "orient":
         from .orient import main as orient_main
 
@@ -153,6 +211,25 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--capability-index",
+        type=Path,
+        default=capabilities.DEFAULT_INDEX,
+        help=(
+            "Nix-generated capability index the /capabilities/ page renders: "
+            "every declared feature, service, script, command, skill, lane, MCP "
+            "server and agent lane, with how to invoke it."
+        ),
+    )
+    parser.add_argument(
+        "--usage-census",
+        type=Path,
+        default=capabilities.DEFAULT_CENSUS,
+        help=(
+            "Weekly usage census JSONL (sinnix-census), joined onto the "
+            "capability rows so a capability nothing has ever used says so."
+        ),
+    )
+    parser.add_argument(
         "--agent-controller",
         default=os.environ.get(
             "SINNIX_AGENT_CONTROLLER",
@@ -198,4 +275,6 @@ def main() -> None:
         hub_manifest=args.hub_manifest,
         inventory_path=args.inventory,
         feedback=feedback,
+        capability_index_path=args.capability_index,
+        usage_census_path=args.usage_census,
     )

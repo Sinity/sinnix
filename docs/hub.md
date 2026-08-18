@@ -13,17 +13,18 @@ somewhere to go.
 Everything below is on the hub port (8880 by default), and every page carries
 the same nav, so the routes are reachable from each other rather than by URL.
 
-| Route         | What it is                                                          |
-| ------------- | ------------------------------------------------------------------- |
-| `/`           | The three-second read: a verdict, six tiles, then supporting detail |
-| `/work/`      | What is actually running, named — see below                         |
-| `/services/`  | Every attested runtime surface, grouped by resource class           |
-| `/ai/`        | The local AI backends and their activation semantics                |
-| `/shaders/`   | The Hyprland screen-shader library, and which one is applied        |
-| `/reports/`   | The generated report tree, browsable and linkable                   |
-| `/ops/v1/*`   | Reverse proxy onto the ops-reducer's read and action API            |
-| `/feedback`   | Append-only spool for report annotations                            |
-| `/terminals/` | Live kitty terminal contents, control, and scrollback history       |
+| Route            | What it is                                                          |
+| ---------------- | ------------------------------------------------------------------- |
+| `/`              | The three-second read: a verdict, six tiles, then supporting detail |
+| `/work/`         | What is actually running, named — see below                         |
+| `/services/`     | Every attested runtime surface, grouped by resource class           |
+| `/ai/`           | The local AI backends and their activation semantics                |
+| `/shaders/`      | The Hyprland screen-shader library, and which one is applied        |
+| `/capabilities/` | Everything this machine can do and how to invoke it — see below     |
+| `/reports/`      | The generated report tree, browsable and linkable                   |
+| `/ops/v1/*`      | Reverse proxy onto the ops-reducer's read and action API            |
+| `/feedback`      | Append-only spool for report annotations                            |
+| `/terminals/`    | Live kitty terminal contents, control, and scrollback history       |
 
 The loopback web UIs get one port each rather than a subpath of the hub —
 `8881` Open WebUI, `8882` ComfyUI, `8883` KoboldCpp. They are single-page apps
@@ -67,6 +68,50 @@ an attested agent job. An ad-hoc `sinnix-scope` placement is neither, so a
 running compile is fully _visible_ and not stoppable from the hub. The page
 says so in place of the button. Making it stoppable is a reducer change — a
 scope-target admission rule with its own attestation — not a hub change.
+
+## The capability index
+
+`/capabilities/` answers the question no other page does: not what is happening,
+but what exists at all. Every row — feature, service, AI backend, script,
+devshell command, agent skill, capture lane, MCP server, agent CLI lane, hub
+page — carries a description, how to invoke it, whether it is enabled, and the
+repo file that declares it.
+
+Nothing on that page is written twice. `/etc/sinnix/capability-index.json` is
+built at evaluation time (`modules/capability-index.nix`, builder in
+`modules/lib/capability-index.nix`) out of the declarations that already carry
+the description: script frontmatter, which fails evaluation without one; the
+`description` argument `mkFeatureModule`/`mkServiceModule` require; the devshell
+command registry; `SKILL.md` frontmatter; the MCP registry, which now throws on
+a server that does not describe itself. Capture lanes and agent CLI lanes have
+no prose of their own, so their rows are rendered from their own structured
+fields — the owning service's description plus the declared cadence, the client
+plus the MCP profile and backend.
+
+The reducer adds the two things Nix cannot know:
+
+- **The hub's own routes**, declared in `pages/shell.py` because that is where
+  the routing lives. The nav and the `hub-page` rows read one table.
+- **The usage census** (`sinnix census`, weekly), joined by name — and, for
+  services, by every runtime surface the module declared, since the census
+  enumerates services from the runtime inventory where `polylogue` the service
+  is `polylogued` the surface. A capability that reads `unused-in-window` has
+  been declared and never used since the window opened.
+
+There are no buttons. Discovering a capability is not an action verb, and the
+things you would do with one already have a page or a shell.
+
+The same merged view is available without a browser:
+
+```
+sinnix-ops-reducer capabilities                # grouped table
+sinnix-ops-reducer capabilities --json         # the whole view
+sinnix-ops-reducer capabilities --kind script  # one kind
+```
+
+`sinnix cheatsheet` (SUPER SHIFT+Slash) renders it into the searchable offline
+page next to the live Hyprland binds, so the same answer is one keystroke away
+from the desktop and one tab away from the phone.
 
 ## Why it cannot be seen from the LAN
 
