@@ -89,6 +89,11 @@ mkFeatureModule {
               # TUI wrapped itself (newline + indent) opens truncated. This
               # rejoins those; see the kitten for the heuristic.
               map ctrl+shift+e kitten hints --customize-processing ~/.config/kitty/unwrap-urls.py --type url --program default
+
+              # Terminal→editor handoff: pick a path[:line] from the screen
+              # (compiler/test/rg output) and open it in nvim at that line,
+              # as an overlay so quitting returns to the scrollback.
+              map ctrl+shift+o kitten hints --type=linenum --linenum-action=overlay nvim +{line} {path}
             '';
           };
         };
