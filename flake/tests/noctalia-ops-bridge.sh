@@ -20,7 +20,7 @@ noctalia plugins lint "$plugin"
 # `noctalia plugins lint` cross-checks the manifest but does not compile Luau;
 # parse every entry so a syntax error cannot ride a green check into the shell.
 for entry in "$plugin"/*.luau; do
-  luau-compile --binary "$entry" > /dev/null
+  luau-compile --binary "$entry" >/dev/null
 done
 
 # Protocol agreement with the producer: the plugin must accept exactly the
