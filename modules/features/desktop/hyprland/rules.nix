@@ -221,12 +221,7 @@ let
   # Combine All Rules
   # ========================================
   allBlockRules =
-    dialogRules
-    ++ [ pipRule ]
-    ++ scratchpadRules
-    ++ appRules
-    ++ idleBlocks
-    ++ layerRules;
+    dialogRules ++ [ pipRule ] ++ scratchpadRules ++ appRules ++ idleBlocks ++ layerRules;
 
 in
 {
