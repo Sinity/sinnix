@@ -17,7 +17,10 @@
 # the systemd.user twin, ready to merge into a module's config.
 #
 # Job spec keys (all optional unless noted):
-#   execStart (required)  full ExecStart string
+#   execStart             full ExecStart string (this or script, exactly one)
+#   script                inline shell body (NixOS `script =` semantics);
+#                         for jobs whose body is a generated script rather
+#                         than a packaged binary
 #   timer                 { onCalendar | intervalSec | onUnitActiveSec,
 #                           onBootSec, onStartupSec, persistent,
 #                           randomizedDelaySec, accuracySec, description }
@@ -60,12 +63,15 @@ let
       AccuracySec = j.timer.accuracySec or null;
     }
   );
-  overrides = {
-    Type = "oneshot";
-    ExecStart = j.execStart;
-  }
-  // lib.optionalAttrs (j ? user) { User = j.user; }
-  // (j.serviceConfig or { });
+  overrides =
+    assert lib.assertMsg ((j ? execStart) != (j ? script))
+      "mkScheduledJob ${unitName}: exactly one of execStart or script";
+    {
+      Type = "oneshot";
+    }
+    // lib.optionalAttrs (j ? execStart) { ExecStart = j.execStart; }
+    // lib.optionalAttrs (j ? user) { User = j.user; }
+    // (j.serviceConfig or { });
   # Failure reporting is a property of unit registration, not of each module
   # remembering to ask for it: a generated job attaches sinnix's
   # failure-notify template itself, in its own manager. Skipped when this
@@ -100,6 +106,7 @@ let
   }
   // lib.optionalAttrs (j ? path) { path = j.path; }
   // lib.optionalAttrs (j ? environment) { environment = j.environment; }
+  // lib.optionalAttrs (j ? script) { script = j.script; }
   // (j.unit or { });
   timerBody = {
     wantedBy = [ "timers.target" ];
