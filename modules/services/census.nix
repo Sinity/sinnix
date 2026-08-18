@@ -28,7 +28,12 @@ mkServiceModule {
         {
           name = "usage-census";
           path = "${config.sinnix.paths.machineRoot}/usage-census.jsonl";
-          eventDriven = true;
+          # The weekly timer appends unconditionally -- there is no "nothing to
+          # census" outcome -- so silence IS evidence here, unlike the lanes
+          # whose content depends on the operator having done something.
+          cadenceSeconds = 604800;
+          # Two weeks: one missed run plus the 2h randomised delay.
+          staleAfterSeconds = 1209600;
         }
       ];
     };

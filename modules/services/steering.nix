@@ -77,6 +77,20 @@ mkServiceModule {
         manager = "user";
         resourceClass = "interactive-agent";
         observe.enable = true;
+        captures = [
+          {
+            name = "steering";
+            path = exportDir;
+            # Unconditional: the exporter runs at 23:50 and writes the day's
+            # file whether or not the operator did a ritual, so silence here
+            # measures the exporter rather than the operator -- which is what
+            # makes a budget honest for this lane and not for the ones whose
+            # content depends on him having something to say.
+            cadenceSeconds = 86400;
+            # One missed day tolerated; two is a dead timer.
+            staleAfterSeconds = 172800;
+          }
+        ];
       };
       sinnix.runtime.surfaces.cockpit = {
         unit = "sinnix-cockpit.service";
