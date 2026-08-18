@@ -23,6 +23,7 @@
 mkServiceModule {
   name = "llama-cpp";
   description = "llama.cpp HTTP server (CUDA)";
+  docs = "docs/local-ai-activation.md";
   surface = {
     unit = "llama-cpp.service";
     resourceClass = "interactive-agent";

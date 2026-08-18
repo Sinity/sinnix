@@ -33,6 +33,7 @@ in
 mkAiService {
   name = "stt";
   description = "Speech-to-text hub (Parakeet TDT via sherpa-onnx)";
+  docs = "docs/speech.md";
   unit = "sinnix-stt.service";
   endpoint = "127.0.0.1:${toString helpers.data.ports.stt.public}";
   requiresCuda = false;

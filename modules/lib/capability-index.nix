@@ -86,49 +86,59 @@ let
       (splitString "\n" text)
     ).lines;
 
-  # `description: one line` and the folded/literal `description: >` forms both
-  # appear in dots/_ai/skills; this is not a general YAML parser and does not
-  # pretend to be one.
-  frontmatterDescription =
-    lines:
+  # `key: one line` and the folded/literal `key: >` forms both appear in
+  # dots/_ai/skills; this is not a general YAML parser and does not pretend
+  # to be one. Returns null when the key is absent.
+  frontmatterField =
+    key: lines:
     let
+      prefix = "${key}:";
       indexed = imap0 (i: line: { inherit i line; }) lines;
-      hit = findFirst (entry: hasPrefix "description:" entry.line) null indexed;
-      inline = trim (removePrefix "description:" hit.line);
-      folded =
-        (builtins.foldl'
-          (
-            acc: line:
-            if acc.done then
-              acc
-            else if trim line == "" then
-              acc
-            else if hasPrefix "  " line then
-              acc // { parts = acc.parts ++ [ (trim line) ]; }
-            else
-              acc // { done = true; }
-          )
-          {
-            done = false;
-            parts = [ ];
-          }
-          (drop (hit.i + 1) lines)
-        ).parts;
+      hit = findFirst (entry: hasPrefix prefix entry.line) null indexed;
     in
     if hit == null then
       null
-    else if
-      builtins.elem inline [
-        ""
-        ">"
-        "|"
-        ">-"
-        "|-"
-      ]
-    then
-      concatStringsSep " " folded
     else
-      inline;
+      let
+        inline = trim (removePrefix prefix hit.line);
+        folded =
+          (builtins.foldl'
+            (
+              acc: line:
+              if acc.done then
+                acc
+              else if trim line == "" then
+                acc
+              else if hasPrefix "  " line then
+                acc // { parts = acc.parts ++ [ (trim line) ]; }
+              else
+                acc // { done = true; }
+            )
+            {
+              done = false;
+              parts = [ ];
+            }
+            (drop (hit.i + 1) lines)
+          ).parts;
+      in
+      if
+        builtins.elem inline [
+          ""
+          ">"
+          "|"
+          ">-"
+          "|-"
+        ]
+      then
+        concatStringsSep " " folded
+      else
+        inline;
+
+  frontmatterDescription = frontmatterField "description";
+  # Optional `docs: docs/foo.md` frontmatter passthrough, consumed in place
+  # of (falling back to) the filename convention. Absent unless a skill's
+  # SKILL.md names one -- no ceremony required.
+  frontmatterDocs = frontmatterField "docs";
 
   mkCapabilityIndex =
     {
@@ -217,7 +227,7 @@ let
               description = unwrapEnableDescription (option.description or name);
               enabled = feature.enable or false;
               owner = declaringFile option;
-              docs = docsFor name;
+              docs = feature.docs or null;
             }
           ) (lib.filterAttrs (_: feature: builtins.isAttrs feature && feature ? enable) features)
         ) (config.sinnix.features or { })
@@ -289,6 +299,7 @@ let
           description = serviceDescription name;
           enabled = service.enable or false;
           invoke = if ai != null then "sinnix ai start ${name}" else unitInvoke surface;
+          docs = service.docs or null;
           extra =
             optionalAttrs (surface != null) {
               inherit (surface) unit manager;
@@ -315,7 +326,7 @@ let
           # sinnix-scope is rendered from the command-class table rather than
           # discovered under scripts/ (flake/launch.nix).
           owner = if name == "sinnix-scope" then "flake/launch.nix" else "scripts/${name}";
-          docs = docsFor (removePrefix "sinnix-" name);
+          docs = if entry.docs or null != null then entry.docs else docsFor (removePrefix "sinnix-" name);
           extra = {
             inherit (entry) tier;
           };
@@ -344,11 +355,12 @@ let
         name:
         let
           file = "${skillsRoot}/${name}/SKILL.md";
-          description =
+          lines =
             if !builtins.pathExists file then
               throw "capability-index: dots/_ai/skills/${name} has no SKILL.md"
             else
-              frontmatterDescription (frontmatterLines (builtins.readFile file));
+              frontmatterLines (builtins.readFile file);
+          description = frontmatterDescription lines;
         in
         mkRow {
           kind = "skill";
@@ -361,6 +373,7 @@ let
           # In the shared roster ⇒ linked into every agent's skill tree.
           enabled = builtins.elem name sharedSkills;
           owner = "dots/_ai/skills/${name}/SKILL.md";
+          docs = frontmatterDocs lines;
         }
       ) skillNames;
 
@@ -532,6 +545,7 @@ in
   inherit
     mkCapabilityIndex
     frontmatterDescription
+    frontmatterDocs
     frontmatterLines
     unwrapEnableDescription
     ;

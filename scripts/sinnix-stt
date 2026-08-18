@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: Sinnix's speech-to-text stack — VAD-gated Parakeet transcription, diarization, and the OpenAI-compatible hub
 # runtimeInputs: coreutils ffmpeg sherpa-onnx curl gnutar bzip2
+# docs: docs/speech.md
 
 """Speech to text, for a machine that listens all day.
 

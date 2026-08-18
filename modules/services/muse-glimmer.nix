@@ -14,6 +14,7 @@
 mkServiceModule {
   name = "muse-glimmer";
   description = "Muse Glimmer 30B hybrid llama.cpp inference";
+  docs = "docs/local-ai-activation.md";
   surface = {
     unit = "muse-glimmer.service";
     resourceClass = "interactive-agent";

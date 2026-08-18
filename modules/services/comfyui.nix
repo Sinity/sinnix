@@ -21,6 +21,7 @@
 mkServiceModule {
   name = "comfyui";
   description = "ComfyUI image/video generation (containerized, CDI GPU)";
+  docs = "docs/local-ai-activation.md";
   surface = {
     unit = "podman-comfyui.service";
     resourceClass = "interactive-agent";
