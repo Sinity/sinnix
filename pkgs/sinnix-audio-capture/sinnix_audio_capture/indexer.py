@@ -29,7 +29,7 @@ sample count is in hand and was previously thrown away -- and it is the one
 measurement that would have caught sinnix-500c. That bug collapsed every
 hourly segment to ~37.5s of real audio for days while the units stayed
 active, the files kept appearing on schedule, and the freshness budget stayed
-satisfied; nothing in the estate compared a segment's *content* against the
+satisfied; nothing on this system compared a segment's *content* against the
 wall-clock window it covered, so nothing alarmed. Recording `decoded_seconds`
 and `coverage` per segment is what makes that class of silent shortfall
 visible to a consumer at all.

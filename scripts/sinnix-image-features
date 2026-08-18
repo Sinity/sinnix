@@ -9,7 +9,7 @@ sinnix-elicit's core engine is domain-neutral by design -- it knows nothing
 about images. This is the piece that gives image domains (wallpaper today,
 anything else later) a real, reusable feature vector instead of hand-rolled
 one-off scripting each time. Classic CV via ImageMagick, not an embedding
-model: no CLIP-class model is in this estate's local-models roster yet
+model: no CLIP-class model is in sinnix's local-models roster yet
 (checked flake/data/local-models.nix), and pulling one in just for this is
 its own decision -- scoped out here, not silently skipped. If/when a local
 embedding model exists, its output is a natural *addition* to this feature

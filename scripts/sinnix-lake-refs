@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Generate and check the estate's hardcoded /realm/data|media|inbox path references
+# description: Generate and check sinnix's hardcoded /realm/data|media|inbox path references
 # runtimeInputs: python3 ripgrep coreutils
 
 """Every literal /realm/{data,media,inbox}/... path in sinnix, lynchpin and
@@ -30,7 +30,7 @@ Two subcommands:
           silently ignoring.
 
 Deliberately narrow: this is not a general dead-code or refactoring tool. It
-only looks for the one shape that has actually hurt this estate --
+only looks for the one shape that has actually hurt this system --
 /realm/data, /realm/media, /realm/inbox path literals -- because that is the
 scope of the reorganisation this was built for.
 """
@@ -50,7 +50,7 @@ REPOS = {
     "polylogue": Path("/realm/project/polylogue"),
 }
 
-# These four lake roots: what the estate reorganisation actually moves.
+# These four lake roots: what the system reorganisation actually moves.
 # media/ stays watched even after the library/ recut lands, so a reference
 # that was never updated off the old root shows up as broken rather than
 # silently falling outside the tool's view. A broader /realm/... pattern

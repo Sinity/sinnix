@@ -370,7 +370,7 @@ in
         ednspacket_max = 1232;
         # Local search domain pushes .lan names
         local_ttl = 60;
-        # Service names, not just machine names. `hub.lan` is the estate's
+        # Service names, not just machine names. `hub.lan` is sinnix's
         # browser front door (modules/services/hub.nix on prime). These names
         # resolve on the LAN, but the hub only LISTENS on loopback +
         # tailscale0, so a LAN client resolving the name still cannot reach it

@@ -54,7 +54,7 @@ check_root /outer-realm \
 # place ownership-as-directory bends to loss profile: other people's
 # personal exports (e.g. twitter-archives) are not re-acquirable the way a
 # public dataset is, so they sit here rather than in library/, despite the
-# owner not being the operator (estate charter Section 3).
+# owner not being the operator (system charter Section 3).
 check_root /realm/data \
   captures exports self knowledgebase derived secrets accounts \
   activity ai code decisions comms health machine records notes reports \

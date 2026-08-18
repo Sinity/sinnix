@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: The estate's speech-to-text stack — VAD-gated Parakeet transcription, diarization, and the OpenAI-compatible hub
+# description: Sinnix's speech-to-text stack — VAD-gated Parakeet transcription, diarization, and the OpenAI-compatible hub
 # runtimeInputs: coreutils ffmpeg sherpa-onnx curl gnutar bzip2
 
 """Speech to text, for a machine that listens all day.
@@ -66,7 +66,7 @@ THREADS = int(os.environ.get("SINNIX_STT_THREADS", "10"))
 RELEASES = "https://github.com/k2-fsa/sherpa-onnx/releases/download"
 
 #: The model set, as (destination, url, kind). Fetched rather than vendored in
-#: the Nix store: half a gigabyte of weights is not source, and the estate
+#: the Nix store: half a gigabyte of weights is not source, and sinnix
 #: already keeps model files under /realm/library/models.
 MODEL_SET = [
     (
@@ -84,7 +84,7 @@ MODEL_SET = [
         SILERO,
         # Pinned to a commit, not master. The phone app fetches this same file
         # at build time and pins it (pkgs/sinnix-phone-app/pkg.nix); one VAD
-        # behaviour across the estate only holds if both sides fetch the same
+        # behaviour across sinnix only holds if both sides fetch the same
         # bytes, and a floating ref would silently end that the next time
         # upstream changes the model. Verified identical today: md5
         # 302cb198a7bb0400c62b73db2942737f on both sides.
@@ -593,7 +593,7 @@ DIARIZED_OVERSHOOT = 3.0
 def cmd_serve(args: argparse.Namespace) -> int:
     """An OpenAI-compatible /v1/audio/transcriptions endpoint.
 
-    The shape exists so every client the estate already has -- hermes, the
+    The shape exists so every client sinnix already has -- hermes, the
     phone, anything speaking the OpenAI audio API -- keeps working across the
     engine change without being touched. This is the interface whisper.cpp
     used to serve on this port; the engine behind it is the only thing that

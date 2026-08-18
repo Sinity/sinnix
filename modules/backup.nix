@@ -324,7 +324,7 @@ let
         # (.lynchpin/cache is not .cache; .sinex/trybuild-target is not target;
         # data/self/genome/cache was 285G of exactly this).
         #
-        # .nobackup is the estate's marker for regenerable-but-not-a-cache:
+        # .nobackup is sinnix's marker for regenerable-but-not-a-cache:
         # scratch trees where CACHEDIR.TAG would be a lie about what the
         # directory is.
         #

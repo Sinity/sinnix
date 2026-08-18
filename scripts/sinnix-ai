@@ -164,7 +164,7 @@ pin_summary() {
 
 # Populates REG_NAME/REG_REGISTERED/REG_UNIT/REG_MANAGER/REG_ENDPOINT/
 # REG_IDLE/REG_ADMISSION/REG_RESTARTABLE/REG_HAS_PROXY for one service name.
-# REG_REGISTERED=0 means the name is a known AI service on this estate but
+# REG_REGISTERED=0 means the name is a known AI service on this system but
 # has no live surface here (module disabled) -- distinct from an unknown
 # name entirely, which is rejected before this runs.
 lookup() {

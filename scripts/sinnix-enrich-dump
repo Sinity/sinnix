@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Enrichment loop v0 — dump estate state, run the enrichment-pass skill, write versioned outputs
+# description: Enrichment loop v0 — dump system state, run the enrichment-pass skill, write versioned outputs
 # runtimeInputs: bash coreutils findutils gnugrep jq claude-code atuin @beads systemd
 set -euo pipefail
 

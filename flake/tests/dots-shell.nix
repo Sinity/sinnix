@@ -1,4 +1,4 @@
-# Shell lint/syntax gate for the "second shell estate": dots/_ai/skills
+# Shell lint/syntax gate for the second body of shell scripts: dots/_ai/skills
 # scripts, dots/claude/hooks, dots/qutebrowser/userscripts, dots/taskwarrior,
 # dots/zsh -- none of which the packaged-scripts shellcheck pass in `lint`
 # (flake/command-registry.nix, which only walks `scripts/`) ever touches.

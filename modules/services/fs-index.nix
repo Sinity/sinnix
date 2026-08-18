@@ -74,7 +74,7 @@ mkServiceModule {
       type = args.lib.types.str;
       default = "weekly";
       description = ''
-        How often to re-walk the estate. Weekly, not daily: a full scan of
+        How often to re-walk the system. Weekly, not daily: a full scan of
         /realm and /outer-realm is multi-TB and multi-million-file, and the
         judgment ledger it feeds changes by hand-authored rows, not by the
         clock -- there is no benefit to a fresher mechanical scan than the

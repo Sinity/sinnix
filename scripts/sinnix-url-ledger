@@ -6,7 +6,7 @@
 """URL x visit x archive-snapshot ledger -- Stage 1 (evidence join, no crawling).
 
 Bead sinnix-xt8 (sub-program of sinnix-0d5/sinnix-ngf). Stage 1 only: read the
-estate's browser history, normalize URLs conservatively, and join against
+operator's browser history, normalize URLs conservatively, and join against
 public CDX/Memento archive-availability APIs to produce a duckdb/parquet
 coverage product. No crawling, no SavePageNow, no browser dependency -- see
 the bead for the full multi-stage design (Stage 2 acts on the gaps found

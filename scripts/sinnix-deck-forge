@@ -58,7 +58,7 @@ def now_iso() -> str:
 def write_deck(deck: dict, *, dry_run: bool = False) -> Path | None:
     """One deck, atomically, into the directory the drain pushes.
 
-    The `.part` rename is the same discipline the rest of the estate uses for
+    The `.part` rename is the same discipline the rest of sinnix uses for
     anything a second process collects: the drain moves whole files, and a
     half-written deck collected mid-write is a deck the phone reports as
     corrupt.
@@ -269,7 +269,7 @@ def _count_lines(path: Path, limit: int = 5_000_000) -> int:
 
 
 def lake_facts() -> list[tuple[str, float, str]]:
-    """Checkable quantities about the operator's own estate.
+    """Checkable quantities about the operator's own data on this machine.
 
     Every item has an answer the machine can verify, which is what makes this
     estimation practice rather than trivia: the calibration curve only means
@@ -299,7 +299,7 @@ def lake_facts() -> list[tuple[str, float, str]]:
     if transcripts.is_dir():
         n = sum(_count_lines(p) for p in transcripts.glob("2*.jsonl"))
         if n:
-            facts.append(("audio files the estate has transcribed", n, "files"))
+            facts.append(("audio files sinnix has transcribed", n, "files"))
 
     for day in sorted(KEYLOG.glob("*.jsonl"), reverse=True)[:1]:
         n = _count_lines(day)
@@ -310,7 +310,7 @@ def lake_facts() -> list[tuple[str, float, str]]:
 
 
 def build_fermi_deck(rng: random.Random) -> dict | None:
-    """Order-of-magnitude estimation against facts the estate can check.
+    """Order-of-magnitude estimation against facts sinnix can check.
 
     Four buckets rather than a free-text number, because the phone's forced-
     choice engine is what exists and because the useful skill is landing the
@@ -352,7 +352,7 @@ def build_fermi_deck(rng: random.Random) -> dict | None:
         trials.append(
             {
                 # Time-anchored, because every one of these counts grows. An
-                # unanchored "how many audio files has the estate transcribed"
+                # unanchored "how many audio files has sinnix transcribed"
                 # was true when the deck was written and wrong a day later --
                 # and a calibration item with a wrong ground truth does not
                 # merely fail to teach, it poisons the curve it feeds.
@@ -368,7 +368,7 @@ def build_fermi_deck(rng: random.Random) -> dict | None:
     rng.shuffle(trials)
     return deck(
         deck_id="fermi-own-estate",
-        title="Estimate your own estate",
+        title="Estimate your own digital footprint",
         engine="forced_choice",
         trials=trials,
         blurb="Pick the decade. Every answer is checkable against the lake.",
@@ -464,7 +464,7 @@ def cmd_typing(args: argparse.Namespace) -> int:
     keyboard and ten fingers; the deck player runs on a touchscreen and two
     thumbs. Drilling BE on a phone would train thumb-typing and produce a
     tidy-looking series about an apparatus the weakness does not live in --
-    which is exactly the failure mode this estate keeps naming: something that
+    which is exactly the failure mode sinnix keeps naming: something that
     looks like the measurement and is not.
 
     So the profile is written to the lake, where a desktop drill can use it,

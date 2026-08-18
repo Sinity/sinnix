@@ -1,6 +1,6 @@
 # Speech
 
-The estate's speech-to-text stack: one engine, one hub, three lanes into it.
+Sinnix's speech-to-text stack: one engine, one hub, three lanes into it.
 
 ## What it is
 
@@ -136,7 +136,7 @@ drain, where the concern is metered data for gigabytes of audio; an utterance
 is kilobytes and the whole point is that it works when you walk away.
 
 **The lane is on by default and is meant to stay on**, on the same terms as
-every other capture in the estate: started at boot, revived by the watchdog,
+every other capture on this system: started at boot, revived by the watchdog,
 restarted when the app is opened. An earlier version shipped it
 off-by-default on the theory that streaming speech was a categorically
 different thing to switch on. That was the wrong posture here and the operator
@@ -154,7 +154,7 @@ operator issuing a command.
 
 The mechanism that would filter that is speaker conditioning, and the
 distinction matters: this is a **noise filter, not an authenticator**. Voice is
-not a strong authenticator and the estate can synthesise the operator's own
+not a strong authenticator and sinnix can synthesise the operator's own
 voice locally, so treating a voiceprint as authorisation would be theatre. The
 question it answers is only _whether an utterance is a command at all_.
 
@@ -166,7 +166,7 @@ normalisation. Until that is fixed and shown to separate on a held-out cohort,
 the lane listens and records, and the phone's deliberate push-to-talk verb
 remains the way to actually ask for something.
 
-Shipping the channel ungated because the gate is nearly ready is how an estate
+Shipping the channel ungated because the gate is nearly ready is how a system
 acquires a voice-activated foot-gun.
 
 ## Diarization
@@ -197,7 +197,7 @@ be much harder to undo than one recomputed on demand.
 
 ~690 MB under `/realm/library/models/sherpa`, fetched by `sinnix stt models` and
 verified on every service start. Weights are not source and do not belong in
-the Nix store; the estate already keeps model files under `/realm/library/models`.
+the Nix store; sinnix already keeps model files under `/realm/library/models`.
 
 | Model                                        | Size   | Role                 |
 | -------------------------------------------- | ------ | -------------------- |

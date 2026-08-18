@@ -1,4 +1,4 @@
-# The estate's speech-to-text hub — Parakeet TDT 0.6B v3 on 127.0.0.1:8090.
+# Sinnix's speech-to-text hub — Parakeet TDT 0.6B v3 on 127.0.0.1:8090.
 #
 # One OpenAI-compatible /v1/audio/transcriptions endpoint, which is the same
 # interface whisper.cpp served on this port before it was retired. Clients
@@ -103,7 +103,7 @@ mkAiService {
             User = user;
             Group = "users";
             # Half a gigabyte of weights is not source and does not belong in
-            # the store; the estate already keeps model files under
+            # the store; sinnix already keeps model files under
             # /realm/library/models. Fetched once, verified every start.
             ExecStartPre = "${scriptPkgs.sinnix-stt}/bin/sinnix-stt models";
             ExecStart = lib.concatStringsSep " " [

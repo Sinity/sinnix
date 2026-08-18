@@ -402,9 +402,10 @@ trap 'handle_supervisor_exit "$?"' EXIT
 # `session` = `rec` + `stream`: the same PTY is written to the capture lake and
 # served live over a loopback-only HTTP/WebSocket server on an ephemeral port,
 # so the hub can show the actual terminal rather than a periodic snapshot. The
-# port is not chosen here: sinnix-terminal-view finds this recorder by its own
-# KITTY_WINDOW_ID in /proc and reads the port off its listening socket, so
-# nothing has to be allocated, written down, or kept in sync.
+# port is not chosen here: the ops-reducer's terminal-view route finds this
+# recorder by its own KITTY_WINDOW_ID in /proc and reads the port off its
+# listening socket, so nothing has to be allocated, written down, or kept in
+# sync.
 asciinema session \
   --capture-input \
   --stream-local \

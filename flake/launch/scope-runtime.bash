@@ -3,7 +3,7 @@
 # ahead of this text at evaluation time by flake/launch.nix, which is why
 # nothing here reads /etc/sinnix/runtime-inventory.json or shells out to jq:
 # by the time this runs, `apply_class_policy` already exists and already
-# knows every class the estate declares.
+# knows every class sinnix declares.
 #
 # What remains here is what genuinely cannot be known at evaluation time:
 # argument parsing, the caller's cgroup, whether stdin is a terminal, the

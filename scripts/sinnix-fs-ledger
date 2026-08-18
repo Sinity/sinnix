@@ -8,12 +8,12 @@
 sinnix-fs-inventory and sinnix-fs-content produce the mechanical scan
 (nodes/files: what is on disk). Alongside them, an append-only ledger of
 per-path judgments (subject, owner, provenance, lifecycle...) has existed
-since the estate charter pass on 2026-08-16 -- but nothing had ever loaded it
-into either DuckDB file, so "what fraction of the estate is classified" was a
+since the system charter pass on 2026-08-16 -- but nothing had ever loaded it
+into either DuckDB file, so "what fraction of the system is classified" was a
 question with no way to answer it. This closes that gap in SQL, not new
 scanning code: everything here reads data that was already on disk.
 
-Three views, corresponding to the charter's design (estate-charter-2026-08-16
+Three views, corresponding to the charter's design (system-charter-2026-08-16
 Section 4):
 
   resolved_judgments   latest-wins per (target, field), except that a
@@ -124,7 +124,7 @@ QUALIFY row_number() OVER (
 ) = 1;
 
 -- Coverage: four disjoint states per (path, field). Built against the
--- 'subject' field, the one the estate charter's routing decisions actually
+-- 'subject' field, the one the system charter's routing decisions actually
 -- key on; other fields (owner, provenance, lifecycle...) can be queried the
 -- same way by re-running this view with a different field filter -- kept as
 -- one field here rather than a cross-product over all fields, because that

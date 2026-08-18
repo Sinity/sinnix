@@ -47,7 +47,7 @@ in
             activityRoot = mkOption {
               type = types.str;
               default = "${config.dataRoot}/activity";
-              description = "Ambient personal-activity capture: input devices, window/app focus, terminal, media playback, notifications, URL visits. The estate charter's largest capturesRoot absorber.";
+              description = "Ambient personal-activity capture: input devices, window/app focus, terminal, media playback, notifications, URL visits. The system charter's largest capturesRoot absorber.";
             };
             machineRoot = mkOption {
               type = types.str;

@@ -18,7 +18,7 @@ end to end; only the arithmetic was missing. This is the arithmetic.
 Dependency-free on purpose. The signal processing here is a few hundred
 samples of interpolation, a radix-2 FFT over at most a few thousand points,
 and some peak picking; pulling numpy in for that would add a large closure to
-a script that runs for a second at a time, and the rest of the estate's
+a script that runs for a second at a time, and the rest of sinnix's
 Python scripts are stdlib-only for the same reason.
 
 The honesty rule that shapes every scorer: a trace can be too short, too
@@ -66,7 +66,7 @@ def now_iso() -> str:
 
 
 def parse_stamp(s: str | None) -> float:
-    """Both stamp shapes the estate has written, as epoch seconds.
+    """Both stamp shapes this system has written, as epoch seconds.
 
     Records before 2026-08-14 carry the compact filename stamp in `ts` because
     the event writer reached for the wrong helper. The log is append-only, so

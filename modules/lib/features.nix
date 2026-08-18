@@ -164,8 +164,8 @@ let
           // lib.optionalAttrs (j ? user) { User = j.user; }
           // (j.serviceConfig or { });
           # Failure reporting is a property of unit registration, not of each
-          # module remembering to ask for it: a generated job attaches the
-          # estate's failure-notify template itself, in its own manager.
+          # module remembering to ask for it: a generated job attaches
+          # sinnix's failure-notify template itself, in its own manager.
           # Skipped when this job's own surface already carries it --
           # modules/runtime.nix attaches the same template to every observed
           # surface, and a unit naming one dependency twice is noise.

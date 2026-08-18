@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: One-call estate orientation for agents/humans (ops-reducer snapshot, acknowledged outages, capture freshness, bd/steering ready heads)
+# description: One-call system orientation for agents/humans (ops-reducer snapshot, acknowledged outages, capture freshness, bd/steering ready heads)
 # runtimeInputs: bash @sinnix-ops-reducer
 set -euo pipefail
 

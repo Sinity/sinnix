@@ -26,7 +26,7 @@ let
 in
 mkServiceModule {
   name = "enrichment-loop";
-  description = "Hourly estate state-dump -> enrichment-pass -> versioned derived outputs";
+  description = "Hourly system state-dump -> enrichment-pass -> versioned derived outputs";
   extraOptions = {
     intervalMinutes = lib.mkOption {
       type = lib.types.ints.positive;
@@ -55,7 +55,7 @@ mkServiceModule {
           home.packages = [ dump ];
 
           systemd.user.services.sinnix-enrichment-loop = {
-            Unit.Description = "Enrichment pass: dump estate state, run claude -p, write versioned outputs";
+            Unit.Description = "Enrichment pass: dump system state, run claude -p, write versioned outputs";
             Service = lib.sinnix.mkRuntimeServiceConfig {
               runtimeInventory = config.sinnix.runtime.inventory;
               unit = "sinnix-enrichment-loop.service";

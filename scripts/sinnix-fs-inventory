@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Walk the estate's filesystems into a queryable inventory (JSONL + DuckDB/Parquet)
+# description: Walk sinnix's filesystems into a queryable inventory (JSONL + DuckDB/Parquet)
 # runtimeInputs: python3 duckdb coreutils
 
 """A queryable index of what is on this machine's disks.
 
-The estate has ~4 TB across /realm and /outer-realm and no way to answer
+This system has ~4 TB across /realm and /outer-realm and no way to answer
 "what is this, who writes it, is it a copy of something else" without walking
 it by hand every time. This builds the index once and makes it a dataset.
 
@@ -27,7 +27,7 @@ Storage follows the url-ledger precedent: JSONL is the append-only source of
 truth (diffable, re-ingestable, survives a DuckDB version bump) and DuckDB +
 Parquet are the materialisation you query.
 
-Directories are the unit. A file-level index of this estate would be tens of
+Directories are the unit. A file-level index of this system would be tens of
 millions of rows to answer questions that are all really about directories;
 per-directory aggregates plus a sample answers them at a thousandth the size.
 """
@@ -57,7 +57,7 @@ DEFAULT_ROOTS = ["/realm", "/outer-realm"]
 # deliberately-unwalked one must not look the same.
 PRUNE_NAMES = {
     # btrfs snapshot root. Snapshots reflink the same extents, so walking it
-    # counts the estate once per snapshot: measured 29.3 TB across 1.18M
+    # counts the system once per snapshot: measured 29.3 TB across 1.18M
     # directories on a filesystem holding 2.8 TB, which is 69% of every
     # directory on the machine and none of it distinct content.
     ".btrfs",
@@ -83,7 +83,7 @@ TOP_EXTENSIONS = 15
 
 
 def safe(value):
-    """Filenames on this estate are not all valid UTF-8.
+    """Filenames on this system are not all valid UTF-8.
 
     os.scandir hands back surrogate escapes for undecodable bytes, and
     json.dumps then refuses to encode them -- killing a whole-filesystem walk
