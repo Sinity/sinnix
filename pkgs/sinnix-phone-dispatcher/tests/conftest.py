@@ -7,7 +7,6 @@ those env vars (which a real dev shell may already have set)."""
 from __future__ import annotations
 
 import pytest
-import sinnix_phone_dispatcher.dispatch as dispatch_mod
 import sinnix_phone_dispatcher.execute as execute_mod
 import sinnix_phone_dispatcher.inbox as inbox_mod
 import sinnix_phone_dispatcher.state as state_mod
@@ -36,7 +35,6 @@ def isolated_state_dirs(tmp_path, monkeypatch):
     # mark_token/land_shared would still touch the real state tree.
     monkeypatch.setattr(execute_mod, "TOKENS_DIR", tokens_dir)
     monkeypatch.setattr(execute_mod, "LAKE_ROOT", lake_root)
-    monkeypatch.setattr(dispatch_mod, "INBOX_DIR", inbox_dir)
     # Same by-name binding problem for the two lanes the app pushes to and
     # pulls from: uploads.py holds its own EVENTS_DIR and inbox.py its own
     # INBOX_DIR.

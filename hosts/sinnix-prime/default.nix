@@ -122,10 +122,12 @@
     # L0 network flow metadata via kernel conntrack events: 5-tuple +
     # byte/packet counters, no packet capture, no TLS interception.
     capture-netflow.enable = true;
-    # Scheduled phone -> lake drain, wifi + charging gated.
-    phone-drain.enable = true;
+    # The phone's system log, pulled over adb because READ_LOGS is not a
+    # permission a sideloaded app can hold. Everything else the phone produces
+    # it pushes itself -- see docs/phone.md.
+    phone-logcat.enable = true;
     # The other half of the phone's hold-still instruments (score the traces
-    # the drain lands: pulse, tremor, sway, interoception, voice) and the
+    # the app uploads: pulse, tremor, sway, interoception, voice) and the
     # persistent phone->prime telemetry push both used to be separate
     # opt-in services here. As of 2026-08-17 (sinnix-tjqi) both live inside
     # sinnix-phone-dispatcher, which runs whenever hub.enable does (above) --

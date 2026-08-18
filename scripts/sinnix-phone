@@ -95,10 +95,6 @@ PHONE_SSH_PORT="${SINNIX_PHONE_SSH_PORT:-8022}"
 PHONE_USER="${SINNIX_PHONE_USER:-u0_a398}"
 ADB_TARGET="${PHONE_TS_IP}:5555"
 LAKE_ROOT="${SINNIX_PHONE_LAKE:-/realm/data/machine/phone}"
-# The receiver's own lane for the app's mirrored event stream. A sibling of
-# LAKE_ROOT rather than a child, because the receiver names lanes after the
-# `kind` the phone sends and files them at the captures root it was given.
-MIRROR_LANE="${SINNIX_PHONE_MIRROR_LANE:-$(dirname "$LAKE_ROOT")/phone-estate_event}"
 PHONE_STATE="${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}"
 
 # -F /dev/null + explicit identity, not ~/.ssh/config: under a sandboxed
@@ -229,7 +225,7 @@ adb_any() {
 #
 # Every runtime permission the manifest declares is granted here, not just the
 # ones a particular lane needed on the day it was written. The app is the
-# estate's capture agent on this device; enumerating a subset means a lane
+# capture agent on this device; enumerating a subset means a lane
 # added later is dark until someone remembers this function exists.
 #
 # The notification listener is the case that proves it. `PhoneNotificationListener`
@@ -369,130 +365,6 @@ drain_ambient_adb() {
   echo "ambient: drained $pulled new chunk(s) over adb, repaired $repaired truncated"
 }
 
-# Device-side rotation for the adb transport.
-#
-# The rsync path uses --remove-source-files, which unlinks a source only after
-# rsync has confirmed the destination matches. This reproduces that guarantee
-# rather than trusting the pull's exit status: a chunk is removed from the
-# phone only when the lake holds a file of identical, non-zero size. Anything
-# that fails the comparison stays on the device, where the next drain can try
-# again -- the failure mode is a full /sdcard, not lost audio.
-# Collect the app's own estate: its event log and anything queued for prime.
-#
-# The audio lane is not the whole capture any more. The app records what it
-# observed -- chunk closes, holes, grant transitions, sensor windows,
-# instrument runs -- into append-only day files, and that record is what makes
-# prime able to score rather than merely store. Left on the phone it is a
-# diary nobody reads.
-#
-# Today's event file is copied and LEFT IN PLACE: it is still being appended
-# to, and taking it would truncate the day at whatever second the drain ran.
-# Older day files are complete, so they are moved. Outbox entries are one-shot
-# requests and are moved as soon as the lake holds them.
-drain_estate() {
-  local dest today name pulled=0
-  dest="$LAKE_ROOT/estate"
-  mkdir -p "$dest/events" "$dest/outbox"
-  today="events-$(date -u +%Y%m%d).jsonl"
-
-  if [ "${1:-}" = "ssh" ]; then
-    rsync -a --ignore-existing -e "$rsync_ssh" \
-      "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-phone/events/" "$dest/events/" 2>/dev/null || true
-    rsync -a --remove-source-files -e "$rsync_ssh" \
-      "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-phone/outbox/" "$dest/outbox/" 2>/dev/null || true
-    # Today's file is re-copied every drain because it grew; --ignore-existing
-    # above would keep the first, shorter version forever.
-    rsync -a -e "$rsync_ssh" \
-      "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-phone/events/$today" "$dest/events/" 2>/dev/null || true
-    echo "estate: drained over ssh"
-    return 0
-  fi
-
-  adb_resolve || return 1
-  for sub in events outbox; do
-    while IFS= read -r name; do
-      [ -z "$name" ] && continue
-      if adb_any pull "/sdcard/sinnix-phone/$sub/$name" "$dest/$sub/$name" >/dev/null 2>&1; then
-        pulled=$((pulled + 1))
-        # Never delete the file still being written; every other one has been
-        # confirmed present in the lake by the pull that just succeeded.
-        if [ "$sub" = "outbox" ] || [ "$name" != "$today" ]; then
-          adb_any shell "rm -f '/sdcard/sinnix-phone/$sub/$name'" >/dev/null 2>&1 </dev/null
-        fi
-      fi
-    done < <(adb_any shell "ls /sdcard/sinnix-phone/$sub/ 2>/dev/null" 2>/dev/null </dev/null | tr -d '\r')
-  done
-  echo "estate: drained $pulled file(s) over adb"
-}
-
-# Push prime's half of the estate to the phone.
-#
-# The drain was pull-only, and that asymmetry is what made the steering
-# surfaces unbuildable: the phone can render a ready queue it has, and it had
-# no way to ever have one. This is the return channel, and it is deliberately
-# files rather than a listening port -- the phone leaves the house, roams
-# networks, and spends most of its life unreachable, and a file that arrives
-# whenever contact happens survives all three.
-#
-# What goes down: glance.json and steering.json (state, replaced every drain),
-# receipts and notifications (one-shot, deleted by the app once shown), and
-# drill decks (data that turns into instruments).
-push_estate() {
-  local src="$PHONE_STATE/inbox"
-  sinnix-phone-dispatcher push >/dev/null 2>&1 || true
-  [ -d "$src" ] || return 0
-
-  if [ "${1:-}" = "ssh" ]; then
-    ssh_phone "mkdir -p /sdcard/sinnix-phone/inbox/receipts /sdcard/sinnix-phone/inbox/notify /sdcard/sinnix-phone/inbox/decks" >/dev/null 2>&1 || true
-    # State: replaced every drain, so a plain copy is right. glance.json and
-    # steering.json are snapshots -- the phone should always hold the newest.
-    rsync -a --exclude='receipts/' --exclude='notify/' -e "$rsync_ssh" \
-      "$src/" "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-phone/inbox/" 2>/dev/null || true
-    # One-shots: handed over, not shared. --remove-source-files unlinks a source
-    # only after rsync has confirmed the destination matches, which is the same
-    # guarantee the adb path reproduces by hand. Without it prime keeps every
-    # receipt forever and re-pushes it on every drain, and since the app deletes
-    # each one as it renders it, the operator gets the same notification again
-    # every half hour -- observed: one voice receipt shown twice, 99 seconds
-    # apart, from a single scoring run.
-    for one in receipts notify; do
-      [ -d "$src/$one" ] || continue
-      rsync -a --remove-source-files -e "$rsync_ssh" \
-        "$src/$one/" "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-phone/inbox/$one/" 2>/dev/null || true
-    done
-    echo "estate: pushed over ssh"
-    return 0
-  fi
-
-  adb_resolve || return 1
-  adb_any shell "mkdir -p /sdcard/sinnix-phone/inbox/receipts /sdcard/sinnix-phone/inbox/notify /sdcard/sinnix-phone/inbox/decks" >/dev/null 2>&1 </dev/null
-  local pushed=0 rel
-  # `adb push <dir>` merges rather than mirrors, which is what is wanted here:
-  # the app deletes each receipt as it renders it, and a mirroring push would
-  # resurrect every receipt the operator has already seen.
-  while IFS= read -r file; do
-    rel="${file#"$src"/}"
-    if adb_any push "$file" "/sdcard/sinnix-phone/inbox/$rel" >/dev/null 2>&1; then
-      pushed=$((pushed + 1))
-      # One-shots are handed over, not shared: leaving a receipt on prime after
-      # the phone holds it would re-deliver it on the next drain forever.
-      case "$rel" in
-        receipts/* | notify/*) rm -f "$file" ;;
-      esac
-    fi
-  done < <(find "$src" -type f ! -name '*.part')
-  echo "estate: pushed $pushed file(s) over adb"
-}
-
-# Hand collected intents to prime.
-#
-# Runs after the collect half, on whatever the drain just landed. The
-# dispatcher is idempotent on send_token, so an intent that also went out live
-# executes once and still gets its receipt -- which is why this can run
-# unconditionally rather than trying to work out what the phone already did.
-dispatch_intents() {
-  sinnix-phone-dispatcher dispatch --outbox "$LAKE_ROOT/estate/outbox" || true
-}
 
 usage() {
   cat <<'EOF'
@@ -511,13 +383,12 @@ sinnix-phone <command>
   shell [cmd]   Termux shell over the tailnet (interactive when no cmd)
   mirror        scrcpy screen mirror/control over the tailnet
   screenshot    grab the current screen to /realm/tmp/work/
-  pull          rsync camera + downloads into the lake, drain the system log
+  logcat        pull the phone's system log into the lake (adb; the one
+                lane the app cannot push, and the timer's job)
   ambient-audit decode every undecoded ambient chunk in the lake and record
-                its real duration and level (runs at the end of `pull`)
+                its real duration and level
   pull-ambient  rescue chunks the app could not upload (the app ships them
                 itself; this is for when that is failing)
-  drain         pull, but only if the phone is on wifi (for a timer)
-  push          refresh and send prime's estate half to the phone (no pull)
   adb-connect   (re)attach adb over the tailnet
   adb-restore   re-enable adbd TCP mode (requires the phone on USB), then
                 re-assert the capture app's grants (see app-grants)
@@ -568,30 +439,39 @@ app-status)
   echo "== capture app =="
   if ! adb_any get-state >/dev/null 2>&1; then
     # No adb is exactly when this question matters most, and prime is not
-    # actually blind: the app mirrors every event line to the receiver within
-    # a heartbeat, so the lake holds the app's own account of itself up to
-    # about twenty seconds ago. Weaker than status.json (it cannot say what
-    # the app believes RIGHT NOW) and much better than "UNKNOWN".
-    echo "app       : no adb transport — answering from the mirrored event lane"
-    # One pass, and defensive about shape: the mirror also carries lines the
-    # phone could not parse (wrapped as `unparsed`) and its own gap markers,
-    # so an event without a `kind` is normal and must not abort the query.
-    mirror=$(jq -rs '
-      [ .[].payload.event | select(type == "object") ] as $e
+    # actually blind: the app pushes its event log to the dispatcher every
+    # heartbeat, so the lake holds the app's own account of itself up to about
+    # twenty seconds ago. Weaker than status.json (it cannot say what the app
+    # believes RIGHT NOW) and much better than "UNKNOWN".
+    #
+    # Read from the pushed day file rather than the retired mirror lane
+    # (phone-event), which carried the same records in a capture envelope
+    # until the app started shipping the day file itself.
+    echo "app       : no adb transport — answering from the pushed event log"
+    # Newest by name, which for `events-YYYYMMDD.jsonl` is newest by date.
+    events_file=""
+    for f in "$LAKE_ROOT"/events/events-*.jsonl; do
+      [ -e "$f" ] && events_file="$f"
+    done
+    # Tailed, not slurped: one day file reached 3.5 GB after a Health Connect
+    # backfill, and `jq -s` on that is an OOM rather than an answer. The
+    # questions here are all about the newest records.
+    pushed=$([ -n "$events_file" ] && tail -n 2000 "$events_file" | jq -rs '
+      [ .[] | select(type == "object") ] as $e
       | ($e | map(select(.ts)) | sort_by(.ts) | last) as $last
       | if $last == null then "" else
           "ts\t\($last.ts)",
           ($e | map(select(.kind == "chunk_closed")) | last | if . then "chunk\t\(.chunk)" else empty end),
           ($e | map(select((.kind // "") | startswith("chunk_upload"))) | last
              | if . then "upload\t\(.kind)\(if .reason then " — \(.reason)" else "" end)" else empty end)
-        end' "$MIRROR_LANE"/phone-estate_event-*.jsonl 2>/dev/null)
-    if [ -z "$mirror" ]; then
-      echo "            and the mirror is empty too — phone offline, or capture stopped"
+        end' 2>/dev/null)
+    if [ -z "$pushed" ]; then
+      echo "            and nothing has been pushed either — phone offline, or capture stopped"
       exit 0
     fi
-    mirror_ts=$(echo "$mirror" | awk -F'\t' '$1 == "ts" { print $2 }')
-    echo "mirror    : $(( $(date -u +%s) - $(date -u -d "$mirror_ts" +%s) ))s since the phone's last event"
-    echo "$mirror" | awk -F'\t' '
+    pushed_ts=$(echo "$pushed" | awk -F'\t' '$1 == "ts" { print $2 }')
+    echo "events    : $(( $(date -u +%s) - $(date -u -d "$pushed_ts" +%s) ))s since the phone's last event"
+    echo "$pushed" | awk -F'\t' '
       $1 == "chunk"  { printf "last chunk: %s (closed, per the phone)\n", $2 }
       $1 == "upload" { printf "uploads   : %s\n", $2 }'
     exit 0
@@ -860,95 +740,36 @@ screenshot)
   adb_phone shell rm -f /sdcard/.sinnix-shot.png
   echo "$out"
   ;;
-pull)
-  # Camera and downloads are the durable originals.
+logcat)
+  # The phone's system log, and the only lane still pulled rather than pushed.
   #
-  # The Health Connect zip-export lane is GONE, not disabled. It rsynced
-  # /sdcard/HealthConnectExport/ into the lake and never once moved a file --
-  # it depended on the operator configuring a scheduled export inside another
-  # app, on a schedule that app controlled, which is the shape of a lane that
-  # reports nothing and looks configured. HealthLane in the capture app now
-  # reads Health Connect directly and lands 471 records through the events
-  # plane, so the export folder has nothing left to be the fallback for.
-  # Pull only — never push back, and never delete on the phone.
-  mkdir -p "$LAKE_ROOT"/{camera,download,ambient,logcat}
-  set +e
-  # The system log first: it is adb-only and small, and it is the lane that
-  # explains the others when they fail.
-  if adb_any get-state >/dev/null 2>&1; then
-    drain_logcat_adb
-  else
-    echo "adb unavailable: system log not drained"
+  # Everything else the phone produces it ships itself through
+  # sinnix-phone-dispatcher: spooled on the device, acknowledged by hash,
+  # deleted locally only against that acknowledgement. The log cannot join
+  # them -- reading it needs READ_LOGS, which Android grants to system and
+  # privileged apps only, and no amount of appop juggling gets a sideloaded
+  # app there on a locked bootloader. So it stays adb, which has the
+  # compensating virtue of working over USB when no network does.
+  if ! adb_any get-state >/dev/null 2>&1; then
+    echo "logcat: no adb transport — adbd's TCP mode does not survive a reboot"
+    echo "        restore it over USB with: sinnix-phone adb-restore"
+    exit 0
   fi
-  # One reachability check for all four lanes. Without it each rsync spends its
-  # own connect timeout failing the same way and prints the same error three
-  # times before the ambient lane gets to try a transport that works.
-  #
-  # Reachable is not sufficient: the probe reads a real /sdcard path, because
-  # an sshd whose process tree lacks the storage view answers every rsync with
-  # an empty listing and exit 0. That is not hypothetical -- an sshd started
-  # via `adb run-as` lands in the runas_app SELinux domain, which is denied
-  # /storage outright while holding every DAC group that suggests otherwise,
-  # and four consecutive drains reported "drained over ssh" while moving
-  # nothing (2026-08-16). A blind transport must be treated as down.
-  ssh_up=false
-  if ssh_phone 'true' >/dev/null 2>&1; then
-    if ssh_phone 'test -r /sdcard/sinnix-phone' >/dev/null 2>&1; then
-      ssh_up=true
-    else
-      echo "ssh up but storage-blind (SELinux domain? restart Termux app): treating as down"
-    fi
+  ensure_device_capture_settings
+  drain_logcat_adb
+
+  # This is now the only thing prime runs against the phone on a schedule, so
+  # it also carries the one question prime can answer better than the phone
+  # can: are the app's uploads landing? A phone whose uploads fail keeps
+  # recording, so the backlog is the honest signal — chunks piling up means
+  # capture is working and delivery is not, which is exactly the failure that
+  # used to hide behind "no audio yet".
+  backlog=$(adb_any shell 'ls /sdcard/sinnix-ambient/*.m4a 2>/dev/null | wc -l' 2>/dev/null | tr -d '\r')
+  if [ -n "${backlog:-}" ] && [ "$backlog" -gt 12 ]; then
+    echo "logcat: WARNING -- $backlog finished chunks still on the phone; uploads are not landing." >&2
+    echo "  Ask the app why: adb shell grep chunk_upload_blocked in today's events file." >&2
+    echo "  Recover them by hand with: sinnix-phone pull-ambient" >&2
   fi
-  if [ "$ssh_up" = true ]; then
-    # Best-effort, and deliberately not fatal. DCIM and Download are shared
-    # media roots: Termux reads them only with MANAGE_EXTERNAL_STORAGE, while
-    # the app's own /sdcard/sinnix-* trees need no such grant. So a refusal
-    # here says one Android permission is missing, not that the drain failed
-    # -- yet rsync's exit 23 was becoming the whole unit's status, and
-    # sinnix-phone-drain went red every 30 minutes while successfully draining
-    # logcat, ActivityWatch, ambient audio, and the estate lanes. A unit that
-    # reports failure for something it did not fail at trains everyone to
-    # ignore it.
-    #
-    # Loud, though, not swallowed: without the warning this reads as "nothing
-    # new to mirror", and DCIM has in fact mirrored nothing since 2025-11.
-    for media in DCIM:camera Download:download; do
-      remote="${media%%:*}"
-      local_dir="${media##*:}"
-      if ! rsync -av --ignore-existing -e "$rsync_ssh" \
-        "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/${remote}/" "$LAKE_ROOT/${local_dir}/"; then
-        echo "phone: /sdcard/${remote} not mirrored -- grant Termux all-files access (MANAGE_EXTERNAL_STORAGE) to restore it" >&2
-      fi
-    done
-  else
-    echo "ssh unavailable: camera and downloads need it and are skipped"
-  fi
-  # Ambient audio is NOT pulled here any more: the app uploads each chunk to
-  # the hub as soon as the muxer closes it and deletes its copy only once
-  # prime has confirmed the bytes by hash (ChunkUploader, 2026-08-17). A
-  # second mover would race that delete for no gain -- and this one could
-  # only run when Termux's sshd happened to be up, which is the fragility the
-  # upload exists to remove.
-  #
-  # Recovery, when it is needed, is a chunk sitting on the device because
-  # uploads are failing; the app says why in `chunk_upload_blocked`, and
-  # `pull-ambient` below moves them by hand.
-  # The drain deliberately does NOT force a Mi Fitness sync. Mi Fitness
-  # writes Health Connect on its own roughly hourly (measured 2026-08-17),
-  # the Xiaomi cloud witness covers the vendor plane, and driving the UI
-  # every half hour was operator-vetoed (2026-08-16). `sinnix phone
-  # health-sync` stays as the on-demand backfill/repair verb.
-  if [ "$ssh_up" = true ]; then
-    drain_estate ssh
-    push_estate ssh
-  elif adb_any get-state >/dev/null 2>&1; then
-    drain_estate
-    push_estate
-  fi
-  dispatch_intents
-  set -e
-  du -sh "$LAKE_ROOT" 2>/dev/null
-  "$0" ambient-audit
   ;;
 health-sync)
   # Force Mi Fitness to export to Health Connect NOW.
@@ -1090,50 +911,6 @@ ambient-audit)
     echo "  silent chunks are listed in $ledger (captured_nothing: true)" >&2
   fi
   ;;
-drain)
-  # Everything the phone does NOT ship itself: the system log, the camera and
-  # Downloads mirrors, ActivityWatch, and the estate's events/outbox. Ambient
-  # audio left this list on 2026-08-17 -- the app uploads its own chunks now,
-  # which is why what remains is small. The wifi gate stays anyway, because
-  # the camera mirror can still be a large transfer.
-  if ! timeout 5 bash -c "exec 3<>/dev/tcp/$PHONE_TS_IP/$PHONE_SSH_PORT" 2>/dev/null; then
-    # No tailnet, which is the normal state after a phone reboot and whenever
-    # Termux is not running. adb is a separate transport: if it answers (USB,
-    # typically), drain through it. The wifi gate below is a network-cost
-    # gate and a USB cable is not metered, so it does not apply here.
-    if adb_any get-state >/dev/null 2>&1; then
-      echo "drain: no tailnet, draining over adb"
-      "$0" pull
-      exit 0
-    fi
-    echo "drain: phone unreachable, skipping"
-    exit 0
-  fi
-  ensure_adb
-  wifi_state=$(ssh_phone termux-wifi-connectioninfo 2>/dev/null | jq -r '.supplicant_state // empty')
-  if [ "$wifi_state" != "COMPLETED" ]; then
-    echo "drain: not on wifi (state: ${wifi_state:-unknown}), skipping"
-    exit 0
-  fi
-  echo "drain: wifi confirmed, pulling"
-  "$0" pull
-
-  # Rotation is the app's now: it deletes a chunk only after prime confirms
-  # the hash, which is a stronger guarantee than rsync's --remove-source-files
-  # gave and does not need a transport this side can only sometimes open.
-  #
-  # What is still this side's job is noticing that it STOPPED. A phone whose
-  # uploads fail keeps recording, so the backlog is the honest signal: chunks
-  # accumulating means the app is capturing and prime is not receiving, which
-  # is exactly the failure that used to hide behind "no audio yet".
-  backlog=$(adb_any shell 'ls /sdcard/sinnix-ambient/*.m4a 2>/dev/null | wc -l' 2>/dev/null | tr -d '\r')
-  if [ -n "${backlog:-}" ] && [ "$backlog" -gt 12 ]; then
-    echo "drain: WARNING -- $backlog finished chunks still on the phone; uploads are not landing." >&2
-    echo "  Ask the app why: adb shell grep chunk_upload_blocked in today's events file." >&2
-    echo "  Recover them by hand with: sinnix-phone pull-ambient" >&2
-  fi
-  ;;
-
 pull-ambient)
   # The manual recovery path for chunks the app could not upload. Not part of
   # the drain: this exists for the case where uploads are broken and the audio
@@ -1151,19 +928,6 @@ pull-ambient)
   else
     echo "no transport to the phone: ambient chunks stay on the device" >&2
     exit 1
-  fi
-  ;;
-push)
-  # The push half on its own, for when something on prime should reach the
-  # phone now rather than at the next drain -- a receipt worth interrupting
-  # for, a deck just generated.
-  if ssh_phone 'true' >/dev/null 2>&1; then
-    push_estate ssh
-  elif adb_any get-state >/dev/null 2>&1; then
-    push_estate
-  else
-    echo "push: phone unreachable; the next drain will carry it" >&2
-    sinnix-phone-dispatcher push >/dev/null 2>&1 || true
   fi
   ;;
 adb-connect)
