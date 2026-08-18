@@ -127,201 +127,200 @@ mkServiceModule {
     };
   };
   configFn =
-    { ... }:
-    {
-      systemd.tmpfiles.rules = [
-        "d ${audioDir} 0755 ${username} users -"
-        "d ${devicesDir} 0755 ${username} users -"
-        "d ${topologyDir} 0755 ${username} users -"
-        "d ${indexDir} 0755 ${username} users -"
-      ];
-
-      sinnix.runtime.surfaces = {
-        capture-audio-recorder-devices = {
-          unit = "sinnix-audio-recorder-devices.service";
-          manager = "user";
-          resourceClass = "capture-runtime";
-          observe = {
-            enable = true;
-            restartable = true;
-          };
-          captures = [
-            {
-              # The supervisor's own state lane, not the audio directories:
-              # per-device channel dirs are dynamic, and pointing a staleness
-              # budget at their shared parent would let one healthy device
-              # mask every other device's silence.
-              name = "audio-devices";
-              path = devicesDir;
-              eventDriven = true;
-              # The supervisor heartbeats into this lane every 10 minutes
-              # (devices.HEARTBEAT_SECONDS) even when nothing changes, so a
-              # quiet lane means a dead supervisor, not a quiet desktop.
-              staleAfterSeconds = 3600;
-              # Staleness cannot see the failure this lane exists to prevent:
-              # a device that is present in the graph and recorded by nobody.
-              livenessProbe = {
-                command = "${audioPkg}/bin/sinnix-audio-capture devices-probe --capture-root ${capturesRoot} --pw-dump-bin ${pwDumpBin} ${excludeArgs}";
-                timeoutSeconds = 15;
-              };
-            }
-          ];
-        };
-        capture-audio-topology = {
-          unit = "sinnix-audio-topology.service";
-          manager = "user";
-          resourceClass = "capture-runtime";
-          observe = {
-            enable = true;
-            restartable = true;
-          };
-          captures = [
-            {
-              name = "audio-topology";
-              path = topologyDir;
-              eventDriven = true;
-              # Node/port/link churn is intermittent (device plug/unplug,
-              # profile switches) -- a quiet day is a legitimate "topology
-              # didn't change" outcome, matching capture-a11y's event-driven
-              # budget.
-              staleAfterSeconds = 86400;
-            }
-          ];
-        };
-        capture-audio-index = {
-          unit = "sinnix-audio-index.service";
-          manager = "user";
-          resourceClass = "capture-runtime";
-          observe = {
-            enable = true;
-            restartable = true;
-          };
-          captures = [
-            {
-              name = "audio-index";
-              path = indexDir;
-              eventDriven = true;
-              # Timer runs hourly; the package's own 26h default lookback
-              # already tolerates one missed run, so double that again here.
-              staleAfterSeconds = 172800;
-            }
-          ];
-        };
-      };
-
-      home-manager.users.${username} =
-        { ... }:
+    { config, ... }:
+    lib.mkMerge [
+      # Timer-driven batch oneshot, hourly Silero VAD index pass -- unlike
+      # the other two (always-on `simple` recorders with no timer), this one
+      # is exactly the mkScheduledJob shape, so it gets a direct call rather
+      # than joining audio-recorder-devices/audio-topology's hand-rolled HM
+      # block below.
+      (lib.sinnix.mkScheduledJob
         {
-          systemd.user.services = {
-            sinnix-audio-recorder-devices = {
-              Unit = {
-                Description = "Sinnix audio capture: every PipeWire source and sink (minus the blacklists) -> hour-aligned Opus";
-                After = [
-                  "graphical-session.target"
-                  "pipewire.service"
-                ];
-                PartOf = [ "graphical-session.target" ];
-                StartLimitIntervalSec = 300;
-                StartLimitBurst = 5;
-              };
-              Service = lib.sinnix.mkRuntimeServiceConfig {
-                runtimeInventory = config.sinnix.runtime.inventory;
-                unit = "sinnix-audio-recorder-devices.service";
-                overrides = {
-                  Type = "simple";
-                  ExecStart = lib.concatStringsSep " " (
-                    [
-                      "${audioPkg}/bin/sinnix-audio-capture"
-                      "record-devices"
-                      "--capture-root ${capturesRoot}"
-                      "--pw-record-bin ${pwRecordBin}"
-                      "--pw-dump-bin ${pwDumpBin}"
-                      "--opusenc-bin ${opusencBin}"
-                    ]
-                    ++ lib.optional (excludeArgs != "") excludeArgs
-                    ++ lib.optionals (cfg.asrSourcePattern != null) [
-                      "--asr-source ${lib.escapeShellArg cfg.asrSourcePattern}"
-                      # RuntimeDirectory gives the socket a writable %t path
-                      # under ProtectSystem=strict without widening
-                      # ReadWritePaths.
-                      "--tee-socket %t/sinnix/audio/asr.pcm"
-                    ]
-                  );
-                  Restart = "on-failure";
-                  RestartSec = "5s";
-                  # The per-device channel directories are created at runtime,
-                  # so the writable path is the parent, not an enumerable list.
-                  ReadWritePaths = [
-                    audioDir
-                    devicesDir
-                  ];
-                  RuntimeDirectory = "sinnix/audio";
-                }
-                // hardening;
-              };
-              Install.WantedBy = [ "graphical-session.target" ];
-            };
-
-            sinnix-audio-topology = {
-              Unit = {
-                Description = "Sinnix audio capture: pw-mon Node/Port/Link topology stream";
-                After = [
-                  "graphical-session.target"
-                  "pipewire.service"
-                ];
-                PartOf = [ "graphical-session.target" ];
-                StartLimitIntervalSec = 300;
-                StartLimitBurst = 5;
-              };
-              Service = lib.sinnix.mkRuntimeServiceConfig {
-                runtimeInventory = config.sinnix.runtime.inventory;
-                unit = "sinnix-audio-topology.service";
-                overrides = {
-                  Type = "simple";
-                  ExecStart = "${audioPkg}/bin/sinnix-audio-capture topology --capture-root ${capturesRoot} --pw-mon-bin ${pwMonBin}";
-                  Restart = "on-failure";
-                  RestartSec = "5s";
-                  ReadWritePaths = [ topologyDir ];
-                }
-                // hardening;
-              };
-              Install.WantedBy = [ "graphical-session.target" ];
-            };
-
-            sinnix-audio-index = {
-              Unit = {
-                Description = "Sinnix audio capture: Silero VAD index pass over recently-closed Opus segments";
-                # Timer-driven batch oneshot: sd-switch waits for a changed
-                # unit's job, and a full VAD sweep outlives the 5-minute
-                # activation timeout, failing the whole activation. No daemon
-                # to keep current -- the next trigger picks up the new binary.
-                X-SwitchMethod = "keep-old";
-              };
-              Service = lib.sinnix.mkRuntimeServiceConfig {
-                runtimeInventory = config.sinnix.runtime.inventory;
-                unit = "sinnix-audio-index.service";
-                overrides = {
-                  Type = "oneshot";
-                  ExecStart = "${audioPkg}/bin/sinnix-audio-capture index --capture-root ${capturesRoot} --ffmpeg-bin ${ffmpegBin}";
-                  ReadWritePaths = [
-                    audioDir
-                    indexDir
-                  ];
-                }
-                // hardening;
-              };
-            };
+          inherit config;
+          unitName = "sinnix-audio-index";
+          description = "Sinnix audio capture: Silero VAD index pass over recently-closed Opus segments";
+          surface = config.sinnix.runtime.surfaces.capture-audio-index;
+        }
+        {
+          manager = "user";
+          resourceClass = "capture-runtime";
+          execStart = "${audioPkg}/bin/sinnix-audio-capture index --capture-root ${capturesRoot} --ffmpeg-bin ${ffmpegBin}";
+          serviceConfig = {
+            ReadWritePaths = [
+              audioDir
+              indexDir
+            ];
+          }
+          // hardening;
+          timer = {
+            onCalendar = "hourly";
+            persistent = true;
+            randomizedDelaySec = "5m";
+            description = "Hourly trigger for the Sinnix audio capture Silero VAD index pass";
           };
+        }
+      )
+      {
+        systemd.tmpfiles.rules = [
+          "d ${audioDir} 0755 ${username} users -"
+          "d ${devicesDir} 0755 ${username} users -"
+          "d ${topologyDir} 0755 ${username} users -"
+          "d ${indexDir} 0755 ${username} users -"
+        ];
 
-          systemd.user.timers.sinnix-audio-index = {
-            Unit.Description = "Hourly trigger for the Sinnix audio capture Silero VAD index pass";
-            Timer = {
-              OnCalendar = "hourly";
-              Persistent = true;
-              RandomizedDelaySec = "5m";
+        sinnix.runtime.surfaces = {
+          capture-audio-recorder-devices = {
+            unit = "sinnix-audio-recorder-devices.service";
+            manager = "user";
+            resourceClass = "capture-runtime";
+            observe = {
+              enable = true;
+              restartable = true;
             };
-            Install.WantedBy = [ "timers.target" ];
+            captures = [
+              {
+                # The supervisor's own state lane, not the audio directories:
+                # per-device channel dirs are dynamic, and pointing a staleness
+                # budget at their shared parent would let one healthy device
+                # mask every other device's silence.
+                name = "audio-devices";
+                path = devicesDir;
+                eventDriven = true;
+                # The supervisor heartbeats into this lane every 10 minutes
+                # (devices.HEARTBEAT_SECONDS) even when nothing changes, so a
+                # quiet lane means a dead supervisor, not a quiet desktop.
+                staleAfterSeconds = 3600;
+                # Staleness cannot see the failure this lane exists to prevent:
+                # a device that is present in the graph and recorded by nobody.
+                livenessProbe = {
+                  command = "${audioPkg}/bin/sinnix-audio-capture devices-probe --capture-root ${capturesRoot} --pw-dump-bin ${pwDumpBin} ${excludeArgs}";
+                  timeoutSeconds = 15;
+                };
+              }
+            ];
+          };
+          capture-audio-topology = {
+            unit = "sinnix-audio-topology.service";
+            manager = "user";
+            resourceClass = "capture-runtime";
+            observe = {
+              enable = true;
+              restartable = true;
+            };
+            captures = [
+              {
+                name = "audio-topology";
+                path = topologyDir;
+                eventDriven = true;
+                # Node/port/link churn is intermittent (device plug/unplug,
+                # profile switches) -- a quiet day is a legitimate "topology
+                # didn't change" outcome, matching capture-a11y's event-driven
+                # budget.
+                staleAfterSeconds = 86400;
+              }
+            ];
+          };
+          capture-audio-index = {
+            unit = "sinnix-audio-index.service";
+            manager = "user";
+            resourceClass = "capture-runtime";
+            observe = {
+              enable = true;
+              restartable = true;
+            };
+            captures = [
+              {
+                name = "audio-index";
+                path = indexDir;
+                eventDriven = true;
+                # Timer runs hourly; the package's own 26h default lookback
+                # already tolerates one missed run, so double that again here.
+                staleAfterSeconds = 172800;
+              }
+            ];
           };
         };
-    };
+
+        home-manager.users.${username} =
+          { ... }:
+          {
+            systemd.user.services = {
+              sinnix-audio-recorder-devices = {
+                Unit = {
+                  Description = "Sinnix audio capture: every PipeWire source and sink (minus the blacklists) -> hour-aligned Opus";
+                  After = [
+                    "graphical-session.target"
+                    "pipewire.service"
+                  ];
+                  PartOf = [ "graphical-session.target" ];
+                  StartLimitIntervalSec = 300;
+                  StartLimitBurst = 5;
+                };
+                Service = lib.sinnix.mkRuntimeServiceConfig {
+                  runtimeInventory = config.sinnix.runtime.inventory;
+                  unit = "sinnix-audio-recorder-devices.service";
+                  overrides = {
+                    Type = "simple";
+                    ExecStart = lib.concatStringsSep " " (
+                      [
+                        "${audioPkg}/bin/sinnix-audio-capture"
+                        "record-devices"
+                        "--capture-root ${capturesRoot}"
+                        "--pw-record-bin ${pwRecordBin}"
+                        "--pw-dump-bin ${pwDumpBin}"
+                        "--opusenc-bin ${opusencBin}"
+                      ]
+                      ++ lib.optional (excludeArgs != "") excludeArgs
+                      ++ lib.optionals (cfg.asrSourcePattern != null) [
+                        "--asr-source ${lib.escapeShellArg cfg.asrSourcePattern}"
+                        # RuntimeDirectory gives the socket a writable %t path
+                        # under ProtectSystem=strict without widening
+                        # ReadWritePaths.
+                        "--tee-socket %t/sinnix/audio/asr.pcm"
+                      ]
+                    );
+                    Restart = "on-failure";
+                    RestartSec = "5s";
+                    # The per-device channel directories are created at runtime,
+                    # so the writable path is the parent, not an enumerable list.
+                    ReadWritePaths = [
+                      audioDir
+                      devicesDir
+                    ];
+                    RuntimeDirectory = "sinnix/audio";
+                  }
+                  // hardening;
+                };
+                Install.WantedBy = [ "graphical-session.target" ];
+              };
+
+              sinnix-audio-topology = {
+                Unit = {
+                  Description = "Sinnix audio capture: pw-mon Node/Port/Link topology stream";
+                  After = [
+                    "graphical-session.target"
+                    "pipewire.service"
+                  ];
+                  PartOf = [ "graphical-session.target" ];
+                  StartLimitIntervalSec = 300;
+                  StartLimitBurst = 5;
+                };
+                Service = lib.sinnix.mkRuntimeServiceConfig {
+                  runtimeInventory = config.sinnix.runtime.inventory;
+                  unit = "sinnix-audio-topology.service";
+                  overrides = {
+                    Type = "simple";
+                    ExecStart = "${audioPkg}/bin/sinnix-audio-capture topology --capture-root ${capturesRoot} --pw-mon-bin ${pwMonBin}";
+                    Restart = "on-failure";
+                    RestartSec = "5s";
+                    ReadWritePaths = [ topologyDir ];
+                  }
+                  // hardening;
+                };
+                Install.WantedBy = [ "graphical-session.target" ];
+              };
+            };
+          };
+      }
+    ];
 } args
