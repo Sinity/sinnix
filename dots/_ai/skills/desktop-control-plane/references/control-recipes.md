@@ -17,7 +17,7 @@ scripts/kitty-remote-control.sh send-await \
 scripts/kitty-remote-control.sh capture \
   --match 'title:Codex' \
   --extent all \
-  --out /realm/data/captures/logs/codex-session.txt
+  --out /realm/data/activity/logs/codex-session.txt
 ```
 
 ## 3) Inspect Hyprland Context Before Automation
