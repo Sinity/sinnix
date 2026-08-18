@@ -85,6 +85,32 @@ in
         };
       }
     )
+    # Boot-triggered oneshot, same governance treatment as syslog-index:
+    # previously unclassed and without failure reporting.
+    (lib.sinnix.mkScheduledJob
+      {
+        inherit config;
+        unitName = "capture-boot-metrics";
+        description = "Capture boot metrics";
+        surface = config.sinnix.runtime.surfaces.capture-boot-metrics;
+      }
+      {
+        execStart = "${captureBootMetrics}/bin/capture-boot-metrics";
+        unit = {
+          # systemd-analyze needs FinishTimestampMonotonic != 0, only set
+          # once every boot service has finished (2+ min with slow nofail
+          # mounts).
+          after = [
+            "systemd-journald.service"
+            "multi-user.target"
+          ];
+        };
+        timer = {
+          onBootSec = "3min";
+          accuracySec = "10s";
+        };
+      }
+    )
     {
       environment.systemPackages = lib.mkIf isDesktop (
         coreDiagnostics
@@ -105,26 +131,10 @@ in
         "d ${journaldBaseDir}/index 0750 ${username} users -"
       ];
 
-      systemd.services.capture-boot-metrics = {
-        description = "Capture boot metrics";
-        # systemd-analyze needs FinishTimestampMonotonic != 0, only set once
-        # every boot service has finished (2+ min with slow nofail mounts).
-        after = [
-          "systemd-journald.service"
-          "multi-user.target"
-        ];
-        serviceConfig = {
-          Type = "oneshot";
-          ExecStart = "${captureBootMetrics}/bin/capture-boot-metrics";
-        };
-      };
-
-      systemd.timers.capture-boot-metrics = {
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnBootSec = "3min";
-          AccuracySec = "10s";
-        };
+      sinnix.runtime.surfaces.capture-boot-metrics = {
+        unit = "capture-boot-metrics.service";
+        resourceClass = "background-maintenance";
+        observe.enable = true;
       };
 
       sinnix.runtime.surfaces.syslog-index = {
