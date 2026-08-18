@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Provably fails when: the evidence freeze stops capturing one of its
+# artifacts (verified by emptying reflog.txt), or the recovery probe stops
+# reporting an authority or the authorization requirement.
 set -euo pipefail
 freeze=$1
 recover=$2

@@ -634,6 +634,14 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/scope-wrapper.sh} ${pkgs.writeText "sinnix-direnvrc-rendered" (runtimeDefaults.renderDirenvrc (builtins.readFile ../../scripts/sinnix-direnvrc))}
             touch "$out"
           '';
+      # Provably fails when: the job control plane misclassifies a terminal
+      # event (verified by classifying a timeout as a plain failure), or the
+      # launcher stops passing scope options and attestation environment
+      # through to the child.
+      #
+      # Note: the unattested-interrupt case is guarded in depth (manifest
+      # attestation, PID liveness, start-time, cgroup and worktree identity),
+      # so removing any single guard leaves it refused by the next one.
       agentJobHandleFixture =
         pkgs.runCommand "agent-job-handle-fixture"
           {
