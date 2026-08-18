@@ -223,13 +223,18 @@ def main() -> int:
     suppressed = {
         row
         for row in suspects
-        if any(row.startswith(f"{unit}: {word}") for unit, word in KNOWN_FALSE_POSITIVES)
+        if any(
+            row.startswith(f"{unit}: {word}") for unit, word in KNOWN_FALSE_POSITIVES
+        )
     }
     live = suspects - suppressed
     for row in sorted(live):
         print(row)
     if suppressed:
-        print(f"\n{len(suppressed)} reviewed false positive(s) suppressed:", file=sys.stderr)
+        print(
+            f"\n{len(suppressed)} reviewed false positive(s) suppressed:",
+            file=sys.stderr,
+        )
         for row in sorted(suppressed):
             print(f"  {row}", file=sys.stderr)
     print(f"\n{len(live)} suspect command(s)", file=sys.stderr)

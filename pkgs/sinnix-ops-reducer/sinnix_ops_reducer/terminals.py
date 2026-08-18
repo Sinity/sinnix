@@ -80,17 +80,25 @@ MAX_BODY = 1 << 16  # 64 KiB: a pasted command, not a file upload
 # --history-dir than this, so the value is now a fixed convention rather than
 # a reducer CLI flag.
 HISTORY_DIR = Path("/realm/data/activity/kitty-scrollback")
-HISTORY_NAME_RE = re.compile(r"^(?P<ts>[^-]+)-(?P<host>[^-]+)-pid(?P<pid>\d+)-win(?P<winid>\d+)-")
+HISTORY_NAME_RE = re.compile(
+    r"^(?P<ts>[^-]+)-(?P<host>[^-]+)-pid(?P<pid>\d+)-win(?P<winid>\d+)-"
+)
 
 LIVE_RE = re.compile(r"^/terminals/v1/live/(\d+)/(\d+)(?P<rest>/[A-Za-z0-9._-]*)?$")
 CONTENT_RE = re.compile(r"^/terminals/v1/windows/(\d+)/(\d+)/content$")
 HISTORY_RE = re.compile(r"^/terminals/v1/windows/(\d+)/(\d+)/history$")
-HISTORY_FILE_RE = re.compile(r"^/terminals/v1/windows/(\d+)/(\d+)/history/([A-Za-z0-9._-]+\.ansi)$")
+HISTORY_FILE_RE = re.compile(
+    r"^/terminals/v1/windows/(\d+)/(\d+)/history/([A-Za-z0-9._-]+\.ansi)$"
+)
 SEND_RE = re.compile(r"^/terminals/v1/windows/(\d+)/(\d+)/send$")
 
 
 def is_terminal_route(path: str) -> bool:
-    return path == "/terminals" or path.startswith("/terminals/") or path.startswith("/terminals?")
+    return (
+        path == "/terminals"
+        or path.startswith("/terminals/")
+        or path.startswith("/terminals?")
+    )
 
 
 def discover_kitty_sockets() -> list[Path]:
@@ -189,7 +197,16 @@ def send_text(pid: int, window_id: int, text: str) -> bool:
         return False
     try:
         out = subprocess.run(
-            [KITTY_BIN, "@", "--to", f"unix:{sock}", "send-text", "--match", f"id:{window_id}", text],
+            [
+                KITTY_BIN,
+                "@",
+                "--to",
+                f"unix:{sock}",
+                "send-text",
+                "--match",
+                f"id:{window_id}",
+                text,
+            ],
             capture_output=True,
             text=True,
             timeout=5,
@@ -220,7 +237,16 @@ def send_key(pid: int, window_id: int, name: str) -> bool:
         return False
     try:
         out = subprocess.run(
-            [KITTY_BIN, "@", "--to", f"unix:{sock}", "send-key", "--match", f"id:{window_id}", key],
+            [
+                KITTY_BIN,
+                "@",
+                "--to",
+                f"unix:{sock}",
+                "send-key",
+                "--match",
+                f"id:{window_id}",
+                key,
+            ],
             capture_output=True,
             text=True,
             timeout=5,
@@ -250,7 +276,10 @@ def live_streams() -> dict[tuple[int, int], int]:
                 continue
             env = dict(
                 item.split("=", 1)
-                for item in (proc / "environ").read_bytes().decode("utf-8", "replace").split("\0")
+                for item in (proc / "environ")
+                .read_bytes()
+                .decode("utf-8", "replace")
+                .split("\0")
                 if "=" in item
             )
         except OSError:
@@ -307,7 +336,11 @@ def fetch_upstream(port: int, path: str) -> tuple[int, str, bytes] | None:
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
         conn.request("GET", path)
         response = conn.getresponse()
-        return response.status, response.getheader("Content-Type", "application/octet-stream"), response.read()
+        return (
+            response.status,
+            response.getheader("Content-Type", "application/octet-stream"),
+            response.read(),
+        )
     except (OSError, http.client.HTTPException):
         return None
     finally:
@@ -324,7 +357,9 @@ def connect_live_ws(port: int, headers) -> socket.socket:
     upstream = socket.create_connection(("127.0.0.1", port), timeout=10)
     request = ["GET /ws HTTP/1.1", f"Host: 127.0.0.1:{port}"]
     request += [
-        f"{name}: {value}" for name, value in headers.items() if name.lower() not in ("host", "content-length")
+        f"{name}: {value}"
+        for name, value in headers.items()
+        if name.lower() not in ("host", "content-length")
     ]
     upstream.sendall(("\r\n".join(request) + "\r\n\r\n").encode())
     return upstream

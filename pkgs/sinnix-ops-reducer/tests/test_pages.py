@@ -104,7 +104,9 @@ def test_scope_class_prefers_the_longest_matching_class() -> None:
         scope_class("sinnix-nix-build-1786553380794796579-1234.scope", ordered)
         == "nix-build"
     )
-    assert scope_class("sinnix-build-1786553380794796579-1234.scope", ordered) == "build"
+    assert (
+        scope_class("sinnix-build-1786553380794796579-1234.scope", ordered) == "build"
+    )
 
 
 def test_every_route_renders_a_complete_document_without_a_snapshot() -> None:
@@ -150,7 +152,9 @@ def test_lifecycle_controls_mirror_the_action_api_admission_rule() -> None:
     assert "<button" not in lifecycle_controls(
         "x.service", restartable=True, installed=False, active=False
     )
-    active = lifecycle_controls("x.service", restartable=True, installed=True, active=True)
+    active = lifecycle_controls(
+        "x.service", restartable=True, installed=True, active=True
+    )
     assert active.count("<button") == 2
     assert "'start'" not in active
     inactive = lifecycle_controls(

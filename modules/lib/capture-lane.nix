@@ -121,10 +121,7 @@ let
 
   resolvedWritablePaths = if writablePaths != null then writablePaths else [ laneDir ];
   resolvedTmpfilesRules =
-    if tmpfilesRules != null then
-      tmpfilesRules
-    else
-      [ "d ${laneDir} 0755 ${username} users -" ];
+    if tmpfilesRules != null then tmpfilesRules else [ "d ${laneDir} 0755 ${username} users -" ];
 
   defaultCaptures = lib.optional (laneDir != null) (
     {
@@ -146,23 +143,23 @@ let
       inherit restartable;
     };
     captures = resolvedCaptures;
-  } // extraSurface;
+  }
+  // extraSurface;
 
-  baseOverrides =
-    {
-      ExecStart = execStart;
-      NoNewPrivileges = true;
-      ProtectSystem = "strict";
-      ProtectHome = "read-only";
-      ReadWritePaths = resolvedWritablePaths;
-    }
-    // lib.optionalAttrs (environment != [ ]) { Environment = environment; }
-    // lib.optionalAttrs (runtimeDirectory != null) { RuntimeDirectory = runtimeDirectory; }
-    // lib.optionalAttrs (
-      runtimeDirectoryPreserve != null
-    ) { RuntimeDirectoryPreserve = runtimeDirectoryPreserve; }
-    // lib.optionalAttrs (umask != null) { UMask = umask; }
-    // lib.optionalAttrs privateTmp { PrivateTmp = true; };
+  baseOverrides = {
+    ExecStart = execStart;
+    NoNewPrivileges = true;
+    ProtectSystem = "strict";
+    ProtectHome = "read-only";
+    ReadWritePaths = resolvedWritablePaths;
+  }
+  // lib.optionalAttrs (environment != [ ]) { Environment = environment; }
+  // lib.optionalAttrs (runtimeDirectory != null) { RuntimeDirectory = runtimeDirectory; }
+  // lib.optionalAttrs (runtimeDirectoryPreserve != null) {
+    RuntimeDirectoryPreserve = runtimeDirectoryPreserve;
+  }
+  // lib.optionalAttrs (umask != null) { UMask = umask; }
+  // lib.optionalAttrs privateTmp { PrivateTmp = true; };
 
   streamOverrides =
     baseOverrides
@@ -197,18 +194,21 @@ let
       description = unitDescription;
       serviceConfig = jobServiceConfig;
     }
-    // lib.optionalAttrs (pollAfter != [ ]) { unit = { after = pollAfter; }; }
+    // lib.optionalAttrs (pollAfter != [ ]) {
+      unit = {
+        after = pollAfter;
+      };
+    }
     // {
-      timer =
-        {
-          accuracySec = timer.accuracySec or null;
-          persistent = timer.persistent or false;
-          description = timerDescription;
-        }
-        // lib.optionalAttrs (timer ? intervalSec) { inherit (timer) intervalSec; }
-        // lib.optionalAttrs (timer ? onUnitActiveSec) { inherit (timer) onUnitActiveSec; }
-        // lib.optionalAttrs (timer ? onStartupSec) { inherit (timer) onStartupSec; }
-        // lib.optionalAttrs (!(timer ? onStartupSec)) { onBootSec = timer.onBootSec or "2min"; };
+      timer = {
+        accuracySec = timer.accuracySec or null;
+        persistent = timer.persistent or false;
+        description = timerDescription;
+      }
+      // lib.optionalAttrs (timer ? intervalSec) { inherit (timer) intervalSec; }
+      // lib.optionalAttrs (timer ? onUnitActiveSec) { inherit (timer) onUnitActiveSec; }
+      // lib.optionalAttrs (timer ? onStartupSec) { inherit (timer) onStartupSec; }
+      // lib.optionalAttrs (!(timer ? onStartupSec)) { onBootSec = timer.onBootSec or "2min"; };
     }
   );
 
@@ -229,16 +229,15 @@ let
           {
             home-manager.users.${username} = {
               systemd.user.services.${unitName} = {
-                Unit =
-                  {
-                    Description = unitDescription;
-                    After = [ target ] ++ extraAfter;
-                  }
-                  // lib.optionalAttrs partOf { PartOf = [ target ]; }
-                  // lib.optionalAttrs (startLimit != null) {
-                    StartLimitIntervalSec = startLimit.intervalSec;
-                    StartLimitBurst = startLimit.burst;
-                  };
+                Unit = {
+                  Description = unitDescription;
+                  After = [ target ] ++ extraAfter;
+                }
+                // lib.optionalAttrs partOf { PartOf = [ target ]; }
+                // lib.optionalAttrs (startLimit != null) {
+                  StartLimitIntervalSec = startLimit.intervalSec;
+                  StartLimitBurst = startLimit.burst;
+                };
                 Service = lib.sinnix.mkRuntimeServiceConfig {
                   runtimeInventory = config.sinnix.runtime.inventory;
                   inherit unit;
@@ -253,6 +252,12 @@ let
     ];
 in
 {
-  inherit name description extraOptions surface configFn;
+  inherit
+    name
+    description
+    extraOptions
+    surface
+    configFn
+    ;
 }
 // lib.optionalAttrs (mode == "poll") { job = pollJob; }

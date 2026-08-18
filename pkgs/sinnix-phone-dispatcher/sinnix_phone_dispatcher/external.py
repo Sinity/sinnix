@@ -45,11 +45,17 @@ def _score_worker() -> None:
     try:
         proc = subprocess.run([exe, "run"], capture_output=True, text=True, timeout=600)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        print(f"phone-dispatcher: score: sinnix-score run did not complete: {exc}", file=sys.stderr)
+        print(
+            f"phone-dispatcher: score: sinnix-score run did not complete: {exc}",
+            file=sys.stderr,
+        )
         return
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()
-        print(f"phone-dispatcher: score: sinnix-score run exited {proc.returncode}: {detail}", file=sys.stderr)
+        print(
+            f"phone-dispatcher: score: sinnix-score run exited {proc.returncode}: {detail}",
+            file=sys.stderr,
+        )
     elif proc.stdout.strip():
         print(f"phone-dispatcher: score: {proc.stdout.strip()}", file=sys.stderr)
 

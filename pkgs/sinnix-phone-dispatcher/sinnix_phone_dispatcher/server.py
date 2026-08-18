@@ -125,7 +125,9 @@ class Handler(BaseHTTPRequestHandler):
         # and before MAX_BODY, which sizes an intent, not an archive file.
         if route == "/chunk":
             if length > MAX_UPLOAD:
-                self._send(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"ok": False, "bytes": length})
+                self._send(
+                    HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"ok": False, "bytes": length}
+                )
                 return
             query = self._query()
             status, payload = store_upload(
@@ -139,13 +141,18 @@ class Handler(BaseHTTPRequestHandler):
 
         if route == "/events":
             if length > MAX_UPLOAD:
-                self._send(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"ok": False, "bytes": length})
+                self._send(
+                    HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"ok": False, "bytes": length}
+                )
                 return
             query = self._query()
             try:
                 offset = int(query.get("offset", ""))
             except ValueError:
-                self._send(HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "offset must be an integer"})
+                self._send(
+                    HTTPStatus.BAD_REQUEST,
+                    {"ok": False, "detail": "offset must be an integer"},
+                )
                 return
             status, payload = append_events(
                 query.get("day", ""),
@@ -165,7 +172,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "not JSON"})
             return
         if not isinstance(payload, dict):
-            self._send(HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "expected an object"})
+            self._send(
+                HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "expected an object"}
+            )
             return
 
         if route == "/intent":
@@ -253,7 +262,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     signal.signal(signal.SIGTERM, request_shutdown)
     signal.signal(signal.SIGINT, request_shutdown)
 
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True, name="phone-http")
+    server_thread = threading.Thread(
+        target=server.serve_forever, daemon=True, name="phone-http"
+    )
     server_thread.start()
     print(f"serving on {sock_path}", file=sys.stderr)
 

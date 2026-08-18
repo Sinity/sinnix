@@ -3,7 +3,6 @@
 import json
 
 import pytest
-
 from sinnix_lib.spool import Spool
 
 

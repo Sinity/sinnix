@@ -82,7 +82,9 @@ def gpu_compute_apps() -> tuple[list[dict[str, Any]] | None, str | None]:
     except (OSError, subprocess.TimeoutExpired) as error:
         return None, str(error)
     if result.returncode != 0:
-        return None, (result.stderr or "nvidia-smi exited non-zero").strip()[:200] or "nvidia-smi failed"
+        return None, (result.stderr or "nvidia-smi exited non-zero").strip()[
+            :200
+        ] or "nvidia-smi failed"
     rows: list[dict[str, Any]] = []
     for line in result.stdout.splitlines():
         parts = [part.strip() for part in line.split(",")]
@@ -124,7 +126,9 @@ def vram_by_unit(
         if not cgroup or proc.get("used_mib") is None:
             continue
         for unit, prefix in unit_cgroups.items():
-            if prefix and (cgroup == prefix or cgroup.startswith(prefix.rstrip("/") + "/")):
+            if prefix and (
+                cgroup == prefix or cgroup.startswith(prefix.rstrip("/") + "/")
+            ):
                 totals[unit] = totals.get(unit, 0) + proc["used_mib"]
                 break
     return totals
@@ -134,7 +138,11 @@ def gpu_admission_states(units: list[tuple[str, str]]) -> dict[str, dict[str, st
     states: dict[str, dict[str, str]] = {}
     for manager in {manager for manager, _ in units}:
         states.update(
-            show_units(manager, [unit for owner, unit in units if owner == manager], GPU_STATE_PROPERTIES)
+            show_units(
+                manager,
+                [unit for owner, unit in units if owner == manager],
+                GPU_STATE_PROPERTIES,
+            )
         )
     return states
 
@@ -151,7 +159,9 @@ def gpu_lifecycle_events(units: list[str]) -> tuple[list[dict[str, Any]], str | 
     for unit in units:
         arguments += ["-u", unit]
     try:
-        result = subprocess.run(arguments, capture_output=True, text=True, timeout=25, check=False)
+        result = subprocess.run(
+            arguments, capture_output=True, text=True, timeout=25, check=False
+        )
     except (OSError, subprocess.TimeoutExpired) as error:
         return [], str(error)
     if result.returncode != 0:
@@ -162,7 +172,10 @@ def gpu_lifecycle_events(units: list[str]) -> tuple[list[dict[str, Any]], str | 
             entry = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if entry.get("JOB_RESULT") != "done" or entry.get("JOB_TYPE") not in {"start", "stop"}:
+        if entry.get("JOB_RESULT") != "done" or entry.get("JOB_TYPE") not in {
+            "start",
+            "stop",
+        }:
             continue
         unit = entry.get("UNIT")
         timestamp = as_int(entry.get("__REALTIME_TIMESTAMP"))
@@ -213,7 +226,8 @@ def gpu_admission_card(services: list[dict[str, Any]], now: dt.datetime) -> str:
     members = [
         service
         for service in services
-        if service.get("registered") and service.get("exclusiveResource") == GPU_ADMISSION_KEY
+        if service.get("registered")
+        and service.get("exclusiveResource") == GPU_ADMISSION_KEY
     ]
     if not members:
         return card(
@@ -226,10 +240,15 @@ def gpu_admission_card(services: list[dict[str, Any]], now: dt.datetime) -> str:
 
     unit_by_name = {str(service["name"]): str(service["unit"]) for service in members}
     units = sorted(set(unit_by_name.values()))
-    unit_owner_pairs = [(str(service.get("manager") or "system"), str(service["unit"])) for service in members]
+    unit_owner_pairs = [
+        (str(service.get("manager") or "system"), str(service["unit"]))
+        for service in members
+    ]
     states = gpu_admission_states(unit_owner_pairs)
     processes, proc_error = gpu_compute_apps()
-    unit_cgroups = {unit: str(states.get(unit, {}).get("ControlGroup") or "") for unit in units}
+    unit_cgroups = {
+        unit: str(states.get(unit, {}).get("ControlGroup") or "") for unit in units
+    }
     vram = vram_by_unit(processes, unit_cgroups) if processes is not None else {}
     monotonic = monotonic_now_us()
 
@@ -259,7 +278,9 @@ def gpu_admission_card(services: list[dict[str, Any]], now: dt.datetime) -> str:
                 tone = "warn"
             started = as_int(info.get("ActiveEnterTimestampMonotonic"))
             if monotonic is not None and started:
-                meta.append(f"resident {esc(duration_human((monotonic - started) / 1_000_000))}")
+                meta.append(
+                    f"resident {esc(duration_human((monotonic - started) / 1_000_000))}"
+                )
             meta.append(
                 "idle-out: not a live countdown — systemd-socket-proxyd tears the "
                 "backend down synchronously with its own 30s idle detection, so "
@@ -271,7 +292,9 @@ def gpu_admission_card(services: list[dict[str, Any]], now: dt.datetime) -> str:
         status_badge = (
             badge("not installed", "muted")
             if not installed
-            else badge("resident", "ok") if active else badge("idle/stopped", "muted")
+            else badge("resident", "ok")
+            if active
+            else badge("idle/stopped", "muted")
         )
         resident_blocks += row(headline, [status_badge, *meta], tone=tone)
 
@@ -285,7 +308,9 @@ def gpu_admission_card(services: list[dict[str, Any]], now: dt.datetime) -> str:
             [
                 " ".join(f"<code>{esc(other)}</code>" for other in gpu_conflicts)
                 if gpu_conflicts
-                else badge("no live Conflicts= against another gpu-inference member", "bad")
+                else badge(
+                    "no live Conflicts= against another gpu-inference member", "bad"
+                )
             ],
         )
 
@@ -302,7 +327,8 @@ def gpu_admission_card(services: list[dict[str, Any]], now: dt.datetime) -> str:
         )
     if not evictions:
         eviction_blocks = empty(
-            f"journalctl error: {journal_error}" if journal_error
+            f"journalctl error: {journal_error}"
+            if journal_error
             else f"no evictions in the last lookback window ({GPU_EVICTION_SINCE})"
         )
 
@@ -310,7 +336,11 @@ def gpu_admission_card(services: list[dict[str, Any]], now: dt.datetime) -> str:
         '<div class="tiles">'
         + tile(str(resident_count), "resident now", "info" if resident_count else "ok")
         + tile(str(len(members)), "admission members")
-        + (tile("live", "vram source", "ok") if processes is not None else tile("unmeasured", "vram source", "warn"))
+        + (
+            tile("live", "vram source", "ok")
+            if processes is not None
+            else tile("unmeasured", "vram source", "warn")
+        )
         + "</div>"
     )
     body += f'<div class="group"><h3>resident state</h3>{resident_blocks}</div>'
@@ -364,9 +394,13 @@ def resolve_ai_services(
             resolved.append({"name": name, "registered": False})
             continue
         activation = (
-            surface.get("activation") if isinstance(surface.get("activation"), dict) else {}
+            surface.get("activation")
+            if isinstance(surface.get("activation"), dict)
+            else {}
         )
-        observe = surface.get("observe") if isinstance(surface.get("observe"), dict) else {}
+        observe = (
+            surface.get("observe") if isinstance(surface.get("observe"), dict) else {}
+        )
         resolved.append(
             {
                 "name": name,
@@ -383,7 +417,6 @@ def resolve_ai_services(
     return resolved
 
 
-
 def render_ai(
     manifest: dict[str, Any],
     inventory: dict[str, Any] | None,
@@ -393,7 +426,11 @@ def render_ai(
     now = dt.datetime.now(dt.timezone.utc)
     services = resolve_ai_services(manifest, inventory)
     states = unit_states(
-        [(str(s.get("manager", "system")), str(s["unit"])) for s in services if s.get("unit")]
+        [
+            (str(s.get("manager", "system")), str(s["unit"]))
+            for s in services
+            if s.get("unit")
+        ]
     )
 
     blocks = ""
@@ -422,11 +459,15 @@ def render_ai(
         if service.get("idleTimeout"):
             meta.append(f"idle exit {esc(service['idleTimeout'])}")
         if service.get("exclusiveResource"):
-            meta.append(f"admission key <code>{esc(service['exclusiveResource'])}</code>")
+            meta.append(
+                f"admission key <code>{esc(service['exclusiveResource'])}</code>"
+            )
         blocks += row(
             f"<strong>{esc(service.get('name'))}</strong>",
             meta,
-            lifecycle_controls(unit, bool(service.get("restartable")), installed, active),
+            lifecycle_controls(
+                unit, bool(service.get("restartable")), installed, active
+            ),
             "bad" if tone == "bad" else "",
         )
 
@@ -440,12 +481,16 @@ def render_ai(
             if gpu
             else tile("—", "gpu", "muted")
         )
-        + (tile(esc(gpu.split(",")[2].strip()), "gpu utilisation") if gpu and len(gpu.split(",")) > 2 else "")
+        + (
+            tile(esc(gpu.split(",")[2].strip()), "gpu utilisation")
+            if gpu and len(gpu.split(",")) > 2
+            else ""
+        )
         + "</div>"
     )
     body += (
         '<section class="card wide"><h2>Local AI backends</h2>'
-        "<p class=\"sub\">These sit behind <code>systemd-socket-proxyd</code> and "
+        '<p class="sub">These sit behind <code>systemd-socket-proxyd</code> and '
         "exit after their idle timeout, so <em>idle</em> is the resting state, not "
         "a fault: connecting to the public endpoint starts one with no privileged "
         "action at all. Ollama and KoboldCpp hold the same "
@@ -469,4 +514,3 @@ def render_ai(
         body,
         tail=ACTION_SCRIPT,
     )
-

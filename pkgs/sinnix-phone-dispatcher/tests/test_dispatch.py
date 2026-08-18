@@ -22,9 +22,13 @@ def _args(outbox: Path) -> argparse.Namespace:
 def test_executed_intent_file_is_removed(monkeypatch, tmp_path) -> None:
     outbox = tmp_path / "outbox"
     outbox.mkdir()
-    (outbox / "intent-1.json").write_text(json.dumps({"kind": "mark", "send_token": "tok-1"}))
+    (outbox / "intent-1.json").write_text(
+        json.dumps({"kind": "mark", "send_token": "tok-1"})
+    )
 
-    monkeypatch.setattr(dispatch_mod, "execute", lambda intent: {"ok": True, "kind": intent["kind"]})
+    monkeypatch.setattr(
+        dispatch_mod, "execute", lambda intent: {"ok": True, "kind": intent["kind"]}
+    )
 
     dispatch_mod.cmd_dispatch(_args(outbox))
 
@@ -34,9 +38,13 @@ def test_executed_intent_file_is_removed(monkeypatch, tmp_path) -> None:
 def test_failed_intent_file_is_kept_not_deleted(monkeypatch, tmp_path) -> None:
     outbox = tmp_path / "outbox"
     outbox.mkdir()
-    (outbox / "intent-1.json").write_text(json.dumps({"kind": "job_answer", "send_token": "tok-1"}))
+    (outbox / "intent-1.json").write_text(
+        json.dumps({"kind": "job_answer", "send_token": "tok-1"})
+    )
 
-    monkeypatch.setattr(dispatch_mod, "execute", lambda intent: {"ok": False, "detail": "no answer"})
+    monkeypatch.setattr(
+        dispatch_mod, "execute", lambda intent: {"ok": False, "detail": "no answer"}
+    )
 
     dispatch_mod.cmd_dispatch(_args(outbox))
 

@@ -50,7 +50,9 @@ class CoalescingTrigger:
     happens while a persistently broken one cannot spin.
     """
 
-    def __init__(self, command: list[str], delay: float = 5.0, timeout: float = 300.0) -> None:
+    def __init__(
+        self, command: list[str], delay: float = 5.0, timeout: float = 300.0
+    ) -> None:
         self.command = command
         self.delay = delay
         self.timeout = timeout
@@ -92,7 +94,9 @@ class CoalescingTrigger:
                 timeout=self.timeout,
             )
         except (OSError, subprocess.TimeoutExpired) as error:
-            print(f"sinnix-ops-reducer: feedback drain failed: {error}", file=sys.stderr)
+            print(
+                f"sinnix-ops-reducer: feedback drain failed: {error}", file=sys.stderr
+            )
             return False
         if result.returncode != 0:
             print(
@@ -105,13 +109,17 @@ class CoalescingTrigger:
 
 
 class FeedbackSpool:
-    def __init__(self, directory: Path, elicit: CoalescingTrigger | None = None) -> None:
+    def __init__(
+        self, directory: Path, elicit: CoalescingTrigger | None = None
+    ) -> None:
         self.directory = Path(directory)
         self.elicit = elicit
         self.lock = threading.Lock()
         self.sequence = 0
 
-    def append(self, payload: Any, page: str | None, agent: str | None) -> dict[str, Any]:
+    def append(
+        self, payload: Any, page: str | None, agent: str | None
+    ) -> dict[str, Any]:
         received = dt.datetime.now(dt.timezone.utc)
         with self.lock:
             self.sequence += 1

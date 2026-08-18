@@ -39,7 +39,9 @@ def default_static_inventory_path() -> Path:
     tests and fixture hosts that already point that env var elsewhere also
     redirect orient's acknowledged-outages read."""
     return Path(
-        os.environ.get("SINNIX_RUNTIME_INVENTORY_FILE", "/etc/sinnix/runtime-inventory.json")
+        os.environ.get(
+            "SINNIX_RUNTIME_INVENTORY_FILE", "/etc/sinnix/runtime-inventory.json"
+        )
     )
 
 
@@ -123,9 +125,7 @@ def degraded_sources(sources: dict[str, Any] | None) -> list[str]:
     )
 
 
-def system_verdict(
-    units: list[dict[str, Any]], degraded: list[str]
-) -> tuple[str, str]:
+def system_verdict(units: list[dict[str, Any]], degraded: list[str]) -> tuple[str, str]:
     """(status, one-line summary) -- the three-second read."""
     failed = [u for u in units if u.get("active_state") == "failed"]
     activating = [u for u in units if u.get("active_state") == "activating"]
@@ -327,7 +327,9 @@ def render_human(data: dict[str, Any]) -> str:
     acked = data.get("acknowledged_outages") or []
     if acked:
         lines.append("")
-        lines.append(f"Acknowledged outages ({len(acked)}, do not re-report as incidents):")
+        lines.append(
+            f"Acknowledged outages ({len(acked)}, do not re-report as incidents):"
+        )
         for row in acked:
             lines.append(
                 f"  - {row['surface']} ({row.get('unit') or '?'}) — {row['reason']} "
@@ -356,7 +358,9 @@ def render_human(data: dict[str, Any]) -> str:
     steering = data.get("steering") or {}
     if steering.get("available"):
         lines.append("")
-        lines.append(f"Steering ready ({len(steering['ready'])} of {steering['total']}):")
+        lines.append(
+            f"Steering ready ({len(steering['ready'])} of {steering['total']}):"
+        )
         for item in steering["ready"]:
             lines.append(f"  - {item['id']}  {_truncate(item['title'])}")
 
@@ -403,7 +407,11 @@ def acknowledged_only_report(
 
 
 def default_socket_path() -> Path:
-    return Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "sinnix" / "ops.sock"
+    return (
+        Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"))
+        / "sinnix"
+        / "ops.sock"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

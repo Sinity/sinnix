@@ -151,7 +151,10 @@ def describe(
             "core-dump": "It was killed by a signal.",
         }.get(result, "It is not running and was not meant to be stopped.")
         scope = "--user " if manager == "user" else ""
-        return f"{unit} stopped working", f"{body}\nLook: journalctl {scope}-u {unit} -e"
+        return (
+            f"{unit} stopped working",
+            f"{body}\nLook: journalctl {scope}-u {unit} -e",
+        )
     if key == "service_failure:acknowledged":
         return (
             f"{unit} is down, as expected",
@@ -183,7 +186,10 @@ def describe(
             else "The front-door socket is down, so nothing can reach the service "
             "behind it."
         )
-        return f"{unit} is not accepting connections", f"{body}\nLook: journalctl -u {unit} -e"
+        return (
+            f"{unit} is not accepting connections",
+            f"{body}\nLook: journalctl -u {unit} -e",
+        )
     if key == "socket_failure:unknown":
         return (
             f"Cannot tell whether {unit} is listening",
@@ -394,7 +400,9 @@ class Emitter:
             if confirmed:
                 self.notifier("normal", title, body)
             return
-        self.notifier("critical" if status not in CALM_STATUSES else "normal", title, body)
+        self.notifier(
+            "critical" if status not in CALM_STATUSES else "normal", title, body
+        )
 
     def prune(self) -> None:
         """Drop any state key this run did not emit.
@@ -437,7 +445,9 @@ def newest_mtime(path: Path) -> float | None:
     return newest
 
 
-def sweep_captures(captures: Iterable[dict[str, Any]], emitter: Emitter, now: float) -> None:
+def sweep_captures(
+    captures: Iterable[dict[str, Any]], emitter: Emitter, now: float
+) -> None:
     """Every declared lane, including those with neither a cadence nor a budget.
 
     Those used to be filtered out, which meant the MOST broken state a lane can
@@ -538,7 +548,9 @@ def sweep_payloads(captures: Iterable[dict[str, Any]], emitter: Emitter) -> None
             continue
         newest = max(candidates, key=lambda entry: entry.stat().st_mtime)
         try:
-            lines = newest.read_text(encoding="utf-8").splitlines()[-PAYLOAD_SAMPLE_SIZE:]
+            lines = newest.read_text(encoding="utf-8").splitlines()[
+                -PAYLOAD_SAMPLE_SIZE:
+            ]
         except OSError:
             continue
         payloads = []
@@ -611,7 +623,13 @@ def sweep_probes(captures: Iterable[dict[str, Any]], emitter: Emitter) -> None:
         path = str(lane.get("path") or "")
         code = run_probe(str(probe["command"]), float(probe.get("timeoutSeconds") or 5))
         if code == 0:
-            emitter.emit(f"publisher:{name}", "publisher_liveness", name, "healthy", f"path={path}")
+            emitter.emit(
+                f"publisher:{name}",
+                "publisher_liveness",
+                name,
+                "healthy",
+                f"path={path}",
+            )
         elif code == 1:
             emitter.emit(
                 f"publisher:{name}",
@@ -725,7 +743,11 @@ def sweep_services(
             continue
         manager = str(entry.get("manager") or "system")
         activation_mode = str(entry.get("activationMode") or "direct")
-        acknowledged = entry.get("acknowledged") if isinstance(entry.get("acknowledged"), dict) else {}
+        acknowledged = (
+            entry.get("acknowledged")
+            if isinstance(entry.get("acknowledged"), dict)
+            else {}
+        )
         info = properties.get((manager, unit), {})
         active_state = info.get("ActiveState", "")
         unit_type = info.get("Type", "")
@@ -736,13 +758,16 @@ def sweep_services(
         if not active_state:
             status, evidence = "unknown", f"manager={manager};probe=unreachable"
         elif active_state == "active":
-            status, evidence = "healthy", f"manager={manager};active_state={active_state}"
+            status, evidence = (
+                "healthy",
+                f"manager={manager};active_state={active_state}",
+            )
         elif active_state == "inactive" and unit_type == "oneshot":
             status = "healthy" if result == "success" else "failed"
-            evidence = (
-                f"manager={manager};active_state={active_state};type=oneshot;result={result}"
-            )
-        elif active_state == "inactive" and (activation_mode == "socket-proxy" or not wanted_by):
+            evidence = f"manager={manager};active_state={active_state};type=oneshot;result={result}"
+        elif active_state == "inactive" and (
+            activation_mode == "socket-proxy" or not wanted_by
+        ):
             status = "healthy" if result == "success" else "failed"
             evidence = (
                 f"manager={manager};active_state={active_state};"
@@ -762,7 +787,10 @@ def sweep_services(
             emitter.observe(key)
             continue
         else:
-            status, evidence = "unknown", f"manager={manager};active_state={active_state}"
+            status, evidence = (
+                "unknown",
+                f"manager={manager};active_state={active_state}",
+            )
 
         # An acknowledged outage is expected, so it must not be scored as a
         # failure -- but it is deliberately NOT silenced: the surface still
@@ -804,7 +832,10 @@ def sweep_sockets(
         if not active_state:
             status, evidence = "unknown", f"manager={manager};probe=unreachable"
         elif active_state == "active":
-            status, evidence = "healthy", f"manager={manager};active_state={active_state}"
+            status, evidence = (
+                "healthy",
+                f"manager={manager};active_state={active_state}",
+            )
         else:
             status = "failed"
             evidence = f"manager={manager};active_state={active_state};result={result}"
@@ -814,7 +845,9 @@ def sweep_sockets(
                     evidence = f"{evidence};recovered=reset-failed+start"
                 else:
                     evidence = f"{evidence};recovery=failed"
-        emitter.emit(f"socket:{manager}:{unit}", "socket_failure", unit, status, evidence)
+        emitter.emit(
+            f"socket:{manager}:{unit}", "socket_failure", unit, status, evidence
+        )
 
 
 def reset_and_start(manager: str, unit: str) -> bool:
@@ -848,12 +881,16 @@ def observed(inventory: dict[str, Any], kind: str) -> list[dict[str, Any]]:
 
 def captures_of(inventory: dict[str, Any]) -> list[dict[str, Any]]:
     rows = inventory.get("captures")
-    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    return (
+        [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    )
 
 
 def mounts_of(inventory: dict[str, Any]) -> list[dict[str, Any]]:
     rows = inventory.get("mounts")
-    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    return (
+        [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    )
 
 
 def sweep(

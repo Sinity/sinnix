@@ -23,7 +23,9 @@ def user_runtime_dir() -> Path:
 
 
 def inventory_path() -> Path:
-    return Path(os.environ.get("SINNIX_RUNTIME_INVENTORY", "/etc/sinnix/runtime-inventory.json"))
+    return Path(
+        os.environ.get("SINNIX_RUNTIME_INVENTORY", "/etc/sinnix/runtime-inventory.json")
+    )
 
 
 def transitions_ledger() -> Path:

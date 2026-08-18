@@ -153,8 +153,7 @@ mkServiceModule {
       default = lib.naturalSort (
         lib.attrNames (
           lib.filterAttrs (
-            _: service:
-            (service.enable or false) && (lib.attrByPath [ "meta" "ai" ] null service) != null
+            _: service: (service.enable or false) && (lib.attrByPath [ "meta" "ai" ] null service) != null
           ) config.sinnix.services
         )
       );

@@ -22,11 +22,15 @@ def build_glance() -> dict:
     tiles: list[dict] = []
 
     units = snapshot.get("units")
-    failed = [
-        u
-        for u in units
-        if isinstance(u, dict) and str(u.get("state", "")).startswith("fail")
-    ] if isinstance(units, list) else []
+    failed = (
+        [
+            u
+            for u in units
+            if isinstance(u, dict) and str(u.get("state", "")).startswith("fail")
+        ]
+        if isinstance(units, list)
+        else []
+    )
     for u in failed[:5]:
         attention.append(
             {

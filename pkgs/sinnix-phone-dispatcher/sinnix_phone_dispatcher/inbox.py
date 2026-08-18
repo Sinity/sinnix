@@ -130,7 +130,10 @@ def read_inbox(name: str) -> tuple[HTTPStatus, bytes | dict]:
         return HTTPStatus.OK, _generated_bytes(name)
     path = _resolve(name)
     if path is None:
-        return HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "unacceptable inbox name"}
+        return HTTPStatus.BAD_REQUEST, {
+            "ok": False,
+            "detail": "unacceptable inbox name",
+        }
     if not path.is_file():
         return HTTPStatus.NOT_FOUND, {"ok": False, "detail": f"no inbox entry {name!r}"}
     try:
@@ -151,10 +154,18 @@ def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict
     if name in GENERATED:
         # Nothing to consume: the next request builds it again. Answered ok so
         # the app can confirm everything it fetched without special-casing.
-        return HTTPStatus.OK, {"ok": True, "name": name, "retained": True, "generated": True}
+        return HTTPStatus.OK, {
+            "ok": True,
+            "name": name,
+            "retained": True,
+            "generated": True,
+        }
     path = _resolve(name)
     if path is None:
-        return HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "unacceptable inbox name"}
+        return HTTPStatus.BAD_REQUEST, {
+            "ok": False,
+            "detail": "unacceptable inbox name",
+        }
     sub = name.split("/", 1)[0]
     if not SUBDIRS.get(sub, False):
         return HTTPStatus.OK, {"ok": True, "name": name, "retained": True}
@@ -162,7 +173,12 @@ def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict
         # Already gone: a re-confirmed one-shot is a success, for the same
         # reason a re-uploaded chunk is. The phone retries a confirmation
         # whose answer it never saw.
-        return HTTPStatus.OK, {"ok": True, "name": name, "deleted": False, "already_gone": True}
+        return HTTPStatus.OK, {
+            "ok": True,
+            "name": name,
+            "deleted": False,
+            "already_gone": True,
+        }
     try:
         body = path.read_bytes()
     except OSError as exc:

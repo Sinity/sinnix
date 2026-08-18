@@ -7,7 +7,6 @@ those env vars (which a real dev shell may already have set)."""
 from __future__ import annotations
 
 import pytest
-
 import sinnix_phone_dispatcher.dispatch as dispatch_mod
 import sinnix_phone_dispatcher.execute as execute_mod
 import sinnix_phone_dispatcher.inbox as inbox_mod

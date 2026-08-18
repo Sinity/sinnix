@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .external import steer, trigger_score
-from .state import LAKE_ROOT, TOKENS_DIR, TOKEN_RE, emit_receipt, ensure_dirs, now_iso
+from .state import LAKE_ROOT, TOKEN_RE, TOKENS_DIR, emit_receipt, ensure_dirs, now_iso
 
 
 def seen_token(token: str) -> bool:
@@ -90,7 +90,9 @@ def execute(intent: dict) -> dict:
         else:
             code, out = 2, f"unknown outcome {outcome!r}"
         result = {"ok": code == 0, "detail": out}
-        emit_receipt("steering_resolve", "Resolved", f"{item}: {outcome}", token, "home")
+        emit_receipt(
+            "steering_resolve", "Resolved", f"{item}: {outcome}", token, "home"
+        )
     elif kind == "job_answer":
         result = deliver_job_answer(intent)
         emit_receipt(

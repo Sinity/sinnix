@@ -13,17 +13,17 @@ somewhere to go.
 Everything below is on the hub port (8880 by default), and every page carries
 the same nav, so the routes are reachable from each other rather than by URL.
 
-| Route        | What it is                                                          |
-| ------------ | ------------------------------------------------------------------- |
-| `/`          | The three-second read: a verdict, six tiles, then supporting detail |
-| `/work/`     | What is actually running, named — see below                         |
-| `/services/` | Every attested runtime surface, grouped by resource class           |
-| `/ai/`       | The local AI backends and their activation semantics                |
-| `/shaders/`  | The Hyprland screen-shader library, and which one is applied        |
-| `/reports/`  | The generated report tree, browsable and linkable                   |
-| `/ops/v1/*`  | Reverse proxy onto the ops-reducer's read and action API            |
-| `/feedback`  | Append-only spool for report annotations                            |
-| `/terminals/`| Live kitty terminal contents, control, and scrollback history       |
+| Route         | What it is                                                          |
+| ------------- | ------------------------------------------------------------------- |
+| `/`           | The three-second read: a verdict, six tiles, then supporting detail |
+| `/work/`      | What is actually running, named — see below                         |
+| `/services/`  | Every attested runtime surface, grouped by resource class           |
+| `/ai/`        | The local AI backends and their activation semantics                |
+| `/shaders/`   | The Hyprland screen-shader library, and which one is applied        |
+| `/reports/`   | The generated report tree, browsable and linkable                   |
+| `/ops/v1/*`   | Reverse proxy onto the ops-reducer's read and action API            |
+| `/feedback`   | Append-only spool for report annotations                            |
+| `/terminals/` | Live kitty terminal contents, control, and scrollback history       |
 
 The loopback web UIs get one port each rather than a subpath of the hub —
 `8881` Open WebUI, `8882` ComfyUI, `8883` KoboldCpp. They are single-page apps
@@ -231,7 +231,7 @@ Three sources, none of them a new capture lane:
   `/proc` and proxies its player and WebSocket under `/terminals/v1/live/
 <pid>/<window_id>/`. A viewer joining late gets the current screen first.
 - **Snapshot** — kitty's own remote-control protocol (`kitty @ get-text
-  --ansi`), for any window with no live stream (started before streaming was
+--ansi`), for any window with no live stream (started before streaming was
   wired in, or outside `sinnix-captured-shell`).
 - **History** — the existing full-ANSI scrollback captures
   `sinnix-capture-kitty-scrollback` already writes to
@@ -241,7 +241,7 @@ Three sources, none of them a new capture lane:
 `send-text`/`send-key`, from the page's input box and quick-action buttons,
 are the operator's own deliberate typing routed through a browser instead of
 a keyboard — not the "never inject into a live agent TUI" case, which is
-about *automated* interruption of a session an agent doesn't own.
+about _automated_ interruption of a session an agent doesn't own.
 
 No auth beyond the tailnet boundary the rest of the hub relies on, and no
 database: kitty's own `ls`/`get-text` and the scrollback files on disk are

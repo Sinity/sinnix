@@ -25,9 +25,13 @@ def surface_rows(inventory: dict[str, Any] | None) -> list[dict[str, Any]]:
     for name, surface in surfaces.items():
         if not isinstance(surface, dict) or not surface.get("unit"):
             continue
-        observe = surface.get("observe") if isinstance(surface.get("observe"), dict) else {}
+        observe = (
+            surface.get("observe") if isinstance(surface.get("observe"), dict) else {}
+        )
         activation = (
-            surface.get("activation") if isinstance(surface.get("activation"), dict) else {}
+            surface.get("activation")
+            if isinstance(surface.get("activation"), dict)
+            else {}
         )
         rows.append(
             {
@@ -44,7 +48,9 @@ def surface_rows(inventory: dict[str, Any] | None) -> list[dict[str, Any]]:
     return rows
 
 
-def unit_status(info: dict[str, str], socket_activated: bool = False) -> tuple[str, str]:
+def unit_status(
+    info: dict[str, str], socket_activated: bool = False
+) -> tuple[str, str]:
     """(badge html, tone) for one unit's live state."""
     load = info.get("LoadState", "")
     active = info.get("ActiveState")
@@ -58,16 +64,22 @@ def unit_status(info: dict[str, str], socket_activated: bool = False) -> tuple[s
         return badge("failed", "bad"), "bad"
     if socket_activated:
         return badge("idle", "muted"), "muted"
-    return badge(active or "inactive", "warn" if active == "activating" else "muted"), "muted"
+    return badge(
+        active or "inactive", "warn" if active == "activating" else "muted"
+    ), "muted"
 
 
-def lifecycle_controls(unit: str, restartable: bool, installed: bool, active: bool) -> str:
+def lifecycle_controls(
+    unit: str, restartable: bool, installed: bool, active: bool
+) -> str:
     if not installed:
-        return '<span class="sub">registered in the inventory, unknown to systemd</span>'
+        return (
+            '<span class="sub">registered in the inventory, unknown to systemd</span>'
+        )
     if not restartable:
         return (
             '<span class="sub" title="the runtime inventory does not declare '
-            'observe.restartable, and the action API refuses lifecycle verbs '
+            "observe.restartable, and the action API refuses lifecycle verbs "
             'for it">not restartable</span>'
         )
     verbs = ("stop", "restart") if active else ("start",)
@@ -117,7 +129,9 @@ def render_services(
             row(
                 f"<strong>{esc(entry['name'])}</strong>",
                 meta,
-                lifecycle_controls(entry["unit"], entry["restartable"], installed, active),
+                lifecycle_controls(
+                    entry["unit"], entry["restartable"], installed, active
+                ),
                 "bad" if tone == "bad" else "",
                 search=f"{entry['name']} {entry['unit']} {entry['resource_class']}".lower(),
             )
@@ -127,7 +141,9 @@ def render_services(
         '<div class="tiles">'
         + tile(str(len(rows)), "attested surfaces")
         + tile(str(counts["active"]), "active", "ok")
-        + tile(str(counts["failed"]), "failed or masked", "bad" if counts["failed"] else "")
+        + tile(
+            str(counts["failed"]), "failed or masked", "bad" if counts["failed"] else ""
+        )
         + tile(str(counts["restartable"]), "controllable here", "info")
         + "</div>"
     )
@@ -154,4 +170,3 @@ def render_services(
         body,
         tail=ACTION_SCRIPT,
     )
-

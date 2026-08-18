@@ -4,7 +4,6 @@ import json
 import threading
 
 import pytest
-
 from sinnix_lib.atomic_json import modify_json, read_json, write_json_atomic
 from sinnix_lib.ledger import append_jsonl, iter_jsonl, receipt
 from sinnix_lib.lock import LockBusy, flock

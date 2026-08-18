@@ -561,7 +561,11 @@ def test_scope_pattern_matches_live_identity_shape():
     identity group from SCOPE_UNIT_PATTERN fails the first assert."""
     from sinnix_ops_reducer.actions import SCOPE_UNIT_PATTERN
 
-    assert SCOPE_UNIT_PATTERN.match("sinnix-build-cargo-test-1786566375240889502-2296063.scope")
+    assert SCOPE_UNIT_PATTERN.match(
+        "sinnix-build-cargo-test-1786566375240889502-2296063.scope"
+    )
     assert SCOPE_UNIT_PATTERN.match("sinnix-nix-build-nix-1-2.scope")
-    assert not SCOPE_UNIT_PATTERN.match("sinnix-build-1786566375240889502-2296063.scope")
+    assert not SCOPE_UNIT_PATTERN.match(
+        "sinnix-build-1786566375240889502-2296063.scope"
+    )
     assert not SCOPE_UNIT_PATTERN.match("sinnix-evil-x-1-2.scope")

@@ -57,7 +57,9 @@ def shader_library(manifest: dict[str, Any]) -> list[dict[str, str]]:
         except OSError:
             continue
         lines = text.splitlines()
-        description = lines[0].lstrip("/ ").strip() if lines and lines[0].startswith("//") else ""
+        description = (
+            lines[0].lstrip("/ ").strip() if lines and lines[0].startswith("//") else ""
+        )
         found.append(
             {
                 "name": path.stem,
@@ -76,7 +78,11 @@ def hypr_option(name: str, field: str) -> Any:
         return None
     try:
         result = subprocess.run(
-            [binary, "getoption", name, "-j"], capture_output=True, text=True, timeout=10, check=False
+            [binary, "getoption", name, "-j"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
         )
         return json.loads(result.stdout).get(field)
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError, ValueError):
@@ -94,7 +100,10 @@ def render_shaders(manifest: dict[str, Any], generated: str) -> str:
     fp16 = hypr_option("render:use_fp16", "int")
 
     state, _ = load_json(
-        Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "sinnix" / "shader" / "state.json"
+        Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"))
+        / "sinnix"
+        / "shader"
+        / "state.json"
     )
     applied = (state or {}).get("stages") or []
 
@@ -117,7 +126,11 @@ def render_shaders(manifest: dict[str, Any], generated: str) -> str:
             "animation",
             "info" if damage == 0 else "",
         )
-        + tile(str(fp16) if fp16 is not None else "—", "render:use_fp16", "" if fp16 == 0 else "warn")
+        + tile(
+            str(fp16) if fp16 is not None else "—",
+            "render:use_fp16",
+            "" if fp16 == 0 else "warn",
+        )
         + "</div>"
     )
 
@@ -171,7 +184,7 @@ def render_shaders(manifest: dict[str, Any], generated: str) -> str:
         "away and looks like neither. Warps always land before shades regardless "
         "of where they are named, because there is only one texture fetch to place "
         "them around.</p>"
-        "<p class=\"sub\">The one real limit: a stage that resamples the screen "
+        '<p class="sub">The one real limit: a stage that resamples the screen '
         "itself — <code>chromatic</code>, <code>edges</code>, <code>bloom</code>, "
         "<code>sketch</code>, <code>vhs</code> — reads the original image, not the "
         "previous stage's output, because one pass has no intermediate buffer to "
@@ -186,7 +199,12 @@ def render_shaders(manifest: dict[str, Any], generated: str) -> str:
     if preset_rows:
         body += card(
             "Compositions worth keeping",
-            kv_table([(name, f"<code>{esc(members)}</code>") for name, members in preset_rows]),
+            kv_table(
+                [
+                    (name, f"<code>{esc(members)}</code>")
+                    for name, members in preset_rows
+                ]
+            ),
             subtitle=(
                 "Named in <code>_presets.conf</code> beside the stages, so they are "
                 "editable without a rebuild. Apply one by name: "
@@ -206,7 +224,7 @@ def render_shaders(manifest: dict[str, Any], generated: str) -> str:
         "and mixed on the <code>time</code> uniform, so the fade happens per-pixel "
         "on the GPU, and it needs animation on for the same reason everything else "
         "does.</p>"
-        "<p class=\"sub\">It runs as a transient systemd unit whose "
+        '<p class="sub">It runs as a transient systemd unit whose '
         "<code>ExecStopPost</code> clears the screen — the one teardown a signal "
         "handler cannot promise. <code>SIGKILL</code> on the loop still restores the "
         "shader, fp16 and damage tracking; verified, not assumed. Steady-state cost "
@@ -231,12 +249,12 @@ def render_shaders(manifest: dict[str, Any], generated: str) -> str:
         "(<code>vhs + crt + scanlines</code>, animated) came in at 118fps and "
         "1.06ms. GPU draw moved 76.7W to 77.8W. That is a real cost and a small "
         "one — a full-screen fragment pass is not what troubles a 3080.</p>"
-        "<p class=\"sub\">Caveat on those numbers: the desktop was busy while they "
+        '<p class="sub">Caveat on those numbers: the desktop was busy while they '
         "were taken, so it was already redrawing near-continuously. On a genuinely "
         "idle screen damage tracking would skip most frames, and the gap would be "
         "wider — bounded above by 120 full-screen passes a second at the times "
         "above.</p>"
-        "<p class=\"sub\"><code>apply</code> turns it on by itself when a stage "
+        '<p class="sub"><code>apply</code> turns it on by itself when a stage '
         "needs it and <code>off</code> puts it back; every apply decides the "
         "setting outright, so a static shader never inherits it. Shaders marked "
         "<em>needs animation on</em> above are frozen without it, not broken.</p>",
@@ -248,11 +266,11 @@ def render_shaders(manifest: dict[str, Any], generated: str) -> str:
         "<p>A screen shader that reads <code>time</code> or a pointer uniform while "
         "damage tracking is on makes Hyprland paint a red banner across the top of "
         "the display: <em>\"Screen shader uses uniform 'time', which requires "
-        "debug:damage_tracking to be switched off\"</em>. Turning damage tracking "
+        'debug:damage_tracking to be switched off"</em>. Turning damage tracking '
         "off <em>before</em> the shader is applied is what prevents it, and that is "
         "the order <code>sinnix-shader</code> uses — the banner is avoided rather "
         "than dismissed after the fact.</p>"
-        "<p class=\"sub\">A stage's uniforms are only declared when it actually "
+        '<p class="sub">A stage\'s uniforms are only declared when it actually '
         "uses them, so the static shaders never trip the check at all. The overlay "
         "has no expiry, so <code>apply</code> clears any banner still up from "
         "earlier before it starts and <code>off</code> clears it on the way out; "
@@ -268,8 +286,14 @@ def render_shaders(manifest: dict[str, Any], generated: str) -> str:
                 ("list", "<code>sinnix-shader list</code>"),
                 ("apply", "<code>sinnix-shader apply crt scanlines vignette</code>"),
                 ("a preset", "<code>sinnix-shader apply television</code>"),
-                ("flip through", "<code>sinnix-shader next</code> / <code>prev</code> / <code>random</code>"),
-                ("playback", "<code>sinnix-shader play --interval 4 --crossfade 1</code>"),
+                (
+                    "flip through",
+                    "<code>sinnix-shader next</code> / <code>prev</code> / <code>random</code>",
+                ),
+                (
+                    "playback",
+                    "<code>sinnix-shader play --interval 4 --crossfade 1</code>",
+                ),
                 ("stop everything", "<code>sinnix-shader off</code>"),
                 ("read the source", "<code>sinnix-shader show vhs</code>"),
                 (
@@ -289,4 +313,3 @@ def render_shaders(manifest: dict[str, Any], generated: str) -> str:
         "/shaders/",
         body,
     )
-

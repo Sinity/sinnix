@@ -19,7 +19,6 @@ import json
 from http import HTTPStatus
 
 import pytest
-
 import sinnix_phone_dispatcher.inbox as inbox_mod
 
 
@@ -31,7 +30,10 @@ def stub_generated(monkeypatch):
     monkeypatch.setattr(
         inbox_mod,
         "GENERATED",
-        {"glance.json": lambda: {"attention": []}, "steering.json": lambda: {"ready": []}},
+        {
+            "glance.json": lambda: {"attention": []},
+            "steering.json": lambda: {"ready": []},
+        },
     )
 
 
@@ -116,7 +118,13 @@ def test_confirming_a_deck_keeps_it(isolated_state_dirs) -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["../../etc/passwd", "receipts/../../escape", "tokens/abcd", "receipts/", "receipts/.hidden"],
+    [
+        "../../etc/passwd",
+        "receipts/../../escape",
+        "tokens/abcd",
+        "receipts/",
+        "receipts/.hidden",
+    ],
 )
 def test_traversal_names_are_refused(name) -> None:
     assert inbox_mod.read_inbox(name)[0] == HTTPStatus.BAD_REQUEST

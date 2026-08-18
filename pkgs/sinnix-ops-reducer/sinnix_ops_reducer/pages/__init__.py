@@ -77,7 +77,9 @@ def render(
     inventory: dict[str, Any] | None,
     snapshot_error: str | None = None,
 ) -> str:
-    generated = dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
+    generated = (
+        dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
+    )
     route = canonical(path)
     if route == "/work/":
         return render_work(manifest, snapshot, inventory, generated)

@@ -26,7 +26,6 @@ from .state import (
     now_iso,
 )
 
-
 #: How deep a lane path may go. `DCIM/Camera/IMG_0001.jpg` arrives as
 #: `Camera/IMG_0001.jpg`; nothing on this phone nests further, and a cap means
 #: a confused client cannot walk a directory tree into the lake.
@@ -86,7 +85,9 @@ def newest_in_lane(lane: str) -> tuple[HTTPStatus, dict]:
     }
 
 
-def store_upload(lane: str, name: str, body: bytes, declared_sha: str | None) -> tuple[HTTPStatus, dict]:
+def store_upload(
+    lane: str, name: str, body: bytes, declared_sha: str | None
+) -> tuple[HTTPStatus, dict]:
     """Land a capture file the phone pushed, or say precisely why not.
 
     This is the phone's own half of the ambient archive: the app uploads a
@@ -188,7 +189,9 @@ def events_cursor(day: str) -> tuple[HTTPStatus, dict]:
     }
 
 
-def append_events(day: str, offset: int, body: bytes, declared_sha: str | None) -> tuple[HTTPStatus, dict]:
+def append_events(
+    day: str, offset: int, body: bytes, declared_sha: str | None
+) -> tuple[HTTPStatus, dict]:
     """Land a slice of the app's event log at the offset it came from.
 
     The write is a positional `pwrite`, and that single choice is what makes

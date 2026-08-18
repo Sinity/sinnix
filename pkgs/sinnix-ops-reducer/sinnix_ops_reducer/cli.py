@@ -185,9 +185,7 @@ def main() -> None:
         controller=args.agent_controller,
     )
     elicit = (
-        CoalescingTrigger(args.elicit_command.split())
-        if args.elicit_command
-        else None
+        CoalescingTrigger(args.elicit_command.split()) if args.elicit_command else None
     )
     feedback = FeedbackSpool(layer.feedback_spool_dir, elicit=elicit)
     fds = list(range(3, 3 + int(os.environ.get("LISTEN_FDS", "0"))))

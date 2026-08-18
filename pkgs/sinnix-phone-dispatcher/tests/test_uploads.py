@@ -15,7 +15,6 @@ import os
 from http import HTTPStatus
 
 import pytest
-
 import sinnix_phone_dispatcher.uploads as uploads_mod
 
 
@@ -47,7 +46,9 @@ def test_correct_sha_lands_the_file(monkeypatch, tmp_path) -> None:
     assert (tmp_path / "ambient" / "clip.m4a").read_bytes() == body
 
 
-def test_reuploading_the_identical_chunk_is_a_success_duplicate(monkeypatch, tmp_path) -> None:
+def test_reuploading_the_identical_chunk_is_a_success_duplicate(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setattr(uploads_mod, "UPLOAD_LANES", _lanes(tmp_path))
     body = b"chunk bytes"
     digest = hashlib.sha256(body).hexdigest()
@@ -88,7 +89,13 @@ def test_a_lane_subdirectory_is_preserved(monkeypatch, tmp_path) -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["../escape.jpg", "Camera/../../escape.jpg", "a/b/c/d/e/deep.jpg", "Camera/", "/abs.jpg"],
+    [
+        "../escape.jpg",
+        "Camera/../../escape.jpg",
+        "a/b/c/d/e/deep.jpg",
+        "Camera/",
+        "/abs.jpg",
+    ],
 )
 def test_a_traversing_path_is_rejected(monkeypatch, tmp_path, name) -> None:
     monkeypatch.setattr(uploads_mod, "UPLOAD_LANES", {"camera": tmp_path / "camera"})

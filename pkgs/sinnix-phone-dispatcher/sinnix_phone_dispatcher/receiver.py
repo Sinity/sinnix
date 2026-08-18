@@ -49,7 +49,9 @@ _MAX_UTTERANCE_SECONDS = 120
 #: from the duration ceiling above. Deriving one from the other means raising
 #: the ceiling cannot silently start dropping connections.
 _PCM_BYTES_PER_SECOND = 16000 * 2  # 16 kHz, mono, s16le
-_PHONE_STREAM_READ_LIMIT = int(_MAX_UTTERANCE_SECONDS * _PCM_BYTES_PER_SECOND * 4 / 3) + (1 << 16)
+_PHONE_STREAM_READ_LIMIT = int(
+    _MAX_UTTERANCE_SECONDS * _PCM_BYTES_PER_SECOND * 4 / 3
+) + (1 << 16)
 
 
 def _phone_stream_lane_name(kind: str) -> str:
@@ -94,7 +96,10 @@ def _phone_stream_transcribe(wav: bytes, *, timeout: float = 60.0) -> dict | Non
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8", "replace"))
     except (urllib.error.URLError, OSError, ValueError) as exc:
-        print(f"phone-dispatcher: phone-stream: stt hub did not answer: {exc}", file=sys.stderr)
+        print(
+            f"phone-dispatcher: phone-stream: stt hub did not answer: {exc}",
+            file=sys.stderr,
+        )
         return None
 
 
@@ -118,7 +123,9 @@ class _PhoneSpeechLane:
             obj["error"] = "speech line carried no audio"
             return obj
         if seconds > _MAX_UTTERANCE_SECONDS:
-            obj["error"] = f"utterance of {seconds:.0f}s exceeds the {_MAX_UTTERANCE_SECONDS}s ceiling"
+            obj["error"] = (
+                f"utterance of {seconds:.0f}s exceeds the {_MAX_UTTERANCE_SECONDS}s ceiling"
+            )
             return obj
 
         try:
@@ -148,7 +155,10 @@ class _PhoneSpeechLane:
         obj["speech_seconds"] = result.get("speech_seconds")
         obj["engine"] = result.get("engine")
         if obj["text"]:
-            print(f"phone-dispatcher: phone-stream: utterance ({seconds:.1f}s): {obj['text'][:120]}", file=sys.stderr)
+            print(
+                f"phone-dispatcher: phone-stream: utterance ({seconds:.1f}s): {obj['text'][:120]}",
+                file=sys.stderr,
+            )
         return obj
 
 
@@ -172,10 +182,16 @@ class _PhoneStreamDemuxer:
         try:
             obj = json.loads(line)
         except json.JSONDecodeError:
-            print(f"phone-dispatcher: phone-stream: dropped malformed line ({len(line)} bytes)", file=sys.stderr)
+            print(
+                f"phone-dispatcher: phone-stream: dropped malformed line ({len(line)} bytes)",
+                file=sys.stderr,
+            )
             return
         if not isinstance(obj, dict):
-            print("phone-dispatcher: phone-stream: dropped non-object line", file=sys.stderr)
+            print(
+                "phone-dispatcher: phone-stream: dropped non-object line",
+                file=sys.stderr,
+            )
             return
         kind = str(obj.get("kind", "unknown"))
         if kind == "speech":
@@ -188,7 +204,9 @@ class _PhoneStreamHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
         peer = self.client_address
         demux: _PhoneStreamDemuxer = self.server.demux  # type: ignore[attr-defined]
-        print(f"phone-dispatcher: phone-stream: client connected: {peer}", file=sys.stderr)
+        print(
+            f"phone-dispatcher: phone-stream: client connected: {peer}", file=sys.stderr
+        )
         try:
             while True:
                 raw = self.rfile.readline(_PHONE_STREAM_READ_LIMIT + 1)
@@ -206,7 +224,10 @@ class _PhoneStreamHandler(socketserver.StreamRequestHandler):
                     try:
                         demux.ingest_line(line.decode("utf-8", "replace"))
                     except Exception as exc:  # noqa: BLE001 - one bad line must not kill the connection
-                        print(f"phone-dispatcher: phone-stream: error ingesting line from {peer}: {exc}", file=sys.stderr)
+                        print(
+                            f"phone-dispatcher: phone-stream: error ingesting line from {peer}: {exc}",
+                            file=sys.stderr,
+                        )
                     continue
                 if len(raw) <= _PHONE_STREAM_READ_LIMIT:
                     # Fewer bytes than the cap and still no terminator: the
@@ -216,13 +237,19 @@ class _PhoneStreamHandler(socketserver.StreamRequestHandler):
                 # line ends, then drop the whole thing. A single bad line
                 # must never take down a connection carrying everything else
                 # the phone is sending.
-                print(f"phone-dispatcher: phone-stream: dropped an oversized line from {peer}", file=sys.stderr)
+                print(
+                    f"phone-dispatcher: phone-stream: dropped an oversized line from {peer}",
+                    file=sys.stderr,
+                )
                 while True:
                     more = self.rfile.readline(1 << 16)
                     if not more or more.endswith(b"\n"):
                         break
         finally:
-            print(f"phone-dispatcher: phone-stream: client disconnected: {peer}", file=sys.stderr)
+            print(
+                f"phone-dispatcher: phone-stream: client disconnected: {peer}",
+                file=sys.stderr,
+            )
 
 
 class _PhoneStreamServer(socketserver.ThreadingTCPServer):
@@ -234,10 +261,17 @@ class _PhoneStreamServer(socketserver.ThreadingTCPServer):
         super().__init__((host, port), _PhoneStreamHandler)
 
 
-def start_phone_stream_server(host: str, port: int, capture_root: Path) -> _PhoneStreamServer:
+def start_phone_stream_server(
+    host: str, port: int, capture_root: Path
+) -> _PhoneStreamServer:
     """Start the always-on telemetry receiver as a background thread of this process."""
     server = _PhoneStreamServer(host, port, capture_root)
-    thread = threading.Thread(target=server.serve_forever, daemon=True, name="phone-stream")
+    thread = threading.Thread(
+        target=server.serve_forever, daemon=True, name="phone-stream"
+    )
     thread.start()
-    print(f"phone-dispatcher: phone-stream: listening on {host}:{port}, capture_root={capture_root}", file=sys.stderr)
+    print(
+        f"phone-dispatcher: phone-stream: listening on {host}:{port}, capture_root={capture_root}",
+        file=sys.stderr,
+    )
     return server
