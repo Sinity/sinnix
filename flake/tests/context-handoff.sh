@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Provably fails when: the handoff record is written world-readable, or stops
+# excluding transcript/environment content.
 
 set -euo pipefail
 

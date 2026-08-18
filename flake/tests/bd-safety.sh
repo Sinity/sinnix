@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Provably fails when: the hook stops denying a wrong-checkout git commit or a
+# replace-write bd update from a worktree.
 
 set -euo pipefail
 

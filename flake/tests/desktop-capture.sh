@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Provably fails when: the OCR helper acts on a cancelled (empty) selection,
+# or the scratchpad dismisser toggles workspaces that are not visible.
 set -euo pipefail
 
 ocr_helper=$1
@@ -44,6 +46,18 @@ done
 export OCR_CLIPBOARD=$TMPDIR/clipboard
 PATH="$fixture_bin:$PATH" "$ocr_helper"
 [ "$(cat "$OCR_CLIPBOARD")" = "fixture OCR text" ]
+
+# A cancelled selection must stop there: without the empty-geometry guard,
+# grim is asked to capture "" and the OCR helper would clobber the clipboard
+# with whatever that produced.
+cat >"$fixture_bin/slurp" <<EOF
+#!$(command -v bash)
+printf ''
+EOF
+chmod +x "$fixture_bin/slurp"
+rm -f "$OCR_CLIPBOARD"
+PATH="$fixture_bin:$PATH" "$ocr_helper"
+[ ! -e "$OCR_CLIPBOARD" ]
 
 export HYPR_ACTIONS=$TMPDIR/actions
 PATH="$fixture_bin:$PATH" "$dismiss_helper"

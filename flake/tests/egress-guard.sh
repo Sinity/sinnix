@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Provably fails when: the scanner stops denying a credential-bearing outward
+# publication, stops honouring the explicit override, or stops recording the
+# decision ledger.
 set -euo pipefail
 
 scanner=$1
