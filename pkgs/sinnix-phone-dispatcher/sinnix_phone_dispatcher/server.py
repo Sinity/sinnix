@@ -7,6 +7,7 @@ $NOTIFY_SOCKET)."""
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import signal
@@ -22,9 +23,10 @@ from typing import Any
 
 from .execute import execute
 from .glance import build_glance, build_jobs, build_steering
+from .inbox import confirm_inbox, list_inbox, read_inbox
 from .receiver import start_phone_stream_server
 from .state import MAX_BODY, MAX_UPLOAD, ensure_dirs, now_iso
-from .uploads import store_upload
+from .uploads import append_events, events_cursor, store_upload
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -60,6 +62,16 @@ class Handler(BaseHTTPRequestHandler):
                 return route[len(prefix) :]
         return route
 
+    def _send_bytes(self, body: bytes, sha: str) -> None:
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        # The same header the phone sends on the way up, for the same reason:
+        # the receiver verifies before it acts on what it got.
+        self.send_header("X-Sinnix-Sha256", sha)
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's contract
         route = self._route()
         if route in ("/ping", "/"):
@@ -70,6 +82,20 @@ class Handler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.OK, build_steering())
         elif route == "/jobs":
             self._send(HTTPStatus.OK, build_jobs())
+        elif route == "/inbox":
+            self._send(*list_inbox())
+        elif route == "/inbox/file":
+            status, payload = read_inbox(self._query().get("name", ""))
+            if isinstance(payload, bytes):
+                self._send_bytes(payload, hashlib.sha256(payload).hexdigest())
+            else:
+                self._send(status, payload)
+        elif route == "/events":
+            # The phone's cursor question: how much of this day does prime
+            # already hold? Asked once per day file, so a phone that has been
+            # offline knows where to resume without shipping a byte to find
+            # out.
+            self._send(*events_cursor(self._query().get("day", "")))
         else:
             self._send(HTTPStatus.NOT_FOUND, {"ok": False, "detail": "no such route"})
 
@@ -81,6 +107,14 @@ class Handler(BaseHTTPRequestHandler):
         route = self._route()
         length = int(self.headers.get("Content-Length") or 0)
 
+        # An acknowledgement carries no body -- everything it says is in the
+        # query -- so it branches before the JSON parse below, which would
+        # otherwise reject an empty body as malformed.
+        if route == "/inbox/confirm":
+            query = self._query()
+            self._send(*confirm_inbox(query.get("name", ""), query.get("sha256")))
+            return
+
         # Uploads are raw bytes, so they branch before the JSON parse below --
         # and before MAX_BODY, which sizes an intent, not an archive file.
         if route == "/chunk":
@@ -91,6 +125,25 @@ class Handler(BaseHTTPRequestHandler):
             status, payload = store_upload(
                 query.get("lane", "ambient"),
                 query.get("name", ""),
+                self.rfile.read(length),
+                self.headers.get("X-Sinnix-Sha256"),
+            )
+            self._send(status, payload)
+            return
+
+        if route == "/events":
+            if length > MAX_UPLOAD:
+                self._send(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"ok": False, "bytes": length})
+                return
+            query = self._query()
+            try:
+                offset = int(query.get("offset", ""))
+            except ValueError:
+                self._send(HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "offset must be an integer"})
+                return
+            status, payload = append_events(
+                query.get("day", ""),
+                offset,
                 self.rfile.read(length),
                 self.headers.get("X-Sinnix-Sha256"),
             )

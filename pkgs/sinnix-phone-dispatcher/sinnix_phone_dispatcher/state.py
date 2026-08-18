@@ -20,8 +20,12 @@ SCHEMA = "sinnix.phone.receipt/1"
 STATE_DIR = Path(os.environ.get("SINNIX_PHONE_STATE_DIR", "/realm/state/sinnix-phone"))
 LAKE_ROOT = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/data/machine/phone"))
 
-# What the drain pushes to the device. Written here, moved by the drain; the
-# app deletes each file once it has rendered it.
+# What prime has waiting for the device. The app FETCHES this over
+# /phone/v1/inbox on its own cadence and confirms each one-shot it landed;
+# nothing on this side pushes it anywhere. A receipt written here while the
+# phone is in a pocket on the other side of the city is a receipt the phone
+# collects when it next has a network, which is the same durability the
+# outbound direction gets from the app's spool.
 INBOX_DIR = STATE_DIR / "inbox"
 RECEIPTS_DIR = INBOX_DIR / "receipts"
 NOTIFY_DIR = INBOX_DIR / "notify"
@@ -46,7 +50,26 @@ MAX_UPLOAD = 128 << 20
 UPLOAD_LANES = {
     "ambient": LAKE_ROOT / "ambient",
     "camera": LAKE_ROOT / "camera",
+    "download": LAKE_ROOT / "download",
+    # Voice notes, PPG/IMU traces and shared files, with their metadata
+    # sidecars. Same directory the drain's rsync landed them in, so nothing
+    # downstream has to learn a new path just because the mover changed.
+    "estate-outbox": LAKE_ROOT / "estate" / "outbox",
 }
+
+# The app's own event log. Not an UPLOAD_LANE: a day file is appended to all
+# day rather than finalized, so it arrives as byte ranges through /events
+# (uploads.append_events) instead of as a whole file through /chunk.
+EVENTS_DIR = LAKE_ROOT / "estate" / "events"
+
+EVENTS_DAY_RE = re.compile(r"^\d{8}$")
+
+# A batch is a slice of a day file, sized by the phone. Generous next to the
+# 512 KiB the app actually ships, and far below MAX_UPLOAD: a client that
+# thinks it can hand over a 3.5 GB day file in one request (one exists, from
+# a Health Connect backfill) should be told no by a number rather than by the
+# machine running out of memory.
+MAX_EVENT_BATCH = 8 << 20
 
 # Chunk names are minted by the app from a UTC stamp
 # (`ambient-20260817T103201Z.m4a`, `.orphan` when a crash truncated one).
