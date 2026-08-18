@@ -156,6 +156,13 @@ mkServiceModule {
           OLLAMA_KEEP_ALIVE = "30m";
           # 10 GB VRAM: keep one model resident at a time to avoid thrashing.
           OLLAMA_MAX_LOADED_MODELS = "1";
+          # Default 5m0s is too short for a cold load of a VRAM-overflowing
+          # model that needs RAM offload: qwen3:30b (18GB weights, MoE) in the
+          # daily roster measured 2026-08-13 as still producing zero tokens at
+          # 300s, hitting this ceiling and returning HTTP 500 before the
+          # warm-up pass completed (sinnix-h6cp). 15m gives cold RAM-offloaded
+          # loads headroom without masking a genuinely hung daemon.
+          OLLAMA_LOAD_TIMEOUT = "15m";
         };
       };
 
