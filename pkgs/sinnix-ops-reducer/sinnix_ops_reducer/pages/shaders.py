@@ -19,7 +19,7 @@ SHADER_CONTROL_NOTE = (
     "the ops-reducer's action API has: that API admits lifecycle verbs on "
     "attested runtime-inventory units and <code>interrupt</code> on agent jobs, "
     "and a shader is neither. Giving the hub its own path to "
-    "<code>hyprctl</code> would be the second control plane this estate does "
+    "<code>hyprctl</code> would be the second control plane sinnix does "
     "not have. So the page reports, and the commands below are what drives it — "
     "from a terminal, or from <kbd>F4</kbd> / <kbd>Shift+F4</kbd> / "
     "<kbd>Super+F4</kbd> / <kbd>Super+Shift+F4</kbd>."

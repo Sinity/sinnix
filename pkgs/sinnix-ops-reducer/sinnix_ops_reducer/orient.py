@@ -1,4 +1,4 @@
-"""`sinnix-ops-reducer orient` -- one-call estate orientation for agents.
+"""`sinnix-ops-reducer orient` -- one-call system orientation for agents.
 
 Thin, read-only composition over sources that are already authoritative
 elsewhere: the reducer's own /v1/snapshot (which embeds the runtime
@@ -94,7 +94,7 @@ def read_static_inventory(path: Path) -> dict[str, Any] | None:
 
 
 def failed_and_attention_units(state: dict[str, Any]) -> list[dict[str, Any]]:
-    """Units in `failed` or `activating` -- the same two states pages/estate.py
+    """Units in `failed` or `activating` -- the same two states pages/dashboard.py
     treats as needing attention, reimplemented here (not imported) so this
     module has no dependency on the hub page's own evolution."""
     units = state.get("systemd_units")
@@ -123,7 +123,7 @@ def degraded_sources(sources: dict[str, Any] | None) -> list[str]:
     )
 
 
-def estate_verdict(
+def system_verdict(
     units: list[dict[str, Any]], degraded: list[str]
 ) -> tuple[str, str]:
     """(status, one-line summary) -- the three-second read."""
@@ -146,7 +146,7 @@ def estate_verdict(
         )
     if problems:
         return "attention", "Needs attention: " + "; ".join(problems) + "."
-    return "healthy", "The estate is healthy."
+    return "healthy", "The system is healthy."
 
 
 def acknowledged_outages(inventory: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -280,7 +280,7 @@ def compose(
 
     result: dict[str, Any] = {"schema": SCHEMA, "generated_at": now_iso()}
     if not isinstance(snapshot, dict) or state == {}:
-        result["estate"] = {
+        result["system"] = {
             "status": "unavailable",
             "summary": "the ops-reducer snapshot is unavailable",
         }
@@ -289,8 +289,8 @@ def compose(
         degraded = degraded_sources(
             snapshot.get("sources") if isinstance(snapshot.get("sources"), dict) else {}
         )
-        status, summary = estate_verdict(units, degraded)
-        result["estate"] = {
+        status, summary = system_verdict(units, degraded)
+        result["system"] = {
             "status": status,
             "summary": summary,
             "sequence": snapshot.get("sequence"),
@@ -313,15 +313,15 @@ def _truncate(text: Any, width: int = TITLE_MAX) -> str:
 
 def render_human(data: dict[str, Any]) -> str:
     lines: list[str] = []
-    estate = data.get("estate") or {}
+    system = data.get("system") or {}
     lines.append(f"sinnix orient — {data.get('generated_at', '?')}")
     lines.append("")
-    lines.append(str(estate.get("summary", "estate status unknown")))
-    for unit in estate.get("failed_units") or []:
+    lines.append(str(system.get("summary", "system status unknown")))
+    for unit in system.get("failed_units") or []:
         lines.append(f"  FAILED      {unit.get('unit')} ({unit.get('manager')})")
-    for unit in estate.get("attention_units") or []:
+    for unit in system.get("attention_units") or []:
         lines.append(f"  ACTIVATING  {unit.get('unit')} ({unit.get('manager')})")
-    for name in estate.get("degraded_sources") or []:
+    for name in system.get("degraded_sources") or []:
         lines.append(f"  SOURCE DOWN {name}")
 
     acked = data.get("acknowledged_outages") or []

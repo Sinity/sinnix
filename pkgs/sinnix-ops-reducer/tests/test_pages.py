@@ -1,8 +1,8 @@
 """Behaviour checks for the hub pages the reducer renders.
 
 Two things here are real contracts rather than restatements of the code
-(carried over from flake/tests/hub-render.py when the renderer moved into this
-package):
+(carried over from an earlier render-on-timer test suite when the renderer
+moved into this package):
 
   1. The scope command reducer is a parser. `sinnix-scope` hands systemd a
      launch line wrapped in `env`, assignments, `nice`, `ionice`, a supervisor

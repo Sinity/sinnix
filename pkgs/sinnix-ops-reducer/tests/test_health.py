@@ -1,9 +1,9 @@
 """The inventory health sweep: transitions, debounce, and the notify rules.
 
-Ported from flake/tests/health-sentinel.nix, which drove the retired bash
-sentinel through a fixture inventory with stub `df`/`systemctl`/`sudo` binaries
-on PATH. The fixtures here are function-level instead (the unit prober and the
-mount reader are injected), so every behavioural assertion the nix check made
+Ported from an earlier NixOS VM check that drove a standalone bash sweep
+through a fixture inventory with stub `df`/`systemctl`/`sudo` binaries on
+PATH. The fixtures here are function-level instead (the unit prober and the
+mount reader are injected), so every behavioural assertion the VM check made
 survives, plus the ones its shape could not reach: acknowledged outages, the
 notification rules, and the shared state between the OnFailure fast path and
 the sweep.

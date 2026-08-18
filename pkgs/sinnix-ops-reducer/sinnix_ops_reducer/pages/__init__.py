@@ -2,7 +2,7 @@
 
 Every page is complete HTML: the browser fetches no data to show state. That
 is deliberate -- a phone on a flaky link, or a page left open overnight, still
-shows the estate as of a timestamp it prints, rather than an empty skeleton
+shows the system as of a timestamp it prints, rather than an empty skeleton
 waiting on XHR. Only the *action* buttons need JavaScript, and they talk to the
 bounded action API this same process serves.
 
@@ -15,11 +15,11 @@ Six routes, one shell:
   /shaders/   the Hyprland screen-shader library, and what is applied
   /reports/   served by Caddy off disk; the pages only link to it
 
-These used to be written to static files by a 60s timer (sinnix-hub-render).
-They are rendered here instead because the reducer already holds the state they
-show: a page load reads the live snapshot rather than whatever the last timer
-tick happened to catch, and there is no window of pages describing an estate
-that has since moved on.
+These used to be written to static files by a 60s render-on-timer job. They
+are rendered on request instead because the reducer already holds the state
+they show: a page load reads the live snapshot rather than whatever the last
+timer tick happened to catch, and there is no window of pages describing a
+system that has since moved on.
 
 Rendering never fails the request on a missing input: a degraded dashboard that
 says "reducer snapshot unavailable" is more useful than no dashboard.
@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from .ai import render_ai
-from .estate import render_dashboard
+from .dashboard import render_dashboard
 from .probes import load_json
 from .services import render_services
 from .shaders import render_shaders
@@ -60,7 +60,7 @@ def load_manifest(path: Path | None) -> dict[str, Any]:
 
     An empty manifest is a renderable state, not an error: every page reads it
     with .get() defaults, so a host with no hub configured still gets pages
-    that describe the estate rather than a 500.
+    that describe the system rather than a 500.
     """
     if path is None:
         return {}

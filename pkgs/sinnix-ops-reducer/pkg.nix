@@ -17,7 +17,7 @@ python3Packages.buildPythonApplication {
   pyproject = true;
   src = ./.;
   build-system = [ python3Packages.setuptools ];
-  # The estate's shared primitives (atomic state, ledgers, locks, desktop
+  # Sinnix's shared primitives (atomic state, ledgers, locks, desktop
   # notification, batched systemd probes) the health sweep and the action
   # receipts are written against, rather than private copies of each.
   dependencies = [ sinnix-lib ];

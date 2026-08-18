@@ -1,8 +1,8 @@
 """The hub's house style, components, and page shell.
 
-Ported verbatim from sinnix-hub-render. The only client-side JavaScript on the
-hub is here: theme/reading-size persistence, the services filter, and the
-bounded action API driver.
+Ported verbatim from the retired render-on-timer job. The only client-side
+JavaScript on the hub is here: theme/reading-size persistence, the services
+filter, and the bounded action API driver.
 """
 
 from __future__ import annotations
@@ -144,7 +144,7 @@ def dot(tone: str) -> str:
 
 
 # --------------------------------------------------------------------------
-# style -- the estate's house tokens, not a second visual language
+# style -- sinnix's house tokens, not a second visual language
 # --------------------------------------------------------------------------
 
 STYLE = """
@@ -407,7 +407,7 @@ async function act(verb, kind, id, button){
 
 
 PAGES = (
-    ("/", "estate"),
+    ("/", "sinnix"),
     ("/work/", "work"),
     ("/services/", "services"),
     ("/ai/", "ai"),

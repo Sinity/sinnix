@@ -1,7 +1,7 @@
 """Terminal contents and control as a first-class remote surface (sinnix-qxm8).
 
-Absorbed from the retired `sinnix-terminal-view` daemon (sinnix-859p), same
-move as the hub feedback spool before it (see feedback.py): the routes, the
+Absorbed from an earlier standalone terminal-viewing daemon (sinnix-859p),
+same move as the hub feedback spool before it (see feedback.py): the routes, the
 response shapes, and the design doctrine below carry over unchanged. Only the
 transport changes -- this used to be its own Unix-socket process behind
 `handle_path /terminals/*`; it is now a route family on the reducer's own

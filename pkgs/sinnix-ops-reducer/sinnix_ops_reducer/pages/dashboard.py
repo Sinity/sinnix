@@ -164,7 +164,7 @@ def verdict(
     if problems:
         sentence = "Needs attention: " + "; ".join(problems) + "."
     else:
-        sentence = "The estate is healthy."
+        sentence = "The system is healthy."
     detail = ", ".join(activity).capitalize() + "."
     if memory:
         detail += f" Memory {memory[0]:.1f} of {memory[1]:.1f} GiB."
@@ -366,7 +366,7 @@ def render_dashboard(
 
     if snapshot is None:
         body = (
-            '<div class="verdict bad"><p>The estate snapshot is unavailable, so '
+            '<div class="verdict bad"><p>The system snapshot is unavailable, so '
             "this page cannot say whether anything is wrong.</p>"
             f'<p class="sub">{esc(snapshot_error)}</p></div>'
         )

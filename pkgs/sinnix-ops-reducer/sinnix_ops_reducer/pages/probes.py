@@ -1,6 +1,6 @@
 """Live host probes the pages need and the reducer's snapshot does not carry.
 
-Ported verbatim from the retired sinnix-hub-render script: systemd unit and
+Ported verbatim from the retired render-on-timer job: systemd unit and
 scope enumeration, the launch-line reducer that turns a wrapped `sinnix-scope`
 command back into the verb the operator typed, and nvidia-smi's one-line GPU
 summary. These run on request now rather than on a 60s timer, so the numbers a
@@ -18,7 +18,7 @@ from typing import Any, Iterable
 
 from .shell import as_int
 
-# Transient scopes the estate creates on purpose. Agent-gateway jobs carry a
+# Transient scopes sinnix creates on purpose. Agent-gateway jobs carry a
 # job id and are drivable through the reducer via the job_id target; plain
 # sinnix-scope placements are drivable too (sinnix-pl37), via the reducer's
 # scope target -- name-shape plus live-state admission, stop only.
