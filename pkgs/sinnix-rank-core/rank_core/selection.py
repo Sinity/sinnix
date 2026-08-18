@@ -29,11 +29,17 @@ class Selector:
 
     def __post_init__(self) -> None:
         if len(self.item_ids) < self.grid_n:
-            raise ValueError(f"need at least {self.grid_n} items, got {len(self.item_ids)}")
-        self.counts: dict[str, int] = {i: 0 for i in self.item_ids}
+            raise ValueError(
+                f"need at least {self.grid_n} items, got {len(self.item_ids)}"
+            )
+        self.counts: dict[str, int] = dict.fromkeys(self.item_ids, 0)
         self._fit: FitResult | None = None
         self._recent: list[tuple[str, ...]] = []
-        self._window = self.recent_window if self.recent_window is not None else max(3, self.grid_n * 3)
+        self._window = (
+            self.recent_window
+            if self.recent_window is not None
+            else max(3, self.grid_n * 3)
+        )
         self._tick = 0
 
     def update_fit(self, fit_result: FitResult) -> None:
@@ -76,7 +82,10 @@ class Selector:
         if len(components) > 1 and self._tick % self.bridge_every == 0:
             chosen, strategy = self._bridge(components, pool)
         elif self._tick % self.explore_every == 0:
-            chosen, strategy = self.rng.sample(pool, min(self.grid_n, len(pool))), "random"
+            chosen, strategy = (
+                self.rng.sample(pool, min(self.grid_n, len(pool))),
+                "random",
+            )
         else:
             chosen, strategy = self._uncertainty(pool), "uncertainty"
 
@@ -84,7 +93,9 @@ class Selector:
         self._note_shown(chosen)
         return chosen, strategy
 
-    def _bridge(self, components: dict[int, list[str]], pool: list[str]) -> tuple[list[str], str]:
+    def _bridge(
+        self, components: dict[int, list[str]], pool: list[str]
+    ) -> tuple[list[str], str]:
         comp_ids = list(components.keys())
         self.rng.shuffle(comp_ids)
         chosen: list[str] = []
@@ -105,19 +116,34 @@ class Selector:
     def _uncertainty(self, pool: list[str]) -> list[str]:
         anchor = self._choose_anchor(pool)
         if not self._fit or not self._fit.records:
-            rank_index = {i: idx for idx, i in enumerate(sorted(pool, key=lambda x: self.counts.get(x, 0)))}
+            rank_index = {
+                i: idx
+                for idx, i in enumerate(
+                    sorted(pool, key=lambda x: self.counts.get(x, 0))
+                )
+            }
         else:
-            ranked = sorted(pool, key=lambda i: -self._fit.records.get(i, ItemFit(i, 0.0, float("inf"), 0)).theta)
+            ranked = sorted(
+                pool,
+                key=lambda i: (
+                    -self._fit.records.get(i, ItemFit(i, 0.0, float("inf"), 0)).theta
+                ),
+            )
             rank_index = {i: idx for idx, i in enumerate(ranked)}
         anchor_rank = rank_index[anchor]
-        window = [i for i in pool if i != anchor and abs(rank_index[i] - anchor_rank) <= 15] or [
-            i for i in pool if i != anchor
-        ]
+        window = [
+            i for i in pool if i != anchor and abs(rank_index[i] - anchor_rank) <= 15
+        ] or [i for i in pool if i != anchor]
         if self._fit and self._fit.records:
-            weights = [max(self._fit.records.get(i, ItemFit(i, 0.0, 1.0, 0)).se, 1e-6) for i in window]
+            weights = [
+                max(self._fit.records.get(i, ItemFit(i, 0.0, 1.0, 0)).se, 1e-6)
+                for i in window
+            ]
         else:
             weights = [1.0 / (1 + self.counts.get(i, 0)) for i in window]
-        companions = _weighted_sample(window, weights, min(self.grid_n - 1, len(window)), self.rng)
+        companions = _weighted_sample(
+            window, weights, min(self.grid_n - 1, len(window)), self.rng
+        )
         chosen = [anchor] + companions
         while len(chosen) < self.grid_n and len(pool) >= self.grid_n:
             extra = self.rng.choice(pool)
@@ -127,14 +153,21 @@ class Selector:
 
     def _choose_anchor(self, pool: list[str]) -> str:
         if self._fit and self._fit.records:
-            by_se = sorted(pool, key=lambda i: -self._fit.records.get(i, ItemFit(i, 0.0, float("inf"), 0)).se)
+            by_se = sorted(
+                pool,
+                key=lambda i: (
+                    -self._fit.records.get(i, ItemFit(i, 0.0, float("inf"), 0)).se
+                ),
+            )
             top = by_se[: max(1, min(16, len(by_se)))]
             return self.rng.choice(top)
         least_seen = sorted(pool, key=lambda i: self.counts.get(i, 0))
         return self.rng.choice(least_seen[: max(1, min(16, len(least_seen)))])
 
 
-def _weighted_sample(items: list[str], weights: list[float], k: int, rng: random.Random) -> list[str]:
+def _weighted_sample(
+    items: list[str], weights: list[float], k: int, rng: random.Random
+) -> list[str]:
     items = list(items)
     weights = list(weights)
     out = []

@@ -26,7 +26,9 @@ class StabilityReport:
     samples: int
 
 
-def top_k_stability(fit_result: FitResult, k: int = 1, samples: int = 500, seed: int | None = None) -> StabilityReport:
+def top_k_stability(
+    fit_result: FitResult, k: int = 1, samples: int = 500, seed: int | None = None
+) -> StabilityReport:
     records = list(fit_result.records.values())
     k = max(1, min(k, len(records)))
     if not records:

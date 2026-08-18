@@ -69,7 +69,11 @@ class Item:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Item":
-        return cls(id=str(d["id"]), label=d.get("label", str(d["id"])), meta=d.get("meta", {}) or {})
+        return cls(
+            id=str(d["id"]),
+            label=d.get("label", str(d["id"])),
+            meta=d.get("meta", {}) or {},
+        )
 
     def to_dict(self) -> dict:
         return {"id": self.id, "label": self.label, "meta": self.meta}
