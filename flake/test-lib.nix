@@ -257,25 +257,40 @@ let
     };
 
   # Evaluate a test spec without forcing a check derivation.
+  #
+  # `spec.assertions` are declared as ordinary NixOS module assertions, which
+  # the module system only evaluates when something forces
+  # `system.build.toplevel`. Test consumers never do, so the assertion list is
+  # forced here instead: a false entry throws at evaluation time and takes the
+  # whole check down with it. Module-declared assertions (sinnix's own
+  # eval-time contracts) are enforced by the same pass.
   evalTestSpec =
     system: spec:
-    lib.nixosSystem {
-      inherit system;
-      modules =
-        baseModules
-        ++ spec.modules
-        ++ [
-          (
-            { config, ... }:
-            {
-              assertions = spec.assertions config;
-            }
-          )
-        ];
-      specialArgs = sharedSpecialArgs // {
-        lib = extendedLib;
+    let
+      evaluated = lib.nixosSystem {
+        inherit system;
+        modules =
+          baseModules
+          ++ spec.modules
+          ++ [
+            (
+              { config, ... }:
+              {
+                assertions = spec.assertions config;
+              }
+            )
+          ];
+        specialArgs = sharedSpecialArgs // {
+          lib = extendedLib;
+        };
       };
-    };
+      failures = builtins.filter (entry: !entry.assertion) evaluated.config.assertions;
+      report = lib.concatMapStringsSep "\n" (entry: "  - ${entry.message}") failures;
+    in
+    if failures == [ ] then
+      evaluated
+    else
+      throw "Test spec '${spec.name or "<unnamed>"}' failed ${toString (builtins.length failures)} assertion(s):\n${report}";
 
   renderManagedEntry =
     {
