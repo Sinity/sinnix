@@ -45,7 +45,7 @@ in
           {
             # Every backup job's freshness marker is watched by the sentinel
             # through its capture lane. The lane's path and the path actually
-            # written have to be the same file, or the estate reports a backup
+            # written have to be the same file, or the health sweep reports a backup
             # as fresh while nothing produces the marker (and the reverse: a
             # marker nobody watches). The writer is the unit's own script plus
             # the sources of the packaged scripts that unit invokes -- the

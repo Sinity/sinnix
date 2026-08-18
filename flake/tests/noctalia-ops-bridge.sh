@@ -36,6 +36,6 @@ grep -Fq "$resume_header" "$plugin/service.luau" ||
   }
 
 # The bridge is the plugin's only authority: a shell-out or a direct read of
-# estate state would be a second, unbounded control plane in the shell.
+# system state would be a second, unbounded control plane in the shell.
 ! grep -Eq 'systemctl|jq|curl|sqlite|\.jsonl' "$plugin"/*.luau
 echo "noctalia ops bridge fixture passed"
