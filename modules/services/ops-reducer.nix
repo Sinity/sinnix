@@ -35,8 +35,6 @@ mkServiceModule {
         quota.passthru.codexbar
         scriptPkgs.sinnix-pressure-park
         scriptPkgs.sinnix-rebuild-override
-        scriptPkgs.sinnix-ops-afk-start
-        scriptPkgs.sinnix-ops-afk-resume
       ];
       systemd.tmpfiles.rules = [ "d /realm/state/sinnix-ops 0700 ${userName} users -" ];
       sinnix.runtime.surfaces.ops-reducer = {

@@ -1,8 +1,0 @@
-# @sinnix-package
-# description: Record the start of a long AFK interval for the operations reducer
-# runtimeInputs: bash coreutils
-#!/usr/bin/env bash
-set -euo pipefail
-dir="${XDG_RUNTIME_DIR:?}/sinnix"
-mkdir -p "$dir"
-date -u +%Y-%m-%dT%H:%M:%SZ > "$dir/afk-start"
