@@ -9,7 +9,14 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
+from sinnix_lib.systemd import show_units
+
 from .reducer import atomic_json, now_iso
+
+# Properties captured for a receipt's previous_state/resulting_state on
+# unit and scope targets -- the target's own live systemd shape, not the
+# whole reducer snapshot (see ActionService._target_state).
+UNIT_STATE_PROPERTIES = ("LoadState", "ActiveState", "SubState")
 
 # Ad-hoc `sinnix-scope` transient scopes (build.slice/agent.slice/etc placements
 # created by the generated sinnix-scope launcher (flake/launch.nix), distinct
@@ -246,6 +253,7 @@ class ActionService:
         ) = None,
         controller: str = "agent_job_control.sh",
         scope_prober: Callable[[str], str | None] | None = None,
+        unit_state_prober: Callable[[str, str], dict[str, str]] | None = None,
     ) -> None:
         self.snapshot = snapshot
         self.inventory_path = inventory_path
@@ -253,6 +261,7 @@ class ActionService:
         self.adapter = adapter or self._live_adapter
         self.controller = controller
         self.scope_prober = scope_prober or self._live_scope_prober
+        self.unit_state_prober = unit_state_prober or self._live_unit_state_prober
         self.receipts: dict[str, dict[str, Any]] = self._load_receipts()
 
     def _load_receipts(self) -> dict[str, dict[str, Any]]:
@@ -389,6 +398,41 @@ class ActionService:
                 return manager
         return None
 
+    def _live_unit_state_prober(self, unit: str, manager: str) -> dict[str, str]:
+        return show_units(
+            [unit], user=(manager == "user"), properties=UNIT_STATE_PROPERTIES
+        ).get(unit, {})
+
+    def _target_state(self, resolved: dict[str, Any]) -> dict[str, Any]:
+        """The resolved target's OWN prior/current state, not the whole
+        reducer snapshot -- a stop-scope receipt used to embed 25KB+ of
+        unrelated agent-gateway job histories and per-process IO because
+        previous_state/resulting_state copied `snapshot["state"]` wholesale
+        (sinnix-rd69). The full snapshot stays reachable by its sequence
+        number, recorded separately in `preconditions.revision`."""
+        kind = resolved.get("kind")
+        if kind == "job":
+            return {"kind": "job", "job": resolved.get("job")}
+        if kind == "scope":
+            unit = resolved.get("unit")
+            manager = resolved.get("manager", "system")
+            return {
+                "kind": "scope",
+                "unit": unit,
+                "manager": manager,
+                "systemd": self.unit_state_prober(unit, manager) if unit else {},
+            }
+        if kind == "unit":
+            surface = resolved.get("surface") or {}
+            unit = surface.get("unit")
+            manager = surface.get("manager", "system")
+            return {
+                "kind": "unit",
+                "surface": surface,
+                "systemd": self.unit_state_prober(unit, manager) if unit else {},
+            }
+        return {"kind": kind}
+
     def execute(self, raw: Any) -> dict[str, Any]:
         request = validate_request(raw)
         digest = hashlib.sha256(
@@ -419,6 +463,7 @@ class ActionService:
                         "orphan reap requires two identical cold expendable observations",
                         409,
                     )
+            previous_target_state = self._target_state(resolved)
             adapter_receipt = self.adapter(request, resolved)
         except ActionError as error:
             rejected = {
@@ -450,8 +495,13 @@ class ActionService:
                 "revision": snapshot.get("sequence"),
                 "resolved": resolved,
             },
-            "previous_state": snapshot.get("state"),
-            "resulting_state": snapshot.get("state"),
+            "previous_state": previous_target_state,
+            # Re-probed after the adapter ran, not the same pre-action copy:
+            # for unit/scope targets this reflects the systemctl state the
+            # action actually produced. Job targets have no post-action
+            # re-snapshot source, so this stays identical to previous_state
+            # for those (unchanged from prior behavior).
+            "resulting_state": self._target_state(resolved),
             "adapter": adapter_receipt,
             "created_at": now_iso(),
         }
