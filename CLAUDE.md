@@ -7,37 +7,30 @@
 > file in the same commit as any structural change it describes.
 >
 > Deep architecture and machine maps live in `.agent/scratch/`
-> (`*-sinnix-architecture-grok.md`, `*-machine-map.md`) — read them when you
-> need evidence-level detail beyond this contract.
+> (`*-sinnix-architecture-grok.md`, `*-machine-map.md`); both are dated
+> 2026-07-07 and predate the 2026-08 reduction drive, so treat them as
+> orientation, not current fact — this file and the tree win.
 
 ---
 
-## Operational Loop (Silent, Every Reply)
+## Standing Rules
 
-- Reconfirm requested scope and explicit constraints.
-- Reconfirm module placement against taxonomy before editing.
-- Reconfirm no compatibility aliases/shims are introduced.
-- Reconfirm existing scripts/skills were checked before adding new helpers.
-- Reconfirm commit boundary is coherent and validated.
-- `switch` already evaluates and builds before it activates, so never wrap it
-  in hygiene probes: no `check --no-build` before (or between) attempts, and
-  no standalone `nix eval`/`nix build`/flake-check runs on config edits
-  unless the user asks for that diagnostic. They are slow on this host and
+- Place new config by the module taxonomy below before writing it; check the
+  existing script/skill registry before adding a helper.
+- **No aliases, no transition periods.** A rename or replacement updates every
+  reference in one pass; deprecated compatibility interfaces are never kept.
+  Retired capabilities leave the active tree entirely — git history is the
+  archive, and comments/docs describe the present design without narrating
+  what it replaced.
+- **`switch` is self-verifying** — it evaluates and builds before activating.
+  Never wrap it in hygiene probes (`check --no-build` first, standalone
+  `nix eval`/`nix build` on config edits): they are slow on this host and
   repeat work `switch` performs through the intended resource wrapper. If
   `switch` fails during activation, fix the blocker and rerun `switch`.
-
-## Beads Issue Tracking
-
-This repository uses `bd` (Beads) for durable project task tracking.
-
-- Run `bd prime` when task context, ready work, blockers, or durable project
-  memory matter.
-- Use `bd ready --json`, `bd show <id> --json`, `bd update <id> --claim --json`,
-  and `bd close <id> --reason "..." --json` for tracked work.
-- Create linked Beads issues for discovered follow-up work instead of leaving
-  markdown TODO lists as the source of truth.
-- `bd dolt push` follows the same repo policy as `git push`: Sinnix may push
-  verified `master` work directly; do not bypass explicit hold instructions.
+- **Beads (`bd`) is the work tracker.** `bd prime` for context; discovered
+  follow-ups become linked issues, not markdown TODO lists. `bd dolt push`
+  follows the same policy as `git push`: verified `master` work may be pushed
+  directly; explicit hold instructions are never bypassed.
 
 ## Public Repository Boundary
 
@@ -58,22 +51,13 @@ GitHub discussion is public.
 - Before every commit, review the complete staged diff for private prose,
   fixtures, identifiers, and datasets. Known private path and file shapes are
   blocked by `.gitignore`; no script can judge content — that review is the
-  committer's job.
-- If there is any doubt whether content belongs in the public repository,
+  committer's job. When in doubt whether content belongs in the public repo,
   confirm with the operator before committing it.
 - Publish only `master`. Never push `--mirror`, `--all`, or `--tags`; any new
   branch or tag requires an explicit publication review first.
 - If private material was committed, stop publication, rotate any live secret,
   rewrite the allowed branch, and verify a fresh clone. Deleting the current
   file does not remove it from history.
-
-## No-Alias Rule
-
-- Do not preserve deprecated compatibility interfaces for renamed
-  files/modules/options/commands.
-- Apply full rename and reference updates in one pass.
-
----
 
 ## Architecture Map
 
@@ -93,8 +77,6 @@ Evaluation pipeline: `flake.nix` (flake-parts) → `flake/nixos.nix` `mkHost` �
 
 `modules/default.nix` auto-imports every module via
 `lib.sinnix.mkAutoImports ./. [ "lib" ]` — new modules need zero wiring.
-Retired capabilities leave the active tree instead of accumulating in a
-parallel archive hierarchy; Git history remains the archive.
 
 ## Module Taxonomy
 
@@ -130,7 +112,7 @@ Boundary rules:
   pipeline), `secrets.nix` (agenix auto-discovery), `dotfiles-sweep.nix`,
   `introspection.nix` (`/etc/sinnix/config.json`). Desktop resource
   governance (slices, sysctls, earlyoom, io.cost init) lives in
-  `profiles/workstation.nix`, not a top-level module — see below.
+  `profiles/workstation.nix`, not a top-level module.
 
 ## Factory Contracts
 
@@ -139,7 +121,7 @@ Boundary rules:
   default character. Hosts express _exceptions_
   (`sinnix.features.<path>.enable = false`) and configuration detail, not
   enables. Optional background capabilities belong in the default-off service
-  namespace; retired capabilities leave the active tree.
+  namespace.
 - **Services are default-OFF.** `mkServiceModule { name, surface, ... }`
   creates `sinnix.services.<name>`; hosts opt in. The optional `surface`
   argument auto-registers the unit in `sinnix.runtime.surfaces` so resource
@@ -195,9 +177,6 @@ endpoint, activation, backendKind, requiresCuda, ... }` wraps
     entries for lanes with no owning unit. Not a service at all.
   - `features/dev/agents/*.nix` except `clis.nix` and `mcp.nix` — plain-Nix
     helpers imported directly by those two, not auto-imported modules.
-- Hermetic tests for modules live in `flake/tests-runtime.nix` using
-  `flake/test-lib.nix` (`mkFeatureTest`, `mkHmRuntimeCheck`, `mkVmCheck`,
-  `sanitizedInputs`, `mountTmpfsRoots`).
 
 ## Runtime Governance
 
@@ -216,40 +195,38 @@ resourceClass, observe, captures }`. Eval-time assertions reject duplicate
 - A capture lane whose writer is **not** a unit (a hotkey script, a shell
   wrapper) goes in `sinnix.runtime.captures` instead: same lane fields, no
   `unit`. Both sources flatten into one `.captures` array in the inventory, so
-  the health sweep and every other consumer see one kind of lane. Do not invent a
-  synthetic unit name to fit a lane into a surface — that is what this option
-  exists to prevent.
+  the health sweep and every other consumer see one kind of lane. Do not
+  invent a synthetic unit name to fit a lane into a surface — that is what
+  this option exists to prevent.
 - `lib.sinnix.mkRuntimeServiceConfig { runtimeInventory; unit; }` resolves a
   unit to its class serviceConfig (as mkDefault) and **throws on unknown
   units** — register the surface first.
 - The whole inventory is serialized to `/etc/sinnix/runtime-inventory.json`,
-  consumed at runtime by `sinnix-observe`, machine telemetry,
-  and the ops-reducer's health sweep — the inventory-driven check (lane
-  staleness, payload degeneracy, liveness probes, mount capacity, unit resting
-  state) that writes `sinnix-health-transition-v1` lines to
-  `/run/sinnix/health-transitions.jsonl` and notifies the desktop. It used to
-  be a root oneshot on a one-minute timer (`sinnix-health-sentinel`); it now
-  runs on the reducer's own 60s tick, inside the operator's session, sharing
+  consumed at runtime by `sinnix-observe`, machine telemetry, and the
+  ops-reducer's health sweep — the inventory-driven check (lane staleness,
+  payload degeneracy, liveness probes, mount capacity, unit resting state)
+  that runs on the reducer's own 60s tick inside the operator's session,
+  writes `sinnix-health-transition-v1` lines to
+  `/run/sinnix/health-transitions.jsonl`, notifies the desktop, and shares
   one dedup state with the `sinnix-unit-failure-notify@` OnFailure path.
-  When adding a daemon: declare the surface, apply
-  `mkRuntimeServiceConfig`, done — no ad-hoc Nice/IOWeight overrides.
+  When adding a daemon: declare the surface, apply `mkRuntimeServiceConfig`,
+  done — no ad-hoc Nice/IOWeight overrides.
 - **Launch policy is rendered, not interpreted.** `flake/launch.nix` generates
   the `sinnix-scope` launcher from `commandClasses`: one `apply_class_policy`
   shell function whose branches carry the baked slice, nice/ionice, systemd
   properties and env defaults, prepended to the runtime half in
-  `flake/launch/scope-runtime.bash` (argument parsing, cgroup checks, unit-name
-  synthesis, the scope supervisor). `renderDirenvrc` does the same for the
-  devshell command wrappers' class resolver. Nothing reads
-  `/etc/sinnix/runtime-inventory.json` to *place* a process any more — the
-  inventory carries `commandClasses` for observability only. A class that is
-  not in the table is a usage error naming the classes that are; adding one is
-  a table edit, not a launcher edit.
+  `flake/launch/scope-runtime.bash` (argument parsing, cgroup checks,
+  unit-name synthesis, the scope supervisor). `renderDirenvrc` does the same
+  for the devshell command wrappers' class resolver. Nothing reads
+  `/etc/sinnix/runtime-inventory.json` to *place* a process — the inventory
+  carries `commandClasses` for observability only. A class that is not in the
+  table is a usage error naming the classes that are; adding one is a table
+  edit, not a launcher edit.
 - Concurrency is governed by slice memory caps and weights, not
   serialization; the only build-path lock is `/tmp/sinnix-switch.lock`, a
   correctness guard against two activations racing on the system profile.
-  Gateway and native launches share
-  versioned UUID manifests and correlation IDs consumed by
-  `sinnix-observe`.
+  Gateway and native launches share versioned UUID manifests and correlation
+  IDs consumed by `sinnix-observe`.
 
 ## Flake Layout & Input Pinning
 
@@ -258,9 +235,9 @@ resourceClass, observe, captures }`. Eval-time assertions reject duplicate
 truth for lock/containment/preflight shared by devshell binaries and
 `nix run .#switch`), `scripts.nix` + `script-discovery.nix` (script registry),
 `launch.nix` + `launch/scope-runtime.bash` (the generated `sinnix-scope`
-launcher — see Runtime Governance),
-`packages.nix` (public package surface), `tests.nix` + `tests-runtime.nix` +
-`test-lib.nix`, `router.nix` (sinnix-gw), `deploy.nix` (colmena +
+launcher — see Runtime Governance), `packages.nix` (public package surface),
+`tests.nix` + `tests-runtime.nix` + `test-lib.nix` + `tests/*.{nix,sh}` (the
+individual checks), `router.nix` (sinnix-gw), `deploy.nix` (colmena +
 nixos-anywhere), `overlay/package/*.nix` (per-package overlays),
 `data/*.nix` (pure data: MCP registry, runtime defaults, local model roster,
 shared skill list, agent CLI wrapper lane registry).
@@ -282,23 +259,24 @@ or `pkgs/<name>/` for real derivations.
   sinex CI publishes to sinity.cachix.org — and `switch` publishes the sinex
   closure to the cache after a successful activation (`sinexCachePush`,
   flake/command-registry.nix, backed by the shared
-  `scripts/sinnix-sinex-cache-push` push logic). The FIRST
-  switch after a sinex master bump no longer pays that compile synchronously:
-  `sinnix.services.sinex-cache-prebuild` (`modules/services/sinex-cache-prebuild.nix`,
-  enabled on sinnix-prime) is a periodic timer that diffs flake.lock's sinex
-  revision against a state file, and on a move builds + cache-pushes it async
-  under `sinnix-scope nix-build` (sinnix-m9v).
-- `lynchpin` is a local `git+file://` input; sinex/polylogue/scribe-tap/
-  yt-polisher come from GitHub so deploys don't consume local checkout state.
-  One-off local testing: `SINNIX_{SINEX,POLYLOGUE,LYNCHPIN}_OVERRIDE=<path>
-switch` (wired as `--override-input --no-write-lock-file`).
+  `scripts/sinnix-sinex-cache-push` push logic). The FIRST switch after a
+  sinex master bump doesn't pay that compile synchronously:
+  `sinnix.services.sinex-cache-prebuild` (enabled on sinnix-prime) is a
+  periodic timer that diffs flake.lock's sinex revision against a state
+  file, and on a move builds + cache-pushes it async under
+  `sinnix-scope nix-build` (sinnix-m9v).
+- `lynchpin` and `steering` are local `git+file://` inputs;
+  sinex/polylogue/scribe-tap/yt-polisher/phone-app come from GitHub so
+  deploys don't consume local checkout state. One-off local testing:
+  `SINNIX_{SINEX,POLYLOGUE,LYNCHPIN}_OVERRIDE=<path> switch` (wired as
+  `--override-input --no-write-lock-file`).
 
 ## Notable Services & Packages
 
 Surfaces with standing design decisions an agent might otherwise "fix":
 
 - `sinnix.services.stt` (`modules/services/stt.nix`, `scripts/sinnix-stt`,
-  docs/speech.md) is the estate's speech stack, served OpenAI-compatible at
+  docs/speech.md) is the system's speech stack, served OpenAI-compatible at
   `/v1/audio/transcriptions`. Four sherpa-onnx models under
   `/realm/library/models/sherpa`, fetched on first start: Parakeet TDT 0.6B v3
   (int8) transcribes, Silero VAD gates, pyannote segmentation 3.0 diarizes,
@@ -317,17 +295,16 @@ Surfaces with standing design decisions an agent might otherwise "fix":
   as `local-glimmer`.
 - The phone app (Sinnix, `dev.sinnix.phone`) lives in its own repo,
   github:Sinity/sinnix-phone-app, consumed as the non-flake `phone-app`
-  input (capture, instruments, ingress, and a remote for prime).
-  Kotlin/Compose built through Gradle against a license-accepting re-import
-  of the same nixpkgs, made reproducible by the nixpkgs Gradle setup hook
-  plus a committed `deps.json` recorded through `mitm-cache`; regenerate with
-  the derivation's `mitmCache.updateScript` after any dependency change. The
-  APK is emitted unsigned and signed at install time against a persistent
-  host-local keystore, which keeps `adb install -r` an upgrade rather than an
-  uninstall that discards runtime grants. Prime's half of its dual transport
-  is `pkgs/sinnix-phone-dispatcher`, served at the hub's `/phone/v1/*` and
-  also driven by the drain. Operate it through `sinnix phone app-*`; see
-  `docs/phone.md`.
+  input. Kotlin/Compose built through Gradle against a license-accepting
+  re-import of the same nixpkgs, made reproducible by the nixpkgs Gradle
+  setup hook plus a committed `deps.json` recorded through `mitm-cache`;
+  regenerate with the derivation's `mitmCache.updateScript` after any
+  dependency change. The APK is emitted unsigned and signed at install time
+  against a persistent host-local keystore, which keeps `adb install -r` an
+  upgrade rather than an uninstall that discards runtime grants. Prime's
+  counterpart is `pkgs/sinnix-phone-dispatcher`, served at the hub's
+  `/phone/v1/*`. Operate it through `sinnix phone app-*`; transport and lane
+  detail in `docs/phone.md`.
 
 ## Scripts
 
@@ -348,12 +325,13 @@ or, for scripts launched directly (Hyprland keybindings, shell-sourced):
 ```
 
 There is no manual wrapper registration. `flake/scripts.nix` only adds
-non-script externals (lynchpin/polylogue pythons, vendored npm CLIs, beads);
-`flake/packages.nix` curates the small public `nix run` surface.
-`sinnix` (`flake/cli-dispatcher.nix`, installed by `modules/features/cli/core.nix`)
-is a generated meta-CLI front door over the whole packaged registry: `sinnix
-help` lists every script, `sinnix <name>` dispatches to it (short name or
-full `sinnix-<name>`) — it needs zero wiring when a new script is added.
+non-script externals (lynchpin/polylogue/steering pythons, vendored npm CLIs,
+beads); `flake/packages.nix` curates the small public `nix run` surface.
+`sinnix` (`flake/cli-dispatcher.nix`, installed by
+`modules/features/cli/core.nix`) is a generated meta-CLI front door over the
+whole packaged registry: `sinnix help` lists every script, `sinnix <name>`
+dispatches to it (short name or full `sinnix-<name>`) — it needs zero wiring
+when a new script is added.
 
 ## Dotfiles & Agent Context
 
@@ -394,9 +372,10 @@ skills`, `~/.codex/skills`, `~/.gemini/skills`) are linkFarms over it.
 - Agent gateway: `modules/services/agent-gateway.nix` renders one canonical
   project contract and one official-SDK stdio MCP implementation with
   `remote-readonly`, `local-agent-control`, and `remote-operator` profiles.
-  `sinnix-agent-control-mcp` is a thin local wrapper around that implementation.
-  Remote ChatGPT access uses the pinned OpenAI `tunnel-client` user service;
-  the gateway has no custom HTTP/SSE transport or separate PID job substrate.
+  `sinnix-agent-control-mcp` is a thin local wrapper around that
+  implementation. Remote ChatGPT access uses the pinned OpenAI
+  `tunnel-client` user service; the gateway has no custom HTTP/SSE transport
+  or separate PID job substrate.
 
 ## Secrets
 
@@ -418,17 +397,17 @@ config in `secrets.nix` (repo root).
   systemd-tpm2-setup masked. `sinnix.services.hub`
   (`modules/services/hub.nix`, docs/hub.md) is the browser front door:
   Caddy in the user manager serving `/reports/` off disk and proxying every
-  other path to the ops-reducer, which renders five pages on request from the
-  state it already holds — estate verdict, `/work/` (semantic workload view
-  over scopes, the project ledger and gateway jobs), `/services/`, `/ai/`,
-  `/shaders/` — and whose buttons post to that same reducer's bounded action
-  API. No second control
-  plane: where the action API cannot express a target the page says so rather
-  than growing a private kill path — `/shaders/` is entirely buttonless for
-  exactly that reason, since applying a screen shader is not an action verb.
-  It binds loopback plus the tailscale0 address via an explicit Caddy `bind`
-  (site addresses alone collapse to a `:PORT` wildcard) and opens its ports
-  on tailscale0 only.
+  other path to the ops-reducer, which renders every hub page on request
+  from state it already holds — the system dashboard, `/work/` (semantic
+  workload view over scopes, the project ledger and gateway jobs),
+  `/services/`, `/ai/`, `/shaders/` — and whose buttons post to that same
+  reducer's bounded action API. No second control plane: where the action
+  API cannot express a target the page says so rather than growing a private
+  kill path — `/shaders/` is entirely buttonless for exactly that reason,
+  since applying a screen shader is not an action verb. It binds loopback
+  plus the tailscale0 address via an explicit Caddy `bind` (site addresses
+  alone collapse to a `:PORT` wildcard) and opens its ports on tailscale0
+  only.
 - **sinnix-ethereal** — Hetzner AX42 headless replica
   (`profiles/cloud.nix`, disko, bootstrap via `nix run .#deploy-ethereal`,
   steady-state via colmena `apply-all`). Runs sinex `deploymentRole =
@@ -452,11 +431,15 @@ config in `secrets.nix` (repo root).
   declared is wiped on reboot. New service state ⇒ add a persistence entry in
   the same change.
 - Backups: btrbk snapshots (producer) are deleted only after the hourly Borg
-  drain proves a matching archive on `/outer-realm` (durability gate). Borg
-  freshness (archive markers, snapshot-queue lag, integrity-receipt state) is
-  watched as ops-reducer health lanes declared on the owning surfaces in
-  `modules/backup.nix`, not a bespoke checker; drill evidence still lands in
-  `borg_drill.jsonl`.
+  drain proves a matching archive on `/outer-realm` (durability gate).
+  `/realm/state` roots that snapshots cannot cover (nested subvols snapshot
+  as empty directories) get direct-path Borg jobs instead; live SQLite
+  databases are covered by dump units (`sinnix-sqlite-backup`), never
+  file-copied mid-write, and large near-static derived artifacts ride Borg
+  dedup rather than the dump path. Borg freshness (archive markers,
+  snapshot-queue lag, integrity-receipt state) is watched as ops-reducer
+  health lanes declared on the owning surfaces in `modules/backup.nix`, not
+  a bespoke checker; drill evidence still lands in `borg_drill.jsonl`.
 - **Backup membership is a property the directory carries, not a path in a
   list.** A directory is excluded when it holds `CACHEDIR.TAG` (the
   bford.info standard, which cargo/uv/ruff/pytest/mypy write unprompted) or
@@ -488,12 +471,12 @@ config in `secrets.nix` (repo root).
   one lock, nix-build.slice containment, and the read-only
   `sinnix-preflight switch` gate. Reboot inspection uses
   `sinnix-preflight reboot`; `SINNIX_PREFLIGHT_FORCE=1` is a deliberate,
-  explicit override. The preflight checks only things it can actually
-  know: nix free space, a concurrent generation operation, generation
-  pairing, flake drift. It deliberately does NOT gate on memory headroom —
-  a fixed MemAvailable threshold cannot tell a no-op rebuild from a
-  world rebuild, and build memory is already bounded while it runs by
-  nix-build.slice rather than guessed at before it starts.
+  explicit override. The preflight checks only things it can actually know:
+  nix free space, a concurrent generation operation, generation pairing,
+  flake drift. It deliberately does NOT gate on memory headroom — a fixed
+  MemAvailable threshold cannot tell a no-op rebuild from a world rebuild,
+  and build memory is already bounded while it runs by nix-build.slice
+  rather than guessed at before it starts.
 - `check` = curated default tier (cheap; `nix flake check` traversal has
   wedged this host — don't run it raw). `check-all` adds the heavy tier
   (`heavyChecks` flake output: HM runtime checks, VM checks, host builds).
@@ -506,25 +489,23 @@ config in `secrets.nix` (repo root).
   recent commits (and boot-time options like `boot.tmp.*`) are not live yet —
   say so instead of assuming config == reality. Plain `--revision` reports
   the NIXPKGS revision — an equally plausible-looking sha; do not read it as
-  a sinnix commit. Generations older than 2026-07-10 predate the stamp and
-  print nothing for `--configuration-revision`.
+  a sinnix commit.
 - **A switch's exit code is not evidence it applied.** `sinnix-preflight`
-  can BLOCK a switch (exit 75) for memory headroom, nix storage, a
-  concurrent generation operation, or flake drift — this is correct
-  behaviour, and it means "I ran switch" and "the system changed" are
-  different claims. Shell shapes like `switch > log; echo $?; tail log`
+  can BLOCK a switch (exit 75) for any of its gate reasons above — this is
+  correct behaviour, and it means "I ran switch" and "the system changed"
+  are different claims. Shell shapes like `switch > log; echo $?; tail log`
   report the exit status of the LAST command, so a blocked switch reads as
-  success; the same applies to any harness that reports a compound
-  command's status. The revision comparison above is the only check that
-  settles it, so make it after every switch rather than trusting a 0.
-  This is not hypothetical: switches have been reported applied while the
-  system stayed on an older generation.
+  success; the same applies to any harness that reports a compound command's
+  status. The revision comparison above is the only check that settles it,
+  so make it after every switch rather than trusting a 0. This is not
+  hypothetical: switches have been reported applied while the system stayed
+  on an older generation.
 
 ## Maintenance Protocol
 
 - Update this file in the same commit when adding/removing/moving modules,
-  changing conventions, or establishing patterns. Do not keep a changelog
-  here — git history and Beads are the record.
+  changing conventions, or establishing patterns. No changelog here — git
+  history and Beads are the record.
 - Keep guidance needed on most turns here; move specialized long-form
   procedure into skills (`dots/_ai/skills/`).
 - After structural changes: focused test for the edited surface, then
