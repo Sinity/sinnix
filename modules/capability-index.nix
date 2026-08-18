@@ -21,11 +21,13 @@
 let
   builder = import ./lib/capability-index.nix { inherit lib; };
 
-  # The script registry, for names, descriptions and tiers. This is the same
-  # `import ./scripts.nix { ... }` that ~30 modules already make through
-  # helpers.mkSinnixPackagesFor; that helper returns only the package set, and
-  # the frontmatter descriptions are the whole point here.
-  scriptRegistry = (import (inputs.self + "/flake/scripts.nix") { inherit inputs pkgs; }).registry;
+  # The script registry, for names, descriptions and tiers. pkgs.sinnixScriptRegistry
+  # (flake/lib-context.nix's overlay) is the same one evaluation of scripts.nix
+  # every other module reaches through helpers.mkSinnixPackagesFor -- that
+  # helper returns only the package set, and the frontmatter descriptions are
+  # the whole point here, so this reads the registry attribute directly
+  # instead of re-importing scripts.nix a second time.
+  scriptRegistry = pkgs.sinnixScriptRegistry.registry;
 
   # The devshell verbs. commandDocs is a pure list in that file, so nothing of
   # the command machinery it also defines is forced by reading it.
@@ -33,6 +35,7 @@ let
     (import (inputs.self + "/flake/command-registry.nix") {
       inherit inputs pkgs;
       inherit (pkgs.stdenv.hostPlatform) system;
+      sinnixScriptRegistry = pkgs.sinnixScriptRegistry;
     }).commandDocs;
 
   index = builder.mkCapabilityIndex {
