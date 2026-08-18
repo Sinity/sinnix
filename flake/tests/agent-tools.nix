@@ -117,20 +117,24 @@ in
               assertion = builtins.hasAttr ".config/claude/agents" hm.home.file;
               message = "Claude agent definitions must be linked as one directory from the shared dots tree.";
             }
+            # These two jobs render through mkScheduledJob at the NixOS level
+            # (/etc/systemd/user), not through home-manager — the two
+            # namespaces never merge, so asserting the right carrier is the
+            # test's whole value.
             {
-              assertion = builtins.hasAttr "sinnix-settings-env-lint" hm.systemd.user.services;
+              assertion = builtins.hasAttr "sinnix-settings-env-lint" config.systemd.user.services;
               message = "The settings environment audit service must be declared.";
             }
             {
-              assertion = builtins.hasAttr "sinnix-settings-env-lint" hm.systemd.user.timers;
+              assertion = builtins.hasAttr "sinnix-settings-env-lint" config.systemd.user.timers;
               message = "The settings environment audit timer must be declared.";
             }
             {
-              assertion = builtins.hasAttr "sinnix-vacuity-judge" hm.systemd.user.services;
+              assertion = builtins.hasAttr "sinnix-vacuity-judge" config.systemd.user.services;
               message = "The bounded vacuity judge worker must be declared.";
             }
             {
-              assertion = builtins.hasAttr "sinnix-vacuity-judge" hm.systemd.user.timers;
+              assertion = builtins.hasAttr "sinnix-vacuity-judge" config.systemd.user.timers;
               message = "The bounded vacuity judge timer must be declared.";
             }
             {
