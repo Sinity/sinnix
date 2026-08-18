@@ -12,15 +12,23 @@ from typing import Any, Callable
 from .reducer import atomic_json, now_iso
 
 # Ad-hoc `sinnix-scope` transient scopes (build.slice/agent.slice/etc placements
-# created by scripts/sinnix-scope, distinct from attested agent-gateway jobs
+# created by the generated sinnix-scope launcher (flake/launch.nix), distinct
+# from attested agent-gateway jobs
 # which use the `sinnix-agent-job-<id>.scope` namespace and the job_id target
 # instead). Admission for these is structural, not inventory-registered: the
 # name must match the launcher's own naming convention
 # (`sinnix-<commandClass>-<timestamp>-<pid>.scope`) AND the unit must resolve
 # live via systemctl (see _resolve_scope) -- name-matching alone is not trust,
 # a dead or renamed unit is rejected too.
+# The launcher names transient scopes
+# sinnix-<class>-<identity>-<epoch_ns>-<pid>.scope, where <identity> is the
+# launched command's own name, sanitized to [A-Za-z0-9_.-] and capped at 40
+# chars (flake/launch/scope-runtime.bash). The identity segment arrived
+# 2026-08-13 (sinnix-1ei); this pattern lagged without it and admitted
+# nothing for five days -- every live stop-scope action 403'd on name shape.
 SCOPE_UNIT_PATTERN = re.compile(
-    r"^sinnix-(agent|build|background|gpu-runtime|nix-build|system)-\d+-\d+\.scope$"
+    r"^sinnix-(agent|build|background|gpu-runtime|nix-build|system)"
+    r"-[A-Za-z0-9_.-]{1,40}-\d+-\d+\.scope$"
 )
 
 # Scope targets support only the reversible verb: `systemctl stop` on a scope

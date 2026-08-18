@@ -210,6 +210,13 @@ shift
 apply_class_policy "$class"
 
 scoped_command=("$@")
+# Unit-name identity is taken from the command AS THE CALLER GAVE IT, before
+# the nice/ionice/supervisor wrappers are prepended -- the identity segment
+# exists for telemetry joins, and a headless launch that names itself after
+# its own supervisor defeats that (found 2026-08-18, present since the
+# segment was introduced).
+identity_cmd0="${1:-}"
+identity_cmd1="${2:-}"
 property_args=("${class_property_args[@]}")
 unscoped_background_xtask=0
 
@@ -331,9 +338,9 @@ fi
 # identity instead of just "nix-build" for every job. Sanitized and
 # length-capped: unit names have a real character/length ceiling and the
 # command can be arbitrarily long.
-job_identity="$(basename -- "${scoped_command[0]:-$command_base}")"
-if [ "${#scoped_command[@]}" -gt 1 ]; then
-  job_identity="${job_identity}-${scoped_command[1]}"
+job_identity="$(basename -- "${identity_cmd0:-$command_base}")"
+if [ -n "$identity_cmd1" ]; then
+  job_identity="${job_identity}-${identity_cmd1}"
 fi
 job_identity="$(printf '%s' "$job_identity" | tr -c 'A-Za-z0-9_.-' '-' | cut -c1-40)"
 
