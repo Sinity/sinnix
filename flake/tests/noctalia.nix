@@ -19,11 +19,14 @@
                 pkgs.gnugrep
                 pkgs.gnused
                 pkgs.luau
+                pkgs.python3
               ];
             }
             ''
               NOCTALIA_OPS_PLUGIN=${../../dots/noctalia/plugins/sinnix-ops} \
               NOCTALIA_OPS_REDUCER=${../../pkgs/sinnix-ops-reducer} \
+              NOCTALIA_OPS_OBSERVE=${../../pkgs/sinnix-observe} \
+              NOCTALIA_OPS_CONTRACT=${../../flake/tests/noctalia-state-contract.py} \
                 ${pkgs.bash}/bin/bash ${../../flake/tests/noctalia-ops-bridge.sh}
               touch "$out"
             '';
