@@ -249,17 +249,19 @@ in
     services.earlyoom = {
       enable = true;
       enableNotifications = true;
-      # earlyoom acts only when BOTH memory and swap are below threshold; the
-      # memory gate is a % of MemAvailable+AnonPages (~26 GiB on this host).
-      # -m3 is the emergency floor for true exhaustion, not the first
-      # responder — PSI-scoped oomd (below) and the swap tiers handle pressure
-      # first. As first responder earlyoom produces kill storms.
+      # earlyoom acts only when memory AND swap are below threshold AND the
+      # machine is actually stalling (--mem-psi-min, sinnix patch). The
+      # memory gate is a % of physical MemTotal (overlay patch), ~1 GiB
+      # here. -m3 is the emergency floor for true exhaustion, not the first
+      # responder — PSI-scoped oomd (below) and the swap tiers handle
+      # pressure first. As first responder earlyoom produces kill storms.
       freeMemThreshold = 3;
-      # Lets a burst use ~4 GiB of fast NVMe/zram swap before earlyoom panics,
-      # while still firing well before swap is exhausted. At the ~10% default
-      # the kill is suppressed until the compositor is already wedged on a
-      # slower swap substrate.
-      freeSwapThreshold = 50;
+      # Free-swap minimum: fire only once swap is genuinely nearly exhausted
+      # (<10% free ≈ 2 GiB of 20 GiB). The former 50 never bound — swap sits
+      # above 50% used for most of any active day, so the intended
+      # memory-AND-swap conjunction had collapsed to a bare free-memory
+      # trigger (2026-08-18 incident taxonomy; 98-day record).
+      freeSwapThreshold = 10;
       extraArgs = [
         # No --prefer regex: at the -m3 floor oom_score-based choice is fine,
         # and slice-scoped oomd handles "kill the runaway build, not the
@@ -268,6 +270,16 @@ in
         # is not a containment boundary (per-scope MemoryHigh/Max is).
         "--avoid"
         earlyoomAvoidPattern
+        # PSI gate (sinnix earlyoom patch): kill only while memory PSI
+        # "full avg10" >= 20 — the "degraded" regime floor. Measured: 84% of
+        # post-2026-07-13 kills (122/145) fired at PSI < 10 while page cache
+        # and swap absorbed the burst as designed, including the 2026-08-16
+        # bwa-mem2 kill at PSI 3.0 (sinnix-miop). All genuine-stall kills in
+        # the record sat at PSI >= 20. Below the gate the kernel OOM killer
+        # remains the ultimate floor; the gate fails open if PSI data is
+        # unavailable.
+        "--mem-psi-min"
+        "20"
       ];
     };
 

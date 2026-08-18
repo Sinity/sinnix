@@ -301,6 +301,17 @@ Surfaces with standing design decisions an agent might otherwise "fix":
   on CPU (RTF ~0.1 on dense speech) that transcription never queues behind a
   resident model. Do not "fix" that by adding CUDA or the admission key; the
   runtime test asserts it stays out of the mesh.
+- `earlyoom` is locally patched (`flake/overlay/package/earlyoom.nix`): the
+  percent base is physical MemTotal, and `--mem-psi-min 20` gates every kill
+  on memory PSI "full avg10" — with `freeSwapThreshold = 10` this makes the
+  trigger a genuine three-way conjunction (avail low AND swap nearly
+  exhausted AND the machine actually stalling). Evidence: 84% of the 145
+  post-2026-07-13 kills fired at PSI < 10 while swap/page cache absorbed the
+  burst as designed, including a healthy ~19 GB unattended compute job
+  (sinnix-miop, 2026-08-18 incident taxonomy). Do not "fix" the gate away or
+  loosen the swap threshold to make earlyoom more responsive — kill storms
+  on a healthy machine are the failure mode it exists to prevent; the
+  `earlyoom-psi-gate` check exercises the real decision path.
 - `sinnix.services.muse-glimmer` (`modules/services/muse-glimmer.nix`) serves
   the official Muse Glimmer 30B Q4 GGUF directly through llama.cpp:
   socket-activated, GPU-exclusive hybrid CPU/GPU, 1536 MiB fit margin, 32K
