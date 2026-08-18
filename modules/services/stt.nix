@@ -57,103 +57,105 @@ mkAiService {
       user = config.sinnix.user.name;
       modelDir = "${config.sinnix.paths.modelsRoot}/sherpa";
     in
-    {
-      systemd.tmpfiles.rules = [
-        "d ${modelDir} 0755 ${user} users -"
-        "d ${config.sinnix.paths.activityRoot}/transcripts 0755 ${user} users -"
-      ];
-
-      environment.systemPackages = [ scriptPkgs.sinnix-stt ];
-
-      # The hub's own surface comes from mkAiService; the lake pass is a
-      # second unit and needs its own registration, or mkRuntimeServiceConfig
-      # throws on an unknown unit (which is the contract working as intended).
-      sinnix.runtime.surfaces.stt-lake = {
-        unit = "sinnix-stt-lake.service";
-        resourceClass = "background-maintenance";
-        observe = {
-          enable = true;
-          restartable = true;
-        };
-        captures = [
-          {
-            name = "transcripts";
-            path = "${config.sinnix.paths.activityRoot}/transcripts";
-            # Deliberately unbudgeted. The lake pass runs on lakeIntervalSec,
-            # but it only writes when the VAD gate found speech in newly
-            # landed audio, so a quiet stretch --
-            # the operator away, or simply not talking -- produces nothing and
-            # is not evidence of anything. A budget here would measure his day.
-            # The freshness of the audio it consumes is already covered by
-            # audio-devices and audio-index; what this declaration buys is the
-            # "has this ever produced" check, which is the only question about
-            # this lane that has an unambiguous answer.
-            eventDriven = true;
-          }
-        ];
-      };
-
-      systemd.services.sinnix-stt = {
-        description = "Speech-to-text hub (Parakeet TDT via sherpa-onnx)";
-        wantedBy = [ ]; # on-demand, socket-activated via stt-proxy
-        after = [ "network.target" ];
-        partOf = [ "stt-proxy.service" ];
-        serviceConfig = lib.mkMerge [
-          {
-            User = user;
-            Group = "users";
-            # Half a gigabyte of weights is not source and does not belong in
-            # the store; sinnix already keeps model files under
-            # /realm/library/models. Fetched once, verified every start.
-            ExecStartPre = "${scriptPkgs.sinnix-stt}/bin/sinnix-stt models";
-            ExecStart = lib.concatStringsSep " " [
-              "${scriptPkgs.sinnix-stt}/bin/sinnix-stt"
-              "serve"
-              "--listen 127.0.0.1:8091"
-            ];
-            Environment = [ "SINNIX_STT_MODEL_ROOT=${modelDir}" ];
-          }
-          (lib.sinnix.mkRuntimeServiceConfig {
-            runtimeInventory = config.sinnix.runtime.inventory;
-            unit = "sinnix-stt.service";
-          })
-          (lib.sinnix.systemd.mkRestartPolicy {
-            strategy = "on-failure";
-            delaySec = 10;
-          })
-        ];
-      };
-
+    lib.mkMerge [
       # The lake pass. Opportunistic and cheap: the VAD gate means a day of
       # mostly-silent ambient audio costs seconds, so this can run often
-      # enough that a transcript is never far behind the recording.
-      systemd.services.sinnix-stt-lake = {
-        description = "Transcribe newly landed audio in the lake";
-        serviceConfig = lib.mkMerge [
-          {
-            Type = "oneshot";
-            User = user;
+      # enough that a transcript is never far behind the recording. Direct
+      # mkScheduledJob call, not mkAiService/mkServiceModule's `job` sugar:
+      # the hub's own unit already occupies this module's single-surface
+      # slot, and this is a second, independent oneshot+timer pair.
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "sinnix-stt-lake";
+          description = "Transcribe newly landed audio in the lake";
+          surface = config.sinnix.runtime.surfaces.stt-lake;
+        }
+        {
+          execStart = "${scriptPkgs.sinnix-stt}/bin/sinnix-stt lake";
+          user = user;
+          serviceConfig = {
             Group = "users";
-            ExecStart = "${scriptPkgs.sinnix-stt}/bin/sinnix-stt lake";
-            Environment = [ "SINNIX_STT_MODEL_ROOT=${modelDir}" ];
-          }
-          (lib.sinnix.mkRuntimeServiceConfig {
-            runtimeInventory = config.sinnix.runtime.inventory;
-            unit = "sinnix-stt-lake.service";
-          })
+          };
+          environment = {
+            SINNIX_STT_MODEL_ROOT = modelDir;
+          };
+          timer = {
+            onBootSec = "10min";
+            onUnitActiveSec = "${toString cfg.lakeIntervalSec}s";
+            accuracySec = "5min";
+            description = "Periodic transcription of newly landed audio";
+          };
+        }
+      )
+      {
+        systemd.tmpfiles.rules = [
+          "d ${modelDir} 0755 ${user} users -"
+          "d ${config.sinnix.paths.activityRoot}/transcripts 0755 ${user} users -"
         ];
-      };
 
-      systemd.timers.sinnix-stt-lake = {
-        description = "Periodic transcription of newly landed audio";
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnBootSec = "10min";
-          OnUnitActiveSec = "${toString cfg.lakeIntervalSec}s";
-          AccuracySec = "5min";
+        environment.systemPackages = [ scriptPkgs.sinnix-stt ];
+
+        # The hub's own surface comes from mkAiService; the lake pass is a
+        # second unit and needs its own registration, or mkRuntimeServiceConfig
+        # throws on an unknown unit (which is the contract working as intended).
+        sinnix.runtime.surfaces.stt-lake = {
+          unit = "sinnix-stt-lake.service";
+          resourceClass = "background-maintenance";
+          observe = {
+            enable = true;
+            restartable = true;
+          };
+          captures = [
+            {
+              name = "transcripts";
+              path = "${config.sinnix.paths.activityRoot}/transcripts";
+              # Deliberately unbudgeted. The lake pass runs on lakeIntervalSec,
+              # but it only writes when the VAD gate found speech in newly
+              # landed audio, so a quiet stretch --
+              # the operator away, or simply not talking -- produces nothing and
+              # is not evidence of anything. A budget here would measure his day.
+              # The freshness of the audio it consumes is already covered by
+              # audio-devices and audio-index; what this declaration buys is the
+              # "has this ever produced" check, which is the only question about
+              # this lane that has an unambiguous answer.
+              eventDriven = true;
+            }
+          ];
         };
-      };
-    };
+
+        systemd.services.sinnix-stt = {
+          description = "Speech-to-text hub (Parakeet TDT via sherpa-onnx)";
+          wantedBy = [ ]; # on-demand, socket-activated via stt-proxy
+          after = [ "network.target" ];
+          partOf = [ "stt-proxy.service" ];
+          serviceConfig = lib.mkMerge [
+            {
+              User = user;
+              Group = "users";
+              # Half a gigabyte of weights is not source and does not belong in
+              # the store; sinnix already keeps model files under
+              # /realm/library/models. Fetched once, verified every start.
+              ExecStartPre = "${scriptPkgs.sinnix-stt}/bin/sinnix-stt models";
+              ExecStart = lib.concatStringsSep " " [
+                "${scriptPkgs.sinnix-stt}/bin/sinnix-stt"
+                "serve"
+                "--listen 127.0.0.1:8091"
+              ];
+              Environment = [ "SINNIX_STT_MODEL_ROOT=${modelDir}" ];
+            }
+            (lib.sinnix.mkRuntimeServiceConfig {
+              runtimeInventory = config.sinnix.runtime.inventory;
+              unit = "sinnix-stt.service";
+            })
+            (lib.sinnix.systemd.mkRestartPolicy {
+              strategy = "on-failure";
+              delaySec = 10;
+            })
+          ];
+        };
+      }
+    ];
   extraOptions = {
     lakeIntervalSec = args.lib.mkOption {
       type = args.lib.types.ints.positive;
