@@ -233,13 +233,36 @@ mkServiceModule {
             enable = true;
             restartable = true;
           };
-          # Parked: the durable and live tiers disagree on archive identity
-          # and the startup check refuses to proceed. The repair is migration
-          # surgery in the polylogue repo. Acknowledged rather than silenced,
-          # so it stays visible as known-down.
+          # Parked by decision now, not by an unrepaired defect, and the
+          # difference is what stops this being reopened every session.
+          #
+          # Mechanism: the archive root moved from /realm/db/polylogue to
+          # /realm/state/polylogue, which changed the tier files' st_dev while
+          # inode, size and bytes stayed identical. The durable change train
+          # recomputes a released train's immutable archive identity at
+          # startup, finds it differs from historical train v27, and fails
+          # closed -- foreign-copy detection working exactly as designed
+          # against an intentional relocation it had no way to authenticate.
+          #
+          # Polylogue landed the authenticated relocation/rebind route on
+          # 2026-08-14 (operations/archive_root_relocation.py, PR #3976),
+          # which is AFTER the revision this flake pins, so the deployed
+          # daemon has no recovery path and can only crash. Bumping the pin
+          # and running that route is sinnix-8f6y, and it is held: the
+          # operator froze the reindex campaign on 2026-08-16
+          # (polylogue-2paur) because the first restart after the source
+          # 30->33 migration is coupled to a full rebuild that is not yet
+          # resumable. Do not restart to "prove recovery" ahead of that
+          # sequence -- that objection was raised and overruled once already.
+          #
+          # Nothing is being lost meanwhile, which is why the freeze is safe:
+          # session JSONL keeps accumulating under ~/.claude/projects and
+          # ~/.codex/sessions and the hook spool keeps filling
+          # /realm/state/polylogue/hooks/pending, so ingest is deferred rather
+          # than dropped.
           acknowledged = {
             down = true;
-            reason = "DurableChangeTrainError blocks every start; AI-session ingestion is down pending polylogue-side migration repair";
+            reason = "archive-root relocation fails the durable-train identity check; polylogue's fix landed after the pinned rev and the restart is held by the operator's reindex-campaign freeze";
             since = "2026-08-14";
             ref = "sinnix-qh6s";
           };

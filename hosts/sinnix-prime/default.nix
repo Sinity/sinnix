@@ -181,7 +181,11 @@
       # Every launch dies on DurableChangeTrainError (archive identity vs
       # historical train), and Restart=on-failure turns that into a restart
       # loop. Nothing is lost by parking it: the Claude/Codex hooks spool
-      # independently and get ingested when it can run again (sinnix-qh6s).
+      # independently and get ingested when it can run again. Staying down is
+      # currently a decision rather than a defect -- see the surface's
+      # acknowledgement in modules/services/polylogue.nix for the mechanism,
+      # the landed-but-unpinned fix, and the freeze that gates the restart
+      # (sinnix-qh6s, sinnix-8f6y).
       daemon.autoStart = false;
     };
     machine-telemetry.enable = true;
