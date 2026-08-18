@@ -241,10 +241,11 @@ let
     body_file="$artifact_dir/transmission.body"
 
     unit_path_audit_out="$artifact_dir/unit-path-audit.txt"
+    lake_lint_out="$artifact_dir/lake-lint.txt"
 
     cleanup() {
       if [ "$cleanup_artifacts" -eq 1 ]; then
-        rm -f "$headers_file" "$body_file" "$unit_path_audit_out" "$artifact_dir/summary.txt"
+        rm -f "$headers_file" "$body_file" "$unit_path_audit_out" "$lake_lint_out" "$artifact_dir/summary.txt"
         rmdir "$artifact_dir" >/dev/null 2>&1 || true
       fi
     }
@@ -287,6 +288,17 @@ let
     then
       echo "unit_path_audit found a command missing from a unit's resolved PATH:" >&2
       cat "$unit_path_audit_out" >&2
+      exit 1
+    fi
+
+    # lake-lint asserts /realm and /outer-realm's level-1 node sets against
+    # INVENTORY.md's taxonomy -- it reads the live host filesystem, so it
+    # cannot be a flake check (the build sandbox has no /realm). This is the
+    # only tier that already probes real /realm paths (telemetry_db, below
+    # store, above), so it belongs beside them rather than in a new carrier.
+    if ! ${scriptPkgs.lake-lint}/bin/lake-lint > "$lake_lint_out" 2>&1; then
+      echo "lake-lint found an unexpected root node:" >&2
+      cat "$lake_lint_out" >&2
       exit 1
     fi
 
