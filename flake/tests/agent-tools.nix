@@ -929,7 +929,6 @@ in
               pkgs.coreutils
               pkgs.gawk
               pkgs.gnugrep
-              pkgs.git
               pkgs.jq
             ];
           }

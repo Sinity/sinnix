@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
+# Agent definition contract: every dispatchable definition carries the fields
+# the dispatch hook requires, the read-only workers deny write-shaped tools
+# while the implementation lane is granted them, and each structured-output
+# schema is closed and validates a representative verdict.
+#
+# Provably fails when: a definition loses model/effort, a read-only worker is
+# granted Write/Edit/MultiEdit (verified), or a verdict schema stops being a
+# closed object with required fields.
 set -euo pipefail
 
 agents_dir=${1:?agent definitions directory}
 schemas_dir="$agents_dir/schemas"
-fanout=
 test -d "$agents_dir" -a -d "$schemas_dir"
 
 for name in lane triage review judge; do
@@ -20,21 +27,42 @@ for name in lane triage review judge; do
   printf '%s\n' "$frontmatter" | grep -q '^disallowedTools:'
 done
 
-receipt=$(mktemp)
-trap 'rm -f "$receipt"; [[ -z "$fanout" ]] || rm -rf "$fanout"' EXIT
-cat >"$receipt" <<'EOF'
-{"lane":{"model":"sonnet","effort":"high","tools":["Bash","Read","Write","Edit","Glob","Grep"],"isolation":"worktree"},"triage":{"model":"haiku","effort":"medium","tools":["Bash","Read","Glob","Grep"],"isolation":null},"review":{"model":"opus","effort":"high","tools":["Bash","Read","Glob","Grep"],"isolation":null},"judge":{"model":"sonnet","effort":"high","tools":["Bash","Read","Glob","Grep"],"isolation":null}}
-EOF
-for name in lane triage review judge; do
-  jq -e --arg name "$name" \
-    '.[$name].model and .[$name].effort and (.[$name].tools | length > 0)' \
-    "$receipt" >/dev/null
-done
-jq -e '.lane.model == "sonnet" and .lane.effort == "high" and .lane.isolation == "worktree" and .triage.model == "haiku" and .review.model == "opus" and .judge.model == "sonnet"' "$receipt" >/dev/null
+# Capability boundaries, read from the definitions rather than a restated
+# table: the read-only workers must deny every write-shaped tool, and the
+# implementation lane must be granted them. `disallowedTools` may wrap onto
+# the following line, so the block is read as one flattened string.
+frontmatter_field() {
+  awk -v field="$2" '
+    BEGIN { n = 0; collecting = 0 }
+    /^---$/ { n++; if (n == 2) exit; next }
+    n == 1 {
+      if ($0 ~ "^" field ":") { collecting = 1; sub("^" field ":", ""); printf "%s", $0; next }
+      if (collecting && $0 ~ /^[[:space:]]/) { printf "%s", $0; next }
+      if (collecting) exit
+    }
+  ' "$1"
+}
 
-lane_fm=$(awk 'BEGIN { n=0 } /^---$/ { n++; next } n == 1 { print } n == 2 { exit }' "$agents_dir/lane.md")
-printf '%s\n' "$lane_fm" | grep -q '^isolation: worktree$'
-printf '%s\n' "$lane_fm" | grep -q 'Write'
+write_tools="Write Edit MultiEdit"
+for name in triage review judge; do
+  denied=$(frontmatter_field "$agents_dir/$name.md" disallowedTools)
+  granted=$(frontmatter_field "$agents_dir/$name.md" tools)
+  for tool in $write_tools; do
+    printf '%s' "$denied" | grep -q "\b$tool\b" \
+      || { printf '%s must deny %s\n' "$name" "$tool" >&2; exit 1; }
+    if printf '%s' "$granted" | grep -q "\b$tool\b"; then
+      printf '%s must not be granted %s\n' "$name" "$tool" >&2
+      exit 1
+    fi
+  done
+done
+
+lane_granted=$(frontmatter_field "$agents_dir/lane.md" tools)
+for tool in Write Edit; do
+  printf '%s' "$lane_granted" | grep -q "\b$tool\b" \
+    || { printf 'lane must be granted %s\n' "$tool" >&2; exit 1; }
+done
+grep -q '^isolation: worktree$' "$agents_dir/lane.md"
 
 for name in triage judge; do
   test -f "$schemas_dir/$name.schema.json"
@@ -57,19 +85,3 @@ validate_sample() {
 }
 validate_sample "$schemas_dir/triage.schema.json" '{"verdict":"confirmed","confidence":1,"evidence":["fixture:1"],"unsupported":[]}'
 validate_sample "$schemas_dir/judge.schema.json" '{"verdict":"unsupported","confidence":0.2,"evidence":["fixture:2"],"refutation_attempted":true,"unsupported":["missing live route"]}'
-
-# Disposable fanout: a lane's committed output survives worker cleanup, while
-# the triage contract's write capabilities remain explicitly denied.
-fanout=$(mktemp -d)
-git -C "$fanout" init -q
-git -C "$fanout" config user.email fixture@example.invalid
-git -C "$fanout" config user.name fixture
-printf 'lane result\n' >"$fanout/result"
-git -C "$fanout" add result
-git -C "$fanout" commit -qm 'fixture: preserve lane result'
-commit=$(git -C "$fanout" rev-parse HEAD)
-test "$(git -C "$fanout" show --format=%s --no-patch "$commit")" = 'fixture: preserve lane result'
-triage_fm=$(awk 'BEGIN { n=0 } /^---$/ { n++; next } n == 1 { print } n == 2 { exit }' "$agents_dir/triage.md")
-printf '%s\n' "$triage_fm" | grep -q 'Write'
-printf '%s\n' "$triage_fm" | grep -q 'Edit'
-test -f "$fanout/result"
