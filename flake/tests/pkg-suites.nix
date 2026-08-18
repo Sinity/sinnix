@@ -27,7 +27,10 @@
         inherit system;
         config.allowUnfree = true;
       };
-      scriptRegistryUnfree = import ../scripts.nix { inherit inputs; pkgs = unfreePkgs; };
+      scriptRegistryUnfree = import ../scripts.nix {
+        inherit inputs;
+        pkgs = unfreePkgs;
+      };
     in
     {
       checks = {
