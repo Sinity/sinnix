@@ -1,4 +1,4 @@
-# Provably fails when: find_dormant_hosts in scripts/sinnix-capability-manifest
+# Provably fails when: find_dormant_hosts in scripts/sinnix-lifecycle-manifest
 # stops requiring a `<host> = mkHost` entry (the fixture's OpenWrt sinnix-gw
 # then surfaces as a dormant NixOS host) -- verified.
 { inputs, ... }:
@@ -7,8 +7,8 @@
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
-      script = ../../scripts/sinnix-capability-manifest;
-      source = pkgs.runCommand "capability-manifest-fixture-source" { } ''
+      script = ../../scripts/sinnix-lifecycle-manifest;
+      source = pkgs.runCommand "lifecycle-manifest-fixture-source" { } ''
         mkdir -p $out/modules/features/desktop $out/modules/services $out/scripts $out/modules \
           $out/hosts/sinnix-ethereal $out/hosts/sinnix-gw $out/flake
         touch $out/modules/features/desktop/example.nix
@@ -28,7 +28,7 @@
         }
         NIX
       '';
-      inventory = pkgs.writeText "capability-manifest-fixture-inventory.json" (
+      inventory = pkgs.writeText "lifecycle-manifest-fixture-inventory.json" (
         builtins.toJSON {
           schema = "sinnix-runtime-inventory-v1";
           surfaces = {
@@ -62,7 +62,7 @@
         }
       );
       rendered =
-        pkgs.runCommand "capability-manifest-fixture"
+        pkgs.runCommand "lifecycle-manifest-fixture"
           {
             nativeBuildInputs = [
               pkgs.bash
@@ -75,23 +75,19 @@
           ''
             ${pkgs.bash}/bin/bash ${script} --source-root ${source} --inventory ${inventory} --output $out
             ${pkgs.jq}/bin/jq -e '
-              .schema == "sinnix-capability-manifest-v1" and
-              (.features | length) == 1 and
-              (.services | length) == 1 and
-              (.scripts | length) == 1 and
+              .schema == "sinnix-lifecycle-manifest-v1" and
               (.runtimeSurfaces | length) == 2 and
               # Derived, not a hardcoded literal -- sinnix-ethereal
               # is the fixtures only real nixosConfigurations member, and
               # sinnix-gw (hosts/ dir, no mkHost entry) must be excluded.
               (.dormantHosts | any(.host == "sinnix-ethereal")) and
               (.dormantHosts | all(.host != "sinnix-gw")) and
-              (.dormantHosts | all(has("host") and has("state"))) and
-              (.unknowns | length) == 1
+              (.dormantHosts | all(has("host") and has("state")))
             ' $out
           '';
     in
     {
-      checks.capability-manifest = pkgs.runCommand "capability-manifest-check" { inherit rendered; } ''
+      checks.lifecycle-manifest = pkgs.runCommand "lifecycle-manifest-check" { inherit rendered; } ''
         test -s $rendered
         touch $out
       '';
