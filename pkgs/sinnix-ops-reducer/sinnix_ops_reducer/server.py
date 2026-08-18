@@ -15,12 +15,14 @@ from typing import Any
 
 from . import capabilities, health, pages, terminals
 from .actions import ActionError, ActionService
+from .feedback import ELICIT_MODEL_DIR_DEFAULT, FeedbackSpool, resolve_elicit_model
+from .feedback import ELICIT_SCHEMA as FEEDBACK_ELICIT_SCHEMA
 from .feedback import MAX_BODY as FEEDBACK_MAX_BODY
 from .feedback import SCHEMA as FEEDBACK_SCHEMA
-from .feedback import FeedbackSpool
 from .reducer import Reducer
 
 FEEDBACK_PATH = "/feedback"
+FEEDBACK_ELICIT_PREFIX = "/feedback/elicit/"
 FAILURE_PATH = "/v1/health/failure"
 
 
@@ -51,16 +53,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _cors(self) -> None:
-        """Only the feedback route carries these.
+        """Only /feedback and its elicit-model read carry these.
 
-        A generated report is often opened straight off disk as file://, whose
-        Origin is null, and the handback must work from there. The action API
-        deliberately gets the opposite treatment -- the hub's Caddy site
-        refuses a cross-origin POST to /ops/* outright -- so these headers stay
-        on the write-only sink and nowhere near a route that can change state.
+        A generated report (and an elicit comparison session, which is one)
+        is often opened straight off disk as file://, whose Origin is null,
+        and the handback must work from there. The action API deliberately
+        gets the opposite treatment -- the hub's Caddy site refuses a
+        cross-origin POST to /ops/* outright -- so these headers stay off
+        every route that can change state.
         """
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _write_feedback(self, status: int, value: dict[str, Any]) -> None:
@@ -108,6 +111,41 @@ class Handler(BaseHTTPRequestHandler):
             self.headers.get("User-Agent"),
         )
         self._write_feedback(HTTPStatus.CREATED, {"schema": FEEDBACK_SCHEMA, **result})
+
+    def _serve_elicit_model(self, domain: str) -> None:
+        """GET /feedback/elicit/<domain> -- the domain's own latest fitted
+        model, read straight off disk. See feedback.py's module docstring for
+        why this is a different decision from the spool's own "no read
+        endpoint": this reads a derived fit over items the operator already
+        defined, not an arbitrary posted payload. `resolve_elicit_model`
+        does the admission (charset, path-under-root); a missing file is a
+        normal "no rank yet" 404, not a rejected request."""
+        base_dir: Path = self.server.elicit_model_dir  # type: ignore[attr-defined]
+        model_path = resolve_elicit_model(base_dir, domain)
+        if model_path is None:
+            self._write_feedback(
+                HTTPStatus.BAD_REQUEST, {"error": "invalid elicit domain name"}
+            )
+            return
+        try:
+            raw = model_path.read_text(encoding="utf-8")
+        except OSError:
+            self._write_feedback(
+                HTTPStatus.NOT_FOUND,
+                {"error": "no fitted model for this domain yet"},
+            )
+            return
+        try:
+            model = json.loads(raw)
+        except json.JSONDecodeError as error:
+            self._write_feedback(
+                HTTPStatus.BAD_GATEWAY, {"error": f"model.json is malformed: {error}"}
+            )
+            return
+        self._write_feedback(
+            HTTPStatus.OK,
+            {"schema": FEEDBACK_ELICIT_SCHEMA, "domain": domain, "model": model},
+        )
 
     def _record_failure(self) -> None:
         """systemd's OnFailure hook, routed into the process that owns the
@@ -421,6 +459,8 @@ class Handler(BaseHTTPRequestHandler):
                     "accepts": "POST application/json",
                 },
             )
+        elif self.path.startswith(FEEDBACK_ELICIT_PREFIX):
+            self._serve_elicit_model(self.path.removeprefix(FEEDBACK_ELICIT_PREFIX))
         elif self.path == "/v1/health":
             self._write(HTTPStatus.OK, self.reducer.health())
         elif self.path == "/v1/health/lanes":
@@ -569,6 +609,7 @@ def serve(
     hub_manifest: Path | None = None,
     inventory_path: Path = Path("/etc/sinnix/runtime-inventory.json"),
     feedback: FeedbackSpool | None = None,
+    elicit_model_dir: Path = ELICIT_MODEL_DIR_DEFAULT,
     emitter_factory: Callable[[], health.Emitter] = health.Emitter,
     sweep_interval: float = health.SWEEP_INTERVAL_SECONDS,
     capability_index_path: Path | None = capabilities.DEFAULT_INDEX,
@@ -583,6 +624,7 @@ def serve(
         server.capability_index_path = capability_index_path  # type: ignore[attr-defined]
         server.usage_census_path = usage_census_path  # type: ignore[attr-defined]
         server.feedback = feedback  # type: ignore[attr-defined]
+        server.elicit_model_dir = elicit_model_dir  # type: ignore[attr-defined]
         server.emitter_factory = emitter_factory  # type: ignore[attr-defined]
 
     reducer.refresh()

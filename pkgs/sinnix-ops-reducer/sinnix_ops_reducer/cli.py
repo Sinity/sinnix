@@ -8,7 +8,7 @@ import socket
 import sys
 from pathlib import Path
 
-from . import capabilities, health, pages
+from . import capabilities, feedback, health, pages
 from .actions import ActionService
 from .ambient import product_source
 from .feedback import CoalescingTrigger, FeedbackSpool
@@ -201,6 +201,17 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--elicit-model-dir",
+        type=Path,
+        default=feedback.ELICIT_MODEL_DIR_DEFAULT,
+        help=(
+            "sinnix-elicit's own preferences root (its --items/rank state, one "
+            "directory per domain). Read-only: GET /feedback/elicit/<domain> "
+            "serves that domain's latest model.json back, so an elicit "
+            "comparison session can preview 'learning so far' mid-session."
+        ),
+    )
+    parser.add_argument(
         "--hub-manifest",
         type=Path,
         default=None,
@@ -264,7 +275,7 @@ def main() -> None:
     elicit = (
         CoalescingTrigger(args.elicit_command.split()) if args.elicit_command else None
     )
-    feedback = FeedbackSpool(layer.feedback_spool_dir, elicit=elicit)
+    feedback_spool = FeedbackSpool(layer.feedback_spool_dir, elicit=elicit)
     fds = list(range(3, 3 + int(os.environ.get("LISTEN_FDS", "0"))))
     serve(
         reducer,
@@ -274,7 +285,8 @@ def main() -> None:
         actions,
         hub_manifest=args.hub_manifest,
         inventory_path=args.inventory,
-        feedback=feedback,
+        feedback=feedback_spool,
+        elicit_model_dir=args.elicit_model_dir,
         capability_index_path=args.capability_index,
         usage_census_path=args.usage_census,
     )
