@@ -20,7 +20,7 @@
 [shell.screenshot]
 save_to_file = true
 copy_to_clipboard = true
-directory = "/realm/data/captures/screenshot"
+directory = "/realm/data/activity/screenshot"
 filename_pattern = "%Y-%m-%d-At-%Hh%Mm%Ss"
 freeze_screen = false
 confirm_region = false
