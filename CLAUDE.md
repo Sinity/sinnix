@@ -412,7 +412,9 @@ config in `secrets.nix` (repo root).
   stack via single `sinnix.gpu.mode` toggle (nvidia/nvidia-open/igpu/dual).
   Ephemeral btrfs root `@` (initrd rollback + pre-wipe snapshots), `/persist`
   bind-mounts, `@sinex` nodatacow subvol for Postgres, `/realm` NVMe data
-  volume. Journald capped 4G persistent (OOM forensics). fTPM broken →
+  volume. Journald persistent at `/realm/state/journal` (plain directory —
+  a nested subvol was invisible to btrbk/borg for months), SystemMaxUse=64G,
+  kernel audit routed to auditd only. fTPM broken →
   systemd-tpm2-setup masked. `sinnix.services.hub`
   (`modules/services/hub.nix`, docs/hub.md) is the browser front door:
   Caddy in the user manager serving `/reports/` off disk and proxying every
