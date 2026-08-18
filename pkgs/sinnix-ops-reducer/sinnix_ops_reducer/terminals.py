@@ -1,16 +1,19 @@
-#!/usr/bin/env python3
-# @sinnix-package
-# description: Live kitty terminal streams, contents and scrollback over the hub, no tmux
-# runtimeInputs: kitty aha coreutils
-
 """Terminal contents and control as a first-class remote surface (sinnix-qxm8).
 
+Absorbed from the retired `sinnix-terminal-view` daemon (sinnix-859p), same
+move as the hub feedback spool before it (see feedback.py): the routes, the
+response shapes, and the design doctrine below carry over unchanged. Only the
+transport changes -- this used to be its own Unix-socket process behind
+`handle_path /terminals/*`; it is now a route family on the reducer's own
+listeners, reached at the literal `/terminals/*` prefix (Caddy no longer
+strips it, so every path here still starts with `/terminals`, matching what
+the client-side JS in INDEX_HTML already hardcodes).
+
 The operator should never have to learn tmux to read or drive their own
-terminals remotely. This listens on a Unix socket behind the hub's reverse
-proxy (/terminals/*) and, using nothing but the recorders and captures this
-host already runs -- asciinema on every shell, kitty's own remote-control
+terminals remotely. This serves, using nothing but the recorders and captures
+this host already runs -- asciinema on every shell, kitty's own remote-control
 protocol, and the scrollback captures sinnix-capture-kitty-scrollback already
-writes -- serves:
+writes --
 
   * a live stream -- the browser and the desktop window showing the same PTY
     at the same time, not a periodic snapshot. Every kitty shell already runs
@@ -43,9 +46,10 @@ process to ask, which is a much larger lift with its own correctness
 problems) -- the client-side autocomplete here is a plain per-window recently-
 sent-text history, cheap and genuinely useful, not a completion engine.
 
-Deliberately minimal, matching the hub feedback spool's own decisions
-(now the reducer's /feedback route):
-  * no auth beyond the tailnet boundary the hub already enforces;
+Deliberately minimal, matching the hub feedback spool's own decisions:
+  * no auth of its own -- the merged Handler's `_authorized()` gate applies to
+    every route on these listeners, same as the pages; the retired standalone
+    daemon relied on the tailnet boundary alone, which is a subset of that;
   * no database -- kitty's own `ls`/`get-text` and the scrollback capture's
     files on disk are the only state; sent-text history lives in the
     browser's own localStorage, not server state;
@@ -56,31 +60,37 @@ Deliberately minimal, matching the hub feedback spool's own decisions
 
 from __future__ import annotations
 
-import argparse
 import html
 import http.client
 import json
 import os
 import re
-import signal
 import socket
-import socketserver
 import subprocess
-import sys
-import threading
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "sinnix-terminal-view-v1"
 KITTY_BIN = "kitty"
 AHA_BIN = "aha"
 MAX_BODY = 1 << 16  # 64 KiB: a pasted command, not a file upload
 
-# sinnix-capture-kitty-scrollback's own filename convention:
-#   <TIMESTAMP>-<host>-pid<pid>-win<id>-<title-slug>.ansi (+ .meta.json sibling)
+# sinnix-capture-kitty-scrollback's own write location and filename
+# convention: <TIMESTAMP>-<host>-pid<pid>-win<id>-<title-slug>.ansi (+
+# .meta.json sibling). No host ever ran the retired daemon with a different
+# --history-dir than this, so the value is now a fixed convention rather than
+# a reducer CLI flag.
+HISTORY_DIR = Path("/realm/data/activity/kitty-scrollback")
 HISTORY_NAME_RE = re.compile(r"^(?P<ts>[^-]+)-(?P<host>[^-]+)-pid(?P<pid>\d+)-win(?P<winid>\d+)-")
+
+LIVE_RE = re.compile(r"^/terminals/v1/live/(\d+)/(\d+)(?P<rest>/[A-Za-z0-9._-]*)?$")
+CONTENT_RE = re.compile(r"^/terminals/v1/windows/(\d+)/(\d+)/content$")
+HISTORY_RE = re.compile(r"^/terminals/v1/windows/(\d+)/(\d+)/history$")
+HISTORY_FILE_RE = re.compile(r"^/terminals/v1/windows/(\d+)/(\d+)/history/([A-Za-z0-9._-]+\.ansi)$")
+SEND_RE = re.compile(r"^/terminals/v1/windows/(\d+)/(\d+)/send$")
+
+
+def is_terminal_route(path: str) -> bool:
+    return path == "/terminals" or path.startswith("/terminals/") or path.startswith("/terminals?")
 
 
 def discover_kitty_sockets() -> list[Path]:
@@ -307,6 +317,19 @@ def fetch_upstream(port: int, path: str) -> tuple[int, str, bytes] | None:
             pass
 
 
+def connect_live_ws(port: int, headers) -> socket.socket:
+    """Open the raw TCP connection the /ws relay splices onto, with the
+    upstream request already sent. Callers pump bytes both ways; nothing
+    here interprets the stream (see server.Handler for why)."""
+    upstream = socket.create_connection(("127.0.0.1", port), timeout=10)
+    request = ["GET /ws HTTP/1.1", f"Host: 127.0.0.1:{port}"]
+    request += [
+        f"{name}: {value}" for name, value in headers.items() if name.lower() not in ("host", "content-length")
+    ]
+    upstream.sendall(("\r\n".join(request) + "\r\n\r\n").encode())
+    return upstream
+
+
 def ansi_to_html(ansi_text: str, title: str) -> str:
     try:
         out = subprocess.run(
@@ -488,256 +511,3 @@ setInterval(load, 15000);
 </script>
 </body></html>
 """
-
-
-class Handler(BaseHTTPRequestHandler):
-    server_version = "sinnix-terminal-view/1"
-    protocol_version = "HTTP/1.1"
-
-    def _reply(self, status: int, body: bytes, content_type: str) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _json(self, status: int, value: Any) -> None:
-        self._reply(status, (json.dumps(value, sort_keys=True) + "\n").encode(), "application/json")
-
-    def _serve_live(self, pid: int, win_id: int, rest: str | None) -> None:
-        """Proxy this window's own asciinema live stream: player page, its
-        assets, and the WebSocket the player reads the terminal from."""
-        port = live_streams().get((pid, win_id))
-        if port is None:
-            self._json(HTTPStatus.NOT_FOUND, {"error": "no live stream for this window"})
-            return
-
-        if rest is None:
-            # Relative redirect: the browser resolves it against the URL it
-            # actually asked for, which is the only place the hub's /terminals
-            # prefix is still known -- the proxy has already stripped it here.
-            self.send_response(HTTPStatus.MOVED_PERMANENTLY)
-            self.send_header("Location", f"{win_id}/")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
-
-        asset = rest.lstrip("/")
-
-        if asset == "ws":
-            self._relay_websocket(port)
-            return
-
-        upstream = fetch_upstream(port, f"/{asset}")
-        if upstream is None:
-            self._json(HTTPStatus.BAD_GATEWAY, {"error": "live stream unreachable"})
-            return
-        status, content_type, body = upstream
-
-        if not asset:
-            page = body.decode("utf-8", "replace")
-            if PLAYER_WS_SRC not in page:
-                self._json(
-                    HTTPStatus.BAD_GATEWAY,
-                    {"error": "asciinema's player page no longer matches the expected shape; "
-                              "the stream URL rewrite in sinnix-terminal-view needs updating"},
-                )
-                return
-            body = (
-                page.replace(PLAYER_WS_SRC, PLAYER_WS_PROXIED)
-                .replace(PLAYER_FONT_SRC, PLAYER_FONT_PROXIED)
-                .encode()
-            )
-
-        self._reply(status, body, content_type)
-
-    def _relay_websocket(self, port: int) -> None:
-        """Splice this connection onto the recorder's /ws.
-
-        Nothing here interprets the stream: the player and asciinema speak
-        their own protocol (v1.alis) to each other and this only carries the
-        bytes, so a protocol change upstream needs no change here.
-        """
-        self.close_connection = True
-        try:
-            upstream = socket.create_connection(("127.0.0.1", port), timeout=10)
-        except OSError:
-            self._json(HTTPStatus.BAD_GATEWAY, {"error": "live stream unreachable"})
-            return
-
-        request = ["GET /ws HTTP/1.1", f"Host: 127.0.0.1:{port}"]
-        request += [
-            f"{name}: {value}"
-            for name, value in self.headers.items()
-            if name.lower() not in ("host", "content-length")
-        ]
-        upstream.sendall(("\r\n".join(request) + "\r\n\r\n").encode())
-
-        client = self.connection
-
-        def pump(src: socket.socket, dst: socket.socket) -> None:
-            try:
-                while chunk := src.recv(65536):
-                    dst.sendall(chunk)
-            except OSError:
-                pass
-            finally:
-                for sock in (src, dst):
-                    try:
-                        sock.shutdown(socket.SHUT_RDWR)
-                    except OSError:
-                        pass
-
-        upward = threading.Thread(target=pump, args=(client, upstream), daemon=True)
-        upward.start()
-        pump(upstream, client)
-        upward.join(timeout=5)
-
-    def do_GET(self) -> None:  # noqa: N802 (stdlib naming)
-        path = self.path.split("?", 1)[0]
-        history_dir: Path = self.server.history_dir  # type: ignore[attr-defined]
-
-        if path in ("/", "/terminals", "/terminals/"):
-            self._reply(HTTPStatus.OK, INDEX_HTML.encode(), "text/html; charset=utf-8")
-            return
-
-        if path == "/v1/windows" or path == "/terminals/v1/windows":
-            self._json(HTTPStatus.OK, list_windows())
-            return
-
-        m = re.match(r"^(?:/terminals)?/v1/live/(\d+)/(\d+)(?P<rest>/[A-Za-z0-9._-]*)?$", path)
-        if m:
-            self._serve_live(int(m.group(1)), int(m.group(2)), m.group("rest"))
-            return
-
-        m = re.match(r"^(?:/terminals)?/v1/windows/(\d+)/(\d+)/content$", path)
-        if m:
-            pid, win_id = int(m.group(1)), int(m.group(2))
-            text = get_window_text(pid, win_id)
-            if text is None:
-                self._json(HTTPStatus.NOT_FOUND, {"error": "window not found or kitty unreachable"})
-                return
-            self._reply(
-                HTTPStatus.OK,
-                ansi_to_html(text, f"kitty pid{pid} win{win_id}").encode(),
-                "text/html; charset=utf-8",
-            )
-            return
-
-        m = re.match(r"^(?:/terminals)?/v1/windows/(\d+)/(\d+)/history$", path)
-        if m:
-            pid, win_id = int(m.group(1)), int(m.group(2))
-            self._json(HTTPStatus.OK, history_for(history_dir, pid, win_id))
-            return
-
-        m = re.match(r"^(?:/terminals)?/v1/windows/(\d+)/(\d+)/history/([A-Za-z0-9._-]+\.ansi)$", path)
-        if m:
-            pid, win_id, fname = int(m.group(1)), int(m.group(2)), m.group(3)
-            # Confirm the requested file is one this window's own history lists
-            # (belt-and-suspenders against path tricks even though the regex
-            # already forbids '/' and '..').
-            entries = history_for(history_dir, pid, win_id)
-            if not any(e.get("ansi_file") == fname for e in entries):
-                self._json(HTTPStatus.NOT_FOUND, {"error": "not this window's history"})
-                return
-            target = history_dir / fname
-            try:
-                ansi_text = target.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                self._json(HTTPStatus.NOT_FOUND, {"error": "capture file missing"})
-                return
-            self._reply(
-                HTTPStatus.OK,
-                ansi_to_html(ansi_text, fname).encode(),
-                "text/html; charset=utf-8",
-            )
-            return
-
-        self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
-
-    def do_POST(self) -> None:  # noqa: N802 (stdlib naming)
-        path = self.path.split("?", 1)[0]
-        length = int(self.headers.get("Content-Length", "0") or "0")
-        if length <= 0 or length > MAX_BODY:
-            self._json(HTTPStatus.BAD_REQUEST, {"error": "missing or oversized body"})
-            return
-        raw = self.rfile.read(length)
-        try:
-            body = json.loads(raw)
-        except json.JSONDecodeError:
-            self._json(HTTPStatus.BAD_REQUEST, {"error": "invalid json"})
-            return
-
-        m = re.match(r"^(?:/terminals)?/v1/windows/(\d+)/(\d+)/send$", path)
-        if m:
-            pid, win_id = int(m.group(1)), int(m.group(2))
-            text = body.get("text")
-            key = body.get("key")
-            if isinstance(text, str) and text:
-                ok = send_text(pid, win_id, text)
-            elif isinstance(key, str) and key:
-                ok = send_key(pid, win_id, key)
-            else:
-                self._json(HTTPStatus.BAD_REQUEST, {"error": "need 'text' or 'key'"})
-                return
-            if not ok:
-                self._json(HTTPStatus.NOT_FOUND, {"error": "window not found, kitty unreachable, or unknown key"})
-                return
-            self._json(HTTPStatus.OK, {"status": "sent"})
-            return
-
-        self._json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
-
-    def log_message(self, *_args: object) -> None:
-        return
-
-
-class UnixHTTPServer(socketserver.ThreadingUnixStreamServer):
-    allow_reuse_address = True
-    daemon_threads = True
-
-    def get_request(self) -> tuple[socket.socket, tuple[str, int]]:
-        connection, _ = super().get_request()
-        return connection, ("unix", 0)
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--socket", type=Path, required=True, help="Unix socket the hub reverse-proxies to")
-    parser.add_argument(
-        "--history-dir",
-        type=Path,
-        default=Path("/realm/data/activity/kitty-scrollback"),
-        help="Directory sinnix-capture-kitty-scrollback writes .ansi/.meta.json into",
-    )
-    args = parser.parse_args()
-
-    args.socket.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        args.socket.unlink()
-    except FileNotFoundError:
-        pass
-
-    server = UnixHTTPServer(str(args.socket), Handler)
-    server.history_dir = args.history_dir  # type: ignore[attr-defined]
-    os.chmod(args.socket, 0o666)
-
-    def shutdown(*_args: object) -> None:
-        threading.Thread(target=server.shutdown, daemon=True).start()
-
-    signal.signal(signal.SIGTERM, shutdown)
-    signal.signal(signal.SIGINT, shutdown)
-    print(f"sinnix-terminal-view: {args.socket} (history: {args.history_dir})", file=sys.stderr)
-    try:
-        server.serve_forever()
-    finally:
-        server.server_close()
-        try:
-            args.socket.unlink()
-        except FileNotFoundError:
-            pass
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

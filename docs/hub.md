@@ -23,6 +23,7 @@ the same nav, so the routes are reachable from each other rather than by URL.
 | `/reports/`  | The generated report tree, browsable and linkable                   |
 | `/ops/v1/*`  | Reverse proxy onto the ops-reducer's read and action API            |
 | `/feedback`  | Append-only spool for report annotations                            |
+| `/terminals/`| Live kitty terminal contents, control, and scrollback history       |
 
 The loopback web UIs get one port each rather than a subpath of the hub —
 `8881` Open WebUI, `8882` ComfyUI, `8883` KoboldCpp. They are single-page apps
@@ -211,6 +212,40 @@ A `sinnix-elicit-v1` record arriving in the spool starts the drain
 instead of a 120s timer looking for one. The trigger coalesces: a comparison
 session is a burst of one POST per judgment, and the Bradley-Terry refit happens
 once, a few seconds after the last tap, rather than once per tap.
+
+## Terminal views
+
+`/terminals/` (sinnix-859p) reads and drives the operator's own kitty windows
+over the browser, without a multiplexer. It is a route family on the
+ops-reducer, absorbed from the retired `sinnix-terminal-view` daemon —
+same URLs, same response shapes, same design doctrine, now falling through
+the same catch-all `handle` in the Caddyfile as every other page instead of
+its own `handle_path` block and its own Unix-socket process.
+
+Three sources, none of them a new capture lane:
+
+- **Live** — every kitty shell already runs under `asciinema session
+  --stream-local` (that is how the capture lake is written), so the reducer
+  reads the recorder's own process environment and listening port back out of
+  `/proc` and proxies its player and WebSocket under `/terminals/v1/live/
+<pid>/<window_id>/`. A viewer joining late gets the current screen first.
+- **Snapshot** — kitty's own remote-control protocol (`kitty @ get-text
+  --ansi`), for any window with no live stream (started before streaming was
+  wired in, or outside `sinnix-captured-shell`).
+- **History** — the existing full-ANSI scrollback captures
+  `sinnix-capture-kitty-scrollback` already writes to
+  `/realm/data/activity/kitty-scrollback`, joined to a window by the
+  `(kitty_pid, window_id)` pair that is the capture's own filename key.
+
+`send-text`/`send-key`, from the page's input box and quick-action buttons,
+are the operator's own deliberate typing routed through a browser instead of
+a keyboard — not the "never inject into a live agent TUI" case, which is
+about *automated* interruption of a session an agent doesn't own.
+
+No auth beyond the tailnet boundary the rest of the hub relies on, and no
+database: kitty's own `ls`/`get-text` and the scrollback files on disk are
+the only state, and per-window sent-text recall lives in the browser's own
+`localStorage`.
 
 ## Rendering
 
