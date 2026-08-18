@@ -19,8 +19,8 @@ mkServiceModule {
     resourceClass = "interactive-agent"; # uncapped memory — required for RAM offload
     activation = {
       mode = "socket-proxy";
-      publicEndpoint = "127.0.0.1:11434";
-      backendEndpoint = "127.0.0.1:11435";
+      publicEndpoint = "127.0.0.1:${toString helpers.data.ports.ollama.public}";
+      backendEndpoint = "127.0.0.1:${toString helpers.data.ports.ollama.backend}";
       idleTimeout = "240s";
       exclusiveResource = "gpu-inference";
       dependsOn = [ "ollama-proxy" ];
@@ -29,7 +29,7 @@ mkServiceModule {
       consumers = [
         {
           unit = "ollama-model-loader";
-          environment.OLLAMA_HOST = "127.0.0.1:11434";
+          environment.OLLAMA_HOST = "127.0.0.1:${toString helpers.data.ports.ollama.public}";
         }
       ];
     };
@@ -60,6 +60,7 @@ mkServiceModule {
       config,
       lib,
       pkgs,
+      helpers,
       ...
     }:
     let
@@ -144,10 +145,10 @@ mkServiceModule {
         user = "ollama";
         group = "ollama";
         host = "127.0.0.1";
-        # 11434 is reserved for the socket-activated front door. Keep the
-        # daemon on a private loopback port so clients cannot bypass lifecycle
-        # admission and idle teardown.
-        port = 11435;
+        # The public port is reserved for the socket-activated front door.
+        # Keep the daemon on the private loopback backend port so clients
+        # cannot bypass lifecycle admission and idle teardown.
+        port = helpers.data.ports.ollama.backend;
         openFirewall = false;
         inherit modelsDir;
         inherit (cfg) loadModels;

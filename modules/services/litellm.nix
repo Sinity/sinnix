@@ -18,6 +18,7 @@
   mkServiceModule,
   lib,
   pkgs,
+  helpers,
   ...
 }@args:
 mkServiceModule {
@@ -31,8 +32,8 @@ mkServiceModule {
     resourceClass = "interactive-agent";
     activation = {
       mode = "socket-proxy";
-      publicEndpoint = "127.0.0.1:4000";
-      backendEndpoint = "127.0.0.1:4001";
+      publicEndpoint = "127.0.0.1:${toString helpers.data.ports.litellm.public}";
+      backendEndpoint = "127.0.0.1:${toString helpers.data.ports.litellm.backend}";
       idleTimeout = "30s";
       dependsOn = [ "ollama-proxy" ];
     };
@@ -59,8 +60,8 @@ mkServiceModule {
       services.litellm = {
         enable = true;
         host = "127.0.0.1";
-        # 4000 is reserved for the socket-activated front door.
-        port = 4001;
+        # The public port is reserved for the socket-activated front door.
+        port = helpers.data.ports.litellm.backend;
         openFirewall = false;
         settings = {
           # Model names exposed to the agents, backed by the Ollama hub on

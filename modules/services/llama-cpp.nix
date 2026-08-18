@@ -17,6 +17,7 @@
   mkServiceModule,
   lib,
   pkgs,
+  helpers,
   ...
 }@args:
 mkServiceModule {
@@ -27,8 +28,8 @@ mkServiceModule {
     resourceClass = "interactive-agent";
     activation = {
       mode = "socket-proxy";
-      publicEndpoint = "127.0.0.1:8081";
-      backendEndpoint = "127.0.0.1:8082";
+      publicEndpoint = "127.0.0.1:${toString helpers.data.ports.llamaCpp.public}";
+      backendEndpoint = "127.0.0.1:${toString helpers.data.ports.llamaCpp.backend}";
       idleTimeout = "30s";
       dependsOn = [ "llama-cpp-proxy" ];
     };
@@ -80,6 +81,7 @@ mkServiceModule {
       config,
       lib,
       pkgs,
+      helpers,
       ...
     }:
     let
@@ -98,10 +100,11 @@ mkServiceModule {
         package = if cfg.gpuLayers == 0 then pkgs.llama-cpp else pkgs.llama-cpp-cuda;
         settings = {
           host = "127.0.0.1";
-          # 8081 is reserved for the socket-activated front door
-          # (llama-cpp-proxy). Keep the daemon on a private loopback port so
-          # clients cannot bypass lifecycle admission and idle teardown.
-          port = 8082;
+          # The public port is reserved for the socket-activated front door
+          # (llama-cpp-proxy). Keep the daemon on the private loopback backend
+          # port so clients cannot bypass lifecycle admission and idle
+          # teardown.
+          port = helpers.data.ports.llamaCpp.backend;
           flash-attn = "on";
           n-gpu-layers = cfg.gpuLayers;
           ctx-size = cfg.ctxSize;

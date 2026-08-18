@@ -12,6 +12,7 @@
   mkServiceModule,
   lib,
   pkgs,
+  helpers,
   ...
 }@args:
 mkServiceModule {
@@ -22,8 +23,8 @@ mkServiceModule {
     resourceClass = "interactive-agent";
     activation = {
       mode = "socket-proxy";
-      publicEndpoint = "127.0.0.1:5001";
-      backendEndpoint = "127.0.0.1:5002";
+      publicEndpoint = "127.0.0.1:${toString helpers.data.ports.koboldcpp.public}";
+      backendEndpoint = "127.0.0.1:${toString helpers.data.ports.koboldcpp.backend}";
       idleTimeout = "300s";
       exclusiveResource = "gpu-inference";
       dependsOn = [ "koboldcpp-proxy" ];
@@ -61,6 +62,7 @@ mkServiceModule {
       config,
       lib,
       pkgs,
+      helpers,
       ...
     }:
     let
@@ -70,7 +72,7 @@ mkServiceModule {
         [
           "${pkgs.koboldcpp-cuda}/bin/koboldcpp"
           "--host 127.0.0.1"
-          "--port 5002"
+          "--port ${toString helpers.data.ports.koboldcpp.backend}"
           "--usecublas normal"
           "--gpulayers ${toString cfg.gpuLayers}"
           "--quiet"

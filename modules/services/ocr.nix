@@ -8,6 +8,7 @@
   mkServiceModule,
   lib,
   pkgs,
+  helpers,
   ...
 }@args:
 mkServiceModule {
@@ -18,8 +19,8 @@ mkServiceModule {
     resourceClass = "interactive-agent";
     activation = {
       mode = "socket-proxy";
-      publicEndpoint = "127.0.0.1:8020";
-      backendEndpoint = "127.0.0.1:8021";
+      publicEndpoint = "127.0.0.1:${toString helpers.data.ports.ocr.public}";
+      backendEndpoint = "127.0.0.1:${toString helpers.data.ports.ocr.backend}";
       idleTimeout = "300s";
       exclusiveResource = "gpu-inference";
       dependsOn = [ "ocr-proxy" ];
@@ -37,12 +38,12 @@ mkServiceModule {
     };
     port = args.lib.mkOption {
       type = args.lib.types.port;
-      default = 8020;
+      default = helpers.data.ports.ocr.public;
       description = "PUBLIC host port (bound to 127.0.0.1) clients use -- the ocr-proxy socket front door.";
     };
     backendPort = args.lib.mkOption {
       type = args.lib.types.port;
-      default = 8021;
+      default = helpers.data.ports.ocr.backend;
       description = "PRIVATE host port the container itself publishes to; ocr-proxy forwards here.";
     };
     containerPort = args.lib.mkOption {

@@ -112,7 +112,7 @@ mkServiceModule {
   extraOptions = {
     port = lib.mkOption {
       type = lib.types.port;
-      default = 8880;
+      default = helpers.data.ports.hub.self;
       description = "Port the hub itself listens on, on loopback and the tailnet address.";
     };
 
@@ -170,18 +170,18 @@ mkServiceModule {
       default = {
         open-webui = {
           label = "Open WebUI";
-          port = 8881;
-          upstream = "127.0.0.1:8080";
+          port = helpers.data.ports.hub.openWebui;
+          upstream = "127.0.0.1:${toString helpers.data.ports.openWebui}";
         };
         comfyui = {
           label = "ComfyUI";
-          port = 8882;
-          upstream = "127.0.0.1:8188";
+          port = helpers.data.ports.hub.comfyui;
+          upstream = "127.0.0.1:${toString helpers.data.ports.comfyui.public}";
         };
         koboldcpp = {
           label = "KoboldCpp";
-          port = 8883;
-          upstream = "127.0.0.1:5001";
+          port = helpers.data.ports.hub.koboldcpp;
+          upstream = "127.0.0.1:${toString helpers.data.ports.koboldcpp.public}";
         };
       };
       description = ''

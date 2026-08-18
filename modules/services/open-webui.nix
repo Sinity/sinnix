@@ -14,13 +14,14 @@
   mkAiService,
   lib,
   pkgs,
+  helpers,
   ...
 }@args:
 mkAiService {
   name = "open-webui";
   description = "Open WebUI chat frontend for local models";
   unit = "open-webui.service";
-  endpoint = "127.0.0.1:8080";
+  endpoint = "127.0.0.1:${toString helpers.data.ports.openWebui}";
   stateDirectories = [ "/var/lib/open-webui" ];
   requiresCuda = false;
   extraOptions = {
@@ -42,10 +43,10 @@ mkAiService {
       services.open-webui = {
         enable = true;
         host = "127.0.0.1";
-        port = 8080;
+        port = helpers.data.ports.openWebui;
         openFirewall = false;
         environment = {
-          OLLAMA_BASE_URL = "http://127.0.0.1:11434";
+          OLLAMA_BASE_URL = "http://127.0.0.1:${toString helpers.data.ports.ollama.public}";
           WEBUI_AUTH = "False"; # single-user localhost
           ANONYMIZED_TELEMETRY = "False";
           DO_NOT_TRACK = "True";
@@ -57,11 +58,11 @@ mkAiService {
           # there, not here.
           RAG_EMBEDDING_ENGINE = "ollama";
           RAG_EMBEDDING_MODEL = helpers.data.localModels.ragEmbeddingOllamaTag;
-          RAG_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
+          RAG_OLLAMA_BASE_URL = "http://127.0.0.1:${toString helpers.data.ports.ollama.public}";
 
           # Read-aloud / voice-call via the OpenedAI-Speech bridge (TTS service).
           AUDIO_TTS_ENGINE = "openai";
-          AUDIO_TTS_OPENAI_API_BASE_URL = "http://127.0.0.1:8000/v1";
+          AUDIO_TTS_OPENAI_API_BASE_URL = "http://127.0.0.1:${toString helpers.data.ports.tts.public}/v1";
           AUDIO_TTS_OPENAI_API_KEY = "sk-local";
           AUDIO_TTS_MODEL = "tts-1";
           AUDIO_TTS_VOICE = "alloy";

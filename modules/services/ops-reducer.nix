@@ -65,7 +65,7 @@ mkServiceModule {
           Socket = {
             ListenStream = [
               "%t/sinnix/ops.sock"
-              "127.0.0.1:3090"
+              "127.0.0.1:${toString helpers.data.ports.opsReducer}"
             ];
             SocketMode = "0600";
             RemoveOnStop = true;
