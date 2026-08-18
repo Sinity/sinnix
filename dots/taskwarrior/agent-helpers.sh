@@ -7,7 +7,8 @@ if [ -z "${AGENT_NAME:-}" ]; then
 fi
 
 if [ -z "${AGENT_SESSION_ID:-}" ]; then
-  export AGENT_SESSION_ID="${AGENT_NAME}-$(date +%H%M%S)-$$"
+  AGENT_SESSION_ID="${AGENT_NAME}-$(date +%H%M%S)-$$"
+  export AGENT_SESSION_ID
 fi
 
 export AGENT_NAME
@@ -16,7 +17,6 @@ export AGENT_SESSION_ID
 AGENT_NAME_TAG="agent_${AGENT_NAME}"
 AGENT_SESSION_TAG="session_${AGENT_SESSION_ID}"
 AGENT_PROJECT="agent.${AGENT_NAME}.${AGENT_SESSION_ID}"
-AGENT_PROJECT_PREFIX="agent.${AGENT_NAME}."
 AGENT_SHARED_PROJECT="agent.shared"
 
 agent_project() {
@@ -107,7 +107,7 @@ agent_complete_task() {
     task "$task_id" modify actual:"$actual" 2>&1 | grep -v "^Filter:"
   fi
 
-  task "$task_id" done 2>&1 | grep -v "^Filter:"
+  task "$task_id" "done" 2>&1 | grep -v "^Filter:"
   timew stop 2>&1 | grep -v "^Filter:"
   echo "✓ Completed task $task_id"
 }

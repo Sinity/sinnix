@@ -18,13 +18,11 @@ new_start=$(echo "$json_new" | jq -r '.start // empty')
 
 # Check if task was stopped (completed or deleted)
 new_status=$(echo "$json_new" | jq -r '.status')
-old_status=$(echo "$json_old" | jq -r '.status')
 
 # Get task description and tags
 description=$(echo "$json_new" | jq -r '.description')
 tags=$(echo "$json_new" | jq -r '.tags[]?' | tr '\n' ' ')
 project=$(echo "$json_new" | jq -r '.project // empty')
-uuid=$(echo "$json_new" | jq -r '.uuid')
 
 # Task was just started
 if [[ -z "$old_start" && -n "$new_start" ]]; then

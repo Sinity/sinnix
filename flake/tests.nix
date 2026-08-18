@@ -46,6 +46,7 @@ in
     ./tests/noctalia.nix
     ./tests/memory-audit.nix
     ./tests/sinex-nats-security.nix
+    ./tests/dots-shell.nix
   ];
 
   perSystem =

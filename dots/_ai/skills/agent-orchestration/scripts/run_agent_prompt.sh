@@ -326,7 +326,7 @@ fi
 [[ ${credential_profile} != api ]] || claude_api_key_auth=1
 
 umask 077
-mkdir -p -m 0700 "${job_state_dir}" "${job_state_dir}/.reservations" "$(dirname "${log_file}")"
+mkdir -p "${job_state_dir}" "${job_state_dir}/.reservations" "$(dirname "${log_file}")"
 chmod 0700 "${job_state_dir}"
 chmod 0700 "${job_state_dir}/.reservations"
 [[ -z ${json_file} ]] || mkdir -p "$(dirname "${json_file}")"
