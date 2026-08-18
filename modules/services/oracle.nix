@@ -41,38 +41,47 @@ mkServiceModule {
       description = "Directory where YYYY-MM-DD.md digests are written.";
     };
   };
-  configFn =
+  configFn = _: {
+    sinnix.persistence.home.directories = [ ".local/share/oracle" ];
+  };
+  # Function form. The `timer` key stays statically present (its VALUE
+  # carries `enable = cfg.timer.enable`, deferred through mkScheduledJob's
+  # mkIf wrapping) rather than being conditionally omitted via
+  # `lib.optionalAttrs cfg.timer.enable { timer = ...; }`: the latter forces
+  # cfg.timer.enable to decide this module's OWN config SHAPE, which is a
+  # genuine self-referential blackhole for a same-module option (see
+  # modules/lib/scheduled-job.nix's `timer.enable` doc comment). The
+  # rendered behaviour is identical to the previous
+  # `lib.mkIf cfg.timer.enable { ... }` on the hand-rolled
+  # systemd.user.timers.oracle: no timer unit at all when disabled.
+  job =
     { cfg, pkgs, ... }:
     let
       oracleScript = "${config.sinnix.paths.projectRoot}/scripts/oracle";
     in
     {
-      sinnix.persistence.home.directories = [ ".local/share/oracle" ];
-
-      systemd.user.services.oracle = {
-        description = "Oracle daily reverse-prompting digest";
+      unitName = "oracle";
+      manager = "user";
+      description = "Oracle daily reverse-prompting digest";
+      # outputDir is passed through, not merely declared. It used to be an
+      # option with a type, a default and a description saying where
+      # digests are written -- that nothing read, so setting it did
+      # nothing. An option that silently ignores you is worse than no
+      # option; the script has taken --output all along.
+      execStart = "${pkgs.bash}/bin/bash -lc '${oracleScript} --output-dir ${lib.escapeShellArg cfg.outputDir}'";
+      serviceConfig = {
+        TimeoutStartSec = 600;
+      };
+      unit = {
         after = [ "network-online.target" ];
         wants = [ "network-online.target" ];
-        serviceConfig = {
-          Type = "oneshot";
-          # outputDir is passed through, not merely declared. It used to be an
-          # option with a type, a default and a description saying where
-          # digests are written -- that nothing read, so setting it did
-          # nothing. An option that silently ignores you is worse than no
-          # option; the script has taken --output all along.
-          ExecStart = "${pkgs.bash}/bin/bash -lc '${oracleScript} --output-dir ${lib.escapeShellArg cfg.outputDir}'";
-          TimeoutStartSec = 600;
-        };
       };
-
-      systemd.user.timers.oracle = lib.mkIf cfg.timer.enable {
+      timer = {
+        enable = cfg.timer.enable;
+        onCalendar = cfg.timer.onCalendar;
+        randomizedDelaySec = cfg.timer.randomizedDelaySec;
+        persistent = true;
         description = "Daily oracle digest";
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnCalendar = cfg.timer.onCalendar;
-          RandomizedDelaySec = toString cfg.timer.randomizedDelaySec;
-          Persistent = true;
-        };
       };
     };
 } args
