@@ -21,11 +21,13 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
+from sinnix_lib.ledger import utc_ts
+
 from .execute import execute
 from .glance import build_glance, build_jobs, build_steering
 from .inbox import confirm_inbox, list_inbox, read_inbox
 from .receiver import start_phone_stream_server
-from .state import MAX_BODY, MAX_UPLOAD, ensure_dirs, now_iso
+from .state import MAX_BODY, MAX_UPLOAD, ensure_dirs
 from .uploads import append_events, events_cursor, newest_in_lane, store_upload
 
 
@@ -75,7 +77,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's contract
         route = self._route()
         if route in ("/ping", "/"):
-            self._send(HTTPStatus.OK, {"ok": True, "at": now_iso()})
+            self._send(HTTPStatus.OK, {"ok": True, "at": utc_ts()})
         elif route == "/glance":
             self._send(HTTPStatus.OK, build_glance())
         elif route == "/steering":

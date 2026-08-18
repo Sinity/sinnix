@@ -18,6 +18,8 @@ import sys
 from http import HTTPStatus
 from pathlib import Path
 
+from sinnix_lib.ledger import utc_ts
+
 from .notifications import mirror_new_events
 from .state import (
     EVENTS_DAY_RE,
@@ -25,7 +27,6 @@ from .state import (
     MAX_EVENT_BATCH,
     UPLOAD_LANES,
     UPLOAD_NAME_RE,
-    now_iso,
 )
 
 #: How deep a lane path may go. `DCIM/Camera/IMG_0001.jpg` arrives as
@@ -164,7 +165,7 @@ def store_upload(
         "bytes": len(body),
         "sha256": digest,
         "path": str(target),
-        "at": now_iso(),
+        "at": utc_ts(),
     }
 
 
@@ -288,5 +289,5 @@ def append_events(
         "bytes": len(body),
         "cursor": offset + len(body),
         "sha256": digest,
-        "at": now_iso(),
+        "at": utc_ts(),
     }

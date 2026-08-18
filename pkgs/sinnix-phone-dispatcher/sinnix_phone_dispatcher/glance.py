@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import json
 
+from sinnix_lib.ledger import utc_ts
+
 from .external import steer
 from .ops import ops_get
-from .state import now_iso
 
 
 def build_glance() -> dict:
@@ -68,7 +69,7 @@ def build_glance() -> dict:
     verdict = "all quiet" if not attention else f"{len(attention)} want you"
     return {
         "schema": "sinnix.phone.glance/1",
-        "generated_at": now_iso(),
+        "generated_at": utc_ts(),
         "verdict": verdict,
         "attention": attention,
         "tiles": tiles,
@@ -92,7 +93,7 @@ def build_steering() -> dict:
             pass
     return {
         "schema": "sinnix.phone.steering/1",
-        "generated_at": now_iso(),
+        "generated_at": utc_ts(),
         "menu": [],
         "commitments": [],
         "ready_queue": [],
@@ -119,4 +120,4 @@ def build_jobs() -> dict:
                 "elapsed": j.get("elapsed"),
             }
         )
-    return {"jobs": rows, "generated_at": now_iso()}
+    return {"jobs": rows, "generated_at": utc_ts()}
