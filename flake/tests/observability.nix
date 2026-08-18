@@ -1,3 +1,8 @@
+# Provably fails when: sinnix-observe stops classifying a gap it can see in
+# its inputs (verified by renaming the sinex.invocation.lacks_cgroup gap),
+# drops a source from the merged report, or changes the report schema without
+# the consumers being updated.
+#
 # sinnix-observe offline-report runtime check — synthesizes sinex xtask
 # history, Polylogue live-ingest, and `below` cgroup/process TSV fixtures and
 # asserts the merged JSON/human report shape.

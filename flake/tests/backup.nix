@@ -242,41 +242,39 @@ in
             }
           ];
 
-      polylogueStateBorgScript =
-        rewriteBackupHook polylogueStateBorgScriptChecked
-          [
-            {
-              from = "/outer-realm/backup/borg-polylogue-state-v1";
-              to = "$TMPDIR/repos/borg-polylogue-state-v1";
-            }
-            {
-              # Must precede the plain ".cache/borg" pattern below:
-              # replaceStrings matches earlier list entries first at a given
-              # position, and "borg" is itself a prefix of "borg-drain".
-              from = "/persist/root/.cache/borg-drain";
-              to = "$TMPDIR/state/borg-drain";
-            }
-            {
-              from = "/persist/root/.cache/borg";
-              to = "$TMPDIR/state/borg-cache";
-            }
-            {
-              from = "/run/lock/sinnix-borg.lock";
-              to = "$TMPDIR/state/sinnix-borg.lock";
-            }
-            {
-              from = "install -d -m 0700 -o root -g root";
-              to = "install -d -m 0700";
-            }
-            {
-              from = "install -d -m 0755 -o root -g root";
-              to = "install -d -m 0755";
-            }
-            {
-              from = "/realm/state/polylogue";
-              to = "$TMPDIR/live-polylogue";
-            }
-          ];
+      polylogueStateBorgScript = rewriteBackupHook polylogueStateBorgScriptChecked [
+        {
+          from = "/outer-realm/backup/borg-polylogue-state-v1";
+          to = "$TMPDIR/repos/borg-polylogue-state-v1";
+        }
+        {
+          # Must precede the plain ".cache/borg" pattern below:
+          # replaceStrings matches earlier list entries first at a given
+          # position, and "borg" is itself a prefix of "borg-drain".
+          from = "/persist/root/.cache/borg-drain";
+          to = "$TMPDIR/state/borg-drain";
+        }
+        {
+          from = "/persist/root/.cache/borg";
+          to = "$TMPDIR/state/borg-cache";
+        }
+        {
+          from = "/run/lock/sinnix-borg.lock";
+          to = "$TMPDIR/state/sinnix-borg.lock";
+        }
+        {
+          from = "install -d -m 0700 -o root -g root";
+          to = "install -d -m 0700";
+        }
+        {
+          from = "install -d -m 0755 -o root -g root";
+          to = "install -d -m 0755";
+        }
+        {
+          from = "/realm/state/polylogue";
+          to = "$TMPDIR/live-polylogue";
+        }
+      ];
 
       sinexBeadsDrillScript =
         rewriteBackupHook backupRuntimeEval.config.systemd.services.sinnix-borg-beads-drill.script

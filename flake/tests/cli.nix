@@ -66,6 +66,10 @@ in
           EOF
         '';
       };
+      # Provably fails when: the rendered ssh config stops isolating the
+      # GitHub key from the agent (verified by removing IdentityAgent = none
+      # from modules/features/cli/core.nix), or the wildcard host stops
+      # setting AddKeysToAgent=false.
       cliCoreRuntime = mkHmRuntimeCheck system {
         name = "cli-core-runtime-check";
         spec = cliCoreRuntimeSpec;

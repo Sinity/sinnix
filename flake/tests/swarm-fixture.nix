@@ -1,3 +1,14 @@
+# Lane-manifest validation fixture: the real scripts/sinnix-validate-lane-manifest
+# must accept a disjoint three-lane manifest and reject one whose lanes own
+# overlapping paths (a shared hotspot is what makes parallel lanes collide).
+#
+# Provably fails when: the validator stops rejecting overlapping `owns` paths,
+# or stops accepting a valid manifest (verified by relaxing the overlap check
+# in the script).
+#
+# The former git merge sequence here was deleted: it created three branches
+# and merged them, which exercises git rather than anything in this repo, and
+# no change to sinnix could make it fail.
 { inputs, ... }:
 {
   perSystem =
@@ -19,7 +30,6 @@
             nativeBuildInputs = [
               pkgs.bash
               pkgs.coreutils
-              pkgs.git
               pkgs.jq
               pkgs.ripgrep
               validator
@@ -27,7 +37,7 @@
           }
           ''
             export HOME=$TMPDIR/home
-            mkdir -p "$HOME" "$TMPDIR/work"
+            mkdir -p "$HOME"
             cat > "$TMPDIR/valid.json" <<'EOF'
             {"lanes":[
               {"id":"a","agent":"lane","model":"gpt-5.6-terra","effort":"high","owns":["a"],"avoids":["b","c"],"verification":["test"],"merge_order":1},
@@ -48,23 +58,6 @@
             overlap_status=$?
             set -e
             test "$overlap_status" -ne 0
-            cd "$TMPDIR/work"
-            git init -q --initial-branch=master
-            git config user.email fixture@example.invalid
-            git config user.name fixture
-            git commit --allow-empty -qm base
-            for lane in a b c; do
-              git switch -qc "lane-$lane"
-              printf '%s\n' "$lane" > "$lane.txt"
-              git add "$lane.txt"
-              git commit -qm "lane $lane"
-              git switch -q master
-            done
-            git merge --no-ff -qm 'merge lane a' lane-a
-            git merge --no-ff -qm 'merge lane b' lane-b
-            git merge --no-ff -qm 'merge lane c' lane-c
-            test "$(git log --format='%s' -6 | sed -n '1p')" = 'merge lane c'
-            test -f a.txt -a -f b.txt -a -f c.txt
             touch "$out"
           '';
     in
