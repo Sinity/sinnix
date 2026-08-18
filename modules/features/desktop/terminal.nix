@@ -69,11 +69,6 @@ mkFeatureModule {
               url_prefixes = "http https file ftp";
               url_style = "single";
               allow_hyperlinks = "yes";
-              tab_title_template = "{title}";
-              active_tab_font_style = "normal";
-              inactive_tab_font_style = "normal";
-              tab_bar_style = "powerline";
-              tab_powerline_style = "angled";
               shell = captureShellCmd;
             };
             extraConfig = ''
@@ -82,8 +77,6 @@ mkFeatureModule {
               include ~/.config/kitty/themes/noctalia.conf
 
               map ctrl+shift+f12 debug_config
-
-              map ctrl+shift+enter launch --type=tab --cwd=current
 
               # detect_urls only sees one screen line at a time, so a URL a
               # TUI wrapped itself (newline + indent) opens truncated. This

@@ -79,18 +79,6 @@ let
       waitTries = 50;
     };
 
-    spotify = {
-      class = "Spotify";
-      workspace = "scratch_spotify";
-      size = {
-        w = 0.85;
-        h = 0.85;
-      };
-      command = [ "spotify" ];
-      classPattern = "(?i)^spotify$";
-      waitTries = 100;
-    };
-
     weechat = {
       class = "scratchpad-weechat";
       workspace = "scratch_weechat";
