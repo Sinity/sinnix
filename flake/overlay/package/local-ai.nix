@@ -40,7 +40,40 @@ in
   # nixpkgs-ai`) — koboldcpp may rename/unify this option flag to match
   # llama-cpp's `cudaSupport`, which would silently no-op this
   # override if the old attr name is simply ignored rather than erroring.
-  koboldcpp-cuda = aiPkgs.pkgsForCudaArch.sm_86.koboldcpp.override { cublasSupport = true; };
+  #
+  # sinnix-dvwm: upstream's package.nix postPatch strips `-lcuda` out of the
+  # Makefile's CUBLASLD_FLAGS so the build never needs a link-time
+  # libcuda.so (nixpkgs doesn't ship the real driver lib; only
+  # addDriverRunpath's runtime search does). But koboldcpp's ggml still
+  # calls real CUDA *driver*-API functions unconditionally — cuMemCreate,
+  # cuMemMap, cuGetErrorString, etc., only exported by libcuda.so.1 — from
+  # its VMM pooled allocator. The newest vendored ggml fork
+  # (ggml-cuda.cu) can disable that path at compile time via
+  # -DGGML_CUDA_NO_VMM, but koboldcpp additionally vendors two older ggml
+  # forks for legacy model formats (otherarch/ggml_v3-cuda.cu compiles the
+  # same cuMemCreate/cuMemMap/cuGetErrorString calls with no such guard at
+  # all — verified: -DGGML_CUDA_NO_VMM alone still leaves `U cuMemCreate`
+  # in koboldcpp_cublas.so), so disabling VMM per-macro is a losing chase
+  # across forks. Fix at the link layer upstream's postPatch broke instead:
+  # keep `-lcuda`, add nixpkgs' CUDA driver *stub* lib (built for exactly
+  # this — link-time only, real driver resolved at runtime) to
+  # CUBLASLD_FLAGS's search path, and autoAddDriverRunpath fixes up the
+  # built .so's RUNPATH to the real host driver so the stub is never
+  # touched again once installed.
+  koboldcpp-cuda =
+    let
+      cudaPkgs = aiPkgs.pkgsForCudaArch.sm_86;
+    in
+    (cudaPkgs.koboldcpp.override { cublasSupport = true; }).overrideAttrs (old: {
+      postPatch = ''
+        nixLog "patching $PWD/Makefile to keep -lcuda but resolve it against the CUDA driver stub lib (sinnix-dvwm)"
+        substituteInPlace "$PWD/Makefile" \
+          --replace-fail \
+            'CUBLASLD_FLAGS = -lcuda -lcublas' \
+            'CUBLASLD_FLAGS = -lcuda -L${cudaPkgs.cudaPackages.cuda_cudart}/lib/stubs -lcublas'
+      '';
+      nativeBuildInputs = old.nativeBuildInputs ++ [ cudaPkgs.autoAddDriverRunpath ];
+    });
   # Muse Glimmer support landed after the nixpkgs-ai package snapshot. Keep
   # the existing CUDA package recipe and replace only its pinned upstream
   # source until nixpkgs-ai carries b10353 or newer.
