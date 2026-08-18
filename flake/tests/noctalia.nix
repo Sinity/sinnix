@@ -26,6 +26,19 @@
                 ${pkgs.bash}/bin/bash ${../../flake/tests/noctalia-ops-bridge.sh}
               touch "$out"
             '';
+        noctalia-cockpit-lint =
+          pkgs.runCommand "noctalia-cockpit-lint-check"
+            {
+              nativeBuildInputs = [
+                noctalia
+                pkgs.bash
+                pkgs.coreutils
+              ];
+            }
+            ''
+              noctalia plugins lint ${../../dots/noctalia/plugins/sinnix-cockpit}
+              touch "$out"
+            '';
         noctalia-config-validate =
           pkgs.runCommand "noctalia-config-validate-check"
             {

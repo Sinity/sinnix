@@ -1,0 +1,18 @@
+id = "sinity/sinnix-cockpit"
+name = "Sinnix Cockpit"
+version = "0.1.0"
+plugin_api = 9
+author = "Sinity"
+license = "MIT"
+dependencies = ["hyprctl"]
+tags = ["bar", "system", "utility", "hyprland"]
+icon = "space_dashboard"
+description = "Visible bar affordances for the drilled capture verbs and the capability index."
+
+[[service]]
+id = "probe"
+entry = "service.luau"
+
+[[widget]]
+id = "capture-strip"
+entry = "capture-strip.luau"

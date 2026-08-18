@@ -101,6 +101,8 @@ mkFeatureModule {
             "${communityPlugins}/keybind-cheatsheet";
           home.file.".local/share/noctalia/local/sinnix-ops".source =
             mkDotsFile "/noctalia/plugins/sinnix-ops";
+          home.file.".local/share/noctalia/local/sinnix-cockpit".source =
+            mkDotsFile "/noctalia/plugins/sinnix-cockpit";
 
           home.packages = with pkgs; [
             nvibrant # digital vibrance (nvibrant plugin)
