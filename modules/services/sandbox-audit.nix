@@ -14,6 +14,13 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   auditLane = "${config.sinnix.paths.activityRoot}/audit";
   auditState = "/realm/state/cursors/audit-drain";
+  # sinnix-oa9j: auditd's own log_file defaults to /var/log/audit on the
+  # wear-limited root SSD. The pre-fix rule set left ~6.9G of ENOENT execve
+  # spam there before the narrowed rules above landed; moving the live path
+  # relieves wear going forward, but does not delete that history (no
+  # retention rule) -- see the migration note on systemd.services.auditd
+  # below for what still needs a one-time manual move.
+  auditLogRoot = "/realm/state/audit";
 in
 mkServiceModule {
   name = "sandbox-audit";
@@ -74,6 +81,11 @@ mkServiceModule {
       systemd.tmpfiles.rules = [
         "d ${auditLane} 0775 ${username} users -"
         "d ${auditState} 0755 root root -"
+        # auditd's own LogsDirectory=audit (upstream unit) only manages
+        # /var/log/audit; log_file below is redirected elsewhere, so this
+        # directory needs its own creation, matching upstream's
+        # LogsDirectoryMode=0700 root:root.
+        "d ${auditLogRoot} 0700 root root -"
       ];
 
       security.auditd.enable = cfg.kernelAudit;
@@ -167,6 +179,44 @@ mkServiceModule {
         max_log_file = 64;
         num_logs = 8;
         max_log_file_action = "rotate";
+        # sinnix-oa9j: off the wear-limited root SSD and onto /realm. Content
+        # is preserved, not pruned -- the pre-fix history at
+        # /var/log/audit/audit.log stays where it is; this only redirects
+        # where the daemon writes from here on. See the migration comment on
+        # systemd.services.auditd below.
+        log_file = "${auditLogRoot}/audit.log";
+      };
+
+      # The upstream package's shipped unit (systemd.packages in nixpkgs'
+      # security.auditd module) carries a fixed
+      # RequiresMountsFor=/run/audit /var/log/audit -- it has no way to know
+      # log_file above points elsewhere. /realm has `nofail` in fstab, so
+      # this adds the same explicit After=/RequiresMountsFor every backup
+      # job in modules/backup.nix already carries, rather than trusting
+      # bare local-fs.target sequencing.
+      #
+      # MIGRATION (one-time, manual -- not automated in activation): moving
+      # the existing ~6.9G /var/log/audit/audit.log across filesystems
+      # (root SSD -> /realm NVMe) is a real copy, not a rename, and an
+      # activation script has no resource containment for a multi-GB
+      # cross-device copy blocking every `switch`/boot. Content is
+      # preserved per the no-retention rule -- this is a relocation, not a
+      # deletion -- run this BEFORE `switch` lands this config, not after:
+      # auditd opens log_file for append rather than truncating, so
+      # pre-staging the old file at the new path means the daemon continues
+      # it seamlessly once it restarts pointed here. Doing the move after
+      # switch would race a freshly-created file at the destination and the
+      # `mv` would clobber whatever auditd had already written to it.
+      #   sudo systemctl stop auditd
+      #   sudo mkdir -p /realm/state/audit
+      #   sudo mv /var/log/audit/audit.log* /realm/state/audit/
+      #   sudo chown root:root /realm/state/audit/audit.log*
+      #   sudo chmod 0600 /realm/state/audit/audit.log*
+      # then apply this config (switch), which restarts auditd against the
+      # new log_file and picks the moved file straight back up.
+      systemd.services.auditd = lib.mkIf cfg.kernelAudit {
+        after = [ "realm.mount" ];
+        unitConfig.RequiresMountsFor = [ auditLogRoot ];
       };
 
       systemd.services.sinnix-audit-drain = lib.mkIf cfg.kernelAudit {
