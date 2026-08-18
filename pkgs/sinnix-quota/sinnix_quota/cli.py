@@ -4,6 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
+from sinnix_lib import atomic_json, ledger
+
 from .normalize import normalize_cost, normalize_usage, redact_json
 
 
@@ -24,12 +26,7 @@ def main() -> None:
         if args.kind == "usage"
         else normalize_cost(raw, args.source)
     )
-    args.raw_output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.raw_output.open("a", encoding="utf-8") as handle:
-        json.dump(redact_json(raw), handle, sort_keys=True)
-        handle.write("\n")
-    args.output.write_text(
-        json.dumps({"schema": "sinnix-quota-v1", "rows": rows}, sort_keys=True) + "\n",
-        encoding="utf-8",
+    ledger.append_jsonl(args.raw_output, redact_json(raw))
+    atomic_json.write_json_atomic(
+        args.output, {"schema": "sinnix-quota-v1", "rows": rows}
     )
