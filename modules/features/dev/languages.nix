@@ -12,7 +12,7 @@ mkFeatureModule {
   description = "Programming language toolchains";
   subFeatures = {
     nix = {
-      description = "Nix language tooling (nixfmt, nil, nix-diff)";
+      description = "Nix language tooling (nixfmt, nixd, nix-diff)";
       default = true;
     };
     python = {
@@ -43,9 +43,12 @@ mkFeatureModule {
     lib.mkMerge [
       # Nix tooling
       (lib.mkIf cfg.nix.enable {
+        # nixd (not nil): both editors' Nix LSP. Mason cannot provide a working
+        # nixd on NixOS, and nixd's flake-aware option completion is the point
+        # of an LSP on this machine; nil remains in the sinnix devshell only.
         home-manager.users.${user}.home.packages = with pkgs; [
           nixfmt
-          nil
+          nixd
           nix-diff
         ];
       })
