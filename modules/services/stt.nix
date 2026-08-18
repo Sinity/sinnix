@@ -75,6 +75,22 @@ mkAiService {
           enable = true;
           restartable = true;
         };
+        captures = [
+          {
+            name = "transcripts";
+            path = "${config.sinnix.paths.activityRoot}/transcripts";
+            # Deliberately unbudgeted. The lake pass runs on lakeIntervalSec,
+            # but it only writes when the VAD gate found speech in newly
+            # landed audio, so a quiet stretch --
+            # the operator away, or simply not talking -- produces nothing and
+            # is not evidence of anything. A budget here would measure his day.
+            # The freshness of the audio it consumes is already covered by
+            # audio-devices and audio-index; what this declaration buys is the
+            # "has this ever produced" check, which is the only question about
+            # this lane that has an unambiguous answer.
+            eventDriven = true;
+          }
+        ];
       };
 
       systemd.services.sinnix-stt = {

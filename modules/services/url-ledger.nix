@@ -30,12 +30,22 @@ mkServiceModule {
       {
         name = "url-ledger-state";
         path = stateDir;
-        eventDriven = true;
+        # The daily join rewrites urls.jsonl and resolution.jsonl every run
+        # regardless of what it finds, so a quiet day is a dead timer.
+        cadenceSeconds = 86400;
+        # Two days: one missed run plus the 2h randomised delay.
+        staleAfterSeconds = 172800;
       }
       {
         name = "url-ledger-coverage";
-        path = derivedDir;
-        eventDriven = true;
+        # coverage.jsonl, not derivedDir: stateDir lives INSIDE derivedDir, so
+        # a lane pointed at the parent reports the newest of the two and can
+        # never see its own product go stale. Observed 2026-08-18 -- the
+        # coverage products were 24h older than the state files and the lane
+        # read as fresh.
+        path = "${derivedDir}/coverage.jsonl";
+        cadenceSeconds = 86400;
+        staleAfterSeconds = 172800;
       }
     ];
   };
