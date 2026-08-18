@@ -57,7 +57,7 @@ grep -Fq "$resume_header" "$plugin/service.luau" ||
 # binds must be published by sinnix-observe's report or the reducer's own
 # state additions. Both sides are parsed from their source.
 NOCTALIA_OPS_PLUGIN="$plugin" \
-NOCTALIA_OPS_REDUCER="$reducer_root" \
-NOCTALIA_OPS_OBSERVE="$observe_root" \
+  NOCTALIA_OPS_REDUCER="$reducer_root" \
+  NOCTALIA_OPS_OBSERVE="$observe_root" \
   python3 "$contract"
 echo "noctalia ops bridge fixture passed"

@@ -57,7 +57,7 @@ def reducer_state_keys(reducer_root: Path) -> set[str]:
         if isinstance(node, ast.Dict) and any(key is None for key in node.keys):
             spreads_report = any(
                 key is None and isinstance(value, ast.Name) and value.id == "report"
-                for key, value in zip(node.keys, node.values)
+                for key, value in zip(node.keys, node.values, strict=True)
             )
             if spreads_report:
                 keys.update(
@@ -72,7 +72,7 @@ def reducer_state_keys(reducer_root: Path) -> set[str]:
 
 BINDING_PATTERNS = (
     re.compile(r'stateValue\(\s*"([A-Za-z0-9_]+)"\s*\)'),
-    re.compile(r'snapshot\.state\.([A-Za-z0-9_]+)'),
+    re.compile(r"snapshot\.state\.([A-Za-z0-9_]+)"),
     re.compile(r'snapshot\.state\[\s*"([A-Za-z0-9_]+)"\s*\]'),
 )
 
@@ -83,16 +83,14 @@ def plugin_bound_keys(plugin_root: Path) -> dict[str, list[str]]:
     for entry in sorted(plugin_root.glob("*.luau")):
         text = entry.read_text()
         keys = sorted(
-            {
-                match
-                for pattern in BINDING_PATTERNS
-                for match in pattern.findall(text)
-            }
+            {match for pattern in BINDING_PATTERNS for match in pattern.findall(text)}
         )
         if keys:
             bound[entry.name] = keys
     if not bound:
-        raise SystemExit("no state bindings found in any plugin entry; extractor broken?")
+        raise SystemExit(
+            "no state bindings found in any plugin entry; extractor broken?"
+        )
     return bound
 
 
