@@ -871,11 +871,11 @@
     "phone-app": {
       "flake": false,
       "locked": {
-        "lastModified": 1787025508,
-        "narHash": "sha256-O8HhBwkpNJVfI2bWoQj5sTJCbGAolPPu2GrGECLSDaE=",
+        "lastModified": 1787029644,
+        "narHash": "sha256-dwCieX46QtGbbKFsa/6DXsR9BM+AYjFiz6mpMbwZbFA=",
         "owner": "Sinity",
         "repo": "sinnix-phone-app",
-        "rev": "6ab5f6623fa28a1cf64eafb7fb7b3f1effaa0269",
+        "rev": "8a93d172105c35b0ba8ec82b3b4d27e068021257",
         "type": "github"
       },
       "original": {
