@@ -46,7 +46,7 @@ import argparse
 import json
 import os
 
-from .dispatch import cmd_dispatch, cmd_notify, cmd_push
+from .dispatch import cmd_dispatch, cmd_notify
 from .glance import build_glance, build_steering
 from .server import cmd_serve
 from .state import LAKE_ROOT
@@ -89,11 +89,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     dispatch.add_argument("--outbox", default=str(LAKE_ROOT / "outbox"))
     dispatch.set_defaults(func=cmd_dispatch)
-
-    push = sub.add_parser(
-        "push", help="refresh glance.json and steering.json for the drain"
-    )
-    push.set_defaults(func=cmd_push)
 
     notify = sub.add_parser("notify", help="queue an interruption for the phone")
     notify.add_argument("title")

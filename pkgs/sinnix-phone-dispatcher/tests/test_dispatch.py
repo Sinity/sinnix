@@ -63,14 +63,3 @@ def test_malformed_json_file_is_kept_not_deleted(tmp_path) -> None:
 
 def test_missing_outbox_is_a_quiet_no_op(tmp_path) -> None:
     assert dispatch_mod.cmd_dispatch(_args(tmp_path / "does-not-exist")) == 0
-
-
-def test_push_writes_glance_and_steering_json(monkeypatch, isolated_state_dirs) -> None:
-    monkeypatch.setattr(dispatch_mod, "build_glance", lambda: {"verdict": "quiet"})
-    monkeypatch.setattr(dispatch_mod, "build_steering", lambda: {"menu": []})
-
-    dispatch_mod.cmd_push(argparse.Namespace())
-
-    inbox = isolated_state_dirs["inbox_dir"]
-    assert json.loads((inbox / "glance.json").read_text()) == {"verdict": "quiet"}
-    assert json.loads((inbox / "steering.json").read_text()) == {"menu": []}

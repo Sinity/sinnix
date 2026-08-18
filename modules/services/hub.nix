@@ -496,6 +496,19 @@ mkServiceModule {
         # audio can be re-transcribed by a better engine later, a transcript
         # cannot be un-lost.
         "d ${phoneLaneRoot}/phone/speech 0755 ${userName} users -"
+        # What prime holds for the phone, moved here from the retired
+        # phone-drain module: what the app FETCHES (glance and steering are
+        # generated on request; receipts, notifications and decks are files)
+        # and the executed-intent tokens that make a re-delivered intent a
+        # no-op. On the NVMe volume rather than the wear-limited root, and
+        # under /realm/state because losing the token set would let an
+        # already-executed intent run a second time after a reboot.
+        "d /realm/state/sinnix-phone 0755 ${userName} users -"
+        "d /realm/state/sinnix-phone/inbox 0755 ${userName} users -"
+        "d /realm/state/sinnix-phone/inbox/receipts 0755 ${userName} users -"
+        "d /realm/state/sinnix-phone/inbox/notify 0755 ${userName} users -"
+        "d /realm/state/sinnix-phone/inbox/decks 0755 ${userName} users -"
+        "d /realm/state/sinnix-phone/tokens 0755 ${userName} users -"
       ];
 
       environment.systemPackages = [
@@ -517,7 +530,9 @@ mkServiceModule {
           # is declared beside the unit that receives it so the thing that
           # can fail is the thing being watched -- it sat on phone-drain
           # until 2026-08-17, which by then was a unit that no longer touched
-          # these files.
+          # these files. The drain itself is gone now; what the phone cannot
+          # push (its system log, which needs READ_LOGS) is pulled by
+          # sinnix-phone-logcat, and nothing else is.
           #
           # Two hours, where the pull-era budget was a day. A chunk closes
           # every five minutes and ships within a heartbeat, so the only
@@ -525,7 +540,7 @@ mkServiceModule {
           # recording -- and both of those are worth hearing about long
           # before tomorrow.
           #
-          # phone-speech and phone-estate_event moved here from the retired
+          # phone-speech and the app's event lane moved here from the retired
           # sinnix-phone-receiver surface (sinnix-tjqi): the dispatcher's
           # embedded TCP receiver is what writes them now, so the lane
           # declaration sits beside the unit that can actually fail to write
@@ -546,18 +561,29 @@ mkServiceModule {
               eventDriven = true;
             }
             {
-              # The app's live event mirror. `sinnix-phone app-status`
-              # answers from this lane when adb is down, which is when the
-              # question matters most, so the lane's freshness is something
-              # the estate should notice going stale rather than discover
-              # while debugging a silent phone.
+              # The app's own event log -- battery, health, location,
+              # thermal, notifications, instrument runs, and the lane_blocked
+              # records that say when one of those stopped and why. The
+              # richest lane the phone has, and the one `sinnix-phone
+              # app-status` answers from when adb is down, which is when the
+              # question matters most.
               #
-              # Half an hour, against a mirror that flushes every 20 seconds:
-              # the budget has to absorb an ordinary phone-off-the-tailnet
-              # stretch without crying, while still being far tighter than
-              # the drain's day.
-              name = "phone-estate_event";
-              path = "${phoneLaneRoot}/phone-estate_event";
+              # It arrives here as byte ranges appended to the day file
+              # (/phone/v1/events), which is why the budget is half an hour
+              # rather than the drain's day: batches leave the phone on a 20
+              # second heartbeat, so the budget only has to absorb an
+              # ordinary phone-off-the-tailnet stretch.
+              #
+              # This replaced a second lane, `phone-event`, which
+              # carried a live TCP MIRROR of the same records into a
+              # different directory. Two lanes for one subject meant every
+              # consumer had to dedup them, and the mirror could never be the
+              # authority anyway: its cursor started at end-of-file, so
+              # anything written while it was off did not exist as far as it
+              # was concerned. That directory keeps its files as history;
+              # nothing writes it any more, so it is no longer declared.
+              name = "phone-events";
+              path = "/realm/data/machine/phone/events";
               cadenceSeconds = 20;
               staleAfterSeconds = 1800;
             }

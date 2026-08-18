@@ -1,6 +1,6 @@
 # The phone
 
-`dev.sinnix.phone` — the estate's phone-side member. Ambient capture,
+`dev.sinnix.phone` — sinnix's phone-side member. Ambient capture,
 instruments, ingress, and a remote for prime, on a Redmi Note 11 (Android 13 /
 API 33, unrooted, bootloader locked, MIUI).
 
@@ -12,7 +12,7 @@ look the way they do — and nowhere else.
 
 Four things, and they are peers:
 
-- **The estate remote.** The verdict, what agents are doing, answering an
+- **The remote.** Prime's verdict, what agents are doing, answering an
   agent's question, and the bounded actions the hub's action API accepts.
 - **Capture.** Ambient audio, ambient light and motion, notifications — the
   lanes only a device in a pocket can produce.
@@ -27,15 +27,14 @@ links out to it rather than repeating it.
 
 ## Where it lives
 
-| Piece                         | Path                                                                          |
-| ----------------------------- | ----------------------------------------------------------------------------- |
-| App source                    | github:Sinity/sinnix-phone-app (`app/src/main/`)                              |
-| Build + install packaging     | phone-app repo `pkg.nix`, `deps.json`; flake input wired in flake/scripts.nix |
-| Desktop control surface       | `scripts/sinnix-phone`                                                        |
-| Prime's half of the transport | `pkgs/sinnix-phone-dispatcher`                                                |
-| Steering export for the phone | `scripts/sinnix-steer export-phone`                                           |
-| Scheduled bidirectional drain | `modules/services/phone-drain.nix`                                            |
-| Live-plane route + unit       | `modules/services/hub.nix` (`/phone/v1/*`)                                    |
+| Piece                          | Path                                                                          |
+| ------------------------------ | ----------------------------------------------------------------------------- |
+| App source                     | github:Sinity/sinnix-phone-app (`app/src/main/`)                              |
+| Build + install packaging      | phone-app repo `pkg.nix`, `deps.json`; flake input wired in flake/scripts.nix |
+| Desktop control surface        | `scripts/sinnix-phone`                                                        |
+| Prime's half of the transport  | `pkgs/sinnix-phone-dispatcher`                                                |
+| Transport routes + unit        | `modules/services/hub.nix` (`/phone/v1/*`)                                    |
+| System-log pull (the one pull) | `modules/services/phone-logcat.nix`                                           |
 
 ## Build
 
@@ -89,8 +88,7 @@ sinnix phone app-status     # is capture alive AND producing?
 sinnix phone app-start      # relaunch after the app was stopped
 sinnix phone app-grants     # re-assert shell-uid grants
 sinnix phone app-soak [s]   # acceptance test: screen/foreground/mute + chunk measurement
-sinnix phone drain          # the bidirectional sync, wifi-gated
-sinnix phone push           # send prime's half now, without pulling
+sinnix phone logcat         # pull the system log (adb; what the timer runs)
 sinnix phone pull-ambient   # rescue chunks the app's uploader could not ship
 sinnix phone health-sync    # drive Mi Fitness's Sync button on demand (UI automation)
 ```
@@ -112,41 +110,58 @@ service is up — measured clean on 2026-08-13, uid mode `foreground` with the o
 reading `allow; running` and no package-scope override anywhere. Overriding it
 would mask a service regression rather than fix one.
 
-## The two planes
+## One plane
 
-Every verb the app offers works through **files**, and the tailnet only removes
-the wait. That is the whole architecture, and it is why the app is usable on a
-device that spends most of its life unreachable.
+Every verb the app offers is a **local write that the app then ships**, and
+the tailnet only removes the wait. That is the whole architecture, and it is
+why the app is usable on a device that spends most of its life unreachable.
 
-**File plane.** The app writes into `/sdcard/sinnix-phone/outbox/`; the drain
-collects it and hands it to `sinnix-phone-dispatcher dispatch`. The drain also
-pushes `/sdcard/sinnix-phone/inbox/` down — `glance.json`, `steering.json`,
-receipts, notifications, decks. Latency is the drain interval (1800s, wifi
-gated).
+There used to be two planes and a drain between them: the app wrote files, and
+a half-hourly wifi-gated timer on prime ssh'd into Termux and rsynced them off
+(and rsynced prime's half back down). The live HTTP path existed alongside it
+as an accelerator. That arrangement put durability on the wrong side — the
+phone held the only copy of the data and prime held the only mover, and the
+mover depended on Termux surviving a reboot, its sshd surviving MIUI, and the
+resulting process not landing in an SELinux domain that answers rsync with an
+empty listing and exit 0. Every one of those failed at least once, and each
+failure was silent on both ends.
 
-**Live plane.** One HTTP client speaking JSON to `/phone/v1/*` on the hub. The
-payloads are byte-identical to the file plane's, and one implementation on
-prime executes both — if the live path had its own logic the two would drift,
-and the drift would present as "it worked when I was home", which is the least
-debuggable class of bug.
+So the drain is gone, and there is one plane in both directions:
+
+- **The app pushes.** Ambient chunks, event-log byte ranges, outbox intents,
+  blobs, and the camera/Downloads mirrors all go out over HTTP to
+  `/phone/v1/*`, spooled on the device and deleted locally only against a
+  verified acknowledgement.
+- **The app pulls.** `glance.json` and `steering.json` are built on request;
+  receipts, notifications and decks are files prime holds until the app lists,
+  fetches, verifies and confirms them.
+
+Durability is the app's spool plus retry, not prime's timer. A phone in a
+pocket in another city holds everything it has produced and delivers it, in
+order, when it next has a network.
 
 Reachability is **measured, not assumed**: the app pings, renders the
 round-trip and its age ("live · 34 ms"), and every action reports the path it
-actually took — `sent · live` or `queued · next drain`.
+actually took — `sent · live` or `queued · retrying`.
 
-Idempotency is the `send_token`. The drain can legitimately deliver the same
-intent twice, and an intent that also went out live arrives again by design;
-prime records every executed token, and a repeat is a no-op that still emits
-its receipt.
+Idempotency is the `send_token` for intents and the sha256 for bytes. An
+intent that went out live and was queued anyway executes once, because prime
+records every executed token and answers a repeat with the same receipt. A
+chunk prime already holds answers ok rather than 409, because a phone that
+retried after losing an acknowledgement must be able to let go of the file.
+An event batch declares the offset it starts at and is written there, so
+re-sending one changes nothing.
 
-A third channel exists alongside these two, and it is not an intent plane at
-all: the phone's always-on telemetry push (speech, the app's event mirror)
-streams newline-delimited JSON straight into a persistent tailscale0 TCP
+The persistent TCP channel remains, and it is not an intent plane at all: the
+phone's always-on speech push streams newline-delimited JSON into a tailscale0
 listener, demuxed by `kind` into `phone-<kind>` capture lanes. It used to be
-its own unit (`sinnix-phone-receiver`); as of 2026-08-17 it is a second
-server thread inside `sinnix-phone-dispatcher serve` (sinnix-tjqi) — same
-port, protocol, and lane layout, just one fewer always-running process. See
-docs/speech.md for what that lane deliberately does and does not do.
+its own unit (`sinnix-phone-receiver`); as of 2026-08-17 it is a second server
+thread inside `sinnix-phone-dispatcher serve` (sinnix-tjqi). It also used to
+carry a live _mirror_ of the event log into `phone-event`; that lane is
+retired, because the events plane now arrives complete and within a heartbeat
+through the file it actually lives in, and two lanes carrying one subject is a
+dedup problem for every consumer downstream. See docs/speech.md for what the
+speech lane deliberately does and does not do.
 
 **Actions are the one thing never queued.** `start`/`stop`/`restart` on a live
 unit is a decision about right now; executing it half an hour later against a
@@ -156,27 +171,50 @@ lie.
 
 ### Contracts
 
-| File                                      | Direction | Writer → reader                                     |
-| ----------------------------------------- | --------- | --------------------------------------------------- |
-| `ambient-*.m4a`                           | out       | AmbientService → app upload (`/chunk`) → lake       |
-| `status.json`                             | out       | app → `app-status`, tile, capture screen            |
-| `events/events-*.jsonl`                   | out       | every screen → drain → lake                         |
-| `outbox/intent-*.json`                    | out       | app → drain → dispatcher                            |
-| `outbox/{voice,trace,shared}-*` + `.json` | out       | app → drain → lake                                  |
-| `epoch.json`                              | local     | instruments only                                    |
-| `inbox/glance.json`                       | in        | dispatcher → drain → home + widget                  |
-| `inbox/steering.json`                     | in        | `sinnix-steer export-phone` → drain → steering trio |
-| `inbox/receipts/*.json`                   | in        | dispatcher → notification, then deleted             |
-| `inbox/notify/*.json`                     | in        | estate → notification, then deleted                 |
-| `inbox/decks/*`                           | in        | prime → the instrument shelf                        |
+| File                                      | Direction | Writer → route → reader                                    |
+| ----------------------------------------- | --------- | ---------------------------------------------------------- |
+| `ambient-*.m4a`                           | out       | AmbientService → `POST /chunk?lane=ambient` → lake         |
+| `status.json`                             | out       | app → `app-status`, tile, capture screen (adb, on demand)  |
+| `events/events-*.jsonl`                   | out       | every screen → `POST /events?day=&offset=` → lake day file |
+| `outbox/intent-*.json`                    | out       | app → `POST /intent` → executed, receipt back              |
+| `outbox/{voice,trace,shared}-*` + `.json` | out       | app → `POST /chunk?lane=outbox` → lake                     |
+| `/sdcard/{DCIM,Download}`                 | out       | MediaMirror → `POST /chunk?lane={camera,download}` → lake  |
+| `epoch.json`                              | local     | instruments only                                           |
+| `inbox/glance.json`                       | in        | built on request → `GET /inbox/file` → home + widget       |
+| `inbox/steering.json`                     | in        | built on request → `GET /inbox/file` → steering trio       |
+| `inbox/receipts/*.json`                   | in        | dispatcher → fetch + confirm → notification, then deleted  |
+| `inbox/notify/*.json`                     | in        | prime → fetch + confirm → notification, then deleted       |
+| `inbox/decks/*`                           | in        | prime → fetch (retained, not consumed) → instrument shelf  |
+| logcat                                    | **in**    | `sinnix phone logcat` over adb → lake                      |
 
-The two device directories are deliberately separate. `/sdcard/sinnix-ambient`
-belongs to the app's own uploader: each closed chunk is POSTed to the
-dispatcher's `/chunk` route, sha256-verified against what prime wrote, and
-deleted locally only on an ok. The drain never touches that directory —
-delete-after-transfer pointed at an event log is a data-loss bug waiting for
-its first drain — and `sinnix phone pull-ambient` rescues by hand anything the
-uploader could not ship.
+The two device directories stay deliberately separate. `/sdcard/sinnix-ambient`
+is the uploader's: each closed chunk is POSTed, sha256-verified against what
+prime wrote, and deleted locally only on an ok, with `sinnix phone
+pull-ambient` as the by-hand rescue when uploads are failing.
+`/sdcard/sinnix-phone` is the app's own record and mailbox — events, outbox,
+inbox, epoch — and nothing deletes the event day files at all: they are also
+the app's own history, which the ribbon, the hole list and the offer policy
+are reductions of. Delete-after-transfer pointed at an event log is a data-loss bug waiting
+for its first run.
+
+### What is still a pull, and why
+
+**The system log.** Reading it needs `READ_LOGS`, which Android grants to
+system and privileged apps only; a sideloaded app on a locked bootloader
+cannot hold it at any appop scope. `sinnix.services.phone-logcat` is what is
+left of the drain: an adb pull on a 1800s timer, which also has the
+compensating virtue of working over USB when no network does. It carries one
+other check, because it is the only thing prime still runs against the phone
+on a schedule: a backlog of finished chunks on the device means capture is
+working and delivery is not.
+
+**The media mirror has a stated blind spot.** It ships files newer than an
+mtime watermark seeded from what the lane already holds, because asking prime
+about each of 196,946 Downloads to discover the same thing is not a trade
+worth making. A file that arrives with an _old_ mtime — a download preserving
+a server date, a restore from backup — is behind the watermark and is not
+offered. That is acceptable for a mirror of a directory the operator can also
+copy by hand; it would not be acceptable for a capture lane.
 
 ## Capture
 
@@ -262,7 +300,7 @@ stays unverified rather than being rounded up to OK.
 They appear on the capture screen, the grants screen and the transport label,
 and nowhere else. That boundary is deliberate. Those are the surfaces where
 "measured OK" and "assumed OK" are genuinely different claims; putting
-reliability vocabulary on home, the bench, the estate remote or Talk would make
+reliability vocabulary on home, the bench, the remote or Talk would make
 dev-time incident history the subject of a tool whose subject is capture,
 measurement and action.
 
@@ -335,12 +373,12 @@ internal differences.
 ## Ingress
 
 - **Share sheet.** One manifest entry makes the app a target in every share
-  sheet: URLs, text, images, PDFs land in the outbox and drain like anything
+  sheet: URLs, text, images, PDFs land in the outbox and ship like anything
   else. It is also the sanctioned workaround for Android's
   background-clipboard-read ban — sharing is push-shaped and always allowed,
   which gets the phone→desktop direction without an AccessibilityService.
   Shared `content://` URIs are _copied_, not referenced: the permission grant
-  dies with the Activity, and a drain half an hour later would find nothing.
+  dies with the Activity, and an upload a minute later would find nothing.
 - **Mark.** One tap, a timestamped word, three-second budget from a cold phone
   — hence a sheet rather than a screen, a tile, and a widget button. The
   cheapest capture in the design and the one that multiplies everything else at
@@ -352,7 +390,7 @@ internal differences.
   hole. No on-device transcription — prime's engine is better and the receipt
   pattern avoids realtime self-steering.
 - **Notifications.** A `NotificationListenerService` logs post and dismiss into
-  the events plane: the inbound comms timeline nothing else in the estate can
+  the events plane: the inbound comms timeline nothing else here can
   produce. MIUI may revoke the binding silently, so connect and disconnect are
   written as events and a gap explains itself.
 
@@ -405,8 +443,8 @@ it, which is the condition under test.
 - **Phone calls stop capture.** Platform decision since Android 10, not a
   configuration gap.
 - **The steering ready queue is approximated.** Until the steering store grows
-  its own queue table, `export-phone` treats open commitments whose window ends
-  today as the ready set.
+  its own queue table, the dispatcher's `build_steering` treats open
+  commitments whose window ends today as the ready set.
 
 ## Keeping the phone reachable
 
@@ -431,12 +469,12 @@ failing.
 tree started that way runs in the `runas_app` SELinux domain, which is denied
 `/storage` outright while carrying every group and permission that suggests
 otherwise — the resulting sshd answers rsync with empty listings and exit 0,
-and the drain reports success while moving nothing (four drains lost on
-2026-08-16). The correct repair for a dead sshd is to restart the **app**:
+and the drain reported success while moving nothing (four drains lost on
+2026-08-16, and one of the reasons the drain no longer exists). Termux is now
+a shell, not a data path, but the repair is still worth knowing. Restart the
+**app**:
 `am force-stop com.termux`, `am start -n com.termux/com.termux.app.TermuxActivity`
 — the session sources `~/.profile`, which starts `runsvdir` and raises `sshd`
 in the app's own `untrusted_app` domain. If an old blind tree still holds
 :8022, kill it first (`run-as com.termux kill <pids>` is fine for killing;
-it is only starting daemons that must not happen there). The drain now probes
-`test -r /sdcard/sinnix-phone` over ssh and treats a storage-blind transport
-as down.
+it is only starting daemons that must not happen there).

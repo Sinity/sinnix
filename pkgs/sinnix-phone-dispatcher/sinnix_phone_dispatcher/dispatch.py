@@ -1,5 +1,10 @@
-"""The file plane: executing drained intents, refreshing the state files the
-drain pushes to the phone, and queuing an operator-initiated notification."""
+"""Executing intents that reached prime as files, and queuing an
+operator-initiated notification.
+
+The glance/steering writer that used to live here is gone with the drain that
+read it: both are built on request now, by the routes the app fetches (see
+inbox.py). `dispatch` stays as the repair verb for intents already sitting in
+the lake's outbox -- the app posts them to /intent itself."""
 
 from __future__ import annotations
 
@@ -9,8 +14,7 @@ import sys
 from pathlib import Path
 
 from .execute import execute
-from .glance import build_glance, build_steering
-from .state import INBOX_DIR, ensure_dirs, notify_phone
+from .state import ensure_dirs, notify_phone
 
 
 def cmd_dispatch(args: argparse.Namespace) -> int:
@@ -47,21 +51,6 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
             )
             failed += 1
     print(f"dispatch: executed {executed}, failed {failed}")
-    return 0
-
-
-def cmd_push(args: argparse.Namespace) -> int:
-    """Refresh the state files the drain pushes to the phone."""
-    ensure_dirs()
-    for name, builder in (
-        ("glance.json", build_glance),
-        ("steering.json", build_steering),
-    ):
-        target = INBOX_DIR / name
-        tmp = target.with_suffix(target.suffix + ".part")
-        tmp.write_text(json.dumps(builder(), indent=2) + "\n", encoding="utf-8")
-        tmp.rename(target)
-        print(f"push: wrote {target}")
     return 0
 
 

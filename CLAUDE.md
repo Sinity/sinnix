@@ -303,8 +303,11 @@ Surfaces with standing design decisions an agent might otherwise "fix":
   against a persistent host-local keystore, which keeps `adb install -r` an
   upgrade rather than an uninstall that discards runtime grants. Prime's
   counterpart is `pkgs/sinnix-phone-dispatcher`, served at the hub's
-  `/phone/v1/*`. Operate it through `sinnix phone app-*`; transport and lane
-  detail in `docs/phone.md`.
+  `/phone/v1/*`: the app pushes everything it produces and fetches
+  everything prime has for it, so there is no scheduled drain and
+  `sinnix.services.phone-logcat` is all that pulls (the system log needs
+  READ_LOGS, which the app cannot hold). Operate it through
+  `sinnix phone app-*`; lane detail in `docs/phone.md`.
 
 ## Scripts
 
