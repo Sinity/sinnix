@@ -44,6 +44,10 @@ CENSUS_CLASSES = {
     "ai-backend": "services",
     "mcp-server": "mcp-servers",
     "skill": "skills",
+    "feature": "features",
+    "command": "commands",
+    "capture-lane": "capture-lanes",
+    "agent-lane": "agent-lanes",
 }
 
 # Display order and the one-line framing for each kind. The order is the
@@ -134,12 +138,21 @@ def _evidence(row: dict[str, Any]) -> dict[str, Any]:
     journald = (
         evidence.get("journald") if isinstance(evidence.get("journald"), dict) else {}
     )
+    # Capture lanes are evidenced by path freshness, not a shell/agent/journal
+    # event -- see sinnix-census's lane_freshness().
+    filesystem = (
+        evidence.get("filesystem")
+        if isinstance(evidence.get("filesystem"), dict)
+        else {}
+    )
     return {
         "verdict": str(row.get("verdict") or "unknown"),
         "shell_runs": atuin.get("n"),
         "shell_last": atuin.get("last"),
         "agent_mentions": polylogue.get("n"),
         "journal_lines": journald.get("n"),
+        "path_written_in_window": filesystem.get("n"),
+        "path_last_write": filesystem.get("last"),
         "static_refs": len(row.get("static_refs") or []),
         "window_days": row.get("window_days"),
     }

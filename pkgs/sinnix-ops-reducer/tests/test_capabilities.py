@@ -138,6 +138,121 @@ def test_the_newest_census_run_wins(tmp_path) -> None:
     assert census["sinnix-census"]["static_refs"] == 1
 
 
+def test_new_kinds_get_census_verdicts_through_the_kind_to_class_map(tmp_path) -> None:
+    """sinnix-census's index-derived extension (features, commands,
+    capture-lanes, agent-lanes) is only visible on this page if CENSUS_CLASSES
+    maps each new kind to the class the census actually emits."""
+    index = {
+        "schema": capabilities.SCHEMA,
+        "host": "fixture",
+        "revision": "abc",
+        "rows": [
+            {
+                "kind": "feature",
+                "name": "cli.docling",
+                "description": "x",
+                "invoke": None,
+                "enabled": True,
+                "owner": "modules/features/cli/docling.nix",
+                "docs": None,
+            },
+            {
+                "kind": "command",
+                "name": "switch",
+                "description": "x",
+                "invoke": "switch",
+                "enabled": None,
+                "owner": "flake/command-registry.nix",
+                "docs": None,
+            },
+            {
+                "kind": "capture-lane",
+                "name": "a11y",
+                "description": "x",
+                "invoke": None,
+                "enabled": True,
+                "owner": "modules/services/capture-a11y.nix",
+                "docs": None,
+                "path": "/realm/data/activity/a11y",
+            },
+            {
+                "kind": "agent-lane",
+                "name": "claude-lean",
+                "description": "x",
+                "invoke": "claude-lean",
+                "enabled": None,
+                "owner": "flake/data/agent-lanes.nix",
+                "docs": None,
+            },
+        ],
+    }
+    census_lines = [
+        {
+            "ts": 1,
+            "window_days": 90,
+            "class": "features",
+            "name": "cli.docling",
+            "evidence": {
+                "atuin": {"n": 3, "last": 1},
+                "polylogue": None,
+                "journald": None,
+            },
+            "static_refs": [],
+            "verdict": "active",
+        },
+        {
+            "ts": 1,
+            "window_days": 90,
+            "class": "commands",
+            "name": "switch",
+            "evidence": {
+                "atuin": {"n": 50, "last": 1},
+                "polylogue": None,
+                "journald": None,
+            },
+            "static_refs": [],
+            "verdict": "active",
+        },
+        {
+            "ts": 1,
+            "window_days": 90,
+            "class": "capture-lanes",
+            "name": "a11y",
+            "evidence": {
+                "atuin": None,
+                "polylogue": None,
+                "journald": None,
+                "filesystem": {"n": 1, "last": 2},
+            },
+            "static_refs": [],
+            "verdict": "active",
+        },
+        {
+            "ts": 1,
+            "window_days": 90,
+            "class": "agent-lanes",
+            "name": "claude-lean",
+            "evidence": {
+                "atuin": {"n": 12, "last": 1},
+                "polylogue": None,
+                "journald": None,
+            },
+            "static_refs": [],
+            "verdict": "active",
+        },
+    ]
+    view = capabilities.build(
+        write_index(tmp_path, index), write_census(tmp_path, census_lines)
+    )
+    census = {row["name"]: row["census"] for row in view["rows"]}
+    assert census["cli.docling"]["verdict"] == "active"
+    assert census["switch"]["verdict"] == "active"
+    assert census["a11y"]["verdict"] == "active"
+    assert census["a11y"]["path_written_in_window"] == 1
+    assert census["claude-lean"]["verdict"] == "active"
+    assert view["censused"] == 4
+
+
 def test_kinds_without_a_census_class_carry_no_verdict(tmp_path) -> None:
     view = capabilities.build(write_index(tmp_path), write_census(tmp_path))
     rows = {row["name"]: row for row in view["rows"]}
