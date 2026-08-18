@@ -9,7 +9,6 @@ import sqlite3
 from datetime import datetime, timezone
 
 import pytest
-
 from sinnix_observe import cli, joins, render, runtime_inventory, util
 from sinnix_observe.sources import (
     agent_gateway,
