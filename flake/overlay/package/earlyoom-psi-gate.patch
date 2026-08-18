@@ -1,0 +1,181 @@
+--- a/meminfo.h
++++ b/meminfo.h
+@@ -21,6 +21,9 @@
+     // Calculated percentages
+     double MemAvailablePercent; // percent of physical memory that is available
+     double SwapFreePercent; // percent of total swap that is free
++    // memory PSI "full avg10" from /proc/pressure/memory, or -1 when
++    // pressure data is unavailable
++    double MemPressureFullAvg10;
+ } meminfo_t;
+ 
+ typedef struct procinfo {
+--- a/meminfo.c
++++ b/meminfo.c
+@@ -60,6 +60,46 @@
+     return MemFree + Cached + Buffers - Shmem;
+ }
+ 
++/* Read the "full avg10" value from /proc/pressure/memory.
++ * Returns -1 when pressure data is unavailable (kernel without PSI,
++ * or unreadable file). EARLYOOM_PSI_PATH overrides the path (test hook).
++ */
++static double parse_psi_full_avg10()
++{
++    static FILE* fd;
++    static int warned = 0;
++    char buf[512] = { 0 };
++
++    if (fd == NULL) {
++        char pathbuf[PATH_LEN] = { 0 };
++        const char* path = getenv("EARLYOOM_PSI_PATH");
++        if (path == NULL) {
++            snprintf(pathbuf, sizeof(pathbuf), "%s/pressure/memory", procdir_path);
++            path = pathbuf;
++        }
++        fd = fopen(path, "r");
++        if (fd == NULL) {
++            if (!warned) {
++                warn("could not open %s: %s - memory pressure data unavailable\n",
++                    path, strerror(errno));
++                warned = 1;
++            }
++            return -1;
++        }
++    }
++    rewind(fd);
++
++    size_t len = fread(buf, 1, sizeof(buf) - 1, fd);
++    if (len == 0) {
++        return -1;
++    }
++    char* hit = strstr(buf, "full avg10=");
++    if (hit == NULL) {
++        return -1;
++    }
++    return strtod(hit + strlen("full avg10="), NULL);
++}
++
+ /* Parse /proc/meminfo.
+  * This function either returns valid data or kills the process
+  * with a fatal error.
+@@ -119,6 +159,8 @@
+         m.SwapFreePercent = 0;
+     }
+ 
++    m.MemPressureFullAvg10 = parse_psi_full_avg10();
++
+     return m;
+ }
+ 
+--- a/kill.h
++++ b/kill.h
+@@ -35,6 +35,9 @@
+     int report_interval_ms;
+     /* Flag --dryrun was passed */
+     bool dryrun;
++    /* only kill when memory PSI "full avg10" is at or above this value.
++     * Negative = gate disabled. */
++    double mem_psi_min;
+ } poll_loop_args_t;
+ 
+ void kill_process(const poll_loop_args_t* args, int sig, const procinfo_t* victim);
+--- a/main.c
++++ b/main.c
+@@ -43,6 +43,7 @@
+     LONG_OPT_IGNORE_ROOT,
+     LONG_OPT_USE_SYSLOG,
+     LONG_OPT_SORT_BY_RSS,
++    LONG_OPT_MEM_PSI_MIN,
+ };
+ 
+ static int set_oom_score_adj(int);
+@@ -141,6 +142,7 @@
+         .report_interval_ms = 1000,
+         .ignore_root_user = false,
+         .sort_by_rss = false,
++        .mem_psi_min = -1,
+         /* omitted fields are set to zero */
+     };
+     int set_my_priority = 0;
+@@ -184,6 +186,7 @@
+         { "dryrun", no_argument, NULL, LONG_OPT_DRYRUN },
+         { "ignore-root-user", no_argument, NULL, LONG_OPT_IGNORE_ROOT },
+         { "sort-by-rss", no_argument, NULL, LONG_OPT_SORT_BY_RSS },
++        { "mem-psi-min", required_argument, NULL, LONG_OPT_MEM_PSI_MIN },
+         { "syslog", no_argument, NULL, LONG_OPT_USE_SYSLOG },
+         { "help", no_argument, NULL, 'h' },
+         { "debug", no_argument, NULL, 'd' },
+@@ -301,6 +304,16 @@
+         case LONG_OPT_IGNORE:
+             ignore_cmds = optarg;
+             break;
++        case LONG_OPT_MEM_PSI_MIN: {
++            errno = 0;
++            char* endptr = NULL;
++            double val = strtod(optarg, &endptr);
++            if (errno != 0 || endptr == optarg || *endptr != '\0' || val < 0 || val > 100) {
++                fatal(17, "--mem-psi-min: invalid value '%s' (expected 0..100)\n", optarg);
++            }
++            args.mem_psi_min = val;
++            break;
++        }
+         case 'h':
+             fprintf(stderr,
+                 "Usage: %s [OPTION]...\n"
+@@ -329,6 +342,8 @@
+                 "  --prefer REGEX            prefer to kill processes matching REGEX\n"
+                 "  --avoid REGEX             avoid killing processes matching REGEX\n"
+                 "  --ignore REGEX            ignore processes matching REGEX\n"
++                "  --mem-psi-min VALUE       only kill when memory PSI \"full avg10\" is at or\n"
++                "                            above VALUE (0..100). Requires kernel PSI support.\n"
+                 "  --dryrun                  dry run (do not kill any processes)\n"
+                 "  --syslog                  use syslog instead of std streams\n"
+                 "  -h, --help                this help text\n",
+@@ -415,6 +430,9 @@
+         args.mem_term_percent, args.swap_term_percent);
+     fprintf(stderr, "        SIGKILL when mem avail <= " PRIPCT " and swap free <= " PRIPCT "\n",
+         args.mem_kill_percent, args.swap_kill_percent);
++    if (args.mem_psi_min >= 0) {
++        fprintf(stderr, "kills gated on memory PSI full avg10 >= %.2lf\n", args.mem_psi_min);
++    }
+ 
+     startup_selftests(&args);
+ 
+@@ -497,11 +515,33 @@
+  */
+ static int lowmem_sig(const poll_loop_args_t* args, const meminfo_t* m)
+ {
++    int sig = 0;
+     if (m->MemAvailablePercent <= args->mem_kill_percent && m->SwapFreePercent <= args->swap_kill_percent)
+-        return SIGKILL;
++        sig = SIGKILL;
+     else if (m->MemAvailablePercent <= args->mem_term_percent && m->SwapFreePercent <= args->swap_term_percent)
+-        return SIGTERM;
+-    return 0;
++        sig = SIGTERM;
++
++    /* PSI gate: below the thresholds, but is anything actually stalling?
++     * Fail-open when pressure data is unavailable: the emergency floor
++     * must not be disabled by a missing file. Logs on transitions only. */
++    static bool psi_suppressing = false;
++    if (sig && args->mem_psi_min >= 0 && m->MemPressureFullAvg10 >= 0
++        && m->MemPressureFullAvg10 < args->mem_psi_min) {
++        if (!psi_suppressing) {
++            warn("mem/swap below limits, but memory PSI full avg10 %.2lf < %.2lf: not killing\n",
++                m->MemPressureFullAvg10, args->mem_psi_min);
++            psi_suppressing = true;
++        }
++        return 0;
++    }
++    if (psi_suppressing) {
++        if (sig) {
++            warn("memory PSI full avg10 %.2lf >= %.2lf: kills enabled again\n",
++                m->MemPressureFullAvg10, args->mem_psi_min);
++        }
++        psi_suppressing = false;
++    }
++    return sig;
+ }
+ 
+ // poll_loop is the main event loop. Never returns.

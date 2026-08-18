@@ -49,6 +49,7 @@ in
     ./tests/memory-audit.nix
     ./tests/sinex-nats-security.nix
     ./tests/dots-shell.nix
+    ./tests/earlyoom.nix
   ];
 
   perSystem =
