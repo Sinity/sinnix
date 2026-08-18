@@ -324,7 +324,7 @@ def lanes() -> dict[str, Path]:
     """
     found: dict[str, Path] = {
         "phone": MACHINE / "phone" / "ambient",
-        "voice": MACHINE / "phone" / "estate" / "outbox",
+        "voice": MACHINE / "phone" / "outbox",
     }
     audio = ACTIVITY / "audio"
     if audio.is_dir():
