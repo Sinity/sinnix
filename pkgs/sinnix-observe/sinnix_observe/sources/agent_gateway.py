@@ -190,7 +190,16 @@ def collect_agent_gateway(
     audit_error = None
     db = root / "audit/events.sqlite3"
     try:
-        connection = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=0.25)
+        # The audit db is WAL-mode and actively written by the gateway
+        # process; a plain mode=ro open still needs read-write access to its
+        # -shm sidecar for WAL-index locking, which fails under this
+        # service's ProtectHome=read-only sandbox ("unable to open database
+        # file"). immutable=1 tells sqlite no other connection will need to
+        # coordinate through -shm, skipping that open entirely while still
+        # reading committed WAL frames fresh on each new connection.
+        connection = sqlite3.connect(
+            f"file:{db}?mode=ro&immutable=1", uri=True, timeout=0.25
+        )
         connection.execute("pragma query_only=on")
         rows = connection.execute(
             "select sequence,event_id,occurred_at,profile,operation,outcome,payload_json from events order by sequence desc limit ?",

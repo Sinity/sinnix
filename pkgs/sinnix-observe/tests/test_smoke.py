@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
+
+import pytest
 
 from sinnix_observe import cli, joins, render, runtime_inventory, util
 from sinnix_observe.sources import (
@@ -545,3 +548,51 @@ def test_gateway_audit_probe_reports_stable_unavailable_identifier(
     monkeypatch.setenv("SINNIX_POLYLOGUE_INDEX_DB", str(root / "missing.db"))
     out = agent_gateway.collect_agent_gateway()
     assert out["audit_error"] == "audit_log_unreadable"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses the permission bits")
+def test_gateway_audit_probe_survives_readonly_mount(tmp_path, monkeypatch) -> None:
+    """A WAL-mode audit db must stay readable when its directory is read-only.
+
+    sinnix-ops-reducer runs sinnix-observe under ProtectHome=read-only /
+    ProtectSystem=strict, so the audit sqlite's own directory is mounted
+    read-only in the live path. A plain ``mode=ro`` connect still needs a
+    read-write open of the WAL sidecar (-shm) for locking, which fails there
+    with "unable to open database file" (audit_log_unreadable on every job
+    row) even though the data itself is perfectly readable. This reproduces
+    that failure with chmod instead of a mount namespace: once the WAL file
+    has been checkpointed away, a read-only directory triggers the same
+    write-open attempt and the same class of sqlite3.OperationalError.
+    """
+    root = tmp_path / "gateway"
+    audit_dir = root / "audit"
+    audit_dir.mkdir(parents=True)
+    (root / "jobs").mkdir()
+    db_path = audit_dir / "events.sqlite3"
+    connection = sqlite3.connect(db_path)
+    connection.execute("pragma journal_mode=wal")
+    connection.execute(
+        "create table events (sequence integer primary key, event_id text,"
+        " occurred_at real, profile text, operation text, outcome text,"
+        " payload_json text)"
+    )
+    connection.execute(
+        "insert into events values (1, 'e1', 0.0, 'p', 'op', 'ok', '{}')"
+    )
+    connection.commit()
+    connection.close()
+
+    monkeypatch.setenv("SINNIX_AGENT_GATEWAY_STATE_DIR", str(root))
+    monkeypatch.setenv("SINNIX_AGENT_QUOTA_FILE", str(root / "missing"))
+    monkeypatch.setenv("SINNIX_POLYLOGUE_INDEX_DB", str(root / "missing.db"))
+
+    audit_dir.chmod(0o555)
+    db_path.chmod(0o444)
+    try:
+        out = agent_gateway.collect_agent_gateway()
+    finally:
+        audit_dir.chmod(0o755)
+        db_path.chmod(0o644)
+
+    assert out["audit_error"] is None
+    assert [row["event_id"] for row in out["audit"]] == ["e1"]
