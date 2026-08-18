@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # @sinnix-package
 # description: Build a no-loss index for canonical boot-metric captures
-# runtimeInputs: python3 coreutils
+# runtimeInputs: coreutils
+# pythonPackages: @sinnix-lib
 """Build derived indexes for /realm/data/machine/syslog.
 
 The index is not a summary replacement. It records where raw boot-metric files
@@ -14,11 +15,12 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
-import json
 import os
-import tempfile
 from pathlib import Path
 from typing import Any
+
+from sinnix_lib.atomic_json import write_json_atomic
+from sinnix_lib.ledger import write_jsonl_atomic
 
 SCHEMA = "sinnix-syslog-index-v1"
 DEFAULT_ROOT = Path("/realm/data/machine/syslog")
@@ -72,33 +74,19 @@ def boot_metric_rows(root: Path, *, include_hash: bool) -> list[dict[str, Any]]:
     return rows
 
 
-def publish_atomic(tmp_path: Path, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def give_to_owner(path: Path) -> None:
+    """Hand a published file to whoever owns the directory it lives in.
+
+    This runs as a root system oneshot into a sinity-owned capture tree, so a
+    file left root-owned is a file the operator's own tooling cannot rewrite.
+    The atomic writers do not know about ownership, so it is applied after the
+    rename -- the same order the hand-rolled publisher used.
+    """
     parent_stat = path.parent.stat()
-    tmp_path.replace(path)
     try:
         os.chown(path, parent_stat.st_uid, parent_stat.st_gid)
     except PermissionError:
         pass
-    path.chmod(OUTPUT_MODE)
-
-
-def write_jsonl_atomic(path: Path, rows: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as tmp:
-        tmp_path = Path(tmp.name)
-        for row in rows:
-            tmp.write(json.dumps(row, sort_keys=True) + "\n")
-    publish_atomic(tmp_path, path)
-
-
-def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as tmp:
-        tmp_path = Path(tmp.name)
-        json.dump(payload, tmp, indent=2, sort_keys=True)
-        tmp.write("\n")
-    publish_atomic(tmp_path, path)
 
 
 def parse_args() -> argparse.Namespace:
@@ -117,9 +105,12 @@ def main() -> int:
         raise SystemExit(f"syslog root does not exist: {root}")
 
     boot_metrics = boot_metric_rows(root, include_hash=args.hash)
-    write_jsonl_atomic(output / "boot-metrics.jsonl", boot_metrics)
+    metrics_path = output / "boot-metrics.jsonl"
+    write_jsonl_atomic(metrics_path, boot_metrics, mode=OUTPUT_MODE)
+    give_to_owner(metrics_path)
+    manifest_path = output / "manifest.json"
     write_json_atomic(
-        output / "manifest.json",
+        manifest_path,
         {
             "schema": SCHEMA,
             "created_at": utc_now(),
@@ -131,8 +122,10 @@ def main() -> int:
             },
             "hashes_included": bool(args.hash),
         },
+        mode=OUTPUT_MODE,
     )
-    print(output / "manifest.json")
+    give_to_owner(manifest_path)
+    print(manifest_path)
     return 0
 
 

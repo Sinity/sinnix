@@ -37,8 +37,10 @@ import re
 from http import HTTPStatus
 from pathlib import Path
 
+from sinnix_lib.ledger import utc_ts
+
 from .glance import build_glance, build_steering
-from .state import INBOX_DIR, now_iso
+from .state import INBOX_DIR
 
 #: Generated on demand rather than read from disk, keyed to their builder.
 GENERATED = {
@@ -121,7 +123,7 @@ def list_inbox() -> tuple[HTTPStatus, dict]:
                     "one_shot": one_shot,
                 }
             )
-    return HTTPStatus.OK, {"ok": True, "at": now_iso(), "files": files}
+    return HTTPStatus.OK, {"ok": True, "at": utc_ts(), "files": files}
 
 
 def read_inbox(name: str) -> tuple[HTTPStatus, bytes | dict]:
@@ -192,4 +194,4 @@ def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict
             "received": (declared_sha or "").lower(),
         }
     path.unlink(missing_ok=True)
-    return HTTPStatus.OK, {"ok": True, "name": name, "deleted": True, "at": now_iso()}
+    return HTTPStatus.OK, {"ok": True, "name": name, "deleted": True, "at": utc_ts()}

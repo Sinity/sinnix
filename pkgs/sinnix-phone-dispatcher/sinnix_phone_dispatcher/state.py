@@ -1,5 +1,11 @@
 """Shared constants, directories, and receipt/notify writers.
 
+The message-writing bodies live in sinnix_lib.phone_inbox: scripts/sinnix-score
+writes receipts into the same directory, and one copy of the schema and the
+write-then-rename convention is the difference between the two producers
+drifting silently and not being able to. The directories stay here, resolved
+once at import from SINNIX_PHONE_STATE_DIR/SINNIX_PHONE_LAKE and passed in.
+
 The receipt/notify/push JSON on disk keeps its original (non-compact,
 non-sorted) formatting exactly, so it stays byte-for-byte what the drain and
 the phone app already parse -- this is the on-disk-format boundary
@@ -8,14 +14,11 @@ sinnix_lib.atomic_json does not cross for this package (see pkg.nix).
 
 from __future__ import annotations
 
-import datetime as dt
-import json
 import os
 import re
-import uuid
 from pathlib import Path
 
-SCHEMA = "sinnix.phone.receipt/1"
+from sinnix_lib import phone_inbox
 
 STATE_DIR = Path(os.environ.get("SINNIX_PHONE_STATE_DIR", "/realm/state/sinnix-phone"))
 LAKE_ROOT = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/data/machine/phone"))
@@ -83,10 +86,6 @@ UPLOAD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._@,+()'!&#=~-]{0,127}$")
 TOKEN_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 
-def now_iso() -> str:
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def ensure_dirs() -> None:
     for d in (RECEIPTS_DIR, NOTIFY_DIR, DECKS_DIR, TOKENS_DIR):
         d.mkdir(parents=True, exist_ok=True)
@@ -103,32 +102,10 @@ def emit_receipt(
     app deletes it once shown.
     """
     ensure_dirs()
-    name = f"{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}.json"
-    payload = {
-        "schema": SCHEMA,
-        "kind": kind,
-        "title": title,
-        "body": body,
-        "send_token": send_token,
-        "route": route,
-        "at": now_iso(),
-    }
-    tmp = RECEIPTS_DIR / (name + ".part")
-    tmp.write_text(json.dumps(payload) + "\n", encoding="utf-8")
-    tmp.rename(RECEIPTS_DIR / name)
+    phone_inbox.emit_receipt(RECEIPTS_DIR, kind, title, body, send_token, route)
 
 
 def notify_phone(title: str, body: str, route: str | None = None) -> None:
     """Interrupt the operator through the phone. Sent by prime itself, not by an intent."""
     ensure_dirs()
-    name = f"{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}.json"
-    payload = {
-        "schema": SCHEMA,
-        "title": title,
-        "body": body,
-        "route": route,
-        "at": now_iso(),
-    }
-    tmp = NOTIFY_DIR / (name + ".part")
-    tmp.write_text(json.dumps(payload) + "\n", encoding="utf-8")
-    tmp.rename(NOTIFY_DIR / name)
+    phone_inbox.emit_notify(NOTIFY_DIR, title, body, route)

@@ -27,11 +27,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from .ledger import utc_ts
+
 SCHEMA = "sinnix.phone.receipt/1"
-
-
-def now_iso() -> str:
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def message_name() -> str:
@@ -75,7 +73,7 @@ def emit_receipt(
             "body": body,
             "send_token": send_token,
             "route": route,
-            "at": now_iso(),
+            "at": utc_ts(),
         },
     )
 
@@ -94,6 +92,6 @@ def emit_notify(
             "title": title,
             "body": body,
             "route": route,
-            "at": now_iso(),
+            "at": utc_ts(),
         },
     )

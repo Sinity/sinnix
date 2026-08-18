@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: Score the traces the phone hands to prime — PPG, tremor, sway, interoception, voice — and send the receipt back
 # runtimeInputs: coreutils @sinnix-stt
+# pythonPackages: @sinnix-lib
 
 """The half of the phone's promise that prime has to keep.
 
@@ -15,11 +16,12 @@ hold-still instrument — pulse, tremor, sway, interoception — ended on a
 promise that was never kept. The delivery path was already built and tested
 end to end; only the arithmetic was missing. This is the arithmetic.
 
-Dependency-free on purpose. The signal processing here is a few hundred
+No numeric stack on purpose. The signal processing here is a few hundred
 samples of interpolation, a radix-2 FFT over at most a few thousand points,
 and some peak picking; pulling numpy in for that would add a large closure to
-a script that runs for a second at a time, and the rest of sinnix's
-Python scripts are stdlib-only for the same reason.
+a script that runs for a second at a time. The one import beyond the stdlib is
+sinnix_lib, which is stdlib-only itself and carries the receipt contract this
+script shares with the dispatcher.
 
 The honesty rule that shapes every scorer: a trace can be too short, too
 irregular, or too noisy to carry the number it is supposed to carry, and the
@@ -40,12 +42,13 @@ import re
 import shutil
 import subprocess
 import sys
-import uuid
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from sinnix_lib.ledger import append_jsonl, utc_ts
+from sinnix_lib.phone_inbox import emit_receipt
+
 SCHEMA = "sinnix.phone.score/1"
-RECEIPT_SCHEMA = "sinnix.phone.receipt/1"
 
 STATE_DIR = Path(os.environ.get("SINNIX_PHONE_STATE_DIR", "/realm/state/sinnix-phone"))
 LAKE_ROOT = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/data/machine/phone"))
@@ -59,10 +62,6 @@ LEDGER = SCORES / "scored.jsonl"
 # mechanism: the drain already carries this directory to the phone and the app
 # already renders and deletes what it finds there.
 RECEIPTS_DIR = STATE_DIR / "inbox" / "receipts"
-
-
-def now_iso() -> str:
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def parse_stamp(s: str | None) -> float:
@@ -493,31 +492,6 @@ def score_interoception(trace_path: Path, ppg: dict, started_at: float) -> dict 
     }
 
 
-# ---------------------------------------------------------------- receipts
-
-
-def emit_receipt(kind: str, title: str, body: str, send_token: str | None, route: str | None) -> None:
-    """The same shape and directory the dispatcher writes.
-
-    Not a second mechanism: the drain already carries this directory to the
-    phone and the app already renders what it finds and deletes it.
-    """
-    RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
-    name = f"{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}.json"
-    payload = {
-        "schema": RECEIPT_SCHEMA,
-        "kind": kind,
-        "title": title,
-        "body": body,
-        "send_token": send_token,
-        "route": route,
-        "at": now_iso(),
-    }
-    tmp = RECEIPTS_DIR / (name + ".part")
-    tmp.write_text(json.dumps(payload) + "\n", encoding="utf-8")
-    tmp.rename(RECEIPTS_DIR / name)
-
-
 def transcribe(path: Path) -> dict | None:
     """The whole transcript record, not just its text.
 
@@ -582,7 +556,7 @@ def score_blob(path: Path) -> dict:
         "mode": mode,
         "epoch": meta.get("epoch"),
         "recorded_at": meta.get("recorded_at"),
-        "scored_at": now_iso(),
+        "scored_at": utc_ts(),
     }
 
     if path.suffix == ".m4a" or path.name.startswith("voice-"):
@@ -690,16 +664,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         day = dt.datetime.now(dt.timezone.utc).date().isoformat()
         with (SCORES / f"{day}.jsonl").open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-        with LEDGER.open("a", encoding="utf-8") as fh:
-            fh.write(
-                json.dumps(
-                    {"file": path.name, "bytes": size, "ok": record.get("ok"), "at": now_iso()}
-                )
-                + "\n"
-            )
+        append_jsonl(
+            LEDGER,
+            {"file": path.name, "bytes": size, "ok": record.get("ok"), "at": utc_ts()},
+        )
         if not args.no_receipt:
             title, body = receipt_for(record)
             emit_receipt(
+                RECEIPTS_DIR,
                 record.get("kind") or "score",
                 title,
                 body,

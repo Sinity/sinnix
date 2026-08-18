@@ -10,8 +10,10 @@ import os
 from pathlib import Path
 from typing import Any
 
+from sinnix_lib.ledger import utc_ts
+
 from .external import steer, trigger_score
-from .state import LAKE_ROOT, TOKEN_RE, TOKENS_DIR, emit_receipt, ensure_dirs, now_iso
+from .state import LAKE_ROOT, TOKEN_RE, TOKENS_DIR, emit_receipt, ensure_dirs
 
 
 def seen_token(token: str) -> bool:
@@ -24,7 +26,7 @@ def mark_token(token: str, result: str) -> None:
     if not token or not TOKEN_RE.match(token):
         return
     ensure_dirs()
-    (TOKENS_DIR / token).write_text(f"{now_iso()} {result}\n", encoding="utf-8")
+    (TOKENS_DIR / token).write_text(f"{utc_ts()} {result}\n", encoding="utf-8")
 
 
 def execute(intent: dict) -> dict:
@@ -157,7 +159,7 @@ def deliver_job_answer(intent: dict) -> dict:
         target = answers / f"{job_id}.json"
         tmp = target.with_suffix(".json.part")
         tmp.write_text(
-            json.dumps({"job_id": job_id, "answer": answer, "at": now_iso()}) + "\n",
+            json.dumps({"job_id": job_id, "answer": answer, "at": utc_ts()}) + "\n",
             encoding="utf-8",
         )
         tmp.rename(target)
