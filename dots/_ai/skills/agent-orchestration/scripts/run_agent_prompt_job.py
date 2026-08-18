@@ -418,11 +418,17 @@ class Job:
         for any other transient collision in the launcher chain. It never
         retries a genuine task failure.
         """
+        overlap = len(LAUNCHER_RACE_MARKER) - 1
+        tail = b""
         try:
-            data = Path(path).read_bytes()
+            with open(path, "rb") as fh:
+                while chunk := fh.read(1 << 20):
+                    if LAUNCHER_RACE_MARKER in tail + chunk:
+                        return True
+                    tail = chunk[-overlap:]
         except OSError:
             return False
-        return bool(data) and LAUNCHER_RACE_MARKER in data
+        return False
 
     def race_detected(self) -> bool:
         if self.looks_like_launcher_race(self.args.log_path):
