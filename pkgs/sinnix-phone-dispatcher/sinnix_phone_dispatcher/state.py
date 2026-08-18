@@ -71,11 +71,15 @@ EVENTS_DAY_RE = re.compile(r"^\d{8}$")
 # machine running out of memory.
 MAX_EVENT_BATCH = 8 << 20
 
-# Chunk names are minted by the app from a UTC stamp
-# (`ambient-20260817T103201Z.m4a`, `.orphan` when a crash truncated one).
-# Anchored, no separators, no dots-only: a name that does not match is a bug
-# on the phone, not a file to guess at.
-UPLOAD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+# One path segment of an upload name. Chunk names are minted by the app from
+# a UTC stamp (`ambient-20260817T103201Z.m4a`, `.orphan` when a crash
+# truncated one) and would fit a far tighter pattern, but the same check now
+# guards the mirror lanes, where the segments are whatever the operator's own
+# camera, browser and file manager wrote -- `Samsung Health`, `IMG_20260817
+# (1).jpg`. The characters that matter are the ones NOT here: no separator,
+# and a first character that cannot begin `.` or `..`, which is what makes a
+# traversing name impossible rather than filtered.
+UPLOAD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._@,+()'!&#=~-]{0,127}$")
 
 TOKEN_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
