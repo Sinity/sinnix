@@ -6,12 +6,12 @@
 // just a confidence score), and synthesizes with a completeness critic that
 // names what's still uncovered. Unlike GPT-Researcher, STORM, LangChain
 // open_deep_research, and Local Deep Research, it joins against this
-// estate's own evidence planes (lake captures, polylogue AI-session history,
-// lynchpin analysis products) and emits beads rather than a disposable
-// report file.
+// operator's own evidence planes (lake captures, polylogue AI-session
+// history, lynchpin analysis products) and emits beads rather than a
+// disposable report file.
 //
 // Usage: Workflow({ name: "deep-research", args: { question: "...",
-//   depthBudget: "standard" | "exhaustive", includeEstateEvidence: true } })
+//   depthBudget: "standard" | "exhaustive", includeEvidenceJoin: true } })
 //
 // depthBudget controls searcher count and verification-vote count, not
 // corpus size -- corpus size is "everything found", uncapped.
@@ -25,7 +25,7 @@ export const meta = {
     { title: 'Fetch', detail: 'full-text fetch of every source found, uncapped' },
     { title: 'Extract', detail: 'claim extraction via cheap lanes' },
     { title: 'Verify', detail: 'adversarial refutation per claim' },
-    { title: 'Estate join', detail: 'cross-reference against lake/polylogue/lynchpin evidence' },
+    { title: 'Evidence join', detail: 'cross-reference against lake/polylogue/lynchpin evidence' },
     { title: 'Synthesize', detail: 'completeness-critiqued synthesis + html-report' },
   ],
 }
@@ -104,7 +104,7 @@ const CRITIC_SCHEMA = {
 const question = args?.question
 if (!question) throw new Error('deep-research requires args.question')
 const depthBudget = args?.depthBudget === 'exhaustive' ? 'exhaustive' : 'standard'
-const includeEstateEvidence = args?.includeEstateEvidence !== false
+const includeEvidenceJoin = args?.includeEvidenceJoin !== false
 const voteCount = depthBudget === 'exhaustive' ? 5 : 3
 
 log(`Deep research on: "${question}" (${depthBudget} budget, ${voteCount}-vote verification)`)
@@ -186,14 +186,14 @@ if (sources.length === 0) {
   const confirmedClaims = allClaims.filter((c) => c.survivesVerification)
   log(`${allClaims.length} claims extracted, ${confirmedClaims.length} survived adversarial verification`)
 
-  // --- Phase: Estate evidence join (optional, this repo's actual delta
-  // over the studied reference implementations) ---
-  phase('Estate join')
-  let estateEvidence = null
-  if (includeEstateEvidence) {
-    estateEvidence = await agent(
+  // --- Phase: Evidence join (optional, this repo's actual delta over the
+  // studied reference implementations) ---
+  phase('Evidence join')
+  let evidenceJoinResult = null
+  if (includeEvidenceJoin) {
+    evidenceJoinResult = await agent(
       `Research question: "${question}"\n\nSearch this operator's own evidence planes for anything relevant: Polylogue (past AI-session history -- "have I researched this before, what did I conclude"), Lynchpin (personal analysis products), and the sinnix capture lake (captured browsing/documents that might already contain relevant material). Report what you find, or explicitly state nothing relevant exists in any of the three planes -- do not guess.`,
-      { label: 'estate-evidence-join', phase: 'Estate join' }
+      { label: 'evidence-join', phase: 'Evidence join' }
     )
   }
 
@@ -208,7 +208,7 @@ if (sources.length === 0) {
   )
 
   const synthesis = await agent(
-    `Write the final research synthesis for: "${question}"\n\nConfirmed claims (survived adversarial verification):\n${claimSummary}\n\nRejected/unconfirmed claims (found but did not survive verification -- mention only if relevant to explain what's uncertain):\n${allClaims.filter((c) => !c.survivesVerification).map((c) => `- ${c.claim} [${c.sourceTitle}]`).join('\n') || '(none)'}\n\nEstate evidence found: ${estateEvidence || '(not checked)'}\n\nCompleteness critic's uncovered angles (name these explicitly in the synthesis, don't hide the gaps): ${(critique?.uncoveredAngles || []).join('; ')}\n\nWrite a clear, well-organized synthesis with inline citations. Load and follow the html-report skill's standards, then produce a self-contained HTML report file. Write it to /realm/data/derived/reports/deep-research-<slug>-<date>.html.`,
+    `Write the final research synthesis for: "${question}"\n\nConfirmed claims (survived adversarial verification):\n${claimSummary}\n\nRejected/unconfirmed claims (found but did not survive verification -- mention only if relevant to explain what's uncertain):\n${allClaims.filter((c) => !c.survivesVerification).map((c) => `- ${c.claim} [${c.sourceTitle}]`).join('\n') || '(none)'}\n\nEvidence-join findings: ${evidenceJoinResult || '(not checked)'}\n\nCompleteness critic's uncovered angles (name these explicitly in the synthesis, don't hide the gaps): ${(critique?.uncoveredAngles || []).join('; ')}\n\nWrite a clear, well-organized synthesis with inline citations. Load and follow the html-report skill's standards, then produce a self-contained HTML report file. Write it to /realm/data/derived/reports/deep-research-<slug>-<date>.html.`,
     { label: 'synthesis+report', phase: 'Synthesize' }
   )
 
