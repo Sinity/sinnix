@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Provably fails when: a gate stops blocking the condition it exists for
+# (verified by making the nix-storage gate always report healthy).
 set -euo pipefail
 
 preflight="$1"

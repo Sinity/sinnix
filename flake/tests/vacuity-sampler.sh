@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Provably fails when: the sampler stops de-duplicating a candidate or a
+# judgment, or its report stops deriving the review counters.
 set -euo pipefail
 
 sampler=$1

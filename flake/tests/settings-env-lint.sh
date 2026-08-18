@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Provably fails when: the scanner stops redacting secret-valued keys, stops
+# classifying a value class, or stops exiting 2 on an unexplained finding.
 set -euo pipefail
 
 scanner=${1:?scanner path}
