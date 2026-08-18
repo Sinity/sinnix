@@ -116,6 +116,12 @@
     capture-kitty-scrollback.enable = true;
     # Room air quality from the Awair Element's local API.
     capture-awair.enable = true;
+    # Spotify recently-played listening history. Live now even though the
+    # refresh token doesn't exist yet -- the unit fails its own poll with a
+    # one-line instruction ("run sinnix spotify-auth") until the operator
+    # completes that one interactive bootstrap, so the lane goes live the
+    # moment the token lands with no further config change.
+    capture-spotify.enable = true;
     # AORUS FO48U DDC/CI sensor poll: power state, brightness/contrast drift,
     # input source.
     capture-monitor.enable = true;
