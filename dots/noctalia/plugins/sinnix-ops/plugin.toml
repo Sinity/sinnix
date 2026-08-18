@@ -1,6 +1,6 @@
 id = "sinity/sinnix-ops"
 name = "Sinnix Operations"
-version = "0.2.0"
+version = "0.3.0"
 plugin_api = 9
 author = "Sinity"
 license = "MIT"
@@ -25,6 +25,13 @@ type = "file"
 label_key = "settings.token_path.label"
 description_key = "settings.token_path.description"
 default = "$XDG_RUNTIME_DIR/sinnix/ops.token"
+
+[[setting]]
+key = "hub_url"
+type = "string"
+label_key = "settings.hub_url.label"
+description_key = "settings.hub_url.description"
+default = "http://127.0.0.1:8880"
 
 [[setting]]
 key = "stale_seconds"
