@@ -82,8 +82,8 @@ def atuin_evidence(names: list[str], since_ns: int) -> dict | None:
         for name in names:
             row = conn.execute(
                 "SELECT count(*), max(timestamp) FROM history WHERE timestamp > ?"
-                " AND (command = ? OR command LIKE ? OR command LIKE ?)",
-                (since_ns, name, f"{name} %", f"% {name} %"),
+                " AND (command = ? OR command LIKE ? OR command LIKE ? OR command LIKE ?)",
+                (since_ns, name, f"{name} %", f"% {name} %", f"% {name}"),
             ).fetchone()
             out[name] = {"n": row[0], "last": row[1] and int(row[1] // 1_000_000_000)}
         conn.close()

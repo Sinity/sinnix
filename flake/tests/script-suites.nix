@@ -74,6 +74,15 @@
           scripts = [ "sinnix-config-drift" ];
           nativeBuildInputs = [ pkgs.systemd ];
         };
+        # Provably fails when: the atuin word-boundary match regresses to a
+        # naive substring LIKE (false positives) or drops the trailing-token
+        # position again (false negatives), or the @-edge reachability loop
+        # stops iterating to a fixed point and so misses a two-hop dependency.
+        census-suite = mkScriptSuite {
+          name = "sinnix-census";
+          suiteDir = ../../pkgs/sinnix-census/tests;
+          scripts = [ "sinnix-census" ];
+        };
       };
     };
 }
