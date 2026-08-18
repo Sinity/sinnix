@@ -116,18 +116,6 @@ let
       workspace = "${workspace}${if silent then " silent" else ""}";
     };
 
-  # Create a browser scratchpad (common pattern)
-  mkBrowserScratchpad =
-    name:
-    mkScratchpad "browser-${name}" {
-      class = "^(browser-${name})$";
-      workspace = "special:browser_${name}";
-      size = {
-        w = 0.80;
-        h = 0.85;
-      };
-    };
-
   # Create a dialog rule (float by title or class)
   mkDialog =
     name:
@@ -182,7 +170,6 @@ in
   inherit
     mkRule
     mkScratchpad
-    mkBrowserScratchpad
     mkDialog
     mkIdleInhibit
     mkLayerRule

@@ -14,7 +14,6 @@ let
   inherit (rulesDsl)
     mkRule
     mkScratchpad
-    mkBrowserScratchpad
     mkDialog
     mkIdleInhibit
     mkLayerRule
@@ -30,14 +29,6 @@ let
       class = "^(mpv)$";
     }
     {
-      mode = "fullscreen";
-      class = "^(firefox)$";
-    }
-    {
-      mode = "fullscreen";
-      class = "^(qutebrowser)$";
-    }
-    {
       mode = "focus";
       title = ".*[Yy]ou[Tt]ube.*";
     }
@@ -48,18 +39,6 @@ let
     {
       mode = "focus";
       title = ".*YouTube.*";
-    }
-    {
-      mode = "focus";
-      title = ".*Netflix.*";
-    }
-    {
-      mode = "focus";
-      title = ".*Twitch.*";
-    }
-    {
-      mode = "focus";
-      title = ".*Prime Video.*";
     }
   ];
 
@@ -100,50 +79,6 @@ let
       inherit (spec) class workspace size;
     }
   ) scratchpadSpecs;
-
-  # Browser scratchpads (using specialized helper)
-  browserScratchpads = map mkBrowserScratchpad [
-    "chatgpt"
-    "claude"
-    "aistudio"
-    "raindrop"
-    "ytmusic"
-    "youtube"
-  ];
-
-  # ========================================
-  # Music Workspace Rules
-  # ========================================
-  musicRules = [
-    (mkRule "music-classic-player" {
-      class = "^(music)$";
-      workspace = "special:music";
-    })
-    (mkRule "music-ncspot" {
-      title = "^(ncspot)$";
-      workspace = "special:music";
-    })
-    (mkRule "music-volume-control" {
-      class = "^(pwvucontrol)$";
-      workspace = "special:music";
-      float = true;
-      opacity = 0.8;
-    })
-    (mkRule "music-blueman" {
-      class = "^(blueman-manager)$";
-      workspace = "special:music";
-      float = true;
-      size = {
-        w = 0.40;
-        h = 0.45;
-      };
-      move = {
-        x = "(monitor_w*0.02)";
-        y = "(monitor_h*0.55)";
-      };
-      opacity = 0.8;
-    })
-  ];
 
   # ========================================
   # Application-Specific Rules
@@ -236,24 +171,6 @@ let
         h = 800;
       };
     })
-    (mkRule "qutebrowser-main" {
-      class = "^(qutebrowser)$";
-      tile = true;
-      group = "set";
-    })
-    (mkRule "qutebrowser-floating" {
-      class = "^(qutebrowser)$";
-      floating = true;
-      float = true;
-      size = {
-        w = 0.28;
-        h = 0.24;
-      };
-      move = {
-        x = "(monitor_w*0.70)";
-        y = "(monitor_h*0.06)";
-      };
-    })
     (mkRule "imv-floating" {
       class = "^(imv)$";
       float = true;
@@ -306,9 +223,7 @@ let
   allBlockRules =
     dialogRules
     ++ [ pipRule ]
-    ++ musicRules
     ++ scratchpadRules
-    ++ browserScratchpads
     ++ appRules
     ++ idleBlocks
     ++ layerRules;

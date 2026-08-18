@@ -15,23 +15,7 @@ let
   script = rel: "${sinnix.paths.projectRoot}/scripts/${rel}";
 in
 {
-  submaps.system.settings = {
-    bindd = [
-      ", S, Screenshot region, exec, noctalia msg screenshot-region"
-      ", F, Screenshot fullscreen, exec, noctalia msg screenshot-fullscreen"
-      ", R, Save replay ring, exec, sinnix-replay-save"
-      "SHIFT, R, Stop replay ring, exec, sinnix-replay-stop"
-      ", P, Park background work, exec, sinnix-pressure-park auto"
-      ", T, Thaw parked background work, exec, sinnix-pressure-park thaw"
-      ", M, Pulse OLED ASBL, exec, asbl-no-moar once --duration 0.05"
-      ", H, Show display capture status, exec, sinnix-screenshot-control probe"
-      ", Escape, Exit system controls, submap, reset"
-      ", Return, Exit system controls, submap, reset"
-    ];
-  };
-
   bindd = [
-    "SUPER, End, Open Sinnix system controls, submap, system"
     "SUPER SHIFT, Return, Launch Codex in focused Kitty directory, exec, sinnix-kitty-control launch-agent-here --agent codex"
     "SUPER SHIFT, O, OCR selected region to clipboard, exec, hyprland-ocr"
     "SUPER SHIFT, Z, Increase cursor magnification, exec, hyprctl keyword cursor:zoom_factor 2.0"
@@ -47,17 +31,10 @@ in
     "SUPER, Escape, Lock the session, exec, noctalia msg session lock"
     "SUPER, Slash, Show this keybind cheatsheet, exec, noctalia msg panel-toggle kenn/keybind-cheatsheet:cheatsheet"
     # Maximalist companion to the plugin above: not just Hyprland binds, but
-    # the sinnix CLI, shared skills, qutebrowser binds, and curated
-    # beads/git/agent-dispatch references, all regenerated fresh on open
+    # the sinnix CLI, shared skills, and curated beads/git/agent-dispatch
+    # references, all regenerated fresh on open
     # (sinnix-v034). Regenerate-then-open, not a static file.
     "SUPER SHIFT, Slash, Open the full sinnix cheatsheet, exec, ${script "sinnix-cheatsheet"} && ${script "browser-app"} http://127.0.0.1:8880/reports/cheatsheet.html"
-    "SUPER, A, Jump to the oldest agent needing attention, exec, ${script "sinnix-attention"}"
-    # Unified picker (sinnix-r4u8 browser-inversion front door): history +
-    # bookmarks + clipboard + recent project dirs, one fuzzy surface.
-    # scriptPkgs (not the raw `script` helper) so runtimeInputs land on
-    # PATH -- this script shells out to fuzzel/kitty/zoxide/wl-copy.
-    "SUPER, O, Search history bookmarks clipboard and projects, exec, ${scriptPkgs.sinnix-picker}/bin/sinnix-picker"
-
     "SUPER, H, Focus the window to the left, exec, ${script "kitty-hypr-nav"} focus left"
     "SUPER, J, Focus the window below, exec, ${script "kitty-hypr-nav"} focus down"
     "SUPER, K, Focus the window above, exec, ${script "kitty-hypr-nav"} focus up"
@@ -94,7 +71,6 @@ in
 
     # Disabled for now (user request): term (SUPER+grave) + notes (SUPER+N) scratchpads.
     # "SUPER, grave, exec, uwsm app -- ${script "toggle-scratch"} term"
-    "SUPER, S, Toggle the Spotify scratchpad, exec, uwsm app -- ${script "toggle-scratch"} spotify"
     # "SUPER, N, exec, uwsm app -- ${script "toggle-scratch"} notes"
 
     "SUPER, V, Browse clipboard history, exec, uwsm app -- kitty --class clipse -e clipse"
@@ -128,26 +104,11 @@ in
     "SHIFT, F10, Stop the screen replay ring, exec, sinnix-replay-stop"
     # Gaming: MangoHud toggle is Shift_R+F12 (handled by MangoHud itself)
 
-    # Numpad browser scratchpads (numlock OFF)
-    ", KP_Left, Toggle the ChatGPT scratchpad, exec, uwsm app -- ${script "browser-scratchpad"} chatgpt https://chatgpt.com"
-    ", KP_Begin, Toggle the Claude scratchpad, exec, uwsm app -- ${script "browser-scratchpad"} claude https://claude.ai"
-    ", KP_Right, Toggle the AI Studio scratchpad, exec, uwsm app -- ${script "browser-scratchpad"} aistudio https://aistudio.google.com"
-    ", KP_Home, Toggle the Raindrop bookmarks scratchpad, exec, uwsm app -- ${script "browser-scratchpad"} raindrop https://app.raindrop.io"
-    ", KP_Up, Toggle the YouTube Music scratchpad, exec, uwsm app -- ${script "browser-scratchpad"} ytmusic https://music.youtube.com"
-    ", KP_Prior, Toggle the YouTube scratchpad, exec, uwsm app -- ${script "browser-scratchpad"} youtube https://youtube.com"
-
-    "SUPER SHIFT, P, Pin the window above all workspaces, pin"
-
     "SUPER, C, Open the code editor, exec, uwsm app -- ${script "open-code-editor"}"
-    "SUPER, B, Open a browser window, exec, uwsm app -- qutebrowser --target window"
-    "SUPER SHIFT, B, Open a browser window, exec, uwsm app -- qutebrowser --target window"
+    "SUPER, B, Open a new Chrome window, exec, uwsm app -- sinnix-chrome --new-window"
     "SUPER, G, Group or ungroup the window, togglegroup"
-    "SUPER, bracketleft, Add the window to the group on the left, moveintogroup, l"
-    "SUPER, bracketright, Add the window to the group on the right, moveintogroup, r"
-    "SUPER SHIFT, bracketleft, Take the window out of its group, moveoutofgroup"
     "SUPER SHIFT, G, Open a grid of terminals, exec, uwsm app -- ${script "kitty-grid"}"
     "SUPER CTRL, G, Open a 3x3 grid of terminals, exec, uwsm app -- ${script "kitty-grid"} --grid 3x3"
-    "SUPER SHIFT, C, Arrange browser windows into a grid, exec, uwsm app -- ${script "kitty-grid"} --class qutebrowser --grid 3x2 --arrange-only"
 
     ",XF86AudioMute, Mute or unmute audio, exec, pamixer -t"
     ",XF86AudioPlay, Play or pause media, exec, playerctl play-pause && notify-send -t 1000 '♪ Media' '$(playerctl status)'"
@@ -158,22 +119,16 @@ in
     "SUPER, XF86AudioMute, Mute or unmute the microphone, exec, ${script "audio"} mic-toggle"
     "SUPER, XF86AudioRaiseVolume, Switch to the next audio output, exec, ${script "audio"} toggle"
 
-    "SUPER, Tab, Cycle forward through the group, changegroupactive, f"
+    # The #1 measured behavior on this desktop (workspace 1<->2 toggling,
+    # thousands of fires) had no dedicated key; group-cycling here was
+    # near-zero usage, so Tab is freed for it.
+    "SUPER, Tab, Switch to the previous workspace, workspace, previous"
     "SUPER SHIFT, Tab, Cycle backward through the group, changegroupactive, b"
-    "SUPER SHIFT, T, Lock the group so new windows stay out, lockactivegroup, toggle"
 
     "SUPER CTRL, H, Shrink or grow the window leftward, exec, ${script "kitty-hypr-nav"} resize left"
     "SUPER CTRL, L, Shrink or grow the window rightward, exec, ${script "kitty-hypr-nav"} resize right"
     "SUPER CTRL, K, Shrink or grow the window upward, exec, ${script "kitty-hypr-nav"} resize up"
     "SUPER CTRL, J, Shrink or grow the window downward, exec, ${script "kitty-hypr-nav"} resize down"
-
-    "SUPER ALT, H, Nudge the floating window left, moveactive, -80 0"
-    "SUPER ALT, L, Nudge the floating window right, moveactive, 80 0"
-    "SUPER ALT, K, Nudge the floating window up, moveactive, 0 -80"
-    "SUPER ALT, J, Nudge the floating window down, moveactive, 0 80"
-
-    "SUPER, P, Toggle pseudo-tiling for the window, pseudo"
-    "SUPER, Y, Flip the tiling split direction, layoutmsg, togglesplit"
   ];
 
   # binddl / binddm: the described variants of bindl (works while locked) and
@@ -189,6 +144,5 @@ in
   binddm = [
     "SUPER, mouse:272, Drag to move the window, movewindow"
     "SUPER, mouse:273, Drag to resize the window, resizewindow"
-    "SUPER ALT, mouse:272, Drag to resize the window, resizewindow"
   ];
 }
