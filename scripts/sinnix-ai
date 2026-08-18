@@ -15,32 +15,60 @@ export LC_ALL=C
 PIN_PREFIX="sinnix-ai-pin-"
 DEFAULT_PIN_DURATION="2h"
 
-# Registry: name|unit|port|probe-path|description
-# Keep in sync with modules/services/*.nix (ports are module defaults).
-REGISTRY="$(cat <<'EOF'
-stt|sinnix-stt|8090|/|Speech-to-text hub (Parakeet TDT via sherpa-onnx, CPU)
-tts|podman-openedai-speech|8000|/v1/models|OpenedAI-Speech TTS (Piper + XTTS, container)
-kokoro|podman-kokoro|8890|/health|Kokoro-82M TTS (CPU, OpenAI-compatible, container)
-ollama|ollama|11434|/api/tags|Ollama LLM/VLM hub (CUDA)
-litellm|litellm|4000|/health/liveliness|LiteLLM gateway (Anthropic<->OpenAI, fronts Ollama)
-llama-cpp|llama-cpp|8081|/health|llama.cpp HTTP server (CUDA, GGUF)
-muse-glimmer|muse-glimmer|8083|/v1/models|Muse Glimmer 30B hybrid llama.cpp server
-koboldcpp|koboldcpp|5001|/api/v1/info|koboldcpp all-in-one (text/vision/SD, GGUF)
-comfyui|podman-comfyui|8188|/system_stats|ComfyUI image/video generation (container)
-musicgen|podman-musicgen|8010|/|MusicGen/Bark text-to-audio (container)
-ocr|podman-ocr|8020|/|OCR / document understanding (marker-api, container)
-open-webui|open-webui|8080|/health|Open WebUI chat frontend (fronts Ollama)
-EOF
-)"
+INVENTORY="${SINNIX_RUNTIME_INVENTORY_FILE:-/etc/sinnix/runtime-inventory.json}"
+OPS_SOCKET="${XDG_RUNTIME_DIR:-/run/user/1000}/sinnix/ops.sock"
+
+# Every service fact below (unit, endpoint, idle timeout, admission key,
+# manager, restartability) is resolved live from the runtime inventory --
+# this script carries no second copy of ai-control.nix's registry. Exactly
+# two things identify a service by name at all: the deterministic
+# `<name>-proxy` unit ai-control.nix itself names every idle-aware backend's
+# front door with, and (for the one registered AI frontend with no such
+# proxy -- open-webui, which fronts Ollama directly) the hub module's own
+# declared `aiServices` list, read out of the live reducer's ExecStart
+# rather than duplicated here. Neither is a private table: both are the
+# actual Nix-declared source, read at run time.
+inventory_json() {
+  if [[ ! -r "$INVENTORY" ]]; then
+    echo "sinnix-ai: runtime inventory unreadable: $INVENTORY" >&2
+    exit 1
+  fi
+  cat "$INVENTORY"
+}
+
+hub_manifest_path() {
+  systemctl --user show sinnix-ops-reducer.service -p ExecStart --value 2>/dev/null \
+    | grep -oE -- '--hub-manifest [^ ]+' | awk '{print $2}' || true
+}
+
+manifest_ai_services() {
+  local path
+  path="$(hub_manifest_path)"
+  [[ -n "$path" && -r "$path" ]] || return 0
+  jq -r '.aiServices[]?' "$path" 2>/dev/null || true
+}
+
+proxy_backed_services() {
+  inventory_json | jq -r '
+    .surfaces as $s
+    | $s | keys[]
+    | select($s[. + "-proxy"] != null)
+  '
+}
+
+service_names() {
+  { proxy_backed_services; manifest_ai_services; } | sort -u
+}
 
 usage() {
   cat <<'EOF'
 usage: sinnix-ai <command> [args]
 
 commands:
-  list                 All AI services: state, port, autostart, description
+  list                 All AI services: state, endpoint, autostart, admission key
   status [name]        Detail for one service (or GPU + active summary)
-  start <name>...      Start service(s) (sudo systemctl start)
+  start <name>...      Start service(s) (proxy reset-failed direct; backend via the
+                       ops-reducer action API, same admission path the hub uses)
   stop <name>...       Stop service(s) and free VRAM
   pin <name> [dur]     Keep service resident past its idle timeout (default: 2h)
   unpin <name>         Release a pin early (idempotent; ok if not pinned)
@@ -48,28 +76,31 @@ commands:
   gpu                  VRAM snapshot (nvidia-smi)
 
 Services are on-demand by design: start them when needed, stop them to
-reclaim VRAM. Registry lives in this script; ports are module defaults
-from sinnix modules/services/*.nix.
+reclaim VRAM. The service set and every fact about each one (unit, public
+endpoint, idle timeout, gpu-inference admission key, restartability) is
+resolved live from /etc/sinnix/runtime-inventory.json -- run `sinnix-ai
+list` to see exactly what this host currently has registered.
 
 Pinning: services fronted by an idle-aware socket proxy (see
 modules/services/ai-control.nix) tear down after a short idle window
-(currently 30s) once nothing is connected. `pin` holds one open
-connection to the service's public port for a bounded duration so it
-stays resident during a work session. Release is automatic (systemd
-RuntimeMaxSec on a transient --user unit kills the holder and closes
-the connection at the deadline), so a pin cannot outlive its duration
-and never survives a reboot or a killed shell as orphan state. Duration
-accepts bare seconds, or a number with s/m/h suffix (e.g. 30m, 2h). Services
-without an idle-aware proxy (open-webui) don't idle-teardown in the first
-place, so pinning them is a no-op refused with an explanation.
-EOF
-}
+once nothing is connected. `pin` holds one open connection to the
+service's public port for a bounded duration so it stays resident during
+a work session. Release is automatic (systemd RuntimeMaxSec on a
+transient --user unit kills the holder and closes the connection at the
+deadline), so a pin cannot outlive its duration and never survives a
+reboot or a killed shell as orphan state. Duration accepts bare seconds,
+or a number with s/m/h suffix (e.g. 30m, 2h). Services without an
+idle-aware proxy (open-webui) don't idle-teardown in the first place, so
+pinning them is a no-op refused with an explanation.
 
-lookup() {
-  local name="$1" line
-  line=$(grep -m1 "^${name}|" <<<"$REGISTRY" || true)
-  [[ -n "$line" ]] || { echo "unknown service: ${name} (see: sinnix-ai list)" >&2; exit 1; }
-  IFS='|' read -r REG_NAME REG_UNIT REG_PORT REG_PROBE REG_DESC <<<"$line"
+start/stop delegate the backend unit's own lifecycle to the ops-reducer's
+action API (%t/sinnix/ops.sock), the same admission path the hub's /ai/
+panel buttons use, so restartability and idempotency stay single-sourced.
+Bringing the socket proxy back from a latched trigger-limit (reset-failed
++ start) has no equivalent action-API verb and stays a direct systemctl
+call -- it is cleanup of the front door, not a lifecycle decision about
+the registered backend.
+EOF
 }
 
 unit_installed() { systemctl cat "$1" >/dev/null 2>&1; }
@@ -85,11 +116,15 @@ autostart_state() {
   if [[ -n "$wanted" ]]; then echo "boot"; else echo "on-demand"; fi
 }
 
+# TCP-connect only, deliberately -- an HTTP health-check path is per-backend
+# API knowledge the inventory does not carry (and should not: it is not an
+# infrastructure fact ai-control.nix owns). Sufficient to answer "is anything
+# listening", which is all `list`/`status` need.
 port_alive() {
-  curl -fsS -m 2 -o /dev/null "http://127.0.0.1:$1$2" 2>/dev/null && echo yes || echo no
+  local host="$1" port="$2"
+  [[ -n "$host" && -n "$port" ]] || { echo no; return; }
+  (exec 3<>"/dev/tcp/${host}/${port}") 2>/dev/null && { exec 3<&- 3>&-; echo yes; } || echo no
 }
-
-has_proxy() { unit_installed "${1}-proxy.service"; }
 
 # Prints one of: "" (not pinned/no pin unit), "unknown" (active, no parsable
 # deadline), or a non-negative integer of seconds remaining. Live systemd
@@ -127,16 +162,48 @@ pin_summary() {
   fi
 }
 
+# Populates REG_NAME/REG_REGISTERED/REG_UNIT/REG_MANAGER/REG_ENDPOINT/
+# REG_IDLE/REG_ADMISSION/REG_RESTARTABLE/REG_HAS_PROXY for one service name.
+# REG_REGISTERED=0 means the name is a known AI service on this estate but
+# has no live surface here (module disabled) -- distinct from an unknown
+# name entirely, which is rejected before this runs.
+lookup() {
+  local name="$1" surface
+  if ! service_names | grep -qxF "$name"; then
+    echo "unknown service: ${name} (see: sinnix-ai list)" >&2
+    exit 1
+  fi
+  REG_NAME="$name"
+  surface="$(inventory_json | jq -c --arg n "$name" '.surfaces[$n] // null')"
+  if [[ "$surface" == "null" ]]; then
+    REG_REGISTERED=0
+    REG_UNIT=""; REG_MANAGER="system"; REG_ENDPOINT=""; REG_IDLE=""
+    REG_ADMISSION=""; REG_RESTARTABLE="false"; REG_HAS_PROXY=0
+    return
+  fi
+  REG_REGISTERED=1
+  REG_UNIT="$(jq -r '.unit' <<<"$surface")"
+  REG_MANAGER="$(jq -r '.manager // "system"' <<<"$surface")"
+  REG_ENDPOINT="$(jq -r '.activation.publicEndpoint // empty' <<<"$surface")"
+  REG_IDLE="$(jq -r '.activation.idleTimeout // empty' <<<"$surface")"
+  REG_ADMISSION="$(jq -r '.activation.exclusiveResource // empty' <<<"$surface")"
+  REG_RESTARTABLE="$(jq -r '.observe.restartable // false' <<<"$surface")"
+  if unit_installed "${REG_NAME}-proxy.service"; then REG_HAS_PROXY=1; else REG_HAS_PROXY=0; fi
+}
+
 cmd_list() {
-  printf '%-11s %-13s %-6s %-10s %-14s %s\n' NAME STATE PORT START PIN DESCRIPTION
-  while IFS='|' read -r name unit port probe desc; do
+  printf '%-12s %-13s %-22s %-10s %-14s %s\n' NAME STATE ENDPOINT START PIN ADMISSION
+  while IFS= read -r name; do
     [[ -n "$name" ]] || continue
-    local state astart="-" pin
-    state=$(unit_state "$unit")
-    [[ "$state" == "not-installed" ]] || astart=$(autostart_state "$unit")
-    pin=$(pin_summary "$name")
-    printf '%-11s %-13s %-6s %-10s %-14s %s\n' "$name" "$state" "$port" "$astart" "$pin" "$desc"
-  done <<<"$REGISTRY"
+    lookup "$name"
+    local state="not-installed" astart="-" pin="-" admission="${REG_ADMISSION:--}"
+    if [[ "$REG_REGISTERED" == 1 ]]; then
+      state=$(unit_state "$REG_UNIT")
+      [[ "$state" == "not-installed" ]] || astart=$(autostart_state "$REG_UNIT")
+      pin=$(pin_summary "$name")
+    fi
+    printf '%-12s %-13s %-22s %-10s %-14s %s\n' "$name" "$state" "${REG_ENDPOINT:--}" "$astart" "$pin" "$admission"
+  done < <(service_names)
 }
 
 cmd_gpu() {
@@ -155,24 +222,34 @@ cmd_status() {
     return
   fi
   lookup "$1"
-  echo "service: $REG_NAME — $REG_DESC"
+  if [[ "$REG_REGISTERED" != 1 ]]; then
+    echo "service: $REG_NAME"
+    echo "unit:    not registered on this host (enable its sinnix module)"
+    return
+  fi
+  echo "service: $REG_NAME"
   echo "unit:    $REG_UNIT ($(unit_state "$REG_UNIT"), $(autostart_state "$REG_UNIT"))"
+  local host="" port=""
+  if [[ -n "$REG_ENDPOINT" ]]; then
+    host="${REG_ENDPOINT%%:*}"; port="${REG_ENDPOINT##*:}"
+  fi
   # Probing the PUBLIC port is not a read: it connects to the
   # socket-activation front door, so it STARTS the backend -- and for a
   # gpu-inference member, starting it evicts whatever else was resident
   # (Conflicts= SIGKILLs the peer). Only probe a backend already up.
   if [[ "$(unit_state "$REG_UNIT")" == active ]]; then
-    echo "port:    127.0.0.1:$REG_PORT (responding: $(port_alive "$REG_PORT" "$REG_PROBE"))"
-  elif has_proxy "$REG_NAME"; then
-    echo "port:    127.0.0.1:$REG_PORT (not probed — connecting would start it and evict any resident peer)"
+    echo "endpoint: ${REG_ENDPOINT:-n/a} (responding: $(port_alive "$host" "$port"))"
+  elif [[ "$REG_HAS_PROXY" == 1 ]]; then
+    echo "endpoint: ${REG_ENDPOINT:-n/a} (not probed — connecting would start it and evict any resident peer)"
   else
-    echo "port:    127.0.0.1:$REG_PORT (not probed — backend is not running)"
+    echo "endpoint: ${REG_ENDPOINT:-n/a} (not probed — backend is not running)"
   fi
-  if has_proxy "$REG_NAME"; then
+  [[ -n "$REG_ADMISSION" ]] && echo "admission key: $REG_ADMISSION"
+  if [[ "$REG_HAS_PROXY" == 1 ]]; then
     local remaining
     remaining=$(pin_remaining "$REG_NAME")
     if [[ -z "$remaining" ]]; then
-      echo "pin:     not pinned (idle teardown active, ${REG_NAME}-proxy.service)"
+      echo "pin:     not pinned (idle teardown active${REG_IDLE:+, exits after ${REG_IDLE}}, ${REG_NAME}-proxy.service)"
     elif [[ "$remaining" == "unknown" ]]; then
       echo "pin:     pinned (remaining time unknown)"
     else
@@ -186,28 +263,77 @@ cmd_status() {
   fi
 }
 
+ops_get() {
+  curl -fsS -m 3 --unix-socket "$OPS_SOCKET" "http://localhost$1" 2>/dev/null
+}
+
+ops_snapshot_sequence() {
+  ops_get /v1/snapshot | jq -r '.sequence // empty' 2>/dev/null
+}
+
+# start/stop delegate the target unit's own lifecycle to the ops-reducer's
+# bounded action API instead of calling systemctl directly: the API already
+# enforces the one admission rule that matters here (the target must be an
+# attested runtime-inventory unit declaring observe.restartable) and records
+# an idempotent receipt, which is exactly what the hub's own AI panel
+# buttons rely on -- running both paths would let this CLI accept a start
+# the browser's admission check would have refused, or vice versa.
+ops_action() {
+  local action="$1" unit="$2" reason="$3"
+  local seq body resp http_code err attempt
+  for attempt in 1 2; do
+    seq="$(ops_snapshot_sequence)"
+    if [[ -z "$seq" ]]; then
+      echo "sinnix-ai: ops-reducer socket unavailable at $OPS_SOCKET" >&2
+      return 1
+    fi
+    body="$(jq -nc \
+      --arg action "$action" --arg unit "$unit" --argjson seq "$seq" \
+      --arg key "$(cat /proc/sys/kernel/random/uuid)" --arg reason "$reason" \
+      '{action:$action,target:{unit:$unit},expected_revision:$seq,idempotency_key:$key,operator_reason:$reason,parameters:{}}')"
+    resp="$(curl -sS -m 15 --unix-socket "$OPS_SOCKET" -X POST \
+      -H 'Content-Type: application/json' -d "$body" \
+      -w $'\n%{http_code}' "http://localhost/v1/actions")"
+    http_code="${resp##*$'\n'}"
+    resp="${resp%$'\n'*}"
+    if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
+      return 0
+    fi
+    err="$(jq -r '.error // "unknown error"' <<<"$resp" 2>/dev/null || echo "unknown error")"
+    if [[ "$http_code" == 409 && "$err" == *"expected_revision"* && "$attempt" == 1 ]]; then
+      continue # the reducer refreshed between our GET and POST; retry once with a fresh sequence
+    fi
+    echo "sinnix-ai: $action $unit refused ($http_code): $err" >&2
+    return 1
+  done
+  return 1
+}
+
 cmd_start() {
   [[ $# -ge 1 ]] || { usage; exit 1; }
   local name
   for name in "$@"; do
     lookup "$name"
-    unit_installed "$REG_UNIT" || { echo "$name: unit $REG_UNIT not installed on this host (enable its sinnix module)" >&2; exit 1; }
+    [[ "$REG_REGISTERED" == 1 ]] || { echo "$name: not registered on this host (enable its sinnix module)" >&2; exit 1; }
     echo "starting $REG_NAME ($REG_UNIT)..."
-    # Bring the front door up first, and clear any latched failure on it: a
-    # socket that has hit its activation trigger limit stays failed until
-    # something resets it, and then the public port refuses every connection
-    # no matter how healthy the backend is.
-    if has_proxy "$REG_NAME"; then
+    if [[ "$REG_HAS_PROXY" == 1 ]]; then
+      # Clear any latched activation-trigger-limit failure and bring the
+      # front door up first: a socket stuck failed refuses every connection
+      # no matter how healthy the backend then becomes.
       sudo systemctl reset-failed "${REG_NAME}-proxy.socket" "${REG_NAME}-proxy.service" 2>/dev/null || true
       sudo systemctl start "${REG_NAME}-proxy.socket"
     fi
-    sudo systemctl start "$REG_UNIT"
-    local i
-    for i in $(seq 1 30); do
-      [[ "$(port_alive "$REG_PORT" "$REG_PROBE")" == yes ]] && break
-      sleep 1
-    done
-    echo "$REG_NAME: $(unit_state "$REG_UNIT"), port $REG_PORT responding: $(port_alive "$REG_PORT" "$REG_PROBE")"
+    ops_action start "$REG_UNIT" "sinnix-ai start $REG_NAME"
+    local host="" port="" i responding="no"
+    if [[ -n "$REG_ENDPOINT" ]]; then host="${REG_ENDPOINT%%:*}"; port="${REG_ENDPOINT##*:}"; fi
+    if [[ -n "$port" ]]; then
+      for i in $(seq 1 30); do
+        responding="$(port_alive "$host" "$port")"
+        [[ "$responding" == yes ]] && break
+        sleep 1
+      done
+    fi
+    echo "$REG_NAME: $(unit_state "$REG_UNIT"), endpoint ${REG_ENDPOINT:-n/a} responding: $responding"
   done
 }
 
@@ -216,14 +342,15 @@ cmd_stop() {
   local name
   for name in "$@"; do
     lookup "$name"
+    [[ "$REG_REGISTERED" == 1 ]] || { echo "$name: not registered on this host" >&2; exit 1; }
     echo "stopping $REG_NAME ($REG_UNIT)..."
-    # Stop the proxy first: PartOf= carries the stop down to the backend, and
-    # leaving a live proxy behind would just re-summon it. The .socket stays
-    # listening so the next request cold-starts normally.
-    if has_proxy "$REG_NAME"; then
+    if [[ "$REG_HAS_PROXY" == 1 ]]; then
+      # Stop the proxy first: PartOf= carries the stop down to the backend,
+      # and leaving a live proxy behind would just re-summon it. The
+      # .socket stays listening so the next request cold-starts normally.
       sudo systemctl stop "${REG_NAME}-proxy.service"
     fi
-    sudo systemctl stop "$REG_UNIT"
+    ops_action stop "$REG_UNIT" "sinnix-ai stop $REG_NAME"
     echo "$REG_NAME: $(unit_state "$REG_UNIT")"
   done
 }
@@ -249,10 +376,11 @@ cmd_pin() {
   [[ $# -ge 1 ]] || { usage; exit 1; }
   local name="$1" duration="${2:-$DEFAULT_PIN_DURATION}"
   lookup "$name"
-  has_proxy "$REG_NAME" || {
+  [[ "$REG_HAS_PROXY" == 1 ]] || {
     echo "$REG_NAME has no idle-aware proxy (${REG_NAME}-proxy.service not installed) -- nothing auto-tears it down, so there is nothing to pin against" >&2
     exit 1
   }
+  local port="${REG_ENDPOINT##*:}"
   local seconds; seconds=$(parse_duration "$duration")
   local unit="${PIN_PREFIX}${REG_NAME}"
   local deadline=$(( $(date +%s) + seconds ))
@@ -265,9 +393,9 @@ cmd_pin() {
   systemd-run --user --unit="$unit" --collect \
     --description="sinnix-ai pin ${REG_NAME} until ${deadline}" \
     --property="RuntimeMaxSec=${seconds}" \
-    -- bash -c "exec 9<>/dev/tcp/127.0.0.1/${REG_PORT} || exit 1; sleep infinity" \
+    -- bash -c "exec 9<>/dev/tcp/127.0.0.1/${port} || exit 1; sleep infinity" \
     >/dev/null
-  echo "pinned $REG_NAME: holding a connection on port $REG_PORT for ${duration} (releases automatically; unit: ${unit}.service)"
+  echo "pinned $REG_NAME: holding a connection on port $port for ${duration} (releases automatically; unit: ${unit}.service)"
 }
 
 cmd_unpin() {
@@ -284,6 +412,7 @@ cmd_unpin() {
 
 cmd_logs() {
   lookup "$1"; shift
+  [[ "$REG_REGISTERED" == 1 ]] || { echo "$REG_NAME: not registered on this host" >&2; exit 1; }
   local n=50
   [[ "${1:-}" == "-n" ]] && n="$2"
   journalctl -u "$REG_UNIT" -n "$n" --no-pager
