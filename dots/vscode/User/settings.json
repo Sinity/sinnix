@@ -32,13 +32,25 @@
   "rust-analyzer.cargo.allFeatures": true,
   "rust-analyzer.procMacro.enable": true,
   // ——— Nix ———
+  // nixd from the system profile (languages.nix) — same server as nvim.
   "nix.formatterPath": "nixfmt",
+  "nix.serverPath": "nixd",
+  "nix.serverSettings": {
+    "nixd": {
+      "formatting": {
+        "command": ["nixfmt"]
+      }
+    }
+  },
   // ——— Terminal ———
   "terminal.integrated.inheritEnv": true,
   "terminal.integrated.fontFamily": "SauceCodePro Nerd Font Mono",
   "terminal.integrated.enableMultiLinePasteWarning": "auto",
   "terminal.integrated.defaultProfile.linux": "zsh",
   "terminal.integrated.profiles.linux": {
+    "claude": {
+      "path": "claude"
+    },
     "codex": {
       "path": "codex"
     }
@@ -49,8 +61,7 @@
     "**/.direnv/**": true,
     "**/node_modules/**": true
   },
-  // ——— Foam / Markdown ———
-  "foam.edit.linkReferenceDefinitions": "withExtensions",
+  // ——— Markdown ———
   "markdown.references.preferredLocation": "endOfFile",
   // ——— Editor QoL ———
   "breadcrumbs.enabled": true,
@@ -370,33 +381,6 @@
       ]
     },
     {
-      "key": "n",
-      "name": "Nix",
-      "type": "bindings",
-      "bindings": [
-        {
-          "key": "c",
-          "name": "Run Task…",
-          "type": "command",
-          "command": "workbench.action.tasks.runTask"
-        },
-        {
-          "key": "s",
-          "name": "nix: switch",
-          "type": "command",
-          "command": "workbench.action.tasks.runTask",
-          "args": "nix: switch"
-        },
-        {
-          "key": "f",
-          "name": "nix: flake check",
-          "type": "command",
-          "command": "workbench.action.tasks.runTask",
-          "args": "nix: flake check"
-        }
-      ]
-    },
-    {
       "key": "m",
       "name": "Notes",
       "type": "bindings",
@@ -406,31 +390,55 @@
           "name": "Markdown Preview",
           "type": "command",
           "command": "markdown.showPreviewToSide"
-        },
-        {
-          "key": "g",
-          "name": "Foam: Show Graph",
-          "type": "command",
-          "command": "foam-vscode.show-graph"
         }
       ]
     },
     {
       "key": "a",
-      "name": "AI / Copilot",
+      "name": "AI",
       "type": "bindings",
       "bindings": [
         {
-          "key": "c",
-          "name": "Open Chat",
+          "key": "a",
+          "name": "Claude Code: Side Bar",
           "type": "command",
-          "command": "workbench.action.copilot.chat.open"
+          "command": "claude-vscode.sidebar.open"
+        },
+        {
+          "key": "t",
+          "name": "Claude Code: New Tab",
+          "type": "command",
+          "command": "claude-vscode.editor.open"
+        },
+        {
+          "key": "n",
+          "name": "Claude Code: New Conversation",
+          "type": "command",
+          "command": "claude-vscode.newConversation"
+        },
+        {
+          "key": "x",
+          "name": "Codex: Side Bar",
+          "type": "command",
+          "command": "chatgpt.openSidebar"
+        },
+        {
+          "key": "X",
+          "name": "Codex: New Agent",
+          "type": "command",
+          "command": "chatgpt.newCodexPanel"
+        },
+        {
+          "key": "c",
+          "name": "Chat (built-in)",
+          "type": "command",
+          "command": "workbench.action.chat.open"
         },
         {
           "key": "i",
           "name": "Inline Chat",
           "type": "command",
-          "command": "editor.action.copilot.inlineChat.start"
+          "command": "inlineChat.start"
         }
       ]
     },

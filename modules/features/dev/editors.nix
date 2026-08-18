@@ -100,6 +100,15 @@ mkFeatureModule {
           version = "0.12.0";
           hash = "sha256-9uqR4BGXzMh7V1zfKJ8+Zn7tagfVbDXsBh5iS1mzQdk=";
         };
+        # Official Codex IDE extension (marketplace id openai.chatgpt);
+        # platform-specific vsix, hence the explicit linux-x64 pin.
+        codex = mkPinnedVscodeMarketplaceExtension {
+          publisher = "openai";
+          name = "chatgpt";
+          version = "26.5814.41407";
+          hash = "sha256-ol3GFVXQebmJ4ywiAXzV5D4LaJTTQoSBrjRYGDjGZwg=";
+          platform = "linux-x64";
+        };
       };
       waylandEditorFlags =
         "--enable-features=UseOzonePlatform --ozone-platform=wayland "
@@ -141,6 +150,8 @@ mkFeatureModule {
               pkgs.vscode-extensions.oderwat.indent-rainbow
               pkgs.vscode-extensions.jnoortheen.nix-ide
               pkgs.vscode-extensions.rust-lang.rust-analyzer
+              pkgs.vscode-extensions.ms-pyright.pyright
+              pkgs.vscode-extensions.charliermarsh.ruff
               pkgs.vscode-extensions.tamasfe.even-better-toml
               pkgs.vscode-extensions.asvetliakov.vscode-neovim
               pkgs.vscode-extensions.editorconfig.editorconfig
@@ -151,6 +162,11 @@ mkFeatureModule {
               vscodeMarketplacePinned.errorlens
               vscodeMarketplacePinned.markdownAllInOne
               vscodeMarketplacePinned.codexRatelimit
+              # The machine's AI lane: Claude Code + Codex as declared
+              # extensions (the extensions dir is immutable, so the CLIs'
+              # self-install path cannot provide them).
+              pkgs.vscode-extensions.anthropic.claude-code
+              vscodeMarketplacePinned.codex
             ];
           in
           {

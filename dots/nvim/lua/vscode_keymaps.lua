@@ -46,14 +46,18 @@ map("<leader>dc", "workbench.action.debug.continue",         "Debug Continue")
 map("<leader>do", "workbench.action.debug.stepOver",         "Debug Step Over")
 map("<leader>di", "workbench.action.debug.stepInto",         "Debug Step Into")
 
--- Rust / Nix
+-- Rust
 map("<leader>ra", "editor.action.codeAction",                "Code Action")
 map("<leader>rr", "rust-analyzer.run",                       "Rust Analyzer: Run")
 map("<leader>rt", "testing.runAll",                          "Run All Tests")
-map("<leader>nc", "workbench.action.tasks.runTask",          "Run Task… (Nix)")
 
 -- Notes / Markdown
 map("<leader>mp", "markdown.showPreviewToSide",              "Markdown Preview to Side")
+
+-- AI (mirrors the standalone <leader>a lane: Claude Code + Codex)
+map("<leader>aa", "claude-vscode.sidebar.open",              "Claude Code: Side Bar")
+map("<leader>at", "claude-vscode.editor.open",               "Claude Code: New Tab")
+map("<leader>ax", "chatgpt.openSidebar",                     "Codex: Side Bar")
 
 -- Layout
 map("<leader>sv", "workbench.action.splitEditorRight",       "Split Right")
