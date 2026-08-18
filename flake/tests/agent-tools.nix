@@ -254,6 +254,13 @@ in
       agentToolsHermesProfileConfigSources =
         agentToolsRuntimeConfig.sinnix.features.dev.agentTools.hermesProfileConfigSources;
 
+      # Provably fails when: a generic runtime, browser, shell or agent binary
+      # is added to the earlyoom emergency avoid list (verified by adding
+      # "node"), which would make the last-resort OOM killer skip exactly the
+      # processes that cause the pressure.
+      #
+      # Note: this is an eval-time assert, so it takes down the whole checks
+      # attribute rather than one derivation.
       agentResourcePolicy =
         let
           avoidPattern = runtimeDefaults.earlyoomEmergencyAvoidPattern;

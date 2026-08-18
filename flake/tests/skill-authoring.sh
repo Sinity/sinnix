@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Provably fails when: the validator stops reporting a class of structural
+# finding (verified by dropping the malformed-frontmatter errors).
 set -euo pipefail
 
 validator=$1

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Provably fails when: a command's class resolution drifts from the command
+# class table (verified by removing a gpu-runtime commandMatcher).
 set -euo pipefail
 
 # The rc under test is the RENDERED one: `commandMatchers` are baked into the
