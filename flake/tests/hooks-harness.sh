@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Provably fails when: a Claude hook stops emitting the ledger row it owns
+# (verified by renaming the SubagentStop dispatch_end row type), fails
+# shellcheck, or blocks on a malformed payload.
 set -euo pipefail
 
 hooks_dir=$1

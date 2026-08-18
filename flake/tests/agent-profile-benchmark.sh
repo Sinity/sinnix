@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Provably fails when: the benchmark miscounts a profile's tools or samples
+# (verified by double-counting duplicate tool names), or stops reporting
+# provider usage as unavailable when no provider answered.
 set -euo pipefail
 
 benchmark=${1:?benchmark path}
