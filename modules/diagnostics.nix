@@ -1,7 +1,7 @@
 # System diagnostics and introspection tools
 #
 # Hardware introspection and performance-analysis tooling, boot-metrics
-# capture, journal indexing, and persistent journald logging.
+# capture and indexing, and persistent journald logging.
 {
   pkgs,
   lib,
@@ -61,7 +61,7 @@ in
       {
         inherit config;
         unitName = "syslog-index";
-        description = "Build no-loss syslog/journal capture indexes";
+        description = "Build no-loss boot-metric capture indexes";
         surface = config.sinnix.runtime.surfaces.syslog-index;
       }
       {
@@ -69,7 +69,7 @@ in
         # unit-based mkRuntimeServiceConfig lookup below -- resourceClass here
         # would be a no-op (that key only applies to manager="user" jobs); the
         # class comes from the syslog-index surface's own resourceClass field.
-        execStart = "${scriptPkgs.syslog-index}/bin/syslog-index --no-edge-inspect";
+        execStart = "${scriptPkgs.syslog-index}/bin/syslog-index";
         unit = {
           after = [
             "local-fs.target"
@@ -81,7 +81,7 @@ in
           onBootSec = "4min";
           onUnitActiveSec = "1h";
           accuracySec = "1min";
-          description = "Refresh no-loss syslog/journal capture indexes";
+          description = "Refresh no-loss boot-metric capture indexes";
         };
       }
     )
