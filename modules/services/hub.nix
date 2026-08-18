@@ -142,25 +142,27 @@ mkServiceModule {
 
     aiServices = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = [
-        "stt"
-        "tts"
-        "ollama"
-        "litellm"
-        "llama-cpp"
-        "koboldcpp"
-        "comfyui"
-        "musicgen"
-        "ocr"
-        "open-webui"
-      ];
+      # Derived, not listed: every enabled sinnix.services entry that declares
+      # itself an AI backend (mkAiService's meta.ai marker). The hand-written
+      # list this replaces had silently omitted kokoro and muse-glimmer since
+      # it was written -- the drift class dies with the second registry.
+      # Disabled services no longer appear at all: with nothing to drift, the
+      # old "renders as not-registered rather than disappearing" visibility
+      # hack has nothing left to reveal.
+      default = lib.naturalSort (
+        lib.attrNames (
+          lib.filterAttrs (
+            _: service:
+            (service.enable or false) && (lib.attrByPath [ "meta" "ai" ] null service) != null
+          ) config.sinnix.services
+        )
+      );
+      defaultText = lib.literalExpression "every enabled service carrying meta.ai";
       description = ''
         Names of AI services the control panel offers. Names only: every unit,
         endpoint, idle timeout, admission key, and restartable flag is resolved
         at render time from /etc/sinnix/runtime-inventory.json, so the panel
-        cannot drift from the inventory the action API validates against. A
-        name with no registered surface renders as "not registered" rather
-        than disappearing.
+        cannot drift from the inventory the action API validates against.
       '';
     };
 
