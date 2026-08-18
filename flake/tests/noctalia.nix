@@ -18,6 +18,7 @@
                 pkgs.coreutils
                 pkgs.gnugrep
                 pkgs.gnused
+                pkgs.luau
               ];
             }
             ''
@@ -33,10 +34,17 @@
                 noctalia
                 pkgs.bash
                 pkgs.coreutils
+                pkgs.luau
               ];
             }
             ''
+              # Manifest/settings cross-check, then a real parse of every entry:
+              # `noctalia plugins lint` does not compile Luau, so a syntax error
+              # would otherwise surface only at live shell load.
               noctalia plugins lint ${../../dots/noctalia/plugins/sinnix-cockpit}
+              for entry in ${../../dots/noctalia/plugins/sinnix-cockpit}/*.luau; do
+                luau-compile --binary "$entry" > /dev/null
+              done
               touch "$out"
             '';
         noctalia-config-validate =

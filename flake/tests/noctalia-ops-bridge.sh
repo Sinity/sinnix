@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Provably fails when: the plugin stops accepting the schema the ops reducer
 # stamps (verified by changing SCHEMA in the reducer), stops resuming the SSE
-# stream, gains a direct shell-out or state read, or fails Noctalia's own
-# plugin lint.
+# stream, gains a direct shell-out or state read, fails Noctalia's own
+# plugin lint, or an entry stops parsing as Luau (verified 2026-08-18 by
+# appending a malformed statement to bar-attention.luau: lint alone still
+# said ok, the luau-compile pass failed with a SyntaxError).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -14,6 +16,12 @@ test -f "$plugin/service.luau"
 test -f "$plugin/bar.luau"
 test -f "$plugin/panel.luau"
 noctalia plugins lint "$plugin"
+
+# `noctalia plugins lint` cross-checks the manifest but does not compile Luau;
+# parse every entry so a syntax error cannot ride a green check into the shell.
+for entry in "$plugin"/*.luau; do
+  luau-compile --binary "$entry" > /dev/null
+done
 
 # Protocol agreement with the producer: the plugin must accept exactly the
 # schema the ops reducer stamps on its payloads, and must resume the stream
