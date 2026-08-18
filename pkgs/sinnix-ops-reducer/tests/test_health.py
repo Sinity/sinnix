@@ -72,6 +72,9 @@ def world(tmp_path: Path, monkeypatch):
     import os
 
     os.utime(old, (0, 0))
+    # Exists, declared, holds nothing: "never produced" is a property of the
+    # contents, not of whether the directory was created.
+    (lanes / "declared-empty").mkdir(parents=True)
     (lanes / "payload-dead").mkdir(parents=True)
     (lanes / "payload-live").mkdir(parents=True)
     dead = lanes / "payload-dead" / "dead-20260813.jsonl"
@@ -134,6 +137,13 @@ def world(tmp_path: Path, monkeypatch):
             # Neither cadence nor budget, and nothing ever written: the most
             # broken a lane can be, and the state that used to raise nothing.
             {"name": "unbudgeted-never-wrote", "path": str(tmp_path / "does-not-exist")},
+            # A budget cannot fire on a lane with no file to age: an empty
+            # declared directory is unproduced, not stale.
+            {
+                "name": "empty-but-declared",
+                "path": str(lanes / "declared-empty"),
+                "expectedStaleAfterSeconds": 60,
+            },
         ],
         "mounts": [{"path": "/fixture", "warnPct": 80, "failPct": 95}],
         "observedServices": [
@@ -189,7 +199,7 @@ def test_every_lane_and_unit_shape_reaches_the_ledger(world) -> None:
     assert find(events, "capture_stale", "ed-stale")["status"] == "stale"
     assert find(events, "capture_stale", "ed-fresh")["status"] == "healthy"
     never = find(events, "capture_stale", "unbudgeted-never-wrote")
-    assert never["status"] == "stale" and "reason=no-file" in never["evidence"]
+    assert never["status"] == "unproduced" and "reason=no-file" in never["evidence"]
 
     assert find(events, "mount_capacity", "/fixture")["status"] == "failed"
 
@@ -226,6 +236,86 @@ def test_every_lane_and_unit_shape_reaches_the_ledger(world) -> None:
     assert find(events, "publisher_liveness", "probe-unknown")["status"] == "unknown"
     timeout = find(events, "publisher_liveness", "probe-timeout")
     assert timeout["status"] == "unknown" and "probe_exit=124" in timeout["evidence"]
+
+
+def test_silence_resolves_three_ways_not_two(world) -> None:
+    """The distinction sinnix-pev0 exists for. A quiet lane is one of:
+
+      * never produced (no file at all) -> unproduced, whether or not the
+        directory itself exists;
+      * produced and then stopped past its budget -> stale, the fault case;
+      * quiet inside its budget -> healthy.
+
+    Mutation: emitting "stale" from the newest-is-None branch (the pre-split
+    behaviour) collapses the first onto the second and fails both unproduced
+    assertions.
+    """
+    world["run"]()
+    events = world["run"]()
+
+    absent = find(events, "capture_stale", "unbudgeted-never-wrote")
+    assert absent["status"] == "unproduced"
+    assert "path_exists=false" in absent["evidence"]
+
+    empty = find(events, "capture_stale", "empty-but-declared")
+    assert empty["status"] == "unproduced"
+    assert "path_exists=true" in empty["evidence"]
+    # It carries a budget, and the budget is irrelevant: there is no age.
+    assert "age_seconds" not in empty["evidence"]
+
+    assert find(events, "capture_stale", "ed-stale")["status"] == "stale"
+    assert find(events, "capture_stale", "ed-fresh")["status"] == "healthy"
+
+
+def test_an_unproduced_lane_is_told_once_and_calmly(world) -> None:
+    """A lane that never started is not an outage. Mutation: routing every
+    non-healthy status to "critical" (the pre-split emit) makes both urgency
+    assertions read "critical"."""
+    world["run"]()
+    world["run"]()
+
+    calm = [
+        (urgency, title)
+        for urgency, title, _ in world["recorder"].notifications
+        if "never produced" in title
+    ]
+    assert sorted(calm) == [
+        ("normal", "empty-but-declared lane has never produced anything"),
+        ("normal", "unbudgeted-never-wrote lane has never produced anything"),
+    ]
+    # A lane that produced and stopped stays critical: that one IS a fault.
+    assert ("critical", "ed-stale lane has gone quiet") in [
+        (urgency, title) for urgency, title, _ in world["recorder"].notifications
+    ]
+
+    # Told once: further sweeps in the same state say nothing more.
+    world["recorder"].notifications.clear()
+    world["run"]()
+    world["run"]()
+    assert not [
+        title for _, title, _ in world["recorder"].notifications if "never produced" in title
+    ]
+
+
+def test_first_production_clears_unproduced_without_claiming_a_recovery(world) -> None:
+    """unproduced -> healthy is a first write, not a comeback, and must not be
+    announced as one. Mutation: dropping the `previous` argument from describe()
+    restores "is recording again" and fails the phrasing assertion."""
+    world["run"]()
+    world["run"]()
+    world["recorder"].notifications.clear()
+
+    (world["lanes"] / "declared-empty" / "first").write_text("x")
+    world["run"]()
+    events = world["run"]()
+
+    assert find(events, "capture_stale", "empty-but-declared")["status"] == "healthy"
+    announced = [
+        (urgency, title)
+        for urgency, title, _ in world["recorder"].notifications
+        if "empty-but-declared" in title
+    ]
+    assert announced == [("normal", "empty-but-declared lane has produced for the first time")]
 
 
 def test_a_settled_status_is_not_re_emitted(world) -> None:

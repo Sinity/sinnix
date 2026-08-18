@@ -18,7 +18,15 @@ loop, with two things that improve by the move:
 
 Preserved exactly, because they are contracts other things read:
   * the ledger schema `sinnix-health-transition-v1` and its `k=v;k=v` evidence
-    strings, at /run/sinnix/health-transitions.jsonl;
+    strings, at /run/sinnix/health-transitions.jsonl. The schema is open over
+    the `status` value and every reader treats it that way (`/v1/health/lanes`
+    hands the state file back verbatim; orient lists anything that is not
+    "healthy"), so a new status is an additive change under the same name. The
+    `capture_stale` statuses are `healthy`, `stale`, and -- added 2026-08-18 --
+    `unproduced`, which means the lane's path holds no file at all: it has
+    never produced, as opposed to having produced and stopped. That third
+    state used to be reported as `stale`, which made a newly-declared lane and
+    a dead one indistinguishable in both the ledger and the notification;
   * the state file shape at /run/sinnix/health-sentinel-state.json --
     `{key: {status, pending?, streak?}}`, keyed `service:<manager>:<unit>`,
     `socket:<manager>:<unit>`, `capture:<name>`, `payload:<name>`,
@@ -62,6 +70,14 @@ APP_NAME = "sinnix-health"
 # for anything a human then has to go look at -- and removes the entire class.
 CONFIRM_SAMPLES = 2
 
+# Statuses that are not "healthy" but are also not a fault: the operator should
+# be told once, calmly, and not paged. A lane that has never produced is either
+# newly declared or has a producer that never ran -- both are worth a look and
+# neither is an outage, and treating them as critical is what made the sweep's
+# widening to budget-less lanes (2026-08-16) surface five simultaneous
+# criticals for a condition that had been true for weeks.
+CALM_STATUSES = frozenset({"unproduced"})
+
 PAYLOAD_SAMPLE_SIZE = 50
 PAYLOAD_MIN_SAMPLES = 5
 SERVICE_PROPERTIES = ("Id", "ActiveState", "Type", "Result", "WantedBy")
@@ -104,13 +120,20 @@ def humanize_duration(seconds: Any) -> str:
     return f"{value // 86400}d {(value % 86400) // 3600}h"
 
 
-def describe(type_: str, unit: str, status: str, evidence: str) -> tuple[str, str]:
+def describe(
+    type_: str, unit: str, status: str, evidence: str, previous: str = ""
+) -> tuple[str, str]:
     """(title, body) a human can act on.
 
     The raw evidence string is a debugging carrier -- "manager=user;
     active_state=failed;type=oneshot;result=timeout;wanted_by=" tells you
     nothing at a glance about what broke or where to look -- so it stays in the
     JSONL ledger and out of the notification.
+
+    *previous* is the status being left behind, which some phrasings need in
+    order not to lie: a lane leaving `unproduced` is producing for the FIRST
+    time, and calling that "recording again" tells the operator it recovered
+    from an outage that never happened.
     """
     manager = evidence_field(evidence, "manager")
     key = f"{type_}:{status}"
@@ -168,20 +191,31 @@ def describe(type_: str, unit: str, status: str, evidence: str) -> tuple[str, st
         )
     if key == "capture_stale:healthy":
         age = evidence_field(evidence, "age_seconds")
+        if previous == "unproduced":
+            return (
+                f"{unit} lane has produced for the first time",
+                f"It was declared but empty; there is now a file in it, "
+                f"{humanize_duration(age or 0)} old.",
+            )
         return (
             f"{unit} lane is recording again",
             f"Newest file is {humanize_duration(age or 0)} old.",
         )
+    if key == "capture_stale:unproduced":
+        return (
+            f"{unit} lane has never produced anything",
+            "Its path holds no file at all, so this is not a quiet spell -- "
+            "either the lane is newly declared and its producer has not run "
+            "yet, or the producer has never once written.\nPath: "
+            + evidence_field(evidence, "path"),
+        )
     if key == "capture_stale:stale":
         age = evidence_field(evidence, "age_seconds")
         budget = evidence_field(evidence, "stale_after_seconds")
-        if age:
-            body = f"Nothing written for {humanize_duration(age)}"
-            if budget and budget != "null":
-                body += f", past its {humanize_duration(budget)} budget"
-            body += "."
-        else:
-            body = "The lane directory holds no files at all."
+        body = f"Nothing written for {humanize_duration(age)}"
+        if budget and budget != "null":
+            body += f", past its {humanize_duration(budget)} budget"
+        body += "."
         return (
             f"{unit} lane has gone quiet",
             body + "\nPath: " + evidence_field(evidence, "path"),
@@ -346,7 +380,7 @@ class Emitter:
             },
             mode=0o664,
         )
-        title, body = describe(type_, unit, status, evidence)
+        title, body = describe(type_, unit, status, evidence, confirmed)
         if status == "acknowledged":
             # Recorded in the ledger, never paged: the operator already knows,
             # and a notification for a known outage is exactly the noise the
@@ -359,7 +393,7 @@ class Emitter:
             if confirmed:
                 self.notifier("normal", title, body)
             return
-        self.notifier("critical", title, body)
+        self.notifier("critical" if status not in CALM_STATUSES else "normal", title, body)
 
     def prune(self) -> None:
         """Drop any state key this run did not emit.
@@ -410,6 +444,22 @@ def sweep_captures(captures: Iterable[dict[str, Any]], emitter: Emitter, now: fl
     one state that raised nothing. Five lanes were in exactly that state on
     2026-08-16, four with a path that did not exist at all. An age-based verdict
     still needs a budget; "has this lane ever produced anything" needs none.
+
+    Three outcomes, not two, because a lane's silence has three causes and only
+    one of them is a fault:
+
+      * `unproduced` -- the path holds no file. The lane has never produced, so
+        there is no age to judge and no budget that could have been exceeded.
+        Calm: newly-declared lanes pass through this state on their way to
+        working, and a producer that has never run is a wiring question rather
+        than an outage.
+      * `stale` -- it produced before and has now been idle past its budget.
+        This is the fault case: something that was working stopped.
+      * `healthy` -- it produced recently enough, or it is an event-driven lane
+        inside a generous budget with nothing to say. Indistinguishable from
+        `unproduced` before this split, which is why a correctly-wired
+        video-resolve lane that had simply never matched a candidate URL read
+        as a dead one.
     """
     for lane in captures:
         path = str(lane.get("path") or "")
@@ -422,8 +472,9 @@ def sweep_captures(captures: Iterable[dict[str, Any]], emitter: Emitter, now: fl
                 f"capture:{name}",
                 "capture_stale",
                 name,
-                "stale",
-                f"path={path};reason=no-file",
+                "unproduced",
+                f"path={path};reason=no-file;"
+                f"path_exists={'true' if Path(path).exists() else 'false'}",
             )
             continue
         age = int(now) - int(newest)
