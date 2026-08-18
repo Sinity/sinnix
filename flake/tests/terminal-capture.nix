@@ -1,6 +1,7 @@
-# Provably fails when: the captured shell honours a caller-supplied
-# SINNIX_CAPTURE_SESSION_ID / cast / events path (the poisoned environment in
-# the fixture), writes its session outside the year/month/day layout, or stops
+# Provably fails when: the recorder stops stripping inherited SINNIX_CAPTURE_*
+# state before launching the shell (verified by deleting that loop from
+# scripts/sinnix-captured-shell), writes its session outside the
+# year/month/day layout (verified by flattening session_dir), or stops
 # propagating the recorder's exit code (the -failure variant).
 #
 # Kitty/PTY terminal-capture recorder runtime checks (asciinema wrapper +
@@ -43,11 +44,17 @@ in
             }:$PATH"
             mkdir -p "$HOME" "$TMPDIR/captures"
 
+            # The shell the recorder launches must not inherit any
+            # SINNIX_CAPTURE_* state from whoever started it: a nested
+            # capture session that trusts inherited paths writes into its
+            # parent's session. The recorder strips those variables before
+            # exporting its own, so an inherited marker must be gone here.
             cat > "$TMPDIR/fake-shell.zsh" <<'EOF'
             #!${pkgs.zsh}/bin/zsh
             set -eu
             source ${../../scripts/sinnix-terminal-capture-hooks.zsh}
             print -r -- "terminal-capture-ready"
+            print -r -- "inherited-capture-marker: ''${SINNIX_CAPTURE_POISON:-stripped}"
             true
             exit 0
             EOF
@@ -64,12 +71,14 @@ in
               SINNIX_CAPTURE_CAST_FILE='$TMPDIR/poison.cast' \
               SINNIX_CAPTURE_EVENTS_FILE='$TMPDIR/poison.events.jsonl' \
               SINNIX_CAPTURE_ROOT='$TMPDIR/captures' \
+              SINNIX_CAPTURE_POISON='leaked' \
               SINNIX_CAPTURE_SESSION_ID='poison-session' \
               TERM='xterm-kitty' \
               USER='tester' \
               ${pkgs.bash}/bin/bash ${../../scripts/sinnix-captured-shell}" "$transcript"
 
             grep -q "terminal-capture-ready" "$transcript"
+            grep -q "inherited-capture-marker: stripped" "$transcript"
 
             session_json="$(find "$TMPDIR/captures" -type f -name session.json | sed -n '1p')"
             events_json="$(find "$TMPDIR/captures" -type f -name events.jsonl | sed -n '1p')"
