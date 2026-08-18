@@ -10,7 +10,7 @@ but visibly dropped the display signal, so it is not an acceptable workflow.
 
 Noctalia v5 provides native region and output capture through Wayland
 screencopy. The Print bindings call its IPC directly. Noctalia saves into
-`/realm/data/captures/screenshot` and copies the encoded PNG to the clipboard.
+`/realm/data/activity/screenshot` and copies the encoded PNG to the clipboard.
 Region capture does not freeze the whole output first because frozen full
 output capture is one of the reported Hyprland 0.55 HDR failure paths.
 
