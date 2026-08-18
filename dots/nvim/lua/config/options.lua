@@ -6,5 +6,13 @@ vim.opt.title = true
 vim.opt.titlestring =
   "%{&readonly?'🔒':''}%{&modified?'✱':''}%f %{&filetype!=#''?'['.&filetype.']':''} ⟪ %{fnamemodify(getcwd(),':~')} ⟫"
 
--- Configure LSP logging to be less verbose (prevent lsp.log from growing too large)
-vim.lsp.set_log_level("error")
+-- Project-root detection: same marker set as scripts/lsp-root, so <leader>ff,
+-- grep, and terminals agree with how the rest of sinnix resolves a project.
+vim.g.root_spec = {
+  "lsp",
+  { "flake.nix", "Cargo.toml", "pyproject.toml", "go.mod", "package.json", ".git" },
+  "cwd",
+}
+
+-- Keep lsp.log from growing (error-level only)
+vim.lsp.log.set_level(vim.log.levels.ERROR)
