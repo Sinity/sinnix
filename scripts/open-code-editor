@@ -6,9 +6,5 @@ if command -v code >/dev/null 2>&1; then
   exec code --reuse-window
 fi
 
-if command -v codium >/dev/null 2>&1; then
-  exec codium --reuse-window
-fi
-
-printf '%s\n' "open-code-editor: neither code nor codium is available" >&2
+printf '%s\n' "open-code-editor: code is not available" >&2
 exit 127
