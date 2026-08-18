@@ -27,6 +27,65 @@ from .state import (
 )
 
 
+#: How deep a lane path may go. `DCIM/Camera/IMG_0001.jpg` arrives as
+#: `Camera/IMG_0001.jpg`; nothing on this phone nests further, and a cap means
+#: a confused client cannot walk a directory tree into the lake.
+MAX_NAME_DEPTH = 4
+
+
+def safe_relative(lane_dir: Path, name: str) -> Path | None:
+    """Resolve a client-chosen name under its lane, or None if it is not one.
+
+    Every segment must match the same anchored pattern a flat chunk name does,
+    which is what makes traversal impossible rather than filtered: `..` and `.`
+    fail it on their first character, an empty segment fails it outright, and
+    a segment with a separator cannot exist after the split.
+
+    The containment check afterwards resolves both sides first, and that is
+    not decoration: `Path.relative_to` is textual, so an unresolved
+    `<lane>/Camera/../../escape.jpg` passes it while pointing two levels above
+    the lane. Measured, by mutating the segment check away and watching that
+    path land -- which is the whole reason the second check exists.
+    """
+    if not name or name.endswith("/"):
+        return None
+    parts = name.split("/")
+    if len(parts) > MAX_NAME_DEPTH or not all(UPLOAD_NAME_RE.match(p) for p in parts):
+        return None
+    target = lane_dir.joinpath(*parts)
+    try:
+        target.resolve().relative_to(lane_dir.resolve())
+    except (ValueError, OSError):
+        return None
+    return target
+
+
+def newest_in_lane(lane: str) -> tuple[HTTPStatus, dict]:
+    """The newest mtime the lane holds, which is how the phone's media mirror
+    learns where to resume without listing two hundred thousand files.
+
+    The mirror lanes were filled by an `rsync -a` that preserved the phone's
+    own mtimes, so this number means the same thing on both sides: everything
+    older than it is already here.
+    """
+    directory = UPLOAD_LANES.get(lane)
+    if directory is None:
+        return HTTPStatus.NOT_FOUND, {"ok": False, "detail": f"no upload lane {lane!r}"}
+    newest = 0.0
+    count = 0
+    if directory.is_dir():
+        for path in directory.rglob("*"):
+            if path.is_file():
+                count += 1
+                newest = max(newest, path.stat().st_mtime)
+    return HTTPStatus.OK, {
+        "ok": True,
+        "lane": lane,
+        "files": count,
+        "newest_mtime_ms": int(newest * 1000),
+    }
+
+
 def store_upload(lane: str, name: str, body: bytes, declared_sha: str | None) -> tuple[HTTPStatus, dict]:
     """Land a capture file the phone pushed, or say precisely why not.
 
@@ -49,7 +108,8 @@ def store_upload(lane: str, name: str, body: bytes, declared_sha: str | None) ->
     directory = UPLOAD_LANES.get(lane)
     if directory is None:
         return HTTPStatus.NOT_FOUND, {"ok": False, "detail": f"no upload lane {lane!r}"}
-    if not UPLOAD_NAME_RE.match(name):
+    target = safe_relative(directory, name)
+    if target is None:
         return HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "unacceptable file name"}
     if not body:
         return HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "empty body"}
@@ -64,7 +124,6 @@ def store_upload(lane: str, name: str, body: bytes, declared_sha: str | None) ->
             "bytes": len(body),
         }
 
-    target = directory / name
     if target.exists() and target.stat().st_size == len(body):
         return HTTPStatus.OK, {
             "ok": True,
@@ -74,9 +133,13 @@ def store_upload(lane: str, name: str, body: bytes, declared_sha: str | None) ->
             "path": str(target),
         }
 
-    part = directory / f"{name}.part"
+    part = target.with_name(target.name + ".part")
     try:
-        directory.mkdir(parents=True, exist_ok=True)
+        # The lane's own subdirectory, when the name carried one: the camera
+        # mirror keeps `Camera/`, `Screenshots/` and `Pictures/` because the
+        # rsync that filled it did, and flattening them now would re-upload
+        # every photo under a new name.
+        target.parent.mkdir(parents=True, exist_ok=True)
         with part.open("wb") as fh:
             fh.write(body)
             fh.flush()
