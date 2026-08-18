@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-direnvrc="${1:?direnv rc required}"
+# The rc under test is the RENDERED one: `commandMatchers` are baked into the
+# wrapper's class resolver at evaluation time (runtime-defaults'
+# renderDirenvrc), so a wrapped command consults no runtime inventory. Feeding
+# the raw scripts/sinnix-direnvrc here would leave the placeholder in place and
+# the gpu-runtime assertions below would fail on a syntax error.
+direnvrc="${1:?rendered direnv rc required}"
 fixture="$(mktemp -d)"
 trap 'rm -rf "$fixture"' EXIT
 
@@ -20,24 +25,8 @@ EOF_SCOPE
 chmod +x "$fixture/bin/sinnix-scope"
 sed -i "1c#!$(command -v bash)" "$fixture/bin/sinnix-scope"
 
-cat >"$fixture/inventory.json" <<'EOF_INVENTORY'
-{
-  "commandClasses": {
-    "background": {},
-    "nix-build": {},
-    "gpu-runtime": {
-      "commandMatchers": [
-        "stashbox-vlm-serve",
-        "stashbox-llama-vlm-serve-gpu"
-      ]
-    }
-  }
-}
-EOF_INVENTORY
-
 ln -s .sinnix-scope-wrapper "$wrapper_dir/nix"
 ln -s .sinnix-scope-wrapper "$wrapper_dir/just"
-export SINNIX_RUNTIME_INVENTORY_FILE="$fixture/inventory.json"
 export SINNIX_SCOPE_BIN="$fixture/bin/sinnix-scope"
 export SINNIX_SCOPE_WRAPPER_DIR="$wrapper_dir"
 export SINNIX_SCOPE_ORIGINAL_PATH="$original_dir:$PATH"
