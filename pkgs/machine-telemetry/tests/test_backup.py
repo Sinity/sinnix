@@ -102,7 +102,6 @@ def test_backup_sweeps_orphaned_sidecar_from_a_prior_crashed_run(
     assert not orphan.exists()
 
 
-
 def test_backup_of_a_parked_walless_database_succeeds(tmp_path: Path) -> None:
     """A cleanly-checkpointed (parked) db has no -wal sidecar; that is the
     clean state, not an error. Mutation: reverting the exists() check to the

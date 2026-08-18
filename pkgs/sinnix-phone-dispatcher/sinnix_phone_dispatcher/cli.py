@@ -57,7 +57,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     serve = sub.add_parser(
-        "serve", help="the live plane (Unix socket) plus the always-on telemetry receiver (TCP)"
+        "serve",
+        help="the live plane (Unix socket) plus the always-on telemetry receiver (TCP)",
     )
     serve.add_argument(
         "--socket",
@@ -83,11 +84,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     serve.set_defaults(func=cmd_serve)
 
-    dispatch = sub.add_parser("dispatch", help="the file plane: execute drained intents")
+    dispatch = sub.add_parser(
+        "dispatch", help="the file plane: execute drained intents"
+    )
     dispatch.add_argument("--outbox", default=str(LAKE_ROOT / "outbox"))
     dispatch.set_defaults(func=cmd_dispatch)
 
-    push = sub.add_parser("push", help="refresh glance.json and steering.json for the drain")
+    push = sub.add_parser(
+        "push", help="refresh glance.json and steering.json for the drain"
+    )
     push.set_defaults(func=cmd_push)
 
     notify = sub.add_parser("notify", help="queue an interruption for the phone")
@@ -97,10 +102,16 @@ def build_parser() -> argparse.ArgumentParser:
     notify.set_defaults(func=cmd_notify)
 
     glance = sub.add_parser("glance", help="print the phone's glance as JSON")
-    glance.set_defaults(func=lambda _a: (print(json.dumps(build_glance(), indent=2)), 0)[1])
+    glance.set_defaults(
+        func=lambda _a: (print(json.dumps(build_glance(), indent=2)), 0)[1]
+    )
 
-    steering = sub.add_parser("steering", help="print the phone's steering view as JSON")
-    steering.set_defaults(func=lambda _a: (print(json.dumps(build_steering(), indent=2)), 0)[1])
+    steering = sub.add_parser(
+        "steering", help="print the phone's steering view as JSON"
+    )
+    steering.set_defaults(
+        func=lambda _a: (print(json.dumps(build_steering(), indent=2)), 0)[1]
+    )
 
     return parser
 

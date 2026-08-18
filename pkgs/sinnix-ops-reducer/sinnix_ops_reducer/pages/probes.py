@@ -60,7 +60,9 @@ def systemctl(manager: str, *arguments: str, timeout: int = 15) -> str | None:
     return result.stdout
 
 
-def show_units(manager: str, units: Iterable[str], properties: Iterable[str]) -> dict[str, dict[str, str]]:
+def show_units(
+    manager: str, units: Iterable[str], properties: Iterable[str]
+) -> dict[str, dict[str, str]]:
     """`systemctl show` a batch of units, keyed by unit id.
 
     The manager matters: asking the system manager about a user unit reports
@@ -150,7 +152,9 @@ def gpu_summary() -> str | None:
 
 
 def command_classes(inventory: dict[str, Any] | None) -> list[str]:
-    if isinstance(inventory, dict) and isinstance(inventory.get("commandClasses"), dict):
+    if isinstance(inventory, dict) and isinstance(
+        inventory.get("commandClasses"), dict
+    ):
         names = [name for name in inventory["commandClasses"] if isinstance(name, str)]
         if names:
             return sorted(names, key=len, reverse=True)
@@ -223,7 +227,11 @@ def shorten_command(command: str | None) -> str:
         if head in {"--", "--internal-supervise"}:
             parts.pop(0)
             continue
-        if "=" in head and not head.startswith("-") and "/" not in head.split("=", 1)[0]:
+        if (
+            "=" in head
+            and not head.startswith("-")
+            and "/" not in head.split("=", 1)[0]
+        ):
             parts.pop(0)
             continue
         if (
@@ -273,7 +281,15 @@ def collect_scopes(inventory: dict[str, Any] | None) -> list[dict[str, Any]]:
     monotonic = monotonic_now_us()
     found: list[dict[str, Any]] = []
     for manager in ("user", "system"):
-        listing = systemctl(manager, "list-units", "--type=scope", "--state=active", "-o", "json", "--no-pager")
+        listing = systemctl(
+            manager,
+            "list-units",
+            "--type=scope",
+            "--state=active",
+            "-o",
+            "json",
+            "--no-pager",
+        )
         if not listing:
             continue
         try:
@@ -318,4 +334,3 @@ def collect_scopes(inventory: dict[str, Any] | None) -> list[dict[str, Any]]:
             )
     found.sort(key=lambda item: item.get("elapsed") or 0, reverse=True)
     return found
-

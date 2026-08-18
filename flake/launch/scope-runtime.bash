@@ -35,7 +35,7 @@ supervise_scope_command() {
   collect_remaining_pids() {
     remaining_pids=()
     while IFS= read -r pid; do
-      [[ "$pid" =~ ^[0-9]+$ ]] || continue
+      [[ $pid =~ ^[0-9]+$ ]] || continue
       [ "$pid" -gt 1 ] || continue
       [ "$pid" != "$BASHPID" ] || continue
       if kill -0 "$pid" 2>/dev/null; then
@@ -126,28 +126,28 @@ validate_agent_property() {
   fi
 
   case "$name" in
-    MemoryHigh|MemoryMax)
-      [[ "$value" =~ ^([0-9]+|[0-9]+[KMGTP]([iB])?|infinity)$ ]] || {
-        echo "sinnix-scope: invalid $name value: $value" >&2
-        exit 64
-      }
-      ;;
-    CPUWeight|IOWeight)
-      [[ "$value" =~ ^[0-9]+$ ]] && [ "$value" -ge 1 ] && [ "$value" -le 10000 ] || {
-        echo "sinnix-scope: invalid $name value: $value" >&2
-        exit 64
-      }
-      ;;
-    RuntimeMaxSec)
-      [[ "$value" =~ ^[0-9]+$ ]] && [ "$value" -ge 1 ] || {
-        echo "sinnix-scope: invalid $name value: $value" >&2
-        exit 64
-      }
-      ;;
-    *)
-      echo "sinnix-scope: unsupported agent property: $name" >&2
+  MemoryHigh | MemoryMax)
+    [[ $value =~ ^([0-9]+|[0-9]+[KMGTP]([iB])?|infinity)$ ]] || {
+      echo "sinnix-scope: invalid $name value: $value" >&2
       exit 64
-      ;;
+    }
+    ;;
+  CPUWeight | IOWeight)
+    [[ $value =~ ^[0-9]+$ ]] && [ "$value" -ge 1 ] && [ "$value" -le 10000 ] || {
+      echo "sinnix-scope: invalid $name value: $value" >&2
+      exit 64
+    }
+    ;;
+  RuntimeMaxSec)
+    [[ $value =~ ^[0-9]+$ ]] && [ "$value" -ge 1 ] || {
+      echo "sinnix-scope: invalid $name value: $value" >&2
+      exit 64
+    }
+    ;;
+  *)
+    echo "sinnix-scope: unsupported agent property: $name" >&2
+    exit 64
+    ;;
   esac
 }
 
@@ -158,44 +158,44 @@ validate_agent_property() {
 # consumed here so the launch line stays self-describing.
 while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
   case "$1" in
-    --unit)
-      [ "$class" = "agent" ] || {
-        echo "sinnix-scope: --unit is valid only for the agent class" >&2
-        exit 64
-      }
-      unit_override="${2:?sinnix-scope: --unit requires a value}"
-      [[ "$unit_override" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]*\.scope$ ]] || {
-        echo "sinnix-scope: invalid scope unit: $unit_override" >&2
-        exit 64
-      }
-      shift 2
-      ;;
-    --agent-property)
-      [ "$class" = "agent" ] || {
-        echo "sinnix-scope: --agent-property is valid only for the agent class" >&2
-        exit 64
-      }
-      property="${2:?sinnix-scope: --agent-property requires a value}"
-      validate_agent_property "$property"
-      agent_properties+=("$property")
-      shift 2
-      ;;
-    --job-id)
-      : "${2:?sinnix-scope: --job-id requires a value}"
-      shift 2
-      ;;
-    --project)
-      : "${2:?sinnix-scope: --project requires a value}"
-      shift 2
-      ;;
-    --work-item)
-      : "${2:?sinnix-scope: --work-item requires a value}"
-      shift 2
-      ;;
-    *)
-      echo "sinnix-scope: unknown option: $1" >&2
+  --unit)
+    [ "$class" = "agent" ] || {
+      echo "sinnix-scope: --unit is valid only for the agent class" >&2
       exit 64
-      ;;
+    }
+    unit_override="${2:?sinnix-scope: --unit requires a value}"
+    [[ $unit_override =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]*\.scope$ ]] || {
+      echo "sinnix-scope: invalid scope unit: $unit_override" >&2
+      exit 64
+    }
+    shift 2
+    ;;
+  --agent-property)
+    [ "$class" = "agent" ] || {
+      echo "sinnix-scope: --agent-property is valid only for the agent class" >&2
+      exit 64
+    }
+    property="${2:?sinnix-scope: --agent-property requires a value}"
+    validate_agent_property "$property"
+    agent_properties+=("$property")
+    shift 2
+    ;;
+  --job-id)
+    : "${2:?sinnix-scope: --job-id requires a value}"
+    shift 2
+    ;;
+  --project)
+    : "${2:?sinnix-scope: --project requires a value}"
+    shift 2
+    ;;
+  --work-item)
+    : "${2:?sinnix-scope: --work-item requires a value}"
+    shift 2
+    ;;
+  *)
+    echo "sinnix-scope: unknown option: $1" >&2
+    exit 64
+    ;;
   esac
 done
 
@@ -245,12 +245,12 @@ done
 
 if [ -n "$ionice_class" ] && command -v ionice >/dev/null 2>&1; then
   case "$ionice_class" in
-    best-effort)
-      scoped_command=(ionice -c 2 -n "${ionice_priority:-7}" -- "${scoped_command[@]}")
-      ;;
-    idle)
-      scoped_command=(ionice -c 3 -- "${scoped_command[@]}")
-      ;;
+  best-effort)
+    scoped_command=(ionice -c 2 -n "${ionice_priority:-7}" -- "${scoped_command[@]}")
+    ;;
+  idle)
+    scoped_command=(ionice -c 3 -- "${scoped_command[@]}")
+    ;;
   esac
 fi
 
@@ -322,10 +322,9 @@ reset_slice_memory_peak() {
   local peak_path
   for peak_path in \
     "/sys/fs/cgroup/nix.slice/$slice/memory.peak" \
-    "/sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/nix.slice/$slice/memory.peak"
-  do
+    "/sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/nix.slice/$slice/memory.peak"; do
     [ -w "$peak_path" ] || continue
-    echo 0 > "$peak_path" 2>/dev/null || true
+    echo 0 >"$peak_path" 2>/dev/null || true
   done
 }
 if [ "$slice" = "nix-build.slice" ]; then

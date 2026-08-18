@@ -24,7 +24,12 @@ def test_second_execution_with_same_token_is_a_noop_duplicate(monkeypatch) -> No
 
     monkeypatch.setattr(execute_mod, "steer", fake_steer)
 
-    intent = {"kind": "steering_resolve", "id": "item-1", "outcome": "done", "send_token": "tok-abc"}
+    intent = {
+        "kind": "steering_resolve",
+        "id": "item-1",
+        "outcome": "done",
+        "send_token": "tok-abc",
+    }
     first = execute_mod.execute(dict(intent))
     second = execute_mod.execute(dict(intent))
 
@@ -39,8 +44,22 @@ def test_second_execution_with_same_token_is_a_noop_duplicate(monkeypatch) -> No
 def test_a_different_token_still_executes(monkeypatch) -> None:
     monkeypatch.setattr(execute_mod, "steer", lambda *a: (0, "ok"))
 
-    a = execute_mod.execute({"kind": "steering_resolve", "id": "x", "outcome": "done", "send_token": "tok-a"})
-    b = execute_mod.execute({"kind": "steering_resolve", "id": "x", "outcome": "done", "send_token": "tok-b"})
+    a = execute_mod.execute(
+        {
+            "kind": "steering_resolve",
+            "id": "x",
+            "outcome": "done",
+            "send_token": "tok-a",
+        }
+    )
+    b = execute_mod.execute(
+        {
+            "kind": "steering_resolve",
+            "id": "x",
+            "outcome": "done",
+            "send_token": "tok-b",
+        }
+    )
 
     assert a.get("duplicate") is not True
     assert b.get("duplicate") is not True
@@ -60,7 +79,9 @@ def test_shared_text_emits_no_receipt(monkeypatch) -> None:
     emitted = []
     monkeypatch.setattr(execute_mod, "emit_receipt", lambda *a, **kw: emitted.append(a))
 
-    result = execute_mod.execute({"kind": "shared_text", "text": "hello", "send_token": "tok-share"})
+    result = execute_mod.execute(
+        {"kind": "shared_text", "text": "hello", "send_token": "tok-share"}
+    )
 
     assert result["ok"] is True
     assert emitted == []

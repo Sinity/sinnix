@@ -23,7 +23,9 @@ def utc_ts() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def append_jsonl(path: Path | str, record: Mapping[str, Any], *, mode: int = 0o644) -> None:
+def append_jsonl(
+    path: Path | str, record: Mapping[str, Any], *, mode: int = 0o644
+) -> None:
     """Append *record* as one compact JSON line, creating parents."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -70,7 +72,9 @@ def receipt(
     receipt written by a unit is joinable against the journal for free.
     """
     return {
-        "run_id": run_id or os.environ.get("INVOCATION_ID") or f"{operation_kind}-{int(time.time())}",
+        "run_id": run_id
+        or os.environ.get("INVOCATION_ID")
+        or f"{operation_kind}-{int(time.time())}",
         "operation_kind": operation_kind,
         "state": state,
         "ts": utc_ts(),

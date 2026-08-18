@@ -205,13 +205,12 @@ let
           // lib.optionalAttrs (j ? timer && j.timer ? description) {
             description = j.timer.description;
           };
-          units =
-            {
-              services.${unitName} = serviceBody;
-            }
-            // lib.optionalAttrs (j ? timer) {
-              timers.${unitName} = timerBody;
-            };
+          units = {
+            services.${unitName} = serviceBody;
+          }
+          // lib.optionalAttrs (j ? timer) {
+            timers.${unitName} = timerBody;
+          };
         in
         if manager == "user" then { systemd.user = units; } else { systemd = units; };
     in

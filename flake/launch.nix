@@ -94,16 +94,16 @@ let
       "    ${lib.escapeShellArg name})"
       "      slice=${lib.escapeShellArg class.slice}"
       "      nice_level=${
-        lib.escapeShellArg (if (class.nice or null) == null then "" else toString class.nice)
-      }"
+              lib.escapeShellArg (if (class.nice or null) == null then "" else toString class.nice)
+            }"
       "      ionice_class=${
-        lib.escapeShellArg (if (class.ioniceClass or null) == null then "" else class.ioniceClass)
-      }"
+              lib.escapeShellArg (if (class.ioniceClass or null) == null then "" else class.ioniceClass)
+            }"
       "      ionice_priority=${
-        lib.escapeShellArg (
-          if (class.ionicePriority or null) == null then "" else toString class.ionicePriority
-        )
-      }"
+              lib.escapeShellArg (
+                if (class.ionicePriority or null) == null then "" else toString class.ionicePriority
+              )
+            }"
       "      class_property_args=(${shellList (propertyArgs name properties)})"
       "      class_env_defaults=(${shellList (envDefaultEntries name envDefaults)})"
       "      ;;"

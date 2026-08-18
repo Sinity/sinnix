@@ -139,7 +139,7 @@ endpoint, activation, backendKind, requiresCuda, ... }` wraps
   systemd.services/timers pairs and no HM-format user units for scheduled
   jobs. `surface` and `job` may be attrsets or functions of the module args
   (function form: the module FILE must name `pkgs` in its own pattern for a
-  job that uses it — _module.args inject only named formals). Documented
+  job that uses it — \_module.args inject only named formals). Documented
   structural exceptions only: mi-unlock's deadline-waiting simple service,
   second units inside sandbox-audit/machine-telemetry/stt.
 - **Capture lanes use `mkCaptureLane`** (`modules/lib/capture-lane.nix`,
@@ -218,7 +218,7 @@ resourceClass, observe, captures }`. Eval-time assertions reject duplicate
   `flake/launch/scope-runtime.bash` (argument parsing, cgroup checks,
   unit-name synthesis, the scope supervisor). `renderDirenvrc` does the same
   for the devshell command wrappers' class resolver. Nothing reads
-  `/etc/sinnix/runtime-inventory.json` to *place* a process — the inventory
+  `/etc/sinnix/runtime-inventory.json` to _place_ a process — the inventory
   carries `commandClasses` for observability only. A class that is not in the
   table is a usage error naming the classes that are; adding one is a table
   edit, not a launcher edit.

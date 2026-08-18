@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from sinnix_ops_reducer import cli, health
 from sinnix_ops_reducer.reducer import Reducer
 from sinnix_ops_reducer.server import Handler

@@ -92,7 +92,9 @@ def ensure_dirs() -> None:
         d.mkdir(parents=True, exist_ok=True)
 
 
-def emit_receipt(kind: str, title: str, body: str, send_token: str | None, route: str | None = None) -> None:
+def emit_receipt(
+    kind: str, title: str, body: str, send_token: str | None, route: str | None = None
+) -> None:
     """Leave a receipt for the phone.
 
     Written into the push directory rather than sent anywhere: the phone may be
@@ -120,7 +122,13 @@ def notify_phone(title: str, body: str, route: str | None = None) -> None:
     """Interrupt the operator through the phone. Sent by prime itself, not by an intent."""
     ensure_dirs()
     name = f"{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}.json"
-    payload = {"schema": SCHEMA, "title": title, "body": body, "route": route, "at": now_iso()}
+    payload = {
+        "schema": SCHEMA,
+        "title": title,
+        "body": body,
+        "route": route,
+        "at": now_iso(),
+    }
     tmp = NOTIFY_DIR / (name + ".part")
     tmp.write_text(json.dumps(payload) + "\n", encoding="utf-8")
     tmp.rename(NOTIFY_DIR / name)

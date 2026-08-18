@@ -7,8 +7,8 @@ import socket
 import sys
 import threading
 import time
-from http import HTTPStatus
 from collections.abc import Callable
+from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -98,7 +98,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            self._write_feedback(HTTPStatus.BAD_REQUEST, {"error": f"invalid JSON: {error}"})
+            self._write_feedback(
+                HTTPStatus.BAD_REQUEST, {"error": f"invalid JSON: {error}"}
+            )
             return
         result = spool.append(
             payload,
@@ -166,14 +168,18 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_terminal_get(self) -> None:
         path = self.path
         if path in ("/terminals", "/terminals/"):
-            self._write_raw(HTTPStatus.OK, terminals.INDEX_HTML.encode(), "text/html; charset=utf-8")
+            self._write_raw(
+                HTTPStatus.OK, terminals.INDEX_HTML.encode(), "text/html; charset=utf-8"
+            )
             return
         if path == "/terminals/v1/windows":
             self._write(HTTPStatus.OK, terminals.list_windows())
             return
         match = terminals.LIVE_RE.match(path)
         if match:
-            self._serve_terminal_live(int(match.group(1)), int(match.group(2)), match.group("rest"))
+            self._serve_terminal_live(
+                int(match.group(1)), int(match.group(2)), match.group("rest")
+            )
             return
         match = terminals.CONTENT_RE.match(path)
         if match:
@@ -181,12 +187,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         match = terminals.HISTORY_FILE_RE.match(path)
         if match:
-            self._serve_terminal_history_file(int(match.group(1)), int(match.group(2)), match.group(3))
+            self._serve_terminal_history_file(
+                int(match.group(1)), int(match.group(2)), match.group(3)
+            )
             return
         match = terminals.HISTORY_RE.match(path)
         if match:
             self._write(
-                HTTPStatus.OK, terminals.history_for(terminals.HISTORY_DIR, int(match.group(1)), int(match.group(2)))
+                HTTPStatus.OK,
+                terminals.history_for(
+                    terminals.HISTORY_DIR, int(match.group(1)), int(match.group(2))
+                ),
             )
             return
         self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
@@ -194,7 +205,9 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_terminal_content(self, pid: int, win_id: int) -> None:
         text = terminals.get_window_text(pid, win_id)
         if text is None:
-            self._write(HTTPStatus.NOT_FOUND, {"error": "window not found or kitty unreachable"})
+            self._write(
+                HTTPStatus.NOT_FOUND, {"error": "window not found or kitty unreachable"}
+            )
             return
         self._write_raw(
             HTTPStatus.OK,
@@ -216,14 +229,20 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             self._write(HTTPStatus.NOT_FOUND, {"error": "capture file missing"})
             return
-        self._write_raw(HTTPStatus.OK, terminals.ansi_to_html(ansi_text, fname).encode(), "text/html; charset=utf-8")
+        self._write_raw(
+            HTTPStatus.OK,
+            terminals.ansi_to_html(ansi_text, fname).encode(),
+            "text/html; charset=utf-8",
+        )
 
     def _serve_terminal_live(self, pid: int, win_id: int, rest: str | None) -> None:
         """Proxy this window's own asciinema live stream: player page, its
         assets, and the WebSocket the player reads the terminal from."""
         port = terminals.live_streams().get((pid, win_id))
         if port is None:
-            self._write(HTTPStatus.NOT_FOUND, {"error": "no live stream for this window"})
+            self._write(
+                HTTPStatus.NOT_FOUND, {"error": "no live stream for this window"}
+            )
             return
 
         if rest is None:
@@ -333,7 +352,10 @@ class Handler(BaseHTTPRequestHandler):
             self._write(HTTPStatus.BAD_REQUEST, {"error": "need 'text' or 'key'"})
             return
         if not ok:
-            self._write(HTTPStatus.NOT_FOUND, {"error": "window not found, kitty unreachable, or unknown key"})
+            self._write(
+                HTTPStatus.NOT_FOUND,
+                {"error": "window not found, kitty unreachable, or unknown key"},
+            )
             return
         self._write(HTTPStatus.OK, {"status": "sent"})
 
@@ -452,7 +474,7 @@ class Handler(BaseHTTPRequestHandler):
             self._write_html(
                 HTTPStatus.NOT_FOUND,
                 "<!doctype html><title>not found</title>"
-                "<p>No such page. <a href=\"/\">Back to the dashboard.</a></p>\n",
+                '<p>No such page. <a href="/">Back to the dashboard.</a></p>\n',
             )
 
     def do_POST(self) -> None:

@@ -37,7 +37,6 @@ WORKLOAD_CONTROL_NOTE = (
 )
 
 
-
 def slice_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
     slices = state.get("resource_slices")
     if not isinstance(slices, list):
@@ -108,7 +107,9 @@ def ledger_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
 def gateway_jobs(state: dict[str, Any]) -> list[dict[str, Any]]:
     gateway = state.get("agent_gateway")
     jobs = gateway.get("jobs") if isinstance(gateway, dict) else None
-    return [job for job in jobs if isinstance(job, dict)] if isinstance(jobs, list) else []
+    return (
+        [job for job in jobs if isinstance(job, dict)] if isinstance(jobs, list) else []
+    )
 
 
 def orphan_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -203,7 +204,9 @@ def scope_block(
     return row(headline + bar, meta, controls, tone)
 
 
-def scope_groups(scopes: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
+def scope_groups(
+    scopes: list[dict[str, Any]],
+) -> list[tuple[str, list[dict[str, Any]]]]:
     """Sort live scopes into the four things they actually are."""
     heavy, sessions, jobs, other = [], [], [], []
     for entry in scopes:
@@ -229,9 +232,13 @@ def running_ledger(state: dict[str, Any]) -> list[dict[str, Any]]:
     return [entry for entry in ledger_rows(state) if entry.get("status") == "running"]
 
 
-def live_work_card(scopes: list[dict[str, Any]], state: dict[str, Any], now: dt.datetime) -> str:
+def live_work_card(
+    scopes: list[dict[str, Any]], state: dict[str, Any], now: dt.datetime
+) -> str:
     jobs_by_id = {
-        job["job_id"]: job for job in gateway_jobs(state) if isinstance(job.get("job_id"), str)
+        job["job_id"]: job
+        for job in gateway_jobs(state)
+        if isinstance(job.get("job_id"), str)
     }
     slice_limits = {
         str(entry["unit"]): entry["high"] or entry["max"]
@@ -258,7 +265,9 @@ def live_work_card(scopes: list[dict[str, Any]], state: dict[str, Any], now: dt.
     for label, bucket in scope_groups(scopes):
         if not bucket:
             continue
-        blocks = "".join(scope_block(entry, jobs_by_id, slice_limits) for entry in bucket)
+        blocks = "".join(
+            scope_block(entry, jobs_by_id, slice_limits) for entry in bucket
+        )
         body += f'<div class="group"><h3>{esc(label)}</h3>{blocks}</div>'
     if not body:
         return card(
@@ -322,7 +331,9 @@ def ledger_card(state: dict[str, Any], now: dt.datetime) -> str:
     blocks = ""
     for entry in rows[:10]:
         status = str(entry.get("status") or "unknown")
-        tone = {"success": "ok", "failed": "bad", "running": "info"}.get(status, "muted")
+        tone = {"success": "ok", "failed": "bad", "running": "info"}.get(
+            status, "muted"
+        )
         metrics = entry.get("metrics") if isinstance(entry.get("metrics"), dict) else {}
         headline = (
             f"<strong>{esc(entry.get('project') or '?')}</strong> "
@@ -334,7 +345,9 @@ def ledger_card(state: dict[str, Any], now: dt.datetime) -> str:
         rss = metrics.get("rss_mb")
         if isinstance(rss, (int, float)):
             meta.append(f"peak {rss / 1024:.1f} G")
-        meta.append(esc(age_since(entry.get("finished_at") or entry.get("started_at"), now)))
+        meta.append(
+            esc(age_since(entry.get("finished_at") or entry.get("started_at"), now))
+        )
         blocks += row(headline, meta, tone="bad" if status == "failed" else "")
     return (
         '<section class="card"><h2>Recent project runs</h2>'
@@ -344,11 +357,15 @@ def ledger_card(state: dict[str, Any], now: dt.datetime) -> str:
     )
 
 
-def agent_jobs_card(state: dict[str, Any], live_job_ids: set[str], now: dt.datetime) -> str:
+def agent_jobs_card(
+    state: dict[str, Any], live_job_ids: set[str], now: dt.datetime
+) -> str:
     jobs = [job for job in gateway_jobs(state) if job.get("job_id") not in live_job_ids]
     jobs.sort(key=lambda job: str(job.get("updated_at") or ""), reverse=True)
     orphans = {
-        row["job_id"]: row for row in orphan_rows(state) if isinstance(row.get("job_id"), str)
+        row["job_id"]: row
+        for row in orphan_rows(state)
+        if isinstance(row.get("job_id"), str)
     }
     if not jobs and not orphans:
         return card("Agent jobs", empty("the gateway has no recorded jobs"))
@@ -357,7 +374,9 @@ def agent_jobs_card(state: dict[str, Any], live_job_ids: set[str], now: dt.datet
         job_id = str(job.get("job_id") or "")
         lifecycle = str(job.get("lifecycle") or "unknown")
         orphan = orphans.get(job_id)
-        tone = {"completed": "ok", "failed": "bad", "cancelled": "muted"}.get(lifecycle, "info")
+        tone = {"completed": "ok", "failed": "bad", "cancelled": "muted"}.get(
+            lifecycle, "info"
+        )
         declared = job.get("declared") if isinstance(job.get("declared"), dict) else {}
         headline = (
             f"<strong>{esc(job.get('backend') or 'agent')}</strong> "
@@ -372,7 +391,9 @@ def agent_jobs_card(state: dict[str, Any], live_job_ids: set[str], now: dt.datet
         controls = ""
         row_tone = ""
         if orphan is not None:
-            policy = orphan.get("policy") if isinstance(orphan.get("policy"), dict) else {}
+            policy = (
+                orphan.get("policy") if isinstance(orphan.get("policy"), dict) else {}
+            )
             proposed = str(policy.get("proposed_action") or "notify")
             meta.append(badge(f"orphaned, {proposed}", "warn"))
             row_tone = "warn"
@@ -403,7 +424,11 @@ def render_work(
     state = state if isinstance(state, dict) else {}
 
     heavy = [entry for entry in scopes if entry.get("class") in HEAVY_CLASSES]
-    agents = [entry for entry in scopes if entry.get("job_id") or entry.get("class") == "agent"]
+    agents = [
+        entry
+        for entry in scopes
+        if entry.get("job_id") or entry.get("class") == "agent"
+    ]
     in_flight = running_ledger(state)
     recent = ledger_rows(state)[:10]
     failed_recent = sum(1 for entry in recent if entry.get("status") == "failed")
@@ -418,7 +443,9 @@ def render_work(
         + tile(str(len(in_flight)), "commands in flight", "info" if in_flight else "")
         + tile(str(len(heavy)), "heavy scopes", "warn" if heavy else "")
         + tile(str(len(agents)), "agent sessions")
-        + tile(str(failed_recent), "of last 10 runs failed", "bad" if failed_recent else "")
+        + tile(
+            str(failed_recent), "of last 10 runs failed", "bad" if failed_recent else ""
+        )
         + "</div>"
     )
     live_job_ids = {entry["job_id"] for entry in scopes if entry.get("job_id")}
@@ -443,4 +470,3 @@ def render_work(
         body,
         tail=ACTION_SCRIPT,
     )
-

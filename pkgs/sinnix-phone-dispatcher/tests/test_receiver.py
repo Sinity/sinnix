@@ -19,7 +19,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from sinnix_phone_dispatcher.receiver import (
     _PHONE_STREAM_READ_LIMIT,
     _PhoneStreamDemuxer,
@@ -56,7 +55,9 @@ def _wait_for_lane_file(lane_dir: Path, timeout: float = 5.0) -> Path:
     raise TimeoutError(f"no index file appeared under {lane_dir}")
 
 
-def test_envelope_seq_is_continuous_across_lines(running_server: _PhoneStreamServer, tmp_path: Path) -> None:
+def test_envelope_seq_is_continuous_across_lines(
+    running_server: _PhoneStreamServer, tmp_path: Path
+) -> None:
     sock = _connect(running_server)
     try:
         for i in range(3):
@@ -96,7 +97,9 @@ def test_oversized_line_is_dropped_but_connection_survives(
 ) -> None:
     sock = _connect(running_server)
     try:
-        oversized = json.dumps({"kind": "battery", "pad": "x" * (_PHONE_STREAM_READ_LIMIT + 1000)})
+        oversized = json.dumps(
+            {"kind": "battery", "pad": "x" * (_PHONE_STREAM_READ_LIMIT + 1000)}
+        )
         sock.sendall(oversized.encode() + b"\n")
         sock.sendall((json.dumps({"kind": "battery", "n": 1}) + "\n").encode())
         index_path = _wait_for_lane_file(tmp_path / "phone-battery")

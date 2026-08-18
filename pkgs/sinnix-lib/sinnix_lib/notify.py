@@ -37,10 +37,23 @@ def notify_desktop(
         uid = bus.parent.name
         if uid == "0" or not bus.is_socket():
             continue
-        env = dict(os.environ, DBUS_SESSION_BUS_ADDRESS=f"unix:path={bus}", XDG_RUNTIME_DIR=str(bus.parent))
+        env = dict(
+            os.environ,
+            DBUS_SESSION_BUS_ADDRESS=f"unix:path={bus}",
+            XDG_RUNTIME_DIR=str(bus.parent),
+        )
         cmd = args
         if os.geteuid() == 0:
-            cmd = ["sudo", "-u", f"#{uid}", "--preserve-env=DBUS_SESSION_BUS_ADDRESS,XDG_RUNTIME_DIR", *args]
-        if subprocess.run(cmd, check=False, capture_output=True, env=env).returncode == 0:
+            cmd = [
+                "sudo",
+                "-u",
+                f"#{uid}",
+                "--preserve-env=DBUS_SESSION_BUS_ADDRESS,XDG_RUNTIME_DIR",
+                *args,
+            ]
+        if (
+            subprocess.run(cmd, check=False, capture_output=True, env=env).returncode
+            == 0
+        ):
             delivered = True
     return delivered

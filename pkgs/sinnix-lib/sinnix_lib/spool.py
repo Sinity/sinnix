@@ -125,7 +125,9 @@ class Spool:
         return counts
 
     def _record(self, token: str) -> None:
-        append_jsonl(self.root / self.token_ledger_name, {"token": token, "ts": utc_ts()})
+        append_jsonl(
+            self.root / self.token_ledger_name, {"token": token, "ts": utc_ts()}
+        )
         self.seen.add(token)
 
     def _finish(self, item: Path, keep_done: bool) -> None:

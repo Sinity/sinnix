@@ -79,9 +79,7 @@ def badge(text: str, tone: str = "muted") -> str:
 
 
 def tile(value: str, label: str, tone: str = "", href: str = "") -> str:
-    body = (
-        f'<span class="n">{value}</span><span class="l">{esc(label)}</span>'
-    )
+    body = f'<span class="n">{value}</span><span class="l">{esc(label)}</span>'
     classes = f"tile {tone}".strip()
     if href:
         return f'<a class="{classes}" href="{esc(href)}">{body}</a>'
@@ -99,17 +97,23 @@ def meter(current: int | None, limit: int | None, tone: str = "") -> str:
     return f'<div class="meter {grade}"><i style="width:{ratio * 100:.1f}%"></i></div>'
 
 
-def card(title: str, body: str, subtitle: str = "", wide: bool = False, anchor: str = "") -> str:
+def card(
+    title: str, body: str, subtitle: str = "", wide: bool = False, anchor: str = ""
+) -> str:
     sub = f'<p class="sub">{subtitle}</p>' if subtitle else ""
     ident = f' id="{esc(anchor)}"' if anchor else ""
     classes = "card wide" if wide else "card"
-    return f'<section class="{classes}"{ident}><h2>{esc(title)}</h2>{sub}{body}</section>'
+    return (
+        f'<section class="{classes}"{ident}><h2>{esc(title)}</h2>{sub}{body}</section>'
+    )
 
 
 def kv_table(rows: list[tuple[str, str]]) -> str:
     if not rows:
         return '<p class="sub">nothing to show</p>'
-    cells = "".join(f"<tr><th>{esc(key)}</th><td>{value}</td></tr>" for key, value in rows)
+    cells = "".join(
+        f"<tr><th>{esc(key)}</th><td>{value}</td></tr>" for key, value in rows
+    )
     return f'<table class="kv">{cells}</table>'
 
 
@@ -469,4 +473,3 @@ def log_card() -> str:
         '<a href="/ops/v1/receipts">/ops/v1/receipts</a>.</div></div>',
         wide=True,
     )
-

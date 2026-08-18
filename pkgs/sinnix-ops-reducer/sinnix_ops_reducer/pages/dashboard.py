@@ -86,7 +86,14 @@ def worst_mount(state: dict[str, Any]) -> tuple[str, float] | None:
     mounts = storage.get("mounts") if isinstance(storage, dict) else None
     if not isinstance(mounts, list):
         return None
-    interesting = {"/", "/persist", "/realm", "/outer-realm", "/neo-outer-realm", "/nix"}
+    interesting = {
+        "/",
+        "/persist",
+        "/realm",
+        "/outer-realm",
+        "/neo-outer-realm",
+        "/nix",
+    }
     worst: tuple[str, float] | None = None
     for entry in mounts:
         if not isinstance(entry, dict) or entry.get("target") not in interesting:
@@ -119,7 +126,9 @@ def verdict(
     if failed:
         tone = "bad"
         names = ", ".join(str(entry.get("unit")) for entry in failed[:3])
-        problems.append(f"{len(failed)} unit{'s' if len(failed) != 1 else ''} failed ({names})")
+        problems.append(
+            f"{len(failed)} unit{'s' if len(failed) != 1 else ''} failed ({names})"
+        )
     degraded = [
         name
         for name, value in sources.items()
@@ -127,7 +136,9 @@ def verdict(
     ]
     if degraded:
         tone = "bad" if tone == "bad" else "warn"
-        problems.append(f"{len(degraded)} source{'s' if len(degraded) != 1 else ''} unavailable")
+        problems.append(
+            f"{len(degraded)} source{'s' if len(degraded) != 1 else ''} unavailable"
+        )
     if mount and mount[1] > 0.9:
         tone = "bad"
         problems.append(f"{mount[0]} is {mount[1] * 100:.0f}% full")
@@ -136,7 +147,11 @@ def verdict(
         problems.append("memory is nearly exhausted")
 
     heavy = [entry for entry in scopes if entry.get("class") in HEAVY_CLASSES]
-    agents = [entry for entry in scopes if entry.get("job_id") or entry.get("class") == "agent"]
+    agents = [
+        entry
+        for entry in scopes
+        if entry.get("job_id") or entry.get("class") == "agent"
+    ]
     in_flight = running_ledger(state)
     activity: list[str] = []
     if in_flight:
@@ -182,7 +197,12 @@ def pressure_card(state: dict[str, Any]) -> str:
             rows.append((f"{label} psi", "—"))
             continue
         tone = "bad" if value > 40 else "warn" if value > 10 else "ok"
-        rows.append((f"{label} psi", f'{dot(tone)}{value:.2f} <span class="sub">avg10 some</span>'))
+        rows.append(
+            (
+                f"{label} psi",
+                f'{dot(tone)}{value:.2f} <span class="sub">avg10 some</span>',
+            )
+        )
     memory = memory_figures(pressure)
     if memory:
         used, total = memory
@@ -190,7 +210,8 @@ def pressure_card(state: dict[str, Any]) -> str:
             0,
             (
                 "memory",
-                f"{used:.1f} / {total:.1f} GiB" + meter(int(used * 1024), int(total * 1024)),
+                f"{used:.1f} / {total:.1f} GiB"
+                + meter(int(used * 1024), int(total * 1024)),
             ),
         )
     return card(
@@ -205,7 +226,14 @@ def storage_card(state: dict[str, Any]) -> str:
     mounts = storage.get("mounts") if isinstance(storage, dict) else None
     if not isinstance(mounts, list) or not mounts:
         return card("Storage", empty("no storage mounts in the snapshot"))
-    interesting = {"/", "/persist", "/realm", "/outer-realm", "/neo-outer-realm", "/nix"}
+    interesting = {
+        "/",
+        "/persist",
+        "/realm",
+        "/outer-realm",
+        "/neo-outer-realm",
+        "/nix",
+    }
     # Several of these are subvolumes of one filesystem and report identical
     # figures; showing the same bar four times is noise, so collapse them onto
     # one row that names every mount point sharing the numbers.
@@ -233,7 +261,9 @@ def storage_card(state: dict[str, Any]) -> str:
             "fstype": entry.get("fstype"),
         }
     blocks = ""
-    for figures in sorted(seen.values(), key=lambda item: item["used"] / item["total"], reverse=True):
+    for figures in sorted(
+        seen.values(), key=lambda item: item["used"] / item["total"], reverse=True
+    ):
         names = " ".join(f"<code>{esc(name)}</code>" for name in figures["targets"])
         blocks += row(
             names + meter(figures["used"], figures["total"]),
@@ -255,7 +285,9 @@ def sources_card(snapshot: dict[str, Any]) -> str:
         if not isinstance(value, dict):
             continue
         status = str(value.get("status", "unknown"))
-        tone = {"healthy": "ok", "unavailable": "bad", "disabled": "muted"}.get(status, "warn")
+        tone = {"healthy": "ok", "unavailable": "bad", "disabled": "muted"}.get(
+            status, "warn"
+        )
         note = value.get("degradation") or value.get("freshness") or ""
         blocks += row(
             f"<code>{esc(name)}</code>",
@@ -276,7 +308,8 @@ def failed_card(state: dict[str, Any]) -> str:
     unhealthy = [
         entry
         for entry in units
-        if isinstance(entry, dict) and entry.get("active_state") in {"failed", "activating"}
+        if isinstance(entry, dict)
+        and entry.get("active_state") in {"failed", "activating"}
     ]
     if not unhealthy:
         return card(
@@ -290,8 +323,14 @@ def failed_card(state: dict[str, Any]) -> str:
         tone = "bad" if active == "failed" else "warn"
         blocks += row(
             f"<code>{esc(entry.get('unit'))}</code>",
-            [badge(active, tone), esc(entry.get("sub_state")), esc(entry.get("result") or "")],
-            '<a class="act" href="/services/">manage →</a>' if active == "failed" else "",
+            [
+                badge(active, tone),
+                esc(entry.get("sub_state")),
+                esc(entry.get("result") or ""),
+            ],
+            '<a class="act" href="/services/">manage →</a>'
+            if active == "failed"
+            else "",
             tone,
         )
     return card(
@@ -333,7 +372,9 @@ def reports_card(reports_dir: Path, now: dt.datetime) -> str:
         entries = [
             entry
             for entry in reports_dir.iterdir()
-            if entry.is_file() and entry.suffix == ".html" and entry.name != "index.html"
+            if entry.is_file()
+            and entry.suffix == ".html"
+            and entry.name != "index.html"
         ]
     except OSError as error:
         return card("Reports", f'<p class="sub">{esc(error)}</p>')
@@ -347,7 +388,9 @@ def reports_card(reports_dir: Path, now: dt.datetime) -> str:
         )
     return card(
         "Recent reports",
-        f'<ul class="links">{items}</ul>' if items else empty("no reports generated yet"),
+        f'<ul class="links">{items}</ul>'
+        if items
+        else empty("no reports generated yet"),
         f'<a href="/reports/">all {len(entries)} reports →</a>',
     )
 
@@ -377,8 +420,14 @@ def render_dashboard(
 
     state = snapshot.get("state")
     state = state if isinstance(state, dict) else {}
-    sources = snapshot.get("sources") if isinstance(snapshot.get("sources"), dict) else {}
-    pressure = state.get("live_pressure") if isinstance(state.get("live_pressure"), dict) else {}
+    sources = (
+        snapshot.get("sources") if isinstance(snapshot.get("sources"), dict) else {}
+    )
+    pressure = (
+        state.get("live_pressure")
+        if isinstance(state.get("live_pressure"), dict)
+        else {}
+    )
     memory = memory_figures(pressure)
     failed = failed_units(state)
     mount = worst_mount(state)
@@ -410,7 +459,11 @@ def render_dashboard(
         )
     if cpu is not None:
         tiles.append(
-            tile(f"{cpu:.1f}", "cpu psi avg10", "bad" if cpu > 40 else "warn" if cpu > 10 else "")
+            tile(
+                f"{cpu:.1f}",
+                "cpu psi avg10",
+                "bad" if cpu > 40 else "warn" if cpu > 10 else "",
+            )
         )
     if mount:
         tiles.append(
@@ -440,4 +493,3 @@ def render_dashboard(
     if observed is not None:
         chips.append(f"observed {duration_human((now - observed).total_seconds())} ago")
     return page("hub", host, chips, "/", body, tail=ACTION_SCRIPT)
-

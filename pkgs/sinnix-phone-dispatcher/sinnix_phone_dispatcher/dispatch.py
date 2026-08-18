@@ -32,7 +32,9 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
         except (OSError, json.JSONDecodeError) as exc:
             # Left in place, loudly. A malformed intent is a bug worth seeing,
             # and deleting the evidence would make it a bug nobody can see.
-            print(f"dispatch: {path.name} is not readable JSON ({exc})", file=sys.stderr)
+            print(
+                f"dispatch: {path.name} is not readable JSON ({exc})", file=sys.stderr
+            )
             failed += 1
             continue
         result = execute(intent)
@@ -40,7 +42,9 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
             path.unlink(missing_ok=True)
             executed += 1
         else:
-            print(f"dispatch: {path.name} failed: {result.get('detail')}", file=sys.stderr)
+            print(
+                f"dispatch: {path.name} failed: {result.get('detail')}", file=sys.stderr
+            )
             failed += 1
     print(f"dispatch: executed {executed}, failed {failed}")
     return 0
@@ -49,7 +53,10 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
 def cmd_push(args: argparse.Namespace) -> int:
     """Refresh the state files the drain pushes to the phone."""
     ensure_dirs()
-    for name, builder in (("glance.json", build_glance), ("steering.json", build_steering)):
+    for name, builder in (
+        ("glance.json", build_glance),
+        ("steering.json", build_steering),
+    ):
         target = INBOX_DIR / name
         tmp = target.with_suffix(target.suffix + ".part")
         tmp.write_text(json.dumps(builder(), indent=2) + "\n", encoding="utf-8")

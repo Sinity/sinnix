@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from sinnix_ops_reducer import orient
 
 SNAPSHOT_HEALTHY: dict[str, Any] = {
@@ -55,7 +54,12 @@ SNAPSHOT_HEALTHY: dict[str, Any] = {
                 },
                 "stt": {
                     "unit": "sinnix-stt.service",
-                    "acknowledged": {"down": False, "reason": "", "since": "", "ref": ""},
+                    "acknowledged": {
+                        "down": False,
+                        "reason": "",
+                        "since": "",
+                        "ref": "",
+                    },
                 },
             },
         },
@@ -140,7 +144,10 @@ def test_capture_freshness_counts_and_lists_non_healthy() -> None:
     assert freshness["healthy"] == 1
     assert freshness["non_healthy"] == [
         {"key": "capture:video-resolve", "status": "stale"},
-        {"key": "service:user:sinnix-capture-kitty-scrollback.service", "status": "failed"},
+        {
+            "key": "service:user:sinnix-capture-kitty-scrollback.service",
+            "status": "failed",
+        },
     ]
 
 
@@ -155,7 +162,9 @@ def test_capture_freshness_unavailable_when_lanes_missing() -> None:
 
 
 def test_bd_ready_head_parses_and_truncates() -> None:
-    items = [{"id": f"sinnix-{i}", "title": f"item {i}", "priority": 3} for i in range(8)]
+    items = [
+        {"id": f"sinnix-{i}", "title": f"item {i}", "priority": 3} for i in range(8)
+    ]
     result = orient.bd_ready_head(runner=make_runner(json.dumps(items)))
     assert result["available"] is True
     assert result["total"] == 8
@@ -164,7 +173,9 @@ def test_bd_ready_head_parses_and_truncates() -> None:
 
 
 def test_bd_ready_head_absent_on_nonzero_exit() -> None:
-    result = orient.bd_ready_head(runner=make_runner("Error: no beads database found", 1))
+    result = orient.bd_ready_head(
+        runner=make_runner("Error: no beads database found", 1)
+    )
     assert result == {"available": False}
 
 
@@ -186,7 +197,9 @@ def test_steering_ready_head_present_when_workspace_exists(tmp_path: Path) -> No
     beads_dir = tmp_path / ".beads"
     beads_dir.mkdir()
     items = [{"id": "steer-1", "title": "morning check-in", "priority": 2}]
-    result = orient.steering_ready_head(beads_dir=beads_dir, runner=make_runner(json.dumps(items)))
+    result = orient.steering_ready_head(
+        beads_dir=beads_dir, runner=make_runner(json.dumps(items))
+    )
     assert result == {"available": True, "total": 1, "ready": items}
 
 
@@ -197,12 +210,18 @@ def test_steering_ready_head_present_when_workspace_exists(tmp_path: Path) -> No
 
 def test_compose_healthy_reducer_and_beads() -> None:
     def fetch(_socket: Path, route: str) -> dict[str, Any] | None:
-        return {"/v1/snapshot": SNAPSHOT_HEALTHY, "/v1/health/lanes": LANES_MIXED}[route]
+        return {"/v1/snapshot": SNAPSHOT_HEALTHY, "/v1/health/lanes": LANES_MIXED}[
+            route
+        ]
 
     data = orient.compose(
         socket_path=Path("/nonexistent/ops.sock"),
         fetch=fetch,
-        bd_head=lambda: {"available": True, "total": 1, "ready": [{"id": "x", "title": "y", "priority": 1}]},
+        bd_head=lambda: {
+            "available": True,
+            "total": 1,
+            "ready": [{"id": "x", "title": "y", "priority": 1}],
+        },
         steering_head=lambda: {"available": False},
     )
     assert data["schema"] == orient.SCHEMA
@@ -213,7 +232,9 @@ def test_compose_healthy_reducer_and_beads() -> None:
     assert data["steering"] == {"available": False}
 
 
-def test_compose_degraded_reducer_falls_back_to_static_inventory(tmp_path: Path) -> None:
+def test_compose_degraded_reducer_falls_back_to_static_inventory(
+    tmp_path: Path,
+) -> None:
     static_inventory = tmp_path / "runtime-inventory.json"
     static_inventory.write_text(
         json.dumps(SNAPSHOT_HEALTHY["state"]["runtime_inventory"]), encoding="utf-8"
@@ -238,7 +259,9 @@ def test_compose_degraded_reducer_falls_back_to_static_inventory(tmp_path: Path)
 
 def test_compose_no_beads_workspace() -> None:
     def fetch(_socket: Path, route: str) -> dict[str, Any] | None:
-        return {"/v1/snapshot": SNAPSHOT_HEALTHY, "/v1/health/lanes": LANES_MIXED}[route]
+        return {"/v1/snapshot": SNAPSHOT_HEALTHY, "/v1/health/lanes": LANES_MIXED}[
+            route
+        ]
 
     data = orient.compose(
         socket_path=Path("/nonexistent/ops.sock"),
@@ -264,7 +287,12 @@ def test_render_human_healthy_system_has_no_attention_rows() -> None:
         "generated_at": "2026-08-18T00:00:00Z",
         "system": {"status": "healthy", "summary": "The system is healthy."},
         "acknowledged_outages": [],
-        "capture_freshness": {"available": True, "total": 5, "healthy": 5, "non_healthy": []},
+        "capture_freshness": {
+            "available": True,
+            "total": 5,
+            "healthy": 5,
+            "non_healthy": [],
+        },
         "beads": {"available": False},
         "steering": {"available": False},
     }
@@ -278,9 +306,20 @@ def test_render_human_healthy_system_has_no_attention_rows() -> None:
 def test_render_human_includes_every_populated_section() -> None:
     data = orient.compose(
         socket_path=Path("/nonexistent/ops.sock"),
-        fetch=lambda _s, route: {"/v1/snapshot": SNAPSHOT_HEALTHY, "/v1/health/lanes": LANES_MIXED}[route],
-        bd_head=lambda: {"available": True, "total": 2, "ready": [{"id": "a", "title": "t", "priority": 1}]},
-        steering_head=lambda: {"available": True, "total": 1, "ready": [{"id": "s", "title": "u", "priority": 1}]},
+        fetch=lambda _s, route: {
+            "/v1/snapshot": SNAPSHOT_HEALTHY,
+            "/v1/health/lanes": LANES_MIXED,
+        }[route],
+        bd_head=lambda: {
+            "available": True,
+            "total": 2,
+            "ready": [{"id": "a", "title": "t", "priority": 1}],
+        },
+        steering_head=lambda: {
+            "available": True,
+            "total": 1,
+            "ready": [{"id": "s", "title": "u", "priority": 1}],
+        },
     )
     text = orient.render_human(data)
     assert "FAILED      sinnix-capture-kitty-scrollback.service (user)" in text
@@ -307,7 +346,10 @@ def test_render_acknowledged_only_matches_hook_contract() -> None:
     assert text.startswith(
         "## Acknowledged outages (known-down, do not re-report as incidents)\n\n"
     )
-    assert "- sinex (sinex.service) — repair in progress [since 2026-07-10, ref sinnix-abcd]" in text
+    assert (
+        "- sinex (sinex.service) — repair in progress [since 2026-07-10, ref sinnix-abcd]"
+        in text
+    )
     assert text.endswith("rather than raising it as new.\n")
 
 
@@ -350,11 +392,17 @@ def test_acknowledged_only_report_falls_back_to_socket(tmp_path: Path) -> None:
     assert "sinex" in text
 
 
-def test_default_static_inventory_path_honors_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_static_inventory_path_honors_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", "/tmp/fixture-inventory.json")
     assert orient.default_static_inventory_path() == Path("/tmp/fixture-inventory.json")
 
 
-def test_default_static_inventory_path_falls_back_to_etc(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_static_inventory_path_falls_back_to_etc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("SINNIX_RUNTIME_INVENTORY_FILE", raising=False)
-    assert orient.default_static_inventory_path() == Path("/etc/sinnix/runtime-inventory.json")
+    assert orient.default_static_inventory_path() == Path(
+        "/etc/sinnix/runtime-inventory.json"
+    )

@@ -16,28 +16,77 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from sinnix_ops_reducer import health
 
 # The resting-state shapes, one fixture unit each -- the sweep derives its
 # verdict from ActiveState/Type/Result/WantedBy and never from a unit list.
 UNIT_FIXTURES: dict[str, dict[str, str]] = {
     # WantedBy set, down: a daemon that should be running, isn't.
-    "fixture.service": {"ActiveState": "inactive", "Type": "simple", "Result": "success", "WantedBy": "multi-user.target"},
+    "fixture.service": {
+        "ActiveState": "inactive",
+        "Type": "simple",
+        "Result": "success",
+        "WantedBy": "multi-user.target",
+    },
     # ran and exited cleanly
-    "oneshot-done.service": {"ActiveState": "inactive", "Type": "oneshot", "Result": "success", "WantedBy": ""},
+    "oneshot-done.service": {
+        "ActiveState": "inactive",
+        "Type": "oneshot",
+        "Result": "success",
+        "WantedBy": "",
+    },
     # ran and failed
-    "oneshot-failed.service": {"ActiveState": "inactive", "Type": "oneshot", "Result": "exit-code", "WantedBy": ""},
+    "oneshot-failed.service": {
+        "ActiveState": "inactive",
+        "Type": "oneshot",
+        "Result": "exit-code",
+        "WantedBy": "",
+    },
     # WantedBy empty: an on-demand backend idled out cleanly
-    "backend-idle.service": {"ActiveState": "inactive", "Type": "exec", "Result": "success", "WantedBy": ""},
+    "backend-idle.service": {
+        "ActiveState": "inactive",
+        "Type": "exec",
+        "Result": "success",
+        "WantedBy": "",
+    },
     # "on-demand" excuses being inactive, not crashing
-    "backend-crashed.service": {"ActiveState": "inactive", "Type": "exec", "Result": "exit-code", "WantedBy": ""},
+    "backend-crashed.service": {
+        "ActiveState": "inactive",
+        "Type": "exec",
+        "Result": "exit-code",
+        "WantedBy": "",
+    },
     # WantedBy still set, but declared socket-proxy: that declaration suffices
-    "socket-proxy-declared.service": {"ActiveState": "inactive", "Type": "exec", "Result": "success", "WantedBy": "multi-user.target"},
-    "acknowledged.service": {"ActiveState": "failed", "Type": "simple", "Result": "exit-code", "WantedBy": "multi-user.target"},
-    "midflight.service": {"ActiveState": "activating", "Type": "oneshot", "Result": "success", "WantedBy": ""},
-    "proxy-listening.socket": {"ActiveState": "active", "Type": "simple", "Result": "success", "WantedBy": "sockets.target"},
-    "proxy-latched.socket": {"ActiveState": "failed", "Type": "simple", "Result": "trigger-limit-hit", "WantedBy": "sockets.target"},
+    "socket-proxy-declared.service": {
+        "ActiveState": "inactive",
+        "Type": "exec",
+        "Result": "success",
+        "WantedBy": "multi-user.target",
+    },
+    "acknowledged.service": {
+        "ActiveState": "failed",
+        "Type": "simple",
+        "Result": "exit-code",
+        "WantedBy": "multi-user.target",
+    },
+    "midflight.service": {
+        "ActiveState": "activating",
+        "Type": "oneshot",
+        "Result": "success",
+        "WantedBy": "",
+    },
+    "proxy-listening.socket": {
+        "ActiveState": "active",
+        "Type": "simple",
+        "Result": "success",
+        "WantedBy": "sockets.target",
+    },
+    "proxy-latched.socket": {
+        "ActiveState": "failed",
+        "Type": "simple",
+        "Result": "trigger-limit-hit",
+        "WantedBy": "sockets.target",
+    },
 }
 
 
@@ -85,7 +134,12 @@ def world(tmp_path: Path, monkeypatch):
                 {
                     "schema": "sinnix-capture-v1",
                     "seq": seq,
-                    "payload": {"window_class": None, "geometry": {}, "monitor": "DP-3", "note": "x"},
+                    "payload": {
+                        "window_class": None,
+                        "geometry": {},
+                        "monitor": "DP-3",
+                        "note": "x",
+                    },
                 }
             )
             + "\n"
@@ -95,7 +149,12 @@ def world(tmp_path: Path, monkeypatch):
                 {
                     "schema": "sinnix-capture-v1",
                     "seq": seq,
-                    "payload": {"window_class": "kitty", "geometry": {"width": 1920}, "monitor": "DP-3", "note": None},
+                    "payload": {
+                        "window_class": "kitty",
+                        "geometry": {"width": 1920},
+                        "monitor": "DP-3",
+                        "note": None,
+                    },
                 }
             )
             + "\n"
@@ -107,7 +166,12 @@ def world(tmp_path: Path, monkeypatch):
             {
                 "schema": "sinnix-capture-v1",
                 "seq": 7,
-                "payload": {"window_class": "kitty", "geometry": {"width": 1920}, "monitor": "DP-3", "note": "present"},
+                "payload": {
+                    "window_class": "kitty",
+                    "geometry": {"width": 1920},
+                    "monitor": "DP-3",
+                    "note": "present",
+                },
             }
         )
         + "\n"
@@ -122,21 +186,55 @@ def world(tmp_path: Path, monkeypatch):
     fields = ["window_class", "geometry.width", "monitor", "note"]
     inventory: dict[str, Any] = {
         "captures": [
-            {"name": "fixture", "path": str(lanes / "stale"), "expectedCadenceSeconds": 60},
-            {"name": "ed-stale", "path": str(lanes / "stale"), "expectedStaleAfterSeconds": 60},
-            {"name": "ed-fresh", "path": str(lanes / "fresh"), "expectedStaleAfterSeconds": 600},
-            {"name": "payload-dead", "path": str(lanes / "payload-dead"), "requiredPayloadFields": fields},
-            {"name": "payload-live", "path": str(lanes / "payload-live"), "requiredPayloadFields": fields},
+            {
+                "name": "fixture",
+                "path": str(lanes / "stale"),
+                "expectedCadenceSeconds": 60,
+            },
+            {
+                "name": "ed-stale",
+                "path": str(lanes / "stale"),
+                "expectedStaleAfterSeconds": 60,
+            },
+            {
+                "name": "ed-fresh",
+                "path": str(lanes / "fresh"),
+                "expectedStaleAfterSeconds": 600,
+            },
+            {
+                "name": "payload-dead",
+                "path": str(lanes / "payload-dead"),
+                "requiredPayloadFields": fields,
+            },
+            {
+                "name": "payload-live",
+                "path": str(lanes / "payload-live"),
+                "requiredPayloadFields": fields,
+            },
             {
                 "name": "probe-absent",
                 "path": str(lanes / "fresh"),
-                "livenessProbe": {"command": f'[ -e "{marker}" ] && exit 0 || exit 1', "timeoutSeconds": 5},
+                "livenessProbe": {
+                    "command": f'[ -e "{marker}" ] && exit 0 || exit 1',
+                    "timeoutSeconds": 5,
+                },
             },
-            {"name": "probe-unknown", "path": str(lanes / "fresh"), "livenessProbe": {"command": "exit 9", "timeoutSeconds": 5}},
-            {"name": "probe-timeout", "path": str(lanes / "fresh"), "livenessProbe": {"command": "sleep 5", "timeoutSeconds": 1}},
+            {
+                "name": "probe-unknown",
+                "path": str(lanes / "fresh"),
+                "livenessProbe": {"command": "exit 9", "timeoutSeconds": 5},
+            },
+            {
+                "name": "probe-timeout",
+                "path": str(lanes / "fresh"),
+                "livenessProbe": {"command": "sleep 5", "timeoutSeconds": 1},
+            },
             # Neither cadence nor budget, and nothing ever written: the most
             # broken a lane can be, and the state that used to raise nothing.
-            {"name": "unbudgeted-never-wrote", "path": str(tmp_path / "does-not-exist")},
+            {
+                "name": "unbudgeted-never-wrote",
+                "path": str(tmp_path / "does-not-exist"),
+            },
             # A budget cannot fire on a lane with no file to age: an empty
             # declared directory is unproduced, not stale.
             {
@@ -152,7 +250,12 @@ def world(tmp_path: Path, monkeypatch):
             {"kind": "service", "manager": "system", "unit": "oneshot-failed.service"},
             {"kind": "service", "manager": "system", "unit": "backend-idle.service"},
             {"kind": "service", "manager": "system", "unit": "backend-crashed.service"},
-            {"kind": "service", "manager": "system", "unit": "socket-proxy-declared.service", "activationMode": "socket-proxy"},
+            {
+                "kind": "service",
+                "manager": "system",
+                "unit": "socket-proxy-declared.service",
+                "activationMode": "socket-proxy",
+            },
             {
                 "kind": "service",
                 "manager": "system",
@@ -170,7 +273,11 @@ def world(tmp_path: Path, monkeypatch):
 
     def run() -> list[dict[str, Any]]:
         health.sweep(inventory, health.Emitter(state, ledger, recorder), prober=prober)
-        return [json.loads(line) for line in ledger.read_text().splitlines()] if ledger.exists() else []
+        return (
+            [json.loads(line) for line in ledger.read_text().splitlines()]
+            if ledger.exists()
+            else []
+        )
 
     return {
         "run": run,
@@ -184,7 +291,9 @@ def world(tmp_path: Path, monkeypatch):
 
 
 def find(events: list[dict[str, Any]], type_: str, unit: str) -> dict[str, Any] | None:
-    matches = [event for event in events if event["type"] == type_ and event["unit"] == unit]
+    matches = [
+        event for event in events if event["type"] == type_ and event["unit"] == unit
+    ]
     return matches[-1] if matches else None
 
 
@@ -208,7 +317,9 @@ def test_every_lane_and_unit_shape_reaches_the_ledger(world) -> None:
     assert find(events, "service_failure", "oneshot-failed.service")["ok"] is False
     assert find(events, "service_failure", "backend-idle.service")["ok"] is True
     assert find(events, "service_failure", "backend-crashed.service")["ok"] is False
-    assert find(events, "service_failure", "socket-proxy-declared.service")["ok"] is True
+    assert (
+        find(events, "service_failure", "socket-proxy-declared.service")["ok"] is True
+    )
     usersurf = find(events, "service_failure", "usersurf.service")
     assert usersurf["status"] == "unknown" and usersurf["ok"] is False
 
@@ -232,7 +343,10 @@ def test_every_lane_and_unit_shape_reaches_the_ledger(world) -> None:
     assert "always_empty=window_class,geometry.width" in degenerate["evidence"]
     assert find(events, "capture_payload", "payload-live")["ok"] is True
 
-    assert find(events, "publisher_liveness", "probe-absent")["status"] == "publisher-absent"
+    assert (
+        find(events, "publisher_liveness", "probe-absent")["status"]
+        == "publisher-absent"
+    )
     assert find(events, "publisher_liveness", "probe-unknown")["status"] == "unknown"
     timeout = find(events, "publisher_liveness", "probe-timeout")
     assert timeout["status"] == "unknown" and "probe_exit=124" in timeout["evidence"]
@@ -293,7 +407,9 @@ def test_an_unproduced_lane_is_told_once_and_calmly(world) -> None:
     world["run"]()
     world["run"]()
     assert not [
-        title for _, title, _ in world["recorder"].notifications if "never produced" in title
+        title
+        for _, title, _ in world["recorder"].notifications
+        if "never produced" in title
     ]
 
 
@@ -315,7 +431,9 @@ def test_first_production_clears_unproduced_without_claiming_a_recovery(world) -
         for urgency, title, _ in world["recorder"].notifications
         if "empty-but-declared" in title
     ]
-    assert announced == [("normal", "empty-but-declared lane has produced for the first time")]
+    assert announced == [
+        ("normal", "empty-but-declared lane has produced for the first time")
+    ]
 
 
 def test_a_settled_status_is_not_re_emitted(world) -> None:
@@ -348,9 +466,11 @@ def test_one_disagreeing_sample_never_transitions(world) -> None:
     os.utime(world["lanes"] / "stale" / "current", (0, 0))
     events = world["run"]()  # back to stale: the candidate is dropped
     assert find(events, "capture_stale", "fixture")["status"] == "stale"
-    assert [event for event in events if event["type"] == "capture_stale" and event["unit"] == "fixture"] == [
-        find(events, "capture_stale", "fixture")
-    ]
+    assert [
+        event
+        for event in events
+        if event["type"] == "capture_stale" and event["unit"] == "fixture"
+    ] == [find(events, "capture_stale", "fixture")]
 
 
 def test_notification_rules(world) -> None:
@@ -364,7 +484,10 @@ def test_notification_rules(world) -> None:
     assert not any("ed-fresh" in title for title in urgencies)
     assert urgencies["fixture.service stopped working"] == "critical"
     bodies = {title: body for _, title, body in notifications}
-    assert "Look: journalctl -u fixture.service -e" in bodies["fixture.service stopped working"]
+    assert (
+        "Look: journalctl -u fixture.service -e"
+        in bodies["fixture.service stopped working"]
+    )
 
     # A recovery is announced only because the outage was.
     world["recorder"].notifications.clear()
@@ -398,9 +521,19 @@ def test_the_failure_fast_path_shares_the_sweeps_key(world) -> None:
     assert json.loads(world["state"].read_text())["service:system:fixture.service"] == {
         "status": "failed"
     }
-    assert len([event for event in
-                (json.loads(line) for line in world["ledger"].read_text().splitlines())
-                if event["unit"] == "fixture.service"]) == 1
+    assert (
+        len(
+            [
+                event
+                for event in (
+                    json.loads(line)
+                    for line in world["ledger"].read_text().splitlines()
+                )
+                if event["unit"] == "fixture.service"
+            ]
+        )
+        == 1
+    )
 
 
 def test_a_mid_transition_unit_keeps_its_previous_verdict(world) -> None:

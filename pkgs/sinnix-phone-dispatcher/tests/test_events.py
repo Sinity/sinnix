@@ -47,7 +47,9 @@ def test_consecutive_batches_extend_the_same_file(isolated_state_dirs) -> None:
     second = b'{"kind":"chunk_closed"}\n'
     uploads_mod.append_events("20260818", 0, first, _sha(first))
 
-    status, payload = uploads_mod.append_events("20260818", len(first), second, _sha(second))
+    status, payload = uploads_mod.append_events(
+        "20260818", len(first), second, _sha(second)
+    )
 
     assert status == HTTPStatus.OK
     assert payload["cursor"] == len(first) + len(second)
@@ -62,21 +64,27 @@ def test_replayed_batch_leaves_the_file_identical(isolated_state_dirs) -> None:
     uploads_mod.append_events("20260818", len(first), second, _sha(second))
     before = _day_file(isolated_state_dirs).read_bytes()
 
-    status, payload = uploads_mod.append_events("20260818", len(first), second, _sha(second))
+    status, payload = uploads_mod.append_events(
+        "20260818", len(first), second, _sha(second)
+    )
 
     assert status == HTTPStatus.OK
     assert payload["duplicate"] is True
     assert _day_file(isolated_state_dirs).read_bytes() == before
 
 
-def test_partially_overlapping_batch_lands_only_the_new_tail(isolated_state_dirs) -> None:
+def test_partially_overlapping_batch_lands_only_the_new_tail(
+    isolated_state_dirs,
+) -> None:
     """The phone rewound further than it needed to. The overlap is rewritten
     with identical bytes and only the remainder extends the file."""
     first = b'{"kind":"mark"}\n'
     uploads_mod.append_events("20260818", 0, first, _sha(first))
     overlapping = first + b'{"kind":"power"}\n'
 
-    status, payload = uploads_mod.append_events("20260818", 0, overlapping, _sha(overlapping))
+    status, payload = uploads_mod.append_events(
+        "20260818", 0, overlapping, _sha(overlapping)
+    )
 
     assert status == HTTPStatus.OK
     assert payload["duplicate"] is False
@@ -96,7 +104,9 @@ def test_a_gap_is_refused_with_primes_cursor(isolated_state_dirs) -> None:
 
 
 def test_sha_mismatch_writes_nothing(isolated_state_dirs) -> None:
-    status, payload = uploads_mod.append_events("20260818", 0, b'{"kind":"mark"}\n', "0" * 64)
+    status, payload = uploads_mod.append_events(
+        "20260818", 0, b'{"kind":"mark"}\n', "0" * 64
+    )
 
     assert status == HTTPStatus.UNPROCESSABLE_ENTITY
     assert payload["ok"] is False

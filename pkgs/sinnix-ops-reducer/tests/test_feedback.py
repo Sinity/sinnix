@@ -16,7 +16,6 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-
 from sinnix_ops_reducer.feedback import CoalescingTrigger, FeedbackSpool, is_elicit
 from sinnix_ops_reducer.reducer import Reducer
 from sinnix_ops_reducer.server import Handler
@@ -76,7 +75,9 @@ def test_a_burst_of_judgments_coalesces_into_one_run(tmp_path: Path) -> None:
     trigger = Counting(["true"], delay=1.0)
     spool = FeedbackSpool(tmp_path, elicit=trigger)
     for index in range(10):
-        spool.append({"schema": "sinnix-elicit-v1", "domain": "d", "n": index}, None, None)
+        spool.append(
+            {"schema": "sinnix-elicit-v1", "domain": "d", "n": index}, None, None
+        )
     time.sleep(2.5)
     assert len(runs) == 1
 
