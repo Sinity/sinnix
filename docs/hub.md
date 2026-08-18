@@ -60,15 +60,24 @@ Long-lived scopes are labelled as such rather than filtered out. A devshell
 Postgres or a Dolt server that has sat in `build.slice` for a week is not
 "nothing" — it is spending the same budget the next compile wants.
 
-### What the page cannot do
+### What the page can and cannot do
 
 Lifecycle control goes through the reducer's action API and nowhere else, so
 the page can only offer what that API accepts: `start`/`stop`/`restart` on an
-attested inventory unit that declares `observe.restartable`, and `interrupt` on
-an attested agent job. An ad-hoc `sinnix-scope` placement is neither, so a
-running compile is fully _visible_ and not stoppable from the hub. The page
-says so in place of the button. Making it stoppable is a reducer change — a
-scope-target admission rule with its own attestation — not a hub change.
+attested inventory unit that declares `observe.restartable`, `interrupt` on an
+attested agent job, `stop` on an admitted `sinnix-scope` placement, and `stop`
+on an admitted `{pid, start_ticks}` process (sinnix-pl37, sinnix-mble — see
+"Unshackling the hub" below). An ad-hoc scope is admitted by name-shape
+(`sinnix-<class>-<identity>-<epoch_ns>-<pid>.scope`) plus live systemd state,
+not by pre-registration, so a running compile is visible and stoppable without
+the reducer having to know about it in advance. A process is admitted by live
+cgroup membership — only inside `agent.slice`, `build.slice`, or a slice the
+runtime inventory itself marks sacrificial — never by name, so the button is
+only offered where the action would actually be accepted. Two gaps remain
+and stay named rather than papered over: a slice-level policy change
+(`MemoryHigh` on `agent.slice` itself) is refused because `set_policy`
+resolves through the runtime inventory and slices are not registered surfaces
+there, and nothing drains swap or reclaims a slice's already-swapped pages.
 
 ## The pressure view
 
@@ -280,6 +289,38 @@ fault, and connecting to the public endpoint starts one with no privileged
 action at all. Ollama and KoboldCpp hold the same `gpu-inference` admission key
 and conflict by design. See `docs/local-ai-activation.md`.
 
+## Unshackling the hub
+
+Operator directive (2026-08-13, sinnix-pl37): "do want hub to be powerful,
+why wouldn't I esp when it is my smartphone and my pc and nothing else? again
+POWER." The scope-target and process-target admission rules above are that
+directive's main body — the reducer widened, never a second control plane.
+The rest of that bead was deciding which of the reducer's other verbs
+(`freeze`/`thaw`/`park`/`set_policy`/`reset_policy`, already implemented and
+already unit-only) belong on a page:
+
+- **`park` and `set_policy`/`reset_policy` are on `/pressure/` and
+  `/services/`.** `park` freezes a unit's cgroup and schedules its own thaw in
+  the same action, so a parked backup cannot be forgotten frozen — the hub
+  button prompts for the deadline rather than guessing one, because the
+  action refuses to run without it. `set_policy`/`reset_policy` tune whichever
+  `MemoryHigh`/`MemoryMax`/`MemoryLow`/`CPUWeight`/`IOWeight`/`Nice` properties
+  a surface's own `effectiveResources` already declares, with one button that
+  restores every one of them from the inventory's value — reversible by
+  construction, which is the design goal the operator named ("auditability
+  and reversibility, not restraint"), not a smaller or safer verb set than
+  the one that already exists.
+- **Bare `freeze`/`thaw` stay backend-only.** They are `park`'s own building
+  blocks (`sinnix-pressure-park freeze`/`thaw`), and the difference that
+  matters is the missing deadline: a bare freeze has no scheduled thaw, so a
+  forgotten one is an indefinitely paused unit rather than a unit that
+  resumes on its own. `park` is strictly more capable for every case a hub
+  button would want (pause now, resume later) and carries the safety property
+  bare freeze does not, so there is no case where surfacing the primitive
+  adds power the composed verb lacks — it only adds a way to forget.
+- **`/feedback/elicit/<domain>`** is the read-API design this bead also asked
+  for, covered under "Report annotations, handed back" below.
+
 ## Report annotations, handed back
 
 The html-report skill generates annotation widgets that autosave to
@@ -305,15 +346,29 @@ submissions apart without trusting client-supplied fields. That file format is
 the contract and is unchanged from the earlier standalone feedback daemon
 this route replaced.
 
-The endpoint is write-only. There is no read route: serving the spool back would
-turn a sink into an exfiltration surface for the personal analysis those
-annotations describe.
+The spool itself is write-only. There is no route that reads it back: serving
+arbitrary posted payloads would turn a sink into an exfiltration surface for
+the personal analysis those annotations describe. That refusal stands.
 
 A `sinnix-elicit-v1` record arriving in the spool starts the drain
 (`sinnix-elicit autoingest`, as a transient `sinnix-elicit-autoingest` unit)
 instead of a 120s timer looking for one. The trigger coalesces: a comparison
 session is a burst of one POST per judgment, and the Bradley-Terry refit happens
 once, a few seconds after the last tap, rather than once per tap.
+
+`GET /feedback/elicit/<domain>` is the one read this route does carry, and it
+is a different decision from the spool refusal above, not a walk-back of it:
+it serves back a domain's own fitted `model.json` (`sinnix-elicit`'s
+`/realm/data/notes/preferences/<domain>/model.json`), a derived
+Bradley-Terry fit over items the operator defined themselves on this host,
+not an arbitrary posted payload. Bounded the same way as everything else
+here — the domain name is checked against a fixed charset and the resolved
+path must stay under the configured preferences root — never a general
+filesystem read. This unblocks the in-session "learning so far" preview
+noted onto this bead from sinnix-eb9c: a comparison session can poll its own
+domain's model mid-session instead of only after the next full page load.
+Wiring that poll into the session page's own JS is `scripts/sinnix-elicit`'s
+follow-up, not this route's.
 
 ## Terminal views
 
