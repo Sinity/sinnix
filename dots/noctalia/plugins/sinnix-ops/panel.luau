@@ -177,9 +177,7 @@ local function render()
     ui.label({ text = "Reason: " .. text(view.reason), color = "on_surface_variant" }),
     ui.column({ gap = 6, padding = 10, fill = "surface_variant/0.4", radius = 8 }, {
       ui.label({ text = "Pressure and memory: " .. pressureText(), color = "on_surface" }),
-      ui.label({ text = "GPU: " .. compact(stateValue("gpu")), color = "on_surface" }),
       ui.label({ text = "Workload policy: " .. policyText(), color = "on_surface" }),
-      ui.label({ text = "Heavy lease: " .. compact(stateValue("agent_gateway")), color = "on_surface" }),
       ui.label({ text = "Drift: " .. gapText(), color = "on_surface" }),
       ui.label({ text = "Backup and capture: " .. compact(stateValue("storage")), color = "on_surface" }),
       ui.label({ text = "Incidents: " .. incidentText(), color = "on_surface" }),
