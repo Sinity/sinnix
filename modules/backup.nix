@@ -89,6 +89,13 @@ let
   borgRepoSinexBlobsPath = "${borgRepoRoot}/borg-sinex-blobs-v1";
   borgRepoPolylogueStatePath = "${borgRepoRoot}/borg-polylogue-state-v1";
   btrfsImageRoot = "${borgRepoRoot}/btrfs-images";
+  btrfsImageRetentionDays = 30;
+  # Never let the age rule take a label below this many images, however long
+  # its captures have been failing.
+  btrfsImageKeepMinimum = 2;
+  # Real images run 0.8-3.9 GB. A floor three orders of magnitude below the
+  # smallest observed one only rejects a stub, never a small-but-real capture.
+  btrfsImageMinBytes = 64 * 1024 * 1024;
   borgRepoPersist = "file://${borgRepoPersistPath}";
   borgRepoRealm = "file://${borgRepoRealmPath}";
   borgRepoRootSnapshots = "file://${borgRepoRootSnapshotsPath}";
@@ -1441,7 +1448,21 @@ in
           outerRealmMountUnit
         ];
       };
-      serviceConfig.TimeoutStopSec = "15s";
+      # backup-maintenance sizes MemoryHigh=2G around borg, but a btrfs-image
+      # walk of the root filesystem peaked at 2.2G on a run that SUCCEEDED
+      # (measured 2026-08-18), so the class default sits below this job's
+      # working set and every attempt spends its whole length in cgroup
+      # reclaim. Right-sized on the unit rather than in the class, which no
+      # other backup job needs raised. Deliberately NOT claimed as the cause
+      # of the persist failures: seven controlled captures that day produced
+      # both successes and failures with and against the cap, so the transid
+      # race below is genuinely probabilistic. This removes one pressure
+      # source that is otherwise present on every single run.
+      serviceConfig = {
+        TimeoutStopSec = "15s";
+        MemoryHigh = "6G";
+        MemoryMax = "8G";
+      };
       path = with pkgs; [
         btrfs-progs
         coreutils
@@ -1503,9 +1524,24 @@ in
           while [ "$attempt" -le 5 ]; do
             rm -f "$tmp"
             if btrfs-image -c 9 "$device" "$tmp"; then
-              chmod 0600 "$tmp"
-              mv "$tmp" "$out"
-              return 0
+              # errexit is disabled inside a function whose caller is an `if`
+              # condition, so nothing from here to the rename is covered by
+              # `set -e`: a chmod or mv that failed (full or read-only
+              # /outer-realm) used to fall through to `return 0` and the unit
+              # reported a capture that was not on disk. Every step is checked
+              # by hand, and the image is only "captured" once it is readable
+              # at its final name.
+              if chmod 0600 "$tmp" && mv -- "$tmp" "$out"; then
+                size="$(stat -c %s "$out" 2>/dev/null || echo 0)"
+                if [ "$size" -ge ${toString btrfsImageMinBytes} ]; then
+                  echo "btrfs-metadata-image-backup: $label captured $label-$stamp.btrfs-image ($size bytes)"
+                  return 0
+                fi
+                echo "btrfs-metadata-image-backup: $label produced a degenerate image ($size bytes, floor ${toString btrfsImageMinBytes})" >&2
+                rm -f -- "$out"
+              else
+                echo "btrfs-metadata-image-backup: $label could not be published to $out" >&2
+              fi
             fi
             echo "btrfs-metadata-image-backup: $label attempt $attempt failed (live-filesystem race or real error)" >&2
             attempt=$((attempt + 1))
@@ -1524,13 +1560,48 @@ in
           return 1
         }
 
+        # Retention is a consequence of a successful capture, never a
+        # scheduled event of its own. The prune used to be one unconditional
+        # sweep of the whole directory at the end of the run, which meant a
+        # label that had just failed still had its history aged out: persist
+        # last captured 2026-08-01 while its 2026-07-18 predecessor was
+        # already past the age rule, so the next few runs would have deleted
+        # persist's images one at a time while every capture kept failing,
+        # ending at zero images for a filesystem the unit exists to protect.
+        # A producer does not delete its own last evidence, so the sweep is
+        # per-label, gated on that label landing a fresh image in THIS run,
+        # and floored at the newest ${toString btrfsImageKeepMinimum}
+        # regardless of age.
+        prune_label() {
+          label="$1"
+          kept=0
+          # Names carry a basic-format UTC stamp, so a reverse lexical sort is
+          # a newest-first chronological sort.
+          for name in $(find "${btrfsImageRoot}" -maxdepth 1 -type f \
+            -name "$label-*.btrfs-image" -printf '%f\n' | sort -r); do
+            kept=$((kept + 1))
+            if [ "$kept" -le ${toString btrfsImageKeepMinimum} ]; then
+              continue
+            fi
+            find "${btrfsImageRoot}/$name" -maxdepth 0 \
+              -mtime +${toString btrfsImageRetentionDays} -delete
+          done
+        }
+
         # Per-label accounting: a combined exit code hides which target is
         # actually broken. persist goes first -- see the comment above.
         rc=0
-        capture_image persist /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 || rc=1
-        capture_image realm /dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a || rc=1
+        if capture_image persist /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02; then
+          prune_label persist
+        else
+          rc=1
+        fi
+        if capture_image realm /dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a; then
+          prune_label realm
+        else
+          rc=1
+        fi
 
-        find "${btrfsImageRoot}" -type f -name '*.btrfs-image' -mtime +30 -delete
         exit "$rc"
       '';
     })
