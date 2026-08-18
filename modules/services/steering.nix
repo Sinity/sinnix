@@ -56,174 +56,161 @@ mkServiceModule {
   };
   configFn =
     { cfg, config, ... }:
-    {
-      environment.systemPackages = [
-        steer
-        cockpit
-      ];
-      systemd.tmpfiles.rules = [
-        "d ${stateDir} 0700 ${username} users -"
-        "d ${exportDir} 0755 ${username} users -"
-      ];
-
-      sinnix.runtime.surfaces.steering-evening = {
-        unit = "sinnix-steering-evening.service";
-        manager = "user";
-        resourceClass = "interactive-agent";
-        observe.enable = true;
-      };
-      sinnix.runtime.surfaces.steering-export = {
-        unit = "sinnix-steering-export.service";
-        manager = "user";
-        resourceClass = "interactive-agent";
-        observe.enable = true;
-        captures = [
-          {
-            name = "steering";
-            path = exportDir;
-            # Unconditional: the exporter runs at 23:50 and writes the day's
-            # file whether or not the operator did a ritual, so silence here
-            # measures the exporter rather than the operator -- which is what
-            # makes a budget honest for this lane and not for the ones whose
-            # content depends on him having something to say.
-            cadenceSeconds = 86400;
-            # One missed day tolerated; two is a dead timer.
-            staleAfterSeconds = 172800;
-          }
+    lib.mkMerge [
+      # Morning/evening/export are each an oneshot-on-a-timer, so they go
+      # through mkScheduledJob directly rather than mkServiceModule's `job`
+      # sugar: a job binds exactly one unit and this module owns three (plus
+      # the non-scheduled cockpit service below). `steer` reaches PATH via
+      # environment.systemPackages below already; no separate home.packages
+      # entry is needed. Shared env: both rituals and export need to agree on
+      # store/export paths with the CLI's own defaults (sinnix-steer in the
+      # steering workspace).
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "sinnix-steering-morning";
+          description = "Morning steering ritual (root-probe + decide-once intentions)";
+          surface = config.sinnix.runtime.surfaces.steering;
+        }
+        {
+          manager = "user";
+          resourceClass = "interactive-agent";
+          execStart = "${steer}/bin/sinnix-steer ritual morning";
+          environment = {
+            SINNIX_STEERING_STATE_DIR = stateDir;
+            SINNIX_STEERING_EXPORT_DIR = exportDir;
+          };
+          timer = {
+            onCalendar = "*-*-* ${cfg.morningTime}:00";
+            persistent = true;
+            accuracySec = "5min";
+            description = "Daily trigger for the morning steering ritual";
+          };
+        }
+      )
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "sinnix-steering-evening";
+          description = "Evening steering review ritual";
+          surface = config.sinnix.runtime.surfaces.steering-evening;
+        }
+        {
+          manager = "user";
+          resourceClass = "interactive-agent";
+          execStart = "${steer}/bin/sinnix-steer ritual evening";
+          environment = {
+            SINNIX_STEERING_STATE_DIR = stateDir;
+            SINNIX_STEERING_EXPORT_DIR = exportDir;
+          };
+          timer = {
+            onCalendar = "*-*-* ${cfg.eveningTime}:00";
+            persistent = true;
+            accuracySec = "5min";
+            description = "Daily trigger for the evening steering review";
+          };
+        }
+      )
+      # Daily JSONL export, independent of the rituals so the lake gets the
+      # raw store even on a day neither ritual runs.
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "sinnix-steering-export";
+          description = "Export the steering store to the capture lake";
+          surface = config.sinnix.runtime.surfaces.steering-export;
+        }
+        {
+          manager = "user";
+          resourceClass = "interactive-agent";
+          execStart = "${steer}/bin/sinnix-steer export";
+          environment = {
+            SINNIX_STEERING_STATE_DIR = stateDir;
+            SINNIX_STEERING_EXPORT_DIR = exportDir;
+          };
+          timer = {
+            onCalendar = "*-*-* 23:50:00";
+            persistent = true;
+            accuracySec = "10min";
+            description = "Nightly trigger for the steering store export";
+          };
+        }
+      )
+      {
+        environment.systemPackages = [
+          steer
+          cockpit
         ];
-      };
-      sinnix.runtime.surfaces.cockpit = {
-        unit = "sinnix-cockpit.service";
-        manager = "user";
-        resourceClass = "interactive-agent";
-        observe = {
-          enable = true;
-          restartable = true;
-        };
-        workload = {
-          class = "protected";
-          rationale = "Read-only steering cockpit; no lifecycle actions, loopback-only.";
-          processMatchers = [ "sinnix-cockpit" ];
-          earlyoomAvoid = true;
-        };
-      };
+        systemd.tmpfiles.rules = [
+          "d ${stateDir} 0700 ${username} users -"
+          "d ${exportDir} 0755 ${username} users -"
+        ];
 
-      # NixOS-level systemd.user rather than home-manager.users.${username}:
-      # this file predates the convention (its four rituals+cockpit units
-      # don't fit mkServiceModule's one-job-per-module-call factory, since
-      # a job binds exactly one unit and this module owns four), so it
-      # renders the same shape mkServiceModule's job would -- oneshot
-      # Type, mkRuntimeServiceConfig for resource-class resolution -- by
-      # hand instead. No explicit OnFailure= here, same as a generated job
-      # would omit it for a unit whose own registered surface (above)
-      # already matches its unit/manager/observe.enable: modules/runtime.nix
-      # attaches the failure-notify drop-in to every observed user-manager
-      # surface regardless of which namespace declared the unit, so all
-      # four of these already get it. `steer` and `cockpit` reach PATH via
-      # environment.systemPackages above already; no separate home.packages
-      # entry is needed.
-      #
-      # Shared env: both rituals and export need to agree on store/export
-      # paths with the CLI's own defaults (sinnix-steer in the steering workspace).
-      systemd.user.services.sinnix-steering-morning = {
-        description = "Morning steering ritual (root-probe + decide-once intentions)";
-        serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
-          runtimeInventory = config.sinnix.runtime.inventory;
-          unit = "sinnix-steering-morning.service";
-          overrides = {
-            Type = "oneshot";
-            ExecStart = "${steer}/bin/sinnix-steer ritual morning";
-            Environment = [
-              "SINNIX_STEERING_STATE_DIR=${stateDir}"
-              "SINNIX_STEERING_EXPORT_DIR=${exportDir}"
-            ];
-          };
-        };
-      };
-      systemd.user.timers.sinnix-steering-morning = {
-        description = "Daily trigger for the morning steering ritual";
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnCalendar = "*-*-* ${cfg.morningTime}:00";
-          Persistent = true;
-          AccuracySec = "5min";
-        };
-      };
-
-      systemd.user.services.sinnix-steering-evening = {
-        description = "Evening steering review ritual";
-        serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
-          runtimeInventory = config.sinnix.runtime.inventory;
+        sinnix.runtime.surfaces.steering-evening = {
           unit = "sinnix-steering-evening.service";
-          overrides = {
-            Type = "oneshot";
-            ExecStart = "${steer}/bin/sinnix-steer ritual evening";
-            Environment = [
-              "SINNIX_STEERING_STATE_DIR=${stateDir}"
-              "SINNIX_STEERING_EXPORT_DIR=${exportDir}"
-            ];
-          };
+          manager = "user";
+          resourceClass = "interactive-agent";
+          observe.enable = true;
         };
-      };
-      systemd.user.timers.sinnix-steering-evening = {
-        description = "Daily trigger for the evening steering review";
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnCalendar = "*-*-* ${cfg.eveningTime}:00";
-          Persistent = true;
-          AccuracySec = "5min";
-        };
-      };
-
-      # Daily JSONL export, independent of the rituals so the lake gets
-      # the raw store even on a day neither ritual runs.
-      systemd.user.services.sinnix-steering-export = {
-        description = "Export the steering store to the capture lake";
-        serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
-          runtimeInventory = config.sinnix.runtime.inventory;
+        sinnix.runtime.surfaces.steering-export = {
           unit = "sinnix-steering-export.service";
-          overrides = {
-            Type = "oneshot";
-            ExecStart = "${steer}/bin/sinnix-steer export";
-            Environment = [
-              "SINNIX_STEERING_STATE_DIR=${stateDir}"
-              "SINNIX_STEERING_EXPORT_DIR=${exportDir}"
-            ];
-          };
+          manager = "user";
+          resourceClass = "interactive-agent";
+          observe.enable = true;
+          captures = [
+            {
+              name = "steering";
+              path = exportDir;
+              # Unconditional: the exporter runs at 23:50 and writes the day's
+              # file whether or not the operator did a ritual, so silence here
+              # measures the exporter rather than the operator -- which is what
+              # makes a budget honest for this lane and not for the ones whose
+              # content depends on him having something to say.
+              cadenceSeconds = 86400;
+              # One missed day tolerated; two is a dead timer.
+              staleAfterSeconds = 172800;
+            }
+          ];
         };
-      };
-      systemd.user.timers.sinnix-steering-export = {
-        description = "Nightly trigger for the steering store export";
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnCalendar = "*-*-* 23:50:00";
-          Persistent = true;
-          AccuracySec = "10min";
-        };
-      };
-
-      systemd.user.services.sinnix-cockpit = {
-        description = "Sinnix steering cockpit (read-only FastAPI+htmx)";
-        serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
-          runtimeInventory = config.sinnix.runtime.inventory;
+        sinnix.runtime.surfaces.cockpit = {
           unit = "sinnix-cockpit.service";
-          overrides = {
-            Type = "simple";
-            # Idempotent (checks existing activity names before inserting), so
-            # this runs harmlessly on every start -- it's what guarantees the
-            # cockpit has seed data to render on a fresh install rather than
-            # requiring a manual `sinnix-steer seed` first.
-            ExecStartPre = "${steer}/bin/sinnix-steer seed";
-            ExecStart = "${cockpit}/bin/sinnix-cockpit --port ${toString cfg.cockpitPort}";
-            Restart = "on-failure";
-            RestartSec = "5s";
-            Environment = [
-              "SINNIX_STEERING_STATE_DIR=${stateDir}"
-              "SINNIX_COCKPIT_PORT=${toString cfg.cockpitPort}"
-            ];
+          manager = "user";
+          resourceClass = "interactive-agent";
+          observe = {
+            enable = true;
+            restartable = true;
+          };
+          workload = {
+            class = "protected";
+            rationale = "Read-only steering cockpit; no lifecycle actions, loopback-only.";
+            processMatchers = [ "sinnix-cockpit" ];
+            earlyoomAvoid = true;
           };
         };
-        wantedBy = [ "default.target" ];
-      };
-    };
+
+        systemd.user.services.sinnix-cockpit = {
+          description = "Sinnix steering cockpit (read-only FastAPI+htmx)";
+          serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
+            runtimeInventory = config.sinnix.runtime.inventory;
+            unit = "sinnix-cockpit.service";
+            overrides = {
+              Type = "simple";
+              # Idempotent (checks existing activity names before inserting), so
+              # this runs harmlessly on every start -- it's what guarantees the
+              # cockpit has seed data to render on a fresh install rather than
+              # requiring a manual `sinnix-steer seed` first.
+              ExecStartPre = "${steer}/bin/sinnix-steer seed";
+              ExecStart = "${cockpit}/bin/sinnix-cockpit --port ${toString cfg.cockpitPort}";
+              Restart = "on-failure";
+              RestartSec = "5s";
+              Environment = [
+                "SINNIX_STEERING_STATE_DIR=${stateDir}"
+                "SINNIX_COCKPIT_PORT=${toString cfg.cockpitPort}"
+              ];
+            };
+          };
+          wantedBy = [ "default.target" ];
+        };
+      }
+    ];
 } args
