@@ -17,6 +17,7 @@ the same nav, so the routes are reachable from each other rather than by URL.
 | ---------------- | ------------------------------------------------------------------- |
 | `/`              | The three-second read: a verdict, six tiles, then supporting detail |
 | `/work/`         | What is actually running, named — see below                         |
+| `/pressure/`     | Which pressure regime the machine is in, and what acting costs      |
 | `/services/`     | Every attested runtime surface, grouped by resource class           |
 | `/ai/`           | The local AI backends and their activation semantics                |
 | `/shaders/`      | The Hyprland screen-shader library, and which one is applied        |
@@ -68,6 +69,49 @@ an attested agent job. An ad-hoc `sinnix-scope` placement is neither, so a
 running compile is fully _visible_ and not stoppable from the hub. The page
 says so in place of the button. Making it stoppable is a reducer change — a
 scope-target admission rule with its own attestation — not a hub change.
+
+## The pressure view
+
+`/pressure/` exists because the machine's two ways of becoming unusable look
+nothing alike, and the conventional gauges see neither. It is derived from a
+clustering of this host's own incident telemetry, so every number on it earns
+its place:
+
+- **A regime banner** naming the cluster rather than a severity: `CALM`,
+  `SWAP-CRITICAL` (swap at/above 75%, or memory full PSI at/above 20),
+  `SPIKE` (under 2 GiB available while nothing is stalling), `IO-SATURATED`
+  (io full PSI at/above 40 with memory fine). They call for different actions,
+  and two of them call for none.
+- **Swap headroom as the primary widget.** Across 29 measured freeze onsets,
+  swap was 90% consumed ten minutes before the freeze while available memory
+  still read 12.8 GiB. Nothing else on this machine displays it.
+- **`memory_psi_full` second** — the honest "is anything actually stalled" —
+  and **available memory last and explicitly demoted**, because it is the
+  number that looks healthy during a freeze and triggers the emergency killer
+  during a burst the machine was surviving.
+- **A hog table ranked on resident _plus_ swapped pages**, with a cost column:
+  a re-runnable tool invocation (`rg`, `bd list`, `git diff`) is free to stop,
+  an expensive job or model server is not, and session processes are summed in
+  one row rather than given rows they would take from something actionable.
+  Scopes are resolved to lanes — a checkout name, a gateway job's backend and
+  model — because "which lane is expendable" is unanswerable about a scope UUID.
+- **A scheduled-pressure strip** off the timer table: borg, btrbk, the scrubs
+  and the SQLite dumps, with how long each one's last run took. This class of
+  IO pressure is declared in advance, so the page predicts rather than alarms.
+
+The same evidence produces one health lane, on the reducer's existing sweep:
+swap at/above 75% while memory full PSI is below 20 emits a
+`sinnix-health-transition-v1` transition and a desktop notification through the
+same debounce, ledger and dedup path as every other lane. That pair is the
+pre-freeze state specifically; swap saturated _while_ everything stalls is
+reported as `stalled`, because the warning has already been missed.
+
+Buttons exist only where the bounded action API admits the target: `park` with
+its own thaw deadline on a _running_ backup unit the runtime inventory carries,
+and `stop` on a scope whose name the API's admission rule accepts. The page
+states the two gaps rather than routing around them — there is no process-level
+target (so reclaiming one runaway `rg` means stopping its whole agent session)
+and no slice target for `set_policy`, since slices are not registered surfaces.
 
 ## The capability index
 

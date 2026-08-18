@@ -422,6 +422,12 @@ PAGES = (
         "What is running right now, as named workloads rather than a process list",
     ),
     (
+        "/pressure/",
+        "pressure",
+        "Which pressure regime the machine is in, what is holding memory, and "
+        "what a kill would cost",
+    ),
+    (
         "/services/",
         "services",
         "Every attested runtime surface, with lifecycle controls",

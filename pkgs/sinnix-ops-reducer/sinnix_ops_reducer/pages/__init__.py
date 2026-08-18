@@ -6,10 +6,11 @@ shows the system as of a timestamp it prints, rather than an empty skeleton
 waiting on XHR. Only the *action* buttons need JavaScript, and they talk to the
 bounded action API this same process serves.
 
-Seven routes, one shell:
+Eight routes, one shell:
 
   /              the three-second read: a verdict, a row of tiles, then detail
   /work/         what is *running* -- named workloads, not a process list
+  /pressure/     which pressure regime the machine is in, and what it costs to act
   /services/     every attested runtime surface, with lifecycle controls
   /ai/           the local AI backends and their activation semantics
   /shaders/      the Hyprland screen-shader library, and what is applied
@@ -40,6 +41,7 @@ from .. import capabilities as capability_index
 from .ai import render_ai
 from .capabilities import render_capabilities
 from .dashboard import render_dashboard
+from .pressure import render_pressure
 from .probes import load_json
 from .services import render_services
 from .shaders import render_shaders
@@ -48,7 +50,15 @@ from .work import render_work
 
 MANIFEST_SCHEMA = "sinnix-hub-manifest-v1"
 
-ROUTES = ("/", "/work/", "/services/", "/ai/", "/shaders/", "/capabilities/")
+ROUTES = (
+    "/",
+    "/work/",
+    "/pressure/",
+    "/services/",
+    "/ai/",
+    "/shaders/",
+    "/capabilities/",
+)
 
 # Where the route table is declared, for the `owner` column of the hub-page
 # rows it produces.
@@ -124,6 +134,8 @@ def render(
     route = canonical(path)
     if route == "/work/":
         return render_work(manifest, snapshot, inventory, generated)
+    if route == "/pressure/":
+        return render_pressure(manifest, snapshot, inventory, generated)
     if route == "/services/":
         return render_services(manifest, inventory, generated)
     if route == "/ai/":

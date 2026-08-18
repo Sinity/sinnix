@@ -62,7 +62,8 @@ def get(url: str) -> tuple[int, str, str]:
 
 
 @pytest.mark.parametrize(
-    "route", ["/", "/work/", "/services/", "/ai/", "/shaders/", "/capabilities/"]
+    "route",
+    ["/", "/work/", "/pressure/", "/services/", "/ai/", "/shaders/", "/capabilities/"],
 )
 def test_every_page_route_answers_with_a_document(hub_server: str, route: str) -> None:
     status, content_type, body = get(hub_server + route)

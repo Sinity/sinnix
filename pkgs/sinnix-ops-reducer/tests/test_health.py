@@ -16,7 +16,18 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sinnix_ops_reducer import health
+from sinnix_ops_reducer import health, pressure
+
+# Swap with headroom and nothing stalling: the swap lane's healthy path, held
+# fixed so these tests judge the inventory sweeps alone. The lane's own
+# behaviour is asserted in test_pressure.py.
+CALM_PRESSURE = pressure.Sample(
+    swap_used_mb=2000,
+    swap_total_mb=20480,
+    mem_avail_mb=12000,
+    memory_psi_full=0.2,
+    io_psi_full=1.0,
+)
 
 # The resting-state shapes, one fixture unit each -- the sweep derives its
 # verdict from ActiveState/Type/Result/WantedBy and never from a unit list.
@@ -272,7 +283,15 @@ def world(tmp_path: Path, monkeypatch):
     ledger = tmp_path / "events.jsonl"
 
     def run() -> list[dict[str, Any]]:
-        health.sweep(inventory, health.Emitter(state, ledger, recorder), prober=prober)
+        health.sweep(
+            inventory,
+            health.Emitter(state, ledger, recorder),
+            prober=prober,
+            # The swap-headroom lane rides this same sweep; pinning its reading
+            # keeps these assertions about the inventory lanes rather than
+            # about whatever the build host's swap happens to be doing.
+            pressure_sample=CALM_PRESSURE,
+        )
         return (
             [json.loads(line) for line in ledger.read_text().splitlines()]
             if ledger.exists()
