@@ -1,3 +1,6 @@
+# Provably fails when: scripts/sinnix-agent-environment-doc stops rendering a
+# skill/agent/server row from its inputs, emits a row twice, or leaks a local
+# absolute path (/home, /persist, /nix/store) into the public document.
 { inputs, ... }:
 {
   perSystem =

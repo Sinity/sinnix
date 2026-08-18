@@ -1,8 +1,14 @@
 # Polylogue service module evaluation checks.
 #
-# The memory-budget check evaluates both the default and an overridden budget,
-# proving the one declared value drives MemoryHigh, MemoryMax, and the daemon's
-# byte-valued environment export together.
+# The memory-budget check proves that one declared budget drives MemoryHigh,
+# MemoryMax, and the daemon's byte-valued environment export together. It uses
+# an explicitly overridden budget rather than the module default: pinning the
+# default's derived values here would only force a two-place edit whenever the
+# default moves, without testing anything the override does not.
+#
+# Provably fails when: the module stops deriving any of the three outputs from
+# memoryBudgetGiB (verified by changing the MemoryHigh factor in
+# modules/services/polylogue.nix).
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -48,13 +54,8 @@ in
             touch "$out"
           '';
 
-      defaultSpec = mkServiceTest {
-        name = "polylogue-memory-budget-default";
-        service = "polylogue";
-        assertions = _config: [ ];
-      };
       overriddenSpec = mkServiceTest {
-        name = "polylogue-memory-budget-overridden";
+        name = "polylogue-memory-budget";
         service = "polylogue";
         extraModules = [
           (_: {
@@ -66,15 +67,8 @@ in
     in
     {
       checks = {
-        polylogue-memory-budget-default = mkMemoryBudgetCheck {
-          name = "polylogue-memory-budget-default-check";
-          spec = defaultSpec;
-          expectedHigh = "14G";
-          expectedMax = "18G";
-          expectedBudgetBytes = "17179869184";
-        };
-        polylogue-memory-budget-overridden = mkMemoryBudgetCheck {
-          name = "polylogue-memory-budget-overridden-check";
+        polylogue-memory-budget = mkMemoryBudgetCheck {
+          name = "polylogue-memory-budget-check";
           spec = overriddenSpec;
           expectedHigh = "21G";
           expectedMax = "27G";
