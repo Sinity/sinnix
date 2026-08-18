@@ -424,11 +424,23 @@ async def run(args: argparse.Namespace) -> int:
             time.sleep(gap / 2)
     log(f"release at {datetime.fromtimestamp(time.time() + off).isoformat(timespec='milliseconds')}")
 
-    results = await asyncio.gather(
-        *(fire(r, w, payloads[i % len(payloads)][1],
-               f"{i}-{payloads[i % len(payloads)][0]}")
-          for i, (r, w, _) in enumerate(conns))
-    )
+    # Arrival-order falsification probe (2026-08-18): two days of batch
+    # refusals seconds after the boundary suggest the pool decision is not
+    # first-come-first-served. Keep the first shots on the boundary (the win
+    # chance if the race IS real is preserved), stagger the rest across the
+    # offsets below; if timing mattered, refusal codes should differ by
+    # offset, and identical batch refusals are evidence the allocator
+    # ignores arrival time entirely.
+    stagger = [0.0, 0.0, 0.25, 1.0]
+
+    async def fire_at(i: int, r, w) -> tuple[int, str]:
+        delay = stagger[i] if i < len(stagger) else 0.0
+        if delay:
+            await asyncio.sleep(delay)
+        label = f"{i}-{payloads[i % len(payloads)][0]}" + (f"+{delay:g}s" if delay else "")
+        return await fire(r, w, payloads[i % len(payloads)][1], label)
+
+    results = await asyncio.gather(*(fire_at(i, r, w) for i, (r, w, _) in enumerate(conns)))
     for _, detail in results:
         log(detail)
     for _, w, _ in conns:
