@@ -11,6 +11,7 @@
       pkgs,
       system,
       self',
+      sinnixScriptRegistry,
       ...
     }:
     let
@@ -27,8 +28,16 @@
         meta.description = description;
       };
 
+      # sinnixScriptRegistry (flake/script-registry.nix) is the one
+      # evaluation of scripts.nix per perSystem `pkgs`, shared via
+      # `_module.args` -- not a second re-walk of scripts/ for this file.
       commandRegistry = import ./command-registry.nix {
-        inherit inputs pkgs system;
+        inherit
+          inputs
+          pkgs
+          system
+          sinnixScriptRegistry
+          ;
       };
 
       generatedApps = builtins.mapAttrs (
