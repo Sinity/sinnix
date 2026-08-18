@@ -1,4 +1,4 @@
-"""Shelling out to the estate CLIs this service dispatches through.
+"""Shelling out to the sinnix CLIs this service dispatches through.
 
 Both `sinnix-steer` and `sinnix-score` are resolved off PATH rather than
 imported: this package owns transport, they own their own schemas, and a

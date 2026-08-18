@@ -36,7 +36,7 @@ from pathlib import Path
 
 from sinnix_capture.writer import CaptureWriter
 
-#: The estate's STT hub. Loopback: this process and the hub are the same host.
+#: The STT hub. Loopback: this process and the hub are the same host.
 _STT_ENDPOINT = "http://127.0.0.1:8090/v1/audio/transcriptions"
 
 #: Anything longer than this in one utterance is a VAD that failed open, and

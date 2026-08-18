@@ -52,15 +52,14 @@ UPLOAD_LANES = {
     "camera": LAKE_ROOT / "camera",
     "download": LAKE_ROOT / "download",
     # Voice notes, PPG/IMU traces and shared files, with their metadata
-    # sidecars. Same directory the drain's rsync landed them in, so nothing
-    # downstream has to learn a new path just because the mover changed.
-    "estate-outbox": LAKE_ROOT / "estate" / "outbox",
+    # sidecars. `sinnix-score` reads this directory by the same name.
+    "outbox": LAKE_ROOT / "outbox",
 }
 
 # The app's own event log. Not an UPLOAD_LANE: a day file is appended to all
 # day rather than finalized, so it arrives as byte ranges through /events
 # (uploads.append_events) instead of as a whole file through /chunk.
-EVENTS_DIR = LAKE_ROOT / "estate" / "events"
+EVENTS_DIR = LAKE_ROOT / "events"
 
 EVENTS_DAY_RE = re.compile(r"^\d{8}$")
 
@@ -118,7 +117,7 @@ def emit_receipt(kind: str, title: str, body: str, send_token: str | None, route
 
 
 def notify_phone(title: str, body: str, route: str | None = None) -> None:
-    """Interrupt the operator through the phone. Used by the estate, not by intents."""
+    """Interrupt the operator through the phone. Sent by prime itself, not by an intent."""
     ensure_dirs()
     name = f"{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}.json"
     payload = {"schema": SCHEMA, "title": title, "body": body, "route": route, "at": now_iso()}

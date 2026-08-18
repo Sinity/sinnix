@@ -1,4 +1,4 @@
-"""The estate's answer to the phone.
+"""Prime's answer to the phone.
 
 The phone has two ways to reach prime and they carry identical JSON:
 
@@ -84,7 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.set_defaults(func=cmd_serve)
 
     dispatch = sub.add_parser("dispatch", help="the file plane: execute drained intents")
-    dispatch.add_argument("--outbox", default=str(LAKE_ROOT / "estate" / "outbox"))
+    dispatch.add_argument("--outbox", default=str(LAKE_ROOT / "outbox"))
     dispatch.set_defaults(func=cmd_dispatch)
 
     push = sub.add_parser("push", help="refresh glance.json and steering.json for the drain")
@@ -96,7 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     notify.add_argument("--route")
     notify.set_defaults(func=cmd_notify)
 
-    glance = sub.add_parser("glance", help="print the estate glance as JSON")
+    glance = sub.add_parser("glance", help="print the phone's glance as JSON")
     glance.set_defaults(func=lambda _a: (print(json.dumps(build_glance(), indent=2)), 0)[1])
 
     steering = sub.add_parser("steering", help="print the phone's steering view as JSON")

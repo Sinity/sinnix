@@ -25,7 +25,7 @@ import sinnix_phone_dispatcher.inbox as inbox_mod
 
 @pytest.fixture(autouse=True)
 def stub_generated(monkeypatch):
-    """The two generated entries are built from the live estate (the ops
+    """The two generated entries are built from live host state (the ops
     reducer's socket); this suite is about the inbox mechanics, so they are
     replaced by builders with no dependencies."""
     monkeypatch.setattr(

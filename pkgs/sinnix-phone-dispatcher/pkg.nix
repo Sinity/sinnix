@@ -21,7 +21,7 @@ python3Packages.buildPythonApplication {
   build-system = [ python3Packages.setuptools ];
   # sinnix-capture-lib: the CaptureWriter/build_envelope the phone-stream
   # receiver appends through -- this package is their canonical origin, no
-  # longer a private port (see receiver.py). sinnix-lib: the estate's shared
+  # longer a private port (see receiver.py). sinnix-lib: the shared
   # atomic-state/ledger/lock primitives, depended on for architecture
   # consistency with the other sinnix Python packages; this package's own
   # JSON writes keep their existing (non-compact) on-disk format rather than

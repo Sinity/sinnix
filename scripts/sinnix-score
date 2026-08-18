@@ -50,8 +50,8 @@ RECEIPT_SCHEMA = "sinnix.phone.receipt/1"
 STATE_DIR = Path(os.environ.get("SINNIX_PHONE_STATE_DIR", "/realm/state/sinnix-phone"))
 LAKE_ROOT = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/data/machine/phone"))
 
-OUTBOX = LAKE_ROOT / "estate" / "outbox"
-EVENTS = LAKE_ROOT / "estate" / "events"
+OUTBOX = LAKE_ROOT / "outbox"
+EVENTS = LAKE_ROOT / "events"
 SCORES = LAKE_ROOT / "scores"
 LEDGER = SCORES / "scored.jsonl"
 

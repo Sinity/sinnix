@@ -98,6 +98,12 @@ def execute(intent: dict) -> dict:
             "Answer delivered" if result.get("ok") else "Answer queued",
             str(result.get("detail") or ""),
             token,
+            # A navigation target in the app, not a name for this system: the
+            # string is matched against the phone's own screen routes, and the
+            # app renders a tab called Estate. It survives the naming sweep
+            # because renaming one side alone sends a tapped notification to a
+            # route Navigation Compose will refuse. Rename both together, in
+            # the app's own pass over that screen.
             "estate",
         )
     elif kind in ("shared_text", "shared_file"):
@@ -111,12 +117,12 @@ def execute(intent: dict) -> dict:
         result = {"ok": True, "recorded": kind}
         if kind in ("voice_note", "trace"):
             # The intent's arrival is the signal that a trace or a voice note
-            # landed in the outbox (this JSON is the acknowledgment; the blob
-            # itself came in beside it, over whichever plane delivered this
-            # intent). There used to be a timer for this
-            # (sinnix.services.phone-score, 900s); scoring on arrival is
-            # strictly faster and no more expensive, since sinnix-score run
-            # is already a cheap no-op sweep when there is nothing new.
+            # landed in the outbox: this JSON is the acknowledgement, and the
+            # blob itself came in beside it. Scored on arrival rather than on
+            # a schedule -- `sinnix-score run` re-scans the whole outbox and
+            # dedups against its own ledger, so triggering it here costs a
+            # no-op sweep when there is nothing new and saves the wait when
+            # there is.
             trigger_score()
     else:
         result = {"ok": False, "detail": f"unknown intent kind {kind!r}"}
