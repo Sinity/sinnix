@@ -26,7 +26,7 @@ from .glance import build_glance, build_jobs, build_steering
 from .inbox import confirm_inbox, list_inbox, read_inbox
 from .receiver import start_phone_stream_server
 from .state import MAX_BODY, MAX_UPLOAD, ensure_dirs, now_iso
-from .uploads import append_events, events_cursor, store_upload
+from .uploads import append_events, events_cursor, newest_in_lane, store_upload
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -96,6 +96,12 @@ class Handler(BaseHTTPRequestHandler):
             # offline knows where to resume without shipping a byte to find
             # out.
             self._send(*events_cursor(self._query().get("day", "")))
+        elif route == "/lane":
+            # The media mirror's equivalent of the events cursor: one number
+            # that tells the phone where the lake already reaches, so a phone
+            # holding two hundred thousand Downloads does not have to offer
+            # them one at a time to find out.
+            self._send(*newest_in_lane(self._query().get("lane", "")))
         else:
             self._send(HTTPStatus.NOT_FOUND, {"ok": False, "detail": "no such route"})
 
