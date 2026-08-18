@@ -1,6 +1,6 @@
 id = "sinity/sinnix-ops"
 name = "Sinnix Operations"
-version = "0.1.0"
+version = "0.2.0"
 plugin_api = 9
 author = "Sinity"
 license = "MIT"
@@ -39,6 +39,10 @@ step = 5
 [[widget]]
 id = "capsule"
 entry = "bar.luau"
+
+[[widget]]
+id = "attention"
+entry = "bar-attention.luau"
 
 [[panel]]
 id = "now"

@@ -3,16 +3,15 @@
 
 local view = noctalia.state.get("sinity-ops.view") or { status = "disconnected" }
 
+-- The attention count lives on the dedicated attention widget; this capsule
+-- is the connection-status surface only.
 local function label()
-  local attention = view.snapshot and view.snapshot.state and view.snapshot.state.attention
-  local count = type(attention) == "table" and tonumber(attention.pending_count) or 0
-  local suffix = count > 0 and (" " .. tostring(count)) or ""
   local base = "OPS x"
   if view.status == "connected" then base = "OPS" end
   if view.status == "snapshot" then base = "OPS ~" end
   if view.status == "source-stale" or view.status == "stale" then base = "OPS !" end
   if view.status == "aggregate" then base = "OPS ?" end
-  return base .. suffix
+  return base
 end
 
 local function render()
