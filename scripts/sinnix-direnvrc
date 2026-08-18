@@ -71,6 +71,17 @@ _sinnix_write_scope_wrapper() {
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Command-to-class resolution for the classes that name their own commands
+# (runtime-defaults' `commandMatchers`). The case body below is rendered at
+# evaluation time by `renderDirenvrc` -- see modules/features/cli/core.nix --
+# so a wrapped command does not shell out to jq against the serialized
+# runtime inventory on every invocation.
+_sinnix_command_class() {
+  case "$1" in
+@SINNIX_COMMAND_CLASS_CASE@
+  esac
+}
+
 cmd="${0##*/}"
 case "$cmd" in
   just)
@@ -108,21 +119,7 @@ case "$cmd" in
           esac
         done
         if [ -n "$_command" ]; then
-          _runtime_inventory="${SINNIX_RUNTIME_INVENTORY_FILE:-}"
-          if [ -z "$_runtime_inventory" ] && [ -r /etc/sinnix/runtime-inventory.json ]; then
-            _runtime_inventory=/etc/sinnix/runtime-inventory.json
-          fi
-          if [ -z "$_runtime_inventory" ] && [ -r /run/current-system/etc/sinnix/runtime-inventory.json ]; then
-            _runtime_inventory=/run/current-system/etc/sinnix/runtime-inventory.json
-          fi
-          if [ -r "$_runtime_inventory" ] && command -v jq >/dev/null 2>&1; then
-            _runtime_class="$(jq -er --arg command "$_command" '
-              .commandClasses
-              | to_entries
-              | map(select((.value.commandMatchers // []) | index($command)))
-              | .[0].key // empty
-            ' "$_runtime_inventory" 2>/dev/null || true)"
-          fi
+          _runtime_class="$(_sinnix_command_class "$_command")"
         fi
       fi
       if [ -n "$_runtime_class" ]; then
@@ -176,9 +173,9 @@ scope_bin="${SINNIX_SCOPE_BIN:-}"
 if [ -z "$scope_bin" ]; then
   scope_bin="$(command -v sinnix-scope 2>/dev/null || true)"
 fi
-if [ -z "$scope_bin" ] && [ -x /realm/project/sinnix/scripts/sinnix-scope ]; then
-  scope_bin=/realm/project/sinnix/scripts/sinnix-scope
-fi
+# No checkout fallback: the launcher is generated (flake/launch.nix), so there
+# is no scripts/sinnix-scope to reach for when it is absent from PATH. An
+# unwrapped exec below is the honest outcome in that case.
 
 if [ -n "$scope_bin" ] && [ -x "$scope_bin" ]; then
   exec "$scope_bin" "$class" -- "$cmd" "$@"

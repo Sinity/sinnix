@@ -4,7 +4,8 @@
 # `sinnix.machine.isDesktop = true` and owns the resource-governance stack
 # that keeps desktop-critical processes protected while build/background
 # workloads are explicitly placed into lower-weight slices by
-# `sinnix-scope`: systemd slices, earlyoom policy, io.cost init, RAPL power
+# `sinnix-scope` (generated from the command-class table by flake/launch.nix):
+# systemd slices, earlyoom policy, io.cost init, RAPL power
 # caps, and the interactive memory sysctls.
 {
   lib,

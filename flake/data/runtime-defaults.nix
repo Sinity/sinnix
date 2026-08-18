@@ -313,6 +313,43 @@ rec {
     };
   };
 
+  # Inverted `commandMatchers`: command basename -> owning command class. A
+  # devshell wrapper needs this direction (it has the command and wants the
+  # class), and it is derived here rather than searched at launch time so no
+  # launcher has to read the serialized inventory to place a process.
+  commandClassByCommand =
+    let
+      pairs = lib.concatLists (
+        lib.mapAttrsToList (
+          className: class: map (command: { inherit command className; }) (class.commandMatchers or [ ])
+        ) commandClasses
+      );
+      duplicates = lib.subtractLists (lib.unique (map (p: p.command) pairs)) (map (p: p.command) pairs);
+    in
+    if duplicates != [ ] then
+      throw "runtime-defaults: commandMatchers claimed by more than one command class: ${lib.concatStringsSep ", " duplicates}"
+    else
+      lib.listToAttrs (map (p: lib.nameValuePair p.command p.className) pairs);
+
+  # The devshell command wrappers (scripts/sinnix-direnvrc) shadow a command
+  # and must name its class before handing it to the launcher. Render that
+  # decision in from the table above rather than letting the wrapper query the
+  # serialized inventory with jq on every wrapped invocation.
+  renderDirenvrc =
+    text:
+    let
+      caseBody = lib.concatStringsSep "\n" (
+        lib.mapAttrsToList (
+          command: className: "      ${command}) printf '%s\\n' ${className} ;;"
+        ) commandClassByCommand
+      );
+      rendered = lib.replaceStrings [ "@SINNIX_COMMAND_CLASS_CASE@" ] [ caseBody ] text;
+    in
+    if rendered == text then
+      throw "runtime-defaults: sinnix-direnvrc no longer carries the @SINNIX_COMMAND_CLASS_CASE@ placeholder"
+    else
+      rendered;
+
   slices = {
     system = {
       background = {

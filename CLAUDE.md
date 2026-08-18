@@ -223,7 +223,7 @@ resourceClass, observe, captures }`. Eval-time assertions reject duplicate
   unit to its class serviceConfig (as mkDefault) and **throws on unknown
   units** — register the surface first.
 - The whole inventory is serialized to `/etc/sinnix/runtime-inventory.json`,
-  consumed at runtime by `sinnix-scope`, `sinnix-observe`, machine telemetry,
+  consumed at runtime by `sinnix-observe`, machine telemetry,
   and the ops-reducer's health sweep — the inventory-driven check (lane
   staleness, payload degeneracy, liveness probes, mount capacity, unit resting
   state) that writes `sinnix-health-transition-v1` lines to
@@ -233,6 +233,17 @@ resourceClass, observe, captures }`. Eval-time assertions reject duplicate
   one dedup state with the `sinnix-unit-failure-notify@` OnFailure path.
   When adding a daemon: declare the surface, apply
   `mkRuntimeServiceConfig`, done — no ad-hoc Nice/IOWeight overrides.
+- **Launch policy is rendered, not interpreted.** `flake/launch.nix` generates
+  the `sinnix-scope` launcher from `commandClasses`: one `apply_class_policy`
+  shell function whose branches carry the baked slice, nice/ionice, systemd
+  properties and env defaults, prepended to the runtime half in
+  `flake/launch/scope-runtime.bash` (argument parsing, cgroup checks, unit-name
+  synthesis, the scope supervisor). `renderDirenvrc` does the same for the
+  devshell command wrappers' class resolver. Nothing reads
+  `/etc/sinnix/runtime-inventory.json` to *place* a process any more — the
+  inventory carries `commandClasses` for observability only. A class that is
+  not in the table is a usage error naming the classes that are; adding one is
+  a table edit, not a launcher edit.
 - Concurrency is governed by slice memory caps and weights, not
   serialization; the only build-path lock is `/tmp/sinnix-switch.lock`, a
   correctness guard against two activations racing on the system profile.
@@ -246,6 +257,8 @@ resourceClass, observe, captures }`. Eval-time assertions reject duplicate
 `dev-shell.nix` + `command-registry.nix` (rebuild commands — single source of
 truth for lock/containment/preflight shared by devshell binaries and
 `nix run .#switch`), `scripts.nix` + `script-discovery.nix` (script registry),
+`launch.nix` + `launch/scope-runtime.bash` (the generated `sinnix-scope`
+launcher — see Runtime Governance),
 `packages.nix` (public package surface), `tests.nix` + `tests-runtime.nix` +
 `test-lib.nix`, `router.nix` (sinnix-gw), `deploy.nix` (colmena +
 nixos-anywhere), `overlay/package/*.nix` (per-package overlays),

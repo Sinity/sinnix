@@ -7,7 +7,13 @@ repo_root="${SINNIX_AGENT_TEST_REPO_ROOT:-$(git -C "${skill_dir}" rev-parse --sh
 runner="${skill_dir}/scripts/run_agent_prompt.sh"
 control="${skill_dir}/scripts/agent_job_control.sh"
 scope_exec="${repo_root}/scripts/sinnix-agent-scope-exec"
-scope="${repo_root}/scripts/sinnix-scope"
+# The launcher is generated from the command-class table rather than living
+# under scripts/ (flake/launch.nix), so the fixture is handed its path.
+scope="${SINNIX_AGENT_TEST_SCOPE_BIN:-$(command -v sinnix-scope 2>/dev/null || true)}"
+if [[ -z ${scope} || ! -x ${scope} ]]; then
+  echo "sinnix-scope not found; set SINNIX_AGENT_TEST_SCOPE_BIN" >&2
+  exit 1
+fi
 
 tmp="$(mktemp -d)"
 cleanup() {
@@ -339,31 +345,23 @@ jq -Rsc -e 'split("\n") | index("agent") != null and
   index("--agent-property") != null and index("MemoryHigh=2G") != null and
   index("CPUWeight=200") != null' "${tmp}/bridge.receipt" >/dev/null
 
-# Exercise production sinnix-scope with a fake systemd-run. Explicit job limits
-# must occur after inventory defaults so they actually override them.
+# Exercise production sinnix-scope with a fake systemd-run. The agent class's
+# placement is rendered into the launcher at evaluation time, so these are the
+# estate's real values (agent.slice, 8G/12G), not a fixture's: the assertions
+# below are what the table means. Explicit job limits must occur after the
+# rendered class defaults so they actually override them.
 cat >"${tmp}/scope-bin/systemd-run" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$@" >"${SYSTEMD_RUN_RECEIPT:?}"
 EOF
 make_executable "${tmp}/scope-bin/systemd-run"
-cat >"${tmp}/runtime-inventory.json" <<'EOF'
-{
-  "commandClasses": {
-    "agent": {
-      "slice": "agent-test.slice",
-      "systemdProperties": {"MemoryHigh": "1G", "CPUWeight": "100"}
-    }
-  }
-}
-EOF
 # Explicit </dev/null: the supervisor-wrapping decision below is keyed off
 # whether sinnix-scope's own stdin is a terminal (interactive launches skip
 # it so bash doesn't redirect the child's stdin from /dev/null and break TTY
-# programs -- see scripts/sinnix-scope). Force the non-interactive path
+# programs -- see flake/launch/scope-runtime.bash). Force the non-interactive path
 # regardless of how this test script itself was invoked.
 SYSTEMD_RUN_RECEIPT="${tmp}/systemd-run.receipt" \
-  SINNIX_RUNTIME_INVENTORY_FILE="${tmp}/runtime-inventory.json" \
   XDG_RUNTIME_DIR="${tmp}/runtime" PATH="${tmp}/scope-bin:${PATH}" \
   "${scope}" agent --unit sinnix-agent-job-scope-test.scope \
   --agent-property MemoryHigh=2G --agent-property CPUWeight=200 \
@@ -371,12 +369,15 @@ SYSTEMD_RUN_RECEIPT="${tmp}/systemd-run.receipt" \
 jq -Rsc -e '
   (split("\n") | map(select(length > 0))) as $args |
   ($args | map(select(startswith("--property=MemoryHigh=")))) ==
-    ["--property=MemoryHigh=1G", "--property=MemoryHigh=2G"] and
+    ["--property=MemoryHigh=8G", "--property=MemoryHigh=2G"] and
   ($args | map(select(startswith("--property=CPUWeight=")))) ==
-    ["--property=CPUWeight=100", "--property=CPUWeight=200"] and
+    ["--property=CPUWeight=200"] and
+  ($args | index("--property=MemoryMax=12G")) != null and
+  ($args | index("--property=IOAccounting=true")) != null and
+  ($args | index("--property=IOWeight=300")) != null and
   ($args | index("--property=RuntimeMaxSec=600")) != null and
   ($args | index("--unit=sinnix-agent-job-scope-test.scope")) != null and
-  ($args | index("--slice=agent-test.slice")) != null and
+  ($args | index("--slice=agent.slice")) != null and
   ($args | index("--internal-supervise")) != null
 ' "${tmp}/systemd-run.receipt" >/dev/null
 

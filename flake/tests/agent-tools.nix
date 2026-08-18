@@ -10,6 +10,7 @@ in
       pkgs = inputs.nixpkgs.legacyPackages.${system};
       runtimeDefaults = import ../data/runtime-defaults.nix { inherit lib; };
       mcpRegistry = import ../data/mcp-registry.nix { inherit lib; };
+      launch = import ../launch.nix { inherit lib pkgs runtimeDefaults; };
       agentLanes = import ../data/agent-lanes.nix;
       # Derived from the lane registry rather than hand-listed: every declared
       # lane must produce an installed wrapper, and adding or retiring a lane
@@ -618,15 +619,19 @@ in
       scopeWrapperFixture =
         pkgs.runCommand "scope-wrapper-fixture"
           {
+            # No jq: the wrapper resolves a command's class from the case body
+            # rendered into the rc below, not from the serialized inventory.
             nativeBuildInputs = [
               pkgs.bash
               pkgs.coreutils
-              pkgs.jq
             ];
           }
           ''
-            cp ${../../scripts/sinnix-direnvrc} "$TMPDIR/sinnix-direnvrc"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/scope-wrapper.sh} "$TMPDIR/sinnix-direnvrc"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/scope-wrapper.sh} ${
+              pkgs.writeText "sinnix-direnvrc-rendered" (
+                runtimeDefaults.renderDirenvrc (builtins.readFile ../../scripts/sinnix-direnvrc)
+              )
+            }
             touch "$out"
           '';
       agentJobHandleFixture =
@@ -666,11 +671,16 @@ in
             cp ${../../dots/_ai/skills/agent-orchestration/scripts/run_agent_prompt.sh} "$fixture_skill/scripts/run_agent_prompt.sh"
             cp ${../../dots/_ai/skills/agent-orchestration/scripts/agent_job_control.sh} "$fixture_skill/scripts/agent_job_control.sh"
             cp ${../../scripts/sinnix-agent-scope-exec} "$fixture_source/scripts/sinnix-agent-scope-exec"
-            cp ${../../scripts/sinnix-scope} "$fixture_source/scripts/sinnix-scope"
             chmod +x "$fixture_skill/scripts/"* "$fixture_source/scripts/"*
             patchShebangs "$fixture_skill/scripts" "$fixture_source/scripts"
             export SINNIX_AGENT_TEST_REPO_ROOT="$fixture_source"
             export SINNIX_AGENT_TEST_SKILL_DIR="$fixture_skill"
+            # The launcher is generated (flake/launch.nix), so there is no
+            # scripts/sinnix-scope to copy. Point the test at the harness
+            # rather than the wrapped package: the wrapper prepends systemd to
+            # PATH, and this test's whole technique is shadowing systemd-run
+            # with a recorder. Same rendered text either way.
+            export SINNIX_AGENT_TEST_SCOPE_BIN=${launch.dispatcher.passthru.harness}
             ${pkgs.bash}/bin/bash ${../../dots/_ai/skills/agent-orchestration/tests/test_agent_job_handles.sh}
             touch "$out"
           '';

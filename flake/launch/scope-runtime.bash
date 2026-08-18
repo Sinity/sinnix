@@ -1,9 +1,14 @@
-#!/usr/bin/env bash
-# @sinnix-package
-# description: Place commands in Sinnix resource-control scopes
-# runtimeInputs: bash coreutils gnugrep jq systemd util-linux
-
-set -euo pipefail
+# Runtime half of sinnix-scope. The policy half (slice, nice, ionice,
+# systemd properties, env defaults, the set of legal class names) is rendered
+# ahead of this text at evaluation time by flake/launch.nix, which is why
+# nothing here reads /etc/sinnix/runtime-inventory.json or shells out to jq:
+# by the time this runs, `apply_class_policy` already exists and already
+# knows every class the estate declares.
+#
+# What remains here is what genuinely cannot be known at evaluation time:
+# argument parsing, the caller's cgroup, whether stdin is a terminal, the
+# unit name (which encodes a timestamp and pid), and the supervisor that
+# outlives a daemonizing child.
 
 supervise_scope_command() {
   if [ "$#" -lt 2 ] || [ "$1" != "--" ]; then
@@ -19,6 +24,7 @@ supervise_scope_command() {
   local hierarchy controllers path pid signal
   local -a remaining_pids=()
 
+  # shellcheck disable=SC2329  # invoked from the traps installed below
   forward_signal() {
     signal="$1"
     if [ -n "$child_pid" ]; then
@@ -108,9 +114,6 @@ shift
 
 unit_override=""
 agent_properties=()
-job_id="${SINNIX_JOB_ID:-}"
-project_id="${SINNIX_PROJECT_ID:-}"
-work_item="${SINNIX_WORK_ITEM:-}"
 
 validate_agent_property() {
   local property="$1"
@@ -148,6 +151,11 @@ validate_agent_property() {
   esac
 }
 
+# --job-id / --project / --work-item are correlation flags: callers such as
+# sinnix-sinex-cache-prebuild pass them, and the values already reach the
+# child through the SINNIX_JOB_ID / SINNIX_PROJECT_ID / SINNIX_WORK_ITEM
+# environment a --scope launch inherits verbatim. They are accepted and
+# consumed here so the launch line stays self-describing.
 while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
   case "$1" in
     --unit)
@@ -173,15 +181,15 @@ while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
       shift 2
       ;;
     --job-id)
-      job_id="${2:?sinnix-scope: --job-id requires a value}"
+      : "${2:?sinnix-scope: --job-id requires a value}"
       shift 2
       ;;
     --project)
-      project_id="${2:?sinnix-scope: --project requires a value}"
+      : "${2:?sinnix-scope: --project requires a value}"
       shift 2
       ;;
     --work-item)
-      work_item="${2:?sinnix-scope: --work-item requires a value}"
+      : "${2:?sinnix-scope: --work-item requires a value}"
       shift 2
       ;;
     *)
@@ -197,64 +205,12 @@ if [ "$#" -lt 2 ] || [ "$1" != "--" ]; then
 fi
 shift
 
-if [ -n "${SINNIX_RUNTIME_INVENTORY_FILE:-}" ]; then
-  inventory_file="$SINNIX_RUNTIME_INVENTORY_FILE"
-elif [ -r /etc/sinnix/runtime-inventory.json ]; then
-  inventory_file="/etc/sinnix/runtime-inventory.json"
-else
-  inventory_file="/run/current-system/etc/sinnix/runtime-inventory.json"
-fi
-fallback_classes="agent build background nix-build heavy"
-
-inventory_value() {
-  local query="$1"
-  local fallback="$2"
-  if [ -r "$inventory_file" ] && command -v jq >/dev/null 2>&1; then
-    jq -er "$query // empty" "$inventory_file" 2>/dev/null || printf '%s\n' "$fallback"
-  else
-    printf '%s\n' "$fallback"
-  fi
-}
-
-inventory_readable() {
-  [ -r "$inventory_file" ] && command -v jq >/dev/null 2>&1 && jq -e . "$inventory_file" >/dev/null 2>&1
-}
-
-fallback_class_known() {
-  case " $fallback_classes " in
-    *" $class "*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-if inventory_readable; then
-  if ! jq -e --arg class "$class" '.commandClasses[$class] != null' "$inventory_file" >/dev/null; then
-    echo "sinnix-scope: unknown class: $class" >&2
-    jq -r '.commandClasses | keys | "known classes: " + join(", ")' "$inventory_file" >&2
-    exit 64
-  fi
-elif ! fallback_class_known; then
-  echo "sinnix-scope: unknown class without readable runtime inventory: $class" >&2
-  echo "fallback classes: $fallback_classes" >&2
-  exit 64
-fi
-
-case "$class" in
-  agent) fallback_slice="agent.slice" ;;
-  build) fallback_slice="build.slice" ;;
-  background) fallback_slice="background.slice" ;;
-  nix-build) fallback_slice="nix-build.slice" ;;
-  heavy) fallback_slice="build.slice" ;;
-  *) fallback_slice="$class.slice" ;;
-esac
-
-slice="$(inventory_value ".commandClasses.\"$class\".slice" "$fallback_slice")"
-nice_level="$(inventory_value ".commandClasses.\"$class\".nice" "")"
-ionice_class="$(inventory_value ".commandClasses.\"$class\".ioniceClass" "")"
-ionice_priority="$(inventory_value ".commandClasses.\"$class\".ionicePriority" "")"
+# Rendered above: sets slice / nice_level / ionice_class / ionice_priority /
+# class_property_args / class_env_defaults, or rejects an unknown class.
+apply_class_policy "$class"
 
 scoped_command=("$@")
-property_args=()
+property_args=("${class_property_args[@]}")
 unscoped_background_xtask=0
 
 command_base="$(basename -- "${1:-}")"
@@ -267,30 +223,14 @@ if [ "$command_base" = "xtask" ]; then
   done
 fi
 
-if inventory_readable; then
-  while IFS='=' read -r name value; do
-    [ -n "$name" ] || continue
-    property_args+=("--property=$name=$value")
-  done < <(jq -r --arg class "$class" '
-    .commandClasses[$class].systemdProperties // {}
-    | to_entries[]
-    | select(.key | test("^[A-Za-z][A-Za-z0-9_]*$"))
-    | if (.value | type) == "array" then
-        .key as $key | .value[] | "\($key)=\(.)"
-      else
-        "\(.key)=\(.value)"
-      end
-  ' "$inventory_file")
+for env_default in "${class_env_defaults[@]}"; do
+  env_name="${env_default%%=*}"
+  if [ "${!env_name+x}" != x ]; then
+    export "${env_default?}"
+  fi
+done
 
-  while IFS='=' read -r name value; do
-    [ -n "$name" ] || continue
-    if [ "${!name+x}" != x ]; then
-      export "$name=$value"
-    fi
-  done < <(jq -r --arg class "$class" '.commandClasses[$class].envDefaults // {} | to_entries[] | "\(.key)=\(.value)"' "$inventory_file")
-fi
-
-# Explicit job limits are overrides, so append them after inventory defaults.
+# Explicit job limits are overrides, so append them after the class defaults.
 # systemd-run applies the last occurrence when a property is specified twice.
 for property in "${agent_properties[@]}"; do
   property_args+=("--property=$property")
