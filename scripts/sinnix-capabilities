@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: List every declared capability (features, services, scripts, commands, skills, capture lanes, MCP servers, agent lanes) with how to invoke it and whether anything has used it
+# runtimeInputs: bash @sinnix-ops-reducer
+set -euo pipefail
+
+# Thin front door: `sinnix capabilities` (this wrapper, discovered like every
+# other scripts/ entry) execs into the merge that lives in the ops-reducer
+# package, which joins /etc/sinnix/capability-index.json with the hub's own
+# routes and the weekly usage census. The same view is the hub's
+# /capabilities/ page. See `sinnix-ops-reducer capabilities --help`.
+exec sinnix-ops-reducer capabilities "$@"
