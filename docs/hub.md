@@ -108,10 +108,22 @@ reported as `stalled`, because the warning has already been missed.
 
 Buttons exist only where the bounded action API admits the target: `park` with
 its own thaw deadline on a _running_ backup unit the runtime inventory carries,
-and `stop` on a scope whose name the API's admission rule accepts. The page
-states the two gaps rather than routing around them — there is no process-level
-target (so reclaiming one runaway `rg` means stopping its whole agent session)
-and no slice target for `set_policy`, since slices are not registered surfaces.
+`stop` on a scope whose name the API's admission rule accepts, and — on hog
+rows the cost column classifies re-runnable — `stop` on the one process
+(`{pid, start_ticks}`), so reclaiming a runaway `rg` no longer means stopping
+its whole agent session. The pin is re-verified against `/proc/<pid>/stat`
+at execution time (a mismatch means the pid was reused and is refused, never
+silently retargeted), and admission is by live cgroup membership rather than
+process name: only `agent.slice`, `build.slice`, and slices the runtime
+inventory itself marks sacrificial (`ManagedOOMMemoryPressure = kill`) can be
+targeted, so a PID 1 direct child, the reducer's own process, and anything in
+a session-critical or unmarked slice never gets the button. The stop is
+SIGTERM first, escalating to SIGKILL only if the same identity is still alive
+after a 3-second grace window — short because every command this reaches is a
+short-lived tool invocation with no state to flush. One gap remains and the
+page still states it rather than routing around it: no slice target exists
+for `set_policy`, since slices are not registered surfaces, and nothing drains
+swap or reclaims a slice's already-swapped pages at all.
 
 ## The capability index
 

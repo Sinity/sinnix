@@ -375,7 +375,10 @@ function hublog(message, tone){
   el.prepend(line);
 }
 async function act(verb, kind, id, button){
-  var label = verb + ' ' + id;
+  // A process target is a {pid, start_ticks} object, not a string -- every
+  // other target kind (unit/scope/job_id) is a plain string identifier.
+  var idText = (typeof id === 'object' && id !== null) ? JSON.stringify(id) : id;
+  var label = verb + ' ' + kind + ' ' + idText;
   if (!confirm(label + '?\\n\\nThis posts a bounded action to the ops-reducer and leaves a receipt.')) return;
   button.disabled = true;
   try {
@@ -391,7 +394,7 @@ async function act(verb, kind, id, button){
         action: verb,
         target: target,
         expected_revision: revision,
-        idempotency_key: 'hub-' + verb + '-' + id + '-' + Date.now(),
+        idempotency_key: 'hub-' + verb + '-' + kind + '-' + idText + '-' + Date.now(),
         operator_reason: 'operator action from the hub control panel',
         parameters: {}
       })
