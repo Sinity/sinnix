@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # @sinnix-package
 # description: Sample completed agent runs for bounded vacuity judgments
-# runtimeInputs: python3 coreutils jq
+# runtimeInputs: coreutils jq
+# pythonPackages: @sinnix-lib
 """Enqueue and judge bounded completion-vacuity candidates."""
 
 from __future__ import annotations
 
 import argparse
 import datetime as dt
-import fcntl
 import hashlib
 import json
 import os
@@ -18,6 +18,8 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+
+from sinnix_lib.ledger import append_jsonl, iter_jsonl
 
 
 POLICY_VERSION = "sinnix-vacuity-sampling-v1"
@@ -48,30 +50,12 @@ def read_payload() -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def append_jsonl(path: Path, row: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as stream:
-        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
-        stream.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
-        stream.flush()
-        os.fsync(stream.fileno())
-        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
-
-
 def existing_candidate_ids() -> set[str]:
     ids: set[str] = set()
     for path in (ledger_path(), queue_path()):
-        try:
-            with path.open(encoding="utf-8") as stream:
-                for line in stream:
-                    try:
-                        row = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if row.get("type") == "vacuity_candidate" and row.get("candidate_id"):
-                        ids.add(str(row["candidate_id"]))
-        except OSError:
-            pass
+        for row in iter_jsonl(path):
+            if row.get("type") == "vacuity_candidate" and row.get("candidate_id"):
+                ids.add(str(row["candidate_id"]))
     return ids
 
 
@@ -123,28 +107,20 @@ def enqueue(payload: dict[str, Any]) -> int:
         "artifact_handles": {"transcript_path": payload.get("transcript_path")},
         "status": "queued" if sampled(candidate_id, rate) else "not_sampled",
     }
-    append_jsonl(queue_path(), row)
-    append_jsonl(ledger_path(), row)
+    append_jsonl(queue_path(), row, fsync=True)
+    append_jsonl(ledger_path(), row, fsync=True)
     return 0
 
 
 def judge_once() -> int:
     pending: list[dict[str, Any]] = []
     judged_ids: set[str] = set()
-    try:
-        for path in (ledger_path(), queue_path()):
-            with path.open(encoding="utf-8") as stream:
-                for line in stream:
-                    try:
-                        row = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if row.get("type") == "vacuity_judgment":
-                        judged_ids.add(str(row.get("candidate_id")))
-                    if path == queue_path() and row.get("sampled") and row.get("status") == "queued" and row.get("candidate_id") not in judged_ids:
-                        pending.append(row)
-    except OSError:
-        return 0
+    for path in (ledger_path(), queue_path()):
+        for row in iter_jsonl(path):
+            if row.get("type") == "vacuity_judgment":
+                judged_ids.add(str(row.get("candidate_id")))
+            if path == queue_path() and row.get("sampled") and row.get("status") == "queued" and row.get("candidate_id") not in judged_ids:
+                pending.append(row)
     schema = Path(os.environ.get("SINNIX_VACUITY_JUDGE_SCHEMA", Path.home() / ".config/claude/agents/schemas/judge.schema.json"))
     judge = os.environ.get("SINNIX_CLAUDE_JUDGE", "sinnix-claude-judge")
     for row in pending:
@@ -178,18 +154,13 @@ def judge_once() -> int:
                 except (json.JSONDecodeError, IndexError, AttributeError):
                     result = {"verdict": "unsupported", "confidence": 0.0, "evidence": ["judge did not return schema-valid JSON"], "refutation_attempted": False, "unsupported": ["judge transport failure"]}
                     status = "failed"
-        append_jsonl(ledger_path(), {"type": "vacuity_judgment", "candidate_id": row["candidate_id"], "session_id": row["session_id"], "timestamp": now(), "policy_version": POLICY_VERSION, "status": status, "model": model, "cost_usd": cost, "receipt_path": receipt_path, "verdict": result})
+        append_jsonl(ledger_path(), {"type": "vacuity_judgment", "candidate_id": row["candidate_id"], "session_id": row["session_id"], "timestamp": now(), "policy_version": POLICY_VERSION, "status": status, "model": model, "cost_usd": cost, "receipt_path": receipt_path, "verdict": result}, fsync=True)
         judged_ids.add(str(row["candidate_id"]))
     return 0
 
 
 def report() -> int:
-    rows: list[dict[str, Any]] = []
-    try:
-        with ledger_path().open(encoding="utf-8") as stream:
-            rows = [json.loads(line) for line in stream if line.strip()]
-    except (OSError, json.JSONDecodeError):
-        pass
+    rows: list[dict[str, Any]] = list(iter_jsonl(ledger_path()))
     candidates = [row for row in rows if row.get("type") == "vacuity_candidate"]
     judgments = [row for row in rows if row.get("type") == "vacuity_judgment"]
     distribution: dict[str, int] = {}
@@ -208,7 +179,7 @@ def report() -> int:
 def review(candidate_id: str, label: str) -> int:
     if label not in {"false_positive", "confirmed"}:
         raise SystemExit("review label must be false_positive or confirmed")
-    append_jsonl(ledger_path(), {"type": "vacuity_review", "candidate_id": candidate_id, "label": label, "timestamp": now(), "policy_version": POLICY_VERSION})
+    append_jsonl(ledger_path(), {"type": "vacuity_review", "candidate_id": candidate_id, "label": label, "timestamp": now(), "policy_version": POLICY_VERSION}, fsync=True)
     return 0
 
 
