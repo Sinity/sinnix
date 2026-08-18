@@ -1,4 +1,4 @@
-# Sinnix hub — the operator's browser front door to the estate, reachable from
+# Sinnix hub — the operator's browser front door to the system, reachable from
 # the tailnet and nowhere else.
 #
 # One unit of its own, in the user manager, default-off until a host opts in:
@@ -18,14 +18,15 @@
 # ── Where the pages come from ───────────────────────────────────────────────
 # Caddy serves no HTML of its own beyond /reports/. Every page is rendered on
 # request by the ops-reducer, which already holds the state the pages show, and
-# Caddy reverse-proxies the page paths to the reducer's Unix socket. There used
-# to be a `sinnix-hub-render` timer writing the same pages to static files every
-# 60 seconds; a page is now as current as the moment it was asked for, and there
-# is no window in which the hub describes an estate that has since moved on.
+# Caddy reverse-proxies the page paths to the reducer's Unix socket. Rendering
+# on request replaced an earlier design that wrote the same pages to static
+# files on a 60-second timer; a page is now as current as the moment it was
+# asked for, and there is no window in which the hub describes a system that
+# has since moved on.
 #
 # ── Where annotations go ────────────────────────────────────────────────────
 # `/feedback` is a route on that same reducer, writing the same append-only
-# JSONL the retired `sinnix-hub-feedback` daemon wrote (same envelope, same
+# JSONL an earlier standalone feedback daemon wrote (same envelope, same
 # file-per-UTC-day, same fsync per line -- agents read those files directly).
 # Arrival of a `sinnix-elicit-v1` record starts the drain that a 120s timer used
 # to run, coalesced so a comparison session refits the model once rather than
@@ -33,8 +34,8 @@
 #
 # ── Where the terminal views come from ──────────────────────────────────────
 # `/terminals/*` is also a route family on that same reducer (sinnix-859p),
-# absorbed from the retired `sinnix-terminal-view` daemon: same URLs, same
-# response shapes, same design doctrine (see the reducer's terminals.py
+# absorbed from an earlier standalone daemon dedicated to terminal views:
+# same URLs, same response shapes, same design doctrine (see the reducer's terminals.py
 # module docstring). It used to be its own Unix-socket process behind
 # `handle_path /terminals/*`; now it falls through the same catch-all
 # `handle` below as every page, so kitty's control sockets and the scrollback
@@ -88,7 +89,7 @@ let
   userName = config.sinnix.user.name;
   # Where the phone's always-on telemetry push (speech, the app's event
   # mirror) lands, demuxed by the dispatcher's embedded TCP receiver
-  # (absorbed from the retired sinnix-phone-receiver, sinnix-tjqi). Host/
+  # (absorbed from an earlier standalone receiver unit, sinnix-tjqi). Host/
   # device telemetry's subject root, not this module's own reportsDir/
   # feedbackDir -- see modules/foundation.nix.
   phoneLaneRoot = config.sinnix.paths.machineRoot;
@@ -96,7 +97,7 @@ let
 in
 mkServiceModule {
   name = "hub";
-  description = "Tailnet-only web hub: reports, estate dashboard, AI control panel";
+  description = "Tailnet-only web hub: reports, system dashboard, AI control panel";
 
   surface = {
     unit = "sinnix-hub.service";
@@ -295,7 +296,7 @@ mkServiceModule {
         }
 
         (hub) {
-          # Usage evidence for the estate's own audits (capture doctrine):
+          # Usage evidence for sinnix's own audits (capture doctrine):
           # the global logger above stays at ERROR for Caddy's own
           # diagnostics, so without a dedicated access logger page usage is
           # otherwise unmeasurable.
@@ -400,8 +401,8 @@ mkServiceModule {
       # The dispatcher's embedded telemetry receiver binds tailscale0
       # directly (it is a raw TCP listener, not something Caddy fronts), so
       # it needs its own resolved-address file on the dispatcher unit's own
-      # ExecStartPre -- ported unchanged from the retired
-      # sinnix-phone-receiver module.
+      # ExecStartPre -- ported unchanged from an earlier standalone
+      # receiver module.
       resolveBindPhoneStream = pkgs.writeShellScript "sinnix-phone-dispatcher-resolve-bind" ''
         set -euo pipefail
         target="$1"
@@ -486,7 +487,7 @@ mkServiceModule {
       systemd.tmpfiles.rules = [
         "d ${cfg.stateDir} 0755 ${userName} users -"
         "d ${cfg.feedbackDir} 0755 ${userName} users -"
-        # Absorbed from the retired sinnix-phone-receiver module. The
+        # Absorbed from an earlier standalone receiver module. The
         # CaptureWriter/SpeechLane ports in the dispatcher script also
         # mkdir(parents=True) these lazily on first write, but declaring them
         # keeps ownership/mode explicit rather than inherited from whatever
@@ -620,7 +621,7 @@ mkServiceModule {
             Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
             # Resolves the tailnet bind address for the embedded telemetry
             # receiver (SINNIX_PHONE_STREAM_HOST), same pattern as the hub's
-            # own resolveBind above and the retired sinnix-phone-receiver
+            # own resolveBind above and the earlier standalone receiver
             # unit it replaces. Optional-EnvironmentFile for the same reason:
             # systemd loads it before ExecStartPre runs, so it must not be
             # required on a cold start.

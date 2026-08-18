@@ -1,11 +1,11 @@
 # The hub
 
-`sinnix.services.hub` is the operator's browser front door to the estate:
+`sinnix.services.hub` is the operator's browser front door to the system:
 generated reports, a live dashboard, and a control panel for the local AI
 backends, reachable from a phone or the desktop and from nowhere else.
 
 It makes each generated report a URL rather than a `file://` path, puts the
-estate's current state on the same origin, and gives report annotations
+system's current state on the same origin, and gives report annotations
 somewhere to go.
 
 ## Routes
@@ -34,7 +34,7 @@ one firewall entry and always works.
 ## The workload view
 
 `/work/` answers "what is this machine doing right now?" in sentences, not in a
-process list. It can, because the estate already names its own work:
+process list. It can, because sinnix already names its own work:
 
 - **Project commands in flight** come from the project ledger the devshell
   wrappers write — the same records lynchpin reads. A row is
@@ -201,7 +201,8 @@ proxy as the pages. Submissions land in
 each wrapping the payload in an envelope carrying the receive time, the
 referring page, and a sequence number — so a consuming agent can tell
 submissions apart without trusting client-supplied fields. That file format is
-the contract and is unchanged from the retired `sinnix-hub-feedback` daemon.
+the contract and is unchanged from the earlier standalone feedback daemon
+this route replaced.
 
 The endpoint is write-only. There is no read route: serving the spool back would
 turn a sink into an exfiltration surface for the personal analysis those
@@ -217,7 +218,7 @@ once, a few seconds after the last tap, rather than once per tap.
 
 `/terminals/` (sinnix-859p) reads and drives the operator's own kitty windows
 over the browser, without a multiplexer. It is a route family on the
-ops-reducer, absorbed from the retired `sinnix-terminal-view` daemon —
+ops-reducer, absorbed from an earlier standalone terminal-viewing daemon —
 same URLs, same response shapes, same design doctrine, now falling through
 the same catch-all `handle` in the Caddyfile as every other page instead of
 its own `handle_path` block and its own Unix-socket process.
@@ -252,16 +253,16 @@ the only state, and per-window sent-text recall lives in the browser's own
 The ops-reducer renders every page on request and Caddy reverse-proxies the
 page paths to its Unix socket; only `/reports/` is served off disk. Each
 response is complete HTML: the browser fetches nothing to display state. A phone
-on a flaky link, or a page left open overnight, shows the estate as of a
+on a flaky link, or a page left open overnight, shows the system as of a
 timestamp it prints, rather than an empty skeleton waiting on XHR. Client-side
 logic is limited to the action buttons, the theme and text-size toggles, the
 services filter, and the three lines that rewrite the frontend port links to
 whichever host you reached the hub on.
 
-Rendering on request replaced a `sinnix-hub-render` timer that wrote the same
-pages to static files every 60 seconds. The reducer already held the state those
-pages show, so the timer bought nothing but staleness: a page is now as current
-as the moment it was asked for.
+Rendering on request replaced an earlier render-on-timer design that wrote the
+same pages to static files every 60 seconds. The reducer already held the
+state those pages show, so the timer bought nothing but staleness: a page is
+now as current as the moment it was asked for.
 
 Inputs are the reducer's live snapshot, the runtime inventory, a Nix-generated
 manifest, live systemd state, and — for the workload view — the scope cgroups
@@ -277,7 +278,7 @@ TCP listener, so the page routes expose exactly what the action API already
 exposed there. POSTs to `/ops/*` keep the same-origin gate and the reducer's
 `expected_revision` check unchanged.
 
-The visual language is the estate's own: the same CSS custom properties, status
+The visual language is sinnix's own: the same CSS custom properties, status
 tones, stat tiles, badges and A−/A+ controls as the generated reports, in the
 violet "ops" accent so the hub is distinguishable at a glance from a report.
 It is styled for the phone first — one column, ≥2.4rem touch targets, no
@@ -305,6 +306,6 @@ rather than the wear-limited root and needs no persistence entry.
 - **No proxying of the raw model APIs** (Ollama `:11434`, LiteLLM `:4000`).
   Republishing them would widen the surface and hold the idle proxies open,
   defeating the teardown the activation design exists for.
-- **No auth beyond the tailnet.** Consistent with the rest of the estate: the
+- **No auth beyond the tailnet.** Consistent with the rest of sinnix: the
   tailnet is the boundary, and every agent on this host is already
   root-equivalent.
