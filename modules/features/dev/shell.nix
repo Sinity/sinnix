@@ -12,6 +12,16 @@ mkFeatureModule {
     "shell"
   ];
   description = "Advanced shell environment (Zsh/Starship/Atuin)";
+  # Gated only by the top-level enable, not per-subFeature: every subFeature
+  # below defaults to true and no host disables one individually, so this
+  # matches current behavior; if that ever changes, a disabled subFeature's
+  # dotfile symlink would still be created (harmless but unused).
+  meta.dotfiles.configFile = {
+    "zsh/init.zsh" = "zsh/init.zsh";
+    "atuin/config.toml" = "atuin/config.toml";
+    "nvim" = "nvim";
+    "tmux/user.conf" = "tmux/tmux.conf";
+  };
   subFeatures = {
     zsh = {
       description = "Zsh shell with oh-my-zsh and plugins";
@@ -58,15 +68,9 @@ mkFeatureModule {
           {
             lib,
             config,
-            mkDotsFileFor,
             ...
           }:
-          let
-            mkDotsFile = mkDotsFileFor config;
-          in
           {
-            xdg.configFile."zsh/init.zsh".source = mkDotsFile "/zsh/init.zsh";
-
             programs.zsh = {
               enable = true;
               enableCompletion = true;
@@ -95,7 +99,7 @@ mkFeatureModule {
 
               # Pure-config init (aliases-adjacent shell setup, fzf preview
               # helpers, terminal title hooks) lives in dots/zsh/init.zsh as a
-              # live out-of-store symlink (xdg.configFile above) so edits take
+              # live out-of-store symlink (meta.dotfiles above) so edits take
               # effect in new shells without a rebuild. Keep this literal
               # (no Nix interpolation) so the sourced path never depends on a
               # store hash.
@@ -146,12 +150,8 @@ mkFeatureModule {
           {
             lib,
             config,
-            mkDotsFileFor,
             ...
           }:
-          let
-            mkDotsFile = mkDotsFileFor config;
-          in
           {
             # Starship settings stay in Nix rather than dots/: Stylix's
             # `stylix.targets.starship` merges theme-derived palette keys into
@@ -256,7 +256,6 @@ mkFeatureModule {
               enableZshIntegration = true;
               flags = [ "--disable-up-arrow" ];
             };
-            xdg.configFile."atuin/config.toml".source = mkDotsFile "/atuin/config.toml";
 
             # Zoxide (directory jumping)
             programs.zoxide = {
@@ -303,12 +302,8 @@ mkFeatureModule {
             config,
             pkgs,
             lib,
-            mkDotsFileFor,
             ...
           }:
-          let
-            mkDotsFile = mkDotsFileFor config;
-          in
           {
             home.sessionVariables = {
               EDITOR = "nvim";
@@ -368,10 +363,6 @@ mkFeatureModule {
               };
             };
 
-            xdg.configFile = {
-              "nvim".source = mkDotsFile "/nvim";
-            };
-
             home.activation.rebuildBatCache = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
               ${lib.getExe pkgs.bat} cache --build 2>/dev/null || true
             '';
@@ -404,26 +395,21 @@ mkFeatureModule {
 
       # Tmux Configuration
       (lib.mkIf cfg.tmux.enable {
-        home-manager.users.${user} =
-          { config, sinnix, ... }:
-          {
-            programs.tmux = {
-              enable = true;
-              baseIndex = 1;
-              escapeTime = 0;
-              historyLimit = 50000;
-              keyMode = "vi";
-              mouse = true;
-              prefix = "C-Space";
-              terminal = "tmux-256color";
-              # Sourced from an out-of-store symlink so edits hot-reload
-              # without a rebuild.
-              extraConfig = "source-file ~/.config/tmux/user.conf";
-            };
-
-            xdg.configFile."tmux/user.conf".source =
-              config.lib.file.mkOutOfStoreSymlink "${sinnix.paths.dotsRoot}/tmux/tmux.conf";
+        home-manager.users.${user} = {
+          programs.tmux = {
+            enable = true;
+            baseIndex = 1;
+            escapeTime = 0;
+            historyLimit = 50000;
+            keyMode = "vi";
+            mouse = true;
+            prefix = "C-Space";
+            terminal = "tmux-256color";
+            # Sourced from an out-of-store symlink (meta.dotfiles above) so
+            # edits hot-reload without a rebuild.
+            extraConfig = "source-file ~/.config/tmux/user.conf";
           };
+        };
       })
     ];
 } args
