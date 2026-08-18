@@ -424,14 +424,21 @@ async def run(args: argparse.Namespace) -> int:
             time.sleep(gap / 2)
     log(f"release at {datetime.fromtimestamp(time.time() + off).isoformat(timespec='milliseconds')}")
 
-    # Arrival-order falsification probe (2026-08-18): two days of batch
-    # refusals seconds after the boundary suggest the pool decision is not
-    # first-come-first-served. Keep the first shots on the boundary (the win
-    # chance if the race IS real is preserved), stagger the rest across the
-    # offsets below; if timing mattered, refusal codes should differ by
-    # offset, and identical batch refusals are evidence the allocator
-    # ignores arrival time entirely.
-    stagger = [0.0, 0.0, 0.25, 1.0]
+    # Offset-mapping probe (2026-08-18). The server's own `ts` field says
+    # which second it PROCESSED each shot, and the two answers split exactly
+    # along it: the one shot processed inside the boundary second
+    # (ts=1787068800) came back apply_result 6 / deadline 0, while the three
+    # processed three seconds later came back the ordinary 3 / next-deadline.
+    # So arrival time is evaluated -- but landing dead on the boundary bought
+    # an undocumented answer rather than a grant, which is what "too early,
+    # window not open" would look like.
+    #
+    # One shot stays on the boundary to test whether 6 reproduces; the rest
+    # map the offsets just after it, where a grant would live if the pool is
+    # opened a beat late. Do not widen this fleet: the burst already sends
+    # four real applications per run, and Xiaomi's documented penalty for
+    # too-frequent retries is a ten-day account block.
+    stagger = [0.0, 0.15, 0.4, 1.0]
 
     async def fire_at(i: int, r, w) -> tuple[int, str]:
         delay = stagger[i] if i < len(stagger) else 0.0
