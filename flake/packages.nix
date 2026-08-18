@@ -4,12 +4,13 @@
 #
 # Script packages are defined in scripts.nix registry.
 # This file re-exports them and can add non-script packages.
-{ inputs, ... }:
 {
+  # sinnixScriptRegistry (flake/script-registry.nix) is the one evaluation of
+  # scripts.nix per perSystem `pkgs`, shared via `_module.args` -- not a
+  # second re-walk of scripts/ for this file.
   perSystem =
-    { pkgs, lib, ... }:
+    { lib, sinnixScriptRegistry, ... }:
     let
-      scriptRegistry = import ./scripts.nix { inherit inputs pkgs; };
       publicPackageNames = [
         "beads"
         "ccusage"
@@ -37,6 +38,6 @@
       # still imported directly by modules/tests; only the explicitly supported
       # external package names stay under `packages` so `nix flake check` does
       # not walk every local convenience wrapper.
-      packages = lib.getAttrs publicPackageNames scriptRegistry.packageSet;
+      packages = lib.getAttrs publicPackageNames sinnixScriptRegistry.packageSet;
     };
 }

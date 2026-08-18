@@ -63,6 +63,30 @@ let
       inputs = moduleInputs;
       inherit overlayLib;
     })
+    {
+      # Every module in one host's evaluation shares the exact same `pkgs`
+      # value, but `helpers.mkSinnixPackagesFor pkgs` used to be a plain
+      # function call -- Nix memoises `import <path>` but never a function
+      # APPLICATION, so ~40 call sites across modules/ each re-ran the whole
+      # 95-script frontmatter discovery independently. Attaching the
+      # registry as an attribute of `pkgs` itself makes it a member of the
+      # same lazily-shared attrset every module already references, so it
+      # evaluates once per host (each host's own `pkgs` fixed point gets its
+      # own thunk -- this does not collapse sinnix-prime and sinnix-ethereal
+      # into one registry, nor does it touch flake/tests/pkg-suites.nix's
+      # deliberately separate unfreePkgs instantiation, which never goes
+      # through this overlay). This is plumbing, not a package -- see
+      # flake/overlay/package/default.nix's header for why an actual script
+      # package would NOT belong here.
+      nixpkgs.overlays = [
+        (final: _prev: {
+          sinnixScriptRegistry = import ./scripts.nix {
+            inputs = moduleInputs;
+            pkgs = final;
+          };
+        })
+      ];
+    }
   ];
 
   mkSharedSpecialArgs = specialInputs: {
@@ -73,12 +97,10 @@ let
     mkCaptureLane = captureLaneLib;
     helpers = {
       inherit (featureLib) mkDotsFileFor;
-      mkSinnixPackagesFor =
-        pkgs:
-        (import ./scripts.nix {
-          inputs = specialInputs;
-          inherit pkgs;
-        }).packageSet;
+      # pkgs.sinnixScriptRegistry is attached once per host by mkBaseModules'
+      # overlay above; this stays a function of `pkgs` only so every existing
+      # call site (`helpers.mkSinnixPackagesFor pkgs`) keeps working unchanged.
+      mkSinnixPackagesFor = pkgs: pkgs.sinnixScriptRegistry.packageSet;
       inherit data;
     };
   };

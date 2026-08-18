@@ -2,10 +2,14 @@
   inputs,
   pkgs,
   system,
+  # The shared per-pkgs registry from flake/script-registry.nix (one
+  # `_module.args` publication per perSystem, not a fresh scripts.nix
+  # evaluation per caller).
+  sinnixScriptRegistry,
 }:
 let
   inherit (pkgs) lib;
-  scriptPkgs = (import ./scripts.nix { inherit inputs pkgs; }).packageSet;
+  scriptPkgs = sinnixScriptRegistry.packageSet;
   rebuildServicePath = lib.makeBinPath [
     pkgs.coreutils
     pkgs.findutils

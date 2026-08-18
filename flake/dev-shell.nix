@@ -10,21 +10,28 @@
     {
       pkgs,
       system,
+      sinnixScriptRegistry,
       ...
     }:
     let
       inherit (pkgs) lib;
       commandRegistry = import ./command-registry.nix {
-        inherit inputs pkgs system;
+        inherit
+          inputs
+          pkgs
+          system
+          sinnixScriptRegistry
+          ;
       };
       nix = "${pkgs.nix}/bin/nix";
       # resolveFlakeDir is shared with command-registry.nix's appCommands
       # (`nix run .#switch` etc.) so both entry points resolve the same way
       # instead of silently drifting apart. scriptPkgs comes from the same
       # place for a plainer reason: `import ./scripts.nix { ... }` is a
-      # function application, and Nix memoises the import but not the call, so
-      # importing it here as well ran the whole 95-script discovery twice per
-      # devshell evaluation.
+      # function application, and Nix memoises the import but not the call --
+      # sinnixScriptRegistry (flake/script-registry.nix) is the one evaluation
+      # of it per perSystem `pkgs`, shared via `_module.args` with every
+      # perSystem module for this system, not just this one.
       inherit (commandRegistry)
         scriptPkgs
         rebuildServicePath

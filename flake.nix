@@ -184,6 +184,7 @@
         inputs.treefmt-nix.flakeModule
 
         # Local modules
+        ./flake/script-registry.nix
         ./flake/dev-shell.nix
         ./flake/apps.nix
         ./flake/packages.nix
