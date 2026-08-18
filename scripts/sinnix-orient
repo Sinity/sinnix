@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: One-call estate orientation for agents/humans (ops-reducer snapshot, acknowledged outages, capture freshness, bd/steering ready heads)
+# runtimeInputs: bash @sinnix-ops-reducer
+set -euo pipefail
+
+# Thin front door: `sinnix orient` (this wrapper, discovered like every other
+# scripts/ entry) execs straight into the real implementation, which lives in
+# the ops-reducer package (pkgs/sinnix-ops-reducer/sinnix_ops_reducer/orient.py)
+# next to the reducer state it reads. See `sinnix-ops-reducer orient --help`.
+exec sinnix-ops-reducer orient "$@"

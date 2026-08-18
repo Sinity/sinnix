@@ -40,6 +40,10 @@ let
       # frontmatter gets pkgs.beads (1.0.3), whose `export` has no -C flag --
       # which failed as a usage dump swallowed by `|| true`.
       beads = externalPackages.beads;
+      # sinnix-orient is a 3-line wrapper around `sinnix-ops-reducer orient`;
+      # the reducer itself lives in externalPackages (a real Python package,
+      # not a discovered script), so it resolves here the same way.
+      sinnix-ops-reducer = externalPackages.sinnix-ops-reducer;
     };
   };
   discovered = discovery.discover (inputs.self + "/scripts");
