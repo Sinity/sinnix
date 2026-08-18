@@ -1,0 +1,979 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Filesystem index pipeline — directory inventory, content scan and judgment ledger (inventory/content/ledger/run)
+# runtimeInputs: python3 duckdb coreutils file
+
+"""sinnix-fs — the filesystem index pipeline, as one CLI.
+
+Three stages, previously three scripts, always run in sequence by
+`sinnix-fs-index.service`: `inventory` walks directories into a mechanical
+scan, `content` indexes document-bearing files (hashes, titles, excerpts),
+and `ledger` materializes the hand-authored judgment ledger against both
+scans. They share one process shape (JSONL -> DuckDB -> Parquet, run
+through the duckdb CLI via a scratch script file) and one `--out-dir` /
+`--index-dir` on disk, which is why they are one script now: splitting them
+never bought independent invocation, only duplicated the mechanics. `run`
+is the three in sequence, sharing one out-dir -- the service's actual entry
+point.
+
+Each subcommand's own docstring below (`INVENTORY_DOC`, `CONTENT_DOC`,
+`LEDGER_DOC`) carries the design rationale that used to live at the top of
+its standalone file; read it via `sinnix-fs <subcommand> --help`.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import pwd
+import grp
+import re
+import stat
+import subprocess
+import sys
+import time
+from collections import Counter
+from pathlib import Path
+
+DEFAULT_ROOTS = ["/realm", "/outer-realm"]
+
+
+def safe(value):
+    """Filenames on this system are not all valid UTF-8.
+
+    os.scandir hands back surrogate escapes for undecodable bytes, and
+    json.dumps then refuses to encode them -- killing a whole-filesystem walk
+    over one badly-named file. Replace the unencodable parts rather than skip
+    the entry: the name is degraded, the record survives.
+    """
+    if isinstance(value, str):
+        return value.encode("utf-8", "replace").decode("utf-8")
+    if isinstance(value, dict):
+        return {safe(k): safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [safe(v) for v in value]
+    return value
+
+
+def run_duckdb_file(db: Path, sql: str, script_name: str) -> subprocess.CompletedProcess:
+    """Write `sql` to a scratch file next to `db` and execute it via the CLI.
+
+    Always via `-f` on a real file, never stdin: piping SQL into `duckdb`
+    over a plain pipe reads nothing, still exits 0, and produces an empty
+    database with a success message. The scratch file is removed regardless
+    of outcome; callers decide how to react to a non-zero exit.
+    """
+    db.parent.mkdir(parents=True, exist_ok=True)
+    script = db.parent / script_name
+    script.write_text(sql, encoding="utf-8")
+    try:
+        return subprocess.run(["duckdb", str(db), "-f", str(script)], text=True,
+                              capture_output=True, check=False)
+    finally:
+        script.unlink(missing_ok=True)
+
+
+def duckdb_query(db: Path, sql: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["duckdb", str(db), "-noheader", "-list", "-c", sql],
+                          text=True, capture_output=True, check=False)
+
+
+# =====================================================================
+# inventory
+# =====================================================================
+
+INVENTORY_DOC = """A queryable index of what is on this machine's disks.
+
+This system has ~4 TB across /realm and /outer-realm and no way to answer
+"what is this, who writes it, is it a copy of something else" without walking
+it by hand every time. This builds the index once and makes it a dataset.
+
+Two layers, deliberately:
+
+  MECHANICAL (this subcommand)  one row per directory: sizes, counts, mtime
+                             range, owners, an extension histogram and a
+                             sample of names. Cheap, exhaustive, re-runnable.
+  CHARACTERISED (agents)     prose per directory: what it actually is, who
+                             writes it, whether it duplicates something else.
+                             Written into a separate table so a re-scan never
+                             destroys it.
+
+Keeping those apart is the whole design. A scan must be free to re-run nightly;
+a judgement about what a directory is for costs real attention and must
+survive. They join on the path.
+
+Storage follows the url-ledger precedent: JSONL is the append-only source of
+truth (diffable, re-ingestable, survives a DuckDB version bump) and DuckDB +
+Parquet are the materialisation you query.
+
+Directories are the unit. A file-level index of this system would be tens of
+millions of rows to answer questions that are all really about directories;
+per-directory aggregates plus a sample answers them at a thousandth the size.
+"""
+
+INVENTORY_SCHEMA = "sinnix-fs-inventory-v1"
+
+# Pruned: opaque by construction (a borg repo is deduplicated chunks, a .git
+# object store is content-addressed blobs), or someone else's index already
+# describes them better than a walk could. Recorded as a single node with
+# prune_reason set, never silently skipped -- an absent directory and a
+# deliberately-unwalked one must not look the same.
+INVENTORY_PRUNE_NAMES = {
+    # btrfs snapshot root. Snapshots reflink the same extents, so walking it
+    # counts the system once per snapshot: measured 29.3 TB across 1.18M
+    # directories on a filesystem holding 2.8 TB, which is 69% of every
+    # directory on the machine and none of it distinct content.
+    ".btrfs",
+    ".git",
+    "node_modules",
+    ".direnv",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "target",  # rust build output; size recorded, contents meaningless
+    ".cargo",
+    "venv",
+    ".venv",
+}
+
+INVENTORY_SAMPLE_NAMES = 12
+INVENTORY_TOP_EXTENSIONS = 15
+
+
+def is_borg_repo(entries: list[os.DirEntry]) -> bool:
+    names = {e.name for e in entries}
+    return "config" in names and "data" in names and any(n.startswith("index.") for n in names)
+
+
+def owner_of(st: os.stat_result) -> tuple[str, str]:
+    try:
+        user = pwd.getpwuid(st.st_uid).pw_name
+    except KeyError:
+        user = str(st.st_uid)
+    try:
+        group = grp.getgrgid(st.st_gid).gr_name
+    except KeyError:
+        group = str(st.st_gid)
+    return user, group
+
+
+def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_every: int) -> int:
+    """Breadth-first walk, one JSONL record per directory.
+
+    BFS rather than DFS so a truncated run still describes the shallow
+    structure completely -- the part a reader needs first -- instead of one
+    deep spur and nothing else.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    written = 0
+    started = time.monotonic()
+
+    with out_path.open("w", encoding="utf-8") as out:
+        queue: list[tuple[str, int]] = [(r, 0) for r in roots if os.path.isdir(r)]
+        while queue:
+            path, depth = queue.pop(0)
+            # error rows MUST carry "parent" like ordinary rows do -- without
+            # it, the rollup's recursive join (n.parent = d.path) never links
+            # an error row to its ancestors, has_error never propagates, and
+            # subtree_complete reads true for a subtree that was never fully
+            # seen. Found by testing against a real permission wall
+            # (/realm/media/model/ollama/blobs, root:root 0700): the flag came
+            # back true until this was added.
+            parent = os.path.dirname(path) if depth else None
+            try:
+                st = os.lstat(path)
+            except OSError as exc:
+                out.write(json.dumps({"schema": INVENTORY_SCHEMA, "path": path, "parent": parent,
+                                      "depth": depth, "error": str(exc)}) + "\n")
+                written += 1
+                continue
+
+            try:
+                with os.scandir(path) as it:
+                    entries = list(it)
+            except PermissionError:
+                out.write(json.dumps({"schema": INVENTORY_SCHEMA, "path": path, "parent": parent,
+                                      "depth": depth, "error": "permission denied"}) + "\n")
+                written += 1
+                continue
+            except OSError as exc:
+                out.write(json.dumps({"schema": INVENTORY_SCHEMA, "path": path, "parent": parent,
+                                      "depth": depth, "error": str(exc)}) + "\n")
+                written += 1
+                continue
+
+            files: list[os.DirEntry] = []
+            dirs: list[os.DirEntry] = []
+            links = 0
+            for e in entries:
+                try:
+                    if e.is_symlink():
+                        links += 1
+                    elif e.is_dir(follow_symlinks=False):
+                        dirs.append(e)
+                    else:
+                        files.append(e)
+                except OSError:
+                    continue
+
+            direct_bytes = 0
+            mtimes: list[float] = []
+            ext_counter: Counter[str] = Counter()
+            biggest: list[tuple[int, str]] = []
+            for e in files:
+                try:
+                    est = e.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                direct_bytes += est.st_size
+                mtimes.append(est.st_mtime)
+                ext = Path(e.name).suffix.lower() or "(none)"
+                ext_counter[ext] += 1
+                biggest.append((est.st_size, e.name))
+            biggest.sort(reverse=True)
+
+            user, group = owner_of(st)
+            prune_reason = None
+            if is_borg_repo(files + dirs):
+                prune_reason = "borg repository (deduplicated chunks)"
+            elif os.path.basename(path) in INVENTORY_PRUNE_NAMES and depth > 0:
+                prune_reason = f"pruned by name: {os.path.basename(path)}"
+            elif max_depth >= 0 and depth >= max_depth:
+                prune_reason = f"max depth {max_depth}"
+
+            record = {
+                "schema": INVENTORY_SCHEMA,
+                "path": path,
+                "parent": os.path.dirname(path) if depth else None,
+                "name": os.path.basename(path) or path,
+                "depth": depth,
+                "direct_files": len(files),
+                "direct_dirs": len(dirs),
+                "direct_symlinks": links,
+                "direct_bytes": direct_bytes,
+                "mtime_min": min(mtimes) if mtimes else None,
+                "mtime_max": max(mtimes) if mtimes else None,
+                "dir_mtime": st.st_mtime,
+                "mode": stat.filemode(st.st_mode),
+                "owner": user,
+                "group": group,
+                "extensions": dict(ext_counter.most_common(INVENTORY_TOP_EXTENSIONS)),
+                "sample_names": [e.name for e in files[:INVENTORY_SAMPLE_NAMES]],
+                "biggest_files": [{"bytes": b, "name": n} for b, n in biggest[:5]],
+                "child_dirs": [e.name for e in dirs[:40]],
+                "prune_reason": prune_reason,
+            }
+            out.write(json.dumps(safe(record), ensure_ascii=False) + "\n")
+            written += 1
+
+            if progress_every and written % progress_every == 0:
+                print(f"  {written} dirs, {time.monotonic()-started:.0f}s, at depth {depth}",
+                      file=sys.stderr)
+
+            if prune_reason is None:
+                for e in dirs:
+                    queue.append((os.path.join(path, e.name), depth + 1))
+
+    print(f"sinnix-fs inventory: {written} directories in {time.monotonic()-started:.0f}s "
+          f"-> {out_path}")
+    return written
+
+
+def inventory_materialize(jsonl: Path, db: Path, parquet: Path) -> None:
+    """JSONL -> DuckDB + Parquet, with the rolled-up subtree sizes.
+
+    direct_bytes is what a directory holds itself; total_bytes is it plus
+    everything under it. The rollup is done here rather than during the walk
+    because it needs the whole tree, and doing it in SQL keeps the walk a
+    single pass that can be interrupted.
+    """
+    sql = f"""
+INSTALL json; LOAD json;
+DROP TABLE IF EXISTS nodes;
+CREATE TABLE nodes AS SELECT * FROM read_json_auto('{jsonl}', ignore_errors=true);
+
+-- Recursive rollup: every node accumulates its own bytes plus its descendants'.
+--
+-- total_bytes used to be silently a FLOOR wherever a permission-denied leaf
+-- sat in the subtree: the leaf's own direct_bytes is 0 (its contents were
+-- never seen), that 0 gets summed like any other, and nothing on the parent
+-- row said the number was incomplete. Measured live: /realm/media/model
+-- reported 35G that way while the true size (readable only as root) is 120G
+-- -- a 3.4x undercount with no marker distinguishing it from a directory that
+-- actually is 35G. subtree_complete/incomplete_reason close that gap: any
+-- error anywhere in the subtree flips the root's subtree_complete to false and
+-- names one reason, so total_bytes can be read as "at least this much" instead
+-- of mistaken for a total.
+DROP TABLE IF EXISTS rollup;
+CREATE TABLE rollup AS
+WITH RECURSIVE descend(root, path, direct_bytes, has_error, error_path) AS (
+    SELECT path AS root, path, COALESCE(direct_bytes, 0),
+           error IS NOT NULL, CASE WHEN error IS NOT NULL THEN path END
+    FROM nodes
+    UNION ALL
+    SELECT d.root, n.path, COALESCE(n.direct_bytes, 0),
+           n.error IS NOT NULL, CASE WHEN n.error IS NOT NULL THEN n.path END
+    FROM descend d JOIN nodes n ON n.parent = d.path
+)
+SELECT root AS path,
+       SUM(direct_bytes) AS total_bytes,
+       COUNT(*) AS subtree_dirs,
+       NOT bool_or(has_error) AS subtree_complete,
+       CASE WHEN bool_or(has_error)
+            THEN 'unreadable: ' || any_value(error_path) FILTER (WHERE has_error)
+       END AS incomplete_reason
+FROM descend GROUP BY root;
+
+DROP VIEW IF EXISTS inventory;
+CREATE VIEW inventory AS
+SELECT n.*, r.total_bytes, r.subtree_dirs, r.subtree_complete, r.incomplete_reason
+FROM nodes n LEFT JOIN rollup r USING (path);
+
+COPY (SELECT * FROM inventory) TO '{parquet}' (FORMAT PARQUET);
+"""
+    db.parent.mkdir(parents=True, exist_ok=True)
+    db.unlink(missing_ok=True)
+    proc = run_duckdb_file(db, sql, ".materialize.sql")
+    if proc.returncode != 0:
+        print(proc.stdout, file=sys.stderr)
+        print(proc.stderr, file=sys.stderr)
+        raise SystemExit(f"duckdb failed ({proc.returncode})")
+    # Verify rather than announce: a materialisation that silently produced
+    # nothing is exactly the failure this whole inventory exists to surface.
+    check = duckdb_query(db, "SELECT count(*) FROM inventory")
+    rows = check.stdout.strip()
+    if check.returncode != 0 or not rows.isdigit() or int(rows) == 0:
+        raise SystemExit(f"materialize produced no rows (duckdb said: {rows!r} "
+                         f"{check.stderr.strip()})")
+    if not parquet.exists() or parquet.stat().st_size == 0:
+        raise SystemExit(f"parquet missing or empty: {parquet}")
+    print(f"sinnix-fs inventory: materialized {rows} rows -> {db}, {parquet}")
+
+
+def cmd_inventory(args: argparse.Namespace) -> int:
+    roots = args.root or DEFAULT_ROOTS
+    out_dir = Path(args.out_dir)
+    jsonl = out_dir / "nodes.jsonl"
+
+    inventory_scan(roots, args.max_depth, jsonl, args.progress_every)
+    if not args.scan_only:
+        inventory_materialize(jsonl, out_dir / "inventory.duckdb", out_dir / "nodes.parquet")
+    return 0
+
+
+# =====================================================================
+# content
+# =====================================================================
+
+CONTENT_DOC = """File-level index of the things a person wrote or collected.
+
+The directory inventory answers "how big is this and who owns it". It cannot
+answer the question that actually matters for reorganising a system: *which
+files belong together but are not stored together*. That is a content
+question, and it needs content.
+
+Scope is deliberately narrow. There are tens of millions of files on this
+machine and almost all of them are uninteresting in bulk -- capture stream
+records, media blobs, build output, package trees. What is interesting is the
+~60k documents: markdown notes, text dumps, PDFs, spreadsheets, the debris of
+years of half-finished organisation. Those are the ones that turn up in six
+places at once, and there are few enough to index individually.
+
+Three things per file make the strewn-ness visible:
+
+  sha256    exact duplicates, wherever they sit. This is the one that proves
+            "the same file is in six places" rather than suggesting it.
+  title     for markdown/HTML, the first heading; for the rest, the filename.
+            Lets near-duplicates and topic clusters surface by name.
+  head      the first few hundred characters, so a later pass can classify
+            what a thing IS without re-reading 60k files off disk.
+
+Excluded on purpose, with the reason recorded rather than silently dropped:
+anything inside a capture lane (those are streams, described by their lane),
+media, build output, and VCS internals.
+"""
+
+CONTENT_SCHEMA = "sinnix-fs-content-v1"
+
+CONTENT_EXTS = {
+    ".md", ".markdown", ".txt", ".org", ".rst", ".adoc",
+    ".pdf", ".docx", ".odt", ".rtf", ".epub",
+    ".csv", ".tsv", ".tex", ".bib",
+    ".html", ".htm",
+    ".json", ".yaml", ".yml", ".toml", ".ini", ".conf",
+}
+
+# Streams and blobs, not documents. A capture lane's contents are described by
+# the lane; indexing each record would drown the signal in telemetry.
+CONTENT_EXCLUDE_DIR_PARTS = {
+    ".git", "node_modules", "target", ".venv", "venv", "__pycache__",
+    ".direnv", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".cargo",
+    "site-packages", ".cache", "share/doc",
+}
+CONTENT_EXCLUDE_PREFIXES = (
+    # btrfs snapshot root. Every snapshot mirrors the whole system, so without
+    # this the index is mostly copies of itself: measured 3.85M of 4.43M files
+    # and 203 GB of 263 GB. It also produces phantom findings — a stray-file
+    # search over the polluted index reported 821 hits where 8 were real.
+    "/realm/.btrfs/",
+    "/realm/data/captures/",
+    "/realm/library/media/",
+    "/realm/library/models/",
+    "/realm/library/datasets/",
+    "/realm/cache/",
+    "/realm/tmp/shell/",
+    "/realm/worktrees/",
+    "/nix/store/",
+)
+
+# A JSON/CSV bigger than this is data, not a document; a markdown bigger than
+# this is a generated dump. Hash and record it, but do not read it in.
+CONTENT_MAX_READ_BYTES = 2 << 20
+CONTENT_HEAD_CHARS = 400
+
+CONTENT_H1 = re.compile(r"^\s{0,3}#\s+(.+?)\s*$", re.M)
+CONTENT_TITLE_TAG = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
+CONTENT_YAML_TITLE = re.compile(r"^title:\s*(.+?)\s*$", re.M)
+
+
+def content_excluded(path: str) -> str | None:
+    if path.startswith(CONTENT_EXCLUDE_PREFIXES):
+        return "bulk lane (stream, media, cache or build)"
+    parts = set(Path(path).parts)
+    hit = parts & CONTENT_EXCLUDE_DIR_PARTS
+    if hit:
+        return f"inside {sorted(hit)[0]}"
+    return None
+
+
+def content_magic_type(path: Path) -> str | None:
+    """Real content type from `file -b --mime-type`, independent of extension.
+
+    Extension-based classification is what this scanner otherwise relies on
+    (CONTENT_EXTS), and extensions lie: a renamed archive, a misnamed export,
+    a script saved as .txt. magic_type is the cheap cross-check -- one
+    subprocess call, no new library dependency, and it is what would have
+    caught this system's own mismatched-build-system class of bug earlier if
+    it had existed on the file layer rather than only the config layer.
+    """
+    try:
+        out = subprocess.run(["file", "-b", "--mime-type", str(path)],
+                              capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout.strip() or None
+
+
+def content_extract(path: Path, size: int, ext: str) -> tuple[str | None, str | None, int | None, str | None]:
+    """(title, head, error) — best effort, never fatal, but never silent either.
+
+    Returns the reason in the third slot instead of swallowing it. A file that
+    could not be read used to be indistinguishable from a file with no title:
+    both produced (None, None). That is the same shape as sinnix's other
+    silent-success bugs -- the sibling scanner (sinnix-fs inventory) already
+    gets this right by writing an explicit permission-denied row.
+    """
+    if size > CONTENT_MAX_READ_BYTES or ext in {".pdf", ".docx", ".odt", ".epub", ".rtf"}:
+        return None, None, None, None
+    try:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+    except PermissionError:
+        return None, None, None, "permission denied"
+    except OSError as exc:
+        return None, None, None, f"read failed: {exc.__class__.__name__}"
+    title = None
+    if ext in {".md", ".markdown"}:
+        if raw.startswith("---"):
+            end = raw.find("\n---", 3)
+            if end > 0:
+                m = CONTENT_YAML_TITLE.search(raw[:end])
+                if m:
+                    title = m.group(1)
+        if not title:
+            m = CONTENT_H1.search(raw)
+            title = m.group(1) if m else None
+    elif ext in {".html", ".htm"}:
+        m = CONTENT_TITLE_TAG.search(raw)
+        title = " ".join(m.group(1).split()) if m else None
+    # The real line count of what was actually read, computed BEFORE head
+    # collapses whitespace into one line -- head.count("\n") is always 0
+    # after that collapse, which would make line_count silently always 1.
+    # wc -l convention: count newlines, plus one more only for a trailing
+    # partial line with no terminator. Most text files end in \n, so the
+    # naive raw.count("\n") + 1 over-counts by one for the common case --
+    # caught by testing against a file with a real trailing newline rather
+    # than trusting the arithmetic.
+    line_count = raw.count("\n") + (1 if raw and not raw.endswith("\n") else 0)
+    head = " ".join(raw[:CONTENT_HEAD_CHARS * 3].split())[:CONTENT_HEAD_CHARS] or None
+    return title, head, line_count, None
+
+
+def content_sha256_of(path: Path, size: int) -> str | None:
+    """Full hash for small files; head+tail+size for large ones.
+
+    A full hash of a 500 MB export costs minutes and buys nothing here: the
+    question is whether two paths hold the same thing, and head+tail+size
+    answers it with no realistic collision among documents.
+    """
+    h = hashlib.sha256()
+    try:
+        with path.open("rb") as f:
+            if size <= 8 << 20:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            else:
+                h.update(f.read(1 << 20))
+                f.seek(-(1 << 20), os.SEEK_END)
+                h.update(f.read(1 << 20))
+                h.update(str(size).encode())
+    except PermissionError:
+        return "ERR:permission denied"
+    except OSError as exc:
+        return f"ERR:{exc.__class__.__name__}"
+    return h.hexdigest()
+
+
+def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    written = 0
+    errored = 0
+    skipped = 0
+    started = time.monotonic()
+    with out_path.open("w", encoding="utf-8") as out:
+        for root in roots:
+            for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+                if content_excluded(dirpath + "/"):
+                    dirnames[:] = []
+                    skipped += len(filenames)
+                    continue
+                dirnames[:] = [d for d in dirnames if d not in CONTENT_EXCLUDE_DIR_PARTS]
+                for fn in filenames:
+                    ext = Path(fn).suffix.lower()
+                    if ext not in CONTENT_EXTS:
+                        continue
+                    p = Path(dirpath) / fn
+                    try:
+                        st = p.stat()
+                    except PermissionError:
+                        # An unreadable file used to `continue` -- it vanished
+                        # from the index entirely, indistinguishable from a file
+                        # that does not exist. Emit a row saying so instead; a
+                        # visible hole is information, a missing row is not.
+                        out.write(json.dumps(safe({
+                            "schema": CONTENT_SCHEMA, "path": str(p), "dir": dirpath,
+                            "name": fn, "ext": ext, "error": "permission denied",
+                        }), ensure_ascii=False) + "\n")
+                        errored += 1
+                        continue
+                    except OSError as exc:
+                        out.write(json.dumps(safe({
+                            "schema": CONTENT_SCHEMA, "path": str(p), "dir": dirpath,
+                            "name": fn, "ext": ext,
+                            "error": f"stat failed: {exc.__class__.__name__}",
+                        }), ensure_ascii=False) + "\n")
+                        errored += 1
+                        continue
+                    if not st.st_size:
+                        continue
+                    title, head, line_count, read_error = content_extract(p, st.st_size, ext)
+                    digest = content_sha256_of(p, st.st_size)
+                    if isinstance(digest, str) and digest.startswith("ERR:"):
+                        read_error = read_error or digest[4:]
+                        digest = None
+                    if read_error:
+                        errored += 1
+                    # line_count is NULL for anything extract() skipped (too
+                    # large, or a binary-shaped extension like .pdf) -- it is
+                    # not computed from a second read, and is a real count of
+                    # what was read, not a lower bound guessed from the
+                    # excerpt.
+                    out.write(json.dumps(safe({
+                        "schema": CONTENT_SCHEMA,
+                        "path": str(p),
+                        "dir": dirpath,
+                        "name": fn,
+                        "ext": ext,
+                        "bytes": st.st_size,
+                        "mtime": st.st_mtime,
+                        "sha256": digest,
+                        "title": title,
+                        "head": head,
+                        "magic_type": content_magic_type(p),
+                        "line_count": line_count,
+                        "error": read_error,
+                    }), ensure_ascii=False) + "\n")
+                    written += 1
+                    if progress_every and written % progress_every == 0:
+                        print(f"  {written} files, {time.monotonic()-started:.0f}s",
+                              file=sys.stderr)
+    # errored is reported separately from skipped: `skipped` is deliberate
+    # prune-exclusion, `errored` is the scanner failing to see something it was
+    # asked to see. Conflating them is how an unreadable subtree reads as an
+    # intentionally-excluded one.
+    print(f"sinnix-fs content: {written} files ({skipped} in excluded trees, "
+          f"{errored} unreadable) in {time.monotonic()-started:.0f}s -> {out_path}")
+    return written
+
+
+def content_materialize(jsonl: Path, db: Path, parquet: Path) -> None:
+    sql = f"""
+DROP TABLE IF EXISTS files;
+CREATE TABLE files AS
+SELECT *,
+  -- Prose a person reads. This is the corpus that enters text embedding and
+  -- per-file classification.
+  ext IN ('.md','.markdown','.txt','.html','.htm','.pdf','.epub','.rst') AS document_like,
+  -- Tabular: classifiable, but not prose. Clusters and embeds differently, so
+  -- it stays out of the text corpus by default rather than diluting it.
+  ext IN ('.csv','.tsv') AS data_like
+FROM read_json_auto('{jsonl}', ignore_errors=true);
+
+-- The point of the whole exercise: one row per piece of content that exists
+-- in more than one place, with every place it exists.
+DROP VIEW IF EXISTS duplicates;
+CREATE VIEW duplicates AS
+SELECT sha256, count(*) AS copies, sum(bytes) AS total_bytes,
+       min(bytes) AS unit_bytes, list(path) AS paths, min(name) AS a_name
+FROM files WHERE sha256 IS NOT NULL
+GROUP BY sha256 HAVING count(*) > 1
+ORDER BY (count(*)-1) * min(bytes) DESC;
+
+-- Same name in many directories: near-duplicates the hash cannot catch,
+-- because someone edited one copy.
+DROP VIEW IF EXISTS scattered_names;
+CREATE VIEW scattered_names AS
+SELECT name, count(*) AS copies, count(DISTINCT dir) AS dirs, list(DISTINCT dir) AS where_
+FROM files GROUP BY name HAVING count(DISTINCT dir) > 2
+ORDER BY count(DISTINCT dir) DESC;
+
+-- The population split, so a coverage query never has to restate the
+-- predicate. Structured-data rows (export payloads, archive internals) are
+-- neither document_like nor data_like and are characterised at container
+-- level, never queued per file.
+DROP VIEW IF EXISTS population;
+CREATE VIEW population AS
+SELECT CASE WHEN document_like THEN 'document'
+            WHEN data_like     THEN 'tabular'
+            ELSE 'structured-data' END AS population,
+       count(*) AS files, sum(bytes) AS bytes
+FROM files GROUP BY 1;
+
+COPY (SELECT * FROM files) TO '{parquet}' (FORMAT PARQUET);
+"""
+    db.parent.mkdir(parents=True, exist_ok=True)
+    db.unlink(missing_ok=True)
+    proc = run_duckdb_file(db, sql, ".content.sql")
+    if proc.returncode != 0:
+        print(proc.stdout, file=sys.stderr)
+        print(proc.stderr, file=sys.stderr)
+        raise SystemExit(f"duckdb failed ({proc.returncode})")
+    check = duckdb_query(db, "SELECT count(*) FROM files")
+    rows = check.stdout.strip()
+    if not rows.isdigit() or int(rows) == 0:
+        raise SystemExit(f"materialize produced no rows ({rows!r} {check.stderr.strip()})")
+    print(f"sinnix-fs content: materialized {rows} rows -> {db}, {parquet}")
+
+
+def cmd_content(args: argparse.Namespace) -> int:
+    roots = args.root or DEFAULT_ROOTS
+    out_dir = Path(args.out_dir)
+    jsonl = out_dir / "files.jsonl"
+    content_walk(roots, jsonl, args.progress_every)
+    content_materialize(jsonl, out_dir / "content.duckdb", out_dir / "files.parquet")
+    return 0
+
+
+# =====================================================================
+# ledger
+# =====================================================================
+
+LEDGER_DOC = """Turn judgments.jsonl from a file agents write into a file agents can query.
+
+`sinnix-fs inventory` and `sinnix-fs content` produce the mechanical scan
+(nodes/files: what is on disk). Alongside them, an append-only ledger of
+per-path judgments (subject, owner, provenance, lifecycle...) has existed
+since the system charter pass on 2026-08-16 -- but nothing had ever loaded it
+into either DuckDB file, so "what fraction of the system is classified" was a
+question with no way to answer it. This closes that gap in SQL, not new
+scanning code: everything here reads data that was already on disk.
+
+Three views, corresponding to the charter's design (system-charter-2026-08-16
+Section 4):
+
+  resolved_judgments   latest-wins per (target, field), except that a
+                        method='operator' row is only ever superseded by
+                        another operator row -- an agent's rule-based guess
+                        never overrides a human decision, no matter which
+                        came later.
+
+  inherited_judgments  every path in nodes/files joined to whichever
+                        judgment target -- a literal sha256: row, or the
+                        LONGEST matching prefix: row -- actually governs it.
+                        This is what lets ~200 prefix judgments classify
+                        millions of files without reading them.
+
+  coverage             the four disjoint states the charter names, per
+                        field: classified (has a judgment) / unclassifiable
+                        (resolved to observation='unknown') / exempt
+                        (not_applicable or withheld) / not_yet_examined (no
+                        row reaches this path at all). Only the last one is
+                        the work queue -- the other three are all "examined",
+                        whatever the answer turned out to be.
+"""
+
+LEDGER_SQL = r"""
+INSTALL json; LOAD json;
+
+DROP TABLE IF EXISTS judgments;
+CREATE TABLE judgments AS
+SELECT * FROM read_json_auto('{judgments_jsonl}', ignore_errors=true);
+
+-- Latest-wins per (target, field), with the operator-override exception: a
+-- method='operator' row can only be superseded by another operator row. Rank
+-- operator rows above rule/model rows regardless of timestamp, then by ts
+-- within each tier.
+DROP VIEW IF EXISTS resolved_judgments;
+CREATE VIEW resolved_judgments AS
+SELECT * EXCLUDE (rk) FROM (
+    SELECT *,
+           row_number() OVER (
+               PARTITION BY target, field
+               ORDER BY (method = 'operator') DESC, ts DESC
+           ) AS rk
+    FROM judgments
+) WHERE rk = 1;
+
+-- Prefix inheritance. A path's judgment is its own sha256: row if one
+-- exists, else the LONGEST prefix: row whose prefix it starts with. DuckDB
+-- has no native trie join, so this is a correlated subquery keyed on
+-- string length -- fine at this row count (hundreds of judgments, not
+-- millions), and the alternative (materializing every prefix x path pair)
+-- would be the thing actually too slow to run.
+DROP VIEW IF EXISTS prefix_judgments;
+CREATE VIEW prefix_judgments AS
+SELECT target, field, value, confidence, observation, method, evidence, ts,
+       substr(target, 8) AS prefix
+FROM resolved_judgments
+WHERE target LIKE 'prefix:%';
+
+-- all_paths / inherited_judgments / coverage are TABLES, not views: they
+-- read from `files`, which lives behind a cross-database ATTACH that does
+-- not persist once this duckdb session exits. A view here would work for
+-- the rest of this script and then silently break -- "table ctn.files does
+-- not exist" -- for every later, ordinary `duckdb inventory.duckdb -c ...`
+-- query. Materializing means re-running `sinnix-fs ledger` is how you
+-- refresh them, same contract as the rollup in `sinnix-fs inventory`.
+DROP TABLE IF EXISTS all_paths;
+CREATE TABLE all_paths AS
+SELECT path, sha256 FROM (
+    SELECT path, NULL AS sha256 FROM nodes
+    UNION ALL
+    SELECT path, sha256 FROM files
+);
+
+-- Only paths that DO match something appear here (an inner join, not a
+-- left join): the "no row at all" case is what QUALIFYing against the full
+-- path population in `coverage` below is for, and this view stays a clean
+-- "here is what governs each classified path" rather than a padded table.
+-- sha256 exact matches always outrank the longest prefix match for the
+-- same (path, field) -- a specific judgment about one file wins over a
+-- general one about its directory.
+DROP TABLE IF EXISTS inherited_judgments;
+CREATE TABLE inherited_judgments AS
+SELECT path, sha256, field, value, confidence, observation, method, evidence, via_prefix
+FROM (
+    SELECT p.path, p.sha256, pj.field, pj.value, pj.confidence, pj.observation,
+           pj.method, pj.evidence, pj.prefix AS via_prefix, 1 AS specificity,
+           length(pj.prefix) AS match_len
+    FROM all_paths p
+    JOIN prefix_judgments pj ON starts_with(p.path, pj.prefix)
+
+    UNION ALL
+
+    SELECT p.path, p.sha256, rj.field, rj.value, rj.confidence, rj.observation,
+           rj.method, rj.evidence, NULL AS via_prefix, 0 AS specificity, 0 AS match_len
+    FROM all_paths p
+    JOIN resolved_judgments rj ON rj.target = 'sha256:' || p.sha256
+    WHERE p.sha256 IS NOT NULL
+)
+QUALIFY row_number() OVER (
+    PARTITION BY path, field ORDER BY specificity ASC, match_len DESC
+) = 1;
+
+-- Coverage: four disjoint states per (path, field). Built against the
+-- 'subject' field, the one the system charter's routing decisions actually
+-- key on; other fields (owner, provenance, lifecycle...) can be queried the
+-- same way by re-running this view with a different field filter -- kept as
+-- one field here rather than a cross-product over all fields, because that
+-- cross-product is exactly the kind of premature generality the operating
+-- contract warns against and nothing downstream needs it yet.
+DROP TABLE IF EXISTS coverage;
+CREATE TABLE coverage AS
+WITH subject_state AS (
+    SELECT p.path,
+           CASE
+             WHEN ij.field IS NULL THEN 'not_yet_examined'
+             WHEN ij.observation = 'not_applicable' OR ij.observation = 'withheld' THEN 'exempt'
+             WHEN ij.observation = 'unknown' THEN 'unclassifiable'
+             ELSE 'classified'
+           END AS state
+    FROM all_paths p
+    LEFT JOIN inherited_judgments ij ON ij.path = p.path AND ij.field = 'subject'
+)
+SELECT state, count(*) AS paths,
+       round(100.0 * count(*) / sum(count(*)) OVER (), 1) AS pct
+FROM subject_state GROUP BY state ORDER BY paths DESC;
+"""
+
+LEDGER_OBJECT_KIND = {
+    "resolved_judgments": "VIEW", "prefix_judgments": "VIEW",
+    "all_paths": "TABLE", "inherited_judgments": "TABLE", "coverage": "TABLE",
+}
+
+
+def ledger_run(index_dir: Path) -> int:
+    judgments = index_dir / "judgments.jsonl"
+    inv_db = index_dir / "inventory.duckdb"
+    content_db = index_dir / "content.duckdb"
+    for p in (judgments, inv_db, content_db):
+        if not p.exists():
+            print(f"sinnix-fs ledger: missing {p} -- run sinnix-fs inventory and "
+                  f"sinnix-fs content first", file=sys.stderr)
+            return 1
+
+    sql = LEDGER_SQL.format(judgments_jsonl=str(judgments))
+    # A prior run may have left an object with the same name as a different
+    # kind (view vs table) -- DROP ... IF EXISTS does not suppress a type
+    # mismatch, only a missing name, so a plain drop-then-create can fail
+    # against the catalog's actual current state. Query it and drop each
+    # target object precisely as whatever it currently is, before running the
+    # real script.
+    catalog_probe = (
+        "SELECT table_name, 'TABLE' FROM duckdb_tables() "
+        "UNION ALL SELECT view_name, 'VIEW' FROM duckdb_views();"
+    )
+    probe = subprocess.run(["duckdb", str(inv_db), "-csv", "-c", catalog_probe],
+                            text=True, capture_output=True)
+    existing = {}
+    if probe.returncode == 0:
+        for line in probe.stdout.splitlines()[1:]:
+            if "," not in line:
+                continue
+            n, kind = line.rsplit(",", 1)
+            existing[n.strip('"')] = kind
+    precise_drops = "\n".join(
+        f"DROP {existing[name]} IF EXISTS {name};"
+        for name in LEDGER_OBJECT_KIND
+        if name in existing and existing[name] != LEDGER_OBJECT_KIND[name]
+    )
+
+    # inventory.duckdb is opened directly (it already has nodes/rollup); only
+    # content.duckdb needs ATTACHing, as a view rather than a copy, so a
+    # re-run of either scanner remains the only place that table is written.
+    full_sql = f"""
+{precise_drops}
+ATTACH '{content_db}' AS ctn (READ_ONLY);
+CREATE OR REPLACE VIEW files AS SELECT * FROM ctn.files;
+{sql}
+.print
+SELECT * FROM coverage;
+"""
+    proc = run_duckdb_file(inv_db, full_sql, ".ledger.sql")
+    if proc.returncode != 0:
+        print(f"sinnix-fs ledger: duckdb failed: {proc.stderr}", file=sys.stderr)
+        return 1
+    print(proc.stdout)
+    print(f"sinnix-fs ledger: materialized resolved_judgments, prefix_judgments, "
+          f"inherited_judgments, coverage in {inv_db}", file=sys.stderr)
+    return 0
+
+
+def cmd_ledger(args: argparse.Namespace) -> int:
+    return ledger_run(args.index_dir)
+
+
+# =====================================================================
+# run — the fs-index service's entry point
+# =====================================================================
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """inventory, then content, then ledger, sharing one out-dir.
+
+    This is what `sinnix-fs-index.service` invokes: the ledger step reads
+    the scan's own DuckDB output, so the three stages always run in this
+    order against the same directory.
+    """
+    roots = args.root or DEFAULT_ROOTS
+    out_dir = Path(args.out_dir)
+
+    nodes_jsonl = out_dir / "nodes.jsonl"
+    inventory_scan(roots, -1, nodes_jsonl, 2000)
+    inventory_materialize(nodes_jsonl, out_dir / "inventory.duckdb", out_dir / "nodes.parquet")
+
+    files_jsonl = out_dir / "files.jsonl"
+    content_walk(roots, files_jsonl, 5000)
+    content_materialize(files_jsonl, out_dir / "content.duckdb", out_dir / "files.parquet")
+
+    return ledger_run(out_dir)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="sinnix-fs", description=__doc__,
+                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="command", required=True)
+
+    inv = sub.add_parser(
+        "inventory", description=INVENTORY_DOC,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="Walk filesystems into a directory-level inventory (JSONL + DuckDB/Parquet)",
+    )
+    inv.add_argument("--root", action="append", default=None,
+                      help=f"Filesystem root to walk (repeatable). Default: {DEFAULT_ROOTS}")
+    inv.add_argument("--out-dir", default="/realm/state/fs-index")
+    inv.add_argument("--max-depth", type=int, default=-1,
+                      help="Stop descending past this depth; -1 for unlimited")
+    inv.add_argument("--progress-every", type=int, default=2000)
+    inv.add_argument("--scan-only", action="store_true")
+    inv.set_defaults(func=cmd_inventory)
+
+    con = sub.add_parser(
+        "content", description=CONTENT_DOC,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="Index content-bearing files (hashes, titles, excerpts) across the system",
+    )
+    con.add_argument("--root", action="append", default=None,
+                      help=f"Filesystem root to walk (repeatable). Default: {DEFAULT_ROOTS}")
+    con.add_argument("--out-dir", default="/realm/state/fs-index")
+    con.add_argument("--progress-every", type=int, default=5000)
+    con.set_defaults(func=cmd_content)
+
+    led = sub.add_parser(
+        "ledger", description=LEDGER_DOC,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="Materialize the judgment ledger into resolved judgments, prefix inheritance and a coverage report",
+    )
+    led.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"),
+                      help="directory holding judgments.jsonl, inventory.duckdb, content.duckdb")
+    led.set_defaults(func=cmd_ledger)
+
+    run = sub.add_parser(
+        "run", description=cmd_run.__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="Run inventory, content and ledger in sequence, sharing one out-dir",
+    )
+    run.add_argument("--root", action="append", default=None,
+                      help=f"Filesystem root to walk (repeatable). Default: {DEFAULT_ROOTS}")
+    run.add_argument("--out-dir", default="/realm/state/fs-index")
+    run.set_defaults(func=cmd_run)
+
+    args = ap.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

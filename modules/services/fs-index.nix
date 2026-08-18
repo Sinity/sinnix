@@ -1,11 +1,11 @@
 # A queryable index of what is actually on this machine's disks, kept
-# current. sinnix-fs-inventory (directories) and sinnix-fs-content (document
-# files) produced a real 2026-08-16 scan, but nothing invoked either of them
-# -- the index was a one-shot, already stale the day after it was built.
-# sinnix-fs-ledger then materializes the judgment ledger against that scan
-# into resolved judgments, prefix inheritance and a coverage report. All
-# three run in sequence here because the ledger step reads the scan's
-# output tables.
+# current. `sinnix-fs inventory` (directories) and `sinnix-fs content`
+# (document files) produced a real 2026-08-16 scan, but nothing invoked
+# either of them -- the index was a one-shot, already stale the day after
+# it was built. `sinnix-fs ledger` then materializes the judgment ledger
+# against that scan into resolved judgments, prefix inheritance and a
+# coverage report. `sinnix-fs run` does all three in sequence, because the
+# ledger step reads the scan's own output tables.
 {
   mkServiceModule,
   config,
@@ -44,16 +44,12 @@ mkServiceModule {
     {
       description = "Rebuild the filesystem inventory, content scan and judgment ledger";
       user = config.sinnix.user.name;
-      # Three scripts, one unit: the ledger step reads the scan's own
+      # One unit, one script invocation: `sinnix-fs run` chains inventory,
+      # content and ledger itself -- the ledger step reads the scan's own
       # DuckDB output, so splitting into three units would need a
-      # dependency chain for no benefit -- nothing else consumes the
-      # scan without the ledger materialized on top of it.
-      execStart = pkgs.writeShellScript "sinnix-fs-index-run" ''
-        set -euo pipefail
-        ${scriptPkgs.sinnix-fs-inventory}/bin/sinnix-fs-inventory --out-dir ${lib.escapeShellArg indexDir}
-        ${scriptPkgs.sinnix-fs-content}/bin/sinnix-fs-content --out-dir ${lib.escapeShellArg indexDir}
-        ${scriptPkgs.sinnix-fs-ledger}/bin/sinnix-fs-ledger --index-dir ${lib.escapeShellArg indexDir}
-      '';
+      # dependency chain for no benefit -- nothing else consumes the scan
+      # without the ledger materialized on top of it.
+      execStart = "${scriptPkgs.sinnix-fs}/bin/sinnix-fs run --out-dir ${lib.escapeShellArg indexDir}";
       serviceConfig = {
         TimeoutStartSec = cfg.maxSecondsPerRun;
       };
