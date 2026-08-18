@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Build a no-loss index for canonical syslog/journal captures
-# runtimeInputs: python3 systemd coreutils
+# description: Build a no-loss index for canonical boot-metric captures
+# runtimeInputs: python3 coreutils
 """Build derived indexes for /realm/data/machine/syslog.
 
-The index is not a summary replacement. It records where raw journal and
-boot-metric files live, with enough metadata to navigate them quickly. Raw logs
-remain canonical and are never modified by this command.
+The index is not a summary replacement. It records where raw boot-metric files
+live, with enough metadata to navigate them quickly. Raw logs remain canonical
+and are never modified by this command.
 """
 
 from __future__ import annotations
@@ -16,8 +16,6 @@ import datetime as dt
 import hashlib
 import json
 import os
-import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -39,49 +37,6 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def journal_edge(path: Path, *, reverse: bool) -> dict[str, Any]:
-    journalctl = shutil.which("journalctl")
-    if journalctl is None:
-        return {"status": "unavailable", "reason": "journalctl not found"}
-    cmd = [
-        journalctl,
-        "--file",
-        str(path),
-        "--output=json",
-        "--no-pager",
-        "--lines=1",
-    ]
-    if reverse:
-        cmd.append("--reverse")
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=8, check=False)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return {"status": "error", "reason": str(exc)}
-    if proc.returncode != 0:
-        return {"status": "error", "reason": proc.stderr.strip() or proc.stdout.strip()}
-    line = next((item for item in proc.stdout.splitlines() if item.strip()), "")
-    if not line:
-        return {"status": "empty"}
-    try:
-        payload = json.loads(line)
-    except json.JSONDecodeError as exc:
-        return {"status": "error", "reason": f"invalid json: {exc}"}
-    return {
-        "status": "ok",
-        "realtime_usec": int(payload["_SOURCE_REALTIME_TIMESTAMP"])
-        if str(payload.get("_SOURCE_REALTIME_TIMESTAMP", "")).isdigit()
-        else None,
-        "monotonic_usec": int(payload["__MONOTONIC_TIMESTAMP"])
-        if str(payload.get("__MONOTONIC_TIMESTAMP", "")).isdigit()
-        else None,
-        "boot_id": payload.get("_BOOT_ID"),
-        "cursor": payload.get("__CURSOR"),
-        "priority": payload.get("PRIORITY"),
-        "unit": payload.get("_SYSTEMD_UNIT") or payload.get("_SYSTEMD_USER_UNIT"),
-        "syslog_identifier": payload.get("SYSLOG_IDENTIFIER"),
-    }
-
-
 def stat_payload(path: Path, root: Path, *, include_hash: bool) -> dict[str, Any]:
     stat = path.stat()
     payload: dict[str, Any] = {
@@ -95,24 +50,6 @@ def stat_payload(path: Path, root: Path, *, include_hash: bool) -> dict[str, Any
     if include_hash:
         payload["sha256"] = file_sha256(path)
     return payload
-
-
-def journal_rows(root: Path, *, include_hash: bool, inspect_edges: bool) -> list[dict[str, Any]]:
-    journal_root = root / "journal"
-    rows: list[dict[str, Any]] = []
-    if not journal_root.exists():
-        return rows
-    for path in sorted(item for item in journal_root.rglob("*") if item.is_file()):
-        row = stat_payload(path, root, include_hash=include_hash)
-        row["kind"] = "journal_file"
-        rel = path.relative_to(journal_root)
-        row["machine_id"] = rel.parts[0] if rel.parts else None
-        row["journal_format"] = path.suffix in {".journal", ".journal~"} or ".journal" in path.name
-        if row["journal_format"] and inspect_edges:
-            row["first_entry"] = journal_edge(path, reverse=False)
-            row["last_entry"] = journal_edge(path, reverse=True)
-        rows.append(row)
-    return rows
 
 
 def boot_metric_rows(root: Path, *, include_hash: bool) -> list[dict[str, Any]]:
@@ -169,7 +106,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--hash", action="store_true", help="Hash raw files; slow but stronger for audits.")
-    parser.add_argument("--no-edge-inspect", action="store_true", help="Skip journalctl first/last entry probes.")
     return parser.parse_args()
 
 
@@ -180,9 +116,7 @@ def main() -> int:
     if not root.exists():
         raise SystemExit(f"syslog root does not exist: {root}")
 
-    journal = journal_rows(root, include_hash=args.hash, inspect_edges=not args.no_edge_inspect)
     boot_metrics = boot_metric_rows(root, include_hash=args.hash)
-    write_jsonl_atomic(output / "journal-files.jsonl", journal)
     write_jsonl_atomic(output / "boot-metrics.jsonl", boot_metrics)
     write_json_atomic(
         output / "manifest.json",
@@ -191,13 +125,11 @@ def main() -> int:
             "created_at": utc_now(),
             "root": str(root),
             "output": str(output),
-            "policy": "derived no-loss index; raw journal and boot metric files remain canonical",
+            "policy": "derived no-loss index; raw boot metric files remain canonical",
             "counts": {
-                "journal_files": len(journal),
                 "boot_metric_dirs": len(boot_metrics),
             },
             "hashes_included": bool(args.hash),
-            "journal_edges_inspected": not args.no_edge_inspect,
         },
     )
     print(output / "manifest.json")
