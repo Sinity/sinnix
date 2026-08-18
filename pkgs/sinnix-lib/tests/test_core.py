@@ -5,7 +5,7 @@ import threading
 
 import pytest
 from sinnix_lib.atomic_json import modify_json, read_json, write_json_atomic
-from sinnix_lib.ledger import append_jsonl, iter_jsonl, receipt
+from sinnix_lib.ledger import append_jsonl, iter_jsonl, receipt, write_jsonl_atomic
 from sinnix_lib.lock import LockBusy, flock
 from sinnix_lib.systemd import _parse_blocks
 
@@ -86,3 +86,27 @@ def test_json_compact(tmp_path):
     write_json_atomic(p, {"b": 1, "a": 2})
     raw = p.read_text().strip()
     assert raw == json.dumps({"a": 2, "b": 1}, sort_keys=True, separators=(",", ":"))
+
+
+def test_write_jsonl_atomic_replaces_whole_file(tmp_path):
+    p = tmp_path / "index.jsonl"
+    write_jsonl_atomic(p, [{"b": 1, "a": 2}, {"a": 3}])
+    write_jsonl_atomic(p, [{"a": 9}])
+    assert list(iter_jsonl(p)) == [{"a": 9}]
+    assert p.read_text() == '{"a":9}\n'
+    # No tmp litter left in the directory the index is published into.
+    assert [x.name for x in tmp_path.iterdir()] == ["index.jsonl"]
+
+
+def test_write_jsonl_atomic_leaves_previous_file_on_failure(tmp_path):
+    p = tmp_path / "index.jsonl"
+    write_jsonl_atomic(p, [{"a": 1}])
+
+    def rows():
+        yield {"a": 2}
+        raise RuntimeError("producer died mid-index")
+
+    with pytest.raises(RuntimeError):
+        write_jsonl_atomic(p, rows())
+    assert list(iter_jsonl(p)) == [{"a": 1}]
+    assert [x.name for x in tmp_path.iterdir()] == ["index.jsonl"]

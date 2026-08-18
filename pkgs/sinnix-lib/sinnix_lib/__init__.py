@@ -17,6 +17,7 @@ __all__ = [
     "lock",
     "notify",
     "paths",
+    "phone_inbox",
     "spool",
     "systemd",
 ]
