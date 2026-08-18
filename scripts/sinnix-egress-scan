@@ -10,7 +10,11 @@ from pathlib import Path
 
 MAX_BYTES = 1024 * 1024
 PATTERNS = (
-    ("openai-style", re.compile(rb"\bsk-[A-Za-z0-9]{20,}\b")),
+    # Hyphenated segments included: current OpenAI keys are sk-proj-<base62>,
+    # and the old alnum-run pattern stopped matching at the second hyphen
+    # (found by the 2026-08-18 content-gate evaluation against a live-format
+    # sample; this is the only BLOCKING tier, so the gap was enforced code).
+    ("openai-style", re.compile(rb"\bsk-[A-Za-z0-9-]{20,}\b")),
     ("github-token", re.compile(rb"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b|\bgithub_pat_[A-Za-z0-9_]{20,}\b")),
     ("cloud-key", re.compile(rb"\bAKIA[0-9A-Z]{16}\b")),
     ("slack-token", re.compile(rb"\bxox[baprs]-[A-Za-z0-9-]{16,}\b")),
