@@ -31,7 +31,7 @@ Preserved exactly, because they are contracts other things read:
   * the state file shape at /run/sinnix/health-state.json --
     `{key: {status, pending?, streak?}}`, keyed `service:<manager>:<unit>`,
     `socket:<manager>:<unit>`, `capture:<name>`, `payload:<name>`,
-    `publisher:<name>`, `mount:<path>`;
+    `publisher:<name>`, `mount:<path>`, `pressure:<lane>`;
   * confirm-2 debounce, the prune that only the full sweep may run, and the
     notification rules (acknowledged silent, recovery only if the outage was
     announced, everything else critical).
@@ -57,6 +57,8 @@ from sinnix_lib.ledger import append_jsonl, utc_ts
 from sinnix_lib.notify import notify_desktop
 from sinnix_lib.paths import runtime_dir
 from sinnix_lib.systemd import show_units
+
+from . import pressure
 
 SCHEMA = "sinnix-health-transition-v1"
 APP_NAME = "sinnix-health"
@@ -257,6 +259,26 @@ def describe(
             f"{evidence_field(evidence, 'probe_exit') or '?'}), so this says "
             "nothing about the lane. Fix the probe before reading anything into it.",
         )
+    if key == "swap_headroom:pre-freeze":
+        percent = evidence_field(evidence, "swap_percent")
+        return (
+            f"Swap is {percent}% consumed and nothing is stalling yet",
+            "This is the state that preceded every multi-hour freeze on this "
+            "machine by about ten minutes, and available memory reads fine "
+            "throughout it, so nothing else will warn you.\nDecide which lane "
+            "is expendable while the machine still responds: the hub's "
+            "/pressure/ page ranks them by swap, not by RSS.",
+        )
+    if key == "swap_headroom:stalled":
+        return (
+            "Swap is full and tasks are stalling",
+            "The warning window has closed: this is the freeze, not the lead-up "
+            "to it. earlyoom will stay silent because available memory is not "
+            "the thing that ran out.",
+        )
+    if key == "swap_headroom:healthy":
+        percent = evidence_field(evidence, "swap_percent")
+        return "Swap headroom is back", f"Now at {percent}% consumed."
     if type_ == "mount_capacity":
         if status == "healthy":
             return (
@@ -898,7 +920,15 @@ def sweep(
     emitter: Emitter,
     now: float | None = None,
     prober: Callable[[Sequence[str], bool], dict[str, dict[str, str]]] | None = None,
+    pressure_sample: pressure.Sample | None = None,
 ) -> Emitter:
+    """Every lane, one emitter, one prune.
+
+    The swap-headroom lane rides here rather than beside here for a structural
+    reason: `prune` deletes every state key this sweep did not emit, so a lane
+    emitted through a second emitter would have its memory wiped on the next
+    tick and would re-announce the same pre-freeze every couple of minutes.
+    """
     captures = captures_of(inventory)
     services = observed(inventory, "service")
     sockets = observed(inventory, "socket")
@@ -909,6 +939,9 @@ def sweep(
     sweep_mounts(mounts_of(inventory), emitter)
     sweep_services(services, properties, emitter)
     sweep_sockets(sockets, properties, emitter)
+    pressure.sweep_swap_headroom(
+        pressure.sample() if pressure_sample is None else pressure_sample, emitter
+    )
     emitter.prune()
     return emitter
 
