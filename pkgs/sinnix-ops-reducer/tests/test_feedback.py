@@ -16,7 +16,12 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-from sinnix_ops_reducer.feedback import CoalescingTrigger, FeedbackSpool, is_elicit
+from sinnix_ops_reducer.feedback import (
+    CoalescingTrigger,
+    FeedbackSpool,
+    is_elicit,
+    resolve_elicit_model,
+)
 from sinnix_ops_reducer.reducer import Reducer
 from sinnix_ops_reducer.server import Handler
 
@@ -88,6 +93,19 @@ def test_is_elicit_ignores_non_objects() -> None:
     assert not is_elicit(None)
 
 
+def test_resolve_elicit_model_rejects_traversal_and_odd_charsets(
+    tmp_path: Path,
+) -> None:
+    assert resolve_elicit_model(tmp_path, "wallpapers") == tmp_path / "wallpapers" / (
+        "model.json"
+    )
+    assert resolve_elicit_model(tmp_path, "../etc") is None
+    assert resolve_elicit_model(tmp_path, "a/b") is None
+    assert resolve_elicit_model(tmp_path, "") is None
+    assert resolve_elicit_model(tmp_path, "a" * 65) is None
+    assert resolve_elicit_model(tmp_path, "a" * 64) is not None
+
+
 @pytest.fixture
 def hub_server(tmp_path: Path):
     reducer = Reducer(tmp_path / "status.json", tmp_path / "token", lambda: {})
@@ -99,6 +117,7 @@ def hub_server(tmp_path: Path):
     server.hub_manifest = None
     server.inventory_path = tmp_path / "missing-inventory.json"
     server.feedback = FeedbackSpool(tmp_path / "spool")
+    server.elicit_model_dir = tmp_path / "preferences"
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -147,4 +166,39 @@ def test_the_spool_refuses_bodies_it_cannot_trust(hub_server) -> None:
     )
     with pytest.raises(urllib.error.HTTPError) as raised:
         urllib.request.urlopen(request, timeout=10)
+    assert raised.value.code == 400
+
+
+def test_elicit_model_reads_the_domains_own_fit(hub_server, tmp_path: Path) -> None:
+    """GET /feedback/elicit/<domain> is the one read this write-only sink
+    grew: a domain's own model.json, read straight back for the in-session
+    'learning so far' preview -- never the spool itself."""
+    base, _ = hub_server
+    domain_dir = tmp_path / "preferences" / "wallpapers"
+    domain_dir.mkdir(parents=True)
+    (domain_dir / "model.json").write_text(
+        json.dumps({"schema": "sinnix-elicit-model-v1", "theta": {"a": 1.2}})
+    )
+    with urllib.request.urlopen(
+        base + "/feedback/elicit/wallpapers", timeout=10
+    ) as response:
+        assert response.status == 200
+        assert response.headers["Access-Control-Allow-Origin"] == "*"
+        body = json.loads(response.read())
+    assert body["schema"] == "sinnix-elicit-v1"
+    assert body["domain"] == "wallpapers"
+    assert body["model"] == {"schema": "sinnix-elicit-model-v1", "theta": {"a": 1.2}}
+
+
+def test_elicit_model_404s_before_any_rank_has_run(hub_server) -> None:
+    base, _ = hub_server
+    with pytest.raises(urllib.error.HTTPError) as raised:
+        urllib.request.urlopen(base + "/feedback/elicit/never-ranked", timeout=10)
+    assert raised.value.code == 404
+
+
+def test_elicit_model_refuses_a_traversal_shaped_domain(hub_server) -> None:
+    base, _ = hub_server
+    with pytest.raises(urllib.error.HTTPError) as raised:
+        urllib.request.urlopen(base + "/feedback/elicit/..%2f..%2fetc", timeout=10)
     assert raised.value.code == 400

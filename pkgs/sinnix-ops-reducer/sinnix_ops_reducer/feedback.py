@@ -11,9 +11,10 @@ Deliberately minimal, and each omission is a decision carried over intact:
     survives every failure mode a database introduces;
   * no auth of its own -- the tailnet is the security boundary, same as the
     rest of the hub, and the reducer's socket is the operator's;
-  * no read endpoint -- agents read the spool from the filesystem. Serving it
-    back would turn a write-only sink into an exfiltration surface for the
-    personal analysis those annotations describe;
+  * no read endpoint on the spool itself -- agents read the annotation spool
+    from the filesystem. Serving arbitrary posted payloads back would turn a
+    write-only sink into an exfiltration surface for the personal analysis
+    those annotations describe;
   * permissive CORS -- reports are also opened straight off disk as file://
     (Origin: null), and the handback must work there too.
 
@@ -22,6 +23,20 @@ judgment, and those records used to sit in the spool until a 120s timer drained
 them. Arrival is the event, so arrival is what runs the drain -- coalesced,
 because a session is a burst of posts and refitting a Bradley-Terry model once
 per tap would be absurd.
+
+Also new: a narrow, bounded READ for elicit's own fitted model
+(`resolve_elicit_model`), which is a different thing from the spool's "no
+read endpoint" decision above and does not revisit it. The spool refusal is
+about serving back *arbitrary posted payloads* -- the personal-analysis
+annotations an operator writes about a report, which the operator never
+asked to see echoed over the network. An elicit domain's `model.json` is
+not that: it is a derived Bradley-Terry fit over items the operator
+themselves defined (`sinnix elicit init`), on this same host, and the
+in-session "learning so far" preview a comparison page wants to show is
+just that fit read back mid-session rather than after the next full page
+load. Bounded the same way the rest of the hub is bounded: domain names are
+validated against a fixed charset, and the resolved path must stay under
+the configured preferences root -- never an arbitrary filesystem read.
 """
 
 from __future__ import annotations
@@ -29,6 +44,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -38,6 +54,29 @@ from typing import Any
 SCHEMA = "sinnix-hub-feedback-v1"
 ELICIT_SCHEMA = "sinnix-elicit-v1"
 MAX_BODY = 1 << 20  # 1 MiB: a generous annotated report, not a file upload
+
+# Mirrors sinnix-elicit's own BASE_DIR default (scripts/sinnix-elicit); a
+# domain writes its model at <root>/<domain>/model.json.
+ELICIT_MODEL_DIR_DEFAULT = Path("/realm/data/notes/preferences")
+ELICIT_DOMAIN_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def resolve_elicit_model(base_dir: Path, domain: str) -> Path | None:
+    """The `model.json` path for *domain* under *base_dir*, or None if the
+    domain name is not a plain identifier or the resolved path would not
+    stay under the configured root (defence in depth alongside the charset
+    check -- a domain of "." or ".." never matches the regex, but a
+    resolved-path check costs nothing and does not rely on the regex being
+    the only guard). Existence is the caller's problem, not this
+    function's: a missing model.json (no `rank` run yet) is a normal state,
+    not a rejected request."""
+    if not ELICIT_DOMAIN_RE.match(domain):
+        return None
+    root = base_dir.resolve()
+    candidate = (base_dir / domain / "model.json").resolve()
+    if candidate != root and root not in candidate.parents:
+        return None
+    return candidate
 
 
 class CoalescingTrigger:
