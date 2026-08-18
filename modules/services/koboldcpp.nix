@@ -77,7 +77,22 @@ mkServiceModule {
           "--usecublas normal"
           "--gpulayers ${toString cfg.gpuLayers}"
           "--quiet"
+          # There is no $DISPLAY under systemd, ever. Without this, koboldcpp
+          # with no --model tries its Tk file-picker GUI and dies on
+          # Tk_Init error -- exactly what a socket-activation probe with no
+          # model configured hits (2026-08-18: a stray connection to the
+          # public port triggered this and crash-looped every 10s). The
+          # built-in web UI (KoboldAI Lite, :5001) is unaffected.
+          "--skiplauncher"
         ]
+        # --skiplauncher above only suppresses the launcher-config GUI; with
+        # no --model AND no --skiplauncher-covered fallback, koboldcpp falls
+        # into a SEPARATE tkinter askopenfilename "pick a model" dialog
+        # (verified live 2026-08-18: py-spy caught the process blocked in
+        # show_gui -> zentk_askopenfilename while --skiplauncher alone let it
+        # sail past the launcher and straight into that picker). --nomodel is
+        # the flag that actually means "run without one, don't ask".
+        ++ lib.optional (cfg.model == "") "--nomodel"
         ++ lib.optional (cfg.model != "") "--model ${modelRoot}/gguf/${cfg.model}"
         ++ lib.optional (cfg.sdmodel != "") "--sdmodel ${modelRoot}/sd-checkpoints/${cfg.sdmodel}"
         ++ lib.optional (
