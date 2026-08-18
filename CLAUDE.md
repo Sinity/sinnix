@@ -335,7 +335,16 @@ frontmatter** or evaluation fails:
 # @sinnix-package
 # description: One-line description (required)
 # runtimeInputs: bash coreutils jq        # space-separated; @name = sibling script
+# pythonPackages: @sinnix-lib numpy       # optional; python3.withPackages shebang
 ```
+
+`runtimeInputs` builds a PATH and can never satisfy a Python `import`: the
+kernel jumps straight at the interpreter named in the patched shebang, whose
+sys.path was fixed when that interpreter was built. A Python script that
+imports anything -- `sinnix_lib` above all -- names it in `pythonPackages`,
+which resolves in `pkgs.python3Packages` (or `@name` for a sibling package)
+and patches that script's shebang against a `python3.withPackages`
+interpreter. Silence keeps bare python3 and builds nothing extra.
 
 or, for scripts launched directly (Hyprland keybindings, shell-sourced):
 
