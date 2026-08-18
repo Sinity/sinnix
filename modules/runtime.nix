@@ -15,7 +15,7 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   resourceClassNames = builtins.attrNames runtimeDefaults.classes;
 
-  # The estate's single failure-report path: a unit that enters `failed`
+  # Sinnix's single failure-report path: a unit that enters `failed`
   # reports itself, so nothing has to poll it. It routes into the ops-reducer,
   # which owns the health sweep, rather than appending to the ledger directly:
   # one schema and one dedup state for both the OnFailure path and the sweep.
@@ -557,8 +557,8 @@ in
       # does, and a live switch inherits whatever the previous generation
       # left. `z` is a no-op when the path does not exist.
       "z /run/sinnix/health-transitions.jsonl 0664 root users -"
-      "z /run/sinnix/health-sentinel-state.json 0664 root users -"
-      "z /run/sinnix/health-sentinel-state.json.lock 0664 root users -"
+      "z /run/sinnix/health-state.json 0664 root users -"
+      "z /run/sinnix/health-state.json.lock 0664 root users -"
     ];
     # Consumer entries from activation.consumers render as forced environment
     # overrides (front-door routing; see the consumers option comment),
