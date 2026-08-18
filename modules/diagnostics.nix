@@ -50,69 +50,88 @@ let
 
 in
 {
-  config = {
-    environment.systemPackages = lib.mkIf isDesktop (
-      coreDiagnostics
-      ++ [
-        scriptPkgs.asbl-no-moar
-        scriptPkgs.nuke-builds
-        scriptPkgs.sinnix-observe
-        scriptPkgs."sinnix-free-headroom"
-        scriptPkgs.machine-experiment-run
-        scriptPkgs.syslog-index
-      ]
-    );
+  config = lib.mkMerge [
+    # syslog-index previously ran with no registered runtime surface at all
+    # (no resourceClass resolution, no failure-notify) -- an intended
+    # semantic delta of this conversion, not merely a render change: it now
+    # carries background-maintenance's Nice/IOScheduling/CPU/IOWeight/Memory
+    # governance and the standard OnFailure path, matching every other
+    # scheduled oneshot on this host.
+    (lib.sinnix.mkScheduledJob
+      {
+        inherit config;
+        unitName = "syslog-index";
+        description = "Build no-loss syslog/journal capture indexes";
+        surface = config.sinnix.runtime.surfaces.syslog-index;
+      }
+      {
+        # manager defaults "system", which always resolves resources via the
+        # unit-based mkRuntimeServiceConfig lookup below -- resourceClass here
+        # would be a no-op (that key only applies to manager="user" jobs); the
+        # class comes from the syslog-index surface's own resourceClass field.
+        execStart = "${scriptPkgs.syslog-index}/bin/syslog-index --no-edge-inspect";
+        unit = {
+          after = [
+            "local-fs.target"
+            "systemd-journald.service"
+          ];
+          unitConfig.RequiresMountsFor = [ journaldBaseDir ];
+        };
+        timer = {
+          onBootSec = "4min";
+          onUnitActiveSec = "1h";
+          accuracySec = "1min";
+          description = "Refresh no-loss syslog/journal capture indexes";
+        };
+      }
+    )
+    {
+      environment.systemPackages = lib.mkIf isDesktop (
+        coreDiagnostics
+        ++ [
+          scriptPkgs.asbl-no-moar
+          scriptPkgs.nuke-builds
+          scriptPkgs.sinnix-observe
+          scriptPkgs."sinnix-free-headroom"
+          scriptPkgs.machine-experiment-run
+          scriptPkgs.syslog-index
+        ]
+      );
 
-    # User-owned: these hold boot-metrics captures, not journald's own store.
-    systemd.tmpfiles.rules = [
-      "d ${journaldBaseDir} 0750 ${username} users -"
-      "d ${bootMetricsDir} 0750 ${username} users -"
-      "d ${journaldBaseDir}/index 0750 ${username} users -"
-    ];
-
-    systemd.services.capture-boot-metrics = {
-      description = "Capture boot metrics";
-      # systemd-analyze needs FinishTimestampMonotonic != 0, only set once
-      # every boot service has finished (2+ min with slow nofail mounts).
-      after = [
-        "systemd-journald.service"
-        "multi-user.target"
+      # User-owned: these hold boot-metrics captures, not journald's own store.
+      systemd.tmpfiles.rules = [
+        "d ${journaldBaseDir} 0750 ${username} users -"
+        "d ${bootMetricsDir} 0750 ${username} users -"
+        "d ${journaldBaseDir}/index 0750 ${username} users -"
       ];
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${captureBootMetrics}/bin/capture-boot-metrics";
-      };
-    };
 
-    systemd.timers.capture-boot-metrics = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnBootSec = "3min";
-        AccuracySec = "10s";
+      systemd.services.capture-boot-metrics = {
+        description = "Capture boot metrics";
+        # systemd-analyze needs FinishTimestampMonotonic != 0, only set once
+        # every boot service has finished (2+ min with slow nofail mounts).
+        after = [
+          "systemd-journald.service"
+          "multi-user.target"
+        ];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${captureBootMetrics}/bin/capture-boot-metrics";
+        };
       };
-    };
 
-    systemd.services.syslog-index = {
-      description = "Build no-loss syslog/journal capture indexes";
-      after = [
-        "local-fs.target"
-        "systemd-journald.service"
-      ];
-      unitConfig.RequiresMountsFor = [ journaldBaseDir ];
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${scriptPkgs.syslog-index}/bin/syslog-index --no-edge-inspect";
+      systemd.timers.capture-boot-metrics = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnBootSec = "3min";
+          AccuracySec = "10s";
+        };
       };
-    };
 
-    systemd.timers.syslog-index = {
-      description = "Refresh no-loss syslog/journal capture indexes";
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnBootSec = "4min";
-        OnUnitActiveSec = "1h";
-        AccuracySec = "1min";
+      sinnix.runtime.surfaces.syslog-index = {
+        unit = "syslog-index.service";
+        resourceClass = "background-maintenance";
+        observe.enable = true;
       };
-    };
-  };
+    }
+  ];
 }

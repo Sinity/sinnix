@@ -158,6 +158,36 @@ let
     '';
   };
 
+  # Previously hand-rolled with no registered runtime surface at all (no
+  # resourceClass resolution, no failure-notify) -- an intended semantic
+  # delta of this conversion: it now carries background-maintenance's
+  # Nice/IOScheduling/CPU/IOWeight/Memory governance and the standard
+  # OnFailure path, matching every other scheduled oneshot on this host.
+  # The explicit IOSchedulingPriority=7 override is dropped along with it:
+  # background-maintenance doesn't set one (defaults to systemd's own
+  # priority-4-within-class), which is the class this job now defers to.
+  drainSwapfileJob =
+    lib.sinnix.mkScheduledJob
+      {
+        inherit config;
+        unitName = "sinnix-drain-swapfile";
+        description = "Drain resident pages from the bounded sinnix-prime swapfile";
+        surface = config.sinnix.runtime.surfaces.sinnix-drain-swapfile;
+      }
+      {
+        execStart = "${drainSwapfile}/bin/sinnix-prime-drain-swapfile";
+        unit.after = [
+          swapUnit
+          "multi-user.target"
+        ];
+        timer = {
+          onBootSec = "2min";
+          onUnitActiveSec = "5min";
+          accuracySec = "30s";
+          persistent = false;
+        };
+      };
+
   realmFsDevice = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
 
   # Initrd scaffold: early-boot placeholders derived from persistence config
@@ -388,20 +418,7 @@ in
       };
     };
 
-    services.sinnix-drain-swapfile = {
-      description = "Drain resident pages from the bounded sinnix-prime swapfile";
-      after = [
-        swapUnit
-        "multi-user.target"
-      ];
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${drainSwapfile}/bin/sinnix-prime-drain-swapfile";
-        Nice = 10;
-        IOSchedulingClass = "idle";
-        IOSchedulingPriority = 7;
-      };
-    };
+    services.sinnix-drain-swapfile = drainSwapfileJob.systemd.services.sinnix-drain-swapfile;
 
     services.sinnix-fstrim = {
       description = "Trim canonical NVMe data filesystem";
@@ -441,15 +458,7 @@ in
       };
     };
 
-    timers.sinnix-drain-swapfile = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnBootSec = "2min";
-        OnUnitActiveSec = "5min";
-        AccuracySec = "30s";
-        Persistent = false;
-      };
-    };
+    timers.sinnix-drain-swapfile = drainSwapfileJob.systemd.timers.sinnix-drain-swapfile;
 
     # Ensure the dedicated sinex subvolume exists on the /realm NVMe (not the
     # MX500) before /var/lib/sinex is mounted. The btrfs top level
@@ -593,6 +602,12 @@ in
     "/home/${username}/.local/share"
     polylogueShareMount
   ];
+
+  sinnix.runtime.surfaces.sinnix-drain-swapfile = {
+    unit = "sinnix-drain-swapfile.service";
+    resourceClass = "background-maintenance";
+    observe.enable = true;
+  };
 
   boot.supportedFilesystems = [
     "btrfs"
