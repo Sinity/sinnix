@@ -212,6 +212,43 @@ def test_policy_properties_and_rebuild_override_are_enumerated(tmp_path: Path) -
     )
 
 
+def test_park_requires_a_bounded_deadline(tmp_path: Path) -> None:
+    """The hub's park button posts `deadline_seconds` explicitly (it prompts
+    the operator for it) precisely because this verb refuses to run without
+    one -- a parked unit must have a scheduled thaw, never an indefinite
+    freeze an operator forgot about."""
+    base = request("park", {"unit": "safe"}, key="park-missing")
+    with pytest.raises(ActionError, match="deadline_seconds"):
+        validate_request(base)
+    with pytest.raises(ActionError, match="between 1 and 86400"):
+        validate_request({**base, "parameters": {"deadline_seconds": 0}})
+    with pytest.raises(ActionError, match="between 1 and 86400"):
+        validate_request({**base, "parameters": {"deadline_seconds": 86401}})
+    validated = validate_request({**base, "parameters": {"deadline_seconds": 600}})
+    assert validated["parameters"] == {"deadline_seconds": 600}
+
+    inventory_path = tmp_path / "inventory.json"
+    inventory(inventory_path)
+    reducer = Reducer(
+        tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
+    )
+    reducer.refresh()
+    calls: list[dict] = []
+    actions = ActionService(
+        reducer.snapshot,
+        inventory_path,
+        tmp_path / "receipts.json",
+        adapter=lambda value, _resolved: calls.append(value) or {"status": "fixture"},
+        unit_state_prober=fake_unit_state_prober,
+    )
+    receipt = actions.execute(
+        request("park", {"unit": "safe"}, key="park-ok")
+        | {"parameters": {"deadline_seconds": 600}}
+    )
+    assert receipt["adapter"]["status"] == "fixture"
+    assert calls[0]["parameters"] == {"deadline_seconds": 600}
+
+
 def test_valid_rejected_action_leaves_a_receipt(tmp_path: Path) -> None:
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)

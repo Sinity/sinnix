@@ -84,6 +84,24 @@ PROCESS_ADMITTED_BASE_SLICES = frozenset({"agent.slice", "build.slice"})
 PROCESS_STOP_GRACE_SECONDS = 3.0
 PROCESS_POLL_INTERVAL_SECONDS = 0.05
 
+# The mutable-property allowlist for `set_policy`/`reset_policy`, in one
+# place: validate_request's admission check, the adapter's live-value guard,
+# and reset_policy's own restoration list all read this rather than each
+# carrying a copy that could drift from the others. The hub's /services/
+# page imports it too, so its per-property controls stay honest to exactly
+# what the action API will accept.
+# A tuple, not a set: reset_policy's `systemctl set-property` assignment
+# list is built by iterating this, and a stable order keeps that command
+# (and anything logging or testing it) deterministic across runs.
+POLICY_PROPERTIES = (
+    "MemoryHigh",
+    "MemoryMax",
+    "MemoryLow",
+    "CPUWeight",
+    "IOWeight",
+    "Nice",
+)
+
 
 def sacrificial_slices(inventory: dict[str, Any] | None) -> set[str]:
     """Slices the runtime inventory itself marks sacrificial: those carrying
@@ -291,14 +309,7 @@ def validate_request(value: Any) -> dict[str, Any]:
             raise ActionError("set_policy requires property and value")
         _string(parameters["property"], "property", 32)
         _string(parameters["value"], "value", 64)
-        if parameters["property"] not in {
-            "MemoryHigh",
-            "MemoryMax",
-            "MemoryLow",
-            "CPUWeight",
-            "IOWeight",
-            "Nice",
-        }:
+        if parameters["property"] not in POLICY_PROPERTIES:
             raise ActionError("unsupported runtime policy property")
     if action == "interrupt":
         if set(parameters) - {"orphan_reap"}:
@@ -891,15 +902,7 @@ class ActionService:
             surface = resolved["surface"]
             property_name = request["parameters"]["property"]
             value = request["parameters"]["value"]
-            allowed = {
-                "MemoryHigh",
-                "MemoryMax",
-                "MemoryLow",
-                "CPUWeight",
-                "IOWeight",
-                "Nice",
-            }
-            if property_name not in allowed:
+            if property_name not in POLICY_PROPERTIES:
                 raise ActionError("unsupported runtime policy property", 403)
             declared = surface.get("effectiveResources", {})
             if property_name not in declared:
@@ -927,17 +930,9 @@ class ActionService:
             surface = resolved["surface"]
             manager = surface["manager"]
             properties = surface.get("effectiveResources", {})
-            allowed = (
-                "MemoryHigh",
-                "MemoryMax",
-                "MemoryLow",
-                "CPUWeight",
-                "IOWeight",
-                "Nice",
-            )
             assignments = [
                 f"{key}={properties[key]}"
-                for key in allowed
+                for key in POLICY_PROPERTIES
                 if properties.get(key) not in (None, "")
             ]
             if not assignments:

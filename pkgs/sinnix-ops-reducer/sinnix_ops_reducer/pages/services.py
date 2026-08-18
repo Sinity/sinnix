@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..actions import POLICY_PROPERTIES
 from .probes import unit_states
 from .shell import (
     ACTION_SCRIPT,
@@ -33,6 +34,11 @@ def surface_rows(inventory: dict[str, Any] | None) -> list[dict[str, Any]]:
             if isinstance(surface.get("activation"), dict)
             else {}
         )
+        effective_resources = (
+            surface.get("effectiveResources")
+            if isinstance(surface.get("effectiveResources"), dict)
+            else {}
+        )
         rows.append(
             {
                 "name": name,
@@ -42,10 +48,43 @@ def surface_rows(inventory: dict[str, Any] | None) -> list[dict[str, Any]]:
                 "resource_class": str(surface.get("resourceClass") or "unclassified"),
                 "restartable": bool(observe.get("restartable")),
                 "activation": activation,
+                "effective_resources": effective_resources,
             }
         )
     rows.sort(key=lambda item: (item["resource_class"], item["name"]))
     return rows
+
+
+def policy_controls(unit: str, effective_resources: dict[str, Any]) -> str:
+    """set_policy/reset_policy controls for whichever properties this
+    surface's own effectiveResources actually declares.
+
+    The action API refuses a property the runtime inventory has not already
+    set for the target ("property is not declared by the runtime
+    inventory"), so a control is only ever offered for a property this
+    surface can actually accept -- there is nothing here for the operator to
+    discover only works after a 403. `reset_policy` is one verb that
+    restores every declared property at once (it re-reads the inventory's
+    own values), so one button covers all of them regardless of how many
+    chips are shown."""
+    declared = [
+        (key, effective_resources[key])
+        for key in POLICY_PROPERTIES
+        if effective_resources.get(key) not in (None, "")
+    ]
+    if not declared:
+        return ""
+    chips = "".join(
+        f'<span class="sub"><code>{esc(key)}</code> {esc(str(value))} '
+        f"<button class=\"act\" onclick=\"setPolicy('{esc(unit)}','{esc(key)}',"
+        f"'{esc(str(value))}',this)\">adjust</button></span>"
+        for key, value in declared
+    )
+    reset = (
+        f"<button class=\"act\" onclick=\"act('reset_policy','unit',"
+        f"'{esc(unit)}',this)\">reset to inventory defaults</button>"
+    )
+    return chips + reset
 
 
 def unit_status(
@@ -125,13 +164,16 @@ def render_services(
         endpoint = entry["activation"].get("publicEndpoint")
         if endpoint:
             meta.append(f"<code>{esc(endpoint)}</code>")
+        controls = lifecycle_controls(
+            entry["unit"], entry["restartable"], installed, active
+        )
+        if installed:
+            controls += policy_controls(entry["unit"], entry["effective_resources"])
         groups.setdefault(entry["resource_class"], []).append(
             row(
                 f"<strong>{esc(entry['name'])}</strong>",
                 meta,
-                lifecycle_controls(
-                    entry["unit"], entry["restartable"], installed, active
-                ),
+                controls,
                 "bad" if tone == "bad" else "",
                 search=f"{entry['name']} {entry['unit']} {entry['resource_class']}".lower(),
             )
@@ -156,7 +198,12 @@ def render_services(
         '<p class="sub">Grouped by the resource class that decides its slice, '
         "weights, and ceilings. Lifecycle buttons post to the reducer's bounded "
         "action API, which independently re-checks that the unit is attested and "
-        "declares <code>observe.restartable</code>.</p>"
+        "declares <code>observe.restartable</code>. <code>adjust</code> chips "
+        "cover whichever properties the runtime inventory already declares for "
+        "that surface (MemoryHigh, MemoryMax, MemoryLow, CPUWeight, IOWeight, "
+        "Nice); <code>reset to inventory defaults</code> restores every one of "
+        "them at once from the inventory's own value, so a live tweak is "
+        "reversible by construction.</p>"
         '<input class="filter" id="filter" type="search" placeholder="filter by name, unit, or class" '
         'autocomplete="off" autocapitalize="off" spellcheck="false">'
         f"{grouped}</section>"

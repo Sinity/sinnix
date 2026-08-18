@@ -374,7 +374,8 @@ function hublog(message, tone){
   line.textContent = new Date().toLocaleTimeString() + '  ' + message;
   el.prepend(line);
 }
-async function act(verb, kind, id, button){
+async function act(verb, kind, id, button, parameters){
+  parameters = parameters || {};
   // A process target is a {pid, start_ticks} object, not a string -- every
   // other target kind (unit/scope/job_id) is a plain string identifier.
   var idText = (typeof id === 'object' && id !== null) ? JSON.stringify(id) : id;
@@ -396,7 +397,7 @@ async function act(verb, kind, id, button){
         expected_revision: revision,
         idempotency_key: 'hub-' + verb + '-' + kind + '-' + idText + '-' + Date.now(),
         operator_reason: 'operator action from the hub control panel',
-        parameters: {}
+        parameters: parameters
       })
     });
     var receipt = await res.json();
@@ -408,6 +409,28 @@ async function act(verb, kind, id, button){
   } finally {
     button.disabled = false;
   }
+}
+// park's deadline is part of the action, not a fixed default -- the
+// reducer rejects a park request with no deadline_seconds, because the
+// whole point of the verb is that a parked unit cannot be forgotten
+// frozen -- so the button asks rather than guessing one.
+function parkUnit(unit, button){
+  var minutes = prompt('Park ' + unit + ' for how many minutes (cgroup freeze, auto-thaws on its own)?', '10');
+  if (minutes === null) return;
+  var seconds = Math.round(parseFloat(minutes) * 60);
+  if (!(seconds >= 1 && seconds <= 86400)) {
+    hublog('park refused locally: minutes must be between 0 and 1440', 'bad');
+    return;
+  }
+  act('park', 'unit', unit, button, {deadline_seconds: seconds});
+}
+// set_policy targets a property the runtime inventory already declares for
+// this surface; reset_policy (a plain act() call, no prompt) restores the
+// inventory's own value, so this is reversible by construction.
+function setPolicy(unit, property, current, button){
+  var value = prompt('New ' + property + ' for ' + unit + ' (inventory default: ' + current + ')', current);
+  if (value === null || value === '') return;
+  act('set_policy', 'unit', unit, button, {property: property, value: value});
 }
 </script>
 """
