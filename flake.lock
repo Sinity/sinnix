@@ -1076,11 +1076,11 @@
     "steering": {
       "flake": false,
       "locked": {
-        "lastModified": 1787023524,
-        "narHash": "sha256-92SDO5vlBxlfNXWcjhls/VjLnFVDFo8V950safRWRiQ=",
+        "lastModified": 1787055782,
+        "narHash": "sha256-IZd6GHZAGWdsjCcLSLJDnHgodqNWR5RcObCbdx8Qkhw=",
         "ref": "master",
-        "rev": "f137f7f405828464339fa6ef1ab085ab4bc1419c",
-        "revCount": 3,
+        "rev": "89d22a281949098a4c9ce3bfdaebebbb61eb130f",
+        "revCount": 4,
         "type": "git",
         "url": "file:///realm/project/steering"
       },
