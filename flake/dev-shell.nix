@@ -14,15 +14,19 @@
     }:
     let
       inherit (pkgs) lib;
-      scriptPkgs = (import ./scripts.nix { inherit inputs pkgs; }).packageSet;
       commandRegistry = import ./command-registry.nix {
         inherit inputs pkgs system;
       };
       nix = "${pkgs.nix}/bin/nix";
       # resolveFlakeDir is shared with command-registry.nix's appCommands
       # (`nix run .#switch` etc.) so both entry points resolve the same way
-      # instead of silently drifting apart.
+      # instead of silently drifting apart. scriptPkgs comes from the same
+      # place for a plainer reason: `import ./scripts.nix { ... }` is a
+      # function application, and Nix memoises the import but not the call, so
+      # importing it here as well ran the whole 95-script discovery twice per
+      # devshell evaluation.
       inherit (commandRegistry)
+        scriptPkgs
         rebuildServicePath
         localInputOverrideArgs
         resolveFlakeDir

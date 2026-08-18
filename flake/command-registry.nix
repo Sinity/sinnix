@@ -370,6 +370,7 @@ let
 in
 {
   inherit
+    scriptPkgs
     resolveFlakeDir
     rebuildLock
     rebuildContainmentFlags
