@@ -514,16 +514,16 @@ def test_park_is_offered_exactly_where_the_action_api_resolves_the_unit() -> Non
         last_seconds=None,
     )
     html = scheduled_card([running, scrub], parkable)
-    assert "act('park','unit','borgbackup-job-realm.service'" in html
+    assert "parkUnit('borgbackup-job-realm.service'" in html
     assert "running now" in html
     assert "btrfs-scrub-realm.service" in html
-    assert "act('park','unit','btrfs-scrub-realm.service'" not in html
+    assert "parkUnit('btrfs-scrub-realm.service'" not in html
     assert "no park verb" in html
     # The historical duration is the reason the strip is worth reading.
     assert "took 1h 10m" in html
 
     idle = scheduled_card([replace(running, active=False)], parkable)
-    assert "act('park','unit'" not in idle
+    assert "parkUnit(" not in idle
     assert "park freezes a running cgroup" in idle
 
 

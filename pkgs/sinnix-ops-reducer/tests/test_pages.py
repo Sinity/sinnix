@@ -22,7 +22,7 @@ from typing import Any
 
 from sinnix_ops_reducer import pages
 from sinnix_ops_reducer.pages.probes import project_of, scope_class, shorten_command
-from sinnix_ops_reducer.pages.services import lifecycle_controls
+from sinnix_ops_reducer.pages.services import lifecycle_controls, policy_controls
 from sinnix_ops_reducer.pages.work import scope_block
 
 CLASSES = ["nix-build", "background", "build", "agent"]
@@ -162,6 +162,19 @@ def test_lifecycle_controls_mirror_the_action_api_admission_rule() -> None:
     )
     assert inactive.count("<button") == 1
     assert "'stop'" not in inactive
+
+
+def test_policy_controls_only_offer_declared_properties() -> None:
+    assert policy_controls("x.service", {}) == ""
+    assert policy_controls("x.service", {"Slice": "app.slice"}) == ""
+    controls = policy_controls(
+        "x.service", {"CPUWeight": 5, "MemoryHigh": "8G", "Slice": "app.slice"}
+    )
+    assert controls.count("setPolicy(") == 2
+    assert "'CPUWeight','5'" in controls
+    assert "'MemoryHigh','8G'" in controls
+    assert "Slice" not in controls
+    assert "act('reset_policy','unit','x.service'" in controls
 
 
 def test_scope_controls_distinguish_plain_scopes_from_attested_jobs() -> None:

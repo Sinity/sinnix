@@ -378,7 +378,7 @@ def scheduled_card(runs: list[pressure_model.ScheduledRun], parkable: set[str]) 
             meta.insert(0, badge("running now", "info"))
         if run.unit in parkable and run.active:
             controls = (
-                f"<button class=\"act\" onclick=\"act('park','unit',"
+                f'<button class="act" onclick="parkUnit('
                 f"'{esc(run.unit)}',this)\">park it</button>"
             )
         elif run.unit in parkable:
