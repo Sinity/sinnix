@@ -45,15 +45,21 @@ let
   polylogueStateRoot = "${realmRoot}/state/polylogue";
   polylogueBackupRoot = "${realmRoot}/state/db-dumps/polylogue";
   # The daemon's live SQLite databases at the top level of the state root.
-  # index.db is a symlink into .index-generations/; sqlite3 opens through a
-  # symlink transparently, so no readlink is needed here.
+  # index.db is deliberately NOT in this list: the symlink points into
+  # .index-generations/ at a 40.5 GB derived rebuild-generation product --
+  # the first live run spent its whole 30-minute budget copying and
+  # compressing it (measured 2026-08-18) while the five real mutable dbs
+  # (~2.7 GB together) had finished in minutes. The index still MUST be
+  # backed up (with the migration broken, sinnix-qh6s, it is not currently
+  # regenerable), but its coverage is the direct-path borg job below, whose
+  # dedup makes a 40 GB near-static file cheap -- not a daily full
+  # copy+zstd through the dump path.
   polylogueDbNames = [
     "source.db"
     "embeddings.db"
     "ops.db"
     "audit.db"
     "user.db"
-    "index.db"
   ];
   # Direct-path borg (below) must not file-copy these live databases or
   # their WAL/SHM sidecars mid-write -- that is exactly the torn-copy risk
