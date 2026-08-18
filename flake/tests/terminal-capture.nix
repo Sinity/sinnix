@@ -1,3 +1,8 @@
+# Provably fails when: the captured shell honours a caller-supplied
+# SINNIX_CAPTURE_SESSION_ID / cast / events path (the poisoned environment in
+# the fixture), writes its session outside the year/month/day layout, or stops
+# propagating the recorder's exit code (the -failure variant).
+#
 # Kitty/PTY terminal-capture recorder runtime checks (asciinema wrapper +
 # session/event JSON shape, including a forced-nonzero-exit variant).
 { inputs, ... }:
