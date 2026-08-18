@@ -68,6 +68,37 @@ let
     effects = mkEffects rule;
   };
 
+  # Build layer-rule match conditions. Layer rules only carry a namespace
+  # prop (see Hyprland's Desktop::Rule::eRuleProperty -- layers ignore every
+  # other match prop even if set), so this is deliberately narrower than
+  # mkMatch.
+  mkLayerMatch = rule: (lib.optional (rule ? namespace) "match:namespace = ${rule.namespace}");
+
+  # Build layer-rule effect conditions (Hyprland's "layerrule v2" special
+  # category, distinct from window-rule effects).
+  mkLayerEffects =
+    rule:
+    (lib.optional (rule.blur or false) "blur = true")
+    ++ (lib.optional (rule ? ignoreAlpha) "ignore_alpha = ${toString rule.ignoreAlpha}")
+    ++ (lib.optional (rule.noAnim or false) "no_anim = true")
+    ++ (lib.optional (rule.xray or false) "xray = true")
+    ++ (lib.optional (rule.dimAround or false) "dim_around = true");
+
+  # Create a layer-rule block (Hyprland 0.56+ hyprlang "layerrule v2" special
+  # category: `layerrule { name = ...; match:namespace = ...; blur = ...; }`,
+  # verified against the pinned Hyprland version with `Hyprland
+  # --verify-config` -- see sinnix-nzr9). This is NOT the same syntax as the
+  # deprecated inline `layerrule = <field>, <namespace>` keyword, which lost
+  # its matcher entirely in the hyprlang provider; the special-category form
+  # is a distinct mechanism registered separately and still carries one.
+  # mkLayerRule "name" { namespace = "waybar"; blur = true; ignoreAlpha = 0.5; }
+  mkLayerRule = name: rule: {
+    inherit name;
+    category = "layerrule";
+    props = mkLayerMatch rule;
+    effects = mkLayerEffects rule;
+  };
+
   # Create a scratchpad rule with common defaults
   # mkScratchpad "terminal" { class = "scratchpad-terminal"; size = { w = 0.75; h = 0.55; }; }
   mkScratchpad =
@@ -128,15 +159,18 @@ let
       // (lib.optionalAttrs (title != null) { inherit title; })
     );
 
-  # Render a rule block to Hyprland config string
+  # Render a rule block to Hyprland config string. `category` selects the
+  # special-category keyword ("windowrule" by default; mkLayerRule sets
+  # "layerrule").
   renderBlock =
     {
       name,
       props,
       effects,
+      category ? "windowrule",
     }:
     ''
-        windowrule {
+        ${category} {
           name = ${name}
       ${lib.concatMapStringsSep "\n" (p: "    ${p}") props}
       ${lib.concatMapStringsSep "\n" (e: "    ${e}") effects}
@@ -151,6 +185,7 @@ in
     mkBrowserScratchpad
     mkDialog
     mkIdleInhibit
+    mkLayerRule
     renderBlock
     ;
 }

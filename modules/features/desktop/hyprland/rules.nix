@@ -17,6 +17,7 @@ let
     mkBrowserScratchpad
     mkDialog
     mkIdleInhibit
+    mkLayerRule
     renderBlock
     ;
 
@@ -273,6 +274,33 @@ let
   ];
 
   # ========================================
+  # Layer Rules
+  # ========================================
+  # Noctalia anchors its notification layer full-height (so toasts can stack
+  # downward) and Quickshell requests compositor blur for the whole layer
+  # surface via a client-side background-effect protocol -- not through any
+  # hyprlang layerrule, which is why no rule needs to (or can) turn blur ON
+  # for it. The problem is that Hyprland then blurs the layer's full rect,
+  # and the ~90% of it below the toast card is near-fully-transparent, so
+  # blurring pulls those pixels toward a local mean: a dimmed column behind
+  # and below every toast. `ignore_alpha` discards near-transparent pixels
+  # from the blur sample regardless of which mechanism turned blur on for
+  # the surface, which is why it still fixes this even though `blur` here is
+  # belt-and-braces (Hyprland's own docs example is the identical rofi case).
+  # See sinnix-nzr9: the earlier "hyprlang layerrule has no matcher" finding
+  # was true only for the deprecated inline `layerrule = <field>, <ns>` form;
+  # the "layerrule v2" special-category form used here (registered
+  # separately in Hyprland's legacy config manager) still carries a
+  # namespace matcher, confirmed with `Hyprland --verify-config`.
+  layerRules = [
+    (mkLayerRule "noctalia-notification-blur" {
+      namespace = "noctalia-notification";
+      blur = true;
+      ignoreAlpha = 0.5;
+    })
+  ];
+
+  # ========================================
   # Combine All Rules
   # ========================================
   allBlockRules =
@@ -282,7 +310,8 @@ let
     ++ scratchpadRules
     ++ browserScratchpads
     ++ appRules
-    ++ idleBlocks;
+    ++ idleBlocks
+    ++ layerRules;
 
 in
 {
