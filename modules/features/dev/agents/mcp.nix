@@ -152,240 +152,249 @@ mkFeatureModule {
         antigravityMcpConfigFile
         ;
     in
-    {
-      sinnix.features.dev.mcp-servers.codexConfigSource = codexConfigFile;
-      sinnix.features.dev.mcp-servers.codexFullConfigSource = codexFullConfigFile;
-      sinnix.features.dev.mcp-servers.codexLeanConfigSource = codexLeanConfigFile;
-      sinnix.features.dev.mcp-servers.codexEvidenceConfigSource = codexEvidenceConfigFile;
-      sinnix.features.dev.mcp-servers.codexBrowserConfigSource = codexBrowserConfigFile;
-      sinnix.features.dev.mcp-servers.codexDeepseekConfigSource = codexDeepseekConfigFile;
-      sinnix.features.dev.mcp-servers.codexLocalConfigSource = codexLocalConfigFile;
-      sinnix.features.dev.mcp-servers.codexHooksSource = codexHooksFile;
-      sinnix.features.dev.mcp-servers.antigravityMcpConfigSource = antigravityMcpConfigFile;
-      sinnix.persistence.home.directories = [
-        ".local/state/sinnix/settings-env-lint"
+    lib.mkMerge [
+      # NixOS-level systemd.user (manager="user", preserving the unit's
+      # existing manager) rather than the previous home-manager.users.${user}
+      # block: neither unit had a registered runtime surface either way, so
+      # this is render-only aside from the namespace move and the gained
+      # OnFailure path every generated job carries by default (same
+      # reasoning as sinnix-enrichment-loop's/sinnix-vacuity-judge's
+      # conversions).
+      (lib.sinnix.mkScheduledJob
         {
-          directory = ".local/share/serena";
-          mode = "0700";
+          inherit config;
+          unitName = "sinnix-settings-env-lint";
+          description = "Audit project agent settings environment paths";
+          surface = null;
         }
-        ".local/state/serena"
-      ];
-
-      home-manager.users.${user} =
         {
-          pkgs,
-          lib,
-          config,
-          secretPaths,
-          mkDotsFileFor,
-          ...
-        }:
-        let
-          mkDotsFile = mkDotsFileFor config;
-        in
-        {
-          # htoprc lives in dots/htop/htoprc (out-of-store symlink) instead of
-          # `programs.htop.settings`, so edits take effect without a rebuild.
-          # Safe only while no other module contributes to that option.
-          programs.htop.enable = true;
-          xdg.configFile."htop/htoprc".source = mkDotsFile "/htop/htoprc";
-
-          home = {
-            activation = {
-              restoreConfigstore = lib.mkIf (secretPaths ? "configstore-update-notifier") (
-                lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                  if [ -f ${secretPaths."configstore-update-notifier"} ]; then
-                    mkdir -p "$HOME/.config/configstore"
-                    rm -rf "$HOME/.config/configstore/update-notifier-@google"
-                    if ! ${pkgs.gzip}/bin/gzip -dc ${
-                      secretPaths."configstore-update-notifier"
-                    } | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config/configstore"; then
-                      echo "warning: unable to restore configstore notifier archive" >&2
-                    fi
-                  fi
-                ''
-              );
-              # Write config.toml as a writable file (not a symlink to the Nix
-              # store) so Codex can append runtime state such as project trust
-              # entries. Nix settings always win on activation; trust entries
-              # added between rebuilds survive until the next switch.
-              codexConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                run mkdir -p "$HOME/.codex/agents"
-                run cp ${codexConfigFile} "$HOME/.codex/config.toml"
-                run cp ${codexModelsV1File} "$HOME/.codex/models-v1.json"
-                run cp ${codexExplorerAgentFile} "$HOME/.codex/agents/explorer.toml"
-                run cp ${codexFullConfigFile} "$HOME/.codex/full.config.toml"
-                run cp ${codexLeanConfigFile} "$HOME/.codex/lean.config.toml"
-                run cp ${codexEvidenceConfigFile} "$HOME/.codex/evidence.config.toml"
-                run cp ${codexBrowserConfigFile} "$HOME/.codex/browser.config.toml"
-                run cp ${codexDeepseekConfigFile} "$HOME/.codex/deepseek.config.toml"
-                run cp ${codexLocalConfigFile} "$HOME/.codex/local.config.toml"
-                run cp ${codexHooksFile} "$HOME/.codex/hooks.json"
-                run chmod 644 "$HOME/.codex/config.toml"
-                run chmod 644 "$HOME/.codex/models-v1.json"
-                run chmod 644 "$HOME/.codex/agents/explorer.toml"
-                run chmod 644 "$HOME/.codex/full.config.toml"
-                run chmod 644 "$HOME/.codex/lean.config.toml"
-                run chmod 644 "$HOME/.codex/evidence.config.toml"
-                run chmod 644 "$HOME/.codex/browser.config.toml"
-                run chmod 644 "$HOME/.codex/deepseek.config.toml"
-                run chmod 644 "$HOME/.codex/local.config.toml"
-                run chmod 644 "$HOME/.codex/hooks.json"
-              '';
-              serenaConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                run mkdir -p "$HOME/.local/share/serena"
-                if [ -f "$HOME/.local/share/serena/serena_config.yml" ] \
-                  && ! ${pkgs.diffutils}/bin/cmp -s ${lib.escapeShellArg (toString serenaConfigFile)} "$HOME/.local/share/serena/serena_config.yml"; then
-                  run cp "$HOME/.local/share/serena/serena_config.yml" "$HOME/.local/share/serena/serena_config.yml.hm-bak"
-                fi
-                run cp ${lib.escapeShellArg (toString serenaConfigFile)} "$HOME/.local/share/serena/serena_config.yml"
-                run chmod 644 "$HOME/.local/share/serena/serena_config.yml"
-              '';
-            };
-          };
-
-          home.file = {
-            # One directory symlink, not per-file entries: a new agent
-            # definition dropped into dots/claude/agents/ is live
-            # immediately, no registration and no rebuild.
-            ".config/claude/agents" = {
-              source = mkDotsFile "/claude/agents";
-              force = true;
-            };
-            ".codex/skills" = {
-              source = codexSkillFarm;
-              force = true;
-            };
-            ".gemini/skills" = {
-              source = sharedSkillFarm;
-              force = true;
-            };
-            ".gemini/settings.json" = {
-              source = geminiSettingsFile;
-              force = true;
-            };
-            ".gemini/config/mcp_config.json" = {
-              source = antigravityMcpConfigFile;
-              force = true;
-            };
-            ".gemini/config/skills" = {
-              source = sharedSkillFarm;
-              force = true;
-            };
-            ".gemini/config/AGENTS.md".source = mkDotsFile "/claude/CLAUDE.md";
-            ".local/bin/serena" = {
-              executable = true;
-              force = true;
-              text = mkSerenaWrapper "serena";
-            };
-            ".local/bin/serena-hooks" = {
-              executable = true;
-              force = true;
-              text = mkSerenaWrapper "serena-hooks";
-            };
-            ".local/bin/sinnix-mcp-sweep" = {
-              source = "${scriptPkgs.sinnix-mcp-sweep}/bin/sinnix-mcp-sweep";
-              force = true;
-            };
-            ".local/bin/bd-prime-if-present" = {
-              source = "${scriptPkgs.bd-prime-if-present}/bin/bd-prime-if-present";
-              force = true;
-            };
-            ".local/bin/mcp-firecrawl" = {
-              source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
-              force = true;
-            };
-            ".local/bin/mcp-chrome-devtools" = {
-              source = "${mcpChromeDevtoolsBin}/bin/mcp-chrome-devtools";
-              force = true;
-            };
-            ".local/bin/sinnix-chrome-control" = {
-              source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/chrome-control.sh";
-              force = true;
-            };
-            ".local/bin/sinnix-hypr-control" = {
-              source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/hypr-control.sh";
-              force = true;
-            };
-            ".local/bin/sinnix-keyboard-control" = {
-              source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/keyboard-control.sh";
-              force = true;
-            };
-            ".local/bin/sinnix-kitty-control" = {
-              source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/kitty-remote-control.sh";
-              force = true;
-            };
-            ".local/bin/sinnix-screenshot-control" = {
-              source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/screenshot-color-lab.sh";
-              force = true;
-            };
-            ".local/bin/mcp-lynchpin" = {
-              executable = true;
-              force = true;
-              text = mcpLynchpinText;
-            };
-            ".local/bin/mcp-polylogue" = {
-              executable = true;
-              force = true;
-              text = mcpPolylogueText;
-            };
-            ".local/bin/mcp-sinex" = {
-              source = "${scriptPkgs.sinnix-mcp-sinex}/bin/sinnix-mcp-sinex";
-              force = true;
-            };
-            ".local/share/polylogue/inbox/chatgpt" = {
-              source = config.lib.file.mkOutOfStoreSymlink "/realm/data/ai/chatlog/raw/chatgpt";
-              force = true;
-            };
-            ".local/share/polylogue/inbox/claude" = {
-              source = config.lib.file.mkOutOfStoreSymlink "/realm/data/ai/chatlog/raw/claude";
-              force = true;
-            };
-          };
-
+          manager = "user";
           # A monthly read-only audit of project Claude settings. The two
-          # Polylogue /tmp roots are intentional workstation-local paths.
-          # Keep them explicit inputs so a new absolute path remains
-          # unexplained and fails loud.
-          systemd.user.services.sinnix-settings-env-lint = {
-            Unit.Description = "Audit project agent settings environment paths";
-            Service = {
-              Type = "oneshot";
-              ExecStart = "${pkgs.bash}/bin/bash -c 'install -d -m 0700 \"$XDG_STATE_HOME/sinnix/settings-env-lint\"; ${scriptPkgs.sinnix-settings-env-lint}/bin/sinnix-settings-env-lint --root /realm/project --intentional-prefix /tmp/polylogue-archive --intentional-prefix /tmp/polylogue-pytest > \"$XDG_STATE_HOME/sinnix/settings-env-lint/latest.json\"'";
-            };
+          # Polylogue /tmp roots are intentional workstation-local paths. Keep
+          # them explicit inputs so a new absolute path remains unexplained
+          # and fails loud.
+          execStart = "${pkgs.bash}/bin/bash -c 'install -d -m 0700 \"$XDG_STATE_HOME/sinnix/settings-env-lint\"; ${scriptPkgs.sinnix-settings-env-lint}/bin/sinnix-settings-env-lint --root /realm/project --intentional-prefix /tmp/polylogue-archive --intentional-prefix /tmp/polylogue-pytest > \"$XDG_STATE_HOME/sinnix/settings-env-lint/latest.json\"'";
+          timer = {
+            onCalendar = "*-*-01 04:20:00";
+            persistent = true;
+            accuracySec = "15min";
+            description = "Monthly project agent settings environment audit";
           };
-          systemd.user.timers.sinnix-settings-env-lint = {
-            Unit.Description = "Monthly project agent settings environment audit";
-            Timer = {
-              OnCalendar = "*-*-01 04:20:00";
-              Persistent = true;
-              AccuracySec = "15min";
-            };
-            Install.WantedBy = [ "timers.target" ];
+        }
+      )
+      # Session-boundary hooks only reap orphans at session start/end; a
+      # daemon orphaned mid-session survives unbounded until the next
+      # boundary. This periodic sweep closes that gap structurally,
+      # independent of any agent behaving correctly.
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "sinnix-mcp-sweep-periodic";
+          description = "Periodically reap orphaned MCP/language-server/dev-daemon processes";
+          surface = null;
+        }
+        {
+          manager = "user";
+          execStart = "${scriptPkgs.sinnix-mcp-sweep}/bin/sinnix-mcp-sweep --orphans-only --quiet";
+          timer = {
+            onBootSec = "10min";
+            onUnitActiveSec = "15min";
+            accuracySec = "1min";
+            description = "Timer for periodic orphaned dev-daemon reaping";
           };
+        }
+      )
+      {
+        sinnix.features.dev.mcp-servers.codexConfigSource = codexConfigFile;
+        sinnix.features.dev.mcp-servers.codexFullConfigSource = codexFullConfigFile;
+        sinnix.features.dev.mcp-servers.codexLeanConfigSource = codexLeanConfigFile;
+        sinnix.features.dev.mcp-servers.codexEvidenceConfigSource = codexEvidenceConfigFile;
+        sinnix.features.dev.mcp-servers.codexBrowserConfigSource = codexBrowserConfigFile;
+        sinnix.features.dev.mcp-servers.codexDeepseekConfigSource = codexDeepseekConfigFile;
+        sinnix.features.dev.mcp-servers.codexLocalConfigSource = codexLocalConfigFile;
+        sinnix.features.dev.mcp-servers.codexHooksSource = codexHooksFile;
+        sinnix.features.dev.mcp-servers.antigravityMcpConfigSource = antigravityMcpConfigFile;
+        sinnix.persistence.home.directories = [
+          ".local/state/sinnix/settings-env-lint"
+          {
+            directory = ".local/share/serena";
+            mode = "0700";
+          }
+          ".local/state/serena"
+        ];
 
-          # Session-boundary hooks only reap orphans at session start/end;
-          # a daemon orphaned mid-session survives unbounded until the next
-          # boundary. This periodic sweep closes that gap structurally,
-          # independent of any agent behaving correctly.
-          systemd.user.services.sinnix-mcp-sweep-periodic = {
-            Unit = {
-              Description = "Periodically reap orphaned MCP/language-server/dev-daemon processes";
+        home-manager.users.${user} =
+          {
+            pkgs,
+            lib,
+            config,
+            secretPaths,
+            mkDotsFileFor,
+            ...
+          }:
+          let
+            mkDotsFile = mkDotsFileFor config;
+          in
+          {
+            # htoprc lives in dots/htop/htoprc (out-of-store symlink) instead of
+            # `programs.htop.settings`, so edits take effect without a rebuild.
+            # Safe only while no other module contributes to that option.
+            programs.htop.enable = true;
+            xdg.configFile."htop/htoprc".source = mkDotsFile "/htop/htoprc";
+
+            home = {
+              activation = {
+                restoreConfigstore = lib.mkIf (secretPaths ? "configstore-update-notifier") (
+                  lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+                    if [ -f ${secretPaths."configstore-update-notifier"} ]; then
+                      mkdir -p "$HOME/.config/configstore"
+                      rm -rf "$HOME/.config/configstore/update-notifier-@google"
+                      if ! ${pkgs.gzip}/bin/gzip -dc ${
+                        secretPaths."configstore-update-notifier"
+                      } | ${pkgs.gnutar}/bin/tar -xC "$HOME/.config/configstore"; then
+                        echo "warning: unable to restore configstore notifier archive" >&2
+                      fi
+                    fi
+                  ''
+                );
+                # Write config.toml as a writable file (not a symlink to the Nix
+                # store) so Codex can append runtime state such as project trust
+                # entries. Nix settings always win on activation; trust entries
+                # added between rebuilds survive until the next switch.
+                codexConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+                  run mkdir -p "$HOME/.codex/agents"
+                  run cp ${codexConfigFile} "$HOME/.codex/config.toml"
+                  run cp ${codexModelsV1File} "$HOME/.codex/models-v1.json"
+                  run cp ${codexExplorerAgentFile} "$HOME/.codex/agents/explorer.toml"
+                  run cp ${codexFullConfigFile} "$HOME/.codex/full.config.toml"
+                  run cp ${codexLeanConfigFile} "$HOME/.codex/lean.config.toml"
+                  run cp ${codexEvidenceConfigFile} "$HOME/.codex/evidence.config.toml"
+                  run cp ${codexBrowserConfigFile} "$HOME/.codex/browser.config.toml"
+                  run cp ${codexDeepseekConfigFile} "$HOME/.codex/deepseek.config.toml"
+                  run cp ${codexLocalConfigFile} "$HOME/.codex/local.config.toml"
+                  run cp ${codexHooksFile} "$HOME/.codex/hooks.json"
+                  run chmod 644 "$HOME/.codex/config.toml"
+                  run chmod 644 "$HOME/.codex/models-v1.json"
+                  run chmod 644 "$HOME/.codex/agents/explorer.toml"
+                  run chmod 644 "$HOME/.codex/full.config.toml"
+                  run chmod 644 "$HOME/.codex/lean.config.toml"
+                  run chmod 644 "$HOME/.codex/evidence.config.toml"
+                  run chmod 644 "$HOME/.codex/browser.config.toml"
+                  run chmod 644 "$HOME/.codex/deepseek.config.toml"
+                  run chmod 644 "$HOME/.codex/local.config.toml"
+                  run chmod 644 "$HOME/.codex/hooks.json"
+                '';
+                serenaConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+                  run mkdir -p "$HOME/.local/share/serena"
+                  if [ -f "$HOME/.local/share/serena/serena_config.yml" ] \
+                    && ! ${pkgs.diffutils}/bin/cmp -s ${lib.escapeShellArg (toString serenaConfigFile)} "$HOME/.local/share/serena/serena_config.yml"; then
+                    run cp "$HOME/.local/share/serena/serena_config.yml" "$HOME/.local/share/serena/serena_config.yml.hm-bak"
+                  fi
+                  run cp ${lib.escapeShellArg (toString serenaConfigFile)} "$HOME/.local/share/serena/serena_config.yml"
+                  run chmod 644 "$HOME/.local/share/serena/serena_config.yml"
+                '';
+              };
             };
-            Service = {
-              Type = "oneshot";
-              ExecStart = "${scriptPkgs.sinnix-mcp-sweep}/bin/sinnix-mcp-sweep --orphans-only --quiet";
+
+            home.file = {
+              # One directory symlink, not per-file entries: a new agent
+              # definition dropped into dots/claude/agents/ is live
+              # immediately, no registration and no rebuild.
+              ".config/claude/agents" = {
+                source = mkDotsFile "/claude/agents";
+                force = true;
+              };
+              ".codex/skills" = {
+                source = codexSkillFarm;
+                force = true;
+              };
+              ".gemini/skills" = {
+                source = sharedSkillFarm;
+                force = true;
+              };
+              ".gemini/settings.json" = {
+                source = geminiSettingsFile;
+                force = true;
+              };
+              ".gemini/config/mcp_config.json" = {
+                source = antigravityMcpConfigFile;
+                force = true;
+              };
+              ".gemini/config/skills" = {
+                source = sharedSkillFarm;
+                force = true;
+              };
+              ".gemini/config/AGENTS.md".source = mkDotsFile "/claude/CLAUDE.md";
+              ".local/bin/serena" = {
+                executable = true;
+                force = true;
+                text = mkSerenaWrapper "serena";
+              };
+              ".local/bin/serena-hooks" = {
+                executable = true;
+                force = true;
+                text = mkSerenaWrapper "serena-hooks";
+              };
+              ".local/bin/sinnix-mcp-sweep" = {
+                source = "${scriptPkgs.sinnix-mcp-sweep}/bin/sinnix-mcp-sweep";
+                force = true;
+              };
+              ".local/bin/bd-prime-if-present" = {
+                source = "${scriptPkgs.bd-prime-if-present}/bin/bd-prime-if-present";
+                force = true;
+              };
+              ".local/bin/mcp-firecrawl" = {
+                source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
+                force = true;
+              };
+              ".local/bin/mcp-chrome-devtools" = {
+                source = "${mcpChromeDevtoolsBin}/bin/mcp-chrome-devtools";
+                force = true;
+              };
+              ".local/bin/sinnix-chrome-control" = {
+                source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/chrome-control.sh";
+                force = true;
+              };
+              ".local/bin/sinnix-hypr-control" = {
+                source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/hypr-control.sh";
+                force = true;
+              };
+              ".local/bin/sinnix-keyboard-control" = {
+                source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/keyboard-control.sh";
+                force = true;
+              };
+              ".local/bin/sinnix-kitty-control" = {
+                source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/kitty-remote-control.sh";
+                force = true;
+              };
+              ".local/bin/sinnix-screenshot-control" = {
+                source = config.lib.file.mkOutOfStoreSymlink "${desktopControlScripts}/screenshot-color-lab.sh";
+                force = true;
+              };
+              ".local/bin/mcp-lynchpin" = {
+                executable = true;
+                force = true;
+                text = mcpLynchpinText;
+              };
+              ".local/bin/mcp-polylogue" = {
+                executable = true;
+                force = true;
+                text = mcpPolylogueText;
+              };
+              ".local/bin/mcp-sinex" = {
+                source = "${scriptPkgs.sinnix-mcp-sinex}/bin/sinnix-mcp-sinex";
+                force = true;
+              };
+              ".local/share/polylogue/inbox/chatgpt" = {
+                source = config.lib.file.mkOutOfStoreSymlink "/realm/data/ai/chatlog/raw/chatgpt";
+                force = true;
+              };
+              ".local/share/polylogue/inbox/claude" = {
+                source = config.lib.file.mkOutOfStoreSymlink "/realm/data/ai/chatlog/raw/claude";
+                force = true;
+              };
             };
           };
-          systemd.user.timers.sinnix-mcp-sweep-periodic = {
-            Unit.Description = "Timer for periodic orphaned dev-daemon reaping";
-            Timer = {
-              OnBootSec = "10min";
-              OnUnitActiveSec = "15min";
-              AccuracySec = "1min";
-            };
-            Install.WantedBy = [ "timers.target" ];
-          };
-        };
-    };
+      }
+    ];
 } args
