@@ -116,6 +116,12 @@
     capture-kitty-scrollback.enable = true;
     # Room air quality from the Awair Element's local API.
     capture-awair.enable = true;
+    # Logitech battery/DPI + BT audio (AVRCP volume/codec) + BT battery
+    # (GATT 0x180f / bluez Battery1, requires the Experimental interface
+    # flip in networking.nix). bt-battery only ever populates when the
+    # Buds2Pro are actually connected -- the other paired devices are
+    # classic-BT-only for GATT purposes.
+    capture-peripherals.enable = true;
     # Spotify recently-played listening history. Live now even though the
     # refresh token doesn't exist yet -- the unit fails its own poll with a
     # one-line instruction ("run sinnix spotify-auth") until the operator
