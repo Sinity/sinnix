@@ -843,6 +843,16 @@ in
       btrfs-metadata-image-backup = {
         unit = "btrfs-metadata-image-backup.service";
         resourceClass = "backup-maintenance";
+        # Was unset (default false), which meant the auto-attached OnFailure
+        # hook (modules/runtime.nix, gated on observe.enable) was NEVER
+        # wired for this unit -- it failed with status=1/FAILURE on
+        # 2026-08-16 and nothing surfaced it. Not a restart candidate: a
+        # failed capture is retried by the retry loop inside the script
+        # itself and by next Sunday's timer, not by systemd Restart=.
+        observe = {
+          enable = true;
+          restartable = false;
+        };
       };
       borgbackup-root-snapshots = {
         unit = "borgbackup-root-snapshots.service";
@@ -1463,6 +1473,29 @@ in
         # That is a race against concurrent writes, not on-disk damage (the
         # device error counters stay at zero throughout), so it is worth
         # retrying rather than failing the run -- a quieter moment succeeds.
+        #
+        # A snapshot cannot route around this (sinnix-0dyg): btrfs-image's
+        # own usage text is "source is the btrfs device" -- it reads the
+        # whole filesystem's chunk/root/extent trees off the block device,
+        # not a mounted path or a subvolume, so a read-only snapshot of
+        # persist does not exist as an addressable source for it. The race
+        # is against the SHARED device, and a snapshot subvolume lives on
+        # that same device.
+        #
+        # Confirmed 2026-08-16 that off-peak scheduling alone is not
+        # sufficient: the SCHEDULED Sun 00:12 run (not the ad-hoc daytime
+        # test run in this bead's earlier notes) produced realm-20260815T233745Z
+        # but no matching persist image -- both labels share one $stamp, so
+        # persist genuinely failed inside that same quiet-hour invocation.
+        # Telemetry for that window (block_device_sample) rules out raw
+        # write volume as the discriminator: nvme0n1p3 (realm) saw ~6x
+        # persist's write rate in the same window and still succeeded, so
+        # persist's smaller size buys it nothing here. The mitigation below
+        # is retry-shape tuning, per the bead's own fallback: capture persist
+        # FIRST (while the window is freshest, before realm's variable-length
+        # capture pushes persist's attempts toward the next btrbk :00/:30
+        # snapshot-creation boundary -- a bigger single generation-bump than
+        # steady small-file writes), and widen the retry budget.
         capture_image() {
           label="$1"
           device="$2"
@@ -1470,7 +1503,7 @@ in
           tmp="$out.tmp"
           attempt=1
 
-          while [ "$attempt" -le 3 ]; do
+          while [ "$attempt" -le 5 ]; do
             rm -f "$tmp"
             if btrfs-image -c 9 "$device" "$tmp"; then
               chmod 0600 "$tmp"
@@ -1479,19 +1512,26 @@ in
             fi
             echo "btrfs-metadata-image-backup: $label attempt $attempt failed (live-filesystem race or real error)" >&2
             attempt=$((attempt + 1))
-            sleep 60
+            if [ "$attempt" -gt 5 ]; then
+              break
+            fi
+            # Deliberately not a fixed interval: a constant 60s could
+            # resonate with another periodic writer on the same cadence.
+            # 45/90/135/180s spreads retries across a wider span of the
+            # window instead.
+            sleep $((45 * (attempt - 1)))
           done
 
           rm -f "$tmp"
-          echo "btrfs-metadata-image-backup: $label failed after 3 attempts" >&2
+          echo "btrfs-metadata-image-backup: $label failed after 5 attempts" >&2
           return 1
         }
 
         # Per-label accounting: a combined exit code hides which target is
-        # actually broken.
+        # actually broken. persist goes first -- see the comment above.
         rc=0
-        capture_image realm /dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a || rc=1
         capture_image persist /dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02 || rc=1
+        capture_image realm /dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a || rc=1
 
         find "${btrfsImageRoot}" -type f -name '*.btrfs-image' -mtime +30 -delete
         exit "$rc"
