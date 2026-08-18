@@ -20,6 +20,9 @@ in
         mkHmRuntimeCheck
         ;
 
+      # Provably fails when: the agenix github-token path stops reaching the
+      # rendered credential helper, the shared ignore_global dots file stops
+      # being deployed, or delta drops out of the feature's package set.
       devGitRuntimeSpec = mkFeatureTest {
         name = "dev-git-runtime";
         feature = "sinnix.features.dev.git.enable";
@@ -46,9 +49,6 @@ in
           # the rendered git config, not just a literal restatement of a
           # config value the module itself set.
           git config --global --get credential.https://github.com.helper | grep -q '/run/agenix/github-token'
-          test "$(git config --global --get user.signingkey)" = "$HOME/.ssh/id_ed25519_github"
-          test "$(git config --global --get gpg.format)" = "ssh"
-          test "$(git config --global --get commit.gpgsign)" = "true"
           grep -q '^AGENTS.md$' "$HOME/.config/git/ignore_global"
           delta --version >/dev/null
         '';
