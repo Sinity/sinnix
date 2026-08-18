@@ -522,156 +522,156 @@ in
       }
     )
     {
-    assertions = [
-      {
-        assertion = duplicateSurfaceUnitKeys == [ ];
-        message =
-          "sinnix.runtime.surfaces must not declare duplicate manager/unit pairs: "
-          + lib.concatStringsSep ", " duplicateSurfaceUnitKeys;
-      }
-      {
-        assertion = kindUnitMismatches == [ ];
-        message =
-          "sinnix.runtime.surfaces unit suffixes must match their kind: "
-          + lib.concatMapStringsSep ", " (
-            surface: "${surface.name}:${surface.kind}:${surface.unit}"
-          ) kindUnitMismatches;
-      }
-      {
-        # An acknowledgement without a reason and a tracking reference is
-        # just a mute, and a mute is how an intentional outage quietly
-        # becomes a forgotten one.
-        assertion = unreferencedAcknowledgements == [ ];
-        message =
-          "sinnix.runtime.surfaces acknowledged outages must carry reason, since and ref: "
-          + lib.concatStringsSep ", " unreferencedAcknowledgements;
-      }
-      {
-        assertion = unknownCommandClasses == [ ];
-        message =
-          "sinnix.runtime.inventory.commandClasses use unknown resource classes: "
-          + lib.concatMapStringsSep ", " (
-            command: "${command.name}:${command.resourceClass}"
-          ) unknownCommandClasses;
-      }
-    ];
+      assertions = [
+        {
+          assertion = duplicateSurfaceUnitKeys == [ ];
+          message =
+            "sinnix.runtime.surfaces must not declare duplicate manager/unit pairs: "
+            + lib.concatStringsSep ", " duplicateSurfaceUnitKeys;
+        }
+        {
+          assertion = kindUnitMismatches == [ ];
+          message =
+            "sinnix.runtime.surfaces unit suffixes must match their kind: "
+            + lib.concatMapStringsSep ", " (
+              surface: "${surface.name}:${surface.kind}:${surface.unit}"
+            ) kindUnitMismatches;
+        }
+        {
+          # An acknowledgement without a reason and a tracking reference is
+          # just a mute, and a mute is how an intentional outage quietly
+          # becomes a forgotten one.
+          assertion = unreferencedAcknowledgements == [ ];
+          message =
+            "sinnix.runtime.surfaces acknowledged outages must carry reason, since and ref: "
+            + lib.concatStringsSep ", " unreferencedAcknowledgements;
+        }
+        {
+          assertion = unknownCommandClasses == [ ];
+          message =
+            "sinnix.runtime.inventory.commandClasses use unknown resource classes: "
+            + lib.concatMapStringsSep ", " (
+              command: "${command.name}:${command.resourceClass}"
+            ) unknownCommandClasses;
+        }
+      ];
 
-    sinnix.runtime.surfaces = runtimeDefaults.baseSurfaces // {
-      # The drift probe itself is governed like everything else it audits:
-      # classed, observed, and its output watched as a lane, so a silently
-      # dead probe is a health verdict rather than a quiet absence.
-      config-drift = {
-        unit = "sinnix-config-drift.service";
-        resourceClass = "background-maintenance";
-        observe.enable = true;
-        captures = [
-          {
-            name = "config-drift";
-            path = "${cfg.paths.machineRoot}/config-drift.jsonl";
-            staleAfterSeconds = 1800;
-          }
-        ];
-      };
-    };
-
-    environment.etc."sinnix/runtime-inventory.json" = {
-      text = builtins.toJSON config.sinnix.runtime.inventory;
-      mode = "0444";
-    };
-    environment.systemPackages = [
-      scriptPkgs.sinnix-config-drift
-      scriptPkgs.sinnix-preflight
-      scriptPkgs.sinnix-capability-manifest
-    ];
-    # setgid: the health transition ledger and its dedup state are written by
-    # the ops-reducer (as the operator) and, when the reducer is down, by the
-    # root-run failure template. Group `users` inherited by both is what keeps
-    # the second writer from locking the first out of its own state file.
-    systemd.tmpfiles.rules = [
-      "d /run/sinnix 2775 root users -"
-      # The two shared files, made group-writable wherever they came from:
-      # the root-run failure template can create them before the reducer ever
-      # does, and a live switch inherits whatever the previous generation
-      # left. `z` is a no-op when the path does not exist.
-      "z /run/sinnix/health-transitions.jsonl 0664 root users -"
-      "z /run/sinnix/health-state.json 0664 root users -"
-      "z /run/sinnix/health-state.json.lock 0664 root users -"
-    ];
-    # Consumer entries from activation.consumers render as forced environment
-    # overrides (front-door routing; see the consumers option comment),
-    # merged with the sentinel/observe units.
-    systemd.services = lib.mkMerge (
-      lib.concatLists (
-        lib.mapAttrsToList (
-          _: surface:
-          map (c: {
-            ${c.unit}.environment = lib.mapAttrs (_: v: lib.mkForce v) c.environment;
-          }) (surface.activation.consumers or [ ])
-        ) surfaces
-      )
-      ++ [
-        (
-          {
-            "sinnix-unit-failure-notify@" = {
-              description = "Record + surface the failure of %i";
-              serviceConfig = {
-                Type = "oneshot";
-                ExecStart = "${unitFailureNotify}/bin/sinnix-unit-failure-notify %i";
-              };
-            };
-          }
-          //
-            lib.mapAttrs'
-              (
-                _name: surface:
-                lib.nameValuePair (lib.removeSuffix ".service" surface.unit) {
-                  unitConfig.OnFailure = [ "sinnix-unit-failure-notify@%n.service" ];
-                }
-              )
-              (
-                lib.filterAttrs (
-                  _: surface: surface.manager == "system" && surface.kind == "service" && surface.observe.enable
-                ) surfaces
-              )
-        )
-      ]
-    );
-    home-manager.users.${cfg.user.name} = {
-      systemd.user.services."sinnix-unit-failure-notify@" = {
-        Unit.Description = "Record + surface the failure of user unit %i";
-        Service = {
-          Type = "oneshot";
-          ExecStart = "${unitFailureNotify}/bin/sinnix-unit-failure-notify %i --user";
+      sinnix.runtime.surfaces = runtimeDefaults.baseSurfaces // {
+        # The drift probe itself is governed like everything else it audits:
+        # classed, observed, and its output watched as a lane, so a silently
+        # dead probe is a health verdict rather than a quiet absence.
+        config-drift = {
+          unit = "sinnix-config-drift.service";
+          resourceClass = "background-maintenance";
+          observe.enable = true;
+          captures = [
+            {
+              name = "config-drift";
+              path = "${cfg.paths.machineRoot}/config-drift.jsonl";
+              staleAfterSeconds = 1800;
+            }
+          ];
         };
       };
 
-      # The failure bridge is a drop-in, not a unit body, because a user
-      # surface may be declared in either of two option namespaces that never
-      # merge: home-manager's `systemd.user.services` (~/.config/systemd/user)
-      # or the NixOS-level `systemd.user.services` (/etc/systemd/user).
-      # Injecting OnFailure as a unit body merges only for the former; for the
-      # latter home-manager emits a standalone `[Unit] OnFailure=` file with no
-      # [Service] section, and ~/.config outranks /etc in the user manager's
-      # search path — the real unit becomes unreachable with
-      # LoadState=bad-setting. A drop-in merges with whichever fragment exists,
-      # so the declaring namespace stops mattering.
-      xdg.configFile =
-        lib.mapAttrs'
+      environment.etc."sinnix/runtime-inventory.json" = {
+        text = builtins.toJSON config.sinnix.runtime.inventory;
+        mode = "0444";
+      };
+      environment.systemPackages = [
+        scriptPkgs.sinnix-config-drift
+        scriptPkgs.sinnix-preflight
+        scriptPkgs.sinnix-capability-manifest
+      ];
+      # setgid: the health transition ledger and its dedup state are written by
+      # the ops-reducer (as the operator) and, when the reducer is down, by the
+      # root-run failure template. Group `users` inherited by both is what keeps
+      # the second writer from locking the first out of its own state file.
+      systemd.tmpfiles.rules = [
+        "d /run/sinnix 2775 root users -"
+        # The two shared files, made group-writable wherever they came from:
+        # the root-run failure template can create them before the reducer ever
+        # does, and a live switch inherits whatever the previous generation
+        # left. `z` is a no-op when the path does not exist.
+        "z /run/sinnix/health-transitions.jsonl 0664 root users -"
+        "z /run/sinnix/health-state.json 0664 root users -"
+        "z /run/sinnix/health-state.json.lock 0664 root users -"
+      ];
+      # Consumer entries from activation.consumers render as forced environment
+      # overrides (front-door routing; see the consumers option comment),
+      # merged with the sentinel/observe units.
+      systemd.services = lib.mkMerge (
+        lib.concatLists (
+          lib.mapAttrsToList (
+            _: surface:
+            map (c: {
+              ${c.unit}.environment = lib.mapAttrs (_: v: lib.mkForce v) c.environment;
+            }) (surface.activation.consumers or [ ])
+          ) surfaces
+        )
+        ++ [
           (
-            _name: surface:
-            lib.nameValuePair "systemd/user/${surface.unit}.d/50-sinnix-unit-failure-notify.conf" {
-              text = ''
-                [Unit]
-                OnFailure=sinnix-unit-failure-notify@%n.service
-              '';
+            {
+              "sinnix-unit-failure-notify@" = {
+                description = "Record + surface the failure of %i";
+                serviceConfig = {
+                  Type = "oneshot";
+                  ExecStart = "${unitFailureNotify}/bin/sinnix-unit-failure-notify %i";
+                };
+              };
             }
+            //
+              lib.mapAttrs'
+                (
+                  _name: surface:
+                  lib.nameValuePair (lib.removeSuffix ".service" surface.unit) {
+                    unitConfig.OnFailure = [ "sinnix-unit-failure-notify@%n.service" ];
+                  }
+                )
+                (
+                  lib.filterAttrs (
+                    _: surface: surface.manager == "system" && surface.kind == "service" && surface.observe.enable
+                  ) surfaces
+                )
           )
-          (
-            lib.filterAttrs (
-              _: surface: surface.manager == "user" && surface.kind == "service" && surface.observe.enable
-            ) surfaces
-          );
-    };
+        ]
+      );
+      home-manager.users.${cfg.user.name} = {
+        systemd.user.services."sinnix-unit-failure-notify@" = {
+          Unit.Description = "Record + surface the failure of user unit %i";
+          Service = {
+            Type = "oneshot";
+            ExecStart = "${unitFailureNotify}/bin/sinnix-unit-failure-notify %i --user";
+          };
+        };
+
+        # The failure bridge is a drop-in, not a unit body, because a user
+        # surface may be declared in either of two option namespaces that never
+        # merge: home-manager's `systemd.user.services` (~/.config/systemd/user)
+        # or the NixOS-level `systemd.user.services` (/etc/systemd/user).
+        # Injecting OnFailure as a unit body merges only for the former; for the
+        # latter home-manager emits a standalone `[Unit] OnFailure=` file with no
+        # [Service] section, and ~/.config outranks /etc in the user manager's
+        # search path — the real unit becomes unreachable with
+        # LoadState=bad-setting. A drop-in merges with whichever fragment exists,
+        # so the declaring namespace stops mattering.
+        xdg.configFile =
+          lib.mapAttrs'
+            (
+              _name: surface:
+              lib.nameValuePair "systemd/user/${surface.unit}.d/50-sinnix-unit-failure-notify.conf" {
+                text = ''
+                  [Unit]
+                  OnFailure=sinnix-unit-failure-notify@%n.service
+                '';
+              }
+            )
+            (
+              lib.filterAttrs (
+                _: surface: surface.manager == "user" && surface.kind == "service" && surface.observe.enable
+              ) surfaces
+            );
+      };
     }
   ];
 }

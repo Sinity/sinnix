@@ -55,7 +55,10 @@ let
       # intervalSec computes from seconds; onUnitActiveSec passes a raw
       # systemd duration through untouched ("30min").
       OnUnitActiveSec =
-        if j.timer ? intervalSec then "${toString j.timer.intervalSec}s" else j.timer.onUnitActiveSec or null;
+        if j.timer ? intervalSec then
+          "${toString j.timer.intervalSec}s"
+        else
+          j.timer.onUnitActiveSec or null;
       OnBootSec = j.timer.onBootSec or null;
       OnStartupSec = j.timer.onStartupSec or null;
       Persistent = if j.timer.persistent or false then true else null;
@@ -64,8 +67,9 @@ let
     }
   );
   overrides =
-    assert lib.assertMsg ((j ? execStart) != (j ? script))
-      "mkScheduledJob ${unitName}: exactly one of execStart or script";
+    assert lib.assertMsg (
+      (j ? execStart) != (j ? script)
+    ) "mkScheduledJob ${unitName}: exactly one of execStart or script";
     {
       Type = "oneshot";
     }
