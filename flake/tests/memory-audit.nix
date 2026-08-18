@@ -1,3 +1,6 @@
+# Provably fails when: scripts/sinnix-memory-audit stops emitting one of its
+# finding kinds (verified by suppressing dead_path), rewrites the file it
+# audits, or walks outside its --root.
 { inputs, ... }:
 {
   perSystem =
