@@ -268,9 +268,20 @@ class Job:
         self.store_manifest(document, "update")
 
     def record_actual_agent(self, pid: int) -> None:
+        """Attest pid and start time together, or not at all.
+
+        A retry ladder attempt whose child exits before its /proc/<pid>/stat
+        is readable must not leave the pid and proc_start of two different
+        attempts paired in the manifest -- that pairing is what
+        sinnix-observe orphans keys pid-reuse detection on. Setting
+        actual_agent_pid only once its matching start time is confirmed
+        keeps the last successfully-attested attempt as the recorded pair
+        instead of the newest (untraceable) pid next to a stale start time.
+        """
         start = proc_start(pid)
         if not start:
             return
+        self.actual_agent_pid = str(pid)
         self.actual_agent_proc_start = start
         self.update_manifest(
             {
@@ -339,30 +350,33 @@ class Job:
             return self.args.json_path
         return self.args.log_path
 
-    def snapshot_stdin(self, sink) -> None:
-        """Materialize the agent's input, as the shell's `cat >tmp` did.
-
-        With --stdin-file the source is re-opened per attempt (the shell
-        redirected each invocation from the prompt file); without it the
-        runner's own stdin is drained once and later attempts see EOF.
-        """
-        if self.args.stdin_file:
-            with open(self.args.stdin_file, "rb") as source:
-                shutil.copyfileobj(source, sink)
-        elif sys.stdin is not None and not sys.stdin.closed:
-            shutil.copyfileobj(sys.stdin.buffer, sink)
-
     def run_attempt(self, argv: list[str]) -> int:
         """One agent invocation, attested and waited on. Returns wait status."""
         a = self.args
-        fd, stdin_path = tempfile.mkstemp(
-            prefix=f"{self.job_id}.stdin.", dir=str(self.state_dir)
-        )
+        stdin_path: str | None = None
         try:
-            with os.fdopen(fd, "wb") as sink:
-                self.snapshot_stdin(sink)
             with contextlib.ExitStack() as stack:
-                child_stdin = stack.enter_context(open(stdin_path, "rb"))
+                if a.stdin_file:
+                    # Backends that read the prompt on stdin (codex, gemini):
+                    # materialize a fresh copy per attempt, as the shell's
+                    # `cat >tmp` did, so a launcher-race retry re-reads the
+                    # prompt file rather than an already-drained stream.
+                    fd, stdin_path = tempfile.mkstemp(
+                        prefix=f"{self.job_id}.stdin.", dir=str(self.state_dir)
+                    )
+                    with (
+                        os.fdopen(fd, "wb") as sink,
+                        open(a.stdin_file, "rb") as source,
+                    ):
+                        shutil.copyfileobj(source, sink)
+                    child_stdin = stack.enter_context(open(stdin_path, "rb"))
+                else:
+                    # Backends that take the prompt as an argv (claude, grok,
+                    # antigravity) never read the runner's own stdin -- draining
+                    # it here only served to block an interactive TTY launch
+                    # that lacked its own </dev/null. Give the child a closed
+                    # stdin instead of forwarding whatever the runner inherited.
+                    child_stdin = stack.enter_context(open(os.devnull, "rb"))
                 out = stack.enter_context(open(self.stdout_target(), "wb"))
                 if a.capture == "split":
                     err = stack.enter_context(open(a.log_path, "wb"))
@@ -371,14 +385,14 @@ class Job:
                 child = subprocess.Popen(
                     argv, stdin=child_stdin, stdout=out, stderr=err
                 )
-            self.actual_agent_pid = str(child.pid)
             self.record_actual_agent(child.pid)
             code = child.wait()
         finally:
-            try:
-                os.unlink(stdin_path)
-            except OSError:
-                pass
+            if stdin_path is not None:
+                try:
+                    os.unlink(stdin_path)
+                except OSError:
+                    pass
         return 128 + (-code) if code < 0 else code
 
     def finalize_artifacts(self) -> int:
