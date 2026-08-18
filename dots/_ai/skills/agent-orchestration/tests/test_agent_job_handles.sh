@@ -76,12 +76,17 @@ EOF
 cat >"${tmp}/bin/grok-sinnix" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+prompt=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --single) shift 2 ;;
+    --single) prompt="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
+if [[ $prompt == *fail* ]]; then
+  printf 'grok refused\n' >&2
+  exit 31
+fi
 printf 'fake grok final\n'
 EOF
 cat >"${tmp}/bin/agy-sinnix" <<'EOF'
@@ -146,12 +151,13 @@ run_job() {
 run_backend_job() {
   local backend="$1"
   local id="$2"
+  local prompt="${3:-${tmp}/prompt.prompt}"
   env -u SINNIX_AGENT_SCOPED -u SINNIX_AGENT_SCOPE_UNIT -u SINNIX_AGENT_SCOPE_CGROUP \
     PATH="${tmp}/bin:${PATH}" SINNIX_AGENT_SCOPE_EXEC="${tmp}/bin/scope-exec" \
     FAKE_SCOPE_RECEIPT_DIR="${tmp}/scope-receipts" \
     "${runner}" --job-id "${id}" --job-state-dir "${tmp}/state" --agent "${backend}" \
     --model fake --reasoning-effort high --workdir "${tmp}/worktree" \
-    --prompt-file "${tmp}/prompt.prompt" --log-file "${tmp}/output/${id}.log" \
+    --prompt-file "${prompt}" --log-file "${tmp}/output/${id}.log" \
     --last-file "${tmp}/output/${id}.final"
 }
 
@@ -205,6 +211,19 @@ if run_job job-fail "${tmp}/fail.prompt"; then
 fi
 jq -e '.lifecycle == "failed" and .exit_status == 23' \
   "${tmp}/state/job-fail.json" >/dev/null
+
+# A backend whose runner copies its own output into the final artifact must
+# still report the agent's status: the manifest is the attestation, so a
+# refused run may not be recorded as a completed one.
+if run_backend_job grok job-grok-fail "${tmp}/fail.prompt"; then
+  echo "failing grok backend unexpectedly succeeded" >&2
+  exit 1
+fi
+jq -e '.lifecycle == "failed" and .exit_status == 31 and .completion.verification.outcome == "failed"' \
+  "${tmp}/state/job-grok-fail.json" >/dev/null || {
+  jq '{lifecycle, exit_status, completion}' "${tmp}/state/job-grok-fail.json" >&2
+  exit 1
+}
 if run_job job-one "${tmp}/prompt.prompt"; then
   echo "duplicate job handle unexpectedly overwrote its manifest" >&2
   exit 1

@@ -37,8 +37,6 @@ io_weight=""
 timeout_seconds="14400"
 internal_agent_scope=0
 job_started_epoch="$(date +%s)"
-actual_agent_pid=""
-actual_agent_proc_start=""
 codex_sandbox=""
 codex_home=""
 codex_skip_git_check=0
@@ -296,6 +294,10 @@ command -v sha256sum >/dev/null 2>&1 || {
   echo "run_agent_prompt.sh requires sha256sum" >&2
   exit 1
 }
+command -v python3 >/dev/null 2>&1 || {
+  echo "run_agent_prompt.sh requires python3" >&2
+  exit 1
+}
 
 if [[ -z ${job_id} ]]; then
   job_id="$(cat /proc/sys/kernel/random/uuid)"
@@ -333,7 +335,6 @@ chmod 0700 "${job_state_dir}/.reservations"
 [[ -z ${last_file} ]] || mkdir -p "$(dirname "${last_file}")"
 
 manifest="${job_state_dir}/${job_id}.json"
-events="${job_state_dir}/${job_id}.events.jsonl"
 reservation="${job_state_dir}/.reservations/${job_id}"
 if [[ ${internal_agent_scope} -eq 0 ]]; then
   if ! mkdir -m 0700 "${reservation}" 2>/dev/null; then
@@ -365,133 +366,61 @@ if [[ -z ${scope_cgroup} && -n ${SINNIX_AGENT_SCOPE_UNIT:-} ]]; then
   scope_cgroup="$(awk -F: -v unit="${SINNIX_AGENT_SCOPE_UNIT}" '$3 ~ ("/" unit "$|/" unit "/") { print $3; exit }' /proc/self/cgroup 2>/dev/null || true)"
 fi
 
-proc_start() {
-  local stat
-  stat="$(cat "/proc/$1/stat" 2>/dev/null || true)"
-  printf '%s\n' "${stat##*) }" | awk '{print $20}'
-}
-event() {
-  local lifecycle="$1" exit_status="${2:-}"
-  jq -cn --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg job_id "$job_id" --arg lifecycle "$lifecycle" --arg scope "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}" --arg cgroup "$scope_cgroup" --arg status "$exit_status" \
-    '{schema_version:2,at:$at,job_id:$job_id,event:(
-      {accepted:"accepted",starting:"starting",running:"heartbeat",succeeded:"completion",failed:"failure",cancel_requested:"approval",cancelled:"completion",timed_out:"failure"}[$lifecycle] // "lifecycle"),lifecycle:$lifecycle,scope_unit:$scope,cgroup:$cgroup,exit_status:(if $status == "" then null else ($status|tonumber) end)}' >>"$events"
-  chmod 0600 "$events"
-  if [[ ${SINNIX_AGENT_JOURNAL:-1} == 1 ]] && command -v logger >/dev/null 2>&1; then
-    printf 'SYSLOG_IDENTIFIER=sinnix-agent-job\nMESSAGE=agent job %s entered %s\nSINNIX_JOB_ID=%s\nSINNIX_JOB_LIFECYCLE=%s\nSINNIX_SCOPE_UNIT=%s\nSINNIX_CGROUP=%s\n' \
-      "$job_id" "$lifecycle" "$job_id" "$lifecycle" "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}" "$scope_cgroup" |
-      logger --journald 2>/dev/null || true
-  fi
-}
-
-update_manifest() {
-  local filter="$1"
-  shift
-  local tmp
-  tmp="$(mktemp "${manifest}.update.XXXXXX")"
-  jq "$@" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${filter} | .updated_at=\$at" "${manifest}" >"${tmp}"
-  chmod 0600 "${tmp}"
-  mv -f "${tmp}" "${manifest}"
-}
-
-record_actual_agent() {
-  local pid="$1" start
-  start="$(proc_start "${pid}")"
-  [[ -n ${start} ]] || return 0
-  actual_agent_proc_start="${start}"
-  update_manifest '.actual_agent={pid:$pid,proc_start:$start,attested_at:(now|todateiso8601)}' \
-    --argjson pid "${pid}" --arg start "${start}"
-}
-
-run_and_attest() {
-  local input_path
-  input_path="$(mktemp "${job_state_dir}/${job_id}.stdin.XXXXXX")"
-  cat >"${input_path}"
-  "$@" <"${input_path}" &
-  actual_agent_pid=$!
-  record_actual_agent "${actual_agent_pid}"
-  wait "${actual_agent_pid}"
-  local result=$?
-  rm -f "${input_path}"
-  return "${result}"
-}
-
-record_completion() {
-  local status="$1" cgroup_root="/sys/fs/cgroup${scope_cgroup}" memory_peak="" cpu_usec="" io_bytes="" duration
-  duration=$(($(date +%s) - job_started_epoch))
-  [[ -r ${cgroup_root}/memory.peak ]] && memory_peak="$(<"${cgroup_root}/memory.peak")"
-  [[ -r ${cgroup_root}/cpu.stat ]] && cpu_usec="$(awk '$1 == "usage_usec" {print $2}' "${cgroup_root}/cpu.stat")"
-  [[ -r ${cgroup_root}/io.stat ]] && io_bytes="$(awk '{for (i=1; i<=NF; i++) if ($i ~ /^rbytes=|^wbytes=/) {split($i,a,"="); sum+=a[2]}} END {print sum+0}' "${cgroup_root}/io.stat")"
-  update_manifest '.completion={duration_seconds:($duration|tonumber),peak_memory_bytes:(if $memory_peak=="" then null else ($memory_peak|tonumber) end),cpu_usage_usec:(if $cpu_usec=="" then null else ($cpu_usec|tonumber) end),io_bytes:(if $io_bytes=="" then null else ($io_bytes|tonumber) end),artifacts:.artifacts,verification:{exit_status:($status|tonumber),outcome:(if ($status|tonumber)==0 then "passed" else "failed" end)}}' \
-    --arg status "${status}" --arg duration "${duration}" --arg memory_peak "${memory_peak}" --arg cpu_usec "${cpu_usec}" --arg io_bytes "${io_bytes}"
-}
+# The manifest, the event log, the actual-agent attestation, the cgroup
+# completion accounting and the supervised run (including the launcher-race
+# retry ladder) live in the sibling run_agent_prompt_job.py (sinnix-gdlu): the
+# manifest is a hard contract, read directly by agent_job_control.sh and
+# attested by `sinnix-observe orphans`, so one implementation owns its bytes.
+# This script keeps option parsing, the reservation lock, the self-reexec,
+# per-backend argv, and the scrubbed child environment.
+job_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/run_agent_prompt_job.py"
+job_args=(
+  --job-id "${job_id}"
+  --job-state-dir "${job_state_dir}"
+  --launch-id "${launch_id}"
+  --backend "${agent}"
+  --model "${model}"
+  --effort "${reasoning_effort}"
+  --repo "${repo_root}"
+  --worktree "${worktree}"
+  --branch "${branch}"
+  --prompt-path "${prompt_file}"
+  --prompt-sha256 "${prompt_sha256}"
+  --log-path "${log_file}"
+  --json-path "${json_file}"
+  --final-path "${last_file}"
+  --role "${job_role}"
+  --work-item "${work_item}"
+  --parent-job-id "${parent_job_id}"
+  --coordinator-job-id "${coordinator_job_id}"
+  --provider "${provider}"
+  --account-hash "${account_hash}"
+  --vendor-session-id "${vendor_session_id}"
+  --polylogue-session-id "${polylogue_session_id}"
+  --kitty-socket "${kitty_socket}"
+  --kitty-window-id "${kitty_window_id}"
+  --hyprland-address "${hyprland_address}"
+  --quota-snapshot-id "${quota_snapshot_id}"
+  --scope-unit "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}"
+  --scope-cgroup "${scope_cgroup}"
+  --launcher-pid "$$"
+  --memory-high "${memory_high}"
+  --memory-max "${memory_max}"
+  --cpu-weight "${cpu_weight}"
+  --io-weight "${io_weight}"
+  --timeout-seconds "${timeout_seconds}"
+)
 
 write_manifest() {
-  local lifecycle="$1"
-  local exit_status="${2:-}"
-  local launcher_pid="$BASHPID"
-  local updated_at
-  updated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  local created_at="$updated_at"
-  if [[ -f ${manifest} ]]; then
-    created_at="$(jq -r '.created_at // empty' "${manifest}")"
-    [[ -n ${created_at} ]] || created_at="$updated_at"
+  if [[ $# -ge 2 ]]; then
+    python3 "${job_helper}" write "${job_args[@]}" --lifecycle "$1" --exit-status "$2"
+  else
+    python3 "${job_helper}" write "${job_args[@]}" --lifecycle "$1"
   fi
-  local tmp
-  tmp="$(mktemp "${manifest}.tmp.XXXXXX")"
-  jq -n \
-    --arg job_id "${job_id}" \
-    --arg launch_id "${launch_id}" \
-    --arg created_at "${created_at}" \
-    --arg updated_at "${updated_at}" \
-    --arg lifecycle "${lifecycle}" \
-    --arg backend "${agent}" \
-    --arg model "${model}" \
-    --arg effort "${reasoning_effort}" \
-    --arg repo "${repo_root}" \
-    --arg worktree "${worktree}" \
-    --arg branch "${branch}" \
-    --arg prompt_path "${prompt_file}" \
-    --arg prompt_sha256 "${prompt_sha256}" \
-    --arg log_path "${log_file}" \
-    --arg json_path "${json_file}" \
-    --arg final_path "${last_file}" \
-    --arg role "${job_role}" \
-    --arg work_item "${work_item}" \
-    --arg parent_job_id "${parent_job_id}" \
-    --arg coordinator_job_id "${coordinator_job_id}" \
-    --arg provider "${provider}" \
-    --arg account_hash "${account_hash}" \
-    --arg vendor_session_id "${vendor_session_id}" \
-    --arg polylogue_session_id "${polylogue_session_id}" \
-    --arg kitty_socket "${kitty_socket}" \
-    --arg kitty_window_id "${kitty_window_id}" \
-    --arg hyprland_address "${hyprland_address}" \
-    --arg quota_snapshot_id "${quota_snapshot_id}" \
-    --arg scope_unit "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}" \
-    --arg scope_cgroup "${scope_cgroup}" \
-    --arg launcher_pid "${launcher_pid}" \
-    --arg launcher_start "$(proc_start "${launcher_pid}")" \
-    --arg exit_status "${exit_status}" \
-    --arg memory_high "${memory_high}" \
-    --arg memory_max "${memory_max}" \
-    --arg cpu_weight "${cpu_weight}" \
-    --arg io_weight "${io_weight}" \
-    --arg timeout_seconds "${timeout_seconds}" \
-    '{schema_version: 3, job_id: $job_id, launch_id: $launch_id, created_at: $created_at, updated_at: $updated_at,
-      lifecycle: $lifecycle, backend: $backend, model: $model, effort: $effort,
-      repo: $repo, worktree: $worktree, branch: $branch,
-      prompt: {path: $prompt_path, sha256: $prompt_sha256},
-      artifacts: {log: $log_path, json: $json_path, final: $final_path},
-      declared: {role: $role, work_item: $work_item},
-      delegation: {parent_job_id: (if $parent_job_id == "" then null else $parent_job_id end), coordinator_job_id: (if $coordinator_job_id == "" then null else $coordinator_job_id end)},
-      identity: {role: $role, bead_id: (if $work_item == "" then null else $work_item end), provider: (if $provider == "" then null else $provider end), account_hash: (if $account_hash == "" then null else $account_hash end)},
-      correlation: {vendor_session_id: (if $vendor_session_id == "" then null else $vendor_session_id end), polylogue_session_id: (if $polylogue_session_id == "" then null else $polylogue_session_id end), kitty_socket: (if $kitty_socket == "" then null else $kitty_socket end), kitty_window_id: (if $kitty_window_id == "" then null else $kitty_window_id end), hyprland_address: (if $hyprland_address == "" then null else $hyprland_address end), quota_snapshot_id: (if $quota_snapshot_id == "" then null else $quota_snapshot_id end)},
-      launcher: {pid: ($launcher_pid | tonumber), proc_start: $launcher_start, scope_unit: $scope_unit, cgroup: $scope_cgroup},
-      resource_overrides: {MemoryHigh: $memory_high, MemoryMax: $memory_max, CPUWeight: $cpu_weight, IOWeight: $io_weight, RuntimeMaxSec: $timeout_seconds},
-      exit_status: (if $exit_status == "" then null else ($exit_status | tonumber) end)}' >"${tmp}"
-  chmod 0600 "${tmp}"
-  mv -f "${tmp}" "${manifest}"
-  event "$lifecycle" "$exit_status"
+}
+
+recorded_lifecycle() {
+  python3 "${job_helper}" lifecycle "${job_args[@]}"
 }
 
 if [[ ${internal_agent_scope} -eq 0 && -z ${SINNIX_AGENT_SCOPED:-} ]]; then
@@ -548,7 +477,7 @@ if [[ ${internal_agent_scope} -eq 0 && -z ${SINNIX_AGENT_SCOPED:-} ]]; then
   "${scope_exec}" "${scope_args[@]}" -- "${inner_args[@]}"
   scope_status=$?
   set -e
-  lifecycle="$(jq -r '.lifecycle // empty' "${manifest}")"
+  lifecycle="$(recorded_lifecycle)"
   if [[ ${lifecycle} == accepted || ${lifecycle} == starting || ${lifecycle} == running ]]; then
     write_manifest failed "${scope_status}"
   fi
@@ -567,21 +496,26 @@ if [[ ${internal_agent_scope} -eq 1 && (${SINNIX_AGENT_SCOPED:-} != 1 || ${SINNI
 fi
 
 write_manifest running
-job_finalized=0
-# Invoked indirectly by the EXIT trap below.
+# Invoked indirectly by the EXIT trap below. The manifest, not a shell flag,
+# says whether the job was already finalized: run_agent_prompt_job.py writes
+# the terminal state itself, so a terminal lifecycle means there is nothing
+# left to record and anything else means this process died before recording it.
 # shellcheck disable=SC2329
 finalize_job() {
   local status=$?
-  if [[ ${job_finalized} -eq 0 ]]; then
-    if [[ ${status} -eq 0 ]]; then
-      write_manifest succeeded 0
-    elif [[ $(jq -r '.lifecycle // empty' "${manifest}") == cancel_requested ]]; then
-      write_manifest cancelled "${status}"
-    elif [[ ${status} -eq 124 || ${status} -eq 137 || ${status} -eq 143 ]]; then
-      write_manifest timed_out "${status}"
-    else
-      write_manifest failed "${status}"
-    fi
+  local lifecycle
+  lifecycle="$(recorded_lifecycle)"
+  case "${lifecycle}" in
+  succeeded | failed | cancelled | timed_out) return 0 ;;
+  esac
+  if [[ ${status} -eq 0 ]]; then
+    write_manifest succeeded 0
+  elif [[ ${lifecycle} == cancel_requested ]]; then
+    write_manifest cancelled "${status}"
+  elif [[ ${status} -eq 124 || ${status} -eq 137 || ${status} -eq 143 ]]; then
+    write_manifest timed_out "${status}"
+  else
+    write_manifest failed "${status}"
   fi
 }
 trap finalize_job EXIT
@@ -601,158 +535,118 @@ agent_bin="$(resolve_agent_bin "${agent}")" || {
   exit 1
 }
 
-run_with_optional_env() {
-  local -a env_args=(env -i)
-  for key in HOME LANG LC_ALL PATH SHELL TERM USER XDG_CONFIG_HOME XDG_DATA_HOME XDG_RUNTIME_DIR XDG_STATE_HOME DBUS_SESSION_BUS_ADDRESS DISPLAY WAYLAND_DISPLAY SSH_AUTH_SOCK SINNIX_AGENT_JOB_STATE_DIR SINNIX_AGENT_SCOPED SINNIX_AGENT_SCOPE_UNIT SINNIX_AGENT_SCOPE_CGROUP SINNIX_CORRELATION_ID; do
-    [[ -z ${!key+x} ]] || env_args+=("$key=${!key}")
-  done
-  [[ ${agent} != claude || ${claude_api_key_auth} -eq 1 || -z ${ANTHROPIC_API_KEY+x} ]] || :
-  if [[ ${agent} == claude && ${claude_api_key_auth} -eq 1 && -n ${ANTHROPIC_API_KEY+x} ]]; then env_args+=("ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"); fi
-  [[ ${skip_agents_render} -eq 0 ]] || env_args+=(SINNIX_SKIP_AGENTS_RENDER=1)
-  [[ ${agent} != codex || -z ${codex_home} ]] || env_args+=("CODEX_HOME=${codex_home}")
-  "${env_args[@]}" "$@"
-}
+# The agent runs with a scrubbed environment: an allowlist of session
+# variables plus the per-backend additions, carried as an `env -i` prefix on
+# the argv handed to the supervisor.
+agent_env=(env -i)
+for key in HOME LANG LC_ALL PATH SHELL TERM USER XDG_CONFIG_HOME XDG_DATA_HOME XDG_RUNTIME_DIR XDG_STATE_HOME DBUS_SESSION_BUS_ADDRESS DISPLAY WAYLAND_DISPLAY SSH_AUTH_SOCK SINNIX_AGENT_JOB_STATE_DIR SINNIX_AGENT_SCOPED SINNIX_AGENT_SCOPE_UNIT SINNIX_AGENT_SCOPE_CGROUP SINNIX_CORRELATION_ID; do
+  [[ -z ${!key+x} ]] || agent_env+=("$key=${!key}")
+done
+if [[ ${agent} == claude && ${claude_api_key_auth} -eq 1 && -n ${ANTHROPIC_API_KEY+x} ]]; then agent_env+=("ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"); fi
+[[ ${skip_agents_render} -eq 0 ]] || agent_env+=(SINNIX_SKIP_AGENTS_RENDER=1)
+[[ ${agent} != codex || -z ${codex_home} ]] || agent_env+=("CODEX_HOME=${codex_home}")
 
-# Detects the transient sinnix-agent-npm-bootstrap launcher race: every
-# wrapped-CLI invocation regenerates ~/.local/state/<tool>/launch.sh
-# in-place and then execve()s it; a sibling process's execve() during that
-# window returns ETXTBSY ("Text file busy"), independent of the model/task
-# itself. Fixed at the source (atomic rename) in
-# scripts/sinnix-agent-npm-bootstrap, but this retry is kept as defense in
-# depth for hosts that haven't rebuilt yet and for any other transient
-# collision in the launcher chain. Never retries a genuine task failure.
-looks_like_launcher_race() {
-  local target="$1"
-  [[ -s ${target} ]] && grep -Fq 'Text file busy' "${target}"
-}
-
-set +e
-retry_attempt=0
-while true; do
-  case "${agent}" in
-  codex)
-    [[ -n ${model} && -n ${last_file} ]] || {
-      echo "codex requires --model and --last-file" >&2
+# Per-backend argv, plus the capture plan the supervisor needs: `split` sends
+# stdout to the JSON artifact and stderr to the log, `merged` sends both to
+# the log; `--final` says how the last-message artifact is produced; and
+# `--stdin-file` marks the backends that read the prompt on stdin.
+run_args=(--job-started-epoch "${job_started_epoch}" --max-retries "${max_retries}")
+case "${agent}" in
+codex)
+  [[ -n ${model} && -n ${last_file} ]] || {
+    echo "codex requires --model and --last-file" >&2
+    exit 2
+  }
+  cmd=("${agent_env[@]}" "${agent_bin}" exec -C "${workdir}" --model "${model}" --output-last-message "${last_file}")
+  [[ -z ${reasoning_effort} ]] || cmd+=(-c "model_reasoning_effort=\"${reasoning_effort}\"")
+  [[ -z ${schema_file} ]] || cmd+=(--output-schema "${schema_file}")
+  [[ -z ${codex_sandbox} ]] || cmd+=(-s "${codex_sandbox}")
+  [[ ${codex_skip_git_check} -eq 0 ]] || cmd+=(--skip-git-repo-check)
+  [[ ${ephemeral} -eq 0 ]] || cmd+=(--ephemeral)
+  [[ ${json_mode} -eq 0 ]] || cmd+=(--json)
+  cmd+=(-)
+  run_args+=(--stdin-file "${prompt_file}" --final none)
+  if [[ ${json_mode} -eq 1 ]]; then run_args+=(--capture split); else run_args+=(--capture merged); fi
+  ;;
+claude)
+  prompt_text="$(<"${prompt_file}")"
+  cmd=("${agent_env[@]}" "${agent_bin}" --print -p "${prompt_text}")
+  [[ -z ${model} ]] || cmd+=(--model "${model}")
+  [[ -z ${reasoning_effort} ]] || cmd+=(--effort "${reasoning_effort}")
+  if [[ -n ${schema_file} ]]; then
+    [[ -f ${schema_file} ]] || {
+      echo "missing schema: ${schema_file}" >&2
+      exit 1
+    }
+    cmd+=(--json-schema "$(<"${schema_file}")")
+  fi
+  if [[ ${json_mode} -eq 1 ]]; then
+    cmd+=(--output-format json)
+    run_args+=(--capture split --final json_result)
+  else
+    run_args+=(--capture merged --final copy)
+  fi
+  ;;
+gemini)
+  cmd=("${agent_env[@]}" "${agent_bin}")
+  run_args+=(--stdin-file "${prompt_file}" --final none)
+  if [[ ${json_mode} -eq 1 ]]; then run_args+=(--capture split); else run_args+=(--capture merged); fi
+  ;;
+grok)
+  prompt_text="$(<"${prompt_file}")"
+  cmd=("${agent_env[@]}" "${agent_bin}" --cwd "${workdir}" --single "${prompt_text}")
+  [[ -z ${model} ]] || cmd+=(--model "${model}")
+  [[ -z ${reasoning_effort} ]] || cmd+=(--reasoning-effort "${reasoning_effort}")
+  if [[ -n ${schema_file} ]]; then
+    [[ -f ${schema_file} ]] || {
+      echo "missing schema: ${schema_file}" >&2
+      exit 1
+    }
+    cmd+=(--json-schema "$(<"${schema_file}")")
+  elif [[ ${json_mode} -eq 1 ]]; then
+    cmd+=(--output-format json)
+  fi
+  if [[ ${json_mode} -eq 1 || -n ${schema_file} ]]; then
+    [[ -n ${json_file} ]] || {
+      echo "grok JSON output requires --json-file" >&2
       exit 2
     }
-    cmd=("${agent_bin}" exec -C "${workdir}" --model "${model}" --output-last-message "${last_file}")
-    [[ -z ${reasoning_effort} ]] || cmd+=(-c "model_reasoning_effort=\"${reasoning_effort}\"")
-    [[ -z ${schema_file} ]] || cmd+=(--output-schema "${schema_file}")
-    [[ -z ${codex_sandbox} ]] || cmd+=(-s "${codex_sandbox}")
-    [[ ${codex_skip_git_check} -eq 0 ]] || cmd+=(--skip-git-repo-check)
-    [[ ${ephemeral} -eq 0 ]] || cmd+=(--ephemeral)
-    [[ ${json_mode} -eq 0 ]] || cmd+=(--json)
-    cmd+=(-)
-    if [[ ${json_mode} -eq 1 ]]; then run_and_attest run_with_optional_env "${cmd[@]}" <"${prompt_file}" >"${json_file}" 2>"${log_file}"; else run_and_attest run_with_optional_env "${cmd[@]}" <"${prompt_file}" >"${log_file}" 2>&1; fi
-    ;;
-  claude)
-    prompt_text="$(<"${prompt_file}")"
-    cmd=("${agent_bin}" --print -p "${prompt_text}")
-    [[ -z ${model} ]] || cmd+=(--model "${model}")
-    [[ -z ${reasoning_effort} ]] || cmd+=(--effort "${reasoning_effort}")
-    if [[ -n ${schema_file} ]]; then
-      [[ -f ${schema_file} ]] || {
-        echo "missing schema: ${schema_file}" >&2
-        exit 1
-      }
-      cmd+=(--json-schema "$(<"${schema_file}")")
-    fi
-    if [[ ${json_mode} -eq 1 ]]; then
-      cmd+=(--output-format json)
-      run_and_attest run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
-      [[ -z ${last_file} ]] || jq -r '.result // empty' "${json_file}" >"${last_file}"
-    else
-      run_and_attest run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
-      [[ -z ${last_file} ]] || cp "${log_file}" "${last_file}"
-    fi
-    ;;
-  gemini)
-    if [[ ${json_mode} -eq 1 ]]; then run_and_attest run_with_optional_env "${agent_bin}" <"${prompt_file}" >"${json_file}" 2>"${log_file}"; else run_and_attest run_with_optional_env "${agent_bin}" <"${prompt_file}" >"${log_file}" 2>&1; fi
-    ;;
-  grok)
-    prompt_text="$(<"${prompt_file}")"
-    cmd=("${agent_bin}" --cwd "${workdir}" --single "${prompt_text}")
-    [[ -z ${model} ]] || cmd+=(--model "${model}")
-    [[ -z ${reasoning_effort} ]] || cmd+=(--reasoning-effort "${reasoning_effort}")
-    if [[ -n ${schema_file} ]]; then
-      [[ -f ${schema_file} ]] || {
-        echo "missing schema: ${schema_file}" >&2
-        exit 1
-      }
-      cmd+=(--json-schema "$(<"${schema_file}")")
-    elif [[ ${json_mode} -eq 1 ]]; then
-      cmd+=(--output-format json)
-    fi
-    if [[ ${json_mode} -eq 1 || -n ${schema_file} ]]; then
-      [[ -n ${json_file} ]] || {
-        echo "grok JSON output requires --json-file" >&2
-        exit 2
-      }
-      run_and_attest run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
-      [[ -z ${last_file} ]] || cp "${json_file}" "${last_file}"
-    else
-      run_and_attest run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
-      [[ -z ${last_file} ]] || cp "${log_file}" "${last_file}"
-    fi
-    ;;
-  antigravity)
-    prompt_text="$(<"${prompt_file}")"
-    cmd=("${agent_bin}")
-    [[ -z ${model} ]] || cmd+=(--model "${model}")
-    [[ -z ${reasoning_effort} ]] || cmd+=(--effort "${reasoning_effort}")
-    if [[ -n ${schema_file} ]]; then
-      [[ -f ${schema_file} ]] || {
-        echo "missing schema: ${schema_file}" >&2
-        exit 1
-      }
-      cmd+=(--json-schema "${schema_file}")
-    elif [[ ${json_mode} -eq 1 ]]; then
-      cmd+=(--output-format json)
-    fi
-    cmd+=(--print "${prompt_text}")
-    if [[ ${json_mode} -eq 1 || -n ${schema_file} ]]; then
-      [[ -n ${json_file} ]] || {
-        echo "Antigravity JSON output requires --json-file" >&2
-        exit 2
-      }
-      run_and_attest run_with_optional_env "${cmd[@]}" >"${json_file}" 2>"${log_file}"
-      [[ -z ${last_file} ]] || cp "${json_file}" "${last_file}"
-    else
-      run_and_attest run_with_optional_env "${cmd[@]}" >"${log_file}" 2>&1
-      [[ -z ${last_file} ]] || cp "${log_file}" "${last_file}"
-    fi
-    ;;
-  *)
-    echo "unknown agent: ${agent}" >&2
-    exit 2
-    ;;
-  esac
-  status=$?
-  if [[ ${status} -eq 0 || ${retry_attempt} -ge ${max_retries} ]]; then
-    break
+    run_args+=(--capture split --final copy)
+  else
+    run_args+=(--capture merged --final copy)
   fi
-  race_detected=0
-  looks_like_launcher_race "${log_file}" && race_detected=1
-  if [[ ${race_detected} -eq 0 && -n ${json_file} ]]; then
-    looks_like_launcher_race "${json_file}" && race_detected=1
+  ;;
+antigravity)
+  prompt_text="$(<"${prompt_file}")"
+  cmd=("${agent_env[@]}" "${agent_bin}")
+  [[ -z ${model} ]] || cmd+=(--model "${model}")
+  [[ -z ${reasoning_effort} ]] || cmd+=(--effort "${reasoning_effort}")
+  if [[ -n ${schema_file} ]]; then
+    [[ -f ${schema_file} ]] || {
+      echo "missing schema: ${schema_file}" >&2
+      exit 1
+    }
+    cmd+=(--json-schema "${schema_file}")
+  elif [[ ${json_mode} -eq 1 ]]; then
+    cmd+=(--output-format json)
   fi
-  if [[ ${race_detected} -eq 0 ]]; then
-    break
+  cmd+=(--print "${prompt_text}")
+  if [[ ${json_mode} -eq 1 || -n ${schema_file} ]]; then
+    [[ -n ${json_file} ]] || {
+      echo "Antigravity JSON output requires --json-file" >&2
+      exit 2
+    }
+    run_args+=(--capture split --final copy)
+  else
+    run_args+=(--capture merged --final copy)
   fi
-  retry_attempt=$((retry_attempt + 1))
-  mv -f "${log_file}" "${log_file}.attempt${retry_attempt}" 2>/dev/null || true
-  [[ -z ${json_file} ]] || mv -f "${json_file}" "${json_file}.attempt${retry_attempt}" 2>/dev/null || true
-  echo "run_agent_prompt.sh: launcher race detected, retrying (attempt ${retry_attempt}/${max_retries})" >&2
-  sleep "0.$(((RANDOM % 900) + 100))" 2>/dev/null || sleep 1
-done
-set -e
+  ;;
+*)
+  echo "unknown agent: ${agent}" >&2
+  exit 2
+  ;;
+esac
 
-if [[ ${status} -eq 0 ]]; then write_manifest succeeded 0; else write_manifest failed "${status}"; fi
-if [[ -n ${actual_agent_pid} && -n ${actual_agent_proc_start} ]]; then
-  update_manifest '.actual_agent={pid:$pid,proc_start:$start,attested_at:(now|todateiso8601)}' \
-    --argjson pid "${actual_agent_pid}" --arg start "${actual_agent_proc_start}"
-fi
-record_completion "${status}"
-job_finalized=1
-trap - EXIT
+status=0
+python3 "${job_helper}" run "${job_args[@]}" "${run_args[@]}" -- "${cmd[@]}" || status=$?
 exit "${status}"

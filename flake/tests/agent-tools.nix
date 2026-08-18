@@ -658,6 +658,7 @@ in
               pkgs.gnugrep
               pkgs.gnused
               pkgs.jq
+              pkgs.python3
               pkgs.util-linux
             ];
           }
@@ -674,6 +675,7 @@ in
                 pkgs.gnugrep
                 pkgs.gnused
                 pkgs.jq
+                pkgs.python3
                 pkgs.util-linux
               ]
             }
@@ -681,6 +683,7 @@ in
             fixture_skill="$fixture_source/dots/_ai/skills/agent-orchestration"
             mkdir -p "$fixture_skill/scripts" "$fixture_source/scripts"
             cp ${../../dots/_ai/skills/agent-orchestration/scripts/run_agent_prompt.sh} "$fixture_skill/scripts/run_agent_prompt.sh"
+            cp ${../../dots/_ai/skills/agent-orchestration/scripts/run_agent_prompt_job.py} "$fixture_skill/scripts/run_agent_prompt_job.py"
             cp ${../../dots/_ai/skills/agent-orchestration/scripts/agent_job_control.sh} "$fixture_skill/scripts/agent_job_control.sh"
             cp ${../../scripts/sinnix-agent-scope-exec} "$fixture_source/scripts/sinnix-agent-scope-exec"
             chmod +x "$fixture_skill/scripts/"* "$fixture_source/scripts/"*
