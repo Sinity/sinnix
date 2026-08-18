@@ -70,8 +70,8 @@ def _journal_rows(limit: int) -> tuple[list[dict[str, Any]], str | None]:
             check=False,
             timeout=2,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return [], type(exc).__name__
+    except (OSError, subprocess.TimeoutExpired):
+        return [], "journal_probe_failed"
     if result.returncode != 0 or len(result.stdout) > 1_048_576:
         return [], "journal_unavailable" if result.returncode else "journal_bound"
     rows = []
@@ -113,8 +113,8 @@ def _polylogue_sessions(
                     "source": "polylogue:index.db/messages_fts",
                 }
         connection.close()
-    except sqlite3.Error as exc:
-        return found, type(exc).__name__
+    except sqlite3.Error:
+        return found, "polylogue_index_unreadable"
     return found, None
 
 
@@ -209,8 +209,11 @@ def collect_agent_gateway(
             }
             for r in rows
         ]
-    except (OSError, sqlite3.Error, json.JSONDecodeError) as exc:
-        audit_error = type(exc).__name__
+    except (OSError, sqlite3.Error, json.JSONDecodeError):
+        # A probe that cannot run reports a stable unavailable identifier;
+        # raw exception class names leaked into workload gaps (and were
+        # counted as gap categories in gaps_summary) before this.
+        audit_error = "audit_log_unreadable"
     journal, journal_error = _journal_rows(max(20, min(limit * 10, 200)))
     journal_by_job: dict[str, list[dict[str, Any]]] = {}
     for row in journal:
