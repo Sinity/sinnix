@@ -422,7 +422,10 @@ config in `secrets.nix` (repo root).
   from state it already holds — the system dashboard, `/work/` (semantic
   workload view over scopes, the project ledger and gateway jobs),
   `/services/`, `/ai/`, `/shaders/`, `/capabilities/` (the capability index
-  joined with live health and census usage) — and whose buttons post to that same
+  joined with live health and census usage), `/pressure/` (regime banner +
+  swap-headroom-first widgets from the 2026-08-18 incident taxonomy; the
+  swap>=75%-while-not-stalling health lane emits from the same tick) — and
+  whose buttons post to that same
   reducer's bounded action API. No second control plane: where the action
   API cannot express a target the page says so rather than growing a private
   kill path — `/shaders/` is entirely buttonless for exactly that reason,
