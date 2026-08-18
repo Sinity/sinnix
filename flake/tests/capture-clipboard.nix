@@ -1,3 +1,9 @@
+# Provably fails when: the lane's directory moves out from under the capture
+# root the unit is given (verified by repointing laneDir at stateRoot), the
+# unit loses write access to the lane it advertises, or the generated watch
+# script stops writing an envelope, deduplicating consecutive copies, or
+# spilling binary payloads to a blob.
+#
 # Clipboard capture lane: static service-shape checks plus a runtime
 # fixture that exercises the real generated watch script (fake wl-paste /
 # hyprctl, real sinnix-capture writer) for text, binary/dedup, and
@@ -24,13 +30,12 @@ in
       evaluated = evalTestSpec system spec;
       hm = evaluated.config.home-manager.users.${evaluated.config.sinnix.user.name};
       unit = hm.systemd.user.services.sinnix-capture-clipboard;
-      surface = evaluated.config.sinnix.runtime.surfaces.capture-clipboard;
       execStart = unit.Service.ExecStart;
       unitJson = builtins.toJSON {
         Unit = unit.Unit;
         Service = unit.Service;
       };
-      surfaceJson = builtins.toJSON surface;
+      capturesJson = builtins.toJSON evaluated.config.sinnix.runtime.inventory.captures;
 
       clipboardWatchRuntime =
         pkgs.runCommand "sinnix-capture-clipboard-runtime-check"
@@ -174,9 +179,9 @@ in
             cat > unit.json <<'EOF_UNIT'
             ${unitJson}
             EOF_UNIT
-            cat > surface.json <<'EOF_SURFACE'
-            ${surfaceJson}
-            EOF_SURFACE
+            cat > captures.json <<'EOF_CAPTURES'
+            ${capturesJson}
+            EOF_CAPTURES
             jq -e '
               # ExecStart may render as a plain string or a single-element
               # array depending on the systemd option merge/apply behavior
@@ -184,21 +189,24 @@ in
               (.Service.ExecStart | if type == "array" then join(" ") else . end) as $execStart |
               ($execStart | contains("wl-paste --watch")) and
               ($execStart | contains("sinnix-capture-clipboard-watch")) and
-              (.Service.Environment | any(startswith("SINNIX_CAPTURE_ROOT="))) and
-              (.Service.Environment | any(startswith("SINNIX_CAPTURE_CLIPBOARD_STATE_DIR="))) and
-              (.Service.ReadWritePaths | length) == 3 and
               .Unit.After == ["graphical-session.target"] and
               .Unit.PartOf == ["graphical-session.target"]
             ' unit.json >/dev/null
-            jq -e '
-              .resourceClass == "capture-runtime" and
-              .kind == "service" and
-              .manager == "user" and
-              (.captures[0].eventDriven) and
-              .captures[0].staleAfterSeconds == 604800 and
-              .observe.enable and
-              .observe.restartable
-            ' surface.json >/dev/null
+            # The lane the sentinel watches and the directory the unit is
+            # actually allowed to write must be the same place: a lane
+            # advertised at a path no unit writes is a silent capture gap.
+            # Neither side is restated as a literal here.
+            jq -e --slurpfile captures captures.json --arg lane "clipboard" '
+              (.Service.Environment
+                | map(select(startswith("SINNIX_CAPTURE_ROOT=")))
+                | first
+                | ltrimstr("SINNIX_CAPTURE_ROOT=")) as $root |
+              ($captures[0] | map(select(.name == $lane)) | first) as $capture |
+              $root != null and
+              $capture != null and
+              ($capture.path | startswith($root + "/")) and
+              (.Service.ReadWritePaths | any($capture.path | startswith(.)))
+            ' unit.json >/dev/null
             touch "$out"
           '';
 

@@ -1,3 +1,7 @@
+# Provably fails when: the lane's directory moves out from under the capture
+# root the unit is given, or the unit loses write access to the lane the
+# runtime inventory advertises for it.
+#
 # PRIMARY-selection capture lane: static service-shape checks (unit
 # ExecStart/Environment/ReadWritePaths, runtime surface metadata).
 #
@@ -27,12 +31,11 @@ in
       evaluated = evalTestSpec system spec;
       hm = evaluated.config.home-manager.users.${evaluated.config.sinnix.user.name};
       unit = hm.systemd.user.services.sinnix-capture-primary;
-      surface = evaluated.config.sinnix.runtime.surfaces.capture-primary;
       unitJson = builtins.toJSON {
         Unit = unit.Unit;
         Service = unit.Service;
       };
-      surfaceJson = builtins.toJSON surface;
+      capturesJson = builtins.toJSON evaluated.config.sinnix.runtime.inventory.captures;
     in
     {
       checks.capture-primary-static =
@@ -44,9 +47,9 @@ in
             cat > unit.json <<'EOF_UNIT'
             ${unitJson}
             EOF_UNIT
-            cat > surface.json <<'EOF_SURFACE'
-            ${surfaceJson}
-            EOF_SURFACE
+            cat > captures.json <<'EOF_CAPTURES'
+            ${capturesJson}
+            EOF_CAPTURES
             jq -e '
               # ExecStart may render as a plain string or a single-element
               # array depending on the systemd option merge/apply behavior
@@ -54,22 +57,24 @@ in
               (.Service.ExecStart | if type == "array" then join(" ") else . end) as $execStart |
               ($execStart | contains("wl-paste --primary --watch")) and
               ($execStart | contains("sinnix-capture-primary-watch")) and
-              (.Service.Environment | any(startswith("SINNIX_CAPTURE_ROOT="))) and
-              (.Service.Environment | any(startswith("SINNIX_CAPTURE_PRIMARY_STATE_DIR="))) and
-              (.Service.Environment | any(startswith("SINNIX_CAPTURE_PRIMARY_DEBOUNCE_MS="))) and
-              (.Service.ReadWritePaths | length) == 3 and
               .Unit.After == ["graphical-session.target"] and
               .Unit.PartOf == ["graphical-session.target"]
             ' unit.json >/dev/null
-            jq -e '
-              .resourceClass == "capture-runtime" and
-              .kind == "service" and
-              .manager == "user" and
-              (.captures[0].eventDriven) and
-              .captures[0].staleAfterSeconds == 604800 and
-              .observe.enable and
-              .observe.restartable
-            ' surface.json >/dev/null
+            # The lane the sentinel watches and the directory the unit is
+            # actually allowed to write must be the same place: a lane
+            # advertised at a path no unit writes is a silent capture gap.
+            # Neither side is restated as a literal here.
+            jq -e --slurpfile captures captures.json --arg lane "primary" '
+              (.Service.Environment
+                | map(select(startswith("SINNIX_CAPTURE_ROOT=")))
+                | first
+                | ltrimstr("SINNIX_CAPTURE_ROOT=")) as $root |
+              ($captures[0] | map(select(.name == $lane)) | first) as $capture |
+              $root != null and
+              $capture != null and
+              ($capture.path | startswith($root + "/")) and
+              (.Service.ReadWritePaths | any($capture.path | startswith(.)))
+            ' unit.json >/dev/null
             touch "$out"
           '';
     };

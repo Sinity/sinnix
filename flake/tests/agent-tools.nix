@@ -627,11 +627,7 @@ in
             ];
           }
           ''
-            ${pkgs.bash}/bin/bash ${../../flake/tests/scope-wrapper.sh} ${
-              pkgs.writeText "sinnix-direnvrc-rendered" (
-                runtimeDefaults.renderDirenvrc (builtins.readFile ../../scripts/sinnix-direnvrc)
-              )
-            }
+            ${pkgs.bash}/bin/bash ${../../flake/tests/scope-wrapper.sh} ${pkgs.writeText "sinnix-direnvrc-rendered" (runtimeDefaults.renderDirenvrc (builtins.readFile ../../scripts/sinnix-direnvrc))}
             touch "$out"
           '';
       agentJobHandleFixture =
