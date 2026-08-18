@@ -172,6 +172,82 @@ jq -e '(.schema_version == 2 or .schema_version == 3) and .backend == "grok" and
 jq -e '(.schema_version == 2 or .schema_version == 3) and .backend == "antigravity" and .lifecycle == "succeeded"' "${tmp}/state/job-antigravity.json" >/dev/null
 grep -Fxq 'fake grok final' "${tmp}/output/job-grok.final"
 grep -Fxq 'fake antigravity final' "${tmp}/output/job-antigravity.final"
+
+# argv backends (claude/grok/antigravity) get the prompt on the command line,
+# never on the runner's own stdin -- so an interactive launch without an
+# explicit </dev/null must not block waiting for EOF on whatever the runner
+# inherited. Simulate a terminal: a FIFO held open read-write, so open()
+# returns immediately but a blocking read() never sees EOF.
+mkfifo "${tmp}/fake-tty"
+exec 9<>"${tmp}/fake-tty"
+set +e
+timeout 5 env -u SINNIX_AGENT_SCOPED -u SINNIX_AGENT_SCOPE_UNIT -u SINNIX_AGENT_SCOPE_CGROUP \
+  PATH="${tmp}/bin:${PATH}" SINNIX_AGENT_SCOPE_EXEC="${tmp}/bin/scope-exec" \
+  FAKE_SCOPE_RECEIPT_DIR="${tmp}/scope-receipts" \
+  "${runner}" --job-id job-grok-notty --job-state-dir "${tmp}/state" --agent grok \
+  --model fake --reasoning-effort high --workdir "${tmp}/worktree" \
+  --prompt-file "${tmp}/prompt.prompt" --log-file "${tmp}/output/job-grok-notty.log" \
+  --last-file "${tmp}/output/job-grok-notty.final" <&9
+notty_status=$?
+set -e
+exec 9<&-
+if [[ ${notty_status} -eq 124 ]]; then
+  echo "grok job blocked draining the runner's own (fake-tty) stdin" >&2
+  exit 1
+fi
+[[ ${notty_status} -eq 0 ]] || {
+  echo "grok fake-tty job failed for an unrelated reason (status ${notty_status})" >&2
+  exit 1
+}
+
+# A retry-ladder attempt whose child exits before /proc/<pid>/stat is
+# readable must not leave the manifest's actual_agent.pid (attempt N, the
+# newest) paired with actual_agent.proc_start (attempt N-1, a different
+# process's start time) -- that pairing is what sinnix-observe orphans keys
+# pid-reuse detection on.
+printf '{"schema_version":3,"job_id":"job-pairing"}' >"${tmp}/state/job-pairing.json"
+SINNIX_AGENT_TEST_JOB_HELPER="${skill_dir}/scripts/run_agent_prompt_job.py" \
+  SINNIX_AGENT_TEST_STATE_DIR="${tmp}/state" python3 - <<'PYEOF'
+import importlib.util
+import os
+import sys
+
+spec = importlib.util.spec_from_file_location(
+    "run_agent_prompt_job", os.environ["SINNIX_AGENT_TEST_JOB_HELPER"]
+)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+starts = iter(["100", None])  # attempt 1: readable; attempt 2: child already gone
+
+
+def fake_proc_start(_pid):
+    return next(starts)
+
+
+module.proc_start = fake_proc_start
+
+
+class Args:
+    job_id = "job-pairing"
+    job_state_dir = os.environ["SINNIX_AGENT_TEST_STATE_DIR"]
+
+
+job = module.Job(Args())
+job.record_actual_agent(111)
+assert job.actual_agent_pid == "111" and job.actual_agent_proc_start == "100", (
+    job.actual_agent_pid,
+    job.actual_agent_proc_start,
+)
+
+job.record_actual_agent(222)  # attempt 2: proc_start unreadable, must not overwrite
+assert job.actual_agent_pid == "111" and job.actual_agent_proc_start == "100", (
+    "attempt 2's untraceable pid leaked into the pairing",
+    job.actual_agent_pid,
+    job.actual_agent_proc_start,
+)
+print("actual_agent pid/proc_start pairing held across an unreadable retry")
+PYEOF
 jq -e --arg repo "${tmp}/repo" --arg worktree "${tmp}/worktree" '
   (.schema_version == 2 or .schema_version == 3) and .job_id == "job-one" and .lifecycle == "succeeded" and .exit_status == 0 and
   .repo == $repo and .worktree == $worktree and .backend == "codex" and .model == "fake" and
