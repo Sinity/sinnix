@@ -502,3 +502,46 @@ def test_successful_read_records_no_error(tmp_path):
 
     assert rows == [{"a": 7}]
     assert sqlite_util.sqlite_errors() == []
+
+
+def test_gateway_probe_failures_surface_as_gap_categories() -> None:
+    """A failed gateway probe is a gap CATEGORY, never a raw reason string.
+
+    gaps_summary counts gap entries as taxonomy keys, so a probe that put
+    its exception class name (e.g. sqlite3 OperationalError) into the gap
+    list minted a fake gap category per exception type. The reason detail
+    belongs on the agent_gateway state; the workload row carries the stable
+    identifier.
+    """
+    rows = joins.build_gateway_rows(
+        {
+            "jobs": [{"job_id": "j", "lifecycle": "running"}],
+            "audit_error": "audit_log_unreadable",
+            "journal_error": None,
+            "polylogue_error": "polylogue_index_unreadable",
+            "quota": {},
+        },
+        {},
+    )
+    assert rows[0]["gaps"] == [
+        "agent_gateway.audit.unavailable",
+        "agent_gateway.polylogue.unavailable",
+    ]
+
+
+def test_gateway_audit_probe_reports_stable_unavailable_identifier(
+    tmp_path, monkeypatch
+) -> None:
+    """An unreadable audit database yields the explicit unavailable state.
+
+    The audit sqlite is absent here, so the read-only connect fails; the
+    probe must report its stable identifier rather than whichever exception
+    class sqlite3 raised (which is what leaked into gaps_summary live).
+    """
+    root = tmp_path / "gateway"
+    (root / "jobs").mkdir(parents=True)
+    monkeypatch.setenv("SINNIX_AGENT_GATEWAY_STATE_DIR", str(root))
+    monkeypatch.setenv("SINNIX_AGENT_QUOTA_FILE", str(root / "missing"))
+    monkeypatch.setenv("SINNIX_POLYLOGUE_INDEX_DB", str(root / "missing.db"))
+    out = agent_gateway.collect_agent_gateway()
+    assert out["audit_error"] == "audit_log_unreadable"

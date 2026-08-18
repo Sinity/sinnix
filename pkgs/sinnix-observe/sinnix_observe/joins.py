@@ -250,14 +250,23 @@ def build_gateway_rows(
                     "quota_provenance": gateway.get("quota"),
                     "orphan": orphan_by_job.get(str(job.get("job_id"))),
                 },
+                # Gap entries are stable category identifiers (gaps_summary
+                # counts them); the probes' reason strings stay on the
+                # agent_gateway state, not in the gap taxonomy.
                 "gaps": [
-                    value
-                    for value in (
-                        gateway.get("audit_error"),
-                        gateway.get("journal_error"),
-                        gateway.get("polylogue_error"),
+                    gap
+                    for gap, reason in (
+                        ("agent_gateway.audit.unavailable", gateway.get("audit_error")),
+                        (
+                            "agent_gateway.journal.unavailable",
+                            gateway.get("journal_error"),
+                        ),
+                        (
+                            "agent_gateway.polylogue.unavailable",
+                            gateway.get("polylogue_error"),
+                        ),
                     )
-                    if value
+                    if reason
                 ],
             }
         )
