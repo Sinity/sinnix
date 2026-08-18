@@ -33,6 +33,10 @@ def hub_server(tmp_path: Path):
     server.is_unix = True
     server.hub_manifest = None
     server.inventory_path = tmp_path / "inventory.json"
+    # Absent on purpose: the capability page must answer over the socket on a
+    # host whose index and census are not there, which is every hermetic build.
+    server.capability_index_path = tmp_path / "capability-index.json"
+    server.usage_census_path = tmp_path / "usage-census.jsonl"
     (tmp_path / "inventory.json").write_text(
         json.dumps({"schema": "sinnix-runtime-inventory-v1", "surfaces": {}})
     )
@@ -57,7 +61,9 @@ def get(url: str) -> tuple[int, str, str]:
         return error.code, error.headers["Content-Type"], error.read().decode()
 
 
-@pytest.mark.parametrize("route", ["/", "/work/", "/services/", "/ai/", "/shaders/"])
+@pytest.mark.parametrize(
+    "route", ["/", "/work/", "/services/", "/ai/", "/shaders/", "/capabilities/"]
+)
 def test_every_page_route_answers_with_a_document(hub_server: str, route: str) -> None:
     status, content_type, body = get(hub_server + route)
     assert status == 200

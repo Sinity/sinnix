@@ -81,7 +81,7 @@ mkServiceModule {
             Type = "simple";
             # --agent-controller: dotsRoot-direct, not the
             # ~/.config/hermes/skills linkFarm hop.
-            ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --ambient-product /realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json --anchor-events %t/sinnix/afk-resume.json --hyprland-events %t/sinnix/hyprland-events --agent-controller ${config.sinnix.paths.dotsRoot}/_ai/skills/agent-orchestration/scripts/agent_job_control.sh --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds} --feedback-dir ${cfg.feedbackDir}${
+            ExecStart = "${reducer}/bin/sinnix-ops-reducer --runtime-dir %t --state-dir ${stateDir} --inventory /etc/sinnix/runtime-inventory.json --capability-index /etc/sinnix/capability-index.json --usage-census ${config.sinnix.paths.machineRoot}/usage-census.jsonl --ambient-product /realm/project/sinity-lynchpin/.lynchpin/generated/analysis/ambient_intelligence.json --anchor-events %t/sinnix/afk-resume.json --hyprland-events %t/sinnix/hyprland-events --agent-controller ${config.sinnix.paths.dotsRoot}/_ai/skills/agent-orchestration/scripts/agent_job_control.sh --observe-command ${observe}/bin/sinnix-observe --interval ${toString cfg.intervalSeconds} --feedback-dir ${cfg.feedbackDir}${
               lib.optionalString (cfg.hubManifest != null) " --hub-manifest ${cfg.hubManifest}"
             }${lib.optionalString (cfg.elicitCommand != null) " --elicit-command '${cfg.elicitCommand}'"}";
             # nvidia-smi, journalctl, systemctl and hyprctl are what the pages

@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from . import health, pages, terminals
+from . import capabilities, health, pages, terminals
 from .actions import ActionError, ActionService
 from .feedback import MAX_BODY as FEEDBACK_MAX_BODY
 from .feedback import SCHEMA as FEEDBACK_SCHEMA
@@ -378,7 +378,16 @@ class Handler(BaseHTTPRequestHandler):
         manifest = pages.load_manifest(self.server.hub_manifest)  # type: ignore[attr-defined]
         inventory, _ = pages.load_json(self.server.inventory_path)  # type: ignore[attr-defined]
         self._write_html(
-            HTTPStatus.OK, pages.render(path, manifest, snapshot, inventory, error)
+            HTTPStatus.OK,
+            pages.render(
+                path,
+                manifest,
+                snapshot,
+                inventory,
+                error,
+                capability_index_path=self.server.capability_index_path,  # type: ignore[attr-defined]
+                usage_census_path=self.server.usage_census_path,  # type: ignore[attr-defined]
+            ),
         )
 
     def _authorized(self) -> bool:
@@ -562,6 +571,8 @@ def serve(
     feedback: FeedbackSpool | None = None,
     emitter_factory: Callable[[], health.Emitter] = health.Emitter,
     sweep_interval: float = health.SWEEP_INTERVAL_SECONDS,
+    capability_index_path: Path | None = capabilities.DEFAULT_INDEX,
+    usage_census_path: Path | None = capabilities.DEFAULT_CENSUS,
 ) -> None:
     def stamp(server: ThreadingHTTPServer, is_unix: bool) -> None:
         server.reducer = reducer  # type: ignore[attr-defined]
@@ -569,6 +580,8 @@ def serve(
         server.is_unix = is_unix  # type: ignore[attr-defined]
         server.hub_manifest = hub_manifest  # type: ignore[attr-defined]
         server.inventory_path = inventory_path  # type: ignore[attr-defined]
+        server.capability_index_path = capability_index_path  # type: ignore[attr-defined]
+        server.usage_census_path = usage_census_path  # type: ignore[attr-defined]
         server.feedback = feedback  # type: ignore[attr-defined]
         server.emitter_factory = emitter_factory  # type: ignore[attr-defined]
 
