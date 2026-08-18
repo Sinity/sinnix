@@ -10,6 +10,21 @@ mkFeatureModule {
     "editors"
   ];
   description = "Developer editors (VS Code, Antigravity)";
+  # Antigravity's vscode/User/* symlinks only; meta.dotfiles is gated by the
+  # top-level enable (not the antigravity subFeature), so hosts that leave
+  # antigravity off still get these two inert symlinks. The
+  # .antigravity/extensions symlink stays hand-rolled below since it targets
+  # ~/.vscode/extensions, outside dots/, which meta.dotfiles cannot express.
+  meta.dotfiles.configFile = {
+    "Antigravity/User/settings.json" = {
+      source = "vscode/User/settings.json";
+      force = true;
+    };
+    "Antigravity/User/keybindings.json" = {
+      source = "vscode/User/keybindings.json";
+      force = true;
+    };
+  };
   subFeatures = {
     vscode = {
       description = "VSCode Editor";
@@ -195,12 +210,10 @@ mkFeatureModule {
         home-manager.users.${user} =
           {
             config,
-            mkDotsFileFor,
             pkgs,
             ...
           }:
           let
-            mkDotsFile = mkDotsFileFor config;
             antigravity-ide-wrapped =
               wrapWaylandEditor "antigravity-ide-wrapped" pkgs.antigravity-ide
                 "antigravity-ide";
@@ -210,16 +223,6 @@ mkFeatureModule {
             home.file = {
               ".antigravity/extensions".source =
                 config.lib.file.mkOutOfStoreSymlink "${config.home.homeDirectory}/.vscode/extensions";
-            };
-            xdg.configFile = {
-              "Antigravity/User/settings.json" = {
-                source = mkDotsFile "/vscode/User/settings.json";
-                force = true;
-              };
-              "Antigravity/User/keybindings.json" = {
-                source = mkDotsFile "/vscode/User/keybindings.json";
-                force = true;
-              };
             };
           };
       })
