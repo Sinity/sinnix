@@ -29,7 +29,7 @@
           ''
             # The evidence lanes: every lifecycle event on which a client
             # ships a session to Polylogue. Codex must cover at least what
-            # Claude does, or half the estate's agent history stops being
+            # Claude does, or half the machine's agent history stops being
             # captured while the other half looks healthy.
             lanes() {
               jq -r '
