@@ -100,3 +100,24 @@ def test_backup_sweeps_orphaned_sidecar_from_a_prior_crashed_run(
     assert result.returncode == 0, result.stderr
     assert output.exists()
     assert not orphan.exists()
+
+
+
+def test_backup_of_a_parked_walless_database_succeeds(tmp_path: Path) -> None:
+    """A cleanly-checkpointed (parked) db has no -wal sidecar; that is the
+    clean state, not an error. Mutation: reverting the exists() check to the
+    old try/except-FileNotFoundError shape fails this (cp exits 1 ->
+    CalledProcessError, which that handler never caught)."""
+    source = tmp_path / "parked.sqlite"
+    with sqlite3.connect(source) as connection:
+        connection.execute("CREATE TABLE t (x INTEGER)")
+        connection.execute("INSERT INTO t VALUES (1)")
+    assert not Path(f"{source}-wal").exists()
+    output = tmp_path / "parked.sqlite.zst"
+    result = subprocess.run(
+        [str(SCRIPT), str(source), str(output)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert output.exists() and output.stat().st_size > 0
