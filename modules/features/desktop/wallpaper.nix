@@ -90,75 +90,83 @@ mkFeatureModule {
         "d ${cfg.corpusRoot}/sets/${mood}/light 0755 ${user} users -"
       ]) cfg.moods;
     in
-    {
-      # Every ancestor needs its own rule, and ancestors must come first: an
-      # undeclared intermediate is created implicitly as root inside a
-      # sinity-owned parent, and tmpfiles then refuses every leaf below it
-      # ("Detected unsafe path transition ...").
-      systemd.tmpfiles.rules = [
-        "d ${cfg.corpusRoot} 0755 ${user} users -"
-        "d ${cfg.corpusRoot}/sets 0755 ${user} users -"
-        "d ${cfg.corpusRoot}/pool 0755 ${user} users -"
-        "d ${cfg.corpusRoot}/generated 0755 ${user} users -"
-        "d ${cfg.corpusRoot}/generated/rejected 0755 ${user} users -"
-      ]
-      ++ moodDirs;
-
-      sinnix.runtime.surfaces.wallpaper-timeofday = {
-        unit = "sinnix-wallpaper-timeofday.timer";
-        manager = "user";
-        kind = "timer";
-        resourceClass = "background-maintenance";
-        observe = {
-          enable = true;
-          restartable = false;
-        };
-      };
-
-      environment.systemPackages = [
-        scriptPkgs.sinnix-wallpaper
-        scriptPkgs.sinnix-wallpaper-timeofday
-      ];
-
-      home-manager.users.${user} =
-        { ... }:
+    lib.mkMerge [
+      # NixOS-level systemd.user (manager="user", preserving the unit's
+      # existing manager) rather than the previous home-manager.users.${user}
+      # block. surface is null, not the registered wallpaper-timeofday
+      # surface below: that surface's `unit` is the *timer*
+      # (sinnix-wallpaper-timeofday.timer, kind = "timer"), which never
+      # matches mkScheduledJob's surfaceCoversFailure check (it compares
+      # against "${unitName}.service") -- the same mismatch that already
+      # meant this service got its resourceClass via a direct
+      # resourceClass = "background-maintenance" key (see the job spec
+      # below) rather than a unit lookup, and equally means it never got the
+      # OnFailure drop-in either (that drop-in only fires for
+      # kind == "service" surfaces). Going through mkScheduledJob is a real
+      # gain here: the service now gets the standard OnFailure path it
+      # never had.
+      (lib.sinnix.mkScheduledJob
         {
-          home.sessionVariables = {
+          inherit config;
+          unitName = "sinnix-wallpaper-timeofday";
+          description = "Retarget ~/wallpaper/{dark,light} to the current time-of-day set";
+          surface = null;
+        }
+        {
+          manager = "user";
+          resourceClass = "background-maintenance";
+          execStart = "${scriptPkgs.sinnix-wallpaper-timeofday}/bin/sinnix-wallpaper-timeofday";
+          environment = {
             SINNIX_WALLPAPER_CORPUS = cfg.corpusRoot;
             SINNIX_WALLPAPER_MOODS = lib.concatStringsSep "," cfg.moods;
+            SINNIX_NOCTALIA_BIN = "${noctaliaPkg}/bin/noctalia";
           };
-
-          systemd.user.services.sinnix-wallpaper-timeofday = {
-            Unit.Description = "Retarget ~/wallpaper/{dark,light} to the current time-of-day set";
-            Service = lib.sinnix.mkRuntimeServiceConfig {
-              runtimeInventory = config.sinnix.runtime.inventory;
-              # The registered surface unit is the *timer*
-              # (sinnix-wallpaper-timeofday.timer, kind = "timer"), so
-              # `unit =` lookup would throw -- resolve the class's
-              # serviceConfig directly instead (same pattern as
-              # weechat-log-sealer.nix).
-              resourceClass = "background-maintenance";
-              overrides = {
-                Type = "oneshot";
-                Environment = [
-                  "SINNIX_WALLPAPER_CORPUS=${cfg.corpusRoot}"
-                  "SINNIX_WALLPAPER_MOODS=${lib.concatStringsSep "," cfg.moods}"
-                  "SINNIX_NOCTALIA_BIN=${noctaliaPkg}/bin/noctalia"
-                ];
-                ExecStart = "${scriptPkgs.sinnix-wallpaper-timeofday}/bin/sinnix-wallpaper-timeofday";
-              };
-            };
+          timer = {
+            onCalendar = cfg.timeOfDay.onCalendar;
+            persistent = true;
+            accuracySec = "1min";
+            description = "Timer for the time-of-day wallpaper set switch";
           };
+        }
+      )
+      {
+        # Every ancestor needs its own rule, and ancestors must come first: an
+        # undeclared intermediate is created implicitly as root inside a
+        # sinity-owned parent, and tmpfiles then refuses every leaf below it
+        # ("Detected unsafe path transition ...").
+        systemd.tmpfiles.rules = [
+          "d ${cfg.corpusRoot} 0755 ${user} users -"
+          "d ${cfg.corpusRoot}/sets 0755 ${user} users -"
+          "d ${cfg.corpusRoot}/pool 0755 ${user} users -"
+          "d ${cfg.corpusRoot}/generated 0755 ${user} users -"
+          "d ${cfg.corpusRoot}/generated/rejected 0755 ${user} users -"
+        ]
+        ++ moodDirs;
 
-          systemd.user.timers.sinnix-wallpaper-timeofday = {
-            Unit.Description = "Timer for the time-of-day wallpaper set switch";
-            Timer = {
-              OnCalendar = cfg.timeOfDay.onCalendar;
-              Persistent = true;
-              AccuracySec = "1min";
-            };
-            Install.WantedBy = [ "timers.target" ];
+        sinnix.runtime.surfaces.wallpaper-timeofday = {
+          unit = "sinnix-wallpaper-timeofday.timer";
+          manager = "user";
+          kind = "timer";
+          resourceClass = "background-maintenance";
+          observe = {
+            enable = true;
+            restartable = false;
           };
         };
-    };
+
+        environment.systemPackages = [
+          scriptPkgs.sinnix-wallpaper
+          scriptPkgs.sinnix-wallpaper-timeofday
+        ];
+
+        home-manager.users.${user} =
+          { ... }:
+          {
+            home.sessionVariables = {
+              SINNIX_WALLPAPER_CORPUS = cfg.corpusRoot;
+              SINNIX_WALLPAPER_MOODS = lib.concatStringsSep "," cfg.moods;
+            };
+          };
+      }
+    ];
 } args
