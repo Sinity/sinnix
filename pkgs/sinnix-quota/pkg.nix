@@ -8,6 +8,7 @@
   curl,
   sqlite,
   python3Packages,
+  sinnix-lib,
 }:
 
 let
@@ -52,6 +53,7 @@ python3Packages.buildPythonApplication {
   pyproject = true;
   src = ./.;
   build-system = [ python3Packages.setuptools ];
+  dependencies = [ sinnix-lib ];
   nativeCheckInputs = [ python3Packages.pytest ];
   checkPhase = ''
     runHook preCheck

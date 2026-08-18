@@ -17,7 +17,9 @@
 let
   inherit (pkgs) lib;
 
-  sinnixCaptureLib = pkgs.callPackage ../pkgs/sinnix-capture/pkg.nix { };
+  sinnixCaptureLib = pkgs.callPackage ../pkgs/sinnix-capture/pkg.nix {
+    sinnix-lib = externalPackages.sinnix-lib;
+  };
   phoneAppPackage = pkgs.callPackage (inputs.phone-app + "/pkg.nix") { };
   discovery = import ./script-discovery.nix {
     inherit lib pkgs;
@@ -336,7 +338,7 @@ let
 
     sinnix-cockpit = pkgs.callPackage ../pkgs/sinnix-cockpit/pkg.nix { };
 
-    sinnix-quota = pkgs.callPackage ../pkgs/sinnix-quota/pkg.nix { };
+    sinnix-quota = pkgs.callPackage ../pkgs/sinnix-quota/pkg.nix { inherit sinnix-lib; };
 
     sinnix-deslop = pkgs.callPackage ../pkgs/sinnix-deslop/pkg.nix { };
 

@@ -24,15 +24,26 @@ def utc_ts() -> str:
 
 
 def append_jsonl(
-    path: Path | str, record: Mapping[str, Any], *, mode: int = 0o644
+    path: Path | str,
+    record: Mapping[str, Any],
+    *,
+    mode: int = 0o644,
+    fsync: bool = False,
 ) -> None:
-    """Append *record* as one compact JSON line, creating parents."""
+    """Append *record* as one compact JSON line, creating parents.
+
+    ``fsync=True`` forces the line to disk before returning, for lanes where
+    losing an unflushed append to a crash is not acceptable (the capture
+    writer fsyncs every record and index line for exactly this reason).
+    """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
     fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, mode)
     try:
         os.write(fd, line.encode("utf-8"))
+        if fsync:
+            os.fsync(fd)
     finally:
         os.close(fd)
 

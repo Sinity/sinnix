@@ -1,4 +1,8 @@
-{ lib, python3Packages }:
+{
+  lib,
+  python3Packages,
+  sinnix-lib,
+}:
 
 python3Packages.buildPythonApplication {
   pname = "sinnix-capture";
@@ -6,6 +10,7 @@ python3Packages.buildPythonApplication {
   pyproject = true;
   src = ./.;
   build-system = [ python3Packages.setuptools ];
+  dependencies = [ sinnix-lib ];
   nativeCheckInputs = [ python3Packages.pytest ];
   checkPhase = ''
     runHook preCheck

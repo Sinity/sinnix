@@ -12,25 +12,16 @@ Layout under ``{capture_root}/{lane}/``:
 
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import socket
 import time
 from pathlib import Path
 
+from sinnix_lib import ledger
+from sinnix_lib.lock import flock
+
 from .envelope import build_envelope
-
-
-def _atomic_append(path: Path, line: str) -> None:
-    with open(path, "a") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        try:
-            f.write(line)
-            f.flush()
-            os.fsync(f.fileno())
-        finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 class CaptureWriter:
@@ -98,19 +89,15 @@ class CaptureWriter:
             return self._highest_indexed_seq()
 
     def _next_seq(self) -> int:
-        with open(self._seq_lock_path, "a+") as lock_f:
-            fcntl.flock(lock_f, fcntl.LOCK_EX)
-            try:
-                seq = self._read_seq() + 1
-                # Written through a temp file and renamed: a rename is atomic,
-                # so a reader (or a killed writer) never observes a truncated
-                # counter, which is how this file went empty in the first place.
-                tmp_path = self._seq_path.with_suffix(".seq.tmp")
-                tmp_path.write_text(str(seq))
-                os.replace(tmp_path, self._seq_path)
-                return seq
-            finally:
-                fcntl.flock(lock_f, fcntl.LOCK_UN)
+        with flock(self._seq_lock_path):
+            seq = self._read_seq() + 1
+            # Written through a temp file and renamed: a rename is atomic,
+            # so a reader (or a killed writer) never observes a truncated
+            # counter, which is how this file went empty in the first place.
+            tmp_path = self._seq_path.with_suffix(".seq.tmp")
+            tmp_path.write_text(str(seq))
+            os.replace(tmp_path, self._seq_path)
+            return seq
 
     def _record_path(self, ts: float) -> Path:
         day = time.strftime("%Y%m%d", time.gmtime(ts))
@@ -130,7 +117,7 @@ class CaptureWriter:
             raw_ref=raw_ref,
         )
         record_path = self._record_path(ts)
-        _atomic_append(record_path, json.dumps(envelope, sort_keys=True) + "\n")
+        ledger.append_jsonl(record_path, envelope, fsync=True)
         index_entry = {"ts": ts, "seq": seq, "file": record_path.name}
-        _atomic_append(self._index_path, json.dumps(index_entry, sort_keys=True) + "\n")
+        ledger.append_jsonl(self._index_path, index_entry, fsync=True)
         return envelope
