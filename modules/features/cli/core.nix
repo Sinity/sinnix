@@ -43,6 +43,8 @@ mkFeatureModule {
           gping
           doggo
           dust
+          arp-scan
+          nmap
         ])
         # `sinnix` -- discoverable front door over the whole packaged script
         # registry (`sinnix help`, `sinnix <name> [args...]`).
