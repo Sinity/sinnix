@@ -135,6 +135,22 @@
 
 ### Runtime Discipline
 
+- **Every dispatch of long-running work carries a time contract.** Before
+  launching anything expected to outlive a minute (background command, gated
+  merge, full test run, build, subagent), state the expected duration WITH its
+  evidence (historical median, receipt, prior run — never a guess presented as
+  fact), and set a deadline watchdog at ~2x that expectation via
+  `ScheduleWakeup` (this is the legitimate wall-clock-deadline use; it is not
+  polling). At the deadline, if no completion notification has arrived:
+  inspect progress evidence (receipts, progress/heartbeat files, process
+  state), then decide — kill, fix, or extend WITH a stated reason. Never sit
+  past a deadline silently, and never wait on work whose expected duration
+  you cannot name. When actual duration exceeds expectation by >50%, that is
+  a finding to report and file, not noise to absorb: either the expectation
+  was wrong (update the evidence base) or the work regressed (investigate).
+  2026-08-18 lesson: a 42-minute terminal verify was watched to completion
+  with zero output, no stated expectation, and no deadline — and its own
+  45-minute cap then killed a run that was minutes from green.
 - For long-running commands, do not busy-wait or spawn duplicates against the
   same resource. Redirect to a known log or let the harness report completion.
 - Do not run multiple heavy builds/tests against the same checkout, database,
