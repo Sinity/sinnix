@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Render a derived sinnix-prime capability and lifecycle manifest
+# description: Render a derived sinnix-prime lifecycle manifest -- live runtime-surface state, dormant hosts, and source-path references
 # runtimeInputs: bash coreutils findutils jq
+
+# What this declares is what the capability index (modules/lib/capability-index.nix,
+# /etc/sinnix/capability-index.json, `sinnix capabilities`) cannot: LIVE facts a
+# Nix evaluation can never hold -- a runtime surface's current systemd
+# ActiveState, which of the repo's declared NixOS hosts is not the one
+# currently running, and the concrete /realm and /persist paths the source
+# tree references. Everything the index already derives (feature/service/
+# script declarations, descriptions, invocations) used to be duplicated here
+# too; that half is deleted, not renamed, now that the index is canonical.
 
 set -euo pipefail
 
@@ -36,19 +45,6 @@ source_revision=$(git -C "$source_root" rev-parse HEAD 2>/dev/null || printf unk
 configuration_revision=$(nixos-version --configuration-revision 2>/dev/null || printf unknown)
 hostname=$(hostname 2>/dev/null || printf unknown)
 
-find_files() {
-  local root=$1
-  if [[ -d "$source_root/$root" ]]; then
-    find "$source_root/$root" -type f -name '*.nix' -printf '%P\n' | sort
-  fi
-}
-
-find_scripts() {
-  if [[ -d "$source_root/scripts" ]]; then
-    find "$source_root/scripts" -maxdepth 1 -type f -printf '%f\n' | sort
-  fi
-}
-
 # dormantHosts is derived from hosts/ + flake/nixos.nix so a new/removed host
 # cannot silently desync the manifest. "Dormant" = a real NixOS host (has a
 # `<name> = mkHost` entry in flake/nixos.nix -- excludes sinnix-gw, an OpenWrt
@@ -69,9 +65,6 @@ find_dormant_hosts() {
   fi
 }
 
-features_json=$(find_files modules/features | jq -Rsc 'split("\n") | map(select(length > 0) | {path: ("modules/features/" + .), lifecycle: "interactive", evidence: "source-declaration"})')
-services_json=$(find_files modules/services | jq -Rsc 'split("\n") | map(select(length > 0) | {path: ("modules/services/" + .), lifecycle: "unknown", evidence: "source-declaration"})')
-scripts_json=$(find_scripts | jq -Rsc 'split("\n") | map(select(length > 0) | {path: ("scripts/" + .), lifecycle: "on-demand", evidence: "packaged-script-declaration"})')
 dormant_hosts_json=$(find_dormant_hosts | jq -Rsc 'split("\n") | map(select(length > 0) | {host: ., state: "dormant", evidence: "host-source-not-live"})')
 
 surface_rows=$(jq -c '
@@ -102,23 +95,20 @@ done < <(jq -r '.[] | [.name, .manager, .unit] | @tsv' <<<"$surface_rows")
 paths_json=$( { rg -o --no-filename '/(realm|persist)(/[A-Za-z0-9_.-]+){1,5}' "$source_root/modules" "$source_root/hosts" 2>/dev/null || true; } | sort -u | jq -Rsc 'split("\n") | map(select(length > 0) | {path: ., evidence: "source-reference", lifecycle: "persistent-or-runtime"})')
 
 jq -n \
-  --arg schema "sinnix-capability-manifest-v1" \
+  --arg schema "sinnix-lifecycle-manifest-v1" \
   --arg generatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg hostname "$hostname" \
   --arg sourceRevision "$source_revision" \
   --arg configurationRevision "$configuration_revision" \
   --argjson inventory "$(cat "$inventory")" \
-  --argjson features "$features_json" \
-  --argjson services "$services_json" \
-  --argjson scripts "$scripts_json" \
   --argjson surfaces "$live_rows" \
   --argjson paths "$paths_json" \
   --argjson dormantHosts "$dormant_hosts_json" \
-  '{schema: $schema, generatedAt: $generatedAt, host: $hostname, sourceRevision: $sourceRevision, configurationRevision: $configurationRevision, authorities: {runtimeInventory: "runtime-inventory.json", systemd: "live-systemd", sourceTree: "source-declaration"}, features: $features, services: $services, scripts: $scripts, runtimeSurfaces: $surfaces, persistentAndRuntimePaths: $paths, dormantHosts: $dormantHosts, unknowns: [{scope: "service-source-to-runtime-surface", reason: "source declarations without an explicit runtime surface remain unknown until evaluated host evidence is available"}], inventorySchema: ($inventory.schema // "unknown")}' > "$tmp/manifest.json"
+  '{schema: $schema, generatedAt: $generatedAt, host: $hostname, sourceRevision: $sourceRevision, configurationRevision: $configurationRevision, authorities: {runtimeInventory: "runtime-inventory.json", systemd: "live-systemd", sourceTree: "source-declaration"}, runtimeSurfaces: $surfaces, persistentAndRuntimePaths: $paths, dormantHosts: $dormantHosts, inventorySchema: ($inventory.schema // "unknown")}' > "$tmp/manifest.json"
 
 # Structural check, not a specific literal host: dormantHosts is an array,
 # and if non-empty every entry carries host+state.
-jq -e '(.schema == "sinnix-capability-manifest-v1") and (.runtimeSurfaces | type == "array") and (.dormantHosts | type == "array") and ((.dormantHosts | length == 0) or (.dormantHosts | all(has("host") and has("state"))))' "$tmp/manifest.json" >/dev/null
+jq -e '(.schema == "sinnix-lifecycle-manifest-v1") and (.runtimeSurfaces | type == "array") and (.dormantHosts | type == "array") and ((.dormantHosts | length == 0) or (.dormantHosts | all(has("host") and has("state"))))' "$tmp/manifest.json" >/dev/null
 
 if [[ "$output" == - ]]; then
   cat "$tmp/manifest.json"
