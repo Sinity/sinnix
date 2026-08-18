@@ -228,6 +228,7 @@ let
     cat "$transcript"
   '';
   hostSmokeServicesScript = ''
+    ${resolveFlakeDir}
     artifact_dir="''${SINNIX_HOST_SMOKE_ARTIFACT_DIR:-}"
     cleanup_artifacts=0
     if [ -n "$artifact_dir" ]; then
@@ -239,9 +240,11 @@ let
     headers_file="$artifact_dir/transmission.headers"
     body_file="$artifact_dir/transmission.body"
 
+    unit_path_audit_out="$artifact_dir/unit-path-audit.txt"
+
     cleanup() {
       if [ "$cleanup_artifacts" -eq 1 ]; then
-        rm -f "$headers_file" "$body_file" "$artifact_dir/summary.txt"
+        rm -f "$headers_file" "$body_file" "$unit_path_audit_out" "$artifact_dir/summary.txt"
         rmdir "$artifact_dir" >/dev/null 2>&1 || true
       fi
     }
@@ -277,6 +280,14 @@ let
       ${pkgs.gnugrep}/bin/grep -q '409 Conflict' "$headers_file"
       session_id="$(${pkgs.gawk}/bin/awk -F': ' '/X-Transmission-Session-Id/ {print $2}' "$headers_file" | ${pkgs.coreutils}/bin/tr -d '\r')"
       [ -n "$session_id" ]
+    fi
+
+    if ! ${pkgs.python3}/bin/python3 "$_flake_dir/dots/_ai/tools/unit_path_audit.py" \
+        > "$unit_path_audit_out" 2>&1
+    then
+      echo "unit_path_audit found a command missing from a unit's resolved PATH:" >&2
+      cat "$unit_path_audit_out" >&2
+      exit 1
     fi
 
     printf 'services smoke ok\nsession_id=%s\n' "$session_id" > "$artifact_dir/summary.txt"
@@ -564,7 +575,7 @@ in
     };
 
     host-smoke-services = {
-      description = "Run an opt-in live host smoke probe for long-running service surfaces";
+      description = "Run an opt-in live host smoke probe for long-running service surfaces, including the exit-127 unit-PATH audit";
       script = hostSmokeServicesScript;
     };
 
