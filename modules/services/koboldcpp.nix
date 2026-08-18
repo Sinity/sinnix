@@ -18,6 +18,7 @@
 mkServiceModule {
   name = "koboldcpp";
   description = "koboldcpp all-in-one inference (CUDA)";
+  docs = "docs/local-ai-activation.md";
   surface = {
     unit = "koboldcpp.service";
     resourceClass = "interactive-agent";

@@ -14,6 +14,7 @@
 mkAiService {
   name = "tts";
   description = "OpenedAI-Speech TTS bridge (Piper + XTTS, containerized)";
+  docs = "docs/local-ai-activation.md";
   unit = "podman-openedai-speech.service";
   endpoint = "127.0.0.1:${toString helpers.data.ports.tts.public}";
   backendKind = "container";

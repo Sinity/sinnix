@@ -180,6 +180,11 @@ let
       ];
       runtimeInputs = lib.unique (baseRuntimeInputs ++ declaredInputs);
       tier = fields.tier or "default";
+      # Optional `docs: docs/foo.md` frontmatter key, consumed by
+      # modules/lib/capability-index.nix in place of (falling back to) its
+      # docs/<name>.md filename convention. Absent unless the script's
+      # frontmatter names one.
+      docs = fields.docs or null;
       patchedScript =
         pkgs.runCommand "${name}-script"
           {
@@ -213,7 +218,12 @@ let
       };
     in
     {
-      inherit description runtimeInputs tier;
+      inherit
+        description
+        runtimeInputs
+        tier
+        docs
+        ;
       package = pkg;
     };
 

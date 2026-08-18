@@ -26,6 +26,20 @@ let
       internal = true;
     };
 
+  # Repo-relative doc that deliberately documents this capability, consumed
+  # by modules/lib/capability-index.nix in place of (falling back to) its
+  # filename convention (docs/<name>.md). Left null where no doc genuinely
+  # exists for the capability -- the index's own filename-convention
+  # fallback still applies in that case.
+  mkDocsOption =
+    docsValue:
+    lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = docsValue;
+      description = "Repo-relative doc that documents this capability, or null.";
+      internal = true;
+    };
+
   mkFeatureModule =
     {
       path,
@@ -35,6 +49,7 @@ let
       # subFeatures = { vscode = { description = "VSCode"; default = true; }; ... }
       subFeatures ? { },
       meta ? { },
+      docs ? null,
       # Features in modules/features/ are unconditionally part of a sinnix
       # host's default character; hosts express exceptions via
       # `sinnix.features.<path>.enable = false`. defaultOn is an explicit
@@ -67,6 +82,7 @@ let
               default = defaultOn;
             };
             meta = mkMetaOption meta;
+            docs = mkDocsOption docs;
           };
       cfg = lib.getAttrFromPath featurePath config;
       user = config.sinnix.user.name;
@@ -88,6 +104,7 @@ let
       # paths without being pushed down into configFn.
       surface ? null,
       meta ? { },
+      docs ? null,
       # Declarative scheduled-oneshot job: sugar over
       # lib.sinnix.mkScheduledJob (modules/lib/scheduled-job.nix, where the
       # full spec-key reference lives). Attrset or function of the module
@@ -112,6 +129,7 @@ let
       optionsForPath = extraOptions // {
         enable = lib.mkEnableOption description;
         meta = mkMetaOption meta;
+        docs = mkDocsOption docs;
       };
       cfg = lib.getAttrFromPath servicePath config;
       moduleArgs = args // {
@@ -157,10 +175,16 @@ let
       requiresCuda ? false,
       extraOptions ? { },
       meta ? { },
+      docs ? null,
       configFn,
     }:
     mkServiceModule {
-      inherit name description extraOptions;
+      inherit
+        name
+        description
+        extraOptions
+        docs
+        ;
       meta = meta // {
         ai = {
           inherit backendKind requiresCuda;

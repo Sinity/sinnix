@@ -28,6 +28,7 @@
 mkAiService {
   name = "kokoro";
   description = "Kokoro-82M TTS (CPU, OpenAI-compatible /v1/audio/speech, containerized)";
+  docs = "docs/local-ai-activation.md";
   unit = "podman-kokoro.service";
   endpoint = "127.0.0.1:${toString helpers.data.ports.kokoro.public}";
   backendKind = "container";

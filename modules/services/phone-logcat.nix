@@ -25,6 +25,7 @@ in
 mkServiceModule {
   name = "phone-logcat";
   description = "Scheduled phone system-log pull over adb";
+  docs = "docs/phone.md";
   extraOptions = {
     intervalSec = lib.mkOption {
       type = lib.types.ints.positive;
