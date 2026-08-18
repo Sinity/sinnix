@@ -2,14 +2,18 @@
 # Provably fails when: the plugin stops accepting the schema the ops reducer
 # stamps (verified by changing SCHEMA in the reducer), stops resuming the SSE
 # stream, gains a direct shell-out or state read, fails Noctalia's own
-# plugin lint, or an entry stops parsing as Luau (verified 2026-08-18 by
+# plugin lint, an entry stops parsing as Luau (verified 2026-08-18 by
 # appending a malformed statement to bar-attention.luau: lint alone still
-# said ok, the luau-compile pass failed with a SyntaxError).
+# said ok, the luau-compile pass failed with a SyntaxError), or the panel
+# binds a snapshot state key the reducer does not publish (verified
+# 2026-08-18 by binding stateValue("gpu") in panel.luau).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 plugin="${NOCTALIA_OPS_PLUGIN:-$repo_root/dots/noctalia/plugins/sinnix-ops}"
 reducer_root="${NOCTALIA_OPS_REDUCER:-$repo_root/pkgs/sinnix-ops-reducer}"
+observe_root="${NOCTALIA_OPS_OBSERVE:-$repo_root/pkgs/sinnix-observe}"
+contract="${NOCTALIA_OPS_CONTRACT:-$repo_root/flake/tests/noctalia-state-contract.py}"
 
 test -f "$plugin/plugin.toml"
 test -f "$plugin/service.luau"
@@ -45,5 +49,15 @@ grep -Fq "$resume_header" "$plugin/service.luau" ||
 
 # The bridge is the plugin's only authority: a shell-out or a direct read of
 # system state would be a second, unbounded control plane in the shell.
+# (xdg-open of a hub page is deliberate: it hands a URL to the browser, it
+# does not read or mutate system state.)
 ! grep -Eq 'systemctl|jq|curl|sqlite|\.jsonl' "$plugin"/*.luau
+
+# Schema agreement with both producers: every snapshot state key the plugin
+# binds must be published by sinnix-observe's report or the reducer's own
+# state additions. Both sides are parsed from their source.
+NOCTALIA_OPS_PLUGIN="$plugin" \
+NOCTALIA_OPS_REDUCER="$reducer_root" \
+NOCTALIA_OPS_OBSERVE="$observe_root" \
+  python3 "$contract"
 echo "noctalia ops bridge fixture passed"
