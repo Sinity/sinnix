@@ -122,7 +122,12 @@ in
         General = {
           ControllerMode = lib.mkDefault "dual";
           DiscoverableTimeout = lib.mkDefault 0;
-          Experimental = lib.mkDefault false;
+          # Enables bluez's experimental D-Bus interfaces, in particular
+          # org.bluez.Battery1 -- without it, paired devices that report
+          # battery over GATT (0x180f) or HFP AT-commands are invisible to
+          # both upower and this host's own capture-peripherals bt-battery
+          # lane (modules/services/capture-peripherals.nix).
+          Experimental = lib.mkDefault true;
           FastConnectable = lib.mkDefault true;
           MultiProfile = lib.mkDefault "multiple";
         };
