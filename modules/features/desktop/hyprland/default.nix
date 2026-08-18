@@ -287,12 +287,17 @@ in
                 dim_inactive = false;
                 dim_strength = 0.0;
 
-                # Hyprland blurs a layer surface's whole rect, and Noctalia's
-                # notification layer is full-height, so toasts dim a column
-                # behind them. The scoped fix (layerrule + ignore_alpha) is
-                # unexpressible: hyprlang's layerrule has no matcher, so a
-                # rule cannot be aimed. Needs the Lua provider (sinnix-nzr9).
-                blur.enabled = false;
+                # Window/layer blur is back on. It was briefly disabled
+                # globally (commit 6ab2bb21) to kill the notification-column
+                # dimming (sinnix-nzr9), believing hyprlang's layerrule had
+                # lost its matcher entirely in 0.56 and so could not scope a
+                # fix to just the notification layer. That belief was wrong
+                # for the deprecated inline `layerrule = <field>, <ns>` form
+                # but not for the "layerrule v2" special-category form (see
+                # the layerRules list in hyprland/rules.nix), which still
+                # carries a namespace matcher and fixes the column with a
+                # scoped ignore_alpha rule instead of a global blur toggle.
+                blur.enabled = true;
 
                 shadow = {
                   enabled = true;
@@ -316,11 +321,13 @@ in
                 ;
               windowrule = rules.windowrule or [ ];
 
-              # NOTE: bar-layer blur (layerrule) omitted — the inline
-              # `layerrule = blur, <ns>` form is rejected by Hyprland 0.54.3
-              # (syntax changed). Re-add once the 0.54 layerrule form is
-              # confirmed; Noctalia namespaces are noctalia-bar-default /
-              # noctalia-wallpaper.
+              # NOTE: bar-layer blur (layerrule) still omitted — the inline
+              # `layerrule = blur, <ns>` keyword form used here through 0.54.3
+              # is gone (sinnix-nzr9). The "layerrule v2" special-category
+              # form that fixes the notification column (hyprland/rules.nix)
+              # would also unblock this (Noctalia namespaces are
+              # noctalia-bar-default / noctalia-wallpaper), but that's a
+              # separate, not-yet-requested change and out of scope here.
             };
 
             submaps = bindings.submaps or { };
