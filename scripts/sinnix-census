@@ -5,9 +5,41 @@
 
 """Join declaration inventories against usage evidence.
 
-Design: .agent/scratch/2026-08-11-census-design.md. Read-only. Verdicts
-degrade to `unknown` when an evidence source is unavailable — absence of
-evidence infrastructure is never reported as absence of use.
+Read-only. Verdicts degrade to `unknown` when an evidence source is
+unavailable -- absence of evidence infrastructure is never reported as
+absence of use.
+
+Declaration side: most classes below enumerate from
+/etc/sinnix/capability-index.json (modules/lib/capability-index.nix), the one
+Nix-derived answer to "what does this host declare and how do I invoke it".
+Four classes stay on a private scraper instead, each because the index is
+provably not a superset for that class (checked empirically, not assumed):
+
+  * scripts   -- the index only carries PACKAGED scripts (those invocable via
+    `sinnix <name>`, which is also why every row needs a description). A
+    "# @sinnix-package: skip" script (Hyprland keybindings, sourced-not-run)
+    has no description and cannot appear in the index at all, yet is exactly
+    as declared as a packaged one -- 14 of 93 marker-carrying scripts are
+    skip-mode on this tree. Auditing the marker directly is the only way to
+    see all of them.
+  * services  -- the index's service/ai-backend rows only cover
+    `sinnix.services.*` (mkServiceModule/mkAiService). Backup jobs
+    (modules/backup.nix), diagnostics jobs, config-drift, and several
+    feature-owned surfaces (activitywatch, socket proxies, sinex, postgres,
+    nats) register real runtime surfaces via `sinnix.runtime.surfaces`
+    directly or through mkScheduledJob outside the services option --
+    42 of 95 live runtime-inventory surfaces are invisible to the index for
+    exactly this reason. The inventory is the actual superset.
+  * models    -- LiteLLM's live model roster has no capability-index kind at
+    all; local models are declared data (flake/data/local-models.nix) the
+    index does not surface as rows.
+  * secrets   -- the index deliberately never carries secret material.
+
+The remaining classes (mcp-servers, skills, features, commands,
+capture-lanes, agent-lanes) were checked to be an index superset (or exact
+match) of what a private scraper could see, so they read the index alone --
+features/commands/capture-lanes/agent-lanes are new census coverage the
+index makes possible for the first time.
 """
 
 from __future__ import annotations
@@ -27,6 +59,7 @@ REPO = Path(os.environ.get("SINNIX_REPO", "/realm/project/sinnix"))
 CAPTURES = Path("/realm/data/machine")
 SECRET_DIR = Path("/realm/data/secrets/sinnix/secret")
 INVENTORY = Path("/etc/sinnix/runtime-inventory.json")
+CAPABILITY_INDEX = Path("/etc/sinnix/capability-index.json")
 
 
 def run(argv: list[str], timeout: int = 30) -> str | None:
@@ -84,6 +117,27 @@ def journal_count(unit: str, days: int, manager_user: bool, pattern: str | None 
     return sum(1 for line in out.splitlines() if line.strip())
 
 
+def lane_freshness(path_str: str | None, since_epoch: int) -> dict | None:
+    """A capture lane's evidence isn't a shell/agent/journal event -- it is
+    whether the path it owns has been written to inside the window. `None`
+    means "cannot tell" (missing path, permission error), never "unused"."""
+    if not path_str:
+        return None
+    path = Path(path_str)
+    try:
+        if path.is_file():
+            last = path.stat().st_mtime
+        elif path.is_dir():
+            mtimes = [path.stat().st_mtime]
+            mtimes += [entry.stat().st_mtime for entry in path.iterdir()]
+            last = max(mtimes)
+        else:
+            return None
+    except OSError:
+        return None
+    return {"n": 1 if last >= since_epoch else 0, "last": int(last)}
+
+
 def static_refs(name: str) -> list[str]:
     refs: list[str] = []
     out = run(["grep", "-rl", "--include=*.nix", name, str(REPO / "modules"), str(REPO / "flake")], timeout=60)
@@ -97,7 +151,33 @@ def static_refs(name: str) -> list[str]:
 
 # ---------- declaration inventories ----------
 
+def load_capability_index() -> dict[str, list[dict]] | None:
+    """/etc/sinnix/capability-index.json, grouped by kind, or None.
+
+    None covers both "host predates the index" and "malformed/wrong schema" --
+    every index-sourced class below then contributes zero rows for this run
+    rather than raising or guessing. A stderr note in main() makes that
+    degradation visible instead of silent.
+    """
+    try:
+        data = json.loads(CAPABILITY_INDEX.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict) or data.get("schema") != "sinnix-capability-index-v1":
+        return None
+    rows = data.get("rows")
+    if not isinstance(rows, list):
+        return None
+    by_kind: dict[str, list[dict]] = {}
+    for row in rows:
+        if isinstance(row, dict) and row.get("kind") and row.get("name"):
+            by_kind.setdefault(row["kind"], []).append(row)
+    return by_kind
+
+
 def declared_scripts() -> dict[str, dict]:
+    # Not index-sourced: see the module docstring -- skip-mode scripts have no
+    # description and cannot appear in the index.
     scripts: dict[str, dict] = {}
     for path in sorted((REPO / "scripts").iterdir()):
         if not path.is_file():
@@ -113,23 +193,19 @@ def declared_scripts() -> dict[str, dict]:
     return scripts
 
 
-def declared_mcp_servers() -> dict[str, dict]:
-    servers: dict[str, dict] = {}
-    for cfg in (HOME / ".config/claude").glob("mcp*.json"):
-        try:
-            data = json.loads(cfg.read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
-        for name in data.get("mcpServers", {}):
-            servers.setdefault(name, {"declared_in": cfg.name})
-    return servers
-
-
-def declared_skills() -> dict[str, dict]:
-    root = HOME / ".config/claude/skills"
-    if not root.is_dir():
+def declared_mcp_servers(index: dict[str, list[dict]] | None) -> dict[str, dict]:
+    if index is None:
         return {}
-    return {p.name: {"declared_in": "dots/_ai/skills"} for p in sorted(root.iterdir())}
+    return {
+        row["name"]: {"declared_in": row.get("owner") or "flake/data/mcp-registry.nix"}
+        for row in index.get("mcp-server", [])
+    }
+
+
+def declared_skills(index: dict[str, list[dict]] | None) -> dict[str, dict]:
+    if index is None:
+        return {}
+    return {row["name"]: {"declared_in": row.get("owner") or "dots/_ai/skills"} for row in index.get("skill", [])}
 
 
 def declared_models() -> dict[str, dict]:
@@ -152,6 +228,10 @@ def declared_secrets() -> dict[str, dict]:
 
 
 def declared_services() -> dict[str, dict]:
+    # Not index-sourced: see the module docstring -- the index's
+    # service/ai-backend rows are a strict subset of the runtime inventory's
+    # surfaces (backup/diagnostics/config-drift jobs and several feature-owned
+    # surfaces register outside `sinnix.services.*`).
     try:
         inv = json.loads(INVENTORY.read_text())
     except (OSError, json.JSONDecodeError):
@@ -162,6 +242,36 @@ def declared_services() -> dict[str, dict]:
                "captures": [c.get("path") for c in s.get("captures", [])]}
         for name, s in inv.get("surfaces", {}).items()
     }
+
+
+def declared_features(index: dict[str, list[dict]] | None) -> dict[str, dict]:
+    if index is None:
+        return {}
+    return {
+        row["name"]: {"declared_in": row.get("owner"), "enabled": bool(row.get("enabled"))}
+        for row in index.get("feature", [])
+    }
+
+
+def declared_commands(index: dict[str, list[dict]] | None) -> dict[str, dict]:
+    if index is None:
+        return {}
+    return {row["name"]: {"declared_in": row.get("owner")} for row in index.get("command", [])}
+
+
+def declared_capture_lanes(index: dict[str, list[dict]] | None) -> dict[str, dict]:
+    if index is None:
+        return {}
+    return {
+        row["name"]: {"declared_in": row.get("owner"), "path": row.get("path")}
+        for row in index.get("capture-lane", [])
+    }
+
+
+def declared_agent_lanes(index: dict[str, list[dict]] | None) -> dict[str, dict]:
+    if index is None:
+        return {}
+    return {row["name"]: {"declared_in": row.get("owner")} for row in index.get("agent-lane", [])}
 
 
 # ---------- census ----------
@@ -186,15 +296,28 @@ def verdict(ev: dict, refs: list[str], reachable: bool) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--window-days", type=int, default=90)
-    ap.add_argument("--classes", default="scripts,mcp-servers,skills,models,secrets,services")
+    ap.add_argument(
+        "--classes",
+        default="scripts,mcp-servers,skills,models,secrets,services,features,commands,capture-lanes,agent-lanes",
+    )
     ap.add_argument("--jsonl-out", default=str(CAPTURES / "usage-census.jsonl"))
     ap.add_argument("--no-write", action="store_true")
     args = ap.parse_args()
 
     now = int(time.time())
     since_ns = (now - args.window_days * 86400) * 1_000_000_000
+    since_epoch = now - args.window_days * 86400
     wanted = set(args.classes.split(","))
     rows: list[dict] = []
+
+    index = load_capability_index()
+    index_dependent = {"mcp-servers", "skills", "features", "commands", "capture-lanes", "agent-lanes"}
+    if index is None and wanted & index_dependent:
+        print(
+            f"sinnix-census: no usable capability index at {CAPABILITY_INDEX}; "
+            f"skipping index-derived classes: {', '.join(sorted(wanted & index_dependent))}",
+            file=sys.stderr,
+        )
 
     if "scripts" in wanted:
         scripts = declared_scripts()
@@ -235,14 +358,14 @@ def main() -> int:
             })
 
     if "mcp-servers" in wanted:
-        for name, meta in declared_mcp_servers().items():
+        for name, meta in declared_mcp_servers(index).items():
             ev = {"atuin": None, "polylogue": polylogue_evidence(f"mcp__{name}__", args.window_days), "journald": None}
             rows.append({"class": "mcp-servers", "name": name, **meta,
                          "evidence": ev, "static_refs": [],
                          "verdict": verdict(ev, [], False)})
 
     if "skills" in wanted:
-        for name, meta in declared_skills().items():
+        for name, meta in declared_skills(index).items():
             ev = {"atuin": None, "polylogue": polylogue_evidence(name, args.window_days), "journald": None}
             rows.append({"class": "skills", "name": name, **meta,
                          "evidence": ev, "static_refs": [],
@@ -273,7 +396,11 @@ def main() -> int:
     if "services" in wanted:
         for name, meta in declared_services().items():
             unit = meta.get("unit") or ""
-            kind = meta.get("kind", "service")
+            # `kind` is always a real systemd unit type and `unit` always
+            # ends in it -- CLAUDE.md's runtime-governance invariant, so the
+            # unit suffix alone tells journalctl-eligibility without needing
+            # a separate field.
+            kind = unit.rsplit(".", 1)[-1] if "." in unit else meta.get("kind", "service")
             n = None
             if kind in ("service", "timer", "socket", "target"):
                 # journalctl accepts the full unit name for all these kinds;
@@ -290,6 +417,65 @@ def main() -> int:
                          "evidence": ev, "static_refs": [],
                          "verdict": verdict(ev, [], False)})
 
+    if "features" in wanted:
+        features = declared_features(index)
+        # A feature isn't invoked by its dotted id ("cli.docling"); the shell
+        # or agent evidence that exists for it, if any, is under the leaf
+        # name ("docling").
+        leaves = {name: name.rsplit(".", 1)[-1] for name in features}
+        atuin = atuin_evidence(sorted(set(leaves.values())), since_ns)
+        for name, meta in features.items():
+            leaf = leaves[name]
+            ev = {
+                "atuin": atuin.get(leaf) if atuin else None,
+                "polylogue": polylogue_evidence(leaf, args.window_days),
+                "journald": None,
+            }
+            # Reachable = the host actually turned it on; an enabled feature
+            # with no direct evidence still reads as "present", not "unused".
+            rows.append({"class": "features", "name": name, **meta,
+                         "evidence": ev, "static_refs": [],
+                         "verdict": verdict(ev, [], meta.get("enabled", False))})
+
+    if "commands" in wanted:
+        commands = declared_commands(index)
+        atuin = atuin_evidence(list(commands), since_ns)
+        for name, meta in commands.items():
+            ev = {
+                "atuin": atuin.get(name) if atuin else None,
+                "polylogue": polylogue_evidence(name, args.window_days),
+                "journald": None,
+            }
+            rows.append({"class": "commands", "name": name, **meta,
+                         "evidence": ev, "static_refs": [],
+                         "verdict": verdict(ev, [], False)})
+
+    if "capture-lanes" in wanted:
+        for name, meta in declared_capture_lanes(index).items():
+            fresh = lane_freshness(meta.get("path"), since_epoch)
+            ev = {"atuin": None, "polylogue": None, "journald": None, "filesystem": fresh}
+            if fresh is None:
+                v = "unknown"
+            elif fresh["n"]:
+                v = "active"
+            else:
+                v = "unused-in-window"
+            rows.append({"class": "capture-lanes", "name": name, **meta,
+                         "evidence": ev, "static_refs": [], "verdict": v})
+
+    if "agent-lanes" in wanted:
+        lanes = declared_agent_lanes(index)
+        atuin = atuin_evidence(list(lanes), since_ns)
+        for name, meta in lanes.items():
+            ev = {
+                "atuin": atuin.get(name) if atuin else None,
+                "polylogue": polylogue_evidence(name, args.window_days),
+                "journald": None,
+            }
+            rows.append({"class": "agent-lanes", "name": name, **meta,
+                         "evidence": ev, "static_refs": [],
+                         "verdict": verdict(ev, [], False)})
+
     stamp = {"ts": now, "window_days": args.window_days}
     if not args.no_write:
         out = Path(args.jsonl_out)
@@ -303,7 +489,7 @@ def main() -> int:
     rows.sort(key=lambda r: (order.get(r["verdict"], 9), r["class"], r["name"]))
     width = max((len(r["name"]) for r in rows), default=10)
     for row in rows:
-        print(f"{row['verdict']:<22} {row['class']:<12} {row['name']:<{width}}")
+        print(f"{row['verdict']:<22} {row['class']:<14} {row['name']:<{width}}")
     counts: dict[str, int] = {}
     for row in rows:
         counts[row["verdict"]] = counts.get(row["verdict"], 0) + 1
