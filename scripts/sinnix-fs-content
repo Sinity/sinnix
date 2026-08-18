@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Index content-bearing files across the estate — hashes, titles, excerpts — to find what is strewn where
+# description: Index content-bearing files across the system — hashes, titles, excerpts — to find what is strewn where
 # runtimeInputs: python3 duckdb coreutils file
 
 """File-level index of the things a person wrote or collected.
 
 The directory inventory answers "how big is this and who owns it". It cannot
-answer the question that actually matters for reorganising an estate: *which
+answer the question that actually matters for reorganising a system: *which
 files belong together but are not stored together*. That is a content
 question, and it needs content.
 
@@ -61,7 +61,7 @@ EXCLUDE_DIR_PARTS = {
     "site-packages", ".cache", "share/doc",
 }
 EXCLUDE_PREFIXES = (
-    # btrfs snapshot root. Every snapshot mirrors the whole estate, so without
+    # btrfs snapshot root. Every snapshot mirrors the whole system, so without
     # this the index is mostly copies of itself: measured 3.85M of 4.43M files
     # and 203 GB of 263 GB. It also produces phantom findings — a stray-file
     # search over the polluted index reported 821 hits where 8 were real.
@@ -88,7 +88,7 @@ YAML_TITLE = re.compile(r"^title:\s*(.+?)\s*$", re.M)
 
 
 def safe(value):
-    """Filenames on this estate are not all valid UTF-8.
+    """Filenames on this system are not all valid UTF-8.
 
     os.scandir hands back surrogate escapes for undecodable bytes, and
     json.dumps then refuses to encode them -- killing a whole-filesystem walk
@@ -120,7 +120,7 @@ def magic_type(path: Path) -> str | None:
     (CONTENT_EXTS), and extensions lie: a renamed archive, a misnamed export,
     a script saved as .txt. magic_type is the cheap cross-check -- one
     subprocess call, no new library dependency, and it is what would have
-    caught this estate's own mismatched-build-system class of bug earlier if
+    caught this system's own mismatched-build-system class of bug earlier if
     it had existed on the file layer rather than only the config layer.
     """
     try:
@@ -138,7 +138,7 @@ def extract(path: Path, size: int, ext: str) -> tuple[str | None, str | None, in
 
     Returns the reason in the third slot instead of swallowing it. A file that
     could not be read used to be indistinguishable from a file with no title:
-    both produced (None, None). That is the same shape as the estate's other
+    both produced (None, None). That is the same shape as sinnix's other
     silent-success bugs -- the sibling scanner sinnix-fs-inventory already gets
     this right by writing an explicit permission-denied row.
     """

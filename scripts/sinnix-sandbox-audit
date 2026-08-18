@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Report gaps between what the estate declares and what it actually does — confinement, empty lanes, units that never succeed
+# description: Report gaps between what sinnix declares and what it actually does — confinement, empty lanes, units that never succeed
 # runtimeInputs: bash coreutils findutils gawk gnugrep jq systemd audit
 set -euo pipefail
 
@@ -158,7 +158,7 @@ done < <(jq -r '.surfaces | to_entries[]
 
 # Capture directories nobody declares. A lane that outlives the module that
 # created it keeps its data out of every freshness and coverage check, and
-# reads as estate data while belonging to nothing.
+# reads as live data while belonging to nothing.
 declared_paths="$(jq -r '.surfaces[] | (.captures // [])[] | .path // empty' "$INVENTORY")"
 while IFS= read -r dir; do
   [[ -z "$dir" ]] && continue

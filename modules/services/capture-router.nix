@@ -1,6 +1,6 @@
 # capture-router: pull the router's own evidence of the network into the lake.
 #
-# sinnix-gw is the estate's only whole-network vantage point. It collects
+# sinnix-gw is sinnix's only whole-network vantage point. It collects
 # four kinds of signal locally:
 #   - a persistent syslog (/overlay/log/syslog + .old) that otherwise rotates
 #     away unharvested (dropbear auth, dnsmasq, hostapd, netifd events);

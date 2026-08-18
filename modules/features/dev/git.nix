@@ -118,7 +118,7 @@ mkFeatureModule {
           };
         };
 
-        # AGENTS.md is a committed symlink to CLAUDE.md in this estate's repos
+        # AGENTS.md is a committed symlink to CLAUDE.md in sinnix's repos
         # but noise in everyone else's; result* are the symlinks `nix build`
         # drops into whatever directory it was run from.
         #

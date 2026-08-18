@@ -2,7 +2,7 @@
 #
 # The device serves unauthenticated JSON on the LAN at
 # http://<ip>/air-data/latest -- no cloud account, no API key, no rate limit
-# beyond politeness. It is the estate's only sensor lane covering the room
+# beyond politeness. It is sinnix's only sensor lane covering the room
 # itself rather than the machine in it.
 #
 # The device does not answer ICMP, so it is invisible to a plain `nmap -sn`

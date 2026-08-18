@@ -15,7 +15,7 @@ let
     ;
   username = config.sinnix.user.name;
   primaryGroupName = config.users.users.${username}.group;
-  # Moved off capturesRoot 2026-08-17 (estate charter subject recut: "ai/
+  # Moved off capturesRoot 2026-08-17 (system charter subject recut: "ai/
   # absorbs ... captures/polylogue"). polylogued.service was not running at
   # move time (confirmed: unit not found), so no live daemon held this open.
   polylogueArchiveRoot = "${aiRoot}/polylogue";

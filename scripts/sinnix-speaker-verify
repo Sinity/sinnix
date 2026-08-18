@@ -8,7 +8,7 @@ enrolled voice centroid (sinnix-7oly).
 
 DESIGN NOTE, load-bearing: per the bead's own explicit framing, this is
 FRICTION AND ATTRIBUTION, never an authorization boundary -- replay and
-voice-cloning (this estate runs Kokoro TTS locally, F5-TTS is on the sinnix-w9l
+voice-cloning (this system runs Kokoro TTS locally, F5-TTS is on the sinnix-w9l
 roadmap) both defeat voice as an authenticator. Callers must tier actions by
 blast radius and never gate a destructive/irreversible action on this score
 alone. See sinnix-7oly for the full tiering design.

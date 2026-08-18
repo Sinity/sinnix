@@ -11,7 +11,7 @@ succeeds.
 
 What was NOT fine is below: every failure was swallowed into an empty result,
 so a query that could not run rendered as a source with nothing in it. An
-empty panel and a broken panel are the same picture, which is the estate's
+empty panel and a broken panel are the same picture, which is sinnix's
 most-repeated failure shape. Errors are recorded and surfaced now, and the
 callers still get their empty value so one unreadable database cannot take the
 whole observation down.

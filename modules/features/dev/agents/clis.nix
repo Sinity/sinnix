@@ -141,7 +141,7 @@ mkFeatureModule {
           };
           # Points at the shared STT hub (modules/services/stt.nix, Parakeet
           # TDT) rather than hermes's embedded faster-whisper, so one
-          # transcription engine serves the estate. The hub ignores the model
+          # transcription engine serves sinnix. The hub ignores the model
           # field -- it has one engine -- but the name is kept honest rather
           # than left saying "whisper-1" about something that is not whisper.
           # api_key is a dummy literal: the hub is

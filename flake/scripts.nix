@@ -36,7 +36,7 @@ let
       # @sinnix-scope resolve to the generated dispatcher, same pattern as
       # @sinnix-steer above.
       sinnix-scope = externalPackages.sinnix-scope;
-      # The estate's bd, not nixpkgs'. A script naming bare `beads` in its
+      # Sinnix's bd, not nixpkgs'. A script naming bare `beads` in its
       # frontmatter gets pkgs.beads (1.0.3), whose `export` has no -C flag --
       # which failed as a usage dump swallowed by `|| true`.
       beads = externalPackages.beads;

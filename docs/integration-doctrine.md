@@ -52,7 +52,7 @@ Polylogue stays an evidence plane, not a general assistant. In scope:
 semantic search over its own AI-session archive; cross-session derived
 products that are session-scoped (topic threads, a decision index answering
 "what did we decide about X" with line citations, per-project conversation
-timelines); the estate's conversational-memory MCP surface. Anything shaped
+timelines); sinnix's conversational-memory MCP surface. Anything shaped
 like a general RAG-over-notes assistant, scheduled research automations, or
 editor plugins is out of scope for polylogue specifically — those are a
 different capability, if ever built.
