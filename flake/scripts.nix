@@ -271,6 +271,8 @@ let
 
     sinnix-ops-reducer = pkgs.callPackage ../pkgs/sinnix-ops-reducer/pkg.nix {
       inherit sinnix-lib;
+      kittyPackage = pkgs.kitty;
+      ahaPackage = pkgs.aha;
     };
 
     # Shared Python library (importable, not a CLI): atomic state, ledgers,

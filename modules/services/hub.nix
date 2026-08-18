@@ -31,6 +31,16 @@
 # to run, coalesced so a comparison session refits the model once rather than
 # once per tap.
 #
+# ── Where the terminal views come from ──────────────────────────────────────
+# `/terminals/*` is also a route family on that same reducer (sinnix-859p),
+# absorbed from the retired `sinnix-terminal-view` daemon: same URLs, same
+# response shapes, same design doctrine (see the reducer's terminals.py
+# module docstring). It used to be its own Unix-socket process behind
+# `handle_path /terminals/*`; now it falls through the same catch-all
+# `handle` below as every page, so kitty's control sockets and the scrollback
+# capture files it reads are reached from the one process already running
+# under the operator's own uid, not a second one.
+#
 # Auth is unchanged by that move. The reducer treats its Unix socket as
 # authorized (it is 0600 in the operator's runtime dir) and still demands a
 # bearer token on its loopback TCP listener, so proxying the page paths through
@@ -249,7 +259,6 @@ mkServiceModule {
       # config text, so the units hand the same directory to both and neither
       # side needs the uid at evaluation time.
       opsSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/ops.sock";
-      terminalSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/terminal-view.sock";
       phoneSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/phone-dispatcher.sock";
 
       frontendSites = lib.concatStringsSep "\n" (
@@ -324,13 +333,6 @@ mkServiceModule {
           # as file://, Origin null) is deliberately not given to /ops/*.
           handle /feedback* {
             reverse_proxy unix/${opsSocket}
-          }
-
-          # Read-only kitty terminal contents + scrollback history
-          # (sinnix-qxm8). No auth beyond the tailnet boundary the rest of
-          # the hub already relies on -- this surface never accepts writes.
-          handle_path /terminals/* {
-            reverse_proxy unix/${terminalSocket}
           }
 
           # The phone's live plane. Everything it carries also works through
@@ -495,7 +497,6 @@ mkServiceModule {
       ];
 
       environment.systemPackages = [
-        scriptPkgs.sinnix-terminal-view
         scriptPkgs.sinnix-phone-dispatcher
       ];
 
@@ -560,20 +561,10 @@ mkServiceModule {
             }
           ];
         };
-        hub-terminal-view = {
-          unit = "sinnix-hub-terminal-view.service";
-          manager = "user";
-          resourceClass = "interactive-agent";
-          observe = {
-            enable = true;
-            restartable = true;
-          };
-        };
       };
 
       home-manager.users.${userName} = {
         home.packages = [
-          scriptPkgs.sinnix-terminal-view
           scriptPkgs.sinnix-elicit
         ];
 
@@ -653,23 +644,6 @@ mkServiceModule {
             WatchdogSec = "60s";
             NoNewPrivileges = true;
             UMask = "0077";
-          };
-          Install.WantedBy = [ "default.target" ];
-        };
-
-        systemd.user.services.sinnix-hub-terminal-view = {
-          Unit.Description = "Read-only kitty terminal contents + scrollback history over the hub";
-          Service = {
-            Type = "simple";
-            ExecStart = lib.concatStringsSep " " [
-              "${scriptPkgs.sinnix-terminal-view}/bin/sinnix-terminal-view"
-              "--socket %t/sinnix/terminal-view.sock"
-              "--history-dir /realm/data/activity/kitty-scrollback"
-            ];
-            Restart = "on-failure";
-            RestartSec = "5s";
-            NoNewPrivileges = true;
-            UMask = "0022";
           };
           Install.WantedBy = [ "default.target" ];
         };

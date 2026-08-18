@@ -413,6 +413,7 @@ PAGES = (
     ("/ai/", "ai"),
     ("/shaders/", "shaders"),
     ("/reports/", "reports"),
+    ("/terminals/", "terminals"),
 )
 
 
