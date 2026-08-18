@@ -34,7 +34,7 @@ in
     # the sinnix CLI, shared skills, and curated beads/git/agent-dispatch
     # references, all regenerated fresh on open
     # (sinnix-v034). Regenerate-then-open, not a static file.
-    "SUPER SHIFT, Slash, Open the full sinnix cheatsheet, exec, ${script "sinnix-cheatsheet"} && ${script "browser-app"} http://127.0.0.1:8880/reports/cheatsheet.html"
+    "SUPER SHIFT, Slash, Open the full sinnix cheatsheet, exec, ${script "sinnix-cheatsheet"} && ${script "sinnix-browser-app"} http://127.0.0.1:8880/reports/cheatsheet.html"
     "SUPER, H, Focus the window to the left, exec, ${script "kitty-hypr-nav"} focus left"
     "SUPER, J, Focus the window below, exec, ${script "kitty-hypr-nav"} focus down"
     "SUPER, K, Focus the window above, exec, ${script "kitty-hypr-nav"} focus up"
