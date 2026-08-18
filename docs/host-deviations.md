@@ -70,4 +70,3 @@ _No sinnix.features/sinnix.services declarations found in this host's \*.nix fil
 | `sinnix.services.url-ledger.enable`                    | `true`  |
 | `sinnix.services.weechat-log-sealer.enable`            | `true`  |
 | `sinnix.services.whisper.enable`                       | `true`  |
-unrelated
