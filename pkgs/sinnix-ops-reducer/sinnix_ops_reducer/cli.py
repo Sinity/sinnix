@@ -89,6 +89,10 @@ def emit_failure_command(argv: list[str]) -> int:
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "emit-failure":
         raise SystemExit(emit_failure_command(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "orient":
+        from .orient import main as orient_main
+
+        raise SystemExit(orient_main(sys.argv[2:]))
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--runtime-dir",
