@@ -489,6 +489,64 @@ resolve_task_workdir() {
   fi
 }
 
+# Appends the runner invocation shared by batch and kitty launch, into the
+# array named by $1 (nameref), for task $2 with its per-task file paths.
+build_runner_cmd() {
+  local -n out_cmd="$1"
+  local prompt_name="$2" prompt_file="$3" log_file="$4" last_file="$5" json_file="$6" task_workdir="$7"
+
+  out_cmd=(
+    "${runner}"
+    --agent "${agent}"
+    --workdir "${task_workdir}"
+    --prompt-file "${prompt_file}"
+    --log-file "${log_file}"
+  )
+  if [[ -n ${job_prefix} ]]; then
+    out_cmd+=(--job-id "${job_prefix}${prompt_name}" --work-item "${prompt_name}")
+  fi
+
+  if [[ -n ${json_file} ]]; then
+    out_cmd+=(--json-file "${json_file}")
+  fi
+  if [[ -n ${last_file} ]]; then
+    out_cmd+=(--last-file "${last_file}")
+  fi
+  if [[ -n ${model} ]]; then
+    out_cmd+=(--model "${model}")
+  fi
+  if [[ -n ${reasoning_effort} ]]; then
+    out_cmd+=(--reasoning-effort "${reasoning_effort}")
+  fi
+  if [[ -n ${schema_file} ]]; then
+    out_cmd+=(--schema-file "${schema_file}")
+  fi
+  if [[ ${json_mode} -eq 1 ]]; then
+    out_cmd+=(--json)
+  fi
+  if [[ ${skip_agents_render} -eq 1 ]]; then
+    out_cmd+=(--skip-agents-render)
+  fi
+  if [[ ${ephemeral} -eq 1 ]]; then
+    out_cmd+=(--ephemeral)
+  fi
+  if [[ ${claude_api_key_auth} -eq 1 ]]; then
+    out_cmd+=(--claude-api-key-auth)
+  fi
+  if [[ -n ${codex_sandbox} ]]; then
+    out_cmd+=(--sandbox "${codex_sandbox}")
+  fi
+  if [[ -n ${codex_home} ]]; then
+    out_cmd+=(--codex-home "${codex_home}")
+  fi
+  if [[ ${codex_skip_git_check} -eq 1 ]]; then
+    out_cmd+=(--skip-git-repo-check)
+  fi
+  if [[ -n ${max_retries} ]]; then
+    out_cmd+=(--max-retries "${max_retries}")
+  fi
+}
+
 run_batch_agent() {
   local prompt_name="$1"
   local prompt_file="${prompt_dir}/${prompt_name}.prompt"
@@ -507,56 +565,8 @@ run_batch_agent() {
     return 1
   fi
 
-  local -a cmd=(
-    "${runner}"
-    --agent "${agent}"
-    --workdir "${task_workdir}"
-    --prompt-file "${prompt_file}"
-    --log-file "${log_file}"
-  )
-  if [[ -n ${job_prefix} ]]; then
-    cmd+=(--job-id "${job_prefix}${prompt_name}" --work-item "${prompt_name}")
-  fi
-
-  if [[ -n ${json_file} ]]; then
-    cmd+=(--json-file "${json_file}")
-  fi
-  if [[ -n ${last_file} ]]; then
-    cmd+=(--last-file "${last_file}")
-  fi
-  if [[ -n ${model} ]]; then
-    cmd+=(--model "${model}")
-  fi
-  if [[ -n ${reasoning_effort} ]]; then
-    cmd+=(--reasoning-effort "${reasoning_effort}")
-  fi
-  if [[ -n ${schema_file} ]]; then
-    cmd+=(--schema-file "${schema_file}")
-  fi
-  if [[ ${json_mode} -eq 1 ]]; then
-    cmd+=(--json)
-  fi
-  if [[ ${skip_agents_render} -eq 1 ]]; then
-    cmd+=(--skip-agents-render)
-  fi
-  if [[ ${ephemeral} -eq 1 ]]; then
-    cmd+=(--ephemeral)
-  fi
-  if [[ ${claude_api_key_auth} -eq 1 ]]; then
-    cmd+=(--claude-api-key-auth)
-  fi
-  if [[ -n ${codex_sandbox} ]]; then
-    cmd+=(--sandbox "${codex_sandbox}")
-  fi
-  if [[ -n ${codex_home} ]]; then
-    cmd+=(--codex-home "${codex_home}")
-  fi
-  if [[ ${codex_skip_git_check} -eq 1 ]]; then
-    cmd+=(--skip-git-repo-check)
-  fi
-  if [[ -n ${max_retries} ]]; then
-    cmd+=(--max-retries "${max_retries}")
-  fi
+  local -a cmd
+  build_runner_cmd cmd "${prompt_name}" "${prompt_file}" "${log_file}" "${last_file}" "${json_file}" "${task_workdir}"
 
   if [[ ${dry_run} -eq 1 ]]; then
     printf 'DRY-RUN (%s): ' "${prompt_name}"
@@ -593,56 +603,8 @@ run_kitty_agent() {
     return 1
   fi
 
-  local -a launch_cmd=(
-    "${runner}"
-    --agent "${agent}"
-    --workdir "${task_workdir}"
-    --prompt-file "${prompt_file}"
-    --log-file "${log_file}"
-  )
-  if [[ -n ${job_prefix} ]]; then
-    launch_cmd+=(--job-id "${job_prefix}${prompt_name}" --work-item "${prompt_name}")
-  fi
-
-  if [[ -n ${json_file} ]]; then
-    launch_cmd+=(--json-file "${json_file}")
-  fi
-  if [[ -n ${last_file} ]]; then
-    launch_cmd+=(--last-file "${last_file}")
-  fi
-  if [[ -n ${model} ]]; then
-    launch_cmd+=(--model "${model}")
-  fi
-  if [[ -n ${reasoning_effort} ]]; then
-    launch_cmd+=(--reasoning-effort "${reasoning_effort}")
-  fi
-  if [[ -n ${schema_file} ]]; then
-    launch_cmd+=(--schema-file "${schema_file}")
-  fi
-  if [[ ${json_mode} -eq 1 ]]; then
-    launch_cmd+=(--json)
-  fi
-  if [[ ${skip_agents_render} -eq 1 ]]; then
-    launch_cmd+=(--skip-agents-render)
-  fi
-  if [[ ${ephemeral} -eq 1 ]]; then
-    launch_cmd+=(--ephemeral)
-  fi
-  if [[ ${claude_api_key_auth} -eq 1 ]]; then
-    launch_cmd+=(--claude-api-key-auth)
-  fi
-  if [[ -n ${codex_sandbox} ]]; then
-    launch_cmd+=(--sandbox "${codex_sandbox}")
-  fi
-  if [[ -n ${codex_home} ]]; then
-    launch_cmd+=(--codex-home "${codex_home}")
-  fi
-  if [[ ${codex_skip_git_check} -eq 1 ]]; then
-    launch_cmd+=(--skip-git-repo-check)
-  fi
-  if [[ -n ${max_retries} ]]; then
-    launch_cmd+=(--max-retries "${max_retries}")
-  fi
+  local -a launch_cmd
+  build_runner_cmd launch_cmd "${prompt_name}" "${prompt_file}" "${log_file}" "${last_file}" "${json_file}" "${task_workdir}"
 
   local window_title="agent-${prompt_name//[^A-Za-z0-9_.-]/-}"
 
