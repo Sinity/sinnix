@@ -500,7 +500,28 @@ in
     description = "Canonical Sinnix runtime surfaces, resource classes, slices, command policy, and capture inventory.";
   };
 
-  config = {
+  config = lib.mkMerge [
+    (lib.sinnix.mkScheduledJob
+      {
+        inherit config;
+        unitName = "sinnix-config-drift";
+        description = "Compare live state with the evaluated Sinnix configuration";
+        surface = config.sinnix.runtime.surfaces.config-drift;
+      }
+      {
+        execStart = "${scriptPkgs.sinnix-config-drift}/bin/sinnix-config-drift --manifest /etc/sinnix/config.json --output ${cfg.paths.machineRoot}/config-drift.jsonl";
+        unit = {
+          after = [ "local-fs.target" ];
+          wants = [ "local-fs.target" ];
+        };
+        timer = {
+          onBootSec = "2min";
+          onUnitActiveSec = "5min";
+          persistent = true;
+        };
+      }
+    )
+    {
     assertions = [
       {
         assertion = duplicateSurfaceUnitKeys == [ ];
@@ -535,7 +556,23 @@ in
       }
     ];
 
-    sinnix.runtime.surfaces = runtimeDefaults.baseSurfaces;
+    sinnix.runtime.surfaces = runtimeDefaults.baseSurfaces // {
+      # The drift probe itself is governed like everything else it audits:
+      # classed, observed, and its output watched as a lane, so a silently
+      # dead probe is a health verdict rather than a quiet absence.
+      config-drift = {
+        unit = "sinnix-config-drift.service";
+        resourceClass = "background-maintenance";
+        observe.enable = true;
+        captures = [
+          {
+            name = "config-drift";
+            path = "${cfg.paths.machineRoot}/config-drift.jsonl";
+            staleAfterSeconds = 1800;
+          }
+        ];
+      };
+    };
 
     environment.etc."sinnix/runtime-inventory.json" = {
       text = builtins.toJSON config.sinnix.runtime.inventory;
@@ -582,15 +619,6 @@ in
                 ExecStart = "${unitFailureNotify}/bin/sinnix-unit-failure-notify %i";
               };
             };
-            sinnix-config-drift = {
-              description = "Compare live state with the evaluated Sinnix configuration";
-              after = [ "local-fs.target" ];
-              wants = [ "local-fs.target" ];
-              serviceConfig = {
-                Type = "oneshot";
-                ExecStart = "${scriptPkgs.sinnix-config-drift}/bin/sinnix-config-drift --manifest /etc/sinnix/config.json --output ${cfg.paths.machineRoot}/config-drift.jsonl";
-              };
-            };
           }
           //
             lib.mapAttrs'
@@ -608,14 +636,6 @@ in
         )
       ]
     );
-    systemd.timers.sinnix-config-drift = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnBootSec = "2min";
-        OnUnitActiveSec = "5min";
-        Persistent = true;
-      };
-    };
     home-manager.users.${cfg.user.name} = {
       systemd.user.services."sinnix-unit-failure-notify@" = {
         Unit.Description = "Record + surface the failure of user unit %i";
@@ -652,5 +672,6 @@ in
             ) surfaces
           );
     };
-  };
+    }
+  ];
 }

@@ -10,6 +10,10 @@ let
   # so it needs no reference to mkServiceModule itself -- just lib, like
   # featureLib/systemdLib/overlayLib.
   captureLaneLib = import ../modules/lib/capture-lane.nix { inherit lib; };
+  # The one renderer for scheduled-oneshot jobs; mkServiceModule's `job`
+  # argument is sugar over it, and multi-job or non-factory modules call it
+  # directly as lib.sinnix.mkScheduledJob.
+  scheduledJobLib = import ../modules/lib/scheduled-job.nix { inherit lib; };
 
   # Pure data tables under flake/data/ are evaluated once at flake-init and
   # shared by reference across every host evaluation. NixOS modules consume
@@ -43,6 +47,7 @@ let
     _final: _prev: {
       sinnix = {
         inherit (featureLib) mkPAMLimits mkSecretLookup mkAutoImports;
+        mkScheduledJob = scheduledJobLib;
         systemd = systemdLib;
         inherit (systemdLib) mkRuntimeServiceConfig;
         overlay = overlayLib;
