@@ -6,7 +6,14 @@ from rank_core.store import Comparison
 
 
 def make_pair(id_, a, b, winner):
-    return Comparison(id=id_, at="2026-08-18T00:00:00Z", kind="pair", set=[a, b], winner=winner, weight=1.0)
+    return Comparison(
+        id=id_,
+        at="2026-08-18T00:00:00Z",
+        kind="pair",
+        set=[a, b],
+        winner=winner,
+        weight=1.0,
+    )
 
 
 def test_selector_bridges_disconnected_components():
@@ -18,9 +25,17 @@ def test_selector_bridges_disconnected_components():
     comparisons = [make_pair("c0", "A", "B", "A"), make_pair("c1", "C", "D", "C")]
     result = fit(items, comparisons)
     components = {r.id: r.component for r in result.records.values()}
-    assert len({components["A"], components["C"]}) == 2  # sanity: genuinely disconnected
+    assert (
+        len({components["A"], components["C"]}) == 2
+    )  # sanity: genuinely disconnected
 
-    selector = Selector(item_ids=items, grid_n=2, bridge_every=3, explore_every=1000, rng=random.Random(1))
+    selector = Selector(
+        item_ids=items,
+        grid_n=2,
+        bridge_every=3,
+        explore_every=1000,
+        rng=random.Random(1),
+    )
     selector.update_fit(result)
 
     saw_bridge = False
@@ -40,7 +55,13 @@ def test_selector_no_bridge_when_single_component():
         make_pair("c2", "C", "D", "C"),
     ]
     result = fit(items, comparisons)
-    selector = Selector(item_ids=items, grid_n=2, bridge_every=1, explore_every=1000, rng=random.Random(1))
+    selector = Selector(
+        item_ids=items,
+        grid_n=2,
+        bridge_every=1,
+        explore_every=1000,
+        rng=random.Random(1),
+    )
     selector.update_fit(result)
     for _ in range(5):
         _, strategy = selector.pick_set()

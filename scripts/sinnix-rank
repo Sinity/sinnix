@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Pairwise/choice-set preference ranking CLI (backlog, ideas, any list) over the shared rank-core engine
+# runtimeInputs: coreutils @sinnix-steer
+# pythonPackages: @sinnix-rank-core
+
+"""Text frontend for rank_core: register items into a domain, run resorter-
+style pairwise prompting sessions, check the fitted ranking + stopping
+statement, and draw one item per a configurable policy (Thompson sampling by
+default) -- optionally committing the draw into steering as a forecastable
+intention.
+
+Store convention (design doc section 2): raw comparisons/items are
+behavioral capture, kept forever under
+/realm/data/captures/ranking/<domain>/; derived fits are never written back
+into that directory, so a full refit from raw comparisons stays reproducible
+at any time -- `status`/`spin` always refit in memory rather than trusting a
+cached theta file.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+from rank_core import Item, Selector, Store, draw, fit, top_k_stability
+from rank_core.draw import POLICIES
+
+CAPTURE_ROOT = Path("/realm/data/captures/ranking")
+BACKLOG_ACTIVITY_NAME = "backlog session"
+
+
+def domain_dir(domain: str) -> Path:
+    return CAPTURE_ROOT / domain
+
+
+def load_items_input(raw: str) -> list[Item]:
+    """Accepts a JSON array (e.g. `bd ready --json`) or JSONL, one object per
+    line. Each record needs an id; label falls back to `title` (bd's field)
+    then the id itself. Every other field is carried through as meta.
+    """
+    raw = raw.strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        records = parsed if isinstance(parsed, list) else [parsed]
+    except json.JSONDecodeError:
+        records = [json.loads(line) for line in raw.splitlines() if line.strip()]
+
+    items = []
+    for rec in records:
+        if not isinstance(rec, dict) or "id" not in rec:
+            raise ValueError(f"item record missing 'id': {rec!r}")
+        item_id = str(rec["id"])
+        label = rec.get("label") or rec.get("title") or item_id
+        meta = {k: v for k, v in rec.items() if k not in ("id", "label")}
+        items.append(Item(id=item_id, label=label, meta=meta))
+    return items
+
+
+def cmd_add(args: argparse.Namespace) -> int:
+    raw = sys.stdin.read() if args.items == "-" else Path(args.items).read_text()
+    items = load_items_input(raw)
+    store = Store(domain_dir(args.domain))
+    existing = store.load_items()
+    new_items = [i for i in items if i.id not in existing]
+    n = store.add_items(new_items)
+    print(f"added {n} new item(s) to domain {args.domain!r} ({len(items) - n} already registered)")
+    return 0
+
+
+def _fit_domain(store: Store):
+    items = store.load_items()
+    comparisons = store.load_comparisons()
+    result = fit(list(items.keys()), comparisons)
+    return items, comparisons, result
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    store = Store(domain_dir(args.domain))
+    items, comparisons, result = _fit_domain(store)
+    if not items:
+        print(f"domain {args.domain!r} has no items yet -- `sinnix-rank add {args.domain} --items ...`")
+        return 1
+    stability = top_k_stability(result, k=args.k)
+    ranked = result.ranked()
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": r.id,
+                            "label": items[r.id].label if r.id in items else r.id,
+                            "theta": r.theta,
+                            "se": r.se,
+                            "matches": r.matches,
+                            "component": r.component,
+                        }
+                        for r in ranked
+                    ],
+                    "stability": {"top_k": stability.top_k, "p_stable": stability.p_stable, "k": stability.k},
+                    "comparisons": len(comparisons),
+                },
+                indent=2,
+            )
+        )
+        return 0
+    components = {r.component for r in ranked}
+    for i, r in enumerate(ranked, start=1):
+        label = items[r.id].label if r.id in items else r.id
+        print(f"{i:>3}. {label}  theta={r.theta:+.3f} se={r.se:.3f} matches={r.matches:.0f} comp={r.component}")
+    if len(components) > 1:
+        print(f"\n{len(components)} disconnected comparison components -- ranking across them is not yet meaningful")
+    print(
+        f"\ntop-{stability.k} stability: {stability.p_stable:.0%} "
+        f"({', '.join(items[i].label if i in items else i for i in stability.top_k)})"
+    )
+    return 0
+
+
+def cmd_compare(args: argparse.Namespace) -> int:
+    store = Store(domain_dir(args.domain))
+    items, comparisons, result = _fit_domain(store)
+    if len(items) < args.grid:
+        print(f"domain {args.domain!r} has fewer than {args.grid} items -- add more first")
+        return 1
+
+    selector = Selector(item_ids=list(items.keys()), grid_n=args.grid)
+    selector.seed_counts(comparisons)
+    selector.update_fit(result)
+    last_id: str | None = None
+
+    for round_n in range(1, args.rounds + 1):
+        chosen, strategy = selector.pick_set()
+        print(f"\n[{round_n}/{args.rounds}] ({strategy})")
+        for i, item_id in enumerate(chosen, start=1):
+            print(f"  {i}. {items[item_id].label}")
+        answer = input("  pick number, 's' skip, 'u' undo, 'q' quit: ").strip().lower()
+        if answer == "q":
+            break
+        if answer == "u":
+            if last_id:
+                store.undo(last_id)
+                print("  undone")
+                last_id = None
+            continue
+        if answer == "s":
+            store.record_comparison(chosen, winner=None, kind="skip", context=args.context)
+            continue
+        if not answer.isdigit() or not (1 <= int(answer) <= len(chosen)):
+            print("  not understood, skipping")
+            continue
+        winner = chosen[int(answer) - 1]
+        last_id = store.record_comparison(chosen, winner=winner, kind="pair" if args.grid == 2 else "choice-set", context=args.context)
+
+        comparisons = store.load_comparisons()
+        result = fit(list(items.keys()), comparisons)
+        selector.update_fit(result)
+
+        if round_n % args.report_every == 0:
+            stability = top_k_stability(result, k=args.k)
+            print(f"  top-{stability.k} stability: {stability.p_stable:.0%}")
+            if stability.p_stable >= args.stop_at:
+                print(f"  reached stability threshold ({args.stop_at:.0%}); stopping")
+                break
+    return 0
+
+
+def cmd_spin(args: argparse.Namespace) -> int:
+    store = Store(domain_dir(args.domain))
+    items, _comparisons, result = _fit_domain(store)
+    if not items:
+        print(f"domain {args.domain!r} has no items yet")
+        return 1
+    kwargs = {}
+    if args.policy == "softmax":
+        kwargs["temperature"] = args.softmax_temperature
+    picked = draw(result, policy=args.policy, **kwargs)
+    if picked is None:
+        print("no items to draw from")
+        return 1
+    label = items[picked].label if picked in items else picked
+    print(f"{label}  ({args.policy}, id={picked})")
+
+    if args.commit:
+        return _commit_to_steering(args.domain, picked, label, args.forecast, args.window_days)
+    return 0
+
+
+def _steer(*argv: str) -> tuple[int, str, str]:
+    proc = subprocess.run(["sinnix-steer", *argv], capture_output=True, text=True, timeout=30)
+    return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+
+
+def _find_or_create_backlog_activity() -> str | None:
+    rc, out, err = _steer("activity", "menu", "--json")
+    if rc == 0:
+        for activity in json.loads(out):
+            if activity["name"] == BACKLOG_ACTIVITY_NAME:
+                return activity["id"]
+    rc, out, err = _steer(
+        "activity", "add", BACKLOG_ACTIVITY_NAME,
+        "--kind", "task", "--energy", "any",
+        "--notes", "standing activity for sinnix-rank spin --commit draws",
+    )
+    if rc != 0:
+        print(f"  could not create steering activity: {err}", file=sys.stderr)
+        return None
+    # cmd_activity_add prints "activity {aid}: {name} (...)"
+    return out.split(":", 1)[0].removeprefix("activity ").strip()
+
+
+def _commit_to_steering(domain: str, item_id: str, label: str, forecast: float, window_days: int) -> int:
+    import datetime as dt
+
+    activity_id = _find_or_create_backlog_activity()
+    window_start = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    window_end = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=window_days)).isoformat(timespec="seconds")
+    text = f"watch {domain} / act on {item_id}: {label}"
+    steer_args = ["intent", "add", text, "--window-start", window_start, "--window-end", window_end]
+    if forecast is not None:
+        steer_args += ["--forecast", str(forecast)]
+    if activity_id:
+        steer_args += ["--activity", activity_id]
+    rc, out, err = _steer(*steer_args)
+    if rc != 0:
+        print(f"  steering commit failed: {err}", file=sys.stderr)
+        return 1
+    print(f"  committed: {out}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Pairwise preference ranking over any domain")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    add = sub.add_parser("add", help="register items into a domain")
+    add.add_argument("domain")
+    add.add_argument("--items", required=True, help="path to a JSON array or JSONL of {id,label,...}, or '-' for stdin")
+    add.set_defaults(func=cmd_add)
+
+    compare = sub.add_parser("compare", help="interactive pairwise/choice-set prompting session")
+    compare.add_argument("domain")
+    compare.add_argument("--grid", type=int, default=2, help="items per choice set (2 = pairwise)")
+    compare.add_argument("--rounds", type=int, default=20)
+    compare.add_argument("--report-every", type=int, default=5)
+    compare.add_argument("--k", type=int, default=1, help="top-k for the stopping statistic")
+    compare.add_argument("--stop-at", type=float, default=0.9)
+    compare.add_argument("--context", default=None)
+    compare.set_defaults(func=cmd_compare)
+
+    status = sub.add_parser("status", help="show the fitted ranking + stopping statement")
+    status.add_argument("domain")
+    status.add_argument("--k", type=int, default=1)
+    status.add_argument("--json", action="store_true")
+    status.set_defaults(func=cmd_status)
+
+    spin = sub.add_parser("spin", help="draw one item per a draw policy")
+    spin.add_argument("domain")
+    policy_group = spin.add_mutually_exclusive_group()
+    policy_group.add_argument("--top", action="store_const", dest="policy", const="top")
+    policy_group.add_argument("--thompson", action="store_const", dest="policy", const="thompson")
+    policy_group.add_argument("--softmax", type=float, dest="softmax_temperature", default=None)
+    spin.set_defaults(policy="thompson")
+    spin.add_argument("--commit", action="store_true", help="insert the draw into steering as a commitment")
+    spin.add_argument("--forecast", type=float, default=None, help="follow-through probability (0-1) for the steering commitment")
+    spin.add_argument("--window-days", type=int, default=3, help="steering commitment validity window")
+    spin.set_defaults(func=cmd_spin)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command == "spin":
+        if getattr(args, "softmax_temperature", None) is not None:
+            args.policy = "softmax"
+        if args.policy not in POLICIES:
+            parser.error(f"unknown policy {args.policy!r}")
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

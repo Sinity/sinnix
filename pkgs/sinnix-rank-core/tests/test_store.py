@@ -24,7 +24,9 @@ def test_store_undo_tombstones_without_deleting_the_raw_line(tmp_path):
 
     assert store.load_comparisons() == []  # tombstoned: not in the live view
     raw_lines = store.comparisons_path.read_text().splitlines()
-    assert len(raw_lines) == 2  # append-only: original record + delete marker survive on disk
+    assert (
+        len(raw_lines) == 2
+    )  # append-only: original record + delete marker survive on disk
 
 
 def test_store_rejects_unknown_kind(tmp_path):

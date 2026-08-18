@@ -7,7 +7,14 @@ from rank_core.store import Comparison
 
 
 def make_pair(id_, a, b, winner):
-    return Comparison(id=id_, at="2026-08-18T00:00:00Z", kind="pair", set=[a, b], winner=winner, weight=1.0)
+    return Comparison(
+        id=id_,
+        at="2026-08-18T00:00:00Z",
+        kind="pair",
+        set=[a, b],
+        winner=winner,
+        weight=1.0,
+    )
 
 
 def _fit_with_uncertainty():
@@ -16,7 +23,7 @@ def _fit_with_uncertainty():
     # not pick the top item, while argmax always must.
     comparisons = [make_pair("c0", "A", "B", "A")]
     for i in range(20):
-        comparisons.append(make_pair(f"c{i+1}", "B", "C", "B" if i % 3 else "C"))
+        comparisons.append(make_pair(f"c{i + 1}", "B", "C", "B" if i % 3 else "C"))
     return fit(["A", "B", "C"], comparisons)
 
 
@@ -39,7 +46,6 @@ def test_draw_thompson_sometimes_diverges_from_argmax():
 
 def test_draw_unknown_policy_raises():
     import pytest
-
     from rank_core.draw import draw
 
     result = _fit_with_uncertainty()

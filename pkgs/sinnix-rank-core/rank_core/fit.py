@@ -48,7 +48,9 @@ def _parse_at(at: str) -> float:
         return time.time()
 
 
-def decay_weight(at: str, half_life_days: float | None, now_epoch: float | None = None) -> float:
+def decay_weight(
+    at: str, half_life_days: float | None, now_epoch: float | None = None
+) -> float:
     """Exponential recency decay: weight halves every `half_life_days`. A
     `None` half-life disables decay (weight 1.0), the current default -- the
     doc calls the exact half-life a tunable, not something to get precisely
@@ -80,7 +82,9 @@ class FitResult:
         return sorted(self.records.values(), key=lambda r: -r.theta)
 
 
-def _effective_records(comparisons: list[Comparison], half_life_days: float | None, now_epoch: float | None):
+def _effective_records(
+    comparisons: list[Comparison], half_life_days: float | None, now_epoch: float | None
+):
     """(members, winner, weight) triples for every usable comparison."""
     out = []
     for c in comparisons:
@@ -117,14 +121,20 @@ def fit(
     first comparison.
     """
     records = _effective_records(comparisons, half_life_days, now_epoch)
-    ids = sorted({str(i) for i in item_ids} | {m for members, _, _ in records for m in members})
+    ids = sorted(
+        {str(i) for i in item_ids} | {m for members, _, _ in records for m in members}
+    )
     index = {sid: i for i, sid in enumerate(ids)}
     n = len(ids)
     if n == 0:
         return FitResult(records={}, tau=tau)
 
     choice_sets = [
-        {"members": [index[m] for m in members], "winner": index[winner], "weight": weight}
+        {
+            "members": [index[m] for m in members],
+            "winner": index[winner],
+            "weight": weight,
+        }
         for members, winner, weight in records
     ]
     by_item: list[list[int]] = [[] for _ in range(n)]
@@ -176,7 +186,15 @@ def fit(
         )
         for i in range(n)
     }
-    _assign_components(result_records, [(ids[cs["winner"]], ids[m]) for cs in choice_sets for m in cs["members"] if m != cs["winner"]])
+    _assign_components(
+        result_records,
+        [
+            (ids[cs["winner"]], ids[m])
+            for cs in choice_sets
+            for m in cs["members"]
+            if m != cs["winner"]
+        ],
+    )
     return FitResult(records=result_records, tau=tau)
 
 
@@ -188,7 +206,9 @@ def _center(arr: list[float]) -> None:
         arr[i] -= mean
 
 
-def _assign_components(records: dict[str, ItemFit], edges: list[tuple[str, str]]) -> None:
+def _assign_components(
+    records: dict[str, ItemFit], edges: list[tuple[str, str]]
+) -> None:
     adj: dict[str, list[str]] = {sid: [] for sid in records}
     for a, b in edges:
         if a in adj and b in adj:

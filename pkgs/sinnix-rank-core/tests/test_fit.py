@@ -5,7 +5,14 @@ from rank_core.store import Comparison
 
 
 def make_pair(id_, a, b, winner):
-    return Comparison(id=id_, at="2026-08-18T00:00:00Z", kind="pair", set=[a, b], winner=winner, weight=1.0)
+    return Comparison(
+        id=id_,
+        at="2026-08-18T00:00:00Z",
+        kind="pair",
+        set=[a, b],
+        winner=winner,
+        weight=1.0,
+    )
 
 
 def test_fit_recovers_known_preference_order():
@@ -17,7 +24,7 @@ def test_fit_recovers_known_preference_order():
     rng = random.Random(7)
     comparisons = []
     i = 0
-    for rep in range(20):
+    for _rep in range(20):
         for x_idx in range(len(order)):
             for y_idx in range(x_idx + 1, len(order)):
                 x, y = order[x_idx], order[y_idx]
@@ -37,7 +44,9 @@ def test_fit_reversed_outcomes_reverse_order():
     comparisons = [
         make_pair(f"c{i}", x, y, y)  # y (the "loser" in `order`) always wins
         for i, (x, y) in enumerate(
-            (order[a], order[b]) for a in range(len(order)) for b in range(a + 1, len(order))
+            (order[a], order[b])
+            for a in range(len(order))
+            for b in range(a + 1, len(order))
         )
     ]
     result = fit(order, comparisons)
@@ -49,8 +58,14 @@ def test_fit_choice_set_pl_extension():
     # A 4-wise choice set "A beats {A,B,C,D}" repeated should push A's theta
     # above the other three, which stay roughly tied.
     comparisons = [
-        Comparison(id=f"c{i}", at="2026-08-18T00:00:00Z", kind="choice-set",
-                   set=["A", "B", "C", "D"], winner="A", weight=1.0)
+        Comparison(
+            id=f"c{i}",
+            at="2026-08-18T00:00:00Z",
+            kind="choice-set",
+            set=["A", "B", "C", "D"],
+            winner="A",
+            weight=1.0,
+        )
         for i in range(30)
     ]
     result = fit(["A", "B", "C", "D"], comparisons)
@@ -77,7 +92,14 @@ def test_fit_components_detects_disconnected_islands():
 
 
 def test_fit_tie_splits_into_half_weight_records():
-    tie = Comparison(id="c0", at="2026-08-18T00:00:00Z", kind="pair", set=["A", "B"], winner=None, weight=1.0)
+    tie = Comparison(
+        id="c0",
+        at="2026-08-18T00:00:00Z",
+        kind="pair",
+        set=["A", "B"],
+        winner=None,
+        weight=1.0,
+    )
     result = fit(["A", "B"], [tie])
     assert abs(result.records["A"].theta - result.records["B"].theta) < 1e-9
 

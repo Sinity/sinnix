@@ -30,6 +30,10 @@ let
       # library on sys.path. The same `@name` resolution as runtimeInputs,
       # a different consumer.
       sinnix-lib = externalPackages.sinnix-lib;
+      # Shared pairwise/choice-set preference ranking engine (rank_core);
+      # consumed by scripts/sinnix-rank the same way scripts import
+      # @sinnix-lib.
+      sinnix-rank-core = externalPackages.sinnix-rank-core;
       # Source lives in the steering workspace input; scripts naming
       # @sinnix-steer resolve to the wrapper below.
       sinnix-steer = externalPackages.sinnix-steer;
@@ -319,6 +323,11 @@ let
     # locks, notify, systemd probes, spools. Python packages here depend on
     # it instead of carrying private copies of these helpers.
     sinnix-lib = pkgs.callPackage ../pkgs/sinnix-lib/pkg.nix { };
+
+    # Shared pairwise/choice-set preference ranking engine (importable, not
+    # a CLI): Plackett-Luce fit, stopping statistic, selection, draw
+    # policies. scripts/sinnix-rank is its text frontend.
+    sinnix-rank-core = pkgs.callPackage ../pkgs/sinnix-rank-core/pkg.nix { };
 
     # Steering CLI: source lives in the steering workspace (a non-flake
     # git+file input), packaging lives here — the same split as lynchpin's

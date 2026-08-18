@@ -24,7 +24,9 @@ def draw_top(fit_result: FitResult) -> str | None:
     return ranked[0].id if ranked else None
 
 
-def draw_softmax(fit_result: FitResult, temperature: float = 1.0, rng: random.Random | None = None) -> str | None:
+def draw_softmax(
+    fit_result: FitResult, temperature: float = 1.0, rng: random.Random | None = None
+) -> str | None:
     records = list(fit_result.records.values())
     if not records:
         return None
@@ -34,14 +36,16 @@ def draw_softmax(fit_result: FitResult, temperature: float = 1.0, rng: random.Ra
     total = sum(weights)
     r = rng.random() * total
     acc = 0.0
-    for rec, w in zip(records, weights):
+    for rec, w in zip(records, weights, strict=True):
         acc += w
         if r <= acc:
             return rec.id
     return records[-1].id
 
 
-def draw_thompson(fit_result: FitResult, rng: random.Random | None = None) -> str | None:
+def draw_thompson(
+    fit_result: FitResult, rng: random.Random | None = None
+) -> str | None:
     records = list(fit_result.records.values())
     if not records:
         return None
@@ -57,5 +61,7 @@ DEFAULT_POLICY = "thompson"
 
 def draw(fit_result: FitResult, policy: str = DEFAULT_POLICY, **kwargs) -> str | None:
     if policy not in POLICIES:
-        raise ValueError(f"unknown draw policy {policy!r}, choose one of {sorted(POLICIES)}")
+        raise ValueError(
+            f"unknown draw policy {policy!r}, choose one of {sorted(POLICIES)}"
+        )
     return POLICIES[policy](fit_result, **kwargs)
