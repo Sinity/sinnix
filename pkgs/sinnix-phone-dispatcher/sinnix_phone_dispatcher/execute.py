@@ -98,13 +98,15 @@ def execute(intent: dict) -> dict:
             "Answer delivered" if result.get("ok") else "Answer queued",
             str(result.get("detail") or ""),
             token,
-            # A navigation target in the app, not a name for this system: the
-            # string is matched against the phone's own screen routes, and the
-            # app renders a tab called Estate. It survives the naming sweep
-            # because renaming one side alone sends a tapped notification to a
-            # route Navigation Compose will refuse. Rename both together, in
-            # the app's own pass over that screen.
-            "estate",
+            # A navigation target in the app, not a name for anything here:
+            # the string is matched against the phone's own screen routes.
+            # Renamed on both sides at once (the app's Destination.PRIME and
+            # its Prime tab), because one side alone sends a tapped
+            # notification to a route the app does not have. An in-flight
+            # receipt carrying the older value is harmless -- the app matches
+            # the route against its known destinations and opens home when it
+            # does not recognise one.
+            "prime",
         )
     elif kind in ("shared_text", "shared_file"):
         result = land_shared(intent)
