@@ -54,7 +54,6 @@ in
     environment.systemPackages = lib.mkIf isDesktop (
       coreDiagnostics
       ++ [
-        scriptPkgs.hogkill
         scriptPkgs.asbl-no-moar
         scriptPkgs.nuke-builds
         scriptPkgs.sinnix-observe
