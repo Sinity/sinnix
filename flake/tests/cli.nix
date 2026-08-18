@@ -49,6 +49,9 @@ in
         assertions = _config: [ ];
       };
 
+      # Provably fails when: the polylogue CLI or its python wrapper drops out
+      # of the feature's package set (verified by removing polylogue-cli), or
+      # a documented subcommand stops being reachable.
       cliPolylogueRuntime = mkHmRuntimeCheck system {
         name = "cli-polylogue-runtime-check";
         spec = cliPolylogueRuntimeSpec;
@@ -89,6 +92,9 @@ in
           grep -qx 'addkeystoagent false' "$TMPDIR/default-ssh-config"
         '';
       };
+      # Provably fails when: a shared taskwarrior/timewarrior alias or helper
+      # stops being defined (verified by repointing `ta`), or task/timew stop
+      # resolving the deployed rc, hooks, data and extension directories.
       cliTaskTrackingRuntime = mkHmRuntimeCheck system {
         name = "cli-task-tracking-runtime-check";
         spec = cliTaskTrackingRuntimeSpec;
@@ -167,6 +173,7 @@ in
             grep -q "$HOME/.config/timewarrior/extensions" "$TMPDIR/timew.diagnostics"
 
           AGENT_NAME=codex AGENT_SESSION_ID=test-session ${pkgs.zsh}/bin/zsh -ic '
+            set -e
             alias ta | grep -q "task add"
             alias twstart | grep -q "timew start"
             type agent_project >/dev/null

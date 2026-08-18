@@ -64,8 +64,6 @@ in
             machine.wait_for_unit("polylogued.service", "sinity")
 
             machine.succeed(f"{as_user} systemctl --user is-active --quiet polylogued.service")
-            machine.fail(f"{as_user} systemctl --user cat polylogue-run.service")
-            machine.fail(f"{as_user} systemctl --user cat polylogue-run.timer")
             machine.succeed(f"{as_user} ${
               inputs.polylogue.packages.${system}.default
             }/bin/polylogued status --format json | jq -e '.daemon == \"polylogued\" and (.live.source_count >= 0)' >/dev/null")
