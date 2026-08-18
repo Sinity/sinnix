@@ -10,6 +10,7 @@
   mkServiceModule,
   lib,
   pkgs,
+  helpers,
   ...
 }@args:
 mkServiceModule {
@@ -20,8 +21,8 @@ mkServiceModule {
     resourceClass = "interactive-agent";
     activation = {
       mode = "socket-proxy";
-      publicEndpoint = "127.0.0.1:8010";
-      backendEndpoint = "127.0.0.1:8011";
+      publicEndpoint = "127.0.0.1:${toString helpers.data.ports.musicgen.public}";
+      backendEndpoint = "127.0.0.1:${toString helpers.data.ports.musicgen.backend}";
       idleTimeout = "900s";
       exclusiveResource = "gpu-inference";
       dependsOn = [ "musicgen-proxy" ];
@@ -39,12 +40,12 @@ mkServiceModule {
     };
     port = args.lib.mkOption {
       type = args.lib.types.port;
-      default = 8010;
+      default = helpers.data.ports.musicgen.public;
       description = "PUBLIC host port (bound to 127.0.0.1) clients use -- the musicgen-proxy socket front door.";
     };
     backendPort = args.lib.mkOption {
       type = args.lib.types.port;
-      default = 8011;
+      default = helpers.data.ports.musicgen.backend;
       description = "PRIVATE host port the container itself publishes to; musicgen-proxy forwards here.";
     };
     containerPort = args.lib.mkOption {

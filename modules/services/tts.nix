@@ -8,18 +8,19 @@
   mkAiService,
   lib,
   pkgs,
+  helpers,
   ...
 }@args:
 mkAiService {
   name = "tts";
   description = "OpenedAI-Speech TTS bridge (Piper + XTTS, containerized)";
   unit = "podman-openedai-speech.service";
-  endpoint = "127.0.0.1:8000";
+  endpoint = "127.0.0.1:${toString helpers.data.ports.tts.public}";
   backendKind = "container";
   requiresCuda = true;
   activation = {
     mode = "socket-proxy";
-    backendEndpoint = "127.0.0.1:8001";
+    backendEndpoint = "127.0.0.1:${toString helpers.data.ports.tts.backend}";
     idleTimeout = "300s";
     exclusiveResource = "gpu-inference";
     dependsOn = [ "tts-proxy" ];
@@ -40,6 +41,7 @@ mkAiService {
     {
       cfg,
       config,
+      helpers,
       ...
     }:
     let
@@ -60,9 +62,11 @@ mkAiService {
         inherit (cfg) autoStart;
         pull = "never";
         # Published on the PRIVATE backend port only -- clients always speak
-        # to 8000 via tts-proxy (modules/services/ai-control.nix), never to
-        # the container directly.
-        ports = [ "127.0.0.1:8001:8000" ];
+        # to the public port via tts-proxy (modules/services/ai-control.nix),
+        # never to the container directly. The container-internal port (right
+        # side) is not a host allocation -- it just happens to numerically
+        # match the public port by coincidence, so it stays a literal.
+        ports = [ "127.0.0.1:${toString helpers.data.ports.tts.backend}:8000" ];
         volumes = [
           "${ttsDir}/voices:/app/voices"
           "${ttsDir}/config:/app/config"

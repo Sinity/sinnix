@@ -22,18 +22,19 @@
   mkAiService,
   lib,
   pkgs,
+  helpers,
   ...
 }@args:
 mkAiService {
   name = "kokoro";
   description = "Kokoro-82M TTS (CPU, OpenAI-compatible /v1/audio/speech, containerized)";
   unit = "podman-kokoro.service";
-  endpoint = "127.0.0.1:8890";
+  endpoint = "127.0.0.1:${toString helpers.data.ports.kokoro.public}";
   backendKind = "container";
   requiresCuda = false;
   activation = {
     mode = "socket-proxy";
-    backendEndpoint = "127.0.0.1:8891";
+    backendEndpoint = "127.0.0.1:${toString helpers.data.ports.kokoro.backend}";
     idleTimeout = "30s";
     dependsOn = [ "kokoro-proxy" ];
   };
@@ -50,17 +51,18 @@ mkAiService {
     };
   };
   configFn =
-    { cfg, ... }:
+    { cfg, helpers, ... }:
     {
       sinnix.ml.containerRuntime.enable = true;
 
       virtualisation.oci-containers.containers.kokoro = {
         inherit (cfg) image autoStart;
         pull = "never";
-        # Container listens on 8880 internally; mapped to the private
-        # backend port the kokoro-proxy socket forwards to (public 8890 is
-        # the proxy's own listener, not this container's).
-        ports = [ "127.0.0.1:8891:8880" ];
+        # Container listens on 8880 internally (not a host allocation, so not
+        # in the port registry); mapped to the private backend port the
+        # kokoro-proxy socket forwards to (the public port is the proxy's own
+        # listener, not this container's).
+        ports = [ "127.0.0.1:${toString helpers.data.ports.kokoro.backend}:8880" ];
         environment = {
           # Weights are already baked into the pinned image; skip the
           # runtime re-download check on every start.

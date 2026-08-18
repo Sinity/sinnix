@@ -107,8 +107,8 @@ let
   ollamaProxy = mkProxy {
     name = "ollama-proxy";
     backendUnit = "ollama.service";
-    publicEndpoint = "127.0.0.1:11434";
-    backendEndpoint = "127.0.0.1:11435";
+    publicEndpoint = "127.0.0.1:${toString helpers.data.ports.ollama.public}";
+    backendEndpoint = "127.0.0.1:${toString helpers.data.ports.ollama.backend}";
     # ~10x the cold-start cost of the daily-driver model (~20-23s); idling
     # out is cheaper than a wasted reload.
     idleTimeout = "240s";
@@ -122,8 +122,8 @@ let
   koboldcppProxy = mkProxy {
     name = "koboldcpp-proxy";
     backendUnit = "koboldcpp.service";
-    publicEndpoint = "127.0.0.1:5001";
-    backendEndpoint = "127.0.0.1:5002";
+    publicEndpoint = "127.0.0.1:${toString helpers.data.ports.koboldcpp.public}";
+    backendEndpoint = "127.0.0.1:${toString helpers.data.ports.koboldcpp.backend}";
     # Unmeasurable: koboldcpp-cuda here fails CUDA init with `undefined
     # symbol: cuMemCreate` from koboldcpp_cublas.so on model load, so GPU
     # inference is non-functional regardless of timeout. Sized from its role
@@ -144,8 +144,8 @@ let
   sttProxy = mkProxy {
     name = "stt-proxy";
     backendUnit = "sinnix-stt.service";
-    publicEndpoint = "127.0.0.1:8090";
-    backendEndpoint = "127.0.0.1:8091";
+    publicEndpoint = "127.0.0.1:${toString helpers.data.ports.stt.public}";
+    backendEndpoint = "127.0.0.1:${toString helpers.data.ports.stt.backend}";
     # Cold start loads a 650MB encoder, ~2s. The idle window is long because
     # nothing scarce is being held and re-loading it between the turns of one
     # conversation would be the only real cost here.
@@ -161,8 +161,8 @@ let
   llamaCppProxy = mkProxy {
     name = "llama-cpp-proxy";
     backendUnit = "llama-cpp.service";
-    publicEndpoint = "127.0.0.1:8081";
-    backendEndpoint = "127.0.0.1:8082";
+    publicEndpoint = "127.0.0.1:${toString helpers.data.ports.llamaCpp.public}";
+    backendEndpoint = "127.0.0.1:${toString helpers.data.ports.llamaCpp.backend}";
     # Cold /v1/rerank for the 0.6B reranker is ~1-3s; 30s is ~10-30x headroom
     # for both timeouts.
     idleTimeout = "30s";
@@ -172,8 +172,8 @@ let
   museGlimmerProxy = mkProxy {
     name = "muse-glimmer-proxy";
     backendUnit = "muse-glimmer.service";
-    publicEndpoint = "127.0.0.1:8083";
-    backendEndpoint = "127.0.0.1:8084";
+    publicEndpoint = "127.0.0.1:${toString helpers.data.ports.museGlimmer.public}";
+    backendEndpoint = "127.0.0.1:${toString helpers.data.ports.museGlimmer.backend}";
     idleTimeout = "900s";
     readinessTimeout = 600;
     exclusiveResource = "gpu-inference";
@@ -182,8 +182,8 @@ let
   litellmProxy = mkProxy {
     name = "litellm-proxy";
     backendUnit = "litellm.service";
-    publicEndpoint = "127.0.0.1:4000";
-    backendEndpoint = "127.0.0.1:4001";
+    publicEndpoint = "127.0.0.1:${toString helpers.data.ports.litellm.public}";
+    backendEndpoint = "127.0.0.1:${toString helpers.data.ports.litellm.backend}";
     # Lightweight gateway process, unmeasured; kept at the baseline default.
     idleTimeout = "30s";
     readinessTimeout = 30;
@@ -195,8 +195,8 @@ let
   kokoroProxy = mkProxy {
     name = "kokoro-proxy";
     backendUnit = "podman-kokoro.service";
-    publicEndpoint = "127.0.0.1:8890";
-    backendEndpoint = "127.0.0.1:8891";
+    publicEndpoint = "127.0.0.1:${toString helpers.data.ports.kokoro.public}";
+    backendEndpoint = "127.0.0.1:${toString helpers.data.ports.kokoro.backend}";
     # Unmeasured; kept at the baseline default.
     idleTimeout = "30s";
     readinessTimeout = 30;
@@ -212,8 +212,8 @@ let
   comfyuiProxy = mkProxy {
     name = "comfyui-proxy";
     backendUnit = "podman-comfyui.service";
-    publicEndpoint = "127.0.0.1:8188";
-    backendEndpoint = "127.0.0.1:8189";
+    publicEndpoint = "127.0.0.1:${toString helpers.data.ports.comfyui.public}";
+    backendEndpoint = "127.0.0.1:${toString helpers.data.ports.comfyui.backend}";
     # Cold start to a 200 from `/` is ~105s: the
     # mmartial/comfyui-nvidia-docker image re-resolves its Python venv on
     # every launch, re-downloading a ~930MB torch wheel, which dominates the
@@ -229,8 +229,8 @@ let
   ttsProxy = mkProxy {
     name = "tts-proxy";
     backendUnit = "podman-openedai-speech.service";
-    publicEndpoint = "127.0.0.1:8000";
-    backendEndpoint = "127.0.0.1:8001";
+    publicEndpoint = "127.0.0.1:${toString helpers.data.ports.tts.public}";
+    backendEndpoint = "127.0.0.1:${toString helpers.data.ports.tts.backend}";
     # Cold start to a 200 from /v1/audio/speech (Piper voice) is ~17s; XTTS
     # voice cloning is heavier. 300s/60s covers headroom for both voices.
     idleTimeout = "300s";
@@ -241,8 +241,8 @@ let
   musicgenProxy = mkProxy {
     name = "musicgen-proxy";
     backendUnit = "podman-musicgen.service";
-    publicEndpoint = "127.0.0.1:8010";
-    backendEndpoint = "127.0.0.1:8011";
+    publicEndpoint = "127.0.0.1:${toString helpers.data.ports.musicgen.public}";
+    backendEndpoint = "127.0.0.1:${toString helpers.data.ports.musicgen.backend}";
     # Unmeasured (disabled on this host). Same all-in-one Gradio+PyTorch
     # toolkit shape as ComfyUI, so sized to the same tier.
     idleTimeout = "900s";
@@ -253,8 +253,8 @@ let
   ocrProxy = mkProxy {
     name = "ocr-proxy";
     backendUnit = "podman-ocr.service";
-    publicEndpoint = "127.0.0.1:8020";
-    backendEndpoint = "127.0.0.1:8021";
+    publicEndpoint = "127.0.0.1:${toString helpers.data.ports.ocr.public}";
+    backendEndpoint = "127.0.0.1:${toString helpers.data.ports.ocr.backend}";
     # Unmeasured (disabled on this host). marker-api's Surya weights are
     # small (~1-2GB) next to ComfyUI's checkpoint tree, so sized to the tts
     # container tier.

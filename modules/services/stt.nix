@@ -34,11 +34,11 @@ mkAiService {
   name = "stt";
   description = "Speech-to-text hub (Parakeet TDT via sherpa-onnx)";
   unit = "sinnix-stt.service";
-  endpoint = "127.0.0.1:8090";
+  endpoint = "127.0.0.1:${toString helpers.data.ports.stt.public}";
   requiresCuda = false;
   activation = {
     mode = "socket-proxy";
-    backendEndpoint = "127.0.0.1:8091";
+    backendEndpoint = "127.0.0.1:${toString helpers.data.ports.stt.backend}";
     # Longer than the GPU services' 30s: there is no scarce resource being
     # held, and re-loading a 650 MB encoder for every voice note in a
     # conversation is worse than keeping it warm through the gaps.
@@ -51,6 +51,7 @@ mkAiService {
       config,
       lib,
       pkgs,
+      helpers,
       ...
     }:
     let
@@ -140,7 +141,7 @@ mkAiService {
               ExecStart = lib.concatStringsSep " " [
                 "${scriptPkgs.sinnix-stt}/bin/sinnix-stt"
                 "serve"
-                "--listen 127.0.0.1:8091"
+                "--listen 127.0.0.1:${toString helpers.data.ports.stt.backend}"
               ];
               Environment = [ "SINNIX_STT_MODEL_ROOT=${modelDir}" ];
             }

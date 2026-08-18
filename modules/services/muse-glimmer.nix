@@ -8,6 +8,7 @@
   mkServiceModule,
   lib,
   pkgs,
+  helpers,
   ...
 }@args:
 mkServiceModule {
@@ -18,8 +19,8 @@ mkServiceModule {
     resourceClass = "interactive-agent";
     activation = {
       mode = "socket-proxy";
-      publicEndpoint = "127.0.0.1:8083";
-      backendEndpoint = "127.0.0.1:8084";
+      publicEndpoint = "127.0.0.1:${toString helpers.data.ports.museGlimmer.public}";
+      backendEndpoint = "127.0.0.1:${toString helpers.data.ports.museGlimmer.backend}";
       idleTimeout = "900s";
       readinessTimeout = 600;
       exclusiveResource = "gpu-inference";
@@ -43,6 +44,7 @@ mkServiceModule {
       config,
       lib,
       pkgs,
+      helpers,
       ...
     }:
     let
@@ -55,7 +57,7 @@ mkServiceModule {
         "--host"
         "127.0.0.1"
         "--port"
-        "8084"
+        (toString helpers.data.ports.museGlimmer.backend)
         "--n-gpu-layers"
         "auto"
         "--fit"

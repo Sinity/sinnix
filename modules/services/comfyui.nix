@@ -15,6 +15,7 @@
   mkServiceModule,
   lib,
   pkgs,
+  helpers,
   ...
 }@args:
 mkServiceModule {
@@ -25,8 +26,8 @@ mkServiceModule {
     resourceClass = "interactive-agent";
     activation = {
       mode = "socket-proxy";
-      publicEndpoint = "127.0.0.1:8188";
-      backendEndpoint = "127.0.0.1:8189";
+      publicEndpoint = "127.0.0.1:${toString helpers.data.ports.comfyui.public}";
+      backendEndpoint = "127.0.0.1:${toString helpers.data.ports.comfyui.backend}";
       idleTimeout = "900s";
       exclusiveResource = "gpu-inference";
       dependsOn = [ "comfyui-proxy" ];
@@ -63,6 +64,7 @@ mkServiceModule {
       cfg,
       config,
       lib,
+      helpers,
       ...
     }:
     let
@@ -80,9 +82,12 @@ mkServiceModule {
         inherit (cfg) image;
         inherit (cfg) autoStart;
         # Published on the PRIVATE backend port only -- clients always speak
-        # to 8188 via comfyui-proxy (modules/services/ai-control.nix), never
-        # to the container directly.
-        ports = [ "127.0.0.1:8189:8188" ];
+        # to the public port via comfyui-proxy (modules/services/ai-control.nix),
+        # never to the container directly. The container-internal port (right
+        # side of the mapping, and COMFYUI_PORT_HOST below) is not a host
+        # allocation -- it just happens to numerically match the public port
+        # by coincidence, so it stays a literal rather than the registry.
+        ports = [ "127.0.0.1:${toString helpers.data.ports.comfyui.backend}:8188" ];
         volumes = [ "${mnt}:/comfy/mnt" ];
         environment = {
           WANTED_UID = toString cfg.uid;
