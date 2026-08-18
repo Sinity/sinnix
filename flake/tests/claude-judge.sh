@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Provably fails when: the judge stops retrying a schema-invalid response, or
+# stops writing its private receipt.
 set -euo pipefail
 
 judge=$1

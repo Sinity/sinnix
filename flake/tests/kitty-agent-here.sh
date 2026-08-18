@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-
+# Provably fails when: the helper sends an agent into a window whose
+# foreground process does not belong to the focused kitty instance (verified
+# by making is_descendant_of always true), targets a non-kitty focused window,
+# or stops falling back to a fresh terminal when it cannot resolve one.
 set -euo pipefail
 
 helper="$1"
@@ -47,7 +50,7 @@ EOF
 
 cat >"$test_root/bin/ps" <<'EOF'
 #!/usr/bin/env bash
-if [[ "${*: -1}" == 200 ]]; then
+if [[ "${*: -1}" == 200 && -z "${KITTY_TEST_FOREIGN_FOREGROUND:-}" ]]; then
   printf ' 100\n'
 else
   printf ' 1\n'
@@ -95,5 +98,18 @@ grep -F -- 'notify ' "$test_root/kitty.log"
 : >"$test_root/kitty.log"
 rm "$test_root/proc/200/stat"
 run_helper "$test_root/work/lynchpin"
+sleep 0.1
+grep -F -- 'fallback app -- kitty --directory '"$test_root/work/sinnix" "$test_root/kitty.log"
+
+# A foreground process that is not a descendant of the focused kitty instance
+# means the window belongs to something else: sending an agent there would run
+# it in a stranger's terminal, so the helper must fall back instead.
+: >"$test_root/kitty.log"
+printf 'shell (shell)' >"$test_root/proc/200/stat"
+{
+  printf ' 0%.0s' {1..19}
+  printf ' 200\n'
+} >>"$test_root/proc/200/stat"
+KITTY_TEST_FOREIGN_FOREGROUND=1 run_helper "$test_root/work/lynchpin"
 sleep 0.1
 grep -F -- 'fallback app -- kitty --directory '"$test_root/work/sinnix" "$test_root/kitty.log"

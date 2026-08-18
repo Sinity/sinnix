@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Provably fails when: the sweep kills a helper whose identity it cannot
+# attribute (verified), stops killing an orphaned one, or stops classifying a
+# live session from its manifest rather than from the parent PID.
 set -euo pipefail
 
 sweep="$1"
@@ -24,6 +27,10 @@ orphan_cgroup=/user.slice/user-1000.slice/user@1000.service/sinnix-agent-job-orp
 make_process 101 10 "$live_cgroup" 'serena start-mcp-server' 100
 make_process 102 1 "$detached_cgroup" 'mcp-polylogue' 200
 make_process 103 1 "$orphan_cgroup" 'mcp-lynchpin' 300
+# A helper in a cgroup no manifest attests to: the sweep can neither confirm
+# it is live nor confirm it is orphaned, and the safe action is to leave it
+# alone. Without this case the whole uncertain-identity branch is unexercised.
+make_process 104 1 /user.slice/user-1000.slice/user@1000.service/app.slice/unattested.scope 'mcp-lynchpin' 400
 
 cat >"$jobs/live.json" <<EOF
 {"schema_version":3,"job_id":"live","lifecycle":"running","launcher":{"pid":10,"cgroup":"$live_cgroup"},"actual_agent":{"pid":11,"cgroup":"$live_cgroup"}}
@@ -47,7 +54,8 @@ grep -Fq '"pid":103,"ppid":1,"rss_kib":42,"pss_anon_kib":300' "$capture/sweep.js
 jq -e 'select(.pid == 101) | .action == "keep" and .reason == "attested-live-session"' "$capture/sweep.jsonl" >/dev/null
 jq -e 'select(.pid == 102) | .action == "keep" and .reason == "attested-live-session"' "$capture/sweep.jsonl" >/dev/null
 jq -e 'select(.pid == 103) | .action == "kill" and .reason == "orphaned"' "$capture/sweep.jsonl" >/dev/null
-jq -e 'select(.event == "summary") | .before.count == 3 and .before.pss_anon_kib == 600 and .after.count == 3 and .after.pss_anon_kib == 600' "$capture/sweep.jsonl" >/dev/null
+jq -e 'select(.pid == 104) | .action == "keep" and .reason == "uncertain-identity"' "$capture/sweep.jsonl" >/dev/null
+jq -e 'select(.event == "summary") | .before.count == 4 and .before.pss_anon_kib == 1000 and .after.count == 4 and .after.pss_anon_kib == 1000' "$capture/sweep.jsonl" >/dev/null
 
 # A second safety run remains idempotent and continues to classify identity
 # from manifests rather than parent PID.
@@ -56,5 +64,5 @@ env \
   SINNIX_AGENT_JOB_STATE_DIR="$jobs" \
   SINNIX_MCP_SWEEP_CAPTURE_DIR="$capture" \
   "$sweep" --orphans-only --quiet
-jq -e 'select(.event == "summary") | .before.count == 3 and .before.pss_anon_kib == 600' "$capture/sweep.jsonl" >/dev/null
+jq -e 'select(.event == "summary") | .before.count == 4 and .before.pss_anon_kib == 1000' "$capture/sweep.jsonl" >/dev/null
 echo 'mcp sweep fixture passed'

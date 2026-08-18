@@ -48,8 +48,11 @@ for name in triage review judge; do
   denied=$(frontmatter_field "$agents_dir/$name.md" disallowedTools)
   granted=$(frontmatter_field "$agents_dir/$name.md" tools)
   for tool in $write_tools; do
-    printf '%s' "$denied" | grep -q "\b$tool\b" \
-      || { printf '%s must deny %s\n' "$name" "$tool" >&2; exit 1; }
+    printf '%s' "$denied" | grep -q "\b$tool\b" ||
+      {
+        printf '%s must deny %s\n' "$name" "$tool" >&2
+        exit 1
+      }
     if printf '%s' "$granted" | grep -q "\b$tool\b"; then
       printf '%s must not be granted %s\n' "$name" "$tool" >&2
       exit 1
@@ -59,8 +62,11 @@ done
 
 lane_granted=$(frontmatter_field "$agents_dir/lane.md" tools)
 for tool in Write Edit; do
-  printf '%s' "$lane_granted" | grep -q "\b$tool\b" \
-    || { printf 'lane must be granted %s\n' "$tool" >&2; exit 1; }
+  printf '%s' "$lane_granted" | grep -q "\b$tool\b" ||
+    {
+      printf 'lane must be granted %s\n' "$tool" >&2
+      exit 1
+    }
 done
 grep -q '^isolation: worktree$' "$agents_dir/lane.md"
 
