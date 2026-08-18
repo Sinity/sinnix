@@ -119,10 +119,6 @@ need_cmd websocat
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-  --target=*)
-    set_target "${1#--target=}"
-    shift
-    ;;
   --help | -h)
     usage
     exit 0
