@@ -2,10 +2,18 @@ from __future__ import annotations
 
 import copy
 import json
+import signal
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
-from sinnix_ops_reducer.actions import ActionError, ActionService, validate_request
+from sinnix_ops_reducer.actions import (
+    ActionError,
+    ActionService,
+    process_admitted_slices,
+    validate_request,
+)
 from sinnix_ops_reducer.reducer import Reducer
 
 
@@ -569,3 +577,405 @@ def test_scope_pattern_matches_live_identity_shape():
         "sinnix-build-1786566375240889502-2296063.scope"
     )
     assert not SCOPE_UNIT_PATTERN.match("sinnix-evil-x-1-2.scope")
+
+
+# --------------------------------------------------------------------------
+# process targets (sinnix-mble): {"process": {"pid": N, "start_ticks": M}},
+# accepting only stop, admitted by live cgroup membership.
+# --------------------------------------------------------------------------
+
+
+def inventory_with_sacrificial_slice(path: Path) -> None:
+    """A runtime inventory carrying one sacrificial (ManagedOOMMemoryPressure
+    = kill) slice, background.slice, alongside the two surfaces every other
+    fixture in this file uses -- so the same file can drive both the
+    unit-target and the process-target tests."""
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "sinnix-runtime-inventory-v1",
+                "surfaces": {
+                    "safe": {
+                        "unit": "safe.service",
+                        "manager": "user",
+                        "observe": {"restartable": True},
+                        "effectiveResources": {"CPUWeight": 5},
+                    },
+                },
+                "slices": {
+                    "system": {"system-critical": {"CPUWeight": 400}},
+                    "user": {
+                        "agent": {"CPUWeight": 400},
+                        "background": {
+                            "ManagedOOMMemoryPressure": "kill",
+                            "MemoryHigh": "2G",
+                        },
+                        "gpu-runtime": {"MemoryHigh": "8G"},
+                    },
+                },
+            }
+        )
+    )
+
+
+def make_process_actions(
+    tmp_path: Path,
+    process_prober,
+    *,
+    inventory_writer=inventory_with_sacrificial_slice,
+    self_pid: int | None = -1,
+    process_stop_grace_seconds: float = 0.05,
+    signaler=None,
+    sleeper=None,
+    clock=None,
+) -> ActionService:
+    inventory_path = tmp_path / "inventory.json"
+    inventory_writer(inventory_path)
+    reducer = Reducer(
+        tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
+    )
+    reducer.refresh()
+    kwargs: dict = {
+        "adapter": None,
+        "unit_state_prober": fake_unit_state_prober,
+        "process_prober": process_prober,
+        "self_pid": self_pid,
+        "process_stop_grace_seconds": process_stop_grace_seconds,
+    }
+    if signaler is not None:
+        kwargs["signaler"] = signaler
+    if sleeper is not None:
+        kwargs["sleeper"] = sleeper
+    if clock is not None:
+        kwargs["clock"] = clock
+    return ActionService(
+        reducer.snapshot,
+        inventory_path,
+        tmp_path / "receipts.json",
+        **kwargs,
+    )
+
+
+def test_process_target_shape_is_validated_and_restricted_to_stop() -> None:
+    """Mutation: drop the pid/start_ticks type or bound checks and a string
+    pid or a negative start_ticks reaches the resolver; drop the verb
+    restriction and `restart` on a process target reaches the adapter."""
+    with pytest.raises(ActionError, match="pid and start_ticks"):
+        validate_request(
+            request("stop", {"process": {"pid": 100}}, key="missing-field")
+        )
+    with pytest.raises(ActionError, match="greater than 1"):
+        validate_request(
+            request(
+                "stop",
+                {"process": {"pid": 1, "start_ticks": 5}},
+                key="pid-one",
+            )
+        )
+    with pytest.raises(ActionError, match="greater than 1"):
+        validate_request(
+            request(
+                "stop",
+                {"process": {"pid": "123", "start_ticks": 5}},
+                key="pid-string",
+            )
+        )
+    with pytest.raises(ActionError, match="non-negative integer"):
+        validate_request(
+            request(
+                "stop",
+                {"process": {"pid": 123, "start_ticks": -1}},
+                key="negative-ticks",
+            )
+        )
+    with pytest.raises(ActionError, match="only support stop"):
+        validate_request(
+            request(
+                "restart",
+                {"process": {"pid": 123, "start_ticks": 5}},
+                key="wrong-verb",
+            )
+        )
+    with pytest.raises(ActionError, match="exactly one"):
+        validate_request(
+            {
+                "action": "stop",
+                "target": {"unit": "safe", "process": {"pid": 123, "start_ticks": 5}},
+                "expected_revision": 1,
+                "idempotency_key": "both",
+                "operator_reason": "x",
+                "parameters": {},
+            }
+        )
+    # A well-shaped request validates cleanly; whether it is admitted is a
+    # question for execute(), not validate_request().
+    validated = validate_request(
+        request("stop", {"process": {"pid": 123, "start_ticks": 987654}}, key="ok")
+    )
+    assert validated["target"] == {"process": {"pid": 123, "start_ticks": 987654}}
+
+
+def test_process_stop_refuses_a_start_ticks_mismatch_or_a_dead_pid(
+    tmp_path: Path,
+) -> None:
+    """The start_ticks pin is checked against a live prober at execution
+    time, not trusted from the request. Mutation: compare only the pid and a
+    reused pid is silently retargeted; skip the not-found case and a pid
+    that has already exited reads as an ordinary admission refusal instead
+    of a distinct 404.
+    """
+
+    def prober(pid: int):
+        if pid == 200:
+            # Live, but a DIFFERENT start_ticks than the caller observed --
+            # the pid was reused by an unrelated process.
+            return (999999, "sinnix-agent-x-1-2.scope", "agent.slice")
+        return None  # pid 300: no such process at all
+
+    actions = make_process_actions(tmp_path, prober)
+    with pytest.raises(ActionError, match="reused"):
+        actions.execute(
+            request(
+                "stop",
+                {"process": {"pid": 200, "start_ticks": 111111}},
+                key="mismatch",
+            )
+        )
+    assert actions.lookup("mismatch")["status"] == "rejected"
+    with pytest.raises(ActionError, match="does not exist"):
+        actions.execute(
+            request(
+                "stop",
+                {"process": {"pid": 300, "start_ticks": 1}},
+                key="gone",
+            )
+        )
+
+
+def test_process_stop_admission_is_by_cgroup_membership_not_name(
+    tmp_path: Path,
+) -> None:
+    """Every non-negotiable in the design: agent.slice and build.slice admit
+    unconditionally, a slice the inventory marks sacrificial (background,
+    here) admits too, an unrelated slice (gpu-runtime, present in the
+    inventory but never marked sacrificial) is refused, a process with no
+    slice at all (a PID 1 direct child, e.g. init.scope) is refused, and the
+    reducer's own pid is refused regardless of which slice it is in.
+
+    Mutation: admit by process/command name instead of cgroup and a process
+    named `rg` outside every admitted slice would be accepted; drop the
+    self-pid check and the reducer could target itself.
+    """
+    slice_by_pid = {
+        401: "agent.slice",
+        402: "build.slice",
+        403: "background.slice",  # sacrificial per inventory_with_sacrificial_slice
+        404: "gpu-runtime.slice",  # in the inventory, never marked sacrificial
+        405: "",  # PID 1 direct child: no slice segment at all
+        406: "agent.slice",  # would admit, but this pid IS the reducer itself
+    }
+
+    def prober(pid: int):
+        if pid not in slice_by_pid:
+            return None
+        return (77, "unit.scope", slice_by_pid[pid])
+
+    actions = make_process_actions(tmp_path, prober, self_pid=406)
+
+    def stop(pid: int, key: str) -> dict:
+        return actions.execute(
+            request("stop", {"process": {"pid": pid, "start_ticks": 77}}, key=key)
+        )
+
+    assert stop(401, "agent")["preconditions"]["resolved"]["slice_unit"] == (
+        "agent.slice"
+    )
+    assert stop(402, "build")["preconditions"]["resolved"]["slice_unit"] == (
+        "build.slice"
+    )
+    assert stop(403, "sacrificial")["preconditions"]["resolved"]["slice_unit"] == (
+        "background.slice"
+    )
+    with pytest.raises(ActionError, match="not in an admitted cgroup"):
+        stop(404, "gpu-runtime-refused")
+    with pytest.raises(ActionError, match="not in an admitted cgroup"):
+        stop(405, "pid1-child-refused")
+    with pytest.raises(ActionError, match="own process"):
+        stop(406, "self-refused")
+
+
+def test_process_admitted_slices_matches_the_action_services_own_admission(
+    tmp_path: Path,
+) -> None:
+    """The page-facing helper (`process_admitted_slices`, imported by
+    pages/pressure.py) must compute exactly what the resolver enforces, or
+    the hub can offer a button the API answers 403 to.
+
+    Mutation: let the two computations diverge (e.g. the page hardcodes a
+    slice list) and this equality fails the moment the inventory's
+    sacrificial markers change.
+    """
+    inventory_path = tmp_path / "inventory.json"
+    inventory_with_sacrificial_slice(inventory_path)
+    inventory = json.loads(inventory_path.read_text())
+    assert process_admitted_slices(inventory) == {
+        "agent.slice",
+        "build.slice",
+        "background.slice",
+    }
+
+
+def test_process_stop_sends_sigterm_then_escalates_to_sigkill_after_grace(
+    tmp_path: Path,
+) -> None:
+    """Reversible-first, bounded escalation: SIGTERM immediately, SIGKILL
+    only if the same identity is still alive once the grace window elapses.
+    Deterministic and fast -- clock/sleeper/process_prober are all fakes, so
+    no wall-clock sleep and no real process is involved here (see the
+    following test for that).
+
+    Mutation: send SIGKILL first, or never escalate at all, and the signal
+    sequence recorded below stops matching.
+    """
+    signals: list[tuple[int, int]] = []
+    ticks = {"now": 0.0}
+    # The process never exits (process_prober always reports the same
+    # start_ticks alive) until enough fake time has elapsed that the poll
+    # loop's own deadline check ends it -- this is what forces escalation.
+    calls = {"n": 0}
+
+    def prober(pid: int):
+        calls["n"] += 1
+        return (55, "unit.scope", "agent.slice")
+
+    def signaler(pid: int, sig: int) -> None:
+        signals.append((pid, sig))
+
+    def clock() -> float:
+        return ticks["now"]
+
+    def sleeper(seconds: float) -> None:
+        ticks["now"] += seconds
+
+    actions = make_process_actions(
+        tmp_path,
+        prober,
+        process_stop_grace_seconds=0.2,
+        signaler=signaler,
+        sleeper=sleeper,
+        clock=clock,
+    )
+    receipt = actions.execute(
+        request("stop", {"process": {"pid": 501, "start_ticks": 55}}, key="escalate")
+    )
+    assert signals == [(501, signal.SIGTERM), (501, signal.SIGKILL)]
+    assert receipt["adapter"]["signal"] == "SIGKILL"
+    assert receipt["adapter"]["grace_seconds"] == 0.2
+    assert calls["n"] > 0
+
+
+def test_process_stop_does_not_escalate_once_the_process_exits(
+    tmp_path: Path,
+) -> None:
+    """The common case: SIGTERM alone is enough, and the grace window is not
+    spent waiting once the process is gone.
+
+    Mutation: always escalate regardless of liveness and a rg that exits
+    cleanly on SIGTERM would still take a needless SIGKILL.
+    """
+    signals: list[tuple[int, int]] = []
+    state = {"alive": True}
+
+    def prober(pid: int):
+        if not state["alive"]:
+            return None
+        return (55, "unit.scope", "agent.slice")
+
+    def signaler(pid: int, sig: int) -> None:
+        signals.append((pid, sig))
+        if sig == signal.SIGTERM:
+            state["alive"] = False
+
+    actions = make_process_actions(
+        tmp_path,
+        prober,
+        process_stop_grace_seconds=5.0,
+        signaler=signaler,
+        sleeper=lambda seconds: None,
+        clock=lambda: 0.0,
+    )
+    receipt = actions.execute(
+        request("stop", {"process": {"pid": 502, "start_ticks": 55}}, key="clean-exit")
+    )
+    assert signals == [(502, signal.SIGTERM)]
+    assert receipt["adapter"]["signal"] == "SIGTERM"
+
+
+def test_process_stop_kills_a_real_process(tmp_path: Path) -> None:
+    """The production route, end to end: a real subprocess, the real
+    /proc-reading prober, and the real os.kill signaler -- not a fake for
+    any of the three. Proves the stop verb actually terminates the process
+    it targets, not merely that the bookkeeping around a fake signaler is
+    correct.
+
+    Mutation: swap `self.signaler(pid, signal.SIGKILL)` for a no-op (or for
+    SIGSTOP) and this test hangs until the surrounding pytest timeout, or
+    the final `proc.wait` never returns 0 alive processes.
+    """
+    from sinnix_ops_reducer.actions import ActionService
+
+    # Ignores SIGTERM so the escalation path is exercised for real; exits
+    # promptly on SIGKILL because that signal cannot be caught or ignored.
+    # Prints and flushes a line only once the handler is installed, and the
+    # test blocks on reading it -- without this handshake the SIGTERM can
+    # race the child's own startup and kill it before SIG_IGN is in place,
+    # which flips this from an escalation test into a flaky SIGTERM test.
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import signal, sys, time; "
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "print('ready', flush=True); "
+            "time.sleep(30)",
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == "ready"
+
+        stat_text = Path(f"/proc/{proc.pid}/stat").read_text(encoding="utf-8")
+        start_ticks = int(stat_text.rpartition(")")[2].split()[19])
+
+        inventory_path = tmp_path / "inventory.json"
+        inventory_with_sacrificial_slice(inventory_path)
+        reducer = Reducer(
+            tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
+        )
+        reducer.refresh()
+        actions = ActionService(
+            reducer.snapshot,
+            inventory_path,
+            tmp_path / "receipts.json",
+            unit_state_prober=fake_unit_state_prober,
+            self_pid=-1,
+            process_stop_grace_seconds=0.3,
+        )
+        # The real _live_process_prober, reading this real process's real
+        # /proc entry, confirms the identity before the stop is even sent.
+        live = actions.process_prober(proc.pid)
+        assert live is not None
+        assert live[0] == start_ticks
+
+        result = actions._stop_process({"pid": proc.pid, "start_ticks": start_ticks})
+        assert result["signal"] == "SIGKILL"
+
+        returncode = proc.wait(timeout=5)
+        # A process killed by a signal reports -signal on POSIX.
+        assert returncode == -signal.SIGKILL
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)

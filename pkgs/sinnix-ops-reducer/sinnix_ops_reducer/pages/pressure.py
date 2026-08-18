@@ -27,7 +27,7 @@ import time
 from typing import Any
 
 from .. import pressure as pressure_model
-from ..actions import SCOPE_UNIT_PATTERN
+from ..actions import SCOPE_UNIT_PATTERN, process_admitted_slices
 from .probes import collect_scopes
 from .shell import (
     ACTION_SCRIPT,
@@ -69,17 +69,21 @@ CHEAPNESS_NOTE = {
 }
 
 MISSING_VERBS_NOTE = (
-    "Two of the actions this evidence asks for do not exist in the bounded "
-    "action API, and the hub will not grow a private path to them. "
-    "<strong>Per-process stop</strong> is the one that matters: stopping a "
-    "runaway <code>rg</code> is costless and correct, but the finest "
-    "granularity the API admits is the whole scope, which takes the agent "
-    "session with it. <strong>A slice policy change</strong> "
-    "(<code>MemoryHigh</code> on <code>agent.slice</code>) is refused for a "
-    "different reason — <code>set_policy</code> resolves its target through "
-    "the runtime inventory, and slices are not registered surfaces there. "
-    "Nothing drains swap or reclaims a slice's swapped pages at all; that is a "
-    "genuine gap rather than a verb waiting to be surfaced."
+    "<strong>Per-process stop</strong> is live on the re-runnable rows below "
+    "(sinnix-mble): stopping a runaway <code>rg</code> or <code>bd list</code> "
+    "is costless and correct, and it now reaches the one process rather than "
+    "the whole scope. It is admitted by cgroup membership, not by name — only "
+    "processes currently inside <code>agent.slice</code>, "
+    "<code>build.slice</code>, or a slice the runtime inventory marks "
+    "sacrificial can be targeted — so the button is offered only where the "
+    "action would actually be accepted. Two gaps remain, and the hub will not "
+    "grow a private path around either of them. "
+    "<strong>A slice policy change</strong> (<code>MemoryHigh</code> on "
+    "<code>agent.slice</code>) is refused because <code>set_policy</code> "
+    "resolves its target through the runtime inventory, and slices are not "
+    "registered surfaces there. Nothing drains swap or reclaims a slice's "
+    "swapped pages at all; that is a genuine gap rather than a verb waiting "
+    "to be surfaced."
 )
 
 
@@ -240,6 +244,7 @@ def hog_row(
     process: pressure_model.Process,
     jobs_by_id: dict[str, dict[str, Any]],
     scopes_by_unit: dict[str, dict[str, Any]],
+    admitted_slices: frozenset[str] | set[str] = frozenset(),
 ) -> str:
     lane = pressure_model.lane_of(process.unit, jobs_by_id, scopes_by_unit)
     meta = [
@@ -254,8 +259,24 @@ def hog_row(
     if process.slice_unit:
         meta.append(esc(process.slice_unit))
     controls = ""
+    rerunnable = process.cheapness == pressure_model.CHEAPNESS_RERUNNABLE
+    if rerunnable and process.slice_unit in admitted_slices:
+        # The pid/start_ticks pin travels in the button itself -- act() posts
+        # it straight into target.process, so the receipt's identity check
+        # sees exactly what this row observed, not a name the operator typed.
+        controls += (
+            "<button class=\"act danger\" onclick=\"act('stop','process',"
+            f'{{pid: {process.pid}, start_ticks: {process.start_ticks}}},this)">'
+            "stop this process</button>"
+        )
+    elif rerunnable:
+        # Re-runnable does not mean admitted: the boundary is cgroup
+        # membership, and a re-runnable command outside agent.slice,
+        # build.slice, or a sacrificial slice answers 403. Say so rather than
+        # silently withholding the button.
+        meta.append(badge("no process-stop button (cgroup not admitted)", "muted"))
     if SCOPE_UNIT_PATTERN.match(process.unit):
-        controls = (
+        controls += (
             f"<button class=\"act danger\" onclick=\"act('stop','scope',"
             f"'{esc(process.unit)}',this)\">stop the whole scope</button>"
         )
@@ -297,6 +318,7 @@ def hogs_card(
     processes: list[pressure_model.Process],
     jobs_by_id: dict[str, dict[str, Any]],
     scopes_by_unit: dict[str, dict[str, Any]],
+    admitted_slices: frozenset[str] | set[str] = frozenset(),
 ) -> str:
     if not processes:
         return card("What is holding memory", empty("no process table available"))
@@ -311,7 +333,7 @@ def hogs_card(
         if process.cheapness == pressure_model.CHEAPNESS_SESSION
     ]
     blocks = "".join(
-        hog_row(process, jobs_by_id, scopes_by_unit)
+        hog_row(process, jobs_by_id, scopes_by_unit, admitted_slices)
         for process in actionable[:HOG_ROWS]
     )
     blocks += session_summary(session)
@@ -433,7 +455,9 @@ def render_pressure(
     body += headroom_card(reading)
     body += stall_card(reading)
     body += io_card(reading)
-    body += hogs_card(processes, jobs_by_id, scopes_by_unit)
+    body += hogs_card(
+        processes, jobs_by_id, scopes_by_unit, process_admitted_slices(inventory)
+    )
     body += scheduled_card(runs, parkable_units(inventory))
     body += available_card(reading)
     body += log_card()

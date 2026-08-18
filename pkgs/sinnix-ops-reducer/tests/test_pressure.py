@@ -27,6 +27,7 @@ from typing import Any
 
 import pytest
 from sinnix_ops_reducer import health, pressure, server
+from sinnix_ops_reducer.actions import process_admitted_slices
 from sinnix_ops_reducer.pages.pressure import (
     hog_row,
     hogs_card,
@@ -530,18 +531,45 @@ def test_the_hog_table_offers_scope_stop_and_names_the_verb_it_lacks(
     fake_proc: Path,
 ) -> None:
     """A scope button may exist only where the action API's own name-shape
-    admission accepts the unit, and the process-level stop the cheap-kill case
-    actually wants does not exist at all.
+    admission accepts the unit; a per-process stop button may exist only on
+    a re-runnable row whose live cgroup the action API would actually admit
+    (sinnix-mble).
 
     Mutation: emit a stop button for any row with a unit and the app-scope
     Chrome row gets one the API answers 403 to; drop the missing-verb prose and
-    the page silently implies the whole-scope stop is the intended granularity.
+    the page silently implies the whole-scope stop is the only granularity;
+    offer the process button on a row outside the admitted cgroups and it
+    answers 403 too.
     """
     rows = {row.comm: row for row in pressure.scan_processes(limit=4, proc=fake_proc)}
-    cheap = hog_row(rows["bd"], {}, {})
+    admitted = process_admitted_slices(INVENTORY)
+    # agent.slice and build.slice are admitted unconditionally, with no
+    # "slices" key in INVENTORY at all -- proving the base set does not
+    # depend on the inventory carrying it.
+    assert admitted == {"agent.slice", "build.slice"}
+
+    cheap = hog_row(rows["bd"], {}, {}, admitted)
     assert "act('stop','scope','sinnix-agent-bd-" in cheap
     assert "stop the whole scope" in cheap
-    assert "act('stop','scope'" not in hog_row(rows["chrome"], {}, {})
+    # bd is re-runnable AND in agent.slice, which is admitted: it gets the
+    # process button, carrying exactly the pid/start_ticks this row observed.
+    assert (
+        f"act('stop','process',{{pid: {rows['bd'].pid}, "
+        f"start_ticks: {rows['bd'].start_ticks}}},this)" in cheap
+    )
+    assert "act('stop','scope'" not in hog_row(rows["chrome"], {}, {}, admitted)
+    # rustc is classified EXPENSIVE (build.slice precedence over the command
+    # name), not RERUNNABLE, so it never gets a process-stop button even
+    # though build.slice is admitted.
+    assert "act('stop','process'" not in hog_row(rows["rustc"], {}, {}, admitted)
+    # A re-runnable command outside every admitted slice (a bare `git`
+    # running as some system.slice service, say) gets no button -- and the
+    # row says why, rather than silently withholding it.
+    outside_admission = replace(rows["bd"], slice_unit="system.slice", unit="")
+    assert outside_admission.cheapness == pressure.CHEAPNESS_RERUNNABLE
+    outside_row = hog_row(outside_admission, {}, {}, admitted)
+    assert "act('stop','process'" not in outside_row
+    assert "no process-stop button" in outside_row
 
     html = render_pressure(
         {"host": "fixture"},
@@ -554,6 +582,35 @@ def test_the_hog_table_offers_scope_stop_and_names_the_verb_it_lacks(
     )
     assert "Per-process stop" in html
     assert "slices are not registered surfaces" in html
+    # The full render wires the same admission the direct hog_row call used
+    # above -- the bd row's process button is live end to end, not only when
+    # a test hand-supplies the admitted set.
+    assert (
+        f"act('stop','process',{{pid: {rows['bd'].pid}, "
+        f"start_ticks: {rows['bd'].start_ticks}}},this)" in html
+    )
+
+
+def test_process_admission_widens_with_a_sacrificial_slice_marker() -> None:
+    """A slice outside agent.slice/build.slice is admitted only if the live
+    inventory itself marks it sacrificial (ManagedOOMMemoryPressure=kill) --
+    mirroring the action API's own boundary, not a second hardcoded list.
+
+    Mutation: derive the sacrificial set from a name list instead of the
+    inventory's own marker and this stops tracking a real policy change.
+    """
+    inventory = {
+        "schema": "sinnix-runtime-inventory-v1",
+        "slices": {
+            "user": {
+                "background": {"ManagedOOMMemoryPressure": "kill"},
+                "gpu-runtime": {},
+            }
+        },
+    }
+    admitted = process_admitted_slices(inventory)
+    assert admitted == {"agent.slice", "build.slice", "background.slice"}
+    assert "gpu-runtime.slice" not in admitted
 
 
 def test_session_processes_are_summed_rather_than_given_rows(fake_proc: Path) -> None:
