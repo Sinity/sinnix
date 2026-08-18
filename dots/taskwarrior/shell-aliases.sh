@@ -62,9 +62,10 @@ function twork() {
   task "$1" start
 
   # Get task details for timewarrior
-  local desc=$(task "$1" export | jq -r '.[0].description')
-  local tags=$(task "$1" export | jq -r '.[0].tags[]?' | tr '\n' ' ')
-  local project=$(task "$1" export | jq -r '.[0].project // empty')
+  local desc tags project
+  desc=$(task "$1" export | jq -r '.[0].description')
+  tags=$(task "$1" export | jq -r '.[0].tags[]?' | tr '\n' ' ')
+  project=$(task "$1" export | jq -r '.[0].project // empty')
 
   # Start timewarrior tracking
   if [ -n "$project" ] && [ -n "$tags" ]; then
@@ -82,7 +83,8 @@ function tstop() {
   # Stop current task in both taskwarrior and timewarrior
   if [ -z "$1" ]; then
     # Find currently active task
-    local active_id=$(task +ACTIVE ids)
+    local active_id
+    active_id=$(task +ACTIVE ids)
     if [ -n "$active_id" ]; then
       task "$active_id" stop
       timew stop
@@ -103,7 +105,7 @@ function tdone() {
     return 1
   fi
 
-  task "$1" done
+  task "$1" "done"
   timew stop
 }
 
@@ -115,7 +117,8 @@ function tquick() {
   fi
 
   # Add and start the task
-  local task_id=$(task add "$@" | grep -oP 'Created task \K\d+')
+  local task_id
+  task_id=$(task add "$@" | grep -oP 'Created task \K\d+')
   if [ -n "$task_id" ]; then
     twork "$task_id"
   fi

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 0077
 usage() { printf 'usage: %s --repo PATH --out DIR [--conflict FILE ...]\n' "$0" >&2; }
 repo=
 out=
@@ -37,7 +38,7 @@ repo=$(git -C "$repo" rev-parse --show-toplevel)
   echo 'output must be absolute' >&2
   exit 64
 }
-mkdir -p -m 0700 "$out/conflicts"
+mkdir -p "$out/conflicts"
 git -C "$repo" status --short >"$out/status.txt"
 git -C "$repo" reflog -n 100 >"$out/reflog.txt"
 git -C "$repo" diff --binary >"$out/diff.patch"

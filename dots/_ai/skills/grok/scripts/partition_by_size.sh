@@ -25,8 +25,8 @@ fi
 
 total_lines() {
   local dir=$1
-  find "$dir" -maxdepth "${2:-999}" -name "$glob" -not -name "*_test.*" -not -name "*test_*" |
-    xargs -r cat 2>/dev/null | wc -l
+  find "$dir" -maxdepth "${2:-999}" -name "$glob" -not -name "*_test.*" -not -name "*test_*" -print0 |
+    xargs -0 -r cat 2>/dev/null | wc -l
 }
 
 echo "# Partition proposal: $root (glob=$glob, target=$target lines/region)"

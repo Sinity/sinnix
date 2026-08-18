@@ -104,7 +104,8 @@ proc_start() {
 }
 
 migrate_or_archive_legacy() {
-  mkdir -p -m 0700 "$archive_dir"
+  mkdir -p "$archive_dir"
+  chmod 0700 "$archive_dir"
   for source in "$state_dir"/*.json; do
     [[ -e $source ]] || continue
     if jq -e '.schema_version == 1' "$source" >/dev/null 2>&1; then
@@ -200,7 +201,7 @@ job_status() {
 case "${command}" in
 list)
   umask 077
-  mkdir -p -m 0700 "${state_dir}"
+  mkdir -p "${state_dir}"
   chmod 0700 "${state_dir}"
   migrate_or_archive_legacy
   shopt -s nullglob

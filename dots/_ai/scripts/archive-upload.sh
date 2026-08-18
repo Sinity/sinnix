@@ -4,7 +4,6 @@
 # Run with: bash archive-upload.sh [--dry-run]
 set -euo pipefail
 
-AGE_BIN="/nix/store/h963yim5mc9429i628d0hnhpfvzhlxdr-age-1.3.1/bin/age"
 ARCHIVE_ROOT="/outer-realm/archive"
 STAGED_ROOT="/outer-realm/archive-staged"
 GDRIVE_TARGET="gdrive:archive"
