@@ -471,7 +471,7 @@ foreground app. Closing this needs an `AccessibilityService` reader (see
 sinnix-uyvt.6, which already has a bound accessibility service to build on) or
 keeping Termux foregrounded, which is a UX regression this design rejects. The
 share sheet (docs/phone.md, "Ingress") is the sanctioned workaround for a
-*deliberate* phone->desktop transfer -- share a URL or text and it lands in
+_deliberate_ phone->desktop transfer -- share a URL or text and it lands in
 the outbox like anything else -- but that is push-shaped by the operator, not
 a live mirror of whatever sits in the clipboard.
 
