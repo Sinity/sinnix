@@ -25,6 +25,11 @@ let
     inherit lib pkgs;
     siblingExtras = {
       sinnix-capture = sinnixCaptureLib;
+      # Importable, not executable: named by a script's `pythonPackages`
+      # frontmatter, which builds that script's shebang interpreter with the
+      # library on sys.path. The same `@name` resolution as runtimeInputs,
+      # a different consumer.
+      sinnix-lib = externalPackages.sinnix-lib;
       # Source lives in the steering workspace input; scripts naming
       # @sinnix-steer resolve to the wrapper below.
       sinnix-steer = externalPackages.sinnix-steer;

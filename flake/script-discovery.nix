@@ -7,6 +7,7 @@
       # @sinnix-package
       # description: One-line description (required)
       # runtimeInputs: bash coreutils jq        (space-separated, may be empty)
+      # pythonPackages: @sinnix-lib numpy       (optional; see below)
       #
       # Every packaged script already gets coreutils, gawk, gnugrep, gnused,
       # findutils, curl, jq and ffmpeg on PATH without asking. Declare only
@@ -16,6 +17,17 @@
   The script is copied into the Nix store with its shebang patched, so Python /
   bash / zsh dispatch is automatic inside sandboxed builds. `runtimeInputs`
   packages land on PATH for both wrapper and script.
+
+  `pythonPackages` is a different axis and the only way a Python script can
+  import a library: PATH is irrelevant to `import`, because the kernel
+  resolves the patched `#!/nix/store/.../python3` shebang directly and that
+  interpreter's sys.path is fixed at build time. Naming packages here builds a
+  `python3.withPackages` interpreter for THAT script and patches its shebang
+  against it instead of the bare `pkgs.python3`. Tokens resolve in
+  `pkgs.python3Packages` (dotted attribute paths allowed); a leading `@`
+  references a sibling non-script package (e.g. `@sinnix-lib`). Scripts that
+  do not name the field -- nearly all of them -- keep bare python3 and pay
+  neither the extra eval nor the wrapper build.
 
   A script that should NOT be packaged (e.g. launched directly by Hyprland)
   declares:
@@ -185,13 +197,37 @@ let
       # docs/<name>.md filename convention. Absent unless the script's
       # frontmatter names one.
       docs = fields.docs or null;
+      # The interpreter a Python script's shebang is patched against.
+      # `runtimeInputs` cannot serve this purpose: it builds a PATH, and an
+      # `import` never consults PATH -- the kernel jumps straight at the
+      # interpreter named in the shebang, whose sys.path was fixed when that
+      # interpreter was built. Bare python3 unless the script asks, so the
+      # withPackages environment is built only for the scripts that import
+      # something.
+      pythonPackagesRaw = splitWords (fields.pythonPackages or "");
+      resolvePythonPkg =
+        token:
+        if hasPrefix "@" token then
+          let
+            pname = lib.substring 1 (lib.stringLength token) token;
+          in
+          siblingExtras.${pname} or (throw "script-discovery: unknown sibling python package @${pname}")
+        else
+          attrByPath (splitString "." token)
+            (throw "script-discovery: pkgs.python3Packages.${token} does not exist")
+            pkgs.python3Packages;
+      pythonInterpreter =
+        if pythonPackagesRaw == [ ] then
+          pkgs.python3
+        else
+          pkgs.python3.withPackages (_ps: map resolvePythonPkg pythonPackagesRaw);
       patchedScript =
         pkgs.runCommand "${name}-script"
           {
             nativeBuildInputs = [
               pkgs.bash
               pkgs.coreutils
-              pkgs.python3
+              pythonInterpreter
               pkgs.zsh
             ];
           }
