@@ -14,8 +14,9 @@ export BEADS_DIR="$STEER_BEADS"
 ready=$(bd ready 2>/dev/null | head -20) || exit 0
 [ -n "$ready" ] || exit 0
 
-echo "# Personal Steering (workspace: /realm/project/steering — bd via BEADS_DIR)"
-echo "Open intentions/activities (agent: surface these when relevant; the"
+echo "# Personal Steering — the operator's own intentions, held outside him"
+echo "# (what this is: docs/steering.md in sinnix; workspace: /realm/project/steering, bd via BEADS_DIR)"
+echo "Open intentions (agent: surface these when relevant; the"
 echo "operator steers, you hold state — never nag, always know):"
 echo "$ready"
 in_prog=$(bd list --status=in_progress 2>/dev/null | head -6) || true

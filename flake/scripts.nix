@@ -58,6 +58,18 @@ let
       package = externalPackages.sinnix-scope;
       runtimeInputs = [ ];
       tier = "default";
+      owner = "flake/launch.nix";
+    };
+    # Same shape for the steering CLI: its source moved into the steering
+    # workspace, but it remains an operator verb — keep it in the registry so
+    # `sinnix help` lists it and `sinnix steer ...` dispatches.
+    sinnix-steer = {
+      description = "Personal steering store CLI — intentions with forecasts, activity menu, rituals";
+      package = externalPackages.sinnix-steer;
+      runtimeInputs = [ ];
+      tier = "default";
+      owner = "flake/scripts.nix";
+      docs = "docs/steering.md";
     };
   };
   scriptPackages = lib.mapAttrs (_: v: v.package) registry // {
