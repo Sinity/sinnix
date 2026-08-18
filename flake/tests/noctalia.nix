@@ -17,10 +17,12 @@
                 pkgs.bash
                 pkgs.coreutils
                 pkgs.gnugrep
+                pkgs.gnused
               ];
             }
             ''
               NOCTALIA_OPS_PLUGIN=${../../dots/noctalia/plugins/sinnix-ops} \
+              NOCTALIA_OPS_REDUCER=${../../pkgs/sinnix-ops-reducer} \
                 ${pkgs.bash}/bin/bash ${../../flake/tests/noctalia-ops-bridge.sh}
               touch "$out"
             '';
