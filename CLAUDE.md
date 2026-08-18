@@ -245,7 +245,10 @@ resourceClass, observe, captures }`. Eval-time assertions reject duplicate
 `flake/`: `nixos.nix` (hosts), `lib-context.nix` (shared bootstrap),
 `dev-shell.nix` + `command-registry.nix` (rebuild commands — single source of
 truth for lock/containment/preflight shared by devshell binaries and
-`nix run .#switch`), `scripts.nix` + `script-discovery.nix` (script registry),
+`nix run .#switch`), `scripts.nix` + `script-discovery.nix` (script registry)
++ `script-registry.nix` (the ONE evaluation of it, published via
+`_module.args` and a per-host `pkgs.sinnixScriptRegistry` overlay — never
+re-import scripts.nix directly),
 `launch.nix` + `launch/scope-runtime.bash` (the generated `sinnix-scope`
 launcher — see Runtime Governance), `packages.nix` (public package surface),
 `tests.nix` + `tests-runtime.nix` + `test-lib.nix` + `tests/*.{nix,sh}` (the
