@@ -100,18 +100,18 @@ def test_failed_and_attention_units_filters_active_states() -> None:
     }
 
 
-def test_estate_verdict_reports_attention_when_units_or_sources_are_bad() -> None:
+def test_system_verdict_reports_attention_when_units_or_sources_are_bad() -> None:
     units = orient.failed_and_attention_units(SNAPSHOT_HEALTHY["state"])
     degraded = orient.degraded_sources(SNAPSHOT_HEALTHY["sources"])
-    status, summary = orient.estate_verdict(units, degraded)
+    status, summary = orient.system_verdict(units, degraded)
     assert status == "attention"
     assert "1 unit failed" in summary
     assert "ambient-intelligence" in summary
 
 
-def test_estate_verdict_healthy_when_nothing_is_wrong() -> None:
-    status, summary = orient.estate_verdict([], [])
-    assert (status, summary) == ("healthy", "The estate is healthy.")
+def test_system_verdict_healthy_when_nothing_is_wrong() -> None:
+    status, summary = orient.system_verdict([], [])
+    assert (status, summary) == ("healthy", "The system is healthy.")
 
 
 def test_acknowledged_outages_extracts_only_down_true() -> None:
@@ -206,7 +206,7 @@ def test_compose_healthy_reducer_and_beads() -> None:
         steering_head=lambda: {"available": False},
     )
     assert data["schema"] == orient.SCHEMA
-    assert data["estate"]["status"] == "attention"
+    assert data["system"]["status"] == "attention"
     assert data["acknowledged_outages"][0]["surface"] == "sinex"
     assert data["capture_freshness"]["healthy"] == 1
     assert data["beads"]["available"] is True
@@ -229,7 +229,7 @@ def test_compose_degraded_reducer_falls_back_to_static_inventory(tmp_path: Path)
         bd_head=lambda: {"available": False},
         steering_head=lambda: {"available": False},
     )
-    assert data["estate"]["status"] == "unavailable"
+    assert data["system"]["status"] == "unavailable"
     # Acknowledged outages still resolve from the static inventory even
     # though the reducer itself could not be reached.
     assert data["acknowledged_outages"][0]["surface"] == "sinex"
@@ -259,17 +259,17 @@ def test_compose_no_beads_workspace() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_render_human_healthy_estate_has_no_attention_rows() -> None:
+def test_render_human_healthy_system_has_no_attention_rows() -> None:
     data = {
         "generated_at": "2026-08-18T00:00:00Z",
-        "estate": {"status": "healthy", "summary": "The estate is healthy."},
+        "system": {"status": "healthy", "summary": "The system is healthy."},
         "acknowledged_outages": [],
         "capture_freshness": {"available": True, "total": 5, "healthy": 5, "non_healthy": []},
         "beads": {"available": False},
         "steering": {"available": False},
     }
     text = orient.render_human(data)
-    assert "The estate is healthy." in text
+    assert "The system is healthy." in text
     assert "FAILED" not in text
     assert "Acknowledged outages" not in text
     assert "5/5 healthy" in text

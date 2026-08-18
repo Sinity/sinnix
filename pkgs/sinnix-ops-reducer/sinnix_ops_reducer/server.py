@@ -160,8 +160,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    # ── /terminals/* — absorbed from the retired sinnix-terminal-view daemon
-    # (sinnix-859p); see terminals.py for the design doctrine. ─────────────
+    # ── /terminals/* — absorbed from an earlier standalone terminal-viewing
+    # daemon (sinnix-859p); see terminals.py for the design doctrine. ──────
 
     def _serve_terminal_get(self) -> None:
         path = self.path
@@ -452,7 +452,7 @@ class Handler(BaseHTTPRequestHandler):
             self._write_html(
                 HTTPStatus.NOT_FOUND,
                 "<!doctype html><title>not found</title>"
-                "<p>No such page. <a href=\"/\">Back to the estate.</a></p>\n",
+                "<p>No such page. <a href=\"/\">Back to the dashboard.</a></p>\n",
             )
 
     def do_POST(self) -> None:

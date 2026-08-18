@@ -1,5 +1,5 @@
-"""The /terminals/* contract as absorbed from the retired sinnix-terminal-view
-daemon (sinnix-859p) -- URL routing, the body cap, the named-key mapping, and
+"""The /terminals/* contract as absorbed from an earlier standalone
+terminal-viewing daemon (sinnix-859p) -- URL routing, the body cap, the named-key mapping, and
 the history filename join. Live kitty/asciinema behavior (an actual window
 snapshot, an actual live-stream join) is not mockable here and is a
 post-switch coordinator check.

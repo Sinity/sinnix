@@ -366,7 +366,7 @@ def test_scope_targets_admit_only_name_shaped_live_units_and_only_stop(
         )
 
 
-def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_estate(
+def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_system(
     tmp_path: Path,
 ) -> None:
     """sinnix-rd69: a stop-scope receipt used to embed the ENTIRE reducer
@@ -379,7 +379,7 @@ def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_estate(
     (the pre-fix behavior) blows the bound below."""
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
-    # An oversized state report standing in for the live estate: many
+    # An oversized state report standing in for the live system: many
     # unrelated jobs with bulky per-process telemetry, none of them the
     # action's own target.
     bloat_jobs = [
@@ -410,7 +410,7 @@ def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_estate(
     )
     reducer.refresh()
     assert len(json.dumps(reducer.snapshot()["state"])) > 20_000, (
-        "fixture must reproduce the estate-sized snapshot the bug embedded"
+        "fixture must reproduce the system-sized snapshot the bug embedded"
     )
     actions = ActionService(
         reducer.snapshot,

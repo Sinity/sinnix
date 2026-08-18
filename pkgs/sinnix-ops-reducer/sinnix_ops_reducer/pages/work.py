@@ -304,7 +304,7 @@ def slices_card(state: dict[str, Any]) -> str:
         blocks += row(headline + meter(entry["current"], limit), meta)
     return (
         '<section class="card"><h2>Slice budgets</h2>'
-        '<p class="sub">Where the estate puts work, and what it is allowed to '
+        '<p class="sub">Where sinnix puts work, and what it is allowed to '
         "cost. Sacrificial slices carry real ceilings; the protected ones do "
         "not.</p>"
         f"{blocks}</section>"

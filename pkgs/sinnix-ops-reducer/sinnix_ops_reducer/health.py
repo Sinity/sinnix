@@ -1,16 +1,17 @@
-"""Inventory-driven health transitions: the sweep the sentinel used to run.
+"""Inventory-driven health transitions: the sweep that watches every attested
+runtime surface for staleness, failure, and recovery.
 
-Absorbed from `sinnix-health-sentinel`, a system oneshot on a one-minute timer.
-The reducer already reads the runtime inventory and already runs on a clock, and
-the sentinel's whole output was a deduplicated transition ledger plus a desktop
-notification -- so it lives here now, on its own 60s tick inside the reducer's
-loop, with two things that improve by the move:
+The reducer already reads the runtime inventory and already runs on a clock,
+so the sweep runs here, on its own 60s tick inside the reducer's loop, with a
+deduplicated transition ledger plus a desktop notification as its output. Two
+properties that follow from living here rather than as a separate root
+oneshot:
 
-  * It runs IN the operator's session. The sentinel was root with no session
-    bus, so every user-manager query and every liveness probe had to be bridged
-    back into the session through sudo; that bridge is what silently broke the
-    PipeWire coverage probe (root cannot reach the user's pw-dump). Here the
-    probes and `systemctl --user` are simply native.
+  * It runs IN the operator's session. A root process with no session bus
+    would have to bridge every user-manager query and every liveness probe
+    back into the session through sudo -- the kind of bridge that silently
+    broke the PipeWire coverage probe (root cannot reach the user's pw-dump).
+    Here the probes and `systemctl --user` are simply native.
   * The OnFailure fast path and the sweep share one state store by
     construction. When they kept separate keys the same unit re-notified on
     every failure and its recovery never paired with the outage
@@ -27,7 +28,7 @@ Preserved exactly, because they are contracts other things read:
     never produced, as opposed to having produced and stopped. That third
     state used to be reported as `stale`, which made a newly-declared lane and
     a dead one indistinguishable in both the ledger and the notification;
-  * the state file shape at /run/sinnix/health-sentinel-state.json --
+  * the state file shape at /run/sinnix/health-state.json --
     `{key: {status, pending?, streak?}}`, keyed `service:<manager>:<unit>`,
     `socket:<manager>:<unit>`, `capture:<name>`, `payload:<name>`,
     `publisher:<name>`, `mount:<path>`;
@@ -85,7 +86,7 @@ SWEEP_INTERVAL_SECONDS = 60.0
 
 
 def state_path() -> Path:
-    return runtime_dir() / "health-sentinel-state.json"
+    return runtime_dir() / "health-state.json"
 
 
 def ledger_path() -> Path:

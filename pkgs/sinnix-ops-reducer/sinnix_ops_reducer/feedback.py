@@ -1,6 +1,6 @@
 """The hub's annotation spool, and the elicit drain it triggers.
 
-Ported from the retired `sinnix-hub-feedback` daemon. The spool file format is
+Ported from an earlier standalone feedback daemon. The spool file format is
 the contract -- agents read `<spool>/<UTC-date>.jsonl` directly, and the
 generated reports and elicit sessions POST to `/feedback` -- so the envelope,
 its key order, its spacing and its fsync-per-line are reproduced exactly rather
