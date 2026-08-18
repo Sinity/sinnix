@@ -44,6 +44,25 @@ in
           }
         ];
       };
+      # `assertions` fed into evalTestSpec above are declared as NixOS module
+      # assertions, but nothing in this test harness forces
+      # `config.assertions` (no `system.build.toplevel` or
+      # `lib.checkAssertions` consumer) -- confirmed empirically: a
+      # deliberately false entry there built without error. Real `assert`
+      # statements below, forced because `polylogueStateBorgScriptChecked`
+      # is what actually gets used, are the enforcement mechanism for the
+      # polylogue exclude-pattern checks instead.
+      polylogueStateBorgScriptChecked =
+        let
+          script = backupRuntimeEval.config.systemd.services.borgbackup-job-polylogue-state.script;
+        in
+        assert lib.assertMsg (lib.hasInfix "--exclude realm/state/polylogue/source.db " script)
+          "Polylogue state Borg job must exclude the qualified source.db path, not a bare filename (excludes match the FULL walked path -- see mkBorgExcludeArgs in modules/backup.nix)";
+        assert lib.assertMsg (lib.hasInfix "--exclude realm/state/polylogue/source.db-wal " script)
+          "Polylogue state Borg job must exclude source.db's WAL sidecar to avoid a torn copy";
+        assert lib.assertMsg (!lib.hasInfix "embeddings.db.retired" script)
+          "Polylogue state Borg job must not name retired database siblings in its exclude list -- they must stay covered by this direct-path job";
+        script;
       rewriteBackupHook =
         hook: replacements:
         builtins.replaceStrings (map (replacement: replacement.from) replacements) (map (
@@ -223,6 +242,42 @@ in
             }
           ];
 
+      polylogueStateBorgScript =
+        rewriteBackupHook polylogueStateBorgScriptChecked
+          [
+            {
+              from = "/outer-realm/backup/borg-polylogue-state-v1";
+              to = "$TMPDIR/repos/borg-polylogue-state-v1";
+            }
+            {
+              # Must precede the plain ".cache/borg" pattern below:
+              # replaceStrings matches earlier list entries first at a given
+              # position, and "borg" is itself a prefix of "borg-drain".
+              from = "/persist/root/.cache/borg-drain";
+              to = "$TMPDIR/state/borg-drain";
+            }
+            {
+              from = "/persist/root/.cache/borg";
+              to = "$TMPDIR/state/borg-cache";
+            }
+            {
+              from = "/run/lock/sinnix-borg.lock";
+              to = "$TMPDIR/state/sinnix-borg.lock";
+            }
+            {
+              from = "install -d -m 0700 -o root -g root";
+              to = "install -d -m 0700";
+            }
+            {
+              from = "install -d -m 0755 -o root -g root";
+              to = "install -d -m 0755";
+            }
+            {
+              from = "/realm/state/polylogue";
+              to = "$TMPDIR/live-polylogue";
+            }
+          ];
+
       sinexBeadsDrillScript =
         rewriteBackupHook backupRuntimeEval.config.systemd.services.sinnix-borg-beads-drill.script
           [
@@ -273,8 +328,11 @@ in
             "$TMPDIR/realm-snapshots" \
             "$TMPDIR/persist-snapshots" \
             "$TMPDIR/realm-empty" \
-            "$TMPDIR/live-cas/objects/ab"
+            "$TMPDIR/live-cas/objects/ab" \
+            "$TMPDIR/live-polylogue/blob/objects/cd"
           printf 'production-shaped-cas-object\n' > "$TMPDIR/live-cas/objects/ab/cdef"
+          printf 'production-shaped-blob-object\n' > "$TMPDIR/live-polylogue/blob/objects/cd/ef01"
+          printf 'live sqlite content, excluded here on purpose\n' > "$TMPDIR/live-polylogue/source.db"
 
           cat > "$TMPDIR/mock-bin/mountpoint" <<'EOF'
           #!${pkgs.bash}/bin/bash
@@ -474,17 +532,25 @@ in
           ${sinexBeadsDrillScript}
           EOF
 
+          cat > "$TMPDIR/run-polylogue-state-backup.sh" <<'EOF'
+          #!${pkgs.bash}/bin/bash
+          set -euo pipefail
+          ${polylogueStateBorgScript}
+          EOF
+
           chmod +x \
             "$TMPDIR/run-realm-hook.sh" \
             "$TMPDIR/run-persist-hook.sh" \
             "$TMPDIR/run-missing-realm-hook.sh" \
             "$TMPDIR/run-sinex-blob-backup.sh" \
-            "$TMPDIR/run-sinex-beads-drill.sh"
+            "$TMPDIR/run-sinex-beads-drill.sh" \
+            "$TMPDIR/run-polylogue-state-backup.sh"
 
           "$TMPDIR/run-realm-hook.sh"
           "$TMPDIR/run-persist-hook.sh"
           "$TMPDIR/run-sinex-blob-backup.sh"
           "$TMPDIR/run-sinex-beads-drill.sh"
+          "$TMPDIR/run-polylogue-state-backup.sh"
 
           grep -q "$TMPDIR/realm-snapshots/realm.2026-04-02T011500 => $TMPDIR/bind/realm" "$TMPDIR/logs/mount.log"
           grep -q "$TMPDIR/persist-snapshots/persist.2026-04-02T011500 => $TMPDIR/bind/persist" "$TMPDIR/logs/mount.log"
@@ -504,6 +570,16 @@ in
           cmp "$TMPDIR/live-cas/objects/ab/cdef" "$TMPDIR/restore/objects/ab/cdef"
           grep -q "create .* $TMPDIR/live-cas" "$TMPDIR/logs/borg.log"
           ! grep -q "/realm/sinex/state/blob-repository" "$TMPDIR/logs/borg.log"
+          polylogue_archive="$(borg list --short file://$TMPDIR/repos/borg-polylogue-state-v1)"
+          case "$polylogue_archive" in polylogue-state-*) ;; *) exit 1 ;; esac
+          mkdir -p "$TMPDIR/restore-polylogue"
+          (
+            cd "$TMPDIR/restore-polylogue"
+            borg extract "file://$TMPDIR/repos/borg-polylogue-state-v1::$polylogue_archive"
+          )
+          cmp "$TMPDIR/live-polylogue/blob/objects/cd/ef01" "$TMPDIR/restore-polylogue/blob/objects/cd/ef01"
+          test -f "$TMPDIR/state/borg-drain/polylogue-state.last-success"
+
           beads_drill_log="$(find "$TMPDIR/realm-data" -name borg_beads_drill.jsonl -print -quit)"
           test -n "$beads_drill_log"
           jq -e '
@@ -537,6 +613,7 @@ in
           borgbackup-job-persist
           borgbackup-job-realm
           borgbackup-job-sinex-blobs
+          borgbackup-job-polylogue-state
           borgbackup-verify
           ;
         allSurfaceNames = builtins.attrNames backupRuntimeEval.config.sinnix.runtime.surfaces;
@@ -556,6 +633,7 @@ in
               (.["borgbackup-job-realm"].captures | any(.name == "borg-realm-archive" and .eventDriven == true and .staleAfterSeconds == 21600)) and
               (.["borgbackup-job-realm"].captures | any(.name == "borg-snapshot-queue" and .livenessProbe.command != null)) and
               (.["borgbackup-job-sinex-blobs"].captures | any(.name == "borg-sinex-blobs-archive" and .eventDriven == true and .staleAfterSeconds == 259200)) and
+              (.["borgbackup-job-polylogue-state"].captures | any(.name == "borg-polylogue-state-archive" and .eventDriven == true and .staleAfterSeconds == 259200)) and
               (.["borgbackup-verify"].captures | any(.name == "borg-drill" and .staleAfterSeconds == 1814400)) and
               (.["borgbackup-verify"].captures | any(.name == "borg-integrity-receipt" and .eventDriven == true and .staleAfterSeconds == 1814400 and .livenessProbe.command != null)) and
               (.allSurfaceNames | index("borgbackup-status") | not) and

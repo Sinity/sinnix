@@ -28,6 +28,44 @@ let
   ) config.services.sinex.storage.blob.repositoryPath;
   borgRepoRoot = "${config.sinnix.paths.outerRealm}/backup";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+  username = config.sinnix.user.name;
+
+  # state/polylogue is a nested btrfs subvolume (sinnix-3pvd): btrbk snapshots
+  # `subvolume .` of /realm, which does not cross subvolume boundaries, so
+  # this tree archives as an empty directory under the normal realm coverage.
+  # Pulling it into btrbk directly was tried and reverted (commits 9c2c068d,
+  # a99f2f7b) because a snapshot forces copy-on-write on the daemon's
+  # nodatacow SQLite files on their next write. The fix is the same shape
+  # sinex-postgres-dump and machine-telemetry-sqlite-backup already use: a
+  # logical dump/direct-path copy on a timer, landing in a plain directory
+  # that IS covered by ordinary realm snapshot+borg. polylogued is currently
+  # parked (acknowledged.down in modules/services/polylogue.nix) so these
+  # jobs run against a quiescent tree today; both are written to work
+  # unattended whenever ingestion resumes.
+  polylogueStateRoot = "${realmRoot}/state/polylogue";
+  polylogueBackupRoot = "${realmRoot}/state/db-dumps/polylogue";
+  # The daemon's live SQLite databases at the top level of the state root.
+  # index.db is a symlink into .index-generations/; sqlite3 opens through a
+  # symlink transparently, so no readlink is needed here.
+  polylogueDbNames = [
+    "source.db"
+    "embeddings.db"
+    "ops.db"
+    "audit.db"
+    "user.db"
+    "index.db"
+  ];
+  # Direct-path borg (below) must not file-copy these live databases or
+  # their WAL/SHM sidecars mid-write -- that is exactly the torn-copy risk
+  # the sqlite-backup dump job exists to avoid. Retired/historical sibling
+  # files (e.g. embeddings.db.retired-20260627) don't match these exact
+  # names and stay in the direct-path job's coverage, which is correct: they
+  # are static and a plain file copy of a static file is safe.
+  polylogueDbExcludes = lib.concatMap (name: [
+    name
+    "${name}-wal"
+    "${name}-shm"
+  ]) polylogueDbNames;
 
   # Snapshot directories
   realmSnapshots = "${realmRoot}/.btrfs/snapshot";
@@ -43,11 +81,13 @@ let
   borgRepoRealmPath = "${borgRepoRoot}/borg-realm-v2";
   borgRepoRootSnapshotsPath = "${borgRepoRoot}/borg-root-snapshots-v1";
   borgRepoSinexBlobsPath = "${borgRepoRoot}/borg-sinex-blobs-v1";
+  borgRepoPolylogueStatePath = "${borgRepoRoot}/borg-polylogue-state-v1";
   btrfsImageRoot = "${borgRepoRoot}/btrfs-images";
   borgRepoPersist = "file://${borgRepoPersistPath}";
   borgRepoRealm = "file://${borgRepoRealmPath}";
   borgRepoRootSnapshots = "file://${borgRepoRootSnapshotsPath}";
   borgRepoSinexBlobs = "file://${borgRepoSinexBlobsPath}";
+  borgRepoPolylogueState = "file://${borgRepoPolylogueStatePath}";
   borgPassphrasePath = config.sinnix.secrets.paths."borg-passphrase";
   outerRealmMountUnit = "outer\\x2drealm.mount";
   borgLockWaitSec = 60;
@@ -728,6 +768,33 @@ in
           }
         ];
       };
+      polylogue-sqlite-backup = {
+        unit = "polylogue-sqlite-backup.service";
+        resourceClass = "backup-maintenance";
+        observe.enable = true;
+      };
+      polylogue-sqlite-backup-timer = {
+        unit = "polylogue-sqlite-backup.timer";
+        kind = "timer";
+        resourceClass = "backup-maintenance";
+      };
+      borgbackup-job-polylogue-state = {
+        unit = "borgbackup-job-polylogue-state.service";
+        resourceClass = "backup-maintenance";
+        observe = {
+          enable = true;
+          restartable = false;
+        };
+        captures = [
+          {
+            name = "borg-polylogue-state-archive";
+            path = "${borgDrainStateRoot}/polylogue-state.last-success";
+            eventDriven = true;
+            # Daily timer, same budget convention as sinex-blobs: 3x cadence.
+            staleAfterSeconds = borgDailyArchiveMaxAgeSec;
+          }
+        ];
+      };
       borgbackup-verify = {
         unit = "borgbackup-verify.service";
         resourceClass = "backup-maintenance";
@@ -980,6 +1047,153 @@ in
       };
     };
 
+    # ─── Polylogue nested-subvolume coverage (sinnix-3pvd) ───
+    #
+    # Two jobs cover state/polylogue, split the same way sinex is split
+    # between sinex-postgres-dump (logical dump of the live DB) and
+    # borgbackup-job-sinex-blobs (direct-path borg of the immutable CAS):
+    # sqlite-safe dumps for the live databases, and a direct-path borg job
+    # for everything else (blob/ CAS, hooks/, browser-capture/, inbox/, and
+    # the retired/historical db siblings that are no longer written).
+    systemd.services.polylogue-sqlite-backup = {
+      description = "Back up Polylogue SQLite databases";
+      after = [
+        "realm.mount"
+      ];
+      requires = [
+        "realm.mount"
+      ];
+      unitConfig.RequiresMountsFor = [
+        polylogueStateRoot
+        polylogueBackupRoot
+      ];
+      restartIfChanged = false;
+      serviceConfig =
+        (lib.sinnix.mkRuntimeServiceConfig {
+          runtimeInventory = config.sinnix.runtime.inventory;
+          unit = "polylogue-sqlite-backup.service";
+        })
+        // {
+          Type = "oneshot";
+          User = username;
+          Group = "users";
+          TimeoutStartSec = "30min";
+        };
+      path = [
+        pkgs.coreutils
+        pkgs.findutils
+        pkgs.gawk
+        scriptPkgs.sinnix-sqlite-backup
+      ];
+      script = ''
+        set -euo pipefail
+
+        umask 077
+        install -d -m 0700 -o ${lib.escapeShellArg username} -g users ${lib.escapeShellArg polylogueBackupRoot}
+
+        stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+
+        for name in ${lib.escapeShellArgs polylogueDbNames}; do
+          src=${lib.escapeShellArg polylogueStateRoot}/"$name"
+          [ -e "$src" ] || continue
+          base="''${name%.db}"
+          final=${lib.escapeShellArg polylogueBackupRoot}/"$base-$stamp".db.zst
+
+          sinnix-sqlite-backup "$src" "$final"
+
+          # Retention is a judgment call, not a measurement: polylogued is
+          # parked (near-zero churn today), and the largest db (source.db,
+          # 1.8G raw) compresses to a fraction of that, so 5 generations per
+          # db is cheap. Widen once real write-rate data exists after the
+          # daemon un-parks.
+          find ${lib.escapeShellArg polylogueBackupRoot} \
+            -maxdepth 1 \
+            -type f \
+            -name "$base"'-*.db.zst' \
+            -printf '%T@ %p\n' \
+            | sort -rn \
+            | awk 'NR > 5 { print substr($0, index($0, $2)) }' \
+            | xargs -r rm -f
+        done
+      '';
+    };
+
+    systemd.timers.polylogue-sqlite-backup = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "*-*-* 04:15:00";
+        RandomizedDelaySec = "20min";
+        Persistent = true;
+      };
+    };
+
+    # Direct-path borg over the live state root, same reasoning as
+    # borgbackup-job-sinex-blobs: excluded files are the live databases
+    # (torn-copy risk, covered by the dump job above instead); everything
+    # else here is either immutable CAS or currently-static, so a plain
+    # file-level copy is safe without a btrfs snapshot.
+    systemd.services.borgbackup-job-polylogue-state = {
+      description = "Back up Polylogue state (blob CAS and non-live files) into Borg";
+      restartIfChanged = false;
+      after = [
+        "realm.mount"
+        outerRealmMountUnit
+      ];
+      requires = [
+        "realm.mount"
+        outerRealmMountUnit
+      ];
+      unitConfig.RequiresMountsFor = [ polylogueStateRoot ];
+      serviceConfig = (backupServiceConfig "borgbackup-job-polylogue-state.service") // {
+        Type = "oneshot";
+        TimeoutStopSec = "15s";
+      };
+      path = with pkgs; [
+        borgbackup
+        coreutils
+        gnugrep
+        procps
+        util-linux
+      ];
+      script = ''
+        set -euo pipefail
+        ${mkBorgCommonScript borgRepoPolylogueState borgRepoPolylogueStatePath}
+
+        install -d -m 0700 -o root -g root ${lib.escapeShellArg borgRepoPolylogueStatePath}
+        recover_stale_borg_locks
+
+        if [ ! -e ${lib.escapeShellArg "${borgRepoPolylogueStatePath}/config"} ]; then
+          with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
+        fi
+
+        archive_name="polylogue-state-$(date -u +%Y%m%dT%H%M%SZ)"
+        with_borg_lock borg create \
+          --compression auto,zstd,1 \
+          --lock-wait ${toString borgLockWaitSec} \
+          ${mkBorgExcludeArgs polylogueStateRoot polylogueDbExcludes} \
+          "::$archive_name" \
+          ${lib.escapeShellArg polylogueStateRoot}
+        echo "polylogue state backup complete: $archive_name"
+
+        install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
+        marker=${lib.escapeShellArg "${borgDrainStateRoot}/polylogue-state.last-success"}
+        {
+          printf 'archive=%s\n' "$archive_name"
+          printf 'epoch=%s\n' "$(date +%s)"
+        } > "$marker.tmp"
+        mv "$marker.tmp" "$marker"
+      '';
+    };
+
+    systemd.timers.borgbackup-job-polylogue-state = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "*-*-* 05:55:00";
+        RandomizedDelaySec = "10min";
+        Persistent = true;
+      };
+    };
+
     assertions =
       lib.optional (sinexBlobRepositoryPath != "") {
         assertion = lib.hasInfix sinexBlobRepositoryPath config.systemd.services.borgbackup-job-sinex-blobs.script;
@@ -1193,6 +1407,7 @@ in
         maintain_repo ${lib.escapeShellArg borgRepoRealm}
         maintain_repo ${lib.escapeShellArg borgRepoSinexBlobs}
         maintain_repo ${lib.escapeShellArg borgRepoRootSnapshots}
+        maintain_repo ${lib.escapeShellArg borgRepoPolylogueState}
       '';
     };
     systemd.timers.borgbackup-maintenance = {
@@ -1297,6 +1512,7 @@ in
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoRealmPath}
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoRootSnapshotsPath}
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoSinexBlobsPath}
+      ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoPolylogueStatePath}
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${btrfsImageRoot}
     '';
 
