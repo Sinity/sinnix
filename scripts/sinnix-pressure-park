@@ -1,16 +1,38 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Park or resume background units based on live PSI pressure
-# runtimeInputs: bash coreutils gawk gnugrep systemd sudo
+# runtimeInputs: bash coreutils gawk gnugrep jq systemd sudo
 
 set -euo pipefail
 
-default_units=(
-  borgbackup-job-realm.service
-  borgbackup-job-persist.service
-  borgbackup-maintenance.service
-  borgbackup-verify.service
-)
+# Parkable set derives from the LIVE runtime inventory: every system-manager
+# backup-maintenance service is by declaration heavy, deferrable, and safe to
+# freeze. Reading the inventory at runtime is correct here (unlike the
+# retired static-class interpretation sinnix-scope did): the inventory IS the
+# current generation's contract and changes with it, so a new backup job is
+# parkable the moment it registers, with no second list to update. The
+# literal fallback covers a host where the inventory is unreadable.
+inventory_file="${SINNIX_RUNTIME_INVENTORY:-/etc/sinnix/runtime-inventory.json}"
+default_units=()
+if [ -r "$inventory_file" ]; then
+  while IFS= read -r _unit; do
+    default_units+=("$_unit")
+  done < <(jq -r '
+    .surfaces | to_entries[]
+    | select(.value.resourceClass == "backup-maintenance"
+             and (.value.manager // "system") == "system"
+             and (.value.kind // "service") == "service")
+    | .value.unit
+  ' "$inventory_file" 2>/dev/null | sort)
+fi
+if [ "${#default_units[@]}" -eq 0 ]; then
+  default_units=(
+    borgbackup-job-realm.service
+    borgbackup-job-persist.service
+    borgbackup-maintenance.service
+    borgbackup-verify.service
+  )
+fi
 
 usage() {
   cat <<'EOF'
