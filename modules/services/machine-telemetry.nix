@@ -197,223 +197,228 @@ mkServiceModule {
         map (item: "${item.label}|${item.scope}|${item.path}") cgroupSpecs
       );
     in
-    {
-      systemd.tmpfiles.rules = [
-        # Operator-owned like the rest of the lake, and group-writable so the
-        # root daemons and operator producers that share this namespace can
-        # both create files. It must NOT be root-owned under an
-        # operator-owned parent: systemd-tmpfiles refuses such a directory
-        # outright ("Detected unsafe path transition ... during
-        # canonicalization"), which silently stops it managing this path at
-        # all.
-        "d ${dataRoot} 0775 ${username} users -"
-        "d ${dataDir}/experiments 0775 ${username} users -"
-        "d ${dataDir}/legacy 0775 ${username} users -"
-        "d ${backupRoot} 0700 ${username} users -"
-      ];
-
-      systemd.services.machine-telemetry-db-scaffold = {
-        description = "Create machine telemetry SQLite nodatacow subvolume";
-        requiredBy = [ "machine-telemetry.service" ];
-        before = [ "machine-telemetry.service" ];
-        requires = [ "realm.mount" ];
-        after = [ "realm.mount" ];
-        path = [
-          pkgs.btrfs-progs
-          pkgs.coreutils
-          pkgs.e2fsprogs
-          pkgs.sqlite
-        ];
-        serviceConfig.Type = "oneshot";
-        script = ''
-          install -d -m 0755 -o root -g users ${dataRoot}
-          if ! btrfs subvolume show ${lib.escapeShellArg dbRoot} >/dev/null 2>&1; then
-            btrfs subvolume create ${lib.escapeShellArg dbRoot}
-            chattr +C ${lib.escapeShellArg dbRoot} || true
-          fi
-          chown root:users ${lib.escapeShellArg dbRoot}
-          chmod 0755 ${lib.escapeShellArg dbRoot}
-          chattr +C ${lib.escapeShellArg dbRoot} || true
-
-          if [ -L ${lib.escapeShellArg legacyDbPath} ]; then
-            current="$(readlink ${lib.escapeShellArg legacyDbPath})"
-            if [ "$current" != ${lib.escapeShellArg dbPath} ]; then
-              echo "Refusing to replace unexpected machine telemetry DB symlink ${legacyDbPath} -> $current" >&2
-              exit 1
-            fi
-          elif [ -e ${lib.escapeShellArg legacyDbPath} ]; then
-            sqlite3 ${lib.escapeShellArg legacyDbPath} 'PRAGMA wal_checkpoint(TRUNCATE);'
-            for sidecar in ${lib.escapeShellArg "${legacyDbPath}-wal"} ${lib.escapeShellArg "${legacyDbPath}-shm"}; do
-              if [ -e "$sidecar" ]; then
-                echo "Refusing to migrate machine telemetry DB while SQLite sidecar exists: $sidecar" >&2
-                echo "Stop machine-telemetry and checkpoint/truncate WAL before running machine-telemetry-db-scaffold." >&2
-                exit 1
-              fi
-            done
-            if [ -e ${lib.escapeShellArg dbPath} ]; then
-              echo "Refusing to overwrite existing machine telemetry DB target ${dbPath}" >&2
-              exit 1
-            fi
-            cp --reflink=never --preserve=mode,ownership,timestamps ${lib.escapeShellArg legacyDbPath} ${lib.escapeShellArg "${dbPath}.tmp"}
-            mv ${lib.escapeShellArg "${dbPath}.tmp"} ${lib.escapeShellArg dbPath}
-            rm ${lib.escapeShellArg legacyDbPath}
-            ln -s ${lib.escapeShellArg dbPath} ${lib.escapeShellArg legacyDbPath}
-          elif [ -e ${lib.escapeShellArg dbPath} ]; then
-            ln -s ${lib.escapeShellArg dbPath} ${lib.escapeShellArg legacyDbPath}
-          fi
-        '';
-      };
-
-      # Append one JSONL line per NixOS generation activation, letting
-      # Lynchpin join telemetry rows back to the sinnix revision that
-      # produced them. Lives here rather than in the lynchpin module because
-      # machine-telemetry owns the captures/machine namespace
-      # unconditionally; lynchpin is an opt-in consumer.
-      #
-      # Failures degrade silently (|| true) because activation must succeed
-      # even if /realm is unavailable (e.g. recovery boot).
-      system.activationScripts.lynchpinGenerationLog = lib.stringAfter [ "var" ] ''
-        LOG_FILE="${dataDir}/generations.jsonl"
-        ${pkgs.coreutils}/bin/mkdir -p "$(${pkgs.coreutils}/bin/dirname "$LOG_FILE")" 2>/dev/null || true
-
-        STORE_PATH="$(${pkgs.coreutils}/bin/readlink -f /run/current-system 2>/dev/null || echo unknown)"
-        GENERATION="unknown"
-        if [ -L /nix/var/nix/profiles/system ]; then
-          GENERATION="$(${pkgs.coreutils}/bin/readlink /nix/var/nix/profiles/system | ${pkgs.gnused}/bin/sed -n 's/^system-\([0-9]\+\)-link$/\1/p')"
-        fi
-        ACTIVATED_AT="$(${pkgs.coreutils}/bin/date -u +%Y-%m-%dT%H:%M:%S+00:00)"
-
-        ${pkgs.coreutils}/bin/printf '%s\n' "$(${pkgs.jq}/bin/jq -nc \
-          --arg generation "''${GENERATION:-unknown}" \
-          --arg activated_at "$ACTIVATED_AT" \
-          --arg store_path "$STORE_PATH" \
-          --arg sinnix_revision "${config.system.configurationRevision}" \
-          --arg nixos_label "${config.system.nixos.label}" \
-          --arg host "${config.networking.hostName}" \
-          '{generation: $generation, activated_at: $activated_at, store_path: $store_path, sinnix_revision: $sinnix_revision, nixos_label: $nixos_label, host: $host}')" \
-          >> "$LOG_FILE" 2>/dev/null || true
-      '';
-
-      systemd.services.machine-telemetry = {
-        description = "machine-telemetry - canonical host telemetry capture";
-        wantedBy = [ "multi-user.target" ];
-        after = [
-          "local-fs.target"
-          "lm_sensors.service"
-        ];
-        path = [
-          pkgs.coreutils
-          # pkgs.bind ships only the daemon; nslookup and dig live in the
-          # split bind.dnsutils output. Without dnsutils the network probe's
-          # nslookup exits 127 and every sample records
-          # network.dns_probe_failed as though DNS were down.
-          pkgs.bind
-          pkgs.bind.dnsutils
-          pkgs.curl
-          pkgs.ethtool
-          pkgs.iproute2
-          pkgs.iputils
-          pkgs.procps
-          pkgs.systemd
-          pkgs.util-linux
-        ]
-        ++ lib.optionals (config.sinnix.gpu.mode != "igpu") [
-          pkgs.linuxPackages.nvidia_x11
-        ];
-        serviceConfig = {
-          Type = "simple";
-          # pynvml dlopen()s libnvidia-ml.so.1; NixOS exposes it at /run/opengl-driver/lib.
-          Environment = lib.optionals (config.sinnix.gpu.mode != "igpu") [
-            "LD_LIBRARY_PATH=/run/opengl-driver/lib"
-          ];
-          ExecStart = "${machineTelemetry}/bin/machine-telemetry --db ${dbPath} --manifest ${manifestPath} --host ${hostName} --interval ${toString cfg.intervalSec} --service-interval ${toString cfg.serviceIntervalSec} --network-interval ${toString cfg.networkIntervalSec} --network-interface ${cfg.networkInterfaceName} --network-gateway ${cfg.networkGateway} --bufferbloat-interval ${toString cfg.bufferbloatIntervalSec} --gpu-interval ${toString cfg.gpuIntervalSec} --process-memory-top ${toString cfg.processMemoryTop} --process-memory-interval ${toString cfg.processMemoryIntervalSec} --kill-event-interval ${toString cfg.killEventIntervalSec} --cgroups ${cgroupArgs} --units ${unitArgs} --user-name ${username}";
-          Restart = "on-failure";
-          RestartSec = "5s";
+    lib.mkMerge [
+      # Second unit pair (documented structural exception): the primary
+      # surface above is machine-telemetry.service itself, so the sqlite
+      # backup oneshot+timer gets a direct mkScheduledJob call rather than
+      # mkServiceModule's single-unit `job` sugar.
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "machine-telemetry-sqlite-backup";
+          description = "Back up machine telemetry SQLite database";
+          surface = config.sinnix.runtime.surfaces.machine-telemetry-sqlite-backup;
         }
-        // lib.sinnix.mkRuntimeServiceConfig {
-          runtimeInventory = config.sinnix.runtime.inventory;
-          unit = "machine-telemetry.service";
-        };
-      };
+        {
+          script = ''
+            set -euo pipefail
 
-      sinnix.runtime.surfaces = {
-        machine-telemetry-sqlite-backup = {
-          unit = "machine-telemetry-sqlite-backup.service";
-          resourceClass = "backup-maintenance";
-          resources = {
-            MemoryHigh = "2G";
-            MemoryMax = "4G";
-          };
-          observe.enable = true;
-        };
-        machine-telemetry-sqlite-backup-timer = {
-          unit = "machine-telemetry-sqlite-backup.timer";
-          kind = "timer";
-          resourceClass = "backup-maintenance";
-        };
-      };
+            umask 077
+            install -d -m 0700 -o ${lib.escapeShellArg username} -g users ${lib.escapeShellArg backupRoot}
 
-      systemd.services.machine-telemetry-sqlite-backup = {
-        description = "Back up machine telemetry SQLite database";
-        after = [
-          "realm.mount"
-          "persist.mount"
-        ];
-        requires = [
-          "realm.mount"
-          "persist.mount"
-        ];
-        unitConfig.RequiresMountsFor = [
-          dbRoot
-          backupRoot
-        ];
-        restartIfChanged = false;
-        serviceConfig =
-          (lib.sinnix.mkRuntimeServiceConfig {
-            runtimeInventory = config.sinnix.runtime.inventory;
-            unit = "machine-telemetry-sqlite-backup.service";
-          })
-          // {
-            Type = "oneshot";
-            User = username;
+            stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+            final=${lib.escapeShellArg backupRoot}/telemetry-"$stamp".sqlite.zst
+
+            sinnix-sqlite-backup ${lib.escapeShellArg dbPath} "$final"
+
+            find ${lib.escapeShellArg backupRoot} \
+              -maxdepth 1 \
+              -type f \
+              -name 'telemetry-*.sqlite.zst' \
+              -printf '%T@ %p\n' \
+              | sort -rn \
+              | awk 'NR > 7 { print substr($0, index($0, $2)) }' \
+              | xargs -r rm -f
+          '';
+          path = [
+            pkgs.coreutils
+            pkgs.findutils
+            pkgs.gawk
+            scriptPkgs.sinnix-sqlite-backup
+          ];
+          user = username;
+          serviceConfig = {
             Group = "users";
             TimeoutStartSec = "30min";
           };
-        path = [
-          pkgs.coreutils
-          pkgs.findutils
-          pkgs.gawk
-          scriptPkgs.sinnix-sqlite-backup
+          unit = {
+            after = [
+              "realm.mount"
+              "persist.mount"
+            ];
+            requires = [
+              "realm.mount"
+              "persist.mount"
+            ];
+            unitConfig.RequiresMountsFor = [
+              dbRoot
+              backupRoot
+            ];
+            restartIfChanged = false;
+          };
+          timer = {
+            onCalendar = "*-*-* 03:42:00";
+            randomizedDelaySec = "30min";
+            persistent = false;
+          };
+        }
+      )
+      {
+        systemd.tmpfiles.rules = [
+          # Operator-owned like the rest of the lake, and group-writable so the
+          # root daemons and operator producers that share this namespace can
+          # both create files. It must NOT be root-owned under an
+          # operator-owned parent: systemd-tmpfiles refuses such a directory
+          # outright ("Detected unsafe path transition ... during
+          # canonicalization"), which silently stops it managing this path at
+          # all.
+          "d ${dataRoot} 0775 ${username} users -"
+          "d ${dataDir}/experiments 0775 ${username} users -"
+          "d ${dataDir}/legacy 0775 ${username} users -"
+          "d ${backupRoot} 0700 ${username} users -"
         ];
-        script = ''
-          set -euo pipefail
 
-          umask 077
-          install -d -m 0700 -o ${lib.escapeShellArg username} -g users ${lib.escapeShellArg backupRoot}
+        systemd.services.machine-telemetry-db-scaffold = {
+          description = "Create machine telemetry SQLite nodatacow subvolume";
+          requiredBy = [ "machine-telemetry.service" ];
+          before = [ "machine-telemetry.service" ];
+          requires = [ "realm.mount" ];
+          after = [ "realm.mount" ];
+          path = [
+            pkgs.btrfs-progs
+            pkgs.coreutils
+            pkgs.e2fsprogs
+            pkgs.sqlite
+          ];
+          serviceConfig.Type = "oneshot";
+          script = ''
+            install -d -m 0755 -o root -g users ${dataRoot}
+            if ! btrfs subvolume show ${lib.escapeShellArg dbRoot} >/dev/null 2>&1; then
+              btrfs subvolume create ${lib.escapeShellArg dbRoot}
+              chattr +C ${lib.escapeShellArg dbRoot} || true
+            fi
+            chown root:users ${lib.escapeShellArg dbRoot}
+            chmod 0755 ${lib.escapeShellArg dbRoot}
+            chattr +C ${lib.escapeShellArg dbRoot} || true
 
-          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-          final=${lib.escapeShellArg backupRoot}/telemetry-"$stamp".sqlite.zst
-
-          sinnix-sqlite-backup ${lib.escapeShellArg dbPath} "$final"
-
-          find ${lib.escapeShellArg backupRoot} \
-            -maxdepth 1 \
-            -type f \
-            -name 'telemetry-*.sqlite.zst' \
-            -printf '%T@ %p\n' \
-            | sort -rn \
-            | awk 'NR > 7 { print substr($0, index($0, $2)) }' \
-            | xargs -r rm -f
-        '';
-      };
-
-      systemd.timers.machine-telemetry-sqlite-backup = {
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnCalendar = "*-*-* 03:42:00";
-          RandomizedDelaySec = "30min";
-          Persistent = false;
+            if [ -L ${lib.escapeShellArg legacyDbPath} ]; then
+              current="$(readlink ${lib.escapeShellArg legacyDbPath})"
+              if [ "$current" != ${lib.escapeShellArg dbPath} ]; then
+                echo "Refusing to replace unexpected machine telemetry DB symlink ${legacyDbPath} -> $current" >&2
+                exit 1
+              fi
+            elif [ -e ${lib.escapeShellArg legacyDbPath} ]; then
+              sqlite3 ${lib.escapeShellArg legacyDbPath} 'PRAGMA wal_checkpoint(TRUNCATE);'
+              for sidecar in ${lib.escapeShellArg "${legacyDbPath}-wal"} ${lib.escapeShellArg "${legacyDbPath}-shm"}; do
+                if [ -e "$sidecar" ]; then
+                  echo "Refusing to migrate machine telemetry DB while SQLite sidecar exists: $sidecar" >&2
+                  echo "Stop machine-telemetry and checkpoint/truncate WAL before running machine-telemetry-db-scaffold." >&2
+                  exit 1
+                fi
+              done
+              if [ -e ${lib.escapeShellArg dbPath} ]; then
+                echo "Refusing to overwrite existing machine telemetry DB target ${dbPath}" >&2
+                exit 1
+              fi
+              cp --reflink=never --preserve=mode,ownership,timestamps ${lib.escapeShellArg legacyDbPath} ${lib.escapeShellArg "${dbPath}.tmp"}
+              mv ${lib.escapeShellArg "${dbPath}.tmp"} ${lib.escapeShellArg dbPath}
+              rm ${lib.escapeShellArg legacyDbPath}
+              ln -s ${lib.escapeShellArg dbPath} ${lib.escapeShellArg legacyDbPath}
+            elif [ -e ${lib.escapeShellArg dbPath} ]; then
+              ln -s ${lib.escapeShellArg dbPath} ${lib.escapeShellArg legacyDbPath}
+            fi
+          '';
         };
-      };
-    };
+
+        # Append one JSONL line per NixOS generation activation, letting
+        # Lynchpin join telemetry rows back to the sinnix revision that
+        # produced them. Lives here rather than in the lynchpin module because
+        # machine-telemetry owns the captures/machine namespace
+        # unconditionally; lynchpin is an opt-in consumer.
+        #
+        # Failures degrade silently (|| true) because activation must succeed
+        # even if /realm is unavailable (e.g. recovery boot).
+        system.activationScripts.lynchpinGenerationLog = lib.stringAfter [ "var" ] ''
+          LOG_FILE="${dataDir}/generations.jsonl"
+          ${pkgs.coreutils}/bin/mkdir -p "$(${pkgs.coreutils}/bin/dirname "$LOG_FILE")" 2>/dev/null || true
+
+          STORE_PATH="$(${pkgs.coreutils}/bin/readlink -f /run/current-system 2>/dev/null || echo unknown)"
+          GENERATION="unknown"
+          if [ -L /nix/var/nix/profiles/system ]; then
+            GENERATION="$(${pkgs.coreutils}/bin/readlink /nix/var/nix/profiles/system | ${pkgs.gnused}/bin/sed -n 's/^system-\([0-9]\+\)-link$/\1/p')"
+          fi
+          ACTIVATED_AT="$(${pkgs.coreutils}/bin/date -u +%Y-%m-%dT%H:%M:%S+00:00)"
+
+          ${pkgs.coreutils}/bin/printf '%s\n' "$(${pkgs.jq}/bin/jq -nc \
+            --arg generation "''${GENERATION:-unknown}" \
+            --arg activated_at "$ACTIVATED_AT" \
+            --arg store_path "$STORE_PATH" \
+            --arg sinnix_revision "${config.system.configurationRevision}" \
+            --arg nixos_label "${config.system.nixos.label}" \
+            --arg host "${config.networking.hostName}" \
+            '{generation: $generation, activated_at: $activated_at, store_path: $store_path, sinnix_revision: $sinnix_revision, nixos_label: $nixos_label, host: $host}')" \
+            >> "$LOG_FILE" 2>/dev/null || true
+        '';
+
+        systemd.services.machine-telemetry = {
+          description = "machine-telemetry - canonical host telemetry capture";
+          wantedBy = [ "multi-user.target" ];
+          after = [
+            "local-fs.target"
+            "lm_sensors.service"
+          ];
+          path = [
+            pkgs.coreutils
+            # pkgs.bind ships only the daemon; nslookup and dig live in the
+            # split bind.dnsutils output. Without dnsutils the network probe's
+            # nslookup exits 127 and every sample records
+            # network.dns_probe_failed as though DNS were down.
+            pkgs.bind
+            pkgs.bind.dnsutils
+            pkgs.curl
+            pkgs.ethtool
+            pkgs.iproute2
+            pkgs.iputils
+            pkgs.procps
+            pkgs.systemd
+            pkgs.util-linux
+          ]
+          ++ lib.optionals (config.sinnix.gpu.mode != "igpu") [
+            pkgs.linuxPackages.nvidia_x11
+          ];
+          serviceConfig = {
+            Type = "simple";
+            # pynvml dlopen()s libnvidia-ml.so.1; NixOS exposes it at /run/opengl-driver/lib.
+            Environment = lib.optionals (config.sinnix.gpu.mode != "igpu") [
+              "LD_LIBRARY_PATH=/run/opengl-driver/lib"
+            ];
+            ExecStart = "${machineTelemetry}/bin/machine-telemetry --db ${dbPath} --manifest ${manifestPath} --host ${hostName} --interval ${toString cfg.intervalSec} --service-interval ${toString cfg.serviceIntervalSec} --network-interval ${toString cfg.networkIntervalSec} --network-interface ${cfg.networkInterfaceName} --network-gateway ${cfg.networkGateway} --bufferbloat-interval ${toString cfg.bufferbloatIntervalSec} --gpu-interval ${toString cfg.gpuIntervalSec} --process-memory-top ${toString cfg.processMemoryTop} --process-memory-interval ${toString cfg.processMemoryIntervalSec} --kill-event-interval ${toString cfg.killEventIntervalSec} --cgroups ${cgroupArgs} --units ${unitArgs} --user-name ${username}";
+            Restart = "on-failure";
+            RestartSec = "5s";
+          }
+          // lib.sinnix.mkRuntimeServiceConfig {
+            runtimeInventory = config.sinnix.runtime.inventory;
+            unit = "machine-telemetry.service";
+          };
+        };
+
+        sinnix.runtime.surfaces = {
+          machine-telemetry-sqlite-backup = {
+            unit = "machine-telemetry-sqlite-backup.service";
+            resourceClass = "backup-maintenance";
+            resources = {
+              MemoryHigh = "2G";
+              MemoryMax = "4G";
+            };
+            observe.enable = true;
+          };
+          machine-telemetry-sqlite-backup-timer = {
+            unit = "machine-telemetry-sqlite-backup.timer";
+            kind = "timer";
+            resourceClass = "backup-maintenance";
+          };
+        };
+
+      }
+    ];
 } args
