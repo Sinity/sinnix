@@ -2,8 +2,23 @@
 let
   pruneAttrs = lib.filterAttrs (_: value: value != null && value != [ ] && value != { });
 
-  registry = {
+  # Every server describes itself in one line, the same contract script
+  # frontmatter and the module factories carry: the capability index
+  # (/etc/sinnix/capability-index.json) renders this registry for a reader who
+  # is asking what "serena" or "firecrawl" even is, and a nameless row there is
+  # worse than absent. Enforced where it is consumed, so a missing description
+  # is a build failure rather than a blank cell on the hub.
+  undescribed = lib.attrNames (
+    lib.filterAttrs (_: server: (server.description or "") == "") rawRegistry
+  );
+  registry = lib.throwIf (undescribed != [ ]) (
+    "flake/data/mcp-registry.nix: these servers have no description: "
+    + lib.concatStringsSep ", " undescribed
+  ) rawRegistry;
+
+  rawRegistry = {
     context7 = {
+      description = "Current third-party library and API documentation, resolved by library id";
       transport = "http";
       tier = "remote-core";
       url = "https://mcp.context7.com/mcp";
@@ -19,6 +34,7 @@ let
     };
 
     github = {
+      description = "GitHub issues, pull requests, and repository operations";
       transport = "stdio";
       tier = "remote-core";
       command = "npx";
@@ -39,6 +55,7 @@ let
     };
 
     agent-control = {
+      description = "Local-agent-control profile of the Sinnix agent gateway: inspect and steer agent jobs";
       transport = "stdio";
       tier = "agent-control";
       command = "sinnix-agent-control-mcp";
@@ -52,6 +69,7 @@ let
     };
 
     serena = {
+      description = "Semantic code navigation: symbol overviews, references, and safe symbol edits";
       transport = "stdio";
       tier = "code-semantic";
       command = "serena";
@@ -82,6 +100,7 @@ let
     };
 
     firecrawl = {
+      description = "Web page scraping and crawling for readable page content";
       transport = "stdio";
       tier = "browser-mcp";
       command = "mcp-firecrawl";
@@ -92,6 +111,7 @@ let
     };
 
     lynchpin = {
+      description = "Personal analysis hub: cross-source timelines, correlations, and materialized products";
       transport = "stdio";
       tier = "deep-evidence";
       command = "mcp-lynchpin";
@@ -109,6 +129,7 @@ let
     };
 
     polylogue = {
+      description = "AI chat archive: search and read past Claude, Codex, and ChatGPT sessions";
       transport = "stdio";
       tier = "recall";
       command = "mcp-polylogue";
@@ -144,6 +165,7 @@ let
     };
 
     sinex = {
+      description = "Sinex capture platform: query captured events and their substrate";
       transport = "stdio";
       tier = "recall";
       command = "mcp-sinex";
@@ -157,6 +179,7 @@ let
     };
 
     chrome-devtools = {
+      description = "Chrome DevTools control of the operator's own browser";
       transport = "stdio";
       tier = "browser-mcp";
       command = "mcp-chrome-devtools";
