@@ -323,9 +323,9 @@ let
           inherit name;
           inherit (entry) description;
           invoke = "sinnix ${removePrefix "sinnix-" name}";
-          # sinnix-scope is rendered from the command-class table rather than
-          # discovered under scripts/ (flake/launch.nix).
-          owner = if name == "sinnix-scope" then "flake/launch.nix" else "scripts/${name}";
+          # Registry entries not discovered under scripts/ (sinnix-scope,
+          # sinnix-steer) carry their own owner in flake/scripts.nix.
+          owner = entry.owner or "scripts/${name}";
           docs = if entry.docs or null != null then entry.docs else docsFor (removePrefix "sinnix-" name);
           extra = {
             inherit (entry) tier;

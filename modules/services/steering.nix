@@ -1,4 +1,7 @@
-# steering: the operator-instrumentation walking skeleton.
+# steering: the estate's memory for the operator's own intentions — the
+# store, the agent-run morning/evening rituals over it, and the read-only
+# cockpit. What it is, why it exists, and what every surface shows:
+# docs/steering.md.
 #
 # Store: sqlite at /realm/project/steering/steering.sqlite (created by
 # sinnix-steer on first run; the CLI source lives in the steering workspace
@@ -30,7 +33,8 @@ let
 in
 mkServiceModule {
   name = "steering";
-  description = "Operator steering store, rituals, and read-only cockpit (sinnix-jfiy.1)";
+  description = "Personal steering: intention store, agent-run morning/evening rituals, read-only cockpit";
+  docs = "docs/steering.md";
   extraOptions = {
     morningTime = lib.mkOption {
       type = lib.types.str;

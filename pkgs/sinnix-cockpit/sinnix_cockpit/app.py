@@ -56,7 +56,14 @@ def _store_unavailable(body: str) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 def root() -> str:
-    return _page("sinnix-cockpit", "<p>Read-only steering cockpit.</p>")
+    return _page(
+        "sinnix-cockpit",
+        "<p>Read-only view of the personal steering store: today's intentions "
+        "(<a href='/today'>today</a>), forecast accuracy "
+        "(<a href='/calibration'>calibration</a>), and the standing menu "
+        "(<a href='/activities'>activities</a>). "
+        "What steering is and why: <code>docs/steering.md</code> in sinnix.</p>",
+    )
 
 
 @app.get("/today", response_class=HTMLResponse)
