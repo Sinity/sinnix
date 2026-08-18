@@ -14,6 +14,7 @@ from .ambient import product_source
 from .feedback import CoalescingTrigger, FeedbackSpool
 from .reducer import Reducer, observe_source
 from .server import FAILURE_PATH, ensure_token, serve
+from .state import StateLayer
 
 
 class UnixConnection(http.client.HTTPConnection):
@@ -164,12 +165,15 @@ def main() -> None:
         observe_command += ["--format", "json", "--limit", "10"]
     root = args.runtime_dir / "sinnix"
     root.mkdir(parents=True, exist_ok=True)
-    token = ensure_token(root / "ops.token")
+    layer = StateLayer.build(
+        runtime_root=root, state_dir=args.state_dir, feedback_dir=args.feedback_dir
+    )
+    token = ensure_token(layer.token_path)
     reducer = Reducer(
-        root / "status.json",
-        root / "ops.token",
+        layer.snapshot_path,
+        layer.token_path,
         observe_source(observe_command),
-        args.state_dir / "reducer.json",
+        layer.reducer_state_path,
         ambient_source=product_source(args.ambient_product),
     )
     reducer.anchor_event_path = args.anchor_events or (root / "afk-resume.json")
@@ -177,7 +181,7 @@ def main() -> None:
     actions = ActionService(
         reducer.snapshot,
         args.inventory,
-        args.state_dir / "action-receipts.json",
+        layer.receipts_path,
         controller=args.agent_controller,
     )
     elicit = (
@@ -185,7 +189,7 @@ def main() -> None:
         if args.elicit_command
         else None
     )
-    feedback = FeedbackSpool(args.feedback_dir, elicit=elicit)
+    feedback = FeedbackSpool(layer.feedback_spool_dir, elicit=elicit)
     fds = list(range(3, 3 + int(os.environ.get("LISTEN_FDS", "0"))))
     serve(
         reducer,

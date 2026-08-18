@@ -431,6 +431,130 @@ def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_estate(
     assert receipt["preconditions"]["revision"] == reducer.sequence
 
 
+def test_receipts_append_prior_lines_never_rewritten(tmp_path: Path) -> None:
+    """Two accepted actions must cost one appended line each, not a whole-store
+    rewrite. Mutation: reverting execute() to `atomic_json(self.receipts_path,
+    self.receipts)` fails the prefix-stability assert below, because the
+    dict-rewrite serializes both receipts into file 1's own bytes on the very
+    first write."""
+    inventory_path = tmp_path / "inventory.json"
+    inventory(inventory_path)
+    reducer = Reducer(
+        tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
+    )
+    reducer.refresh()
+    actions = ActionService(
+        reducer.snapshot,
+        inventory_path,
+        tmp_path / "receipts.json",
+        adapter=lambda *_: {"status": "accepted"},
+        unit_state_prober=fake_unit_state_prober,
+    )
+    ledger = actions.receipts_ledger_path
+    assert ledger.name == "receipts.jsonl"
+
+    actions.execute(request("restart", {"unit": "safe"}, key="k1"))
+    after_first = ledger.read_bytes()
+    # Marker line + one receipt line.
+    assert len(after_first.splitlines()) == 2
+
+    actions.execute(request("restart", {"unit": "safe"}, key="k2"))
+    after_second = ledger.read_bytes()
+    assert len(after_second.splitlines()) == 3
+    # Append-only: everything written for the first action is byte-identical
+    # in the file after the second action, not re-serialized alongside it.
+    assert after_second[: len(after_first)] == after_first
+    # The legacy whole-file store was never created or touched.
+    assert not (tmp_path / "receipts.json").exists()
+
+
+def test_receipts_migration_folds_legacy_dict_exactly_once(tmp_path: Path) -> None:
+    """A pre-existing whole-file receipts dict is folded into the ledger on
+    first start and left untouched; a second start (a restart) must not
+    re-fold it. Mutation: dropping the `if self.receipts_ledger_path.exists():
+    return` guard fails the second-instance line-count assert with a doubled
+    ledger."""
+    inventory_path = tmp_path / "inventory.json"
+    inventory(inventory_path)
+    legacy_path = tmp_path / "receipts.json"
+    legacy = {
+        "old-1": {"idempotency_key": "old-1", "status": "accepted"},
+        "old-2": {"idempotency_key": "old-2", "status": "rejected"},
+    }
+    legacy_path.write_text(json.dumps(legacy))
+    legacy_bytes_before = legacy_path.read_bytes()
+
+    reducer = Reducer(
+        tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
+    )
+    reducer.refresh()
+
+    first = ActionService(
+        reducer.snapshot,
+        inventory_path,
+        legacy_path,
+        adapter=lambda *_: {"status": "accepted"},
+        unit_state_prober=fake_unit_state_prober,
+    )
+    ledger = first.receipts_ledger_path
+    lines_after_first_start = ledger.read_text(encoding="utf-8").splitlines()
+    # One migration marker + the two folded legacy receipts.
+    assert len(lines_after_first_start) == 3
+    assert first.lookup("old-1") == legacy["old-1"]
+    assert first.lookup("old-2") == legacy["old-2"]
+
+    second = ActionService(
+        reducer.snapshot,
+        inventory_path,
+        legacy_path,
+        adapter=lambda *_: {"status": "accepted"},
+        unit_state_prober=fake_unit_state_prober,
+    )
+    lines_after_second_start = ledger.read_text(encoding="utf-8").splitlines()
+    assert lines_after_second_start == lines_after_first_start
+    assert second.lookup("old-1") == legacy["old-1"]
+    # The legacy file is read-only to the migration: never rewritten, never
+    # deleted.
+    assert legacy_path.read_bytes() == legacy_bytes_before
+
+
+def test_receipts_replay_after_restart_reads_the_ledger(tmp_path: Path) -> None:
+    """A fresh ActionService pointed at the same receipts_path after a
+    restart must answer idempotency lookups from the ledger it wrote, not
+    from in-memory state that died with the old process. Mutation: skipping
+    the migration/index-fold in `_load_receipts` (returning `{}` instead)
+    fails the `resumed.lookup` assert."""
+    inventory_path = tmp_path / "inventory.json"
+    inventory(inventory_path)
+    reducer = Reducer(
+        tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
+    )
+    reducer.refresh()
+    receipts_path = tmp_path / "receipts.json"
+    original = ActionService(
+        reducer.snapshot,
+        inventory_path,
+        receipts_path,
+        adapter=lambda *_: {"status": "accepted"},
+        unit_state_prober=fake_unit_state_prober,
+    )
+    written = original.execute(request("restart", {"unit": "safe"}, key="k1"))
+
+    resumed = ActionService(
+        reducer.snapshot,
+        inventory_path,
+        receipts_path,
+        adapter=lambda *_: {"status": "accepted"},
+        unit_state_prober=fake_unit_state_prober,
+    )
+    assert resumed.lookup("k1") == written
+    # Replay must hit the cached receipt, not re-invoke the adapter.
+    calls: list[str] = []
+    resumed.adapter = lambda *_: calls.append("adapter-called") or {"status": "x"}
+    assert resumed.execute(request("restart", {"unit": "safe"}, key="k1")) == written
+    assert calls == []
+
+
 def test_scope_pattern_matches_live_identity_shape():
     """Live scopes carry the command-identity segment since 2026-08-13; the
     pattern without it admitted nothing for five days. Mutation: dropping the
