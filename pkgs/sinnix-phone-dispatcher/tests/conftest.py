@@ -10,7 +10,9 @@ import pytest
 
 import sinnix_phone_dispatcher.dispatch as dispatch_mod
 import sinnix_phone_dispatcher.execute as execute_mod
+import sinnix_phone_dispatcher.inbox as inbox_mod
 import sinnix_phone_dispatcher.state as state_mod
+import sinnix_phone_dispatcher.uploads as uploads_mod
 
 
 @pytest.fixture(autouse=True)
@@ -36,8 +38,14 @@ def isolated_state_dirs(tmp_path, monkeypatch):
     monkeypatch.setattr(execute_mod, "TOKENS_DIR", tokens_dir)
     monkeypatch.setattr(execute_mod, "LAKE_ROOT", lake_root)
     monkeypatch.setattr(dispatch_mod, "INBOX_DIR", inbox_dir)
+    # Same by-name binding problem for the two lanes the app pushes to and
+    # pulls from: uploads.py holds its own EVENTS_DIR and inbox.py its own
+    # INBOX_DIR.
+    monkeypatch.setattr(uploads_mod, "EVENTS_DIR", lake_root / "estate" / "events")
+    monkeypatch.setattr(inbox_mod, "INBOX_DIR", inbox_dir)
 
     return {
+        "events_dir": lake_root / "estate" / "events",
         "state_dir": state_dir,
         "lake_root": lake_root,
         "inbox_dir": inbox_dir,
