@@ -1,0 +1,361 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: One-shot Awair cloud-API backfill of air-quality history predating the local-API capture lane
+# runtimeInputs: coreutils
+# pythonPackages: @sinnix-capture @sinnix-lib
+"""Pull the Awair account's cloud-side air-data history and append it to the
+same capture lake the local-API poller (capture-awair.nix) already writes to.
+
+The local lane only ever sees the device's *current* reading -- it has no
+memory of anything before it started polling. Awair's own cloud keeps a much
+longer history per account, reachable only with a developer token
+(secret/awair-token.age). This script is the one-shot bridge: run by hand,
+never wired into a timer, and safe to abort/resume at any point because
+progress is checkpointed to disk.
+
+Resolution: this account (Hobbyist tier) turns out to have THREE resolutions
+with wildly different retention:
+
+  - raw (10s cadence): retains only a few hours -- probing days in the past
+    consistently returned zero records. Not useful for backfill at all.
+  - 5-min-avg: probed retention starts around mid-2024, roughly two years.
+  - 15-min-avg: probed retention reaches back to the device's own
+    registration (~2022-11-01), the full account lifetime.
+
+Rather than stitching three tiers together for a marginal resolution gain
+on the most recent slice (which is itself about to be superseded by the
+now-live 60s local lane anyway), this script backfills uniformly at
+15-min-avg: it is the only tier that actually covers the multi-year gap,
+keeps the backfilled range internally consistent, and costs far fewer API
+calls against the tightest quota (FIFTEEN_MIN: 100 calls/day on this
+account, vs. FIVE_MIN: 300, RAW: 500 -- see GET /v1/users/self).
+
+Each API response is capped at roughly 767-768 records regardless of the
+requested window or `limit` value (a wider window silently truncates rather
+than erroring), so requests are chunked well under that cap.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from sinnix_capture.writer import CaptureWriter
+
+API_BASE = "https://developer-apis.awair.is/v1"
+LANE = "environment"
+RESOLUTION = "15-min-avg"
+CHUNK_DAYS = 6  # ~576 15-min samples per chunk, safely under the ~767 cap
+# The device has real multi-month cloud-reporting gaps mid-history (confirmed:
+# ~2026-03-03 to at least 2026-03-15, likely wider -- probably an offline/
+# reconfigured stretch), so a short empty streak does NOT mean "reached the
+# account's retention floor". The confirmed retention floor (~2022-11-01) sits
+# behind *years* of continuous emptiness before it, so a generous threshold
+# safely tells a mid-history outage apart from the true floor.
+CONSECUTIVE_EMPTY_TO_STOP = 45  # 45 * 6 days = 270 days of continuous emptiness
+DEFAULT_CALL_BUDGET = 90  # stay under the FIFTEEN_MIN quota (100/24h) with headroom
+
+TS_FMT = "%Y-%m-%dT%H:%M:%S.%fZ"
+
+
+def eprint(*args: object) -> None:
+    print(*args, file=sys.stderr)
+
+
+def get_token() -> str:
+    env = os.environ.get("AWAIR_TOKEN")
+    if env:
+        return env.strip()
+    path = Path("/run/agenix/awair-token")
+    if path.exists():
+        return path.read_text().strip()
+    raise SystemExit(
+        "no Awair token: set AWAIR_TOKEN or ensure /run/agenix/awair-token exists"
+    )
+
+
+class QuotaExceeded(RuntimeError):
+    """The account's rolling-24h call quota for this scope is exhausted."""
+
+
+def api_get(token: str, path: str, params: dict[str, object]) -> dict:
+    url = f"{API_BASE}{path}?{urllib.parse.urlencode(params)}"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")
+        if exc.code == 429:
+            raise QuotaExceeded(
+                f"Awair API quota exhausted on {path}: {body}"
+            ) from exc
+        raise RuntimeError(f"Awair API {exc.code} on {path}: {body}") from exc
+
+
+def fmt_ts(dt: datetime) -> str:
+    return dt.strftime(TS_FMT)[:-4] + "Z"
+
+
+def parse_cloud_ts(s: str) -> datetime:
+    s = s[:-1] if s.endswith("Z") else s  # strip trailing Z
+    if "." in s:
+        base, frac = s.split(".")
+        frac = (frac + "000000")[:6]
+        s = f"{base}.{frac}"
+    else:
+        s = f"{s}.000000"
+    return datetime.strptime(s, "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=timezone.utc)
+
+
+def list_devices(token: str) -> list[dict]:
+    return api_get(token, "/users/self/devices", {})["devices"]
+
+
+def air_data(
+    token: str, device_type: str, device_id: int, dt_from: datetime, dt_to: datetime
+) -> list[dict]:
+    params = {
+        "from": fmt_ts(dt_from),
+        "to": fmt_ts(dt_to),
+        "limit": 100000,
+        "desc": "false",
+    }
+    data = api_get(
+        token,
+        f"/users/self/devices/{device_type}/{device_id}/air-data/{RESOLUTION}",
+        params,
+    )
+    return data.get("data", [])
+
+
+def earliest_captured_ts(capture_root: Path) -> float | None:
+    """Earliest ts already on disk for this lane, across every index sidecar
+    -- both the pre-2026-08-17 "awair" lane name and the current
+    "environment" name cover genuinely-live data, so both count.
+    """
+    lane_dir = capture_root / LANE
+    earliest: float | None = None
+    for index_path in lane_dir.glob("*-index.jsonl"):
+        try:
+            with open(index_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        ts = float(json.loads(line)["ts"])
+                    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                        continue
+                    if earliest is None or ts < earliest:
+                        earliest = ts
+        except OSError:
+            continue
+    return earliest
+
+
+def checkpoint_path(capture_root: Path) -> Path:
+    return capture_root / LANE / "awair-cloud-backfill-checkpoint.json"
+
+
+def load_checkpoint(capture_root: Path) -> dict:
+    path = checkpoint_path(capture_root)
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_checkpoint(capture_root: Path, state: dict) -> None:
+    path = checkpoint_path(capture_root)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(state, indent=2, sort_keys=True))
+    os.replace(tmp, path)
+
+
+def cloud_record_to_payload(record: dict) -> dict:
+    payload: dict[str, object] = {"timestamp": record["timestamp"]}
+    for sensor in record.get("sensors", []):
+        payload[sensor["comp"]] = sensor["value"]
+    if "score" in record:
+        payload["score"] = record["score"]
+    indices = record.get("indices")
+    if indices:
+        payload["indices"] = {i["comp"]: i["value"] for i in indices}
+    return payload
+
+
+def run(args: argparse.Namespace) -> int:
+    capture_root = args.capture_root
+    token = get_token()
+
+    devices = list_devices(token)
+    if len(devices) != 1:
+        eprint(
+            f"expected exactly one Awair device on this account, found {len(devices)}: "
+            f"{[d.get('deviceUUID') for d in devices]}"
+        )
+        if len(devices) == 0:
+            return 1
+    device = devices[0]
+    device_type = device["deviceType"]
+    device_id = device["deviceId"]
+    eprint(f"device: {device['deviceUUID']} ({device.get('name')!r})")
+
+    checkpoint = load_checkpoint(capture_root)
+
+    # The boundary is frozen at the first run and persisted from then on --
+    # once this script starts writing records with ts before the original
+    # live-lane floor, a fresh disk scan would pick up its OWN backfilled
+    # records as the new minimum and the anchor would drift with every
+    # resume. Recomputing it is only correct (and required) before any
+    # backfill data exists yet.
+    if "boundary_ts" in checkpoint:
+        boundary_ts = float(checkpoint["boundary_ts"])
+    else:
+        boundary_ts = earliest_captured_ts(capture_root)
+        if boundary_ts is None:
+            eprint("no existing local-lane records found -- refusing to guess a boundary")
+            return 1
+    boundary_dt = datetime.fromtimestamp(boundary_ts, tz=timezone.utc)
+    eprint(f"local-lane boundary (exclusive upper bound): {boundary_dt.isoformat()}")
+
+    if checkpoint.get("done"):
+        eprint(
+            "checkpoint marks this backfill already complete "
+            f"(earliest_sample={checkpoint.get('earliest_sample')}, "
+            f"records_written={checkpoint.get('records_written')}). Nothing to do."
+        )
+        return 0
+
+    frontier = (
+        datetime.fromisoformat(checkpoint["frontier"])
+        if checkpoint.get("frontier")
+        else boundary_dt
+    )
+    records_written = int(checkpoint.get("records_written", 0))
+    consecutive_empty = int(checkpoint.get("consecutive_empty", 0))
+    last_nonempty_start: str | None = checkpoint.get("last_nonempty_start")
+
+    writer = CaptureWriter(capture_root, LANE)
+    calls_made = 0
+    done = False
+    quota_exhausted = False
+
+    while calls_made < args.max_calls:
+        chunk_end = frontier
+        chunk_start = chunk_end - timedelta(days=CHUNK_DAYS)
+        eprint(f"fetching [{chunk_start.isoformat()}, {chunk_end.isoformat()})...")
+        try:
+            records = air_data(token, device_type, device_id, chunk_start, chunk_end)
+        except QuotaExceeded as exc:
+            eprint(f"  {exc}")
+            quota_exhausted = True
+            break
+        calls_made += 1
+
+        if not records:
+            consecutive_empty += 1
+            eprint(f"  empty ({consecutive_empty}/{CONSECUTIVE_EMPTY_TO_STOP})")
+            if consecutive_empty >= CONSECUTIVE_EMPTY_TO_STOP:
+                done = True
+                break
+            frontier = chunk_start
+        else:
+            consecutive_empty = 0
+            last_nonempty_start = chunk_start.isoformat()
+            written_this_chunk = 0
+            for record in records:
+                rec_dt = parse_cloud_ts(record["timestamp"])
+                rec_ts = rec_dt.timestamp()
+                if rec_ts >= boundary_ts:
+                    continue  # overlaps the live local lane; skip
+                payload = cloud_record_to_payload(record)
+                writer.write(payload, raw_ref=None, ts=rec_ts)
+                written_this_chunk += 1
+            records_written += written_this_chunk
+            eprint(f"  wrote {written_this_chunk}/{len(records)} records (skipped overlap)")
+            frontier = chunk_start
+
+        save_checkpoint(
+            capture_root,
+            {
+                "done": False,
+                "frontier": frontier.isoformat(),
+                "records_written": records_written,
+                "consecutive_empty": consecutive_empty,
+                "last_nonempty_start": last_nonempty_start,
+                "boundary_ts": boundary_ts,
+                "resolution": RESOLUTION,
+            },
+        )
+        time.sleep(args.sleep_seconds)
+
+    if done:
+        save_checkpoint(
+            capture_root,
+            {
+                "done": True,
+                "earliest_sample": last_nonempty_start,
+                "records_written": records_written,
+                "boundary_ts": boundary_ts,
+                "resolution": RESOLUTION,
+            },
+        )
+        eprint(
+            f"backfill complete: earliest sample at {last_nonempty_start}, "
+            f"{records_written} records written at {RESOLUTION} resolution"
+        )
+    elif quota_exhausted:
+        eprint(
+            f"paused: Awair {RESOLUTION} quota exhausted after {calls_made} calls this run -- "
+            f"frontier now {frontier.isoformat()}, {records_written} records written so far. "
+            "The account's quota is a rolling 24h window; re-run this script later to resume "
+            "(checkpoint already saved, nothing to redo)."
+        )
+    else:
+        eprint(
+            f"paused after {calls_made} API calls (budget {args.max_calls}) -- "
+            f"frontier now {frontier.isoformat()}, {records_written} records written so far. "
+            "Re-run this script to resume."
+        )
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--capture-root",
+        type=Path,
+        default=Path("/realm/data/health"),
+        help="Capture lake root (parent of the lane directory), default /realm/data/health",
+    )
+    parser.add_argument(
+        "--max-calls",
+        type=int,
+        default=DEFAULT_CALL_BUDGET,
+        help=f"Max Awair API calls to spend this run (default {DEFAULT_CALL_BUDGET}, "
+        "under the account's FIFTEEN_MIN daily quota)",
+    )
+    parser.add_argument(
+        "--sleep-seconds",
+        type=float,
+        default=0.5,
+        help="Delay between API calls (politeness, not required by Awair)",
+    )
+    args = parser.parse_args(argv)
+    return run(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
