@@ -154,8 +154,12 @@
     # Was a manual one-shot from 2026-08-16 until this; see fs-index.nix.
     fs-index.enable = true;
     # Daily run at the Xiaomi quota reset (sinnix-9tc). Self-terminating:
-    # stops for good once the unlock is granted.
-    mi-unlock.enable = true;
+    # stops for good once the unlock is granted. Disabled 2026-08-19: the
+    # parallel HyperOS account-bind route (sinnix-9tc.1) succeeded directly
+    # (applyBind code 0), making this daily Community-quota lottery
+    # redundant. Both routes only reach the ordinary 168h+ Mi Unlock wait,
+    # not the bootloader unlock itself.
+    mi-unlock.enable = false;
     # Video special-case over the ledger: yt-dlp resolves video-hosting URLs
     # into a real archived copy. Wayback/Common Crawl CDX coverage does not
     # preserve video.
