@@ -45,14 +45,22 @@ def test_healthy_stale_missing_and_malformed_sources_are_distinct(
 
 
 def test_sequence_persists_and_events_are_bounded(tmp_path: Path) -> None:
-    reducer = Reducer(tmp_path / "status.json", tmp_path / "token", lambda: {})
+    state_path = tmp_path / "state.json"
+    reducer = Reducer(
+        tmp_path / "status.json",
+        tmp_path / "token",
+        lambda: {},
+        state_path,
+    )
     reducer.refresh()
+    assert json.loads(state_path.read_text())["sequence"] == 1
     resumed = Reducer(
         tmp_path / "status.json",
         tmp_path / "token",
         lambda: {},
-        tmp_path / "state.json",
+        state_path,
     )
-    resumed.refresh()
     assert resumed.sequence == 1
-    assert resumed.events_since(0)[0]["sequence"] == 1
+    resumed.refresh()
+    assert resumed.sequence == 2
+    assert resumed.events_since(0)[0]["sequence"] == 2

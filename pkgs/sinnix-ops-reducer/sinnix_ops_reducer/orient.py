@@ -175,9 +175,8 @@ def acknowledged_outages(inventory: dict[str, Any] | None) -> list[dict[str, Any
 
 
 def capture_freshness(lanes: dict[str, Any] | None) -> dict[str, Any]:
-    """Counts plus the non-healthy list from the sentinel sweep's ledger
-    (capture/payload/publisher/service/socket/mount keys alike -- the sweep
-    already merges them into one state)."""
+    """Counts plus the non-healthy list from the reducer's merged health state
+    (capture/payload/publisher/service/socket/mount keys alike)."""
     if not isinstance(lanes, dict) or not isinstance(lanes.get("keys"), dict):
         return {"available": False}
     keys = lanes["keys"]

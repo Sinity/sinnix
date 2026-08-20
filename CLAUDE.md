@@ -183,8 +183,9 @@ endpoint, activation, backendKind, requiresCuda, ... }` wraps
   - `services/sinex.nix` + `services/sinex/bridge.nix` — glue onto an upstream
     flake's own `services.sinex` module, so the option surface is upstream's
     to shape, not `mkServiceModule`'s.
-  - `services/ai-control.nix` — installs `scripts/sinnix-ai`, which carries the
-    service registry itself; there is no unit here to declare.
+  - `services/ai-control.nix` — declares the AI proxy units and runtime
+    surfaces, and installs `scripts/sinnix-ai` as the thin inventory/action
+    reader.
   - `services/capture-registry.nix` — declares `sinnix.runtime.captures`
     entries for lanes with no owning unit. Not a service at all.
   - `features/dev/agents/*.nix` except `clis.nix` and `mcp.nix` — plain-Nix

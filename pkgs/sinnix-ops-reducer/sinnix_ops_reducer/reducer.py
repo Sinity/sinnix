@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import tempfile
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,28 +12,11 @@ from . import SCHEMA
 from .anchor import expire_anchor, reduce_anchor_event
 from .attention import normalize_attention
 from .hyprland import HyprlandState, Socket2Adapter, reduce_socket_event
+from sinnix_lib.atomic_json import write_json_atomic
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def atomic_json(path: Path, value: dict[str, Any], mode: int = 0o600) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        os.fchmod(fd, mode)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(value, handle, sort_keys=True, separators=(",", ":"))
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        try:
-            os.unlink(temporary)
-        except FileNotFoundError:
-            pass
 
 
 class Reducer:
@@ -76,12 +58,14 @@ class Reducer:
 
     def _save_sequence(self) -> None:
         if self.state_path is not None:
-            atomic_json(
+            write_json_atomic(
                 self.state_path,
                 {
                     "sequence": self.sequence,
                     "orphan_observations": self.orphan_observations,
                 },
+                mode=0o600,
+                fsync=True,
             )
 
     def _reduce_orphan_policy(self, report: dict[str, Any]) -> None:
@@ -171,7 +155,7 @@ class Reducer:
             else None,
             "degradation": source_health["degradation"],
         }
-        atomic_json(self.snapshot_path, snapshot)
+        write_json_atomic(self.snapshot_path, snapshot, mode=0o600, fsync=True)
         self._snapshot = snapshot
         self._save_sequence()
         status = str(source_health["status"])

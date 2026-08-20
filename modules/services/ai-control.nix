@@ -1,7 +1,7 @@
 # sinnix-ai — on-demand control plane for the local AI services
 # (stt, tts, kokoro, ollama, litellm, llama-cpp, muse-glimmer, koboldcpp,
-# comfyui, musicgen, ocr, open-webui). The script carries the service registry; this
-# module only installs it. See scripts/sinnix-ai.
+# comfyui, musicgen, ocr, open-webui). The module declares the live service
+# and runtime surfaces; scripts/sinnix-ai is a thin inventory/action reader.
 {
   config,
   lib,
