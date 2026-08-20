@@ -221,14 +221,6 @@ mkServiceModule {
 
             sinnix-sqlite-backup ${lib.escapeShellArg dbPath} "$final"
 
-            find ${lib.escapeShellArg backupRoot} \
-              -maxdepth 1 \
-              -type f \
-              -name 'telemetry-*.sqlite.zst' \
-              -printf '%T@ %p\n' \
-              | sort -rn \
-              | awk 'NR > 7 { print substr($0, index($0, $2)) }' \
-              | xargs -r rm -f
           '';
           path = [
             pkgs.coreutils
