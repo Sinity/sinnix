@@ -8,11 +8,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from sinnix_lib.atomic_json import write_json_atomic
+
 from . import SCHEMA
 from .anchor import expire_anchor, reduce_anchor_event
 from .attention import normalize_attention
 from .hyprland import HyprlandState, Socket2Adapter, reduce_socket_event
-from sinnix_lib.atomic_json import write_json_atomic
 
 
 def now_iso() -> str:
