@@ -255,6 +255,9 @@ mkFeatureModule {
         mkClaudeBackendEnv
         mkCodexBackendEnv
         mkClaudeCodeWrapper
+        mkClodexWrapper
+        mkClodexChildWrapper
+        mkClodexServerWrapper
         mkCodexWrapper
         mkGrokWrapper
         mkAntigravityWrapper
@@ -305,6 +308,13 @@ mkFeatureModule {
               directory = ".codex";
               mode = "0700";
             }
+            # Clodex stores only mutable model registry and non-secret OAuth
+            # recovery metadata here. Credentials use the encrypted local
+            # credential helper below.
+            {
+              directory = ".clodex";
+              mode = "0700";
+            }
             {
               directory = ".gemini";
               mode = "0700";
@@ -314,6 +324,7 @@ mkFeatureModule {
             ".local/state/claude-code"
             ".local/state/codex"
             ".local/state/gemini"
+            ".local/state/sinnix/clodex-credentials"
             ".local/state/sinnix/agent-jobs"
             {
               directory = ".grok";
@@ -375,6 +386,8 @@ mkFeatureModule {
                   # claims that literal path and clobbers any symlink there on
                   # auto-update. Suffixed names are never touched.
                   claude = "~/.local/bin/claude-lean";
+                  claude-clodex = "~/.local/bin/claude-clodex";
+                  clodex = "~/.local/bin/clodex";
                   gemini = "~/.local/bin/gemini";
                   grok = "~/.local/bin/grok-sinnix";
                   agy = "~/.local/bin/agy-sinnix";
@@ -503,6 +516,39 @@ mkFeatureModule {
                 })
               ) agentLanes.hermesProfiles)
               // {
+                # Subscription-authenticated Claude Code bridge. Proxy mode
+                # leaves native Anthropic requests untouched and routes only
+                # explicitly selected Clodex models through OpenAI OAuth.
+                ".local/bin/claude-clodex" = mkClodexWrapper { };
+                ".local/bin/clodex-claude" = mkClodexChildWrapper;
+                ".local/bin/sinnix-clodex-server" = mkClodexServerWrapper;
+                ".local/bin/clodex" = {
+                  text = ''
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+
+                    ${mkNpmBootstrap {
+                      stateDir = "clodex";
+                      npmPackage = "@bman654/clodex";
+                      binaryName = "clodex";
+                    }}
+                    CLODEX_STATE="$STATE"
+                    export CLODEX_CREDENTIAL_HELPER=${lib.escapeShellArg "${scriptPkgs.sinnix-clodex-credential-helper}/bin/sinnix-clodex-credential-helper"}
+
+                    ${mkNpmBootstrap {
+                      stateDir = "claude-code";
+                      npmPackage = "@anthropic-ai/claude-code";
+                      binaryName = "claude";
+                    }}
+                    claude_binary="$HOME/.local/state/claude-code/npm/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
+                    export CLODEX_CLAUDE_PATH="$claude_binary"
+                    export TWEAKCC_CC_INSTALLATION_PATH="$claude_binary"
+
+                    exec ${agentScopeExec} "$CLODEX_STATE/launch.sh" "$@"
+                  '';
+                  executable = true;
+                  force = true;
+                };
                 ".local/bin/gemini" = {
                   text = ''
                     #!/usr/bin/env bash
