@@ -32,13 +32,10 @@ wallpaper_scheme = "vibrant"
 
 [theme.templates]
 enable_builtin_templates = true
-# hyprland is in this list because it was missing, and its absence made
-# ~/.config/hypr/noctalia.conf a dead file: hyprland/default.nix sources that
-# path for wallpaper-derived colours, and nothing ever generated it, so it
-# still held only its seed comment. Noctalia's builtin hyprland template is
-# also config-provider aware (it detects hyprland.lua vs hyprland.conf and
-# writes the matching include), so it is the one piece of this desktop already
-# ready for the Lua migration.
+# hyprland is enabled because the native template writes the wallpaper-derived
+# palette to ~/.config/hypr/noctalia.lua and applies it from hyprland.lua. The
+# template detects the active config provider, so it remains aligned with the
+# Lua migration instead of creating a legacy hyprland.conf fragment.
 #
 # NOTE, learned the hard way within an hour of writing the layer warning at
 # the top of this file: adding it HERE is not enough. The state layer carries

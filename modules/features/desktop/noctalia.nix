@@ -118,84 +118,9 @@ mkFeatureModule {
             force = lib.mkForce true;
           };
 
-          systemd.user.services.noctalia-hyprland-colors = {
-            Unit = {
-              Description = "Apply Noctalia-generated Hyprland colors";
-              StartLimitIntervalSec = 0;
-            };
-            Service = {
-              Type = "oneshot";
-              ExecStart =
-                let
-                  applyScript = pkgs.writeShellScript "noctalia-hyprland-colors" ''
-                    set -euo pipefail
-
-                    config_file="''${XDG_CONFIG_HOME:-$HOME/.config}/hypr/noctalia.conf"
-                    [ -r "$config_file" ] || exit 0
-
-                    color_for() {
-                      ${pkgs.gawk}/bin/awk -v name="$1" '
-                        $1 == "$" name && $2 == "=" {
-                          print $3
-                          found = 1
-                          exit
-                        }
-                        END { exit found ? 0 : 1 }
-                      ' "$config_file"
-                    }
-
-                    primary="$(color_for primary || true)"
-                    surface="$(color_for surface || true)"
-                    secondary="$(color_for secondary || true)"
-                    error="$(color_for error || true)"
-
-                    [ -n "$primary" ] || exit 0
-                    [ -n "$surface" ] || exit 0
-                    [ -n "$secondary" ] || exit 0
-                    [ -n "$error" ] || exit 0
-
-                    ${pkgs.hyprland}/bin/hyprctl eval "
-                    hl.config({
-                      general = {
-                        col = {
-                          active_border = \"$primary\",
-                          inactive_border = \"$surface\",
-                        },
-                      },
-                      group = {
-                        col = {
-                          border_active = \"$secondary\",
-                          border_inactive = \"$surface\",
-                          border_locked_active = \"$error\",
-                          border_locked_inactive = \"$surface\",
-                        },
-                        groupbar = {
-                          col = {
-                            active = \"$secondary\",
-                            inactive = \"$surface\",
-                            locked_active = \"$error\",
-                            locked_inactive = \"$surface\",
-                          },
-                        },
-                      },
-                    })
-                    "
-                  '';
-                in
-                "${applyScript}";
-            };
-          };
-
-          systemd.user.paths.noctalia-hyprland-colors = {
-            Unit = {
-              Description = "Watch Noctalia-generated Hyprland colors";
-            };
-            Path = {
-              PathChanged = "${config.home.homeDirectory}/.config/hypr/noctalia.conf";
-              Unit = "noctalia-hyprland-colors.service";
-            };
-            Install.WantedBy = [ "default.target" ];
-          };
+          # Noctalia's native Hyprland template owns the Lua palette. It writes
+          # ~/.config/hypr/noctalia.lua and appends its require/apply hook to
+          # hyprland.lua, so no second color watcher is needed here.
 
         };
 

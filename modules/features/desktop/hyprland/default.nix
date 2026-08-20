@@ -26,7 +26,7 @@ let
 
   # Helper to import sub-modules which might need args
   bindings = import ./bindings.nix {
-    inherit pkgs scriptPkgs;
+    inherit lib pkgs scriptPkgs;
     inherit (config) sinnix;
   };
   rules = import ./rules.nix {
@@ -173,177 +173,124 @@ in
 
           wayland.windowManager.hyprland = {
             enable = true;
-            configType = "hyprlang";
+            configType = "lua";
             package = hyprlandPkg;
             xwayland.enable = true;
             systemd.enable = false;
 
-            # NOTE: hyprexpo (workspace overview) intentionally NOT enabled —
-            # hyprlandPlugins.hyprexpo fails to compile against this nixpkgs
-            # Hyprland pin (missing HookSystemManager.hpp; upstream out of sync).
-            # Re-add via the version-matched plugin from the hyprland flake once
-            # nixpkgs catches up.
-
+            # The Lua provider renders each setting as a semantic hl.* call.
+            # Keep one `hl.config` table for compositor options and use the
+            # dedicated bind/rule calls for values that are not config keys.
             settings = {
-              exec-once = [
-                "uwsm finalize"
-                # Auto-start weechat scratchpad (hidden in special workspace)
-                "uwsm app -- ${pkgs.kitty}/bin/kitty --class scratchpad-weechat --title WeeChat $HOME/.local/bin/weechat-scratchpad"
-                # nav-capture local receiver (origin-chain edges + reading-
-                # stack pushes from the browser extension) + its ambient
-                # widget window -- see sinnix-nav-capture-daemon and
-                # sinnix-reading-stack-widget.
-                "uwsm app -- ${scriptPkgs.sinnix-nav-capture-daemon}/bin/sinnix-nav-capture-daemon"
-                "uwsm app -- ${pkgs.kitty}/bin/kitty --class reading-stack-widget --title reading-stack ${scriptPkgs.sinnix-reading-stack-widget}/bin/sinnix-reading-stack-widget"
-              ];
-
-              # Override uwsm's "start-hyprland:Hyprland" to clean value
-              # Fixes warning from apps like nm-applet that don't understand uwsm format
-              env = [ "XDG_CURRENT_DESKTOP,Hyprland" ];
-
-              xwayland.force_zero_scaling = true;
-
-              cursor.no_warps = true;
-
-              input = {
-                kb_layout = "pl";
-                repeat_rate = 40;
-                repeat_delay = 400;
-                mouse_refocus = true;
-                sensitivity = 0;
-                accel_profile = "flat";
-                force_no_accel = 0;
-                scroll_factor = 1;
-                follow_mouse = 1;
-              };
-
-              general = {
-                border_size = 3;
-                gaps_in = 10;
-                gaps_out = 20;
-                layout = "dwindle";
-                resize_on_border = true;
-                # Noctalia owns the live border palette through its native
-                # Hyprland template included below. These are first-session
-                # fallbacks before ~/.config/hypr/noctalia.conf exists.
-                "col.active_border" = lib.mkForce "rgba(d0bcffee) rgba(a8c7faee) rgba(8fd8d2ee) 45deg";
-                "col.inactive_border" = lib.mkForce "rgba(49454faa)";
-              };
-
-              dwindle = {
-                force_split = 0;
-                special_scale_factor = 1.0;
-                split_width_multiplier = 1.0;
-                use_active_for_splits = true;
-                preserve_split = "yes";
-              };
-
-              misc = {
-                enable_anr_dialog = false;
-                # why mkForce: stylix sets this true; keep the logo visible
-                # during startup as a "compositor alive" indicator.
-                disable_hyprland_logo = lib.mkForce false;
-                # Fullscreen VRR causes the AORUS OLED to briefly drop signal
-                # when mpv enters or leaves fullscreen.
-                vrr = 0;
-                mouse_move_enables_dpms = true;
-                key_press_enables_dpms = true;
-                always_follow_on_dnd = true;
-                focus_on_activate = true;
-                middle_click_paste = true;
-                enable_swallow = false;
-              };
-
-              debug = {
-                disable_logs = true;
-                disable_time = true;
-                enable_stdout_logs = false;
-              };
-
-              render = {
-                # On the AORUS FO48U HDR path, Hyprland's default FP16 render
-                # path can leave the whole output visually dim after Noctalia
-                # wallpaper changes. The F3 ASBL pulse only fixes the state
-                # when it leaves this disabled, so make that runtime state
-                # persistent instead of depending on the pulse side effect.
-                use_fp16 = false;
-                # Hyprland 0.55 can return transparent or stale screencopy
-                # frames in HDR. Keep the SDR copy unconditionally instead of
-                # relying on the intermittent automatic path.
-                keep_unmodified_copy = 1;
-                # Preserve inactive-window background blur when the retained
-                # screencopy buffer participates in HDR composition.
-                use_shader_blur_blend = true;
-              };
-
-              decoration = {
-                rounding = 10;
-                active_opacity = 1.0;
-                # Keep compositor-wide fading off so browsers and other
-                # applications remain legible. Kitty's own focus/unfocus fade
-                # is a per-app override (windowrule "kitty-focus-opacity" in
-                # hyprland/rules.nix), not a global opacity change.
-                inactive_opacity = 1.0;
-                dim_inactive = false;
-                dim_strength = 0.0;
-
-                # Window/layer blur is back on. It was briefly disabled
-                # globally (commit 6ab2bb21) to kill the notification-column
-                # dimming (sinnix-nzr9), believing hyprlang's layerrule had
-                # lost its matcher entirely in 0.56 and so could not scope a
-                # fix to just the notification layer. That belief was wrong
-                # for the deprecated inline `layerrule = <field>, <ns>` form
-                # but not for the "layerrule v2" special-category form (see
-                # the layerRules list in hyprland/rules.nix), which still
-                # carries a namespace matcher and fixes the column with a
-                # scoped ignore_alpha rule instead of a global blur toggle.
-                blur.enabled = true;
-
-                shadow = {
-                  enabled = true;
-                  range = 20;
-                  render_power = 3;
-                  offset = "0 8";
+              config = {
+                env = [ ];
+                xwayland = {
+                  force_zero_scaling = true;
+                };
+                cursor = {
+                  no_warps = true;
+                };
+                input = {
+                  kb_layout = "pl";
+                  repeat_rate = 40;
+                  repeat_delay = 400;
+                  mouse_refocus = true;
+                  sensitivity = 0;
+                  accel_profile = "flat";
+                  force_no_accel = 0;
+                  scroll_factor = 1;
+                  follow_mouse = 1;
+                };
+                general = {
+                  border_size = 3;
+                  gaps_in = 10;
+                  gaps_out = 20;
+                  layout = "dwindle";
+                  resize_on_border = true;
+                  col = {
+                    active_border = {
+                      colors = [
+                        "rgba(d0bcffee)"
+                        "rgba(a8c7faee)"
+                        "rgba(8fd8d2ee)"
+                      ];
+                      angle = 45;
+                    };
+                    inactive_border = "rgba(49454faa)";
+                  };
+                };
+                dwindle = {
+                  force_split = 0;
+                  special_scale_factor = 1.0;
+                  split_width_multiplier = 1.0;
+                  use_active_for_splits = true;
+                  preserve_split = true;
+                };
+                misc = {
+                  enable_anr_dialog = false;
+                  disable_hyprland_logo = lib.mkForce false;
+                  vrr = 0;
+                  mouse_move_enables_dpms = true;
+                  key_press_enables_dpms = true;
+                  always_follow_on_dnd = true;
+                  focus_on_activate = true;
+                  middle_click_paste = true;
+                  enable_swallow = false;
+                };
+                debug = {
+                  disable_logs = true;
+                  disable_time = true;
+                  enable_stdout_logs = false;
+                };
+                render = {
+                  use_fp16 = false;
+                  keep_unmodified_copy = 1;
+                  use_shader_blur_blend = true;
+                };
+                decoration = {
+                  rounding = 10;
+                  active_opacity = 1.0;
+                  inactive_opacity = 1.0;
+                  dim_inactive = false;
+                  dim_strength = 0.0;
+                  blur = {
+                    enabled = true;
+                  };
+                  shadow = {
+                    enabled = true;
+                    range = 20;
+                    render_power = 3;
+                    offset = "0 8";
+                  };
                 };
               };
 
-              # Animations are owned by modules/features/desktop/hyprland-animations.nix
-              # (default-on feature, MD3 curve set). This module deliberately
-              # sets nothing here: two authorities for one block is how the
-              # config stopped meaning what it said.
-
-              # Every bind carries a description (bindd family) so the
-              # SUPER+/ cheatsheet has something to render -- see bindings.nix.
-              inherit (bindings)
-                bindd
-                binddl
-                binddm
-                ;
-              windowrule = rules.windowrule or [ ];
-
-              # NOTE: bar-layer blur (layerrule) still omitted — the inline
-              # `layerrule = blur, <ns>` keyword form used here through 0.54.3
-              # is gone (sinnix-nzr9). The "layerrule v2" special-category
-              # form that fixes the notification column (hyprland/rules.nix)
-              # would also unblock this (Noctalia namespaces are
-              # noctalia-bar-default / noctalia-wallpaper), but that's a
-              # separate, not-yet-requested change and out of scope here.
+              env = [
+                {
+                  _args = [
+                    "XDG_CURRENT_DESKTOP"
+                    "Hyprland"
+                  ];
+                }
+              ];
+              bind = bindings.bindd ++ bindings.binddl ++ bindings.binddm;
+              window_rule = rules.windowRules;
+              layer_rule = rules.layerRules;
             };
 
-            submaps = bindings.submaps or { };
-
-            extraConfig =
-              let
-                extra = rules.extraConfig or "";
-              in
-              lib.mkAfter ''
-                # Generated and live-reloaded by Noctalia's wallpaper-derived
-                # Hyprland template. The file is seeded below so first login
-                # does not depend on template generation order.
-                source = ~/.config/hypr/noctalia.conf
-
-                ${extra}
+            submaps = bindings.submaps;
+            extraConfig = "";
+            extraLuaFiles."sinnix-startup.lua" = {
+              autoLoad = true;
+              content = ''
+                hl.on("hyprland.start", function()
+                  hl.exec_cmd("uwsm finalize")
+                  hl.exec_cmd("uwsm app -- ${pkgs.kitty}/bin/kitty --class scratchpad-weechat --title WeeChat $HOME/.local/bin/weechat-scratchpad")
+                  hl.exec_cmd("uwsm app -- ${scriptPkgs.sinnix-nav-capture-daemon}/bin/sinnix-nav-capture-daemon")
+                  hl.exec_cmd("uwsm app -- ${pkgs.kitty}/bin/kitty --class reading-stack-widget --title reading-stack ${scriptPkgs.sinnix-reading-stack-widget}/bin/sinnix-reading-stack-widget")
+                end)
               '';
+            };
           };
 
           services.hyprpaper.enable = lib.mkForce false;
@@ -353,21 +300,13 @@ in
             force = true;
           };
 
-          xdg.configFile."hypr/hyprland.conf" = {
+          xdg.configFile."hypr/hyprland.lua" = {
             force = true;
             # Home Manager's default onChange runs `hyprctl reload config-only`.
             # During a NixOS switch, unit churn is already risky enough; apply
             # new compositor config on the next session or by explicit reload.
             onChange = lib.mkForce "";
           };
-
-          home.activation.seedNoctaliaHyprlandTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-            theme_file="''${XDG_CONFIG_HOME:-$HOME/.config}/hypr/noctalia.conf"
-            if [ ! -e "$theme_file" ]; then
-              mkdir -p "$(dirname "$theme_file")"
-              printf '%s\n' '# Seed file overwritten by Noctalia native Hyprland template.' > "$theme_file"
-            fi
-          '';
 
           # Scratchpad config files + script links
           home.file =
