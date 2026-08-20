@@ -62,6 +62,8 @@ mkServiceModule {
     }:
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+      machineTelemetryDb = "${config.sinnix.paths.machineRoot}/telemetry.sqlite";
+      machineTelemetryLakeRoot = "${config.sinnix.paths.dataRoot}/derived/machine-telemetry";
       localRoot = "${cfg.repoRoot}/.lynchpin";
       # github_context shells out to `gh`, which authenticates from
       # GITHUB_TOKEN. A systemd unit sources no profile.d, so the agenix
@@ -75,6 +77,11 @@ mkServiceModule {
             secretName = "github-token";
             caller = "lynchpin-materialize";
           }}
+          if [ -e ${lib.escapeShellArg machineTelemetryDb} ]; then
+            ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.cli.machine_telemetry_export
+          else
+            echo "lynchpin: machine telemetry database is absent; skipping lake export" >&2
+          fi
           exec ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.cli.materialize --all
         '';
       };
@@ -111,6 +118,7 @@ mkServiceModule {
         };
         script = ''
           install -d -m 0775 -o sinity -g users ${lib.escapeShellArg localRoot}
+          install -d -m 0775 -o sinity -g users ${lib.escapeShellArg machineTelemetryLakeRoot}
           for dir in ${localHotDirArgs}; do
             install -d -m 0775 -o sinity -g users "$dir"
             chattr +C "$dir" || true
@@ -155,6 +163,8 @@ mkServiceModule {
           Environment = [
             "LYNCHPIN_REPO_ROOT=${cfg.repoRoot}"
             "LYNCHPIN_LOCAL_ROOT=${cfg.repoRoot}/.lynchpin"
+            "LYNCHPIN_MACHINE_TELEMETRY_DB=${machineTelemetryDb}"
+            "LYNCHPIN_MACHINE_TELEMETRY_LAKE_ROOT=${machineTelemetryLakeRoot}"
           ];
           # 4-hour timeout — the full DAG can be heavy.
           TimeoutStartSec = 14400;
