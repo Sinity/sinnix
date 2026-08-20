@@ -382,12 +382,13 @@ in
             groupEvaluated.config.home-manager.users.sinity.wayland.windowManager.hyprland.settings;
         in
         builtins.toJSON (
-          # Every bind family the module emits. These are the described
-          # variants (bindd/binddl/binddm) -- see hyprland/bindings.nix. A
-          # chord collision across families shadows just as silently as one
-          # within a family, so check them together.
-          (hyprSettings.bindd or [ ]) ++ (hyprSettings.binddl or [ ]) ++ (hyprSettings.binddm or [ ])
+          # The Lua provider emits one semantic bind call per entry. Keep the
+          # aggregate here so the collision check covers ordinary, locked, and
+          # mouse binds together.
+          hyprSettings.bind or [ ]
         );
+      groupLuaConfig =
+        groupEvaluated.config.home-manager.users.sinity.xdg.configFile."hypr/hyprland.lua".text;
     in
     {
       # Provably fails when: a surface's `resources` override stops
@@ -436,6 +437,23 @@ in
           ${localModelRosterJson}
           EOF_ROSTER
         '';
+      # Force the actual Home Manager Lua renderer, not just the source
+      # settings. Lua syntax and semantic call families are checked together.
+      checks.hyprland-lua-generated = pkgs.runCommand "hyprland-lua-generated-check" { } ''
+        cat > hyprland.lua <<'EOF_HYPRLAND_LUA'
+        ${groupLuaConfig}
+        EOF_HYPRLAND_LUA
+        ${pkgs.lua}/bin/lua -e 'assert(loadfile("hyprland.lua"))'
+        grep -Fq 'hl.config(' hyprland.lua
+        grep -Fq 'hl.bind(' hyprland.lua
+        grep -Fq 'hl.window_rule(' hyprland.lua
+        grep -Fq 'hl.layer_rule(' hyprland.lua
+        if grep -Eq 'hyprlang|hyprland\\.conf|noctalia\\.conf' hyprland.lua; then
+          echo "legacy provider syntax leaked into generated Lua" >&2
+          exit 1
+        fi
+        touch "$out"
+      '';
       # Provably fails when: a second bind claims a chord an existing bind
       # already uses (verified by duplicating "SUPER SHIFT, F").
       checks.hyprland-groups =
@@ -452,8 +470,8 @@ in
             # what is config content, not contract -- asserting exact binding
             # strings just memorializes the keymap diff-by-diff.
             jq -e '
-              (map(split(",") | {chord: ((.[0] | gsub("^[[:space:]]+|[[:space:]]+$"; "")) + "," + (.[1] | gsub("^[[:space:]]+|[[:space:]]+$"; "")))})
-                | group_by(.chord) | map(select(length > 1)) | length) == 0
+              all(.[]; (._args | length) == 3 and (._args[0] | type) == "string" and (._args[2].description | type) == "string")
+              and (map({chord: ._args[0]}) | group_by(.chord) | map(select(length > 1)) | length) == 0
             ' bindings.json >/dev/null
             touch "$out"
           '';
