@@ -34,8 +34,14 @@ def read_json(path: Path | str, default: Any = None) -> Any:
         return default
 
 
-def write_json_atomic(path: Path | str, data: Any, *, mode: int = 0o644) -> None:
-    """Write *data* as JSON to *path* via tmp-in-same-dir + os.replace."""
+def write_json_atomic(
+    path: Path | str,
+    data: Any,
+    *,
+    mode: int = 0o644,
+    fsync: bool = False,
+) -> None:
+    """Write *data* atomically, optionally syncing the file before replace."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=p.name + ".", suffix=".tmp")
@@ -43,6 +49,9 @@ def write_json_atomic(path: Path | str, data: Any, *, mode: int = 0o644) -> None
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(data, fh, sort_keys=True, separators=(",", ":"))
             fh.write("\n")
+            if fsync:
+                fh.flush()
+                os.fsync(fh.fileno())
         os.chmod(tmp, mode)
         os.replace(tmp, p)
     except BaseException:

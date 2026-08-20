@@ -17,6 +17,13 @@ def test_atomic_roundtrip(tmp_path):
     assert not list(tmp_path.glob("*.tmp"))
 
 
+def test_atomic_roundtrip_preserves_private_mode_when_synced(tmp_path):
+    p = tmp_path / "private.json"
+    write_json_atomic(p, {"secret": True}, mode=0o600, fsync=True)
+    assert p.stat().st_mode & 0o777 == 0o600
+    assert read_json(p) == {"secret": True}
+
+
 def test_read_json_heals_torn_writes(tmp_path):
     p = tmp_path / "state.json"
     p.write_text("{not json")
