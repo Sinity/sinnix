@@ -78,6 +78,17 @@ in
             message = "Every Borg job's capture lane must point at a path its unit -- or a packaged script that unit runs -- actually writes";
           }
           {
+            assertion =
+              let
+                script = config.systemd.services.borgbackup-job-machine-telemetry-dumps.script;
+              in
+              lib.hasInfix "/realm/state/db-dumps/machine-telemetry/./" script
+              && lib.hasInfix "borg extract --stdout" script
+              && lib.hasInfix "zstd -t" script
+              && lib.hasInfix "machine-telemetry-dumps.last-success" script;
+            message = "Machine telemetry dump Borg coverage must archive the canonical path, restore-check one dump, and publish its freshness marker";
+          }
+          {
             # A liveness probe that cannot run is worse than none: the lane
             # reads healthy because nothing contradicts it.
             assertion = lib.all (
@@ -661,6 +672,7 @@ in
           borgbackup-job-realm
           borgbackup-job-sinex-blobs
           borgbackup-job-polylogue-state
+          borgbackup-job-machine-telemetry-dumps
           borgbackup-verify
           ;
         allSurfaceNames = builtins.attrNames backupRuntimeEval.config.sinnix.runtime.surfaces;
