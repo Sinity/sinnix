@@ -97,6 +97,7 @@ in
           (_: {
             sinnix.features.dev.shell.enable = true;
             sinnix.features.dev.mcp-servers.enable = true;
+            sinnix.services.clodex.enable = true;
           })
         ];
         assertions =
@@ -123,6 +124,16 @@ in
             {
               assertion = builtins.hasAttr ".config/claude/agents" hm.home.file;
               message = "Claude agent definitions must be linked as one directory from the shared dots tree.";
+            }
+            {
+              assertion = builtins.hasAttr "sinnix-clodex" hm.systemd.user.services;
+              message = "Clodex must run as an advertised local user service for Claude Code child-process routing.";
+            }
+            {
+              assertion = lib.any (
+                entry: (if builtins.isAttrs entry then entry.directory else entry) == ".clodex"
+              ) config.sinnix.persistence.home.directories;
+              message = "Clodex's non-secret OAuth recovery state must survive impermanence.";
             }
             # These two jobs render through mkScheduledJob at the NixOS level
             # (/etc/systemd/user), not through home-manager — the two
@@ -168,6 +179,10 @@ in
           pkgs.zsh
         ];
         homeFiles = laneWrapperFiles ++ [
+          ".local/bin/claude-clodex"
+          ".local/bin/clodex"
+          ".local/bin/clodex-claude"
+          ".local/bin/sinnix-clodex-server"
           ".gemini/settings.json"
           ".gemini/config/mcp_config.json"
           ".gemini/config/skills"
@@ -466,6 +481,10 @@ in
             assert 'agent-control:' in orchestrate
             PYCODE
 
+            bash -n "$HOME/.local/bin/claude-clodex"
+            bash -n "$HOME/.local/bin/clodex"
+            bash -n "$HOME/.local/bin/clodex-claude"
+            bash -n "$HOME/.local/bin/sinnix-clodex-server"
             for wrapper in \
               ${lib.concatMapStringsSep " \\\n              " (f: ''"$HOME/${f}"'') laneWrapperFiles} \
               "$HOME/.local/bin/gemini" \
@@ -583,6 +602,24 @@ in
             ' "$HOME/.codex/hooks.json" >/dev/null
             ${claudeLaneWrapperChecks}
             ${codexLaneWrapperChecks}
+            grep -Fq '@bman654/clodex' "$HOME/.local/bin/claude-clodex"
+            grep -Fq 'CLODEX_REQUIRE_SERVER=1' "$HOME/.local/bin/claude-clodex"
+            grep -Fq 'CLODEX_CREDENTIAL_HELPER=' "$HOME/.local/bin/claude-clodex"
+            grep -Fq 'claude-wrapper.js' "$HOME/.local/bin/claude-clodex"
+            grep -Fq 'claude-code/bin/claude.exe' "$HOME/.local/bin/claude-clodex"
+            grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp.json"' "$HOME/.local/bin/claude-clodex"
+            grep -Fq 'export SINNIX_CLAUDE_PROFILE=full' "$HOME/.local/bin/claude-clodex"
+            grep -Fq 'sinnix-agent-scope-exec' "$HOME/.local/bin/claude-clodex"
+            grep -Fq '@bman654/clodex' "$HOME/.local/bin/clodex"
+            grep -Fq 'CLODEX_CLAUDE_PATH="$claude_binary"' "$HOME/.local/bin/clodex"
+            grep -Fq 'TWEAKCC_CC_INSTALLATION_PATH="$claude_binary"' "$HOME/.local/bin/clodex"
+            grep -Fq 'claude-code/bin/claude.exe' "$HOME/.local/bin/clodex"
+            grep -Fq 'sinnix-agent-scope-exec "$CLODEX_STATE/launch.sh"' "$HOME/.local/bin/clodex"
+            grep -Fq 'claude-wrapper.js' "$HOME/.local/bin/clodex-claude"
+            grep -Fq 'CLODEX_CREDENTIAL_HELPER=' "$HOME/.local/bin/clodex-claude"
+            grep -Fq 'server --proxy' "$HOME/.local/bin/sinnix-clodex-server"
+            grep -Fq 'CLODEX_CREDENTIAL_HELPER=' "$HOME/.local/bin/sinnix-clodex-server"
+            jq -e '.env.CLAUDE_CODE_PROCESS_WRAPPER == "/home/sinity/.local/bin/clodex-claude"' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
 
             # Every agent wrapper launches its npm-bootstrapped entry point
             # through the scope wrapper, so the process lands in the agent

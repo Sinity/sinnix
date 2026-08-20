@@ -2,7 +2,8 @@
   "cleanupPeriodDays": 99999,
   "env": {
     "CLAUDE_CODE_FORK_SUBAGENT": "1",
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "CLAUDE_CODE_PROCESS_WRAPPER": "/home/sinity/.local/bin/clodex-claude"
   },
   "permissions": {
     "allow": [

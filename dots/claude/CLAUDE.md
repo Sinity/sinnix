@@ -468,8 +468,11 @@ patterns, workflows) lives in each project's `CLAUDE.md`.
 - **Alternate backends**: `claude-deepseek`/`codex-deepseek` (agenix
   `deepseek-api-key`); `claude-local`/`codex-local`/`hermes-local` (local
   Ollama hub via LiteLLM `127.0.0.1:4000`; model names live once in
-  `litellm.nix`). LiteLLM stays local-models-only; remote
-  backends are wired per-wrapper with agenix keys.
+  `litellm.nix`); `claude-clodex` (the local Clodex proxy, using the
+  operator's ChatGPT/Codex subscription OAuth and preserving native Claude
+  routing for Anthropic models). LiteLLM stays local-models-only; remote
+  backends are wired per-wrapper with agenix keys. Clodex operations are in
+  `docs/clodex.md`.
 - **Shared skills** live in `dots/_ai/skills/` (sinnix repo) and are linked
   into `~/.config/claude/skills`, `~/.codex/skills`, `~/.gemini/skills`.
 - **Desktop environment**: Hyprland (Wayland) + Noctalia shell; terminals
