@@ -66,6 +66,7 @@ The common read surface includes:
 - `terminal_read` for Kitty terminal inventory and bounded capture reads
 - `browser_read` for Chrome state and bounded page content
 - `browser_capture` for screenshots of gateway-created hidden browser targets, returned as opaque artifacts
+- `tasks_read` for native Beads lists, ready work, records, comments, history, dependencies, and searches
 - `job_list`, `job_status`, and `job_read_output`
 - `artifact_list` and `artifact_read`
 - `audit_tail` and `audit_verify`
@@ -82,7 +83,7 @@ The common read surface includes:
 
 `browser_action` is operator-only. It first creates an agent window, which the existing wrapper parks on the hidden agent workspace. The gateway persists its returned page ID and allows later navigation, interaction, evaluation, waiting, and closing only against those registered agent targets. It cannot mutate an existing operator tab. `browser_capture` is read-only, but applies the same registered-target check before Chrome receives a screenshot request, so it cannot capture an existing operator tab. `desktop_capture` invokes only the output capture route and never an interactive area selector or a focus operation.
 
-`agent-control` adds `agent_launch` and `job_cancel`. `operator` also adds `files_write`, `project_write`, `project_apply_patch`, `shell_run`, and `shell_start`. `shell_run` accepts exact argv, a working directory, bounded environment overlay, timeout, output limit, and an explicit root flag. It uses `env -i` and a bounded base environment, then invokes `sudo -n --` only when root was requested. The returned receipt identifies the transient service unit, selected identity, exit status, timeout, and output-truncation facts. `shell_start` uses the existing agent-slice scope policy to create a durable, attested shell job. It returns a stable job ID and scope unit; `job_status`, `job_read_output`, and `job_cancel` use that identity rather than a PID. `files_write` supports atomic replacement, append, mkdir, and explicit regular-file removal. A mutation can require the current SHA-256 so concurrent or stale requests fail rather than overwrite newer content.
+`agent-control` adds `agent_launch` and `job_cancel`. `operator` also adds `files_write`, `project_write`, `project_apply_patch`, `tasks_write`, `shell_run`, and `shell_start`. `tasks_read` invokes Beads with its physical read-only flag. `tasks_write` performs only supported structured native operations and uses `--append-notes`, never the history-replacing `--notes` form. `shell_run` accepts exact argv, a working directory, bounded environment overlay, timeout, output limit, and an explicit root flag. It uses `env -i` and a bounded base environment, then invokes `sudo -n --` only when root was requested. The returned receipt identifies the transient service unit, selected identity, exit status, timeout, and output-truncation facts. `shell_start` uses the existing agent-slice scope policy to create a durable, attested shell job. It returns a stable job ID and scope unit; `job_status`, `job_read_output`, and `job_cancel` use that identity rather than a PID. `files_write` supports atomic replacement, append, mkdir, and explicit regular-file removal. A mutation can require the current SHA-256 so concurrent or stale requests fail rather than overwrite newer content.
 
 ## Project and path authority
 

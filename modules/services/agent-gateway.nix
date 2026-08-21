@@ -80,6 +80,7 @@ mkServiceModule {
         agentScopeExecCommand = "${scriptPkgs.sinnix-agent-scope-exec}/bin/sinnix-agent-scope-exec";
         executionJobCommand = "${scriptPkgs.sinnix-agent-gateway}/bin/sinnix-agent-gateway-execution-job";
         observeCommand = "${scriptPkgs.sinnix-observe}/bin/sinnix-observe";
+        beadsCommand = "${scriptPkgs.beads}/bin/bd";
         projects = config.sinnix.projects.entries;
       };
       mcpWrapper = pkgs.writeShellScriptBin "sinnix-agent-gateway-mcp" ''
