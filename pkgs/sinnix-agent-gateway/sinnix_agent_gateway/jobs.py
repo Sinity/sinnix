@@ -4,8 +4,10 @@ import json
 import os
 import re
 import secrets
+import shutil
 import signal
 import subprocess
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -60,6 +62,69 @@ class JobService:
         environment["SINNIX_AGENT_JOB_STATE_DIR"] = str(self.root)
         return environment
 
+    @staticmethod
+    def _shell_environment(overlay: dict[str, str] | None) -> dict[str, str]:
+        environment = {
+            "HOME": os.environ.get("HOME", "/home/sinity"),
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
+        }
+        for name in ("DBUS_SESSION_BUS_ADDRESS", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"):
+            value = os.environ.get(name)
+            if value:
+                environment[name] = value
+        if overlay is None:
+            return environment
+        if len(overlay) > 64:
+            raise JobError("environment overlay has more than 64 variables")
+        for name, value in overlay.items():
+            if not name or not name.replace("_", "a").isalnum() or not name[0].isalpha():
+                raise JobError(f"invalid environment variable name: {name!r}")
+            if not isinstance(value, str) or len(value) > 8_192:
+                raise JobError(f"invalid environment value for {name}")
+            environment[name] = value
+        return environment
+
+    @staticmethod
+    def _shell_request(
+        argv: list[str], cwd: str, timeout_seconds: int, environment: dict[str, str] | None
+    ) -> tuple[Path, dict[str, Any]]:
+        if not argv or len(argv) > 128 or any(not isinstance(arg, str) for arg in argv):
+            raise JobError("argv must contain 1-128 string arguments")
+        if sum(len(arg) for arg in argv) > 32_768:
+            raise JobError("argv exceeds the configured bound")
+        if timeout_seconds < 30 or timeout_seconds > 86_400:
+            raise JobError("timeout_seconds must be 30-86400")
+        workdir = Path(cwd).expanduser().resolve(strict=True)
+        if not workdir.is_dir():
+            raise JobError("cwd is not a directory")
+        return workdir, {
+            "argv": argv,
+            "cwd": str(workdir),
+            "timeout_seconds": timeout_seconds,
+            "environment": environment,
+        }
+
+    @staticmethod
+    def _proc_start(pid: int) -> str:
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text()
+        except OSError:
+            return ""
+        fields = stat.rsplit(") ", 1)[-1].split()
+        return fields[19] if len(fields) >= 20 else ""
+
+    @staticmethod
+    def _cgroup_for_pid(pid: int) -> str:
+        try:
+            for line in Path(f"/proc/{pid}/cgroup").read_text().splitlines():
+                hierarchy, _, cgroup = line.partition("::")
+                if hierarchy == "0":
+                    return cgroup
+        except OSError:
+            pass
+        return ""
+
     def _manifest_path(self, job_id: str) -> Path:
         if not JOB_ID_RE.fullmatch(job_id):
             raise JobError("invalid job ID")
@@ -87,8 +152,11 @@ class JobService:
             raise JobError("unknown job ID") from exc
         except json.JSONDecodeError as exc:
             raise JobError("malformed job manifest") from exc
-        if value.get("schema_version") not in {2, 3} or value.get("job_id") != job_id:
+        version = value.get("schema_version")
+        if version not in {2, 3, 4} or value.get("job_id") != job_id:
             raise JobError("unattested job manifest")
+        if version == 4 and value.get("kind") != "shell":
+            raise JobError("unattested execution job manifest")
         return value
 
     def launch_agent(self, request: AgentLaunchRequest) -> dict[str, Any]:
@@ -217,6 +285,117 @@ class JobService:
             "project_id": request.project_id,
         }
 
+    def start_shell(
+        self,
+        argv: list[str],
+        cwd: str = "/",
+        timeout_seconds: int = 3_600,
+        environment: dict[str, str] | None = None,
+        as_root: bool = False,
+    ) -> dict[str, Any]:
+        self.principal.require(Capability.SHELL_RUN)
+        workdir, request = self._shell_request(
+            argv, cwd, timeout_seconds, self._shell_environment(environment)
+        )
+        scope_command = shutil.which(self.config.agent_scope_exec_command)
+        execution_command = shutil.which(self.config.execution_job_command)
+        if scope_command is None or execution_command is None:
+            raise JobError("execution job launcher is unavailable")
+        if as_root:
+            sudo = shutil.which("sudo")
+            if sudo is None:
+                raise JobError("sudo command is unavailable")
+            request["argv"] = [sudo, "-n", "--", *argv]
+            request["identity"] = "root"
+        else:
+            request["identity"] = "user"
+        job_id = str(uuid.uuid4())
+        launch_id = secrets.token_hex(16)
+        scope_unit = f"sinnix-gateway-exec-{job_id}.scope"
+        reservation_root = self.root / ".reservations"
+        reservation_root.mkdir(mode=0o700, exist_ok=True)
+        reservation_root.chmod(0o700)
+        reservation = reservation_root / job_id
+        try:
+            reservation.mkdir(mode=0o700)
+        except FileExistsError as exc:
+            raise JobError("job ID collision was rejected") from exc
+        launch_file = reservation / "launch-id"
+        launch_file.write_text(launch_id)
+        launch_file.chmod(0o600)
+        request["job_id"] = job_id
+        request["launch_id"] = launch_id
+        request_path = self.root / f"{job_id}.{launch_id}.request"
+        request_path.write_text(json.dumps(request, sort_keys=True, separators=(",", ":")))
+        request_path.chmod(0o600)
+        command = [
+            scope_command,
+            "--unit",
+            scope_unit,
+            "--property",
+            f"RuntimeMaxSec={timeout_seconds + 10}",
+            "--",
+            execution_command,
+            "--job-id",
+            job_id,
+            "--launch-id",
+            launch_id,
+            "--state-dir",
+            str(self.root),
+            "--request",
+            str(request_path),
+            "--scope-unit",
+            scope_unit,
+        ]
+        try:
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                env=self._environment(),
+            )
+        except OSError as exc:
+            request_path.unlink(missing_ok=True)
+            shutil.rmtree(reservation, ignore_errors=True)
+            raise JobError("failed to launch execution job") from exc
+        manifest = self._manifest_path(job_id)
+        for _ in range(40):
+            if manifest.exists() or process.poll() is not None:
+                break
+            time.sleep(0.05)
+        try:
+            value = self._load(job_id)
+        except JobError as exc:
+            self._stop_execution_unit(scope_unit)
+            self._abort_launch(process)
+            request_path.unlink(missing_ok=True)
+            shutil.rmtree(reservation, ignore_errors=True)
+            raise JobError("execution launcher did not create its manifest") from exc
+        if value.get("launch_id") != launch_id:
+            self._stop_execution_unit(scope_unit)
+            self._abort_launch(process)
+            raise JobError("job ID collision was rejected")
+        return {
+            "job_id": job_id,
+            "accepted": True,
+            "kind": "shell",
+            "identity": request["identity"],
+            "cwd": str(workdir),
+            "unit": scope_unit,
+        }
+
+    def _stop_execution_unit(self, unit: str) -> None:
+        subprocess.run(
+            [self.config.systemctl_command, "--user", "stop", unit],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            env=self._environment(),
+        )
+
     def _controller_status(self, job_id: str) -> dict[str, Any]:
         if not self.config.agent_controller.is_file():
             raise JobError("agent controller is unavailable")
@@ -245,10 +424,83 @@ class JobService:
             raise JobError("agent controller returned unattested status")
         return value
 
+    def _shell_live(self, unit: str) -> dict[str, Any]:
+        result = subprocess.run(
+            [
+                self.config.systemctl_command,
+                "--user",
+                "show",
+                unit,
+                "--property=ActiveState",
+                "--property=SubState",
+                "--property=MainPID",
+                "--property=ControlGroup",
+                "--property=Result",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            text=True,
+            env=self._environment(),
+        )
+        if result.returncode != 0:
+            return {"available": False}
+        values = {
+            key: value
+            for line in result.stdout.splitlines()
+            if "=" in line
+            for key, value in [line.split("=", 1)]
+        }
+        return {"available": True, **values}
+
+    def _store_shell_manifest(self, job_id: str, manifest: dict[str, Any]) -> None:
+        path = self._manifest_path(job_id)
+        descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(self.root))
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+                json.dump(manifest, output, sort_keys=True, separators=(",", ":"))
+                output.write("\n")
+                output.flush()
+                os.fsync(output.fileno())
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, path)
+        finally:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+
+    def _shell_status(self, job_id: str, manifest: dict[str, Any]) -> dict[str, Any]:
+        launcher = manifest.get("launcher")
+        if not isinstance(launcher, dict) or not isinstance(launcher.get("scope_unit"), str):
+            raise JobError("unattested execution job manifest")
+        live = self._shell_live(launcher["scope_unit"])
+        if (
+            live.get("available")
+            and live.get("ActiveState") in {"inactive", "failed"}
+            and manifest.get("lifecycle") in {"accepted", "starting", "running", "cancel_requested"}
+        ):
+            if manifest["lifecycle"] == "cancel_requested":
+                lifecycle, exit_status = "cancelled", 143
+            elif live.get("Result") == "timeout":
+                lifecycle, exit_status = "timed_out", 124
+            else:
+                lifecycle, exit_status = "failed", 1
+            manifest["lifecycle"] = lifecycle
+            manifest["exit_status"] = exit_status
+            manifest["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            self._store_shell_manifest(job_id, manifest)
+        return {**manifest, "live": live}
+
     def status(self, job_id: str) -> dict[str, Any]:
         self.principal.require(Capability.JOB_READ)
-        self._load(job_id)
-        manifest = self._controller_status(job_id)
+        loaded = self._load(job_id)
+        manifest = (
+            self._shell_status(job_id, loaded)
+            if loaded.get("schema_version") == 4
+            else self._controller_status(job_id)
+        )
         sanitized = json.loads(json.dumps(manifest))
         for section in ("prompt", "artifacts"):
             if isinstance(sanitized.get(section), dict):
@@ -256,6 +508,14 @@ class JobService:
                     if key == "sha256":
                         continue
                     sanitized[section][key] = bool(sanitized[section][key])
+        command = sanitized.get("command")
+        if isinstance(command, dict) and isinstance(command.get("argv"), list):
+            argv = command["argv"]
+            command["argv"] = {
+                "count": len(argv),
+                "executable": Path(argv[0]).name if argv else None,
+                "sha256": command.get("argv_sha256"),
+            }
         sanitized.pop("repo", None)
         sanitized.pop("worktree", None)
         return sanitized
@@ -273,16 +533,72 @@ class JobService:
             try:
                 value = json.loads(path.read_text())
                 job_id = value.get("job_id")
-                if value.get("schema_version") not in {2, 3} or not isinstance(job_id, str):
+                if value.get("schema_version") not in {2, 3, 4} or not isinstance(job_id, str):
                     raise ValueError("invalid manifest contract")
                 jobs.append(self.status(job_id))
             except (ValueError, json.JSONDecodeError, JobError) as exc:
                 malformed.append({"record": path.name, "error": str(exc)})
         return {"jobs": jobs, "malformed_records": malformed}
 
+    def _cancel_shell(self, job_id: str, manifest: dict[str, Any]) -> dict[str, Any]:
+        launcher = manifest.get("launcher")
+        command = manifest.get("command")
+        if not isinstance(launcher, dict) or not isinstance(command, dict):
+            raise JobError("unattested execution job manifest")
+        unit = launcher.get("scope_unit")
+        cgroup = launcher.get("cgroup")
+        pid = launcher.get("pid")
+        start = launcher.get("proc_start")
+        cwd = command.get("cwd")
+        expected_unit = f"sinnix-gateway-exec-{job_id}.scope"
+        if unit != expected_unit or not isinstance(cgroup, str) or not cgroup:
+            raise JobError("execution job scope identity is invalid")
+        if not isinstance(pid, int) or not isinstance(start, str) or not isinstance(cwd, str):
+            raise JobError("execution job launcher identity is invalid")
+        if manifest.get("lifecycle") == "cancelled":
+            return {"job_id": job_id, "cancelled": True, "already_terminal": True}
+        if manifest.get("lifecycle") not in {
+            "accepted",
+            "starting",
+            "running",
+            "cancel_requested",
+        }:
+            raise JobError("execution job is not live")
+        if self._proc_start(pid) != start or self._cgroup_for_pid(pid) != cgroup:
+            raise JobError("execution job process identity no longer matches")
+        try:
+            actual_cwd = str(Path(f"/proc/{pid}/cwd").resolve(strict=True))
+        except OSError as exc:
+            raise JobError("execution job working directory is unavailable") from exc
+        if actual_cwd != str(Path(cwd).resolve()):
+            raise JobError("execution job working directory no longer matches")
+        live = self._shell_live(unit)
+        if not live.get("available") or live.get("ControlGroup") != cgroup:
+            raise JobError("execution job systemd identity no longer matches")
+        manifest["lifecycle"] = "cancel_requested"
+        manifest["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self._store_shell_manifest(job_id, manifest)
+        result = subprocess.run(
+            [self.config.systemctl_command, "--user", "stop", unit],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            env=self._environment(),
+        )
+        if result.returncode != 0:
+            raise JobError("execution job cancellation was refused")
+        manifest["lifecycle"] = "cancelled"
+        manifest["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        manifest["exit_status"] = 143
+        self._store_shell_manifest(job_id, manifest)
+        return {"job_id": job_id, "cancelled": True, "already_terminal": False}
+
     def cancel(self, job_id: str) -> dict[str, Any]:
         self.principal.require(Capability.JOB_CANCEL)
-        self._load(job_id)
+        manifest = self._load(job_id)
+        if manifest.get("schema_version") == 4:
+            return self._cancel_shell(job_id, manifest)
         if not self.config.agent_controller.is_file():
             raise JobError("agent controller is unavailable")
         result = subprocess.run(

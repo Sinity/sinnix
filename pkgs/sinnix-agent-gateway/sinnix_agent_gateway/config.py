@@ -40,6 +40,8 @@ class GatewayConfig:
     capability_index: Path = Path("/etc/sinnix/capability-index.json")
     agent_runner: Path = DEFAULT_AGENT_RUNNER
     agent_controller: Path = DEFAULT_AGENT_CONTROLLER
+    agent_scope_exec_command: str = "sinnix-agent-scope-exec"
+    execution_job_command: str = "sinnix-agent-gateway-execution-job"
     observe_command: str = "sinnix-observe"
     max_result_bytes: int = 262_144
     approved_manifest_hash: str | None = None
@@ -89,6 +91,12 @@ class GatewayConfig:
             ),
             agent_runner=Path(raw.get("agentRunner", DEFAULT_AGENT_RUNNER)),
             agent_controller=Path(raw.get("agentController", DEFAULT_AGENT_CONTROLLER)),
+            agent_scope_exec_command=raw.get(
+                "agentScopeExecCommand", "sinnix-agent-scope-exec"
+            ),
+            execution_job_command=raw.get(
+                "executionJobCommand", "sinnix-agent-gateway-execution-job"
+            ),
             observe_command=raw.get("observeCommand", "sinnix-observe"),
             max_result_bytes=int(raw.get("maxResultBytes", 262_144)),
             approved_manifest_hash=raw.get("approvedManifestHash"),
