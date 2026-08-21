@@ -15,14 +15,14 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from sinnix_agent_gateway import observe as observe_module
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.capabilities import PolicyError
-from sinnix_agent_gateway.cli import build_manifest
+from sinnix_agent_gateway.cli import build_manifest, parser
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.jobs import JobError
 from sinnix_agent_gateway.projects import ProjectError
 from sinnix_agent_gateway.schemas import AgentLaunchRequest
 
 
-def config(tmp_path: Path, *, remote_write: bool = False) -> GatewayConfig:
+def config(tmp_path: Path, *, observer_read: bool = True) -> GatewayConfig:
     project = tmp_path / "project"
     project.mkdir()
     return GatewayConfig(
@@ -31,19 +31,18 @@ def config(tmp_path: Path, *, remote_write: bool = False) -> GatewayConfig:
             "fixture": ProjectConfig(
                 project_id="fixture",
                 path=project,
-                remote_read=True,
-                remote_write=remote_write,
+                observer_read=observer_read,
             )
         },
         approved_manifest_hash="approved-fixture-hash",
     )
 
 
-def test_official_sdk_profiles_have_stable_distinct_manifests(tmp_path: Path) -> None:
-    cfg = config(tmp_path, remote_write=True)
-    readonly = anyio.run(build_manifest, cfg, "remote-readonly")
-    local = anyio.run(build_manifest, cfg, "local-agent-control")
-    operator = anyio.run(build_manifest, cfg, "remote-operator")
+def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    readonly = anyio.run(build_manifest, cfg, "observer")
+    local = anyio.run(build_manifest, cfg, "agent-control")
+    operator = anyio.run(build_manifest, cfg, "operator")
     readonly_names = {row["name"] for row in readonly["tools"]}
     local_names = {row["name"] for row in local["tools"]}
     operator_names = {row["name"] for row in operator["tools"]}
@@ -77,8 +76,7 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 "projects": {
                     "fixture": {
                         "path": str(cfg.projects["fixture"].path),
-                        "remoteRead": True,
-                        "remoteWrite": True,
+                        "observerRead": True,
                     }
                 },
             }
@@ -93,8 +91,8 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
             [
                 "--config",
                 str(config_path),
-                "--profile",
-                "remote-readonly",
+                "--principal",
+                "observer",
                 "serve",
             ]
         )
@@ -116,20 +114,35 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
 
 
 def test_readonly_policy_is_checked_inside_write_operation(tmp_path: Path) -> None:
-    cfg = config(tmp_path, remote_write=True)
-    runtime = Runtime.create(cfg, "remote-readonly")
-    assert runtime.projects.list()["projects"][0]["remote_write"] is False
+    cfg = config(tmp_path)
+    runtime = Runtime.create(cfg, "observer")
+    assert runtime.projects.list()["projects"][0]["writable"] is False
     target = cfg.projects["fixture"].path / "forbidden.txt"
     with pytest.raises(PolicyError):
         runtime.projects.write("fixture", target.name, "forbidden")
     assert not target.exists()
 
 
+def test_operator_project_writes_do_not_depend_on_observer_visibility(
+    tmp_path: Path,
+) -> None:
+    cfg = config(tmp_path, observer_read=False)
+    runtime = Runtime.create(cfg, "operator")
+    target = cfg.projects["fixture"].path / "operator.txt"
+
+    result = runtime.projects.write("fixture", target.name, "operator authority")
+
+    assert result["bytes"] == len("operator authority")
+    assert target.read_text() == "operator authority"
+    assert runtime.projects.list()["projects"][0]["observer_read"] is False
+    assert runtime.projects.list()["projects"][0]["writable"] is True
+
+
 def test_project_read_applies_late_line_range_before_byte_bound(tmp_path: Path) -> None:
     cfg = config(tmp_path)
     target = cfg.projects["fixture"].path / "large.txt"
     target.write_text("".join(f"line-{line:04d} padding\n" for line in range(1, 301)))
-    runtime = Runtime.create(cfg, "remote-readonly")
+    runtime = Runtime.create(cfg, "observer")
     result = runtime.projects.read("fixture", "large.txt", 250, 251, 128)
     assert "line-0250" in result["content"]
     assert "line-0251" in result["content"]
@@ -137,7 +150,7 @@ def test_project_read_applies_late_line_range_before_byte_bound(tmp_path: Path) 
 
 def test_project_subprocess_output_is_bounded_before_storage(tmp_path: Path) -> None:
     cfg = dataclasses.replace(config(tmp_path), max_result_bytes=4096)
-    runtime = Runtime.create(cfg, "remote-readonly")
+    runtime = Runtime.create(cfg, "observer")
     output = runtime.projects._run_bounded(
         [sys.executable, "-c", "import sys; sys.stdout.write('x' * 10000000)"],
         cfg.projects["fixture"].path,
@@ -178,7 +191,7 @@ def test_project_diff_rejects_option_injection_before_external_driver(
     subprocess.run(["git", "commit", "-qm", "fixture"], cwd=project, check=True)
     (project / "tracked.txt").write_text("after\n")
 
-    runtime = Runtime.create(cfg, "remote-readonly")
+    runtime = Runtime.create(cfg, "observer")
     with pytest.raises(ProjectError, match="invalid git ref"):
         runtime.projects.diff("fixture", "--ext-diff")
     assert not marker.exists()
@@ -192,7 +205,7 @@ def test_project_tree_and_read_reject_symlink_escape(tmp_path: Path) -> None:
     outside = tmp_path / "outside.txt"
     outside.write_text("private")
     (cfg.projects["fixture"].path / "escape.txt").symlink_to(outside)
-    runtime = Runtime.create(cfg, "remote-readonly")
+    runtime = Runtime.create(cfg, "observer")
     with pytest.raises(ProjectError):
         runtime.projects.read("fixture", "escape.txt")
     assert runtime.projects.tree("fixture")["entries"] == []
@@ -213,7 +226,7 @@ def test_remote_project_tools_hide_local_only_agent_state(tmp_path: Path) -> Non
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("gateway-private-marker")
 
-    runtime = Runtime.create(cfg, "remote-readonly")
+    runtime = Runtime.create(cfg, "observer")
     for path in private_files:
         with pytest.raises(ProjectError):
             runtime.projects.read("fixture", str(path.relative_to(project)))
@@ -228,7 +241,7 @@ def test_remote_project_tools_hide_local_only_agent_state(tmp_path: Path) -> Non
 
 
 def test_audit_chain_survives_concurrent_writers(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "remote-readonly")
+    runtime = Runtime.create(config(tmp_path), "observer")
     with concurrent.futures.ThreadPoolExecutor(max_workers=32) as executor:
         list(
             executor.map(
@@ -242,10 +255,13 @@ def test_audit_chain_survives_concurrent_writers(tmp_path: Path) -> None:
     assert verification["valid"] is True
     assert verification["checked"] == 240
     assert len(verification["head_hash"]) == 64
+    assert {event["principal"] for event in runtime.audit.tail(240)["events"]} == {
+        "observer"
+    }
 
 
 def test_runtime_audit_carries_returned_job_correlation(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "local-agent-control")
+    runtime = Runtime.create(config(tmp_path), "agent-control")
     runtime.execute(
         "agent_launch", lambda: {"job_id": "job-correlation", "secret": "hidden"}
     )
@@ -254,15 +270,15 @@ def test_runtime_audit_carries_returned_job_correlation(tmp_path: Path) -> None:
 
 
 def test_gateway_status_exposes_gated_remote_manifest_hash(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "remote-readonly")
-    status = runtime.observe.gateway_status("remote-readonly", "capability-hash")
+    runtime = Runtime.create(config(tmp_path), "observer")
+    status = runtime.observe.gateway_status("observer", "capability-hash")
     assert status["manifest_hash"] == "approved-fixture-hash"
     assert status["capability_contract_hash"] == "capability-hash"
 
 
 def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:
     cfg = config(tmp_path)
-    runtime = Runtime.create(cfg, "local-agent-control")
+    runtime = Runtime.create(cfg, "agent-control")
     source = cfg.state_dir / "jobs" / "job.log"
     source.write_bytes(b"abcdef")
     source.chmod(0o600)
@@ -276,7 +292,7 @@ def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:
 
 
 def test_malformed_job_records_are_visible(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "local-agent-control")
+    runtime = Runtime.create(config(tmp_path), "agent-control")
     (runtime.jobs.root / "broken.json").write_text("{not-json")
     result = runtime.jobs.list()
     assert result["jobs"] == []
@@ -295,7 +311,7 @@ def test_gateway_status_uses_shared_native_controller(tmp_path: Path) -> None:
     )
     controller.chmod(0o700)
     cfg = dataclasses.replace(config(tmp_path), agent_controller=controller)
-    runtime = Runtime.create(cfg, "local-agent-control")
+    runtime = Runtime.create(cfg, "agent-control")
     manifest = {
         "schema_version": 2,
         "job_id": "deadline-job",
@@ -323,7 +339,7 @@ def test_gateway_rejects_runner_job_id_collision(
     runner.write_text("#!/bin/sh\nexit 2\n")
     runner.chmod(0o700)
     cfg = dataclasses.replace(config(tmp_path), agent_runner=runner)
-    runtime = Runtime.create(cfg, "local-agent-control")
+    runtime = Runtime.create(cfg, "agent-control")
     old_prompt = runtime.jobs.root / f"{job_id}.prompt.md"
     old_prompt.write_text("original")
     (runtime.jobs.root / f"{job_id}.json").write_text(
@@ -341,15 +357,20 @@ def test_agent_environment_is_explicitly_allowlisted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("SINNIX_GATEWAY_PROBE_SECRET", "must-not-propagate")
-    runtime = Runtime.create(config(tmp_path), "local-agent-control")
+    runtime = Runtime.create(config(tmp_path), "agent-control")
     environment = runtime.jobs._environment()
     assert "SINNIX_GATEWAY_PROBE_SECRET" not in environment
     assert "PATH" in environment
 
 
-def test_unknown_profile_is_rejected_before_server_creation(tmp_path: Path) -> None:
+def test_unknown_principal_is_rejected_before_server_creation(tmp_path: Path) -> None:
     with pytest.raises(PolicyError):
         create_server(config(tmp_path), "unknown")
+
+
+def test_cli_rejects_retired_profile_flag() -> None:
+    with pytest.raises(SystemExit):
+        parser().parse_args(["--profile", "observer", "info"])
 
 
 def test_config_load_uses_one_project_contract(tmp_path: Path) -> None:
@@ -363,8 +384,7 @@ def test_config_load_uses_one_project_contract(tmp_path: Path) -> None:
                 "projects": {
                     "fixture": {
                         "path": str(project),
-                        "remoteRead": True,
-                        "remoteWrite": False,
+                        "observerRead": True,
                     }
                 },
             }
@@ -372,14 +392,35 @@ def test_config_load_uses_one_project_contract(tmp_path: Path) -> None:
     )
     loaded = GatewayConfig.load(path)
     assert loaded.projects["fixture"].path == project
-    assert loaded.projects["fixture"].remote_read is True
-    assert loaded.projects["fixture"].remote_write is False
+    assert loaded.projects["fixture"].observer_read is True
+
+
+def test_config_rejects_retired_project_visibility_fields(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    path = tmp_path / "gateway.json"
+    path.write_text(
+        json.dumps(
+            {
+                "stateDir": str(tmp_path / "state"),
+                "projects": {
+                    "fixture": {
+                        "path": str(project),
+                        "remoteRead": True,
+                    }
+                },
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="retired gateway field"):
+        GatewayConfig.load(path)
 
 
 def test_machine_report_timeout_is_a_typed_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    runtime = Runtime.create(config(tmp_path), "remote-readonly")
+    runtime = Runtime.create(config(tmp_path), "observer")
 
     def timeout(*args, **kwargs):
         raise subprocess.TimeoutExpired("sinnix-observe", 20)

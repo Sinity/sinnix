@@ -15,7 +15,7 @@ let
 in
 mkServiceModule {
   name = "agent-gateway";
-  description = "capability-profiled MCP gateway over one attested agent-job substrate";
+  description = "principal-scoped MCP gateway over one attested agent-job substrate";
   extraOptions = {
     stateDir = lib.mkOption {
       type = lib.types.str;
@@ -28,7 +28,12 @@ mkServiceModule {
       description = "Maximum bytes returned by bounded project, observe, and artifact operations.";
     };
     tunnel = {
-      enable = lib.mkEnableOption "OpenAI Secure MCP Tunnel for the remote-readonly profile";
+      enable = lib.mkEnableOption "OpenAI Secure MCP Tunnel";
+      principal = lib.mkOption {
+        type = lib.types.enum [ "observer" "operator" ];
+        default = "observer";
+        description = "Gateway principal selected explicitly for this tunnel.";
+      };
       autoStart = lib.mkOption {
         type = lib.types.bool;
         default = true;
@@ -75,28 +80,28 @@ mkServiceModule {
       };
       mcpWrapper = pkgs.writeShellScriptBin "sinnix-agent-gateway-mcp" ''
         set -euo pipefail
-        profile="remote-readonly"
-        if [[ ''${1:-} == --profile ]]; then
-          profile="''${2:?--profile requires a value}"
+        principal="observer"
+        if [[ ''${1:-} == --principal ]]; then
+          principal="''${2:?--principal requires a value}"
           shift 2
         fi
-        exec ${gatewayBin} --config ${configFile} --profile "$profile" serve "$@"
+        exec ${gatewayBin} --config ${configFile} --principal "$principal" serve "$@"
       '';
       manifestCheck = pkgs.writeShellScriptBin "sinnix-agent-gateway-schema" ''
         set -euo pipefail
-        profile="''${1:-remote-readonly}"
-        exec ${gatewayBin} --config ${configFile} --profile "$profile" manifest
+        principal="''${1:-observer}"
+        exec ${gatewayBin} --config ${configFile} --principal "$principal" manifest
       '';
       approvedManifestGate = pkgs.writeShellScript "sinnix-agent-gateway-manifest-gate" ''
         set -euo pipefail
-        actual="$(${gatewayBin} --config ${configFile} --profile remote-readonly manifest | ${pkgs.jq}/bin/jq -r .sha256)"
+        actual="$(${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg cfg.tunnel.principal} manifest | ${pkgs.jq}/bin/jq -r .sha256)"
         expected=${
           lib.escapeShellArg (
             if cfg.tunnel.approvedManifestHash == null then "" else cfg.tunnel.approvedManifestHash
           )
         }
         if [[ "$actual" != "$expected" ]]; then
-          echo "remote-readonly tool manifest drift: expected $expected, got $actual" >&2
+          echo "${cfg.tunnel.principal} tool manifest drift: expected $expected, got $actual" >&2
           exit 1
         fi
       '';
@@ -221,7 +226,7 @@ mkServiceModule {
         };
         systemd.user.services.sinnix-agent-gateway-tunnel = lib.mkIf cfg.tunnel.enable {
           Unit = {
-            Description = "OpenAI Secure MCP Tunnel to Sinnix remote-readonly gateway";
+            Description = "OpenAI Secure MCP Tunnel to Sinnix ${cfg.tunnel.principal} gateway";
             After = [
               "network-online.target"
               "sinnix-agent-gateway-reconcile.service"
@@ -232,39 +237,41 @@ mkServiceModule {
             StartLimitIntervalSec = 300;
             StartLimitBurst = 8;
           };
-          Service = {
-            Type = "simple";
-            ExecStartPre = [
-              stateReconcile
-            ]
-            ++ lib.optionals (cfg.tunnel.approvedManifestHash != null) [
-              approvedManifestGate
-            ];
-            ExecStart = ''
-              ${tunnelClient}/bin/tunnel-client run \
-                --control-plane.tunnel-id ${lib.escapeShellArg cfg.tunnel.tunnelId} \
-                --control-plane.api-key file:%d/runtime-key \
-                --mcp.command ${lib.escapeShellArg "command=${mcpWrapper}/bin/sinnix-agent-gateway-mcp --profile remote-readonly,channel=main"} \
-                --health.listen-addr 127.0.0.1:${toString cfg.tunnel.healthPort} \
-                --log.format json
-            '';
-            LoadCredential = "runtime-key:${cfg.tunnel.runtimeKeyFile}";
-            Restart = "on-failure";
-            RestartSec = "5s";
-            NoNewPrivileges = true;
-            PrivateTmp = true;
-            ProtectSystem = "strict";
-            # launch_agent() fork/execs claude/codex inside this namespace, so
-            # the child inherits this write surface. Unreachable today (the
-            # tunnel runs remote-readonly, which lacks JOB_START) but the
-            # sandbox must not be what decides whether a transcript survives.
-            ProtectHome = false;
-            ReadWritePaths = [
-              cfg.stateDir
-            ]
-            ++ lib.sinnix.systemd.agentRuntimeWritePaths { home = "/home/${userName}"; };
-            UMask = "0077";
-          };
+          Service =
+            {
+              Type = "simple";
+              ExecStartPre = [
+                stateReconcile
+              ]
+              ++ lib.optionals (cfg.tunnel.approvedManifestHash != null) [
+                approvedManifestGate
+              ];
+              ExecStart = ''
+                ${tunnelClient}/bin/tunnel-client run \
+                  --control-plane.tunnel-id ${lib.escapeShellArg cfg.tunnel.tunnelId} \
+                  --control-plane.api-key file:%d/runtime-key \
+                  --mcp.command ${lib.escapeShellArg "command=${mcpWrapper}/bin/sinnix-agent-gateway-mcp --principal ${cfg.tunnel.principal},channel=main"} \
+                  --health.listen-addr 127.0.0.1:${toString cfg.tunnel.healthPort} \
+                  --log.format json
+              '';
+              LoadCredential = "runtime-key:${cfg.tunnel.runtimeKeyFile}";
+              Restart = "on-failure";
+              RestartSec = "5s";
+              # launch_agent() fork/execs claude/codex inside this namespace, so
+              # the child inherits this write surface. The observer does not have
+              # JOB_START, while operator authority is selected explicitly.
+              ProtectHome = false;
+              ReadWritePaths = [
+                cfg.stateDir
+              ]
+              ++ lib.sinnix.systemd.agentRuntimeWritePaths { home = "/home/${userName}"; };
+              UMask = "0077";
+            }
+            // lib.optionalAttrs (cfg.tunnel.principal == "observer") {
+              NoNewPrivileges = true;
+              PrivateTmp = true;
+              ProtectSystem = "strict";
+            };
           Install.WantedBy = lib.optionals cfg.tunnel.autoStart [ "default.target" ];
         };
       };

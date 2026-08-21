@@ -64,17 +64,17 @@ class ObserveService:
             }
 
     def gateway_status(
-        self, profile: str, capability_contract_hash: str
+        self, principal_name: str, capability_contract_hash: str
     ) -> dict[str, Any]:
         self.principal.require(Capability.MACHINE_READ)
         inventory_available = self.config.runtime_inventory.is_file()
         return {
             "status": "ready",
-            "profile": profile,
+            "principal": principal_name,
             "capability_contract_hash": capability_contract_hash,
             "manifest_hash": (
                 self.config.approved_manifest_hash
-                if profile == "remote-readonly"
+                if principal_name == "observer"
                 else None
             ),
             "runtime_inventory": "available" if inventory_available else "unavailable",

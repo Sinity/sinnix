@@ -1,34 +1,42 @@
 # Agent gateway
 
-The Sinnix agent gateway is one official-SDK MCP implementation with three capability profiles. It exposes canonical project and runtime evidence, reuses the attested transient-systemd agent substrate, and keeps remote transport outside the MCP process.
+The Sinnix agent gateway is one official-SDK MCP implementation with three explicit authority principals. It exposes canonical project and runtime evidence, reuses the attested transient-systemd agent substrate, and keeps transport outside the MCP process.
 
 ## Architecture
 
 ```text
-ChatGPT remote-readonly connector
+ChatGPT observer connector
     -> OpenAI Secure MCP Tunnel
     -> tunnel-client user service
-    -> stdio: sinnix-agent-gateway-mcp --profile remote-readonly
+    -> stdio: sinnix-agent-gateway-mcp --principal observer
     -> shared project, job, artifact, audit, and observe services
 
 Local coordinators
     -> sinnix-agent-control-mcp
-    -> stdio: sinnix-agent-gateway --profile local-agent-control
+    -> stdio: sinnix-agent-gateway --principal agent-control
     -> run_agent_prompt.sh and agent_job_control.sh
     -> transient systemd scope, manifest, cgroup, and bounded artifacts
+
+ChatGPT operator connector
+    -> separate OpenAI Secure MCP Tunnel
+    -> tunnel-client user service
+    -> stdio: sinnix-agent-gateway-mcp --principal operator
+    -> explicit operator-authorized tools and attested receipts
 ```
 
 The gateway owns no HTTP server and no listening port. The official OpenAI tunnel owns the remote connection and launches the MCP server over stdio. The gateway uses the official MCP Python SDK v2 for protocol parsing and typed tool schemas.
 
-## Capability profiles
+## Principals
 
-| Profile               | Intended caller                                           | Read projects, jobs, artifacts, audit, machine | Launch and cancel jobs | Write projects                                   |
-| --------------------- | --------------------------------------------------------- | ---------------------------------------------- | ---------------------- | ------------------------------------------------ |
-| `remote-readonly`     | Current ChatGPT connector                                 | Yes                                            | No                     | No                                               |
-| `local-agent-control` | Trusted local coordinators                                | Yes                                            | Yes                    | No                                               |
-| `remote-operator`     | Local testing and a future write-capable remote workspace | Yes                                            | Yes                    | Yes, only for projects with `remoteWrite = true` |
+| Principal | Intended caller | Read projects, jobs, artifacts, audit, machine | Launch and cancel jobs | Write projects |
+| --- | --- | --- | --- | --- |
+| `observer` | Read-only ChatGPT connector and local inspection | Yes, for projects that opt into `observerRead` | No | No |
+| `agent-control` | Trusted local coordinators | Yes | Yes | No |
+| `operator` | Local testing and a write-capable remote workspace | Yes | Yes | Yes |
 
-Tool registration follows the profile. A denied capability is absent from `tools/list`, and the underlying service enforces the same capability again. `remote-readonly` therefore cannot obtain a write path by calling an unlisted function directly.
+Tool registration follows the principal. A denied capability is absent from `tools/list`, and the underlying service enforces the same capability again. `observer` therefore cannot obtain a write path by calling an unlisted function directly.
+
+Authority and transport are independent. A tunnel selects its principal explicitly through `sinnix.services.agent-gateway.tunnel.principal`; a remote connection does not narrow or expand the selected authority. The observer transport remains sandboxed. The operator transport must not impose a sandbox policy that contradicts the selected operator authority.
 
 Ordinary full and browser agent profiles do not receive `agent-control`. Explicit orchestration profiles do. This keeps process mutation out of broad always-on tool surfaces.
 
@@ -37,13 +45,13 @@ Ordinary full and browser agent profiles do not receive `agent-control`. Explici
 The configured commands are:
 
 ```bash
-sinnix-agent-gateway-mcp --profile remote-readonly
+sinnix-agent-gateway-mcp --principal observer
 sinnix-agent-control-mcp
-sinnix-agent-gateway-schema remote-readonly
-sinnix-agent-gateway --config /etc/sinnix/agent-gateway.json --profile remote-readonly info
+sinnix-agent-gateway-schema observer
+sinnix-agent-gateway --config /etc/sinnix/agent-gateway.json --principal observer info
 ```
 
-`sinnix-agent-gateway-schema` emits a canonical, sorted tool manifest and SHA-256. Compare this hash with both the live tunnel `tools/list` response and the frozen ChatGPT connector snapshot whenever tools change. Updating the local server does not update an already approved connector schema.
+`sinnix-agent-gateway-schema` emits a canonical, sorted tool manifest and SHA-256. The selected tunnel principal's manifest is compared with its Nix-approved hash before startup. A local server manifest, an approved Nix manifest, and an externally observed ChatGPT connector snapshot are distinct facts. The gateway must report connector parity as unobserved until an actual product-level observation has been recorded.
 
 The common read surface includes:
 
@@ -53,11 +61,11 @@ The common read surface includes:
 - `artifact_list` and `artifact_read`
 - `audit_tail` and `audit_verify`
 
-`local-agent-control` adds `agent_launch` and `job_cancel`. `remote-operator` also adds `project_write` and `project_apply_patch`.
+`agent-control` adds `agent_launch` and `job_cancel`. `operator` also adds `project_write` and `project_apply_patch`.
 
 ## Project and path authority
 
-`sinnix.projects.entries` is the only project registry. It is derived from the existing project paths in `modules/foundation.nix` and rendered into `/etc/sinnix/agent-gateway.json`. Remote visibility and writes are explicit per project.
+`sinnix.projects.entries` is the only project registry. It is derived from the existing project paths in `modules/foundation.nix` and rendered into `/etc/sinnix/agent-gateway.json`. `observerRead` controls observer project visibility. It does not govern operator write authority: `operator` receives its project-write capability from its selected principal.
 
 Project paths are always relative. Reads and writes reject absolute paths, parent traversal, sensitive path components, and symlink escapes. Tree traversal does not follow symlinks. File reads apply the requested line range before the byte bound, so late ranges do not silently return the beginning of a large file. Git and ripgrep output is written to a temporary file and read back through a fixed response bound instead of being fully buffered in memory.
 
@@ -71,7 +79,7 @@ Artifacts use random opaque UUIDs. The public metadata omits host paths, and rea
 
 ## Audit and observe
 
-Audit events live in a private SQLite WAL ledger. Appends use an immediate transaction and chain each canonical event to the previous hash. Concurrent MCP calls therefore serialize the ledger head without rereading the complete history. `audit_verify` checks the full chain.
+Audit events live in a private SQLite WAL ledger. Appends use an immediate transaction and chain each canonical event to the previous hash. Concurrent MCP calls therefore serialize the ledger head without rereading the complete history. `audit_verify` checks the full chain. The historic hash-chain field is named `profile` for compatibility, but its values are current principal names and returned events expose `principal`.
 
 The tunnel is registered in `/etc/sinnix/runtime-inventory.json` when enabled. Its workload classification, restartability, and process matcher are part of the same runtime-surface declaration consumed by `sinnix-observe` and machine telemetry. `machine_report` delegates to `sinnix-observe` and bounds the returned JSON.
 
@@ -83,11 +91,12 @@ The local MCP implementation is enabled independently of remote transport:
 sinnix.services.agent-gateway.enable = true;
 ```
 
-After creating a tunnel and a dedicated runtime key with Read and Use permissions:
+After creating a tunnel and a dedicated runtime key with the required permissions:
 
 ```nix
 sinnix.services.agent-gateway.tunnel = {
   enable = true;
+  principal = "observer";
   tunnelId = "tunnel_...";
   approvedManifestHash = "...";
 };
@@ -98,10 +107,10 @@ The runtime key is the agenix secret `openai-tunnel-runtime-key`. Tunnel-managem
 ## Deployment and proof
 
 1. Run `switch` so the pinned SDK, tunnel client, generated configuration, runtime inventory, and user units are one generation.
-2. Compare `sinnix-agent-gateway-schema remote-readonly` with a direct stdio `tools/list` call.
-3. Enable the tunnel only after its ID and dedicated runtime credential exist.
+2. Compare `sinnix-agent-gateway-schema observer` with a direct stdio `tools/list` call.
+3. Enable a tunnel only after its ID and dedicated runtime credential exist.
 4. Verify `http://127.0.0.1:3088/healthz` and `/readyz`, then inspect the tunnel logs through systemd.
-5. Create or refresh the ChatGPT connector from the tunnel, approve the exact read-only tool snapshot, and invoke `gateway_status` plus a bounded project read from ChatGPT.
-6. Record the approved manifest hash in the Nix option and compare it during subsequent deployments.
+5. Create or refresh the ChatGPT connector from the tunnel, approve its exact tool snapshot, and invoke `gateway_status` plus a bounded project read from ChatGPT.
+6. Record the observed connector tool names and manifest hash separately from the Nix-approved manifest. The observation is required before claiming connector parity.
 
 The old prototype state may be retained under the canonical state root's `legacy/` directory for forensic inspection. It must not be loaded as active jobs, artifacts, repositories, tasks, or audit data.
