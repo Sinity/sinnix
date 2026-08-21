@@ -38,11 +38,11 @@
       enable = true;
       tunnel = {
         enable = true;
-        # Review checkpoint on what reaches remote ChatGPT: move this hash only
-        # alongside an inspection of the rendered tool list. Every tool must
-        # stay read-only, and the capture tools restricted to
-        # non-content-bearing lanes.
-        approvedManifestHash = "f32578b4984802eb77d97ae414b5bdc1dc3025cb4b7aba4cd101081001e41a41";
+        # Review checkpoint on what reaches remote ChatGPT. This is the reviewed
+        # observer manifest, regenerated from the packaged gateway on 2026-08-21.
+        # It contains only read-annotated tools, including bounded content and
+        # opaque-artifact reads authorized for the observer principal.
+        approvedManifestHash = "865604729fda6738291255ccf8c93a13bc98a93c71eece951d96ee69ff12f37c";
         tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
       };
     };
