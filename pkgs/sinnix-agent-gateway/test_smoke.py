@@ -53,14 +53,17 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "session_read",
         "shell_query",
     } <= readonly_names
-    assert {"files_write", "project_write", "agent_launch"}.isdisjoint(readonly_names)
+    assert {"files_write", "project_write", "agent_launch", "shell_run"}.isdisjoint(
+        readonly_names
+    )
     assert {"agent_launch", "job_cancel"} <= local_names
-    assert {"files_read", "session_list"}.isdisjoint(local_names)
+    assert {"files_read", "session_list", "shell_run"}.isdisjoint(local_names)
     assert {
         "files_write",
         "project_write",
         "project_apply_patch",
         "session_search",
+        "shell_run",
     } <= operator_names
     assert readonly["sha256"] != local["sha256"] != operator["sha256"]
     assert all(
@@ -288,6 +291,16 @@ def test_runtime_audit_carries_returned_job_correlation(tmp_path: Path) -> None:
     )
     payload = runtime.audit.tail(1)["events"][0]["payload"]
     assert payload == {"job_id": "job-correlation", "correlation_id": "job-correlation"}
+
+
+def test_runtime_audit_carries_returned_transient_unit(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "operator")
+    runtime.execute(
+        "shell_run",
+        lambda: {"unit": "sinnix-gateway-run-fixture.service", "secret": "hidden"},
+    )
+    payload = runtime.audit.tail(1)["events"][0]["payload"]
+    assert payload == {"unit": "sinnix-gateway-run-fixture.service"}
 
 
 def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> None:
