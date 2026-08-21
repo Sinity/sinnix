@@ -54,6 +54,7 @@ class GatewayConfig:
     screenshot_control_command: str = "sinnix-screenshot-control"
     kitty_control_command: str = "sinnix-kitty-control"
     chrome_control_command: str = "sinnix-chrome-control"
+    beads_command: str = "bd"
     capture_command: str = "sinnix-capture"
     captures_root: Path = Path("/realm/data/captures")
 
@@ -115,6 +116,7 @@ class GatewayConfig:
             ),
             kitty_control_command=raw.get("kittyControlCommand", "sinnix-kitty-control"),
             chrome_control_command=raw.get("chromeControlCommand", "sinnix-chrome-control"),
+            beads_command=raw.get("beadsCommand", "bd"),
             capture_command=raw.get("captureCommand", "sinnix-capture"),
             captures_root=Path(raw.get("capturesRoot", "/realm/data/captures")),
         )

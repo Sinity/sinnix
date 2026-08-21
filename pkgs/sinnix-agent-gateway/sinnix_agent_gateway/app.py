@@ -10,6 +10,7 @@ from mcp.types import ToolAnnotations
 
 from .artifacts import ArtifactService
 from .audit import AuditService
+from .beads import BeadsService
 from .browser import BrowserService
 from .capabilities import Capability, Principal
 from .capability_index import CapabilityIndexService
@@ -74,6 +75,7 @@ class Runtime:
     desktop: DesktopService
     terminals: TerminalService
     browser: BrowserService
+    beads: BeadsService
     capability_index: CapabilityIndexService
     captures: CaptureService
     files: HostFileService
@@ -97,6 +99,7 @@ class Runtime:
             desktop=DesktopService(config, principal, artifacts),
             terminals=TerminalService(config, principal),
             browser=BrowserService(config, principal, artifacts),
+            beads=BeadsService(config, principal),
             capability_index=CapabilityIndexService(config, principal),
             captures=CaptureService(config, principal),
             files=HostFileService(config, principal),
@@ -219,6 +222,28 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             return runtime.execute(
                 "capability_describe",
                 lambda: runtime.capability_index.describe(name=name, kind=kind),
+            )
+
+    if Capability.TASK_READ in runtime.principal.capabilities:
+
+        @mcp.tool(title="Read Beads tasks", annotations=READ_ONLY_TOOL)
+        def tasks_read(
+            project_id: str, operation: str, arguments: dict[str, Any] | None = None
+        ) -> dict[str, Any]:
+            """Read bounded Beads records through the native owner CLI."""
+            return runtime.execute(
+                "tasks_read", lambda: runtime.beads.read(project_id, operation, arguments)
+            )
+
+    if Capability.TASK_WRITE in runtime.principal.capabilities:
+
+        @mcp.tool(title="Write Beads tasks", annotations=DESTRUCTIVE_TOOL)
+        def tasks_write(
+            project_id: str, operation: str, arguments: dict[str, Any]
+        ) -> dict[str, Any]:
+            """Perform one structured Beads mutation through the native owner CLI."""
+            return runtime.execute(
+                "tasks_write", lambda: runtime.beads.write(project_id, operation, arguments)
             )
 
     if Capability.MACHINE_ACTION in runtime.principal.capabilities:
