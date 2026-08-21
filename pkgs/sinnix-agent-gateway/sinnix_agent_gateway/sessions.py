@@ -162,3 +162,70 @@ class SessionLogService:
             "scanned_bytes": scanned_bytes,
             "truncated": source_truncated,
         }
+
+    def timeline(
+        self,
+        provider: str,
+        start_ns: int | None,
+        end_ns: int | None,
+        query: str | None,
+        max_results: int,
+    ) -> dict[str, Any]:
+        source = self._source(provider)
+        if start_ns is not None and start_ns < 0:
+            raise SessionError("start time must not precede the Unix epoch")
+        if end_ns is not None and end_ns < 0:
+            raise SessionError("end time must not precede the Unix epoch")
+        if start_ns is not None and end_ns is not None and start_ns > end_ns:
+            raise SessionError("start time must not be after end time")
+        if query is not None and (not query or len(query) > 1_000):
+            raise SessionError("query must contain 1-1000 characters")
+        max_results = max(1, min(max_results, 500))
+        files, source_truncated = self._files(source, 1_000)
+        scanned_bytes = 0
+        scan_limit = 8 * 1_024 * 1_024
+        entries: list[dict[str, Any]] = []
+        for path in files:
+            stat = path.stat()
+            if start_ns is not None and stat.st_mtime_ns < start_ns:
+                continue
+            if end_ns is not None and stat.st_mtime_ns > end_ns:
+                continue
+            entry = {
+                "reference": self._reference(source, path),
+                "bytes": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+            }
+            if query is not None:
+                if scanned_bytes >= scan_limit:
+                    source_truncated = True
+                    break
+                with path.open("rb") as handle:
+                    data = handle.read(min(64_000, scan_limit - scanned_bytes))
+                scanned_bytes += len(data)
+                text = data.decode("utf-8", errors="replace")
+                matching_line = next(
+                    (
+                        line
+                        for line in text.splitlines()
+                        if query in line
+                    ),
+                    None,
+                )
+                if matching_line is None:
+                    if len(data) < stat.st_size:
+                        source_truncated = True
+                    continue
+                entry["snippet"] = matching_line[:2_000]
+                if len(data) < stat.st_size:
+                    source_truncated = True
+            entries.append(entry)
+            if len(entries) >= max_results:
+                source_truncated = True
+                break
+        return {
+            "provider": provider,
+            "entries": entries,
+            "scanned_bytes": scanned_bytes,
+            "truncated": source_truncated,
+        }

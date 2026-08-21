@@ -29,6 +29,7 @@ from .schemas import AgentLaunchRequest
 from .sessions import SessionLogService
 from .shell import ShellService
 from .terminals import TerminalService
+from .timeline import TimelineService
 
 T = TypeVar("T")
 
@@ -83,6 +84,7 @@ class Runtime:
     files: HostFileService
     sessions: SessionLogService
     memory: MemoryService
+    timeline: TimelineService
     mcp_broker: McpBrokerService
     shell: ShellService
 
@@ -110,6 +112,7 @@ class Runtime:
             files=HostFileService(config, principal),
             sessions=sessions,
             memory=MemoryService(principal, sessions),
+            timeline=TimelineService(principal, sessions),
             mcp_broker=McpBrokerService(config, principal, artifacts),
             shell=ShellService(config, principal),
         )
@@ -542,6 +545,20 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             """Read one source-scoped memory object with its original provenance."""
             return runtime.execute(
                 "memory_get", lambda: runtime.memory.get(reference, offset, max_bytes)
+            )
+
+        @mcp.tool(title="Query evidence timeline", annotations=READ_ONLY_TOOL)
+        def timeline_query(
+            start: str | None = None,
+            end: str | None = None,
+            query: str | None = None,
+            providers: list[str] | None = None,
+            limit: int = 100,
+        ) -> dict[str, Any]:
+            """Timeline available session evidence without fabricating unavailable upstream coverage."""
+            return runtime.execute(
+                "timeline_query",
+                lambda: runtime.timeline.query(start, end, query, providers, limit),
             )
 
     if Capability.SHELL_QUERY in runtime.principal.capabilities:

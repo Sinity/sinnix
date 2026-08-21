@@ -63,6 +63,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "tasks_read",
         "memory_search",
         "memory_get",
+        "timeline_query",
         "mcp_catalog",
         "mcp_read",
     } <= readonly_names
@@ -96,6 +97,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "tasks_write",
         "memory_search",
         "memory_get",
+        "timeline_query",
         "mcp_catalog",
         "mcp_read",
         "mcp_write",
@@ -122,6 +124,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "tasks_write",
         "memory_search",
         "memory_get",
+        "timeline_query",
         "mcp_catalog",
         "mcp_read",
         "mcp_write",
