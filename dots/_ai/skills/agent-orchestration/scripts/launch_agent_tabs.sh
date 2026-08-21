@@ -366,30 +366,48 @@ build_runner_cmd() {
   local -n out_cmd="$1"
   local prompt_name="$2" prompt_file="$3" log_file="$4" last_file="$5" json_file="$6" task_workdir="$7"
 
-  # run_agent_prompt.sh requires --registered-project/--expected-git-common-dir
-  # together (that pairing is its own authorization boundary, mirroring what
-  # the gateway's JobService always supplies). This script has no separate
-  # "registered project" concept of its own -- a direct launch is
-  # self-authorizing to whatever worktree the caller already trusted enough
-  # to pass as --workdir -- so it registers the task's own worktree against
-  # itself: the runner still verifies task_workdir is a real, uncorrupted Git
-  # worktree with a consistent Git common directory before it runs anything.
-  local registered_project git_common_dir
-  registered_project="$(cd "${task_workdir}" && pwd -P)"
-  git_common_dir="$(git -C "${registered_project}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || {
-    echo "launch_agent_tabs.sh: ${prompt_name}: --workdir is not a Git checkout: ${task_workdir}" >&2
-    return 1
-  }
-
-  out_cmd=(
-    "${runner}"
-    --agent "${agent}"
-    --workdir "${task_workdir}"
-    --registered-project "${registered_project}"
-    --expected-git-common-dir "${git_common_dir}"
-    --prompt-file "${prompt_file}"
-    --log-file "${log_file}"
-  )
+  # run_agent_prompt.sh requires worktree identity in exactly one of two
+  # forms. This script has no separate "registered project" concept of its
+  # own -- a direct launch is self-authorizing to whatever directory the
+  # caller already trusted enough to pass as --workdir -- so:
+  #
+  #  - When task_workdir is itself a Git worktree root (the common case: a
+  #    repo checkout or a linked worktree), register it against itself in
+  #    the attested form. The runner still verifies it is a real,
+  #    uncorrupted Git worktree with a consistent Git common directory
+  #    before it runs anything.
+  #  - Otherwise -- a non-Git directory (the documented --skip-git-repo-check
+  #    use case) or a subdirectory of a Git checkout that is not itself a
+  #    worktree root (the runner's attestation can only authorize a whole
+  #    worktree, never a subdirectory of one) -- use --local-workdir, the
+  #    runner's explicit non-attested opt-out for a caller-trusted directory.
+  local canonical_workdir registered_project git_common_dir
+  canonical_workdir="$(cd "${task_workdir}" && pwd -P)"
+  registered_project="$(git -C "${canonical_workdir}" rev-parse --path-format=absolute --show-toplevel 2>/dev/null)" || registered_project=""
+  if [[ -n ${registered_project} && ${registered_project} == "${canonical_workdir}" ]]; then
+    git_common_dir="$(git -C "${registered_project}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || {
+      echo "launch_agent_tabs.sh: ${prompt_name}: --workdir reports a Git toplevel but its common directory could not be resolved: ${task_workdir}" >&2
+      return 1
+    }
+    out_cmd=(
+      "${runner}"
+      --agent "${agent}"
+      --workdir "${task_workdir}"
+      --registered-project "${registered_project}"
+      --expected-git-common-dir "${git_common_dir}"
+      --prompt-file "${prompt_file}"
+      --log-file "${log_file}"
+    )
+  else
+    out_cmd=(
+      "${runner}"
+      --agent "${agent}"
+      --workdir "${task_workdir}"
+      --local-workdir
+      --prompt-file "${prompt_file}"
+      --log-file "${log_file}"
+    )
+  fi
   if [[ -n ${job_prefix} ]]; then
     out_cmd+=(--job-id "${job_prefix}${prompt_name}" --work-item "${prompt_name}")
   fi

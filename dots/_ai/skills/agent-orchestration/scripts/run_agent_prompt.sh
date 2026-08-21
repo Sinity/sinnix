@@ -5,6 +5,7 @@ agent=""
 workdir=""
 registered_project=""
 expected_git_common_dir=""
+local_workdir=0
 prompt_file=""
 log_file=""
 json_file=""
@@ -52,10 +53,24 @@ Usage:
 Required:
   --agent <claude|codex|gemini|grok|antigravity>
   --workdir <path>
-  --registered-project <path>  Registered project checkout for worktree attestation
-  --expected-git-common-dir <path>  Expected resolved Git common directory
   --prompt-file <path>
   --log-file <path>
+
+Worktree identity (required: exactly one of the two forms below):
+  --registered-project <path>  Registered project checkout for worktree attestation
+  --expected-git-common-dir <path>  Expected resolved Git common directory
+                                (both required together -- this pair is the
+                                runner's own authorization boundary: --workdir
+                                must resolve to --registered-project itself or
+                                a linked Git worktree of it with a matching
+                                Git common directory)
+  --local-workdir               Explicitly opt out of Git-worktree attestation
+                                for a directory the caller already trusts
+                                directly (a non-Git directory, or a
+                                subdirectory of a Git checkout). Mutually
+                                exclusive with --registered-project/
+                                --expected-git-common-dir. Never used by the
+                                gateway's attested job path.
 
 Existing options:
   --json-file <path>
@@ -124,6 +139,10 @@ while [[ $# -gt 0 ]]; do
   --expected-git-common-dir)
     expected_git_common_dir="${2:?missing value for --expected-git-common-dir}"
     shift 2
+    ;;
+  --local-workdir)
+    local_workdir=1
+    shift
     ;;
   --prompt-file)
     prompt_file="${2:?missing value for --prompt-file}"
@@ -286,7 +305,25 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z ${agent} || -z ${workdir} || -z ${registered_project} || -z ${expected_git_common_dir} || -z ${prompt_file} || -z ${log_file} ]]; then
+if [[ -z ${agent} || -z ${workdir} || -z ${prompt_file} || -z ${log_file} ]]; then
+  usage >&2
+  exit 2
+fi
+# Worktree identity is mandatory in exactly one of two forms: attested
+# (--registered-project + --expected-git-common-dir together) or explicitly
+# local (--local-workdir alone). This is the runner's own authorization
+# boundary for Git-worktree jobs, not an optional extra -- the gateway's
+# JobService always uses the attested form -- so there is no silent
+# "identity omitted" fallback. --local-workdir exists as a distinct, clearly
+# named opt-out for a caller (never the gateway) that already trusts
+# --workdir directly: a non-Git directory, or a subdirectory of a Git
+# checkout that isn't itself a worktree root.
+if [[ ${local_workdir} -eq 1 ]]; then
+  if [[ -n ${registered_project} || -n ${expected_git_common_dir} ]]; then
+    echo "run_agent_prompt.sh: --local-workdir is mutually exclusive with --registered-project/--expected-git-common-dir" >&2
+    exit 2
+  fi
+elif [[ -z ${registered_project} || -z ${expected_git_common_dir} ]]; then
   usage >&2
   exit 2
 fi
@@ -363,31 +400,37 @@ elif [[ ! -r ${reservation}/launch-id || $(<"${reservation}/launch-id") != "${la
   echo "refusing mismatched job reservation: ${job_id}" >&2
   exit 2
 fi
-# --registered-project and --expected-git-common-dir are mandatory (checked
-# above) because this block is the runner's own authorization boundary, not
-# an optional extra: the gateway (JobService.launch_agent) always supplies
-# both, unconditionally, for every launch it makes. A direct caller that
-# could omit them would bypass worktree attestation entirely, so there is no
-# "unattested" code path left to fall back to here.
+# --registered-project and --expected-git-common-dir are mandatory together
+# (checked above) whenever --local-workdir was not given, because this block
+# is the runner's own authorization boundary for attested Git-worktree jobs,
+# not an optional extra: the gateway (JobService.launch_agent) always
+# supplies both, unconditionally, for every launch it makes, and never sets
+# --local-workdir. This attestation model requires --workdir to itself be a
+# worktree root (the registered project, or one of its linked worktrees) --
+# it does not and cannot attest a subdirectory of one, so a caller with a
+# genuine subdirectory or non-Git target must say so explicitly via
+# --local-workdir rather than this block silently degrading to accept it.
 worktree="$(cd "${workdir}" && pwd -P)"
-registered_project="$(cd "${registered_project}" && pwd -P)"
-actual_common_dir="$(git -C "${worktree}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-actual_root="$(git -C "${worktree}" rev-parse --path-format=absolute --show-toplevel 2>/dev/null || true)"
-[[ ${actual_common_dir} == "${expected_git_common_dir}" && ${actual_root} == "${worktree}" ]] || {
-  echo "run_agent_prompt.sh: worktree Git identity changed" >&2
-  exit 125
-}
-worktree_attested=0
-while IFS= read -r line; do
-  if [[ ${line} == "worktree "* && "$(realpath "${line#worktree }")" == "${worktree}" ]]; then
-    worktree_attested=1
-    break
-  fi
-done < <(git -C "${registered_project}" worktree list --porcelain 2>/dev/null)
-[[ ${worktree_attested} -eq 1 ]] || {
-  echo "run_agent_prompt.sh: worktree is not registered with the project" >&2
-  exit 125
-}
+if [[ ${local_workdir} -eq 0 ]]; then
+  registered_project="$(cd "${registered_project}" && pwd -P)"
+  actual_common_dir="$(git -C "${worktree}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  actual_root="$(git -C "${worktree}" rev-parse --path-format=absolute --show-toplevel 2>/dev/null || true)"
+  [[ ${actual_common_dir} == "${expected_git_common_dir}" && ${actual_root} == "${worktree}" ]] || {
+    echo "run_agent_prompt.sh: worktree Git identity changed" >&2
+    exit 125
+  }
+  worktree_attested=0
+  while IFS= read -r line; do
+    if [[ ${line} == "worktree "* && "$(realpath "${line#worktree }")" == "${worktree}" ]]; then
+      worktree_attested=1
+      break
+    fi
+  done < <(git -C "${registered_project}" worktree list --porcelain 2>/dev/null)
+  [[ ${worktree_attested} -eq 1 ]] || {
+    echo "run_agent_prompt.sh: worktree is not registered with the project" >&2
+    exit 125
+  }
+fi
 git_common_dir="$(git -C "${worktree}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
 if [[ -n ${git_common_dir} && $(basename "${git_common_dir}") == .git ]]; then
   repo_root="$(dirname "${git_common_dir}")"
@@ -476,10 +519,14 @@ if [[ ${internal_agent_scope} -eq 0 && -z ${SINNIX_AGENT_SCOPED:-} ]]; then
   scope_args+=(--property "RuntimeMaxSec=${timeout_seconds}")
   inner_args=(
     "$0" --internal-agent-scope --job-id "${job_id}" --launch-id "${launch_id}" --job-state-dir "${job_state_dir}"
-    --agent "${agent}" --workdir "${worktree}" --registered-project "${registered_project}"
-    --expected-git-common-dir "${expected_git_common_dir}" --prompt-file "${prompt_file}" --log-file "${log_file}"
+    --agent "${agent}" --workdir "${worktree}" --prompt-file "${prompt_file}" --log-file "${log_file}"
     --timeout-seconds "${timeout_seconds}"
   )
+  if [[ ${local_workdir} -eq 1 ]]; then
+    inner_args+=(--local-workdir)
+  else
+    inner_args+=(--registered-project "${registered_project}" --expected-git-common-dir "${expected_git_common_dir}")
+  fi
   [[ -z ${model} ]] || inner_args+=(--model "${model}")
   [[ -z ${reasoning_effort} ]] || inner_args+=(--reasoning-effort "${reasoning_effort}")
   [[ -z ${job_role} ]] || inner_args+=(--job-role "${job_role}")
