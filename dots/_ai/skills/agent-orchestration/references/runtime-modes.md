@@ -104,12 +104,19 @@ Both vendor CLIs expose a real print mode and can run through the attested
 runner. Use the Sinnix wrappers so the job receives the same containment and
 manifest lifecycle as the other local agents:
 
+`--registered-project` and `--expected-git-common-dir` are mandatory: they are
+the runner's own authorization boundary, not optional extras, so a direct
+invocation registers `<repo>` against itself the same way `launch_agent_tabs.sh`
+does internally:
+
 ```bash
 scripts/run_agent_prompt.sh \
   --agent grok \
   --model grok-4.5 \
   --reasoning-effort high \
   --workdir <repo> \
+  --registered-project <repo> \
+  --expected-git-common-dir "$(git -C <repo> rev-parse --path-format=absolute --git-common-dir)" \
   --prompt-file <prompt-file> \
   --log-file <log-file> \
   --last-file <final-file>
@@ -119,6 +126,8 @@ scripts/run_agent_prompt.sh \
   --model gemini-3.1-pro-high \
   --reasoning-effort high \
   --workdir <repo> \
+  --registered-project <repo> \
+  --expected-git-common-dir "$(git -C <repo> rev-parse --path-format=absolute --git-common-dir)" \
   --prompt-file <prompt-file> \
   --log-file <log-file> \
   --last-file <final-file>
