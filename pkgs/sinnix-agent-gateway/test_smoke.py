@@ -54,6 +54,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "shell_query",
         "machine_query",
         "desktop_read",
+        "terminal_read",
     } <= readonly_names
     assert {
         "files_write",
@@ -61,6 +62,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "agent_launch",
         "machine_action",
         "desktop_action",
+        "terminal_action",
         "shell_run",
     }.isdisjoint(readonly_names)
     assert {"agent_launch", "job_cancel"} <= local_names
@@ -70,6 +72,8 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "files_read",
         "machine_action",
         "session_list",
+        "terminal_action",
+        "terminal_read",
         "shell_run",
     }.isdisjoint(local_names)
     assert {
@@ -80,6 +84,8 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "machine_action",
         "desktop_action",
         "desktop_read",
+        "terminal_action",
+        "terminal_read",
         "shell_run",
     } <= operator_names
     assert readonly["sha256"] != local["sha256"] != operator["sha256"]

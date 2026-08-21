@@ -49,6 +49,7 @@ class GatewayConfig:
     ops_socket_path: Path = field(default_factory=default_ops_socket_path)
     hypr_control_command: str = "sinnix-hypr-control"
     screenshot_control_command: str = "sinnix-screenshot-control"
+    kitty_control_command: str = "sinnix-kitty-control"
     capture_command: str = "sinnix-capture"
     captures_root: Path = Path("/realm/data/captures")
 
@@ -99,6 +100,7 @@ class GatewayConfig:
             screenshot_control_command=raw.get(
                 "screenshotControlCommand", "sinnix-screenshot-control"
             ),
+            kitty_control_command=raw.get("kittyControlCommand", "sinnix-kitty-control"),
             capture_command=raw.get("captureCommand", "sinnix-capture"),
             captures_root=Path(raw.get("capturesRoot", "/realm/data/captures")),
         )

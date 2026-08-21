@@ -23,6 +23,7 @@ from .redaction import public_error
 from .schemas import AgentLaunchRequest
 from .sessions import SessionLogService
 from .shell import ShellService
+from .terminals import TerminalService
 
 T = TypeVar("T")
 
@@ -69,6 +70,7 @@ class Runtime:
     observe: ObserveService
     machine_actions: MachineActionService
     desktop: DesktopService
+    terminals: TerminalService
     captures: CaptureService
     files: HostFileService
     sessions: SessionLogService
@@ -89,6 +91,7 @@ class Runtime:
             observe=ObserveService(config, principal),
             machine_actions=MachineActionService(config, principal),
             desktop=DesktopService(config, principal),
+            terminals=TerminalService(config, principal),
             captures=CaptureService(config, principal),
             files=HostFileService(config, principal),
             sessions=SessionLogService(config, principal),
@@ -215,6 +218,26 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             """Run one exact operator desktop action through the Hyprland wrapper."""
             return runtime.execute(
                 "desktop_action", lambda: runtime.desktop.action(operation, arguments)
+            )
+
+    if Capability.TERMINAL_READ in runtime.principal.capabilities:
+
+        @mcp.tool(title="Read terminal state", annotations=READ_ONLY_TOOL)
+        def terminal_read(
+            operation: str, arguments: dict[str, Any] | None = None
+        ) -> dict[str, Any]:
+            """List Kitty terminals or read a bounded capture through its owner wrapper."""
+            return runtime.execute(
+                "terminal_read", lambda: runtime.terminals.read(operation, arguments)
+            )
+
+    if Capability.TERMINAL_ACTION in runtime.principal.capabilities:
+
+        @mcp.tool(title="Run terminal action", annotations=DESTRUCTIVE_TOOL)
+        def terminal_action(operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
+            """Send one exact operator action to a selected Kitty terminal."""
+            return runtime.execute(
+                "terminal_action", lambda: runtime.terminals.action(operation, arguments)
             )
 
     @mcp.tool(title="List projects", annotations=READ_ONLY_TOOL)
