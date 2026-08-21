@@ -15,6 +15,33 @@ class ObserveService:
         self.config = config
         self.principal = principal
 
+    def _connector_snapshot(self) -> dict[str, str] | None:
+        path = self.config.connector_snapshot_path or (
+            self.config.state_dir / "connector-snapshot.json"
+        )
+        try:
+            snapshot = json.loads(path.read_text())
+        except FileNotFoundError:
+            return None
+        except (OSError, json.JSONDecodeError):
+            return None
+        if (
+            snapshot.get("schema") != "sinnix.gateway-connector-snapshot.v1"
+            or not isinstance(snapshot.get("principal"), str)
+            or not isinstance(snapshot.get("manifest_sha256"), str)
+        ):
+            return None
+        return {
+            "principal": snapshot["principal"],
+            "manifest_sha256": snapshot["manifest_sha256"],
+        }
+
+    @staticmethod
+    def _comparison(left: str | None, right: str | None) -> str:
+        if left is None or right is None:
+            return "unobserved"
+        return "match" if left == right else "mismatch"
+
     def machine_report(self) -> dict[str, Any]:
         self.principal.require(Capability.MACHINE_READ)
         environment = {
@@ -64,19 +91,61 @@ class ObserveService:
             }
 
     def gateway_status(
-        self, principal_name: str, capability_contract_hash: str
+        self,
+        principal_name: str,
+        capability_contract_hash: str,
+        live_manifest_hash: str,
     ) -> dict[str, Any]:
         self.principal.require(Capability.MACHINE_READ)
         inventory_available = self.config.runtime_inventory.is_file()
+        approved_hash = (
+            self.config.approved_manifest_hash
+            if self.config.approved_manifest_principal == principal_name
+            else None
+        )
+        snapshot = self._connector_snapshot()
+        observed_hash = (
+            snapshot["manifest_sha256"]
+            if snapshot is not None and snapshot["principal"] == principal_name
+            else None
+        )
         return {
             "status": "ready",
             "principal": principal_name,
             "capability_contract_hash": capability_contract_hash,
-            "manifest_hash": (
-                self.config.approved_manifest_hash
-                if principal_name == "observer"
-                else None
-            ),
+            "manifests": {
+                "live_server": {
+                    "principal": principal_name,
+                    "sha256": live_manifest_hash,
+                },
+                "nix_approved": (
+                    {
+                        "principal": self.config.approved_manifest_principal,
+                        "sha256": approved_hash,
+                    }
+                    if approved_hash is not None
+                    else None
+                ),
+                "chatgpt_observed": (
+                    {
+                        "principal": principal_name,
+                        "sha256": observed_hash,
+                    }
+                    if observed_hash is not None
+                    else None
+                ),
+                "comparisons": {
+                    "live_to_nix_approved": self._comparison(
+                        live_manifest_hash, approved_hash
+                    ),
+                    "live_to_chatgpt_observed": self._comparison(
+                        live_manifest_hash, observed_hash
+                    ),
+                    "nix_approved_to_chatgpt_observed": self._comparison(
+                        approved_hash, observed_hash
+                    ),
+                },
+            },
             "runtime_inventory": "available" if inventory_available else "unavailable",
             "transport": "stdio",
         }
