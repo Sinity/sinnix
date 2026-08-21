@@ -181,11 +181,7 @@ in
                       type = types.str;
                       default = "master";
                     };
-                    remoteRead = mkOption {
-                      type = types.bool;
-                      default = false;
-                    };
-                    remoteWrite = mkOption {
+                    observerRead = mkOption {
                       type = types.bool;
                       default = false;
                     };
@@ -197,26 +193,22 @@ in
                 sinnix = {
                   path = config.sinnix;
                   remote = "https://github.com/Sinity/sinnix.git";
-                  remoteRead = true;
-                  remoteWrite = true;
+                  observerRead = true;
                 };
                 sinex = {
                   path = config.sinex;
                   remote = "https://github.com/Sinity/sinex.git";
-                  remoteRead = true;
-                  remoteWrite = true;
+                  observerRead = true;
                 };
                 polylogue = {
                   path = config.polylogue;
                   remote = "https://github.com/Sinity/polylogue.git";
-                  remoteRead = true;
-                  remoteWrite = true;
+                  observerRead = true;
                 };
                 lynchpin = {
                   path = config.lynchpin;
                   remote = "https://github.com/Sinity/sinity-lynchpin.git";
-                  remoteRead = true;
-                  remoteWrite = true;
+                  observerRead = true;
                 };
               };
               description = "Canonical project metadata consumed by agent and evidence surfaces.";

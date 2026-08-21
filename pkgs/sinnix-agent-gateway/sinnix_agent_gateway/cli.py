@@ -10,7 +10,7 @@ from typing import Any
 import anyio
 
 from .app import create_server
-from .capabilities import PROFILE_CAPABILITIES
+from .capabilities import PRINCIPAL_CAPABILITIES
 from .config import GatewayConfig
 
 
@@ -25,8 +25,8 @@ def canonical_manifest(tools: list[Any]) -> dict[str, Any]:
     return payload
 
 
-async def build_manifest(config: GatewayConfig, profile: str) -> dict[str, Any]:
-    return canonical_manifest(await create_server(config, profile).list_tools())
+async def build_manifest(config: GatewayConfig, principal_name: str) -> dict[str, Any]:
+    return canonical_manifest(await create_server(config, principal_name).list_tools())
 
 
 def parser() -> argparse.ArgumentParser:
@@ -39,7 +39,7 @@ def parser() -> argparse.ArgumentParser:
         else None,
     )
     result.add_argument(
-        "--profile", choices=sorted(PROFILE_CAPABILITIES), default="remote-readonly"
+        "--principal", choices=sorted(PRINCIPAL_CAPABILITIES), default="observer"
     )
     subcommands = result.add_subparsers(dest="command")
     subcommands.add_parser("serve")
@@ -53,17 +53,17 @@ def main() -> None:
     config = GatewayConfig.load(arguments.config)
     command = arguments.command or "serve"
     if command == "serve":
-        create_server(config, arguments.profile).run("stdio")
+        create_server(config, arguments.principal).run("stdio")
     elif command == "manifest":
         print(
-            json.dumps(anyio.run(build_manifest, config, arguments.profile), indent=2)
+            json.dumps(anyio.run(build_manifest, config, arguments.principal), indent=2)
         )
     elif command == "info":
         print(
             json.dumps(
                 {
                     "version": "0.2.0",
-                    "profile": arguments.profile,
+                    "principal": arguments.principal,
                     "transport": "stdio",
                     "state": str(config.state_dir),
                 },

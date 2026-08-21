@@ -72,7 +72,9 @@ class AuditService:
             body = {
                 "event_id": event_id,
                 "occurred_at": occurred_at,
-                "profile": self.principal.profile,
+                # The hash-chain field name remains stable so existing audit
+                # entries verify. Its values are principal names.
+                "profile": self.principal.name,
                 "operation": operation,
                 "outcome": outcome,
                 "payload": clean_payload,
@@ -86,7 +88,7 @@ class AuditService:
                 (
                     event_id,
                     occurred_at,
-                    self.principal.profile,
+                    self.principal.name,
                     operation,
                     outcome,
                     json.dumps(clean_payload, sort_keys=True),
@@ -111,7 +113,7 @@ class AuditService:
                 "sequence": row[0],
                 "event_id": row[1],
                 "occurred_at": row[2],
-                "profile": row[3],
+                "principal": row[3],
                 "operation": row[4],
                 "outcome": row[5],
                 "payload": json.loads(row[6]),

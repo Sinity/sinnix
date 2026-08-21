@@ -24,17 +24,17 @@ chmod +x "$root/fake-gateway"
 python3 "$benchmark" \
   --home "$root/home" \
   --gateway-bin "bash $root/fake-gateway" \
-  --profiles claude-lean,gateway-remote-readonly \
+  --profiles claude-lean,gateway-observer \
   --repeats 3 \
   --output "$root/out/raw.json" \
   --summary-output "$root/out/summary.json" >"$root/out/stdout.json"
 jq -e '
   .schema == "sinnix-agent-profile-benchmark-v1"
-  and (.profiles | keys == ["claude-lean", "gateway-remote-readonly"])
+  and (.profiles | keys == ["claude-lean", "gateway-observer"])
   and .profiles["claude-lean"].sample_count == 6
-  and .profiles["gateway-remote-readonly"].sample_count == 6
+  and .profiles["gateway-observer"].sample_count == 6
   and .profiles["claude-lean"].tool_count == 1
-  and .profiles["gateway-remote-readonly"].tool_count == 1
+  and .profiles["gateway-observer"].tool_count == 1
   and .recommendations.task_success_guard
 ' "$root/out/summary.json" >/dev/null
 jq -e '(.schema == "sinnix-agent-profile-benchmark-v1") and ((.records | length) == 12) and all(.records[]; .provider_usage.status == "unavailable")' "$root/out/raw.json" >/dev/null

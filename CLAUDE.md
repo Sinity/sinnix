@@ -410,9 +410,9 @@ skills`, `~/.codex/skills`, `~/.gemini/skills`) are linkFarms over it.
   `clis.nix`/`mcp.nix` are real NixOS modules; the sibling files are
   plain-nix helpers imported directly, not auto-imported.
 - Agent gateway: `modules/services/agent-gateway.nix` renders one canonical
-  project contract and one official-SDK stdio MCP implementation with
-  `remote-readonly`, `local-agent-control`, and `remote-operator` profiles.
-  `sinnix-agent-control-mcp` is a thin local wrapper around that
+  project contract and one official-SDK stdio MCP implementation with the
+  `observer`, `agent-control`, and `operator` authority principals. Transport
+  selects its principal explicitly. `sinnix-agent-control-mcp` is a thin local wrapper around that
   implementation. Remote ChatGPT access uses the pinned OpenAI
   `tunnel-client` user service; the gateway has no custom HTTP/SSE transport
   or separate PID job substrate.

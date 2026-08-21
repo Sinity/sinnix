@@ -23,12 +23,12 @@ SCHEMA = "sinnix-agent-profile-benchmark-v1"
 DEFAULT_PROFILES = (
     "claude-lean", "claude-evidence", "claude-full", "claude-browser",
     "codex-lean", "codex-evidence", "codex-full", "codex-browser",
-    "gateway-local-agent-control", "gateway-remote-readonly", "gateway-remote-operator",
+    "gateway-agent-control", "gateway-observer", "gateway-operator",
 )
-GATEWAY_PROFILES = {
-    "gateway-local-agent-control": "local-agent-control",
-    "gateway-remote-readonly": "remote-readonly",
-    "gateway-remote-operator": "remote-operator",
+GATEWAY_PRINCIPALS = {
+    "gateway-agent-control": "agent-control",
+    "gateway-observer": "observer",
+    "gateway-operator": "operator",
 }
 STATIC_FILES = {
     "claude-lean": (".config/claude/mcp-lean.json",),
@@ -154,7 +154,7 @@ def gateway_run(args: argparse.Namespace, profile: str) -> dict[str, Any]:
     command = shlex.split(args.gateway_bin)
     if args.gateway_config:
         command.extend(["--config", str(args.gateway_config)])
-    command.extend(["--profile", GATEWAY_PROFILES[profile], "manifest"])
+    command.extend(["--principal", GATEWAY_PRINCIPALS[profile], "manifest"])
     started = time.monotonic_ns()
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     peak_rss = peak_pss = peak_processes = 0
@@ -220,7 +220,7 @@ def main() -> int:
     for profile in profiles:
         for phase in ("cold", "warm"):
             for sample in range(1, args.repeats + 1):
-                measurement = gateway_run(args, profile) if profile in GATEWAY_PROFILES else static_run(args, profile)
+                measurement = gateway_run(args, profile) if profile in GATEWAY_PRINCIPALS else static_run(args, profile)
                 records.append({
                     "schema": SCHEMA,
                     "profile": profile,
@@ -259,7 +259,7 @@ def main() -> int:
             "implementation_worker": "codex-full",
             "read_only_reviewer": "claude-evidence",
             "browser_operator": "claude-browser",
-            "gateway_readonly": "gateway-remote-readonly",
+            "gateway_observer": "gateway-observer",
             "task_success_guard": "No budget is enforced from this credential-free probe; require representative task success and observed provider usage before changing defaults.",
         },
     }

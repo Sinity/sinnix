@@ -43,7 +43,7 @@ DESTRUCTIVE_TOOL = ToolAnnotations(
 
 @dataclass
 class Runtime:
-    profile: str
+    principal_name: str
     principal: Principal
     config: GatewayConfig
     projects: ProjectService
@@ -54,11 +54,11 @@ class Runtime:
     captures: CaptureService
 
     @classmethod
-    def create(cls, config: GatewayConfig, profile: str) -> "Runtime":
-        principal = Principal.for_profile(profile)
+    def create(cls, config: GatewayConfig, principal_name: str) -> "Runtime":
+        principal = Principal.for_name(principal_name)
         artifacts = ArtifactService(config, principal)
         return cls(
-            profile=profile,
+            principal_name=principal_name,
             principal=principal,
             config=config,
             projects=ProjectService(config, principal),
@@ -88,10 +88,10 @@ class Runtime:
         return result
 
 
-def _profile_contract(profile: str) -> str:
-    principal = Principal.for_profile(profile)
+def _principal_contract(principal_name: str) -> str:
+    principal = Principal.for_name(principal_name)
     payload = {
-        "profile": profile,
+        "principal": principal_name,
         "capabilities": sorted(
             capability.value for capability in principal.capabilities
         ),
@@ -101,14 +101,14 @@ def _profile_contract(profile: str) -> str:
     ).hexdigest()
 
 
-def create_server(config: GatewayConfig, profile: str) -> MCPServer:
-    runtime = Runtime.create(config, profile)
+def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
+    runtime = Runtime.create(config, principal_name)
     mcp = MCPServer(
         name="sinnix-agent-gateway",
         title="Sinnix Agent Gateway",
-        description="Capability-profiled project, machine, and attested-agent control plane.",
+        description="Principal-scoped project, machine, and attested-agent control plane.",
         instructions=(
-            f"Active profile: {profile}. Use project_list before project operations. "
+            f"Active principal: {principal_name}. Use project_list before project operations. "
             "All outputs are bounded; unavailable evidence is reported explicitly."
         ),
         version="0.2.0",
@@ -117,16 +117,19 @@ def create_server(config: GatewayConfig, profile: str) -> MCPServer:
     @mcp.resource("sinnix://gateway/instructions")
     def gateway_instructions() -> str:
         return (
-            f"Profile {profile}. Projects are allowlisted. Paths are project-relative. "
+            f"Principal {principal_name}. Projects are allowlisted. Paths are project-relative. "
             "Job IDs and artifact IDs are the only accepted control identities."
         )
 
     @mcp.tool(title="Gateway status", annotations=READ_ONLY_TOOL)
     def gateway_status() -> dict[str, Any]:
-        """Return the active profile, transport, runtime-inventory state, and capability contract hash."""
+        """Return the active principal, transport, runtime state, and contract hash."""
         return runtime.execute(
             "gateway_status",
-            lambda: runtime.observe.gateway_status(profile, _profile_contract(profile)),
+            lambda: runtime.observe.gateway_status(
+                principal_name,
+                _principal_contract(principal_name),
+            ),
         )
 
     @mcp.tool(title="Machine report", annotations=READ_ONLY_TOOL)
@@ -136,7 +139,7 @@ def create_server(config: GatewayConfig, profile: str) -> MCPServer:
 
     @mcp.tool(title="List projects", annotations=READ_ONLY_TOOL)
     def project_list() -> dict[str, Any]:
-        """List projects available to the active profile without exposing host paths."""
+        """List projects available to the active principal without exposing host paths."""
         return runtime.execute("project_list", runtime.projects.list)
 
     @mcp.tool(title="Project tree", annotations=READ_ONLY_TOOL)
@@ -233,19 +236,14 @@ def create_server(config: GatewayConfig, profile: str) -> MCPServer:
 
         @mcp.tool(title="List visible capture lanes", annotations=READ_ONLY_TOOL)
         def capture_lanes() -> dict[str, Any]:
-            """List the capture-data lanes this profile may query -- not every
-            lane that exists on disk, only the ones this connection's profile
-            is allowed to see."""
+            """List the capture-data lanes this principal may query."""
             return runtime.execute("capture_lanes", runtime.captures.lanes_visible)
 
         @mcp.tool(title="Query capture data", annotations=READ_ONLY_TOOL)
         def capture_query(
             lanes: list[str] | None = None, since: float = 0.0, limit: int = 100
         ) -> dict[str, Any]:
-            """Query sinnix-capture-v1 envelope records. `lanes` omitted means
-            every lane this profile is allowed to see (never every lane on
-            disk); an explicit lane this profile isn't allowed to query is a
-            policy error, not a silent drop."""
+            """Query envelope records within the principal's lane authority."""
             return runtime.execute(
                 "capture_query", lambda: runtime.captures.query(lanes, since, limit)
             )
@@ -291,7 +289,7 @@ def create_server(config: GatewayConfig, profile: str) -> MCPServer:
 
         @mcp.tool(title="Write project file", annotations=DESTRUCTIVE_TOOL)
         def project_write(project_id: str, path: str, content: str) -> dict[str, Any]:
-            """Atomically write one project-relative file under remote-operator policy."""
+            """Atomically write one project-relative file under operator policy."""
             return runtime.execute(
                 "project_write",
                 lambda: runtime.projects.write(project_id, path, content),
@@ -299,7 +297,7 @@ def create_server(config: GatewayConfig, profile: str) -> MCPServer:
 
         @mcp.tool(title="Apply project patch", annotations=DESTRUCTIVE_TOOL)
         def project_apply_patch(project_id: str, patch: str) -> dict[str, Any]:
-            """Apply a bounded Git patch under remote-operator policy."""
+            """Apply a bounded Git patch under operator policy."""
             return runtime.execute(
                 "project_apply_patch",
                 lambda: runtime.projects.apply_patch(project_id, patch),

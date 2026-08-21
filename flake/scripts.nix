@@ -303,9 +303,9 @@ let
       runtimeInputs = [ agentGatewayPackage ];
       text = ''
         config="''${SINNIX_AGENT_GATEWAY_CONFIG:-/etc/sinnix/agent-gateway.json}"
-        exec sinnix-agent-gateway --config "$config" --profile local-agent-control serve
+        exec sinnix-agent-gateway --config "$config" --principal agent-control serve
       '';
-      meta.description = "Local-agent-control profile of the shared Sinnix MCP gateway";
+      meta.description = "Local agent-control principal of the shared Sinnix MCP gateway";
     };
     tunnel-client = pkgs.callPackage ../pkgs/tunnel-client { };
 

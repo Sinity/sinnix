@@ -25,8 +25,7 @@ class ProjectConfig:
     path: Path
     remote: str | None = None
     default_ref: str = "master"
-    remote_read: bool = False
-    remote_write: bool = False
+    observer_read: bool = False
 
 
 @dataclass(frozen=True)
@@ -50,13 +49,19 @@ class GatewayConfig:
             raw = json.loads(path.read_text())
         projects: dict[str, ProjectConfig] = {}
         for project_id, row in raw.get("projects", {}).items():
+            obsolete = {"remoteRead", "remoteWrite"}.intersection(row)
+            if obsolete:
+                fields = ", ".join(sorted(obsolete))
+                raise ValueError(
+                    f"project {project_id} uses retired gateway field(s): {fields}; "
+                    "use observerRead"
+                )
             projects[project_id] = ProjectConfig(
                 project_id=project_id,
                 path=Path(row["path"]).resolve(),
                 remote=row.get("remote"),
                 default_ref=row.get("defaultRef", "master"),
-                remote_read=bool(row.get("remoteRead", False)),
-                remote_write=bool(row.get("remoteWrite", False)),
+                observer_read=bool(row.get("observerRead", False)),
             )
         state_dir = Path(raw.get("stateDir", default_state_dir())).expanduser()
         return cls(
