@@ -13,6 +13,7 @@ from .audit import AuditService
 from .capabilities import Capability, Principal
 from .captures import CaptureService
 from .config import GatewayConfig
+from .files import HostFileService
 from .jobs import JobService
 from .observe import ObserveService
 from .projects import ProjectService
@@ -63,6 +64,7 @@ class Runtime:
     jobs: JobService
     observe: ObserveService
     captures: CaptureService
+    files: HostFileService
 
     @classmethod
     def create(cls, config: GatewayConfig, principal_name: str) -> "Runtime":
@@ -78,6 +80,7 @@ class Runtime:
             jobs=JobService(config, principal, artifacts),
             observe=ObserveService(config, principal),
             captures=CaptureService(config, principal),
+            files=HostFileService(config, principal),
         )
 
     def execute(self, operation: str, callback: Callable[[], T]) -> T:
@@ -196,6 +199,48 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         return runtime.execute(
             "project_diff", lambda: runtime.projects.diff(project_id, ref)
         )
+
+    if Capability.FILE_READ in runtime.principal.capabilities:
+
+        @mcp.tool(title="Read host files", annotations=READ_ONLY_TOOL)
+        def files_read(
+            operation: str,
+            path: str,
+            offset: int = 0,
+            max_bytes: int = 64_000,
+            max_entries: int = 200,
+        ) -> dict[str, Any]:
+            """Stat, read, or list a bounded host path available to this principal."""
+            return runtime.execute(
+                "files_read",
+                lambda: runtime.files.read(
+                    operation,
+                    path,
+                    offset=offset,
+                    max_bytes=max_bytes,
+                    max_entries=max_entries,
+                ),
+            )
+
+    if Capability.FILE_WRITE in runtime.principal.capabilities:
+
+        @mcp.tool(title="Write host files", annotations=DESTRUCTIVE_TOOL)
+        def files_write(
+            operation: str,
+            path: str,
+            content: str | None = None,
+            expected_sha256: str | None = None,
+        ) -> dict[str, Any]:
+            """Replace, append, create, or remove a host path with a durable receipt."""
+            return runtime.execute(
+                "files_write",
+                lambda: runtime.files.write(
+                    operation,
+                    path,
+                    content=content,
+                    expected_sha256=expected_sha256,
+                ),
+            )
 
     @mcp.tool(title="List attested jobs", annotations=READ_ONLY_TOOL)
     def job_list(limit: int = 100) -> dict[str, Any]:

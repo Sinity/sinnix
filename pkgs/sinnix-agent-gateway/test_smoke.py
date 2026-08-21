@@ -46,10 +46,11 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
     readonly_names = {row["name"] for row in readonly["tools"]}
     local_names = {row["name"] for row in local["tools"]}
     operator_names = {row["name"] for row in operator["tools"]}
-    assert "project_write" not in readonly_names
-    assert "agent_launch" not in readonly_names
+    assert {"files_read", "project_read"} <= readonly_names
+    assert {"files_write", "project_write", "agent_launch"}.isdisjoint(readonly_names)
     assert {"agent_launch", "job_cancel"} <= local_names
-    assert {"project_write", "project_apply_patch"} <= operator_names
+    assert "files_read" not in local_names
+    assert {"files_write", "project_write", "project_apply_patch"} <= operator_names
     assert readonly["sha256"] != local["sha256"] != operator["sha256"]
     assert all(
         "inputSchema" in row and "outputSchema" in row for row in readonly["tools"]
