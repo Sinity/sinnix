@@ -112,7 +112,12 @@ mkServiceModule {
         agentScopeExecCommand = "${scriptPkgs.sinnix-agent-scope-exec}/bin/sinnix-agent-scope-exec";
         executionJobCommand = "${scriptPkgs.sinnix-agent-gateway}/bin/sinnix-agent-gateway-execution-job";
         observeCommand = "${scriptPkgs.sinnix-observe}/bin/sinnix-observe";
+        hyprControlCommand = "/home/${userName}/.local/bin/sinnix-hypr-control";
+        screenshotControlCommand = "/home/${userName}/.local/bin/sinnix-screenshot-control";
+        kittyControlCommand = "/home/${userName}/.local/bin/sinnix-kitty-control";
+        chromeControlCommand = "/home/${userName}/.local/bin/sinnix-chrome-control";
         beadsCommand = "${scriptPkgs.beads}/bin/bd";
+        captureCommand = "${scriptPkgs.sinnix-capture}/bin/sinnix-capture";
         mcpBrokerServers = mcpBrokerServers;
         projects = config.sinnix.projects.entries;
       };

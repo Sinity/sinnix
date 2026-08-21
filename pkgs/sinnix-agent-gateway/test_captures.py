@@ -55,6 +55,28 @@ def test_filter_lanes_returns_requested_or_all_authorized_lanes() -> None:
     assert principal.filter_lanes(None, available) == available
 
 
+def test_capture_query_reports_a_missing_collector_as_unavailable(tmp_path: Path) -> None:
+    root = tmp_path / "captures"
+    make_lake(root)
+    service = CaptureService(
+        GatewayConfig(
+            state_dir=tmp_path / "state",
+            projects={},
+            captures_root=root,
+            capture_command=str(tmp_path / "missing-sinnix-capture"),
+        ),
+        Principal.for_name("observer"),
+    )
+
+    result = service.query(["mpris"])
+
+    assert result == {
+        "available": False,
+        "failure_class": "collector_unavailable",
+        "reason": "sinnix-capture query is unavailable: FileNotFoundError",
+    }
+
+
 def test_capture_read_without_a_lane_access_entry_is_a_config_error() -> None:
     from sinnix_agent_gateway import capabilities as caps
 

@@ -106,6 +106,9 @@ class McpBrokerService:
                 None,
             )
         unit = f"sinnix-gateway-mcp-read-{uuid.uuid4().hex}.service"
+        unit_environment = [
+            f"--setenv={name}={value}" for name, value in sorted(environment.items())
+        ]
         return (
             StdioServerParameters(
                 command=self.config.systemd_run_command,
@@ -115,6 +118,7 @@ class McpBrokerService:
                     "--quiet",
                     "--collect",
                     f"--unit={unit}",
+                    *unit_environment,
                     "--property=RuntimeMaxSec=30",
                     "--property=ReadOnlyPaths=/",
                     "--property=PrivateTmp=true",
@@ -122,7 +126,6 @@ class McpBrokerService:
                     "--property=ProtectSystem=strict",
                     "--property=ProtectHome=read-only",
                     "--property=PrivateNetwork=true",
-                    "--property=InaccessiblePaths=/run/user",
                     "--",
                     server["command"],
                     *server["args"],
@@ -200,6 +203,10 @@ class McpBrokerService:
             "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
             **server["env"],
         }
+        for name in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"):
+            value = os.environ.get(name)
+            if value:
+                environment.setdefault(name, value)
         parameters, observer_unit = self._parameters(server, environment)
         stderr_directory = self.config.state_dir / "captures" / uuid.uuid4().hex
         stderr_directory.mkdir(mode=0o700, parents=True)

@@ -403,8 +403,9 @@ def test_runtime_audit_carries_file_mutation_receipt(tmp_path: Path) -> None:
     runtime.execute(
         "files_write",
         lambda: {
-            "operation": "replace",
+            "operation": "move",
             "path": "/realm/tmp/work/gateway-demo/fixture.txt",
+            "destination": "/realm/tmp/work/gateway-demo/moved.txt",
             "bytes": 7,
             "previous_sha256": None,
             "sha256": "fixture-hash",
@@ -415,8 +416,9 @@ def test_runtime_audit_carries_file_mutation_receipt(tmp_path: Path) -> None:
     payload = runtime.audit.tail(1)["events"][0]["payload"]
 
     assert payload == {
-        "operation": "replace",
+        "operation": "move",
         "path": "/realm/tmp/work/gateway-demo/fixture.txt",
+        "destination": "/realm/tmp/work/gateway-demo/moved.txt",
         "bytes": 7,
         "sha256": "fixture-hash",
     }
@@ -696,10 +698,13 @@ def test_machine_query_selects_and_pages_large_collector_report(tmp_path: Path) 
     )
     runtime = Runtime.create(cfg, "observer")
 
-    assert runtime.observe.machine_report()["failure_class"] == "response_bound"
+    machine_report = runtime.observe.machine_report()
     overview = runtime.observe.machine_query("overview")
     units = runtime.observe.machine_query("units", cursor=20, limit=3)
 
+    assert machine_report["available"] is True
+    assert machine_report["operation"] == "overview"
+    assert machine_report["sections"]["live_pressure"] == {"state": "quiet"}
     assert overview["available"] is True
     assert overview["source"]["schema"] == "sinnix.observe.v1"
     assert overview["sections"]["live_pressure"] == {"state": "quiet"}

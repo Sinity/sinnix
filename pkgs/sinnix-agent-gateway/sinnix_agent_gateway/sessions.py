@@ -28,9 +28,13 @@ class SessionLogService:
     ):
         self.config = config
         self.principal = principal
-        self.sources = sources or (
+        configured_sources = sources or (
             SessionSource("claude-code", Path.home() / ".claude" / "projects"),
             SessionSource("codex", Path.home() / ".codex"),
+        )
+        self.sources = tuple(
+            SessionSource(source.provider, source.root.resolve())
+            for source in configured_sources
         )
 
     def _source(self, provider: str) -> SessionSource:

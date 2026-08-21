@@ -152,6 +152,8 @@ def test_observer_broker_runs_upstream_in_read_only_unit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     broker = broker_service(tmp_path, "observer")
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
     captured = []
 
     def stdio(parameters: object, **_kwargs: object) -> FakeTransport:
@@ -166,7 +168,11 @@ def test_observer_broker_runs_upstream_in_read_only_unit(
     assert captured[0].command == broker.config.systemd_run_command
     assert "--property=ReadOnlyPaths=/" in captured[0].args
     assert "--property=PrivateNetwork=true" in captured[0].args
-    assert "--property=InaccessiblePaths=/run/user" in captured[0].args
+    assert "--property=InaccessiblePaths=/run/user" not in captured[0].args
+    assert "--setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus" in captured[0].args
+    assert "--setenv=XDG_RUNTIME_DIR=/run/user/1000" in captured[0].args
+    assert captured[0].env["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/run/user/1000/bus"
+    assert captured[0].env["XDG_RUNTIME_DIR"] == "/run/user/1000"
     separator = captured[0].args.index("--")
     assert captured[0].args[separator + 1 :] == ["fixture-mcp", "--fixture"]
 

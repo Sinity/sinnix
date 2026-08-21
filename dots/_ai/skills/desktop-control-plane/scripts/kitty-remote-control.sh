@@ -37,7 +37,34 @@ need_cmd() {
 
 need_cmd kitty
 
+resolve_socket() {
+  local runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$UID}"
+  local user_name="${USER:-$(id -un)}"
+  local candidate pid command_line
+
+  for candidate in "$runtime_dir"/kitty-"$user_name"-*; do
+    [[ -S $candidate ]] || continue
+    pid="${candidate##*-}"
+    [[ $pid =~ ^[0-9]+$ && -r /proc/$pid/cmdline ]] || continue
+    command_line="$(tr '\0' ' ' </proc/$pid/cmdline)"
+    if [[ $command_line == *'--instance-group terminal'* ]]; then
+      printf 'unix:%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  for candidate in "$runtime_dir"/kitty-"$user_name"-*; do
+    [[ -S $candidate ]] || continue
+    printf 'unix:%s\n' "$candidate"
+    return 0
+  done
+  return 1
+}
+
 run_kitty() {
+  if [[ -z $socket && ! -t 0 ]]; then
+    socket="$(resolve_socket || true)"
+  fi
   if [[ -n $socket ]]; then
     kitty @ --to "$socket" "$@"
   else
