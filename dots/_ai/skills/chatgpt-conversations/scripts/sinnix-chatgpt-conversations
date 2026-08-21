@@ -26,6 +26,10 @@ Commands:
       was omitted, so use another read with --text-start to page long turns.
       Set --text-limit 0 to return complete selected turns.
 
+  full <page-id> [--markdown]
+      Return every currently rendered turn and its complete text. Use this
+      whenever the task calls for the actual complete conversation.
+
   read-open [read options]
       Read the selected windows from every currently open ChatGPT conversation
       tab. Use `list` first when a narrower selection will answer the task.
@@ -103,21 +107,37 @@ transcript_js() {
   const textLimit = ${text_limit};
   const compact = value => (value || '').replace(/\\s+/g, ' ').trim();
   const unique = values => [...new Map(values.map(value => [JSON.stringify(value), value])).values()];
-  const attachment = element => {
+  const attachment = (element, index) => {
     const testid = element.dataset.testid || null;
     const kind = element.dataset.libraryFileIconKind || null;
+    const button = element.closest('button');
+    const anchor = element.closest('a[href]');
+    let label = null;
     let container = element;
     for (let depth = 0; container && depth < 6; depth += 1, container = container.parentElement) {
-      const label = compact(container.innerText);
-      if (label && label.length <= 512) {
-        const anchor = container.closest('a[href]');
-        return { testid, kind, label, href: anchor ? anchor.href : null };
+      const candidate = compact(container.innerText);
+      if (candidate && candidate.length <= 512) {
+        label = candidate;
+        break;
       }
     }
-    return { testid, kind, label: null, href: null };
+    return {
+      index,
+      testid,
+      kind,
+      label,
+      href: anchor ? anchor.href : null,
+      control: button
+        ? { type: 'button', aria_label: button.getAttribute('aria-label') || null }
+        : anchor
+          ? { type: 'link', aria_label: anchor.getAttribute('aria-label') || null }
+          : null,
+    };
   };
   const turns = [...document.querySelectorAll('[data-message-author-role]')];
-  const selected = turns.slice(messageStart, messageStart + messageLimit);
+  const selected = messageLimit === null
+    ? turns.slice(messageStart)
+    : turns.slice(messageStart, messageStart + messageLimit);
   return {
     schema: 'sinnix-chatgpt-conversation-v1',
     url: location.href,
@@ -137,8 +157,8 @@ transcript_js() {
       const links = unique([...turn.querySelectorAll('a[href]')]
         .map(anchor => ({ text: compact(anchor.innerText), href: anchor.href }))
         .filter(link => link.text || link.href));
-      const attachments = unique([...turn.querySelectorAll('[data-testid*="file"], [data-testid*="attachment"], [data-testid*="library"]')]
-        .map(attachment));
+      const attachmentNodes = [...turn.querySelectorAll('[data-testid*="file"], [data-testid*="attachment"], [data-testid*="library"]')];
+      const attachments = unique(attachmentNodes.map(attachment));
       return {
         index: messageStart + offset,
         message_id: turn.dataset.messageId || turn.closest('[data-turn-id]')?.dataset.turnId || null,
@@ -173,6 +193,11 @@ read_transcript() {
   jq --arg page_id "$page_id" '. + {page_id: $page_id}' <<<"$transcript"
 }
 
+read_full_transcript() {
+  local page_id="$1"
+  read_transcript "$page_id" 0 null 0 0
+}
+
 render_markdown() {
   jq -r '
     "# " + .title,
@@ -192,6 +217,22 @@ render_markdown() {
       ""
     )
   '
+}
+
+parse_full_options() {
+  MARKDOWN=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --markdown)
+        MARKDOWN=1
+        shift
+        ;;
+      *)
+        printf 'unknown option for full: %s\n' "$1" >&2
+        exit 2
+        ;;
+    esac
+  done
 }
 
 parse_read_options() {
@@ -254,6 +295,18 @@ case "$command_name" in
     shift
     parse_read_options "$@"
     result=$(read_transcript "$page_id" "$MESSAGE_START" "$MESSAGE_LIMIT" "$TEXT_START" "$TEXT_LIMIT")
+    if [[ $MARKDOWN -eq 1 ]]; then
+      render_markdown <<<"$result"
+    else
+      printf '%s\n' "$result"
+    fi
+    ;;
+  full)
+    page_id="${1:-}"
+    [[ -n $page_id ]] || { printf 'full requires a page ID\n' >&2; exit 2; }
+    shift
+    parse_full_options "$@"
+    result=$(read_full_transcript "$page_id")
     if [[ $MARKDOWN -eq 1 ]]; then
       render_markdown <<<"$result"
     else
