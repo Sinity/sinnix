@@ -187,6 +187,7 @@ class ProjectService:
             "HOME": str(Path.home()),
             "LANG": os.environ.get("LANG", "C.UTF-8"),
             "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
+            "GIT_OPTIONAL_LOCKS": "0",
         }
         process = subprocess.Popen(
             command,
@@ -298,6 +299,68 @@ class ProjectService:
         return {
             "project_id": project_id,
             "diff": self._run_bounded(command, project.path),
+        }
+
+    def summary(self, project_id: str) -> dict[str, Any]:
+        project = self._project(project_id)
+        status = self._run_bounded(
+            ["git", "status", "--porcelain=v2", "--branch"], project.path
+        )
+        branch: dict[str, Any] = {
+            "head": None,
+            "upstream": None,
+            "ahead": 0,
+            "behind": 0,
+        }
+        changes = {"staged": 0, "unstaged": 0, "untracked": 0, "conflicted": 0}
+        for line in status.splitlines():
+            if line.startswith("# branch.head "):
+                branch["head"] = line.removeprefix("# branch.head ")
+                continue
+            if line.startswith("# branch.upstream "):
+                branch["upstream"] = line.removeprefix("# branch.upstream ")
+                continue
+            if line.startswith("# branch.ab "):
+                for value in line.removeprefix("# branch.ab ").split():
+                    if value.startswith("+"):
+                        branch["ahead"] = int(value[1:])
+                    elif value.startswith("-"):
+                        branch["behind"] = int(value[1:])
+                continue
+            if line.startswith(("1 ", "2 ")):
+                fields = line.split(maxsplit=2)
+                xy = fields[1]
+                if xy[0] != ".":
+                    changes["staged"] += 1
+                if xy[1] != ".":
+                    changes["unstaged"] += 1
+                continue
+            if line.startswith("u "):
+                changes["conflicted"] += 1
+                continue
+            if line.startswith("? "):
+                changes["untracked"] += 1
+        head_id = self._run_bounded(
+            ["git", "rev-parse", "--verify", "--quiet", "HEAD"], project.path
+        ).strip()
+        commit: dict[str, str] | None = None
+        if head_id:
+            latest = self._run_bounded(
+                ["git", "log", "-1", "--format=%H%x09%cI%x09%s"], project.path
+            ).rstrip("\n")
+            commit_id, committed_at, subject = latest.split("\t", maxsplit=2)
+            commit = {
+                "id": commit_id,
+                "committed_at": committed_at,
+                "subject": subject[:4_096],
+                "subject_truncated": len(subject) > 4_096,
+            }
+        return {
+            "project_id": project.project_id,
+            "default_ref": project.default_ref,
+            "branch": branch,
+            "changes": changes,
+            "latest_commit": commit,
         }
 
     def write(self, project_id: str, path: str, content: str) -> dict[str, Any]:

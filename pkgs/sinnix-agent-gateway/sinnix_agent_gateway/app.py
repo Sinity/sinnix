@@ -23,6 +23,7 @@ from .machine_actions import MachineActionService
 from .mcp_broker import McpBrokerService
 from .memory import MemoryService
 from .observe import ObserveService
+from .project_context import ProjectContextService
 from .projects import ProjectService
 from .redaction import public_error
 from .schemas import AgentLaunchRequest
@@ -70,6 +71,7 @@ class Runtime:
     principal: Principal
     config: GatewayConfig
     projects: ProjectService
+    project_context: ProjectContextService
     artifacts: ArtifactService
     audit: AuditService
     jobs: JobService
@@ -93,11 +95,14 @@ class Runtime:
         principal = Principal.for_name(principal_name)
         artifacts = ArtifactService(config, principal)
         sessions = SessionLogService(config, principal)
+        projects = ProjectService(config, principal)
+        beads = BeadsService(config, principal)
         return cls(
             principal_name=principal_name,
             principal=principal,
             config=config,
-            projects=ProjectService(config, principal),
+            projects=projects,
+            project_context=ProjectContextService(principal, projects, beads),
             artifacts=artifacts,
             audit=AuditService(config, principal),
             jobs=JobService(config, principal, artifacts),
@@ -106,7 +111,7 @@ class Runtime:
             desktop=DesktopService(config, principal, artifacts),
             terminals=TerminalService(config, principal),
             browser=BrowserService(config, principal, artifacts),
-            beads=BeadsService(config, principal),
+            beads=beads,
             capability_index=CapabilityIndexService(config, principal),
             captures=CaptureService(config, principal),
             files=HostFileService(config, principal),
@@ -415,6 +420,13 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     def project_list() -> dict[str, Any]:
         """List projects available to the active principal without exposing host paths."""
         return runtime.execute("project_list", runtime.projects.list)
+
+    @mcp.tool(title="Get project context", annotations=READ_ONLY_TOOL)
+    def project_context(project_id: str) -> dict[str, Any]:
+        """Get structured Git and ready-work orientation from existing project owners."""
+        return runtime.execute(
+            "project_context", lambda: runtime.project_context.context(project_id)
+        )
 
     @mcp.tool(title="Project tree", annotations=READ_ONLY_TOOL)
     def project_tree(
