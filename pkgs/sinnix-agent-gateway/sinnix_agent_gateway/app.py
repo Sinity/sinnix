@@ -125,7 +125,29 @@ class Runtime:
     def _record_result(self, operation: str, result: Any) -> None:
         payload: dict[str, Any] = {}
         if isinstance(result, dict):
-            for key in ("job_id", "artifact_id", "project_id", "receipt_id", "unit"):
+            for key in (
+                "job_id",
+                "artifact_id",
+                "project_id",
+                "receipt_id",
+                "unit",
+                "path",
+                "operation",
+                "sha256",
+                "previous_sha256",
+                "bytes",
+                "created",
+                "removed",
+                "identity",
+                "exit_status",
+                "timed_out",
+                "truncated",
+                "cwd",
+                "accepted",
+                "cancelled",
+                "already_terminal",
+                "kind",
+            ):
                 value = result.get(key)
                 if isinstance(value, (str, int, float, bool)):
                     payload[key] = value
