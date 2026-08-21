@@ -20,6 +20,7 @@ from .projects import ProjectService
 from .redaction import public_error
 from .schemas import AgentLaunchRequest
 from .sessions import SessionLogService
+from .shell import ShellService
 
 T = TypeVar("T")
 
@@ -67,6 +68,7 @@ class Runtime:
     captures: CaptureService
     files: HostFileService
     sessions: SessionLogService
+    shell: ShellService
 
     @classmethod
     def create(cls, config: GatewayConfig, principal_name: str) -> "Runtime":
@@ -84,6 +86,7 @@ class Runtime:
             captures=CaptureService(config, principal),
             files=HostFileService(config, principal),
             sessions=SessionLogService(config, principal),
+            shell=ShellService(config, principal),
         )
 
     def execute(self, operation: str, callback: Callable[[], T]) -> T:
@@ -272,6 +275,21 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             return runtime.execute(
                 "session_search",
                 lambda: runtime.sessions.search(provider, query, max_results),
+            )
+
+    if Capability.SHELL_QUERY in runtime.principal.capabilities:
+
+        @mcp.tool(title="Run read-only shell query", annotations=READ_ONLY_TOOL)
+        def shell_query(
+            argv: list[str],
+            cwd: str = "/",
+            timeout_seconds: int = 30,
+            max_bytes: int = 64_000,
+        ) -> dict[str, Any]:
+            """Run exact argv in a transient user service with a read-only filesystem."""
+            return runtime.execute(
+                "shell_query",
+                lambda: runtime.shell.query(argv, cwd, timeout_seconds, max_bytes),
             )
 
     @mcp.tool(title="List attested jobs", annotations=READ_ONLY_TOOL)
