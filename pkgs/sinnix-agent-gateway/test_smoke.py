@@ -696,6 +696,66 @@ def test_agent_worktree_authorization_reaches_runner_boundary(tmp_path: Path) ->
     assert Path(values["--expected-git-common-dir"]).resolve() == (project / ".git").resolve()
 
 
+def test_launch_agent_uses_local_workdir_for_non_git_registered_project(
+    tmp_path: Path,
+) -> None:
+    # A registered project is not required to be a Git checkout (config.py
+    # never enforces that). Before this fix, launch_agent unconditionally
+    # passed --registered-project plus an *empty* --expected-git-common-dir
+    # for such a project -- and the runner's own `${2:?msg}` argument parser
+    # treats an empty value the same as a missing one, so every launch
+    # against a non-Git registered project crashed at argument-parsing time,
+    # before any of the runner's own validation logic ran (reproduced
+    # directly against the runner script; not exercised here since this test
+    # captures argv with a fixture runner rather than invoking the real one).
+    # _authorized_agent_worktree guarantees `worktree` cannot differ from
+    # the registered project in this case (any other requested worktree
+    # fails to validate without a Git common directory to link against), so
+    # --local-workdir is the exact non-attested opt-out for that guarantee,
+    # not a weakening of it.
+    project = tmp_path / "project"
+    project.mkdir()  # deliberately not a Git checkout
+    capture = tmp_path / "runner-argv.json"
+    runner = tmp_path / "runner"
+    runner.write_text(
+        f"#!{sys.executable}\n"
+        "import json, pathlib, sys\n"
+        "args = sys.argv[1:]\n"
+        f"pathlib.Path({str(capture)!r}).write_text(json.dumps(args))\n"
+        "values, i = {}, 0\n"
+        "while i < len(args):\n"
+        "    if args[i] == '--local-workdir':\n"
+        "        values['--local-workdir'] = True\n"
+        "        i += 1\n"
+        "    else:\n"
+        "        values[args[i]] = args[i + 1]\n"
+        "        i += 2\n"
+        "state = pathlib.Path(values['--job-state-dir'])\n"
+        "job = values['--job-id']\n"
+        "launch = values['--launch-id']\n"
+        "(state / f'{job}.json').write_text(json.dumps({'schema_version': 3, 'job_id': job, 'launch_id': launch}))\n"
+    )
+    runner.chmod(0o700)
+    cfg = GatewayConfig(
+        state_dir=tmp_path / "state",
+        projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
+        agent_runner=runner,
+    )
+    runtime = Runtime.create(cfg, "agent-control")
+
+    result = runtime.jobs.launch_agent(
+        AgentLaunchRequest(project_id="fixture", prompt="prompt", backend="codex")
+    )
+    args = json.loads(capture.read_text())
+    assert result["accepted"] is True
+    assert "--local-workdir" in args
+    assert "--registered-project" not in args
+    assert "--expected-git-common-dir" not in args
+    # The crash-inducing case: an empty string ever reaching argv as a flag
+    # value that the runner's `${var:?msg}` parser would reject.
+    assert "" not in args
+
+
 def test_agent_overlay_is_deferred_before_secret_state_is_created(
     tmp_path: Path,
 ) -> None:

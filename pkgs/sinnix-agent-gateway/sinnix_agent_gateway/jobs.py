@@ -248,11 +248,37 @@ class JobService:
             check=False,
             text=True,
         )
-        expected_git_common_dir = ""
-        if common_result.returncode == 0:
-            expected_git_common_dir = str(Path(common_result.stdout.strip()).resolve())
         if not self.config.agent_runner.is_file():
             raise JobError("agent runner is unavailable")
+
+        if common_result.returncode == 0:
+            # A Git-backed registered project: the runner attests --workdir
+            # against --registered-project/--expected-git-common-dir. This is
+            # the only case where a linked worktree other than the registered
+            # project itself could have been authorized above.
+            expected_git_common_dir = str(Path(common_result.stdout.strip()).resolve())
+            identity_args = [
+                "--registered-project",
+                str(project.path.resolve()),
+                "--expected-git-common-dir",
+                expected_git_common_dir,
+            ]
+        else:
+            # project.path is not a Git checkout at all, so there is no
+            # worktree concept to attest -- and none was authorized above:
+            # _authorized_agent_worktree only returns a path other than the
+            # registered project itself after validating it as a linked Git
+            # worktree, which is impossible when the registered project has
+            # no Git common directory of its own to link against. `worktree`
+            # is therefore guaranteed to equal project.path.resolve() here,
+            # so this is exactly the runner's explicit non-attested opt-out
+            # for a caller-trusted directory, not a weakening of the
+            # attestation boundary. (Passing an empty --expected-git-common-dir
+            # instead -- the prior behavior -- made the runner's own argument
+            # parser abort on every launch against a non-Git registered
+            # project: `${2:?msg}` treats an empty value the same as a
+            # missing one.)
+            identity_args = ["--local-workdir"]
 
         job_id = str(uuid.uuid4())
         launch_id = secrets.token_hex(16)
@@ -267,10 +293,7 @@ class JobService:
             request.backend,
             "--workdir",
             str(worktree),
-            "--registered-project",
-            str(project.path.resolve()),
-            "--expected-git-common-dir",
-            expected_git_common_dir,
+            *identity_args,
             "--prompt-file",
             str(prompt_path),
             "--log-file",
