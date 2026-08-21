@@ -366,10 +366,27 @@ build_runner_cmd() {
   local -n out_cmd="$1"
   local prompt_name="$2" prompt_file="$3" log_file="$4" last_file="$5" json_file="$6" task_workdir="$7"
 
+  # run_agent_prompt.sh requires --registered-project/--expected-git-common-dir
+  # together (that pairing is its own authorization boundary, mirroring what
+  # the gateway's JobService always supplies). This script has no separate
+  # "registered project" concept of its own -- a direct launch is
+  # self-authorizing to whatever worktree the caller already trusted enough
+  # to pass as --workdir -- so it registers the task's own worktree against
+  # itself: the runner still verifies task_workdir is a real, uncorrupted Git
+  # worktree with a consistent Git common directory before it runs anything.
+  local registered_project git_common_dir
+  registered_project="$(cd "${task_workdir}" && pwd -P)"
+  git_common_dir="$(git -C "${registered_project}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || {
+    echo "launch_agent_tabs.sh: ${prompt_name}: --workdir is not a Git checkout: ${task_workdir}" >&2
+    return 1
+  }
+
   out_cmd=(
     "${runner}"
     --agent "${agent}"
     --workdir "${task_workdir}"
+    --registered-project "${registered_project}"
+    --expected-git-common-dir "${git_common_dir}"
     --prompt-file "${prompt_file}"
     --log-file "${log_file}"
   )
