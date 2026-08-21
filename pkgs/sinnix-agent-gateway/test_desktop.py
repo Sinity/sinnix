@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from sinnix_agent_gateway.artifacts import ArtifactError, ArtifactService
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.desktop import DesktopService
@@ -19,7 +20,15 @@ def desktop_service(tmp_path: Path, principal_name: str) -> tuple[DesktopService
         "import json, pathlib, sys\n"
         f"with pathlib.Path({str(captured)!r}).open('a') as output:\n"
         "    output.write(json.dumps(sys.argv[1:]) + '\\n')\n"
-        "print(json.dumps({'address': '0xfixture'}))\n"
+        "if sys.argv[1] == 'capture-output':\n"
+        "    output_dir = pathlib.Path(sys.argv[sys.argv.index('--out-dir') + 1])\n"
+        "    raw = output_dir / 'gateway-raw.png'\n"
+        "    corrected = output_dir / 'gateway-corrected.png'\n"
+        "    raw.write_bytes(b'raw fixture')\n"
+        "    corrected.write_bytes(b'corrected fixture')\n"
+        "    print(json.dumps({'raw_files': [str(raw)], 'corrected_files': [str(corrected)], 'color_management': {'hdr': True}}))\n"
+        "else:\n"
+        "    print(json.dumps({'address': '0xfixture'}))\n"
     )
     runner.chmod(0o700)
     config = GatewayConfig(
@@ -28,7 +37,8 @@ def desktop_service(tmp_path: Path, principal_name: str) -> tuple[DesktopService
         hypr_control_command=str(runner),
         screenshot_control_command=str(runner),
     )
-    return DesktopService(config, Principal.for_name(principal_name)), captured
+    principal = Principal.for_name(principal_name)
+    return DesktopService(config, principal, ArtifactService(config, principal)), captured
 
 
 def commands(path: Path) -> list[list[str]]:
@@ -77,3 +87,38 @@ def test_observer_cannot_take_desktop_action(tmp_path: Path) -> None:
 
     with pytest.raises(PolicyError, match="desktop.action"):
         desktop.action("focus_window", {"window": "address:0xfixture"})
+
+
+def test_artifact_rejects_unreceipted_capture_source(tmp_path: Path) -> None:
+    desktop, _ = desktop_service(tmp_path, "observer")
+    source = desktop.config.state_dir / "captures" / "unreceipted.png"
+    source.write_bytes(b"fixture")
+
+    with pytest.raises(ArtifactError, match="outside attested gateway state"):
+        desktop.artifacts.register(
+            source,
+            kind="desktop-screenshot",
+            owner_id="desktop-capture",
+        )
+
+
+def test_desktop_capture_registers_raw_and_corrected_artifacts(tmp_path: Path) -> None:
+    desktop, captured = desktop_service(tmp_path, "observer")
+
+    result = desktop.capture_output()
+    artifacts = [desktop.artifacts.read(artifact_id) for artifact_id in result["artifact_ids"]]
+    bounded = desktop.artifacts.read(result["artifact_ids"][0], max_bytes=3)
+
+    assert result["capture"]["fix_hdr"] is True
+    assert result["receipt"]["source"] == "desktop-output"
+    assert result["receipt"]["target"] == {"kind": "current-output"}
+    assert [artifact["base64"] for artifact in artifacts] == [
+        "cmF3IGZpeHR1cmU=",
+        "Y29ycmVjdGVkIGZpeHR1cmU=",
+    ]
+    assert bounded["base64"] == "cmF3"
+    assert bounded["next_offset"] == 3
+    assert "source" not in bounded
+    assert commands(captured)[0][0] == "capture-output"
+    assert "--fix-hdr" in commands(captured)[0]
+    assert "activate" not in commands(captured)[0]

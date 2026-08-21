@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from sinnix_agent_gateway.artifacts import ArtifactService
 from sinnix_agent_gateway.browser import BrowserError, BrowserService
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
@@ -21,6 +22,9 @@ def browser_service(tmp_path: Path, principal_name: str) -> tuple[BrowserService
         "    output.write(json.dumps(sys.argv[1:]) + '\\n')\n"
         "if sys.argv[1] == 'agent-window':\n"
         "    print(json.dumps({'id': 'agent-target', 'parked': True}))\n"
+        "elif sys.argv[1] == 'screenshot':\n"
+        "    pathlib.Path(sys.argv[sys.argv.index('--out') + 1]).write_bytes(b'PNG fixture')\n"
+        "    print(json.dumps({'ok': True}))\n"
         "else:\n"
         "    print(json.dumps({'ok': True}))\n"
     )
@@ -30,7 +34,8 @@ def browser_service(tmp_path: Path, principal_name: str) -> tuple[BrowserService
         projects={},
         chrome_control_command=str(runner),
     )
-    return BrowserService(config, Principal.for_name(principal_name)), captured
+    principal = Principal.for_name(principal_name)
+    return BrowserService(config, principal, ArtifactService(config, principal)), captured
 
 
 def commands(path: Path) -> list[list[str]]:
@@ -98,3 +103,45 @@ def test_observer_cannot_create_or_operate_browser_window(tmp_path: Path) -> Non
 
     with pytest.raises(PolicyError, match="browser.action"):
         browser.action("agent_window", {})
+
+
+def test_browser_capture_registers_only_owned_target_as_artifact(tmp_path: Path) -> None:
+    browser, captured = browser_service(tmp_path, "operator")
+
+    browser.action("agent_window", {})
+    result = browser.capture("agent-target", full_page=True)
+    artifact = browser.artifacts.read(result["artifact_id"])
+
+    assert result["page_id"] == "agent-target"
+    assert result["receipt"]["source"] == "chrome-cdp"
+    assert result["receipt"]["target"] == {
+        "kind": "gateway-owned-browser-target",
+        "page_id": "agent-target",
+    }
+    assert result["artifact"]["content_type"] == "image/png"
+    assert artifact["base64"] == "UE5HIGZpeHR1cmU="
+    assert commands(captured) == [
+        ["agent-window"],
+        [
+            "screenshot",
+            "agent-target",
+            "--format",
+            "png",
+            "--out",
+            str(
+                next((tmp_path / "state" / "captures").glob("*/browser.png"))
+            ),
+            "--full-page",
+        ],
+    ]
+
+
+def test_browser_capture_rejects_existing_operator_target_before_invocation(
+    tmp_path: Path,
+) -> None:
+    browser, captured = browser_service(tmp_path, "operator")
+
+    with pytest.raises(BrowserError, match="gateway-created agent window"):
+        browser.capture("operator-page")
+
+    assert not captured.exists()

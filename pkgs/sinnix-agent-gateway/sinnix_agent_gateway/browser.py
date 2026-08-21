@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import subprocess
 import tempfile
@@ -8,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
 
@@ -17,9 +19,12 @@ class BrowserError(ValueError):
 
 
 class BrowserService:
-    def __init__(self, config: GatewayConfig, principal: Principal):
+    def __init__(
+        self, config: GatewayConfig, principal: Principal, artifacts: ArtifactService
+    ):
         self.config = config
         self.principal = principal
+        self.artifacts = artifacts
 
     @property
     def _targets_path(self) -> Path:
@@ -90,6 +95,74 @@ class BrowserService:
                 "browser action target is not a gateway-created agent window"
             )
         return page_id
+
+    def capture(
+        self,
+        page_id: str,
+        image_format: str = "png",
+        full_page: bool = False,
+        quality: int | None = None,
+    ) -> dict[str, Any]:
+        self.principal.require(Capability.BROWSER_READ)
+        page_id = self._require_owned_target(page_id)
+        if image_format not in {"png", "jpeg"}:
+            raise BrowserError("image_format must be png or jpeg")
+        if not isinstance(full_page, bool):
+            raise BrowserError("full_page must be boolean")
+        if quality is not None and (
+            isinstance(quality, bool) or not isinstance(quality, int) or not 1 <= quality <= 100
+        ):
+            raise BrowserError("quality must be 1-100")
+        capture_dir = self.config.state_dir / "captures" / uuid.uuid4().hex
+        capture_dir.mkdir(mode=0o700, parents=True)
+        source = capture_dir / f"browser.{image_format}"
+        command = [
+            "screenshot",
+            page_id,
+            "--format",
+            image_format,
+            "--out",
+            str(source),
+        ]
+        if full_page:
+            command.append("--full-page")
+        if quality is not None:
+            command.extend(["--quality", str(quality)])
+        self._run(command)
+        try:
+            source = source.resolve(strict=True)
+        except OSError as exc:
+            raise BrowserError("Chrome control did not produce its declared screenshot") from exc
+        if capture_dir.resolve() not in source.parents or not source.is_file():
+            raise BrowserError("Chrome control returned a file outside gateway capture state")
+        receipt = self.artifacts.attest_capture(
+            capture_dir,
+            source="chrome-cdp",
+            target={"kind": "gateway-owned-browser-target", "page_id": page_id},
+            files=[source],
+        )
+        artifact_id = self.artifacts.register(
+            source,
+            kind="browser-screenshot",
+            owner_id="browser-capture",
+        )
+        return {
+            "operation": "screenshot",
+            "page_id": page_id,
+            "artifact_id": artifact_id,
+            "artifact": {
+                "artifact_id": artifact_id,
+                "bytes": source.stat().st_size,
+                "content_type": mimetypes.guess_type(source.name)[0]
+                or "application/octet-stream",
+            },
+            "receipt": {
+                "capture_id": receipt["capture_id"],
+                "source": receipt["source"],
+                "target": receipt["target"],
+            },
+            "capture": {"image_format": image_format, "full_page": full_page},
+        }
 
     def read(
         self,

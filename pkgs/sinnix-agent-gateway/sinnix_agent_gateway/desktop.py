@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import subprocess
 import tempfile
+import uuid
+from pathlib import Path
 from typing import Any
 
+from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
 
@@ -24,9 +28,12 @@ class DesktopService:
         "color_probe": ("screenshot", "probe"),
     }
 
-    def __init__(self, config: GatewayConfig, principal: Principal):
+    def __init__(
+        self, config: GatewayConfig, principal: Principal, artifacts: ArtifactService
+    ):
         self.config = config
         self.principal = principal
+        self.artifacts = artifacts
 
     def _command(self, owner: str, arguments: list[str]) -> list[str]:
         if owner == "hypr":
@@ -67,6 +74,71 @@ class DesktopService:
         if not isinstance(value, str) or not value or len(value) > maximum:
             raise DesktopError(f"{name} must be a non-empty string")
         return value
+
+    def capture_output(self, fix_hdr: bool = True) -> dict[str, Any]:
+        self.principal.require(Capability.DESKTOP_READ)
+        if not isinstance(fix_hdr, bool):
+            raise DesktopError("fix_hdr must be boolean")
+        capture_dir = self.config.state_dir / "captures" / uuid.uuid4().hex
+        capture_dir.mkdir(mode=0o700, parents=True)
+        arguments = ["capture-output", "--out-dir", str(capture_dir), "--name", "gateway"]
+        if fix_hdr:
+            arguments.append("--fix-hdr")
+        result = self._run("screenshot", arguments)
+        response = result["result"]
+        if not isinstance(response, dict):
+            raise DesktopError("screenshot control did not return capture metadata")
+        files_by_variant = []
+        for variant, key in (("raw", "raw_files"), ("corrected", "corrected_files")):
+            files = response.get(key, [])
+            if not isinstance(files, list):
+                raise DesktopError("screenshot control returned malformed capture metadata")
+            for value in files:
+                if not isinstance(value, str):
+                    raise DesktopError("screenshot control returned malformed capture metadata")
+                try:
+                    source = Path(value).resolve(strict=True)
+                except OSError as exc:
+                    raise DesktopError("screenshot control did not produce its declared file") from exc
+                if capture_dir.resolve() not in source.parents or not source.is_file():
+                    raise DesktopError("screenshot control returned a file outside gateway capture state")
+                files_by_variant.append((variant, source))
+        if not files_by_variant:
+            raise DesktopError("screenshot control did not produce any capture files")
+        receipt = self.artifacts.attest_capture(
+            capture_dir,
+            source="desktop-output",
+            target={"kind": "current-output"},
+            files=[source for _, source in files_by_variant],
+        )
+        artifacts = [
+            {
+                "artifact_id": self.artifacts.register(
+                    source,
+                    kind="desktop-screenshot",
+                    owner_id="desktop-capture",
+                ),
+                "variant": variant,
+                "bytes": source.stat().st_size,
+                "content_type": mimetypes.guess_type(source.name)[0]
+                or "application/octet-stream",
+            }
+            for variant, source in files_by_variant
+        ]
+        return {
+            "operation": "capture_output",
+            "artifact_ids": [artifact["artifact_id"] for artifact in artifacts],
+            "artifacts": artifacts,
+            "receipt": {
+                "capture_id": receipt["capture_id"],
+                "source": receipt["source"],
+                "target": receipt["target"],
+            },
+            "capture": {
+                "fix_hdr": fix_hdr,
+                "color_management": response.get("color_management"),
+            },
+        }
 
     def read(self, operation: str) -> dict[str, Any]:
         self.principal.require(Capability.DESKTOP_READ)

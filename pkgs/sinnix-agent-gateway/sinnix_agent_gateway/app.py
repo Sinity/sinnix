@@ -94,9 +94,9 @@ class Runtime:
             jobs=JobService(config, principal, artifacts),
             observe=ObserveService(config, principal),
             machine_actions=MachineActionService(config, principal),
-            desktop=DesktopService(config, principal),
+            desktop=DesktopService(config, principal, artifacts),
             terminals=TerminalService(config, principal),
-            browser=BrowserService(config, principal),
+            browser=BrowserService(config, principal, artifacts),
             capability_index=CapabilityIndexService(config, principal),
             captures=CaptureService(config, principal),
             files=HostFileService(config, principal),
@@ -117,6 +117,11 @@ class Runtime:
                 value = result.get(key)
                 if isinstance(value, (str, int, float, bool)):
                     payload[key] = value
+            artifact_ids = result.get("artifact_ids")
+            if isinstance(artifact_ids, list) and all(
+                isinstance(value, str) for value in artifact_ids
+            ):
+                payload["artifact_ids"] = artifact_ids
             if "job_id" in payload:
                 payload["correlation_id"] = payload["job_id"]
         self.audit.append(operation, "ok", payload)
@@ -249,6 +254,15 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 "desktop_read", lambda: runtime.desktop.read(operation)
             )
 
+    if Capability.DESKTOP_READ in runtime.principal.capabilities:
+
+        @mcp.tool(title="Capture desktop output", annotations=READ_ONLY_TOOL)
+        def desktop_capture(fix_hdr: bool = True) -> dict[str, Any]:
+            """Capture the current output into opaque artifacts without changing desktop focus."""
+            return runtime.execute(
+                "desktop_capture", lambda: runtime.desktop.capture_output(fix_hdr)
+            )
+
     if Capability.DESKTOP_ACTION in runtime.principal.capabilities:
 
         @mcp.tool(title="Run desktop action", annotations=DESTRUCTIVE_TOOL)
@@ -290,6 +304,23 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             return runtime.execute(
                 "browser_read",
                 lambda: runtime.browser.read(operation, page_id, selector),
+            )
+
+    if Capability.BROWSER_READ in runtime.principal.capabilities:
+
+        @mcp.tool(title="Capture owned browser target", annotations=READ_ONLY_TOOL)
+        def browser_capture(
+            page_id: str,
+            image_format: str = "png",
+            full_page: bool = False,
+            quality: int | None = None,
+        ) -> dict[str, Any]:
+            """Capture only a gateway-created hidden Chrome target as an opaque artifact."""
+            return runtime.execute(
+                "browser_capture",
+                lambda: runtime.browser.capture(
+                    page_id, image_format, full_page, quality
+                ),
             )
 
     if Capability.BROWSER_ACTION in runtime.principal.capabilities:
