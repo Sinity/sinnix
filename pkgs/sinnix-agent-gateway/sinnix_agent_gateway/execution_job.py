@@ -126,6 +126,7 @@ class ExecutionJob:
             "launcher": {
                 "pid": os.getpid(),
                 "proc_start": proc_start(os.getpid()),
+                "cwd": str(Path.cwd().resolve()),
                 "scope_unit": self.args.scope_unit,
                 "cgroup": current_cgroup(),
             },

@@ -543,18 +543,19 @@ class JobService:
 
     def _cancel_shell(self, job_id: str, manifest: dict[str, Any]) -> dict[str, Any]:
         launcher = manifest.get("launcher")
-        command = manifest.get("command")
-        if not isinstance(launcher, dict) or not isinstance(command, dict):
+        if not isinstance(launcher, dict):
             raise JobError("unattested execution job manifest")
         unit = launcher.get("scope_unit")
         cgroup = launcher.get("cgroup")
         pid = launcher.get("pid")
         start = launcher.get("proc_start")
-        cwd = command.get("cwd")
+        launcher_cwd = launcher.get("cwd")
         expected_unit = f"sinnix-gateway-exec-{job_id}.scope"
         if unit != expected_unit or not isinstance(cgroup, str) or not cgroup:
             raise JobError("execution job scope identity is invalid")
-        if not isinstance(pid, int) or not isinstance(start, str) or not isinstance(cwd, str):
+        if not isinstance(pid, int) or not isinstance(start, str):
+            raise JobError("execution job launcher identity is invalid")
+        if launcher_cwd is not None and not isinstance(launcher_cwd, str):
             raise JobError("execution job launcher identity is invalid")
         if manifest.get("lifecycle") == "cancelled":
             return {"job_id": job_id, "cancelled": True, "already_terminal": True}
@@ -567,12 +568,13 @@ class JobService:
             raise JobError("execution job is not live")
         if self._proc_start(pid) != start or self._cgroup_for_pid(pid) != cgroup:
             raise JobError("execution job process identity no longer matches")
-        try:
-            actual_cwd = str(Path(f"/proc/{pid}/cwd").resolve(strict=True))
-        except OSError as exc:
-            raise JobError("execution job working directory is unavailable") from exc
-        if actual_cwd != str(Path(cwd).resolve()):
-            raise JobError("execution job working directory no longer matches")
+        if launcher_cwd is not None:
+            try:
+                actual_cwd = str(Path(f"/proc/{pid}/cwd").resolve(strict=True))
+            except OSError as exc:
+                raise JobError("execution job working directory is unavailable") from exc
+            if actual_cwd != str(Path(launcher_cwd).resolve()):
+                raise JobError("execution job launcher directory no longer matches")
         live = self._shell_live(unit)
         if not live.get("available") or live.get("ControlGroup") != cgroup:
             raise JobError("execution job systemd identity no longer matches")
