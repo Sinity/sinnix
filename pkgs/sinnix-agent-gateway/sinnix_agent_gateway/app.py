@@ -41,6 +41,17 @@ DESTRUCTIVE_TOOL = ToolAnnotations(
 )
 
 
+def canonical_manifest(tools: list[Any]) -> dict[str, Any]:
+    rows = [
+        tool.model_dump(by_alias=True, exclude_none=True, mode="json") for tool in tools
+    ]
+    rows.sort(key=lambda row: row["name"])
+    payload = {"schema": "sinnix.gateway-tools.v1", "tools": rows}
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    payload["sha256"] = hashlib.sha256(encoded).hexdigest()
+    return payload
+
+
 @dataclass
 class Runtime:
     principal_name: str
@@ -122,13 +133,15 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         )
 
     @mcp.tool(title="Gateway status", annotations=READ_ONLY_TOOL)
-    def gateway_status() -> dict[str, Any]:
-        """Return the active principal, transport, runtime state, and contract hash."""
+    async def gateway_status() -> dict[str, Any]:
+        """Return principal, manifest provenance, transport, runtime state, and contract hash."""
+        manifest = canonical_manifest(await mcp.list_tools())
         return runtime.execute(
             "gateway_status",
             lambda: runtime.observe.gateway_status(
                 principal_name,
                 _principal_contract(principal_name),
+                manifest["sha256"],
             ),
         )
 

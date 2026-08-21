@@ -109,6 +109,15 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert "project_read" in names
                 assert "project_write" not in names
                 assert "agent_launch" not in names
+                result = await session.call_tool("gateway_status", {})
+                status = json.loads(result.content[0].text)
+                assert status["principal"] == "observer"
+                assert status["manifests"]["live_server"]["sha256"]
+                assert status["manifests"]["comparisons"] == {
+                    "live_to_nix_approved": "unobserved",
+                    "live_to_chatgpt_observed": "unobserved",
+                    "nix_approved_to_chatgpt_observed": "unobserved",
+                }
 
     anyio.run(probe)
 
@@ -269,11 +278,66 @@ def test_runtime_audit_carries_returned_job_correlation(tmp_path: Path) -> None:
     assert payload == {"job_id": "job-correlation", "correlation_id": "job-correlation"}
 
 
-def test_gateway_status_exposes_gated_remote_manifest_hash(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
-    status = runtime.observe.gateway_status("observer", "capability-hash")
-    assert status["manifest_hash"] == "approved-fixture-hash"
+def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    runtime = Runtime.create(cfg, "observer")
+    status = runtime.observe.gateway_status(
+        "observer", "capability-hash", "approved-fixture-hash"
+    )
     assert status["capability_contract_hash"] == "capability-hash"
+    assert status["manifests"]["comparisons"] == {
+        "live_to_nix_approved": "match",
+        "live_to_chatgpt_observed": "unobserved",
+        "nix_approved_to_chatgpt_observed": "unobserved",
+    }
+
+    snapshot = cfg.state_dir / "connector-snapshot.json"
+    snapshot.write_text(
+        json.dumps(
+            {
+                "schema": "sinnix.gateway-connector-snapshot.v1",
+                "principal": "observer",
+                "manifest_sha256": "approved-fixture-hash",
+            }
+        )
+    )
+    status = runtime.observe.gateway_status(
+        "observer", "capability-hash", "approved-fixture-hash"
+    )
+    assert set(status["manifests"]["comparisons"].values()) == {"match"}
+
+    snapshot.write_text(
+        json.dumps(
+            {
+                "schema": "sinnix.gateway-connector-snapshot.v1",
+                "principal": "observer",
+                "manifest_sha256": "stale-hash",
+            }
+        )
+    )
+    status = runtime.observe.gateway_status(
+        "observer", "capability-hash", "approved-fixture-hash"
+    )
+    assert status["manifests"]["comparisons"] == {
+        "live_to_nix_approved": "match",
+        "live_to_chatgpt_observed": "mismatch",
+        "nix_approved_to_chatgpt_observed": "mismatch",
+    }
+
+
+def test_gateway_status_keeps_unapproved_principal_unobserved(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "operator")
+
+    status = runtime.observe.gateway_status(
+        "operator", "capability-hash", "operator-live-hash"
+    )
+
+    assert status["manifests"]["nix_approved"] is None
+    assert status["manifests"]["comparisons"] == {
+        "live_to_nix_approved": "unobserved",
+        "live_to_chatgpt_observed": "unobserved",
+        "nix_approved_to_chatgpt_observed": "unobserved",
+    }
 
 
 def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:

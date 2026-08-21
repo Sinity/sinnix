@@ -38,6 +38,8 @@ class GatewayConfig:
     observe_command: str = "sinnix-observe"
     max_result_bytes: int = 262_144
     approved_manifest_hash: str | None = None
+    approved_manifest_principal: str = "observer"
+    connector_snapshot_path: Path | None = None
     capture_command: str = "sinnix-capture"
     captures_root: Path = Path("/realm/data/captures")
 
@@ -75,6 +77,12 @@ class GatewayConfig:
             observe_command=raw.get("observeCommand", "sinnix-observe"),
             max_result_bytes=int(raw.get("maxResultBytes", 262_144)),
             approved_manifest_hash=raw.get("approvedManifestHash"),
+            approved_manifest_principal=raw.get(
+                "approvedManifestPrincipal", "observer"
+            ),
+            connector_snapshot_path=Path(raw["connectorSnapshotPath"])
+            if "connectorSnapshotPath" in raw
+            else None,
             capture_command=raw.get("captureCommand", "sinnix-capture"),
             captures_root=Path(raw.get("capturesRoot", "/realm/data/captures")),
         )

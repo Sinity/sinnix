@@ -1,29 +1,14 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any
-
 import anyio
 
-from .app import create_server
+from .app import canonical_manifest, create_server
 from .capabilities import PRINCIPAL_CAPABILITIES
 from .config import GatewayConfig
-
-
-def canonical_manifest(tools: list[Any]) -> dict[str, Any]:
-    rows = [
-        tool.model_dump(by_alias=True, exclude_none=True, mode="json") for tool in tools
-    ]
-    rows.sort(key=lambda row: row["name"])
-    payload = {"schema": "sinnix.gateway-tools.v1", "tools": rows}
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    payload["sha256"] = hashlib.sha256(encoded).hexdigest()
-    return payload
-
 
 async def build_manifest(config: GatewayConfig, principal_name: str) -> dict[str, Any]:
     return canonical_manifest(await create_server(config, principal_name).list_tools())
