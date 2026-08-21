@@ -12,6 +12,38 @@ let
   jsonFormat = pkgs.formats.json { };
   gatewayBin = "${scriptPkgs.sinnix-agent-gateway}/bin/sinnix-agent-gateway";
   tunnelClient = scriptPkgs.tunnel-client;
+  brokeredMcpServers = [
+    "lynchpin"
+    "polylogue"
+    "sinex"
+  ];
+  mcpBrokerServers = lib.mapAttrs (
+    name: server:
+    let
+      brokered = builtins.elem name brokeredMcpServers;
+      profile = (server.profiles or { }).lean or { };
+    in
+    {
+      inherit (server) description transport tier;
+      inherit brokered;
+    }
+    // lib.optionalAttrs brokered {
+      command = server.command;
+      args = profile.args or server.args or [ ];
+      env = server.env or { };
+    }
+    // lib.optionalAttrs (!brokered) {
+      reason =
+        if name == "agent-control" then
+          "excluded to avoid recursive gateway job authority"
+        else if name == "chrome-devtools" then
+          "excluded to preserve gateway-owned browser-target isolation"
+        else if server.transport != "stdio" then
+          "transport requires an explicit remote credential contract"
+        else
+          "not admitted to the initial broker route";
+    }
+  ) helpers.data.mcpRegistry.registry;
 in
 mkServiceModule {
   name = "agent-gateway";
@@ -81,6 +113,7 @@ mkServiceModule {
         executionJobCommand = "${scriptPkgs.sinnix-agent-gateway}/bin/sinnix-agent-gateway-execution-job";
         observeCommand = "${scriptPkgs.sinnix-observe}/bin/sinnix-observe";
         beadsCommand = "${scriptPkgs.beads}/bin/bd";
+        mcpBrokerServers = mcpBrokerServers;
         projects = config.sinnix.projects.entries;
       };
       mcpWrapper = pkgs.writeShellScriptBin "sinnix-agent-gateway-mcp" ''

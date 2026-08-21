@@ -29,6 +29,8 @@ class Capability(StrEnum):
     SHELL_RUN = "shell.run"
     TASK_READ = "task.read"
     TASK_WRITE = "task.write"
+    MCP_READ = "mcp.read"
+    MCP_WRITE = "mcp.write"
 
 
 PRINCIPAL_CAPABILITIES: dict[str, frozenset[Capability]] = {
@@ -48,6 +50,7 @@ PRINCIPAL_CAPABILITIES: dict[str, frozenset[Capability]] = {
             Capability.SESSION_READ,
             Capability.SHELL_QUERY,
             Capability.TASK_READ,
+            Capability.MCP_READ,
         }
     ),
     "agent-control": frozenset(
