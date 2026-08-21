@@ -124,6 +124,7 @@ class GatewayConfig:
             self.state_dir,
             self.state_dir / "audit",
             self.state_dir / "artifacts",
+            self.state_dir / "captures",
             self.state_dir / "jobs",
             self.state_dir / "legacy",
         ):

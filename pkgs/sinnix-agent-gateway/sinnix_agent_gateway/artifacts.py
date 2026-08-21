@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import mimetypes
+import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -22,11 +23,67 @@ class ArtifactService:
         config.initialize_state()
         self.root = config.state_dir / "artifacts"
 
+    def _source_is_attested(self, source: Path) -> bool:
+        jobs_root = (self.config.state_dir / "jobs").resolve()
+        if source != jobs_root and jobs_root in source.parents:
+            return True
+        captures_root = (self.config.state_dir / "captures").resolve()
+        if source == captures_root or captures_root not in source.parents:
+            return False
+        try:
+            receipt = json.loads((source.parent / "receipt.json").read_text())
+        except (OSError, json.JSONDecodeError):
+            return False
+        return (
+            receipt.get("schema") == "sinnix.gateway-capture-receipt.v1"
+            and isinstance(receipt.get("capture_id"), str)
+            and isinstance(receipt.get("files"), list)
+            and source.name in receipt["files"]
+        )
+
+    def attest_capture(
+        self,
+        directory: Path,
+        *,
+        source: str,
+        target: dict[str, Any],
+        files: list[Path],
+    ) -> dict[str, Any]:
+        directory = directory.resolve(strict=True)
+        captures_root = (self.config.state_dir / "captures").resolve()
+        if directory == captures_root or captures_root not in directory.parents:
+            raise ArtifactError("capture directory is outside attested gateway state")
+        if not isinstance(source, str) or not source or not isinstance(target, dict):
+            raise ArtifactError("capture receipt is malformed")
+        names = []
+        for file in files:
+            file = file.resolve(strict=True)
+            if file.parent != directory or not file.is_file():
+                raise ArtifactError("capture file is outside its declared capture directory")
+            names.append(file.name)
+        if not names or len(names) != len(set(names)):
+            raise ArtifactError("capture receipt must identify distinct files")
+        receipt = {
+            "schema": "sinnix.gateway-capture-receipt.v1",
+            "capture_id": str(uuid.uuid4()),
+            "source": source,
+            "target": target,
+            "files": names,
+        }
+        output = directory / "receipt.json"
+        temporary = directory / f".{output.name}.{uuid.uuid4().hex}.tmp"
+        try:
+            temporary.write_text(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
+            temporary.chmod(0o600)
+            os.replace(temporary, output)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return receipt
+
     def register(self, source: Path, *, kind: str, owner_id: str) -> str:
         source = source.resolve(strict=True)
-        jobs_root = (self.config.state_dir / "jobs").resolve()
-        if source != jobs_root and jobs_root not in source.parents:
-            raise ArtifactError("artifact source is outside attested job state")
+        if not source.is_file() or not self._source_is_attested(source):
+            raise ArtifactError("artifact source is outside attested gateway state")
         artifact_id = str(uuid.uuid4())
         directory = self.root / artifact_id
         directory.mkdir(mode=0o700)
@@ -55,8 +112,7 @@ class ArtifactService:
         except (FileNotFoundError, json.JSONDecodeError) as exc:
             raise ArtifactError("unknown or malformed artifact") from exc
         source = Path(metadata["source"]).resolve(strict=True)
-        jobs_root = (self.config.state_dir / "jobs").resolve()
-        if jobs_root not in source.parents or not source.is_file():
+        if not source.is_file() or not self._source_is_attested(source):
             raise ArtifactError("artifact source is no longer valid")
         metadata["_source"] = source
         return metadata
