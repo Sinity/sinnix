@@ -67,6 +67,34 @@ def test_observer_reads_beads_through_readonly_native_command(tmp_path: Path) ->
     ]
 
 
+def test_beads_keeps_native_stderr_separate_from_json_response(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    runner = tmp_path / "bd"
+    runner.write_text(
+        f"#!{sys.executable}\n"
+        "import json, sys\n"
+        "print('native warning', file=sys.stderr)\n"
+        "print(json.dumps({'issues': [{'id': 'fixture-1'}]}))\n"
+    )
+    runner.chmod(0o700)
+    config = GatewayConfig(
+        state_dir=tmp_path / "state",
+        projects={
+            "fixture": ProjectConfig(
+                project_id="fixture", path=project, observer_read=True
+            )
+        },
+        beads_command=str(runner),
+    )
+
+    result = BeadsService(config, Principal.for_name("observer")).read(
+        "fixture", "ready", {"limit": 20}
+    )
+
+    assert result["result"] == {"issues": [{"id": "fixture-1"}]}
+
+
 def test_operator_create_uses_append_notes_not_replacement(tmp_path: Path) -> None:
     beads, captured = beads_service(tmp_path, "operator")
 

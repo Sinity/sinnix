@@ -72,30 +72,40 @@ class BeadsService:
             cwd=project.path,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             env=environment,
             start_new_session=True,
         )
         assert process.stdout is not None
+        assert process.stderr is not None
         deadline = time.monotonic() + 30
-        data = bytearray()
+        stdout = bytearray()
+        stderr = bytearray()
+        streams = {
+            process.stdout.fileno(): stdout,
+            process.stderr.fileno(): stderr,
+        }
         bounded = False
         try:
-            while len(data) <= self.config.max_result_bytes:
+            while streams:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise subprocess.TimeoutExpired(command, 30)
-                ready, _, _ = select.select([process.stdout], [], [], remaining)
+                ready, _, _ = select.select(list(streams), [], [], remaining)
                 if not ready:
                     raise subprocess.TimeoutExpired(command, 30)
-                chunk = os.read(
-                    process.stdout.fileno(),
-                    min(65_536, self.config.max_result_bytes + 1 - len(data)),
-                )
-                if not chunk:
+                for descriptor in ready:
+                    destination = streams[descriptor]
+                    chunk = os.read(descriptor, 65_536)
+                    if not chunk:
+                        del streams[descriptor]
+                        continue
+                    destination.extend(chunk)
+                    if len(stdout) + len(stderr) > self.config.max_result_bytes:
+                        bounded = True
+                        break
+                if bounded:
                     break
-                data.extend(chunk)
-            bounded = len(data) > self.config.max_result_bytes
             if bounded:
                 if process.poll() is None:
                     os.killpg(process.pid, signal.SIGTERM)
@@ -113,9 +123,10 @@ class BeadsService:
             raise BeadsError("Beads operation timed out") from exc
         if bounded:
             raise BeadsError("Beads response exceeded response bound")
-        text = data.decode("utf-8", errors="replace")
+        text = stdout.decode("utf-8", errors="replace")
         if result_code != 0:
-            raise BeadsError(text.strip() or "Beads operation failed")
+            error = (stdout + b"\n" + stderr).decode("utf-8", errors="replace").strip()
+            raise BeadsError(error or "Beads operation failed")
         try:
             return json.loads(text)
         except json.JSONDecodeError as exc:
