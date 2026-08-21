@@ -56,7 +56,7 @@ sinnix-agent-gateway --config /etc/sinnix/agent-gateway.json --principal observe
 The common read surface includes:
 
 - `gateway_status`, `machine_report`, `machine_query`, `capability_search`, and `capability_describe`
-- `project_list`, `project_tree`, `project_read`, `project_search`, and `project_diff`
+- `project_list`, `project_context`, `project_tree`, `project_read`, `project_search`, and `project_diff`
 - `files_read` for bounded host-path stat, reads, and directory listings
 - `session_list`, `session_read`, and `session_search` over authoritative Claude Code and Codex JSONL files
 - `memory_search` and `memory_get` for source-preserving semantic access to available raw coding-session memory
@@ -97,6 +97,8 @@ The common read surface includes:
 ## Project and path authority
 
 `sinnix.projects.entries` is the only project registry. It is derived from the existing project paths in `modules/foundation.nix` and rendered into `/etc/sinnix/agent-gateway.json`. `observerRead` controls observer project visibility. It does not govern operator write authority: `operator` receives its project-write capability from its selected principal.
+
+`project_context` composes a project’s native Git status and latest-commit facts with its native bounded Beads ready-work query. A project without a Beads workspace still returns its Git context and labels the task section unavailable with the next route. It does not parse `.beads/issues.jsonl` or keep a gateway task mirror.
 
 Project paths are always relative. Reads and writes reject absolute paths, parent traversal, sensitive path components, and symlink escapes. Tree traversal does not follow symlinks. File reads apply the requested line range before the byte bound, so late ranges do not silently return the beginning of a large file. Git and ripgrep output is written to a temporary file and read back through a fixed response bound instead of being fully buffered in memory.
 

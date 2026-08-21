@@ -129,6 +129,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "mcp_read",
         "mcp_write",
     } <= operator_names
+    assert "project_context" in readonly_names & local_names & operator_names
     assert readonly["sha256"] != local["sha256"] != operator["sha256"]
     assert all(
         "inputSchema" in row and "outputSchema" in row for row in readonly["tools"]
