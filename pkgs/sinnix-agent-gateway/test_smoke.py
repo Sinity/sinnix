@@ -398,6 +398,30 @@ def test_runtime_audit_carries_returned_owner_receipt(tmp_path: Path) -> None:
     assert payload == {"receipt_id": "owner-receipt"}
 
 
+def test_runtime_audit_carries_file_mutation_receipt(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "operator")
+    runtime.execute(
+        "files_write",
+        lambda: {
+            "operation": "replace",
+            "path": "/realm/tmp/work/gateway-demo/fixture.txt",
+            "bytes": 7,
+            "previous_sha256": None,
+            "sha256": "fixture-hash",
+            "secret": "hidden",
+        },
+    )
+
+    payload = runtime.audit.tail(1)["events"][0]["payload"]
+
+    assert payload == {
+        "operation": "replace",
+        "path": "/realm/tmp/work/gateway-demo/fixture.txt",
+        "bytes": 7,
+        "sha256": "fixture-hash",
+    }
+
+
 def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> None:
     cfg = config(tmp_path)
     runtime = Runtime.create(cfg, "observer")
