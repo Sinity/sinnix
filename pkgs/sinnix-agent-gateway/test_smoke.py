@@ -363,6 +363,30 @@ def test_malformed_job_records_are_visible(tmp_path: Path) -> None:
     assert result["malformed_records"][0]["record"] == "broken.json"
 
 
+def test_job_list_preserves_schema_three_manifests(tmp_path: Path) -> None:
+    controller = tmp_path / "agent-job-control"
+    controller.write_text(
+        f"#!{sys.executable}\n"
+        "import pathlib, sys\n"
+        "print((pathlib.Path(sys.argv[2]) / f'{sys.argv[5]}.json').read_text())\n"
+    )
+    controller.chmod(0o700)
+    cfg = dataclasses.replace(config(tmp_path), agent_controller=controller)
+    runtime = Runtime.create(cfg, "agent-control")
+    manifest = {
+        "schema_version": 3,
+        "job_id": "schema-three-job",
+        "lifecycle": "completed",
+        "launcher": {"scope_unit": "sinnix-agent-job-schema-three-job.scope"},
+    }
+    (runtime.jobs.root / "schema-three-job.json").write_text(json.dumps(manifest))
+
+    result = runtime.jobs.list()
+
+    assert [job["job_id"] for job in result["jobs"]] == ["schema-three-job"]
+    assert result["malformed_records"] == []
+
+
 def test_gateway_status_uses_shared_native_controller(tmp_path: Path) -> None:
     controller = tmp_path / "agent-job-control"
     controller.write_text(

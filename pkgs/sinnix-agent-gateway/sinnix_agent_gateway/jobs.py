@@ -273,7 +273,7 @@ class JobService:
             try:
                 value = json.loads(path.read_text())
                 job_id = value.get("job_id")
-                if value.get("schema_version") != 2 or not isinstance(job_id, str):
+                if value.get("schema_version") not in {2, 3} or not isinstance(job_id, str):
                     raise ValueError("invalid manifest contract")
                 jobs.append(self.status(job_id))
             except (ValueError, json.JSONDecodeError, JobError) as exc:
