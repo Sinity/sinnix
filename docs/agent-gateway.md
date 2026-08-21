@@ -60,6 +60,7 @@ The common read surface includes:
 - `files_read` for bounded host-path stat, reads, and directory listings
 - `session_list`, `session_read`, and `session_search` over authoritative Claude Code and Codex JSONL files
 - `memory_search` and `memory_get` for source-preserving semantic access to available raw coding-session memory
+- `timeline_query` for source-preserving coding-session timeline evidence
 - `mcp_catalog` and `mcp_read` for registry-derived upstream MCP discovery and explicitly read-only upstream tools
 - `shell_query` for exact-argument, output-bounded read-only host inspection
 - `shell_run` for exact-argument operator commands in an unrestricted transient user service, with explicit optional `sudo -n` root execution
@@ -78,6 +79,8 @@ The common read surface includes:
 `capability_search` and `capability_describe` read the generated `/etc/sinnix/capability-index.json` rather than maintaining another catalog. Search supports query terms, kind, enabled state, and cursor pagination. Every result identifies the index schema, host, and generation revision. It reports the index as unavailable when the running generation has not rendered it.
 
 `memory_search` and `memory_get` retain the raw session provider and source-specific reference in every result. They report the current Polylogue and Sinex upstreams as unavailable and Lynchpin as not yet adapted. They do not fabricate a unified source or copy session JSONL into gateway state.
+
+`timeline_query` provides chronological session-file evidence from the same authoritative raw providers. Its timestamps are explicitly identified as filesystem modification times, not inferred conversation-event times. It preserves provider coverage and reports unavailable upstreams instead of treating the available raw files as a complete personal timeline.
 
 `mcp_catalog` is generated from the existing MCP registry. The initial broker admits only local evidence servers. It excludes agent control to prevent a recursive job-control path and Chrome DevTools to preserve the browser ownership boundary. `mcp_read` launches a bounded stdio session inside a read-only, network-isolated transient user service for the observer principal, then checks the live upstream tool metadata for an explicit read-only declaration. Oversized normalized responses become opaque artifacts. `mcp_write` is operator-only and rejects tools declared read-only.
 
