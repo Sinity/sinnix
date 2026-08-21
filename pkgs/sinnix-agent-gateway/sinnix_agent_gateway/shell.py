@@ -32,28 +32,7 @@ class ShellService:
             check=False,
         )
 
-    def query(
-        self,
-        argv: list[str],
-        cwd: str = "/",
-        timeout_seconds: int = 30,
-        max_bytes: int = 64_000,
-    ) -> dict[str, Any]:
-        self.principal.require(Capability.SHELL_QUERY)
-        if not argv or len(argv) > 128 or any(not isinstance(arg, str) for arg in argv):
-            raise ShellError("argv must contain 1-128 string arguments")
-        if sum(len(arg) for arg in argv) > 32_768:
-            raise ShellError("argv exceeds the configured bound")
-        if timeout_seconds < 1 or timeout_seconds > 300:
-            raise ShellError("timeout_seconds must be 1-300")
-        max_bytes = max(1, min(max_bytes, self.config.max_result_bytes))
-        workdir = Path(cwd).expanduser().resolve(strict=True)
-        if not workdir.is_dir():
-            raise ShellError("cwd is not a directory")
-        unit = f"sinnix-gateway-query-{uuid.uuid4().hex}.service"
-        env_command = shutil.which("env")
-        if env_command is None:
-            raise ShellError("env command is unavailable")
+    def _environment(self, overlay: dict[str, str] | None = None) -> dict[str, str]:
         environment = {
             "HOME": os.environ.get("HOME", "/home/sinity"),
             "LANG": os.environ.get("LANG", "C.UTF-8"),
@@ -63,6 +42,59 @@ class ShellService:
             value = os.environ.get(name)
             if value:
                 environment[name] = value
+        if overlay is None:
+            return environment
+        if len(overlay) > 64:
+            raise ShellError("environment overlay has more than 64 variables")
+        for name, value in overlay.items():
+            if not name or not name.replace("_", "a").isalnum() or not name[0].isalpha():
+                raise ShellError(f"invalid environment variable name: {name!r}")
+            if not isinstance(value, str) or len(value) > 8_192:
+                raise ShellError(f"invalid environment value for {name}")
+            environment[name] = value
+        return environment
+
+    @staticmethod
+    def _validate(
+        argv: list[str], cwd: str, timeout_seconds: int, max_bytes: int
+    ) -> tuple[Path, int]:
+        if not argv or len(argv) > 128 or any(not isinstance(arg, str) for arg in argv):
+            raise ShellError("argv must contain 1-128 string arguments")
+        if sum(len(arg) for arg in argv) > 32_768:
+            raise ShellError("argv exceeds the configured bound")
+        if timeout_seconds < 1 or timeout_seconds > 3_600:
+            raise ShellError("timeout_seconds must be 1-3600")
+        workdir = Path(cwd).expanduser().resolve(strict=True)
+        if not workdir.is_dir():
+            raise ShellError("cwd is not a directory")
+        return workdir, max(1, max_bytes)
+
+    def _execute(
+        self,
+        *,
+        unit_prefix: str,
+        argv: list[str],
+        cwd: str,
+        timeout_seconds: int,
+        max_bytes: int,
+        read_only: bool,
+        environment: dict[str, str] | None,
+        as_root: bool,
+    ) -> dict[str, Any]:
+        workdir, max_bytes = self._validate(argv, cwd, timeout_seconds, max_bytes)
+        max_bytes = min(max_bytes, self.config.max_result_bytes)
+        env_command = shutil.which("env")
+        if env_command is None:
+            raise ShellError("env command is unavailable")
+        command_argv = list(argv)
+        identity = "user"
+        if as_root:
+            sudo = shutil.which("sudo")
+            if sudo is None:
+                raise ShellError("sudo command is unavailable")
+            command_argv = [sudo, "-n", "--", *command_argv]
+            identity = "root"
+        unit = f"{unit_prefix}-{uuid.uuid4().hex}.service"
         command = [
             self.config.systemd_run_command,
             "--user",
@@ -71,19 +103,28 @@ class ShellService:
             "--quiet",
             "--collect",
             f"--unit={unit}",
-            "--property=ReadOnlyPaths=/",
-            "--property=PrivateTmp=true",
-            "--property=NoNewPrivileges=true",
-            "--property=ProtectSystem=strict",
-            "--property=ProtectHome=read-only",
             f"--property=RuntimeMaxSec={timeout_seconds}",
             f"--property=WorkingDirectory={workdir}",
-            "--",
-            env_command,
-            "-i",
-            *(f"{name}={value}" for name, value in environment.items()),
-            *argv,
         ]
+        if read_only:
+            command.extend(
+                [
+                    "--property=ReadOnlyPaths=/",
+                    "--property=PrivateTmp=true",
+                    "--property=NoNewPrivileges=true",
+                    "--property=ProtectSystem=strict",
+                    "--property=ProtectHome=read-only",
+                ]
+            )
+        command.extend(
+            [
+                "--",
+                env_command,
+                "-i",
+                *(f"{name}={value}" for name, value in self._environment(environment).items()),
+                *command_argv,
+            ]
+        )
         process = subprocess.Popen(
             command,
             stdin=subprocess.DEVNULL,
@@ -131,9 +172,52 @@ class ShellService:
         return {
             "argv": argv,
             "cwd": str(workdir),
+            "identity": identity,
             "unit": unit,
             "exit_status": exit_status,
             "timed_out": timed_out,
             "truncated": truncated,
             "output": output[:max_bytes].decode("utf-8", errors="replace"),
         }
+
+    def query(
+        self,
+        argv: list[str],
+        cwd: str = "/",
+        timeout_seconds: int = 30,
+        max_bytes: int = 64_000,
+    ) -> dict[str, Any]:
+        self.principal.require(Capability.SHELL_QUERY)
+        if timeout_seconds < 1 or timeout_seconds > 300:
+            raise ShellError("timeout_seconds must be 1-300")
+        return self._execute(
+            unit_prefix="sinnix-gateway-query",
+            argv=argv,
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+            max_bytes=max_bytes,
+            read_only=True,
+            environment=None,
+            as_root=False,
+        )
+
+    def run(
+        self,
+        argv: list[str],
+        cwd: str = "/",
+        timeout_seconds: int = 300,
+        max_bytes: int = 64_000,
+        environment: dict[str, str] | None = None,
+        as_root: bool = False,
+    ) -> dict[str, Any]:
+        self.principal.require(Capability.SHELL_RUN)
+        return self._execute(
+            unit_prefix="sinnix-gateway-run",
+            argv=argv,
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+            max_bytes=max_bytes,
+            read_only=False,
+            environment=environment,
+            as_root=as_root,
+        )

@@ -98,7 +98,7 @@ class Runtime:
             raise ValueError(message) from None
         payload: dict[str, Any] = {}
         if isinstance(result, dict):
-            for key in ("job_id", "artifact_id", "project_id"):
+            for key in ("job_id", "artifact_id", "project_id", "unit"):
                 value = result.get(key)
                 if isinstance(value, (str, int, float, bool)):
                     payload[key] = value
@@ -290,6 +290,30 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             return runtime.execute(
                 "shell_query",
                 lambda: runtime.shell.query(argv, cwd, timeout_seconds, max_bytes),
+            )
+
+    if Capability.SHELL_RUN in runtime.principal.capabilities:
+
+        @mcp.tool(title="Run operator shell command", annotations=DESTRUCTIVE_TOOL)
+        def shell_run(
+            argv: list[str],
+            cwd: str = "/",
+            timeout_seconds: int = 300,
+            max_bytes: int = 64_000,
+            environment: dict[str, str] | None = None,
+            as_root: bool = False,
+        ) -> dict[str, Any]:
+            """Run exact argv as the operator, or explicitly through sudo without a prompt."""
+            return runtime.execute(
+                "shell_run",
+                lambda: runtime.shell.run(
+                    argv,
+                    cwd,
+                    timeout_seconds,
+                    max_bytes,
+                    environment,
+                    as_root,
+                ),
             )
 
     @mcp.tool(title="List attested jobs", annotations=READ_ONLY_TOOL)
