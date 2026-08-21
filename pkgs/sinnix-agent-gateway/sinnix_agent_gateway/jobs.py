@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -63,21 +62,6 @@ class JobService:
         environment["SINNIX_AGENT_JOB_STATE_DIR"] = str(self.root)
         return environment
 
-    @staticmethod
-    def _validate_agent_environment(
-        overlay: dict[str, str] | None,
-    ) -> dict[str, str]:
-        if overlay is None:
-            return {}
-        if len(overlay) > 64:
-            raise JobError("environment overlay has more than 64 variables")
-        for name, value in overlay.items():
-            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
-                raise JobError(f"invalid environment variable name: {name!r}")
-            if not isinstance(value, str) or len(value) > 8_192:
-                raise JobError(f"invalid environment value for {name}")
-        return dict(overlay)
-
     def _authorized_agent_worktree(
         self, project_path: Path, requested: str | None
     ) -> Path:
@@ -86,16 +70,16 @@ class JobService:
             return registered
         try:
             candidate = Path(requested).expanduser().resolve(strict=True)
-        except OSError as exc:
+        except (OSError, RuntimeError) as exc:
             raise JobError("requested worktree is unavailable") from exc
         if not candidate.is_dir():
             raise JobError("requested worktree is not a directory")
         if candidate == registered:
             return candidate
 
-        def git_value(*args: str) -> str:
+        def git_value(path: Path, *args: str) -> str:
             result = subprocess.run(
-                ["git", "-C", str(candidate), *args],
+                ["git", "-C", str(path), *args],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 check=False,
@@ -107,31 +91,21 @@ class JobService:
 
         try:
             candidate_root = Path(
-                git_value("rev-parse", "--path-format=absolute", "--show-toplevel")
+                git_value(
+                    candidate, "rev-parse", "--path-format=absolute", "--show-toplevel"
+                )
             ).resolve(strict=True)
             candidate_common = Path(
-                git_value("rev-parse", "--path-format=absolute", "--git-common-dir")
+                git_value(
+                    candidate, "rev-parse", "--path-format=absolute", "--git-common-dir"
+                )
             ).resolve(strict=True)
-            registered_result = subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(registered),
-                    "rev-parse",
-                    "--path-format=absolute",
-                    "--git-common-dir",
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                text=True,
-            )
-            if registered_result.returncode != 0:
-                raise JobError("requested worktree is not linked to the project")
             registered_common = Path(
-                registered_result.stdout.strip()
+                git_value(
+                    registered, "rev-parse", "--path-format=absolute", "--git-common-dir"
+                )
             ).resolve(strict=True)
-        except (OSError, ValueError) as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             raise JobError("requested worktree has an invalid Git identity") from exc
         if candidate_root != candidate or candidate_common != registered_common:
             raise JobError("requested worktree is not linked to the registered project")
@@ -153,29 +127,6 @@ class JobService:
         if candidate not in worktree_paths:
             raise JobError("requested path is not a linked Git worktree")
         return candidate
-
-    @staticmethod
-    def _write_private_json(path: Path, value: dict[str, str]) -> str:
-        payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-        digest = hashlib.sha256(payload).hexdigest()
-        descriptor, temporary = tempfile.mkstemp(
-            prefix=f".{path.name}.", dir=str(path.parent)
-        )
-        try:
-            with os.fdopen(descriptor, "wb") as output:
-                output.write(payload)
-                output.write(b"\n")
-                output.flush()
-                os.fsync(output.fileno())
-            os.chmod(temporary, 0o600)
-            os.replace(temporary, path)
-            os.chmod(path, 0o600)
-        finally:
-            try:
-                os.unlink(temporary)
-            except FileNotFoundError:
-                pass
-        return digest
 
     @staticmethod
     def _shell_environment(overlay: dict[str, str] | None) -> dict[str, str]:
@@ -282,34 +233,44 @@ class JobService:
             raise JobError(f"unknown project: {request.project_id}") from exc
         if not project.path.is_dir():
             raise JobError("project checkout is unavailable")
+        worktree = self._authorized_agent_worktree(project.path, request.worktree)
+        common_result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(project.path.resolve()),
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            text=True,
+        )
+        expected_git_common_dir = ""
+        if common_result.returncode == 0:
+            expected_git_common_dir = str(Path(common_result.stdout.strip()).resolve())
         if not self.config.agent_runner.is_file():
             raise JobError("agent runner is unavailable")
-        worktree = self._authorized_agent_worktree(project.path, request.worktree)
-        environment_overlay = self._validate_agent_environment(
-            request.environment_overlay
-        )
 
         job_id = str(uuid.uuid4())
         launch_id = secrets.token_hex(16)
         prompt_path = self.root / f"{job_id}.{launch_id}.prompt.md"
-        environment_path = self.root / f"{job_id}.{launch_id}.environment.json"
         log_path = self.root / f"{job_id}.log"
         final_path = self.root / f"{job_id}.final.md"
         prompt_path.write_text(request.prompt)
         prompt_path.chmod(0o600)
-        environment_sha256 = self._write_private_json(
-            environment_path, environment_overlay
-        )
         command = [
             str(self.config.agent_runner),
             "--agent",
             request.backend,
             "--workdir",
             str(worktree),
-            "--environment-file",
-            str(environment_path),
-            "--environment-sha256",
-            environment_sha256,
+            "--registered-project",
+            str(project.path.resolve()),
+            "--expected-git-common-dir",
+            expected_git_common_dir,
             "--prompt-file",
             str(prompt_path),
             "--log-file",
@@ -389,8 +350,6 @@ class JobService:
                 },
             )
         except OSError as exc:
-            prompt_path.unlink(missing_ok=True)
-            environment_path.unlink(missing_ok=True)
             raise JobError("failed to launch attested agent job") from exc
         manifest = self._manifest_path(job_id)
         for _ in range(40):
@@ -402,12 +361,10 @@ class JobService:
         except JobError as exc:
             self._abort_launch(process)
             prompt_path.unlink(missing_ok=True)
-            environment_path.unlink(missing_ok=True)
             raise JobError("agent runner did not create its manifest") from exc
         if value.get("launch_id") != launch_id:
             self._abort_launch(process)
             prompt_path.unlink(missing_ok=True)
-            environment_path.unlink(missing_ok=True)
             raise JobError("job ID collision was rejected")
         return {
             "job_id": job_id,

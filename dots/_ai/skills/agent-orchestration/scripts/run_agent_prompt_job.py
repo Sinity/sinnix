@@ -219,13 +219,6 @@ class Job:
             "worktree": a.worktree,
             "branch": a.branch,
             "prompt": {"path": a.prompt_path, "sha256": a.prompt_sha256},
-            "environment": {
-                "sha256": null_if_empty(a.environment_sha256),
-            },
-            "execution": {
-                "interpreter": sys.executable,
-                "executable": null_if_empty(a.agent_executable),
-            },
             "artifacts": {
                 "log": a.log_path,
                 "json": a.json_path,
@@ -498,8 +491,6 @@ def add_manifest_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--branch", default="")
     parser.add_argument("--prompt-path", default="")
     parser.add_argument("--prompt-sha256", default="")
-    parser.add_argument("--environment-sha256", default="")
-    parser.add_argument("--agent-executable", default="")
     parser.add_argument("--log-path", default="")
     parser.add_argument("--json-path", default="")
     parser.add_argument("--final-path", default="")

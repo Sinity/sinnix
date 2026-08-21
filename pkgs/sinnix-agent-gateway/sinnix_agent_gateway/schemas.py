@@ -22,7 +22,6 @@ class AgentLaunchRequest(GatewayModel):
     prompt: str = Field(min_length=1, max_length=200_000)
     backend: str = Field(pattern="^(claude|codex|gemini|grok|antigravity)$")
     worktree: str | None = Field(default=None, min_length=1, max_length=4096)
-    environment_overlay: dict[str, str] | None = Field(default=None, max_length=64)
     model: str | None = Field(default=None, max_length=256)
     reasoning_effort: str | None = Field(default=None, max_length=32)
     job_role: str | None = Field(default=None, max_length=512)
