@@ -53,24 +53,33 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "session_read",
         "shell_query",
         "machine_query",
+        "desktop_read",
     } <= readonly_names
     assert {
         "files_write",
         "project_write",
         "agent_launch",
         "machine_action",
+        "desktop_action",
         "shell_run",
     }.isdisjoint(readonly_names)
     assert {"agent_launch", "job_cancel"} <= local_names
-    assert {"files_read", "machine_action", "session_list", "shell_run"}.isdisjoint(
-        local_names
-    )
+    assert {
+        "desktop_action",
+        "desktop_read",
+        "files_read",
+        "machine_action",
+        "session_list",
+        "shell_run",
+    }.isdisjoint(local_names)
     assert {
         "files_write",
         "project_write",
         "project_apply_patch",
         "session_search",
         "machine_action",
+        "desktop_action",
+        "desktop_read",
         "shell_run",
     } <= operator_names
     assert readonly["sha256"] != local["sha256"] != operator["sha256"]

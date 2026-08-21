@@ -14,6 +14,8 @@ class Capability(StrEnum):
     ARTIFACT_READ = "artifact.read"
     MACHINE_READ = "machine.read"
     MACHINE_ACTION = "machine.action"
+    DESKTOP_READ = "desktop.read"
+    DESKTOP_ACTION = "desktop.action"
     CAPTURE_READ = "capture.read"
     FILE_READ = "file.read"
     FILE_WRITE = "file.write"
@@ -30,6 +32,7 @@ PRINCIPAL_CAPABILITIES: dict[str, frozenset[Capability]] = {
             Capability.AUDIT_READ,
             Capability.ARTIFACT_READ,
             Capability.MACHINE_READ,
+            Capability.DESKTOP_READ,
             Capability.CAPTURE_READ,
             Capability.FILE_READ,
             Capability.SESSION_READ,

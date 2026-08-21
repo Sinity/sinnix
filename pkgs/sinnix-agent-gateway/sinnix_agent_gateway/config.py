@@ -47,6 +47,8 @@ class GatewayConfig:
     systemd_run_command: str = "systemd-run"
     systemctl_command: str = "systemctl"
     ops_socket_path: Path = field(default_factory=default_ops_socket_path)
+    hypr_control_command: str = "sinnix-hypr-control"
+    screenshot_control_command: str = "sinnix-screenshot-control"
     capture_command: str = "sinnix-capture"
     captures_root: Path = Path("/realm/data/captures")
 
@@ -93,6 +95,10 @@ class GatewayConfig:
             systemd_run_command=raw.get("systemdRunCommand", "systemd-run"),
             systemctl_command=raw.get("systemctlCommand", "systemctl"),
             ops_socket_path=Path(raw.get("opsSocketPath", default_ops_socket_path())),
+            hypr_control_command=raw.get("hyprControlCommand", "sinnix-hypr-control"),
+            screenshot_control_command=raw.get(
+                "screenshotControlCommand", "sinnix-screenshot-control"
+            ),
             capture_command=raw.get("captureCommand", "sinnix-capture"),
             captures_root=Path(raw.get("capturesRoot", "/realm/data/captures")),
         )
