@@ -1,0 +1,234 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import subprocess
+import uuid
+from pathlib import Path
+from typing import Any
+
+from mcp import ClientSession
+from mcp.client.stdio import StdioServerParameters, stdio_client
+
+from .artifacts import ArtifactService
+from .capabilities import Capability, Principal
+from .config import GatewayConfig
+
+
+class McpBrokerError(ValueError):
+    pass
+
+
+class McpBrokerService:
+    def __init__(
+        self, config: GatewayConfig, principal: Principal, artifacts: ArtifactService
+    ):
+        self.config = config
+        self.principal = principal
+        self.artifacts = artifacts
+
+    @staticmethod
+    def _string(value: Any, name: str, maximum: int = 8_192) -> str:
+        if not isinstance(value, str) or not value or len(value) > maximum:
+            raise McpBrokerError(f"{name} must be a bounded non-empty string")
+        return value
+
+    def catalog(self) -> dict[str, Any]:
+        self.principal.require(Capability.MCP_READ)
+        servers = []
+        for name, row in sorted(self.config.mcp_broker_servers.items()):
+            if not isinstance(row, dict):
+                continue
+            server = {
+                "name": name,
+                "description": row.get("description"),
+                "transport": row.get("transport"),
+                "tier": row.get("tier"),
+                "brokered": row.get("brokered") is True,
+            }
+            if row.get("brokered") is True:
+                server["availability"] = "unprobed"
+            else:
+                server["availability"] = "unavailable"
+                server["reason"] = row.get("reason", "not admitted to the broker")
+            servers.append(server)
+        return {"servers": servers}
+
+    def _server(self, name: str) -> dict[str, Any]:
+        name = self._string(name, "server", 128)
+        try:
+            server = self.config.mcp_broker_servers[name]
+        except KeyError as exc:
+            raise McpBrokerError(f"unknown MCP server: {name}") from exc
+        if server.get("brokered") is not True:
+            raise McpBrokerError(
+                server.get("reason", "MCP server is not admitted to the broker")
+            )
+        if server.get("transport") != "stdio":
+            raise McpBrokerError("MCP server transport is not supported by this broker")
+        command = server.get("command")
+        args = server.get("args", [])
+        environment = server.get("env", {})
+        if (
+            not isinstance(command, str)
+            or not command
+            or not isinstance(args, list)
+            or any(not isinstance(value, str) for value in args)
+            or not isinstance(environment, dict)
+            or any(not isinstance(key, str) or not isinstance(value, str) for key, value in environment.items())
+        ):
+            raise McpBrokerError("MCP broker server configuration is malformed")
+        return server
+
+    @staticmethod
+    def _tool(tools: list[Any], name: str) -> Any:
+        for tool in tools:
+            if tool.name == name:
+                return tool
+        raise McpBrokerError(f"MCP server does not expose tool {name!r}")
+
+    @staticmethod
+    def _response_payload(result: Any) -> dict[str, Any]:
+        if hasattr(result, "model_dump"):
+            return result.model_dump(by_alias=True, exclude_none=True, mode="json")
+        raise McpBrokerError("MCP server returned an unsupported tool result")
+
+    def _parameters(
+        self, server: dict[str, Any], environment: dict[str, str]
+    ) -> tuple[StdioServerParameters, str | None]:
+        if self.principal.name != "observer":
+            return (
+                StdioServerParameters(
+                    command=server["command"], args=server["args"], env=environment
+                ),
+                None,
+            )
+        unit = f"sinnix-gateway-mcp-read-{uuid.uuid4().hex}.service"
+        return (
+            StdioServerParameters(
+                command=self.config.systemd_run_command,
+                args=[
+                    "--user",
+                    "--pipe",
+                    "--quiet",
+                    "--collect",
+                    f"--unit={unit}",
+                    "--property=RuntimeMaxSec=30",
+                    "--property=ReadOnlyPaths=/",
+                    "--property=PrivateTmp=true",
+                    "--property=NoNewPrivileges=true",
+                    "--property=ProtectSystem=strict",
+                    "--property=ProtectHome=read-only",
+                    "--property=PrivateNetwork=true",
+                    "--property=InaccessiblePaths=/run/user",
+                    "--",
+                    server["command"],
+                    *server["args"],
+                ],
+                env=environment,
+            ),
+            unit,
+        )
+
+    def _stop(self, unit: str) -> None:
+        subprocess.run(
+            [self.config.systemctl_command, "--user", "stop", unit],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+
+    def _store_large_response(
+        self, server_name: str, tool_name: str, encoded: bytes
+    ) -> dict[str, Any]:
+        directory = self.config.state_dir / "captures" / uuid.uuid4().hex
+        directory.mkdir(mode=0o700, parents=True)
+        source = directory / "mcp-response.json"
+        source.write_bytes(encoded)
+        receipt = self.artifacts.attest_capture(
+            directory,
+            source="mcp-upstream",
+            target={"server": server_name, "tool": tool_name},
+            files=[source],
+        )
+        artifact_id = self.artifacts.register(
+            source,
+            kind="mcp-response",
+            owner_id=server_name,
+        )
+        return {
+            "artifact_id": artifact_id,
+            "bytes": len(encoded),
+            "content_type": "application/json",
+            "receipt": {
+                "capture_id": receipt["capture_id"],
+                "source": receipt["source"],
+                "target": receipt["target"],
+            },
+        }
+
+    async def call(
+        self, server_name: str, tool_name: str, arguments: dict[str, Any], *, write: bool
+    ) -> dict[str, Any]:
+        self.principal.require(Capability.MCP_WRITE if write else Capability.MCP_READ)
+        server_name = self._string(server_name, "server", 128)
+        tool_name = self._string(tool_name, "tool", 256)
+        if not isinstance(arguments, dict):
+            raise McpBrokerError("arguments must be an object")
+        server = self._server(server_name)
+        environment = {
+            "HOME": str(Path.home()),
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
+            **server["env"],
+        }
+        parameters, observer_unit = self._parameters(server, environment)
+
+        async def invoke() -> dict[str, Any]:
+            async with stdio_client(parameters) as (read, write_stream):
+                async with ClientSession(read, write_stream) as session:
+                    await session.initialize()
+                    tool = self._tool((await session.list_tools()).tools, tool_name)
+                    read_only = getattr(getattr(tool, "annotations", None), "read_only_hint", None)
+                    if not write and read_only is not True:
+                        raise McpBrokerError(
+                            "MCP tool is not explicitly declared read-only; use mcp_write"
+                        )
+                    if write and read_only is True:
+                        raise McpBrokerError(
+                            "MCP tool is declared read-only; use mcp_read"
+                        )
+                    return self._response_payload(
+                        await session.call_tool(tool_name, arguments)
+                    )
+
+        try:
+            response = await asyncio.wait_for(invoke(), timeout=30)
+        except McpBrokerError:
+            if observer_unit is not None:
+                self._stop(observer_unit)
+            raise
+        except Exception as exc:
+            if observer_unit is not None:
+                self._stop(observer_unit)
+            raise McpBrokerError(
+                f"MCP upstream {server_name} is unavailable: {type(exc).__name__}"
+            ) from exc
+        encoded = json.dumps(response, sort_keys=True, separators=(",", ":")).encode()
+        result = {
+            "server": server_name,
+            "tool": tool_name,
+            "mode": "write" if write else "read",
+        }
+        if len(encoded) > self.config.max_result_bytes:
+            result["artifact"] = self._store_large_response(
+                server_name, tool_name, encoded
+            )
+            result["artifact_id"] = result["artifact"]["artifact_id"]
+            result["truncated"] = True
+        else:
+            result["response"] = response
+            result["truncated"] = False
+        return result

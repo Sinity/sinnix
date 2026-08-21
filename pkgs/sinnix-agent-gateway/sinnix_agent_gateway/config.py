@@ -55,6 +55,7 @@ class GatewayConfig:
     kitty_control_command: str = "sinnix-kitty-control"
     chrome_control_command: str = "sinnix-chrome-control"
     beads_command: str = "bd"
+    mcp_broker_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
     capture_command: str = "sinnix-capture"
     captures_root: Path = Path("/realm/data/captures")
 
@@ -81,6 +82,12 @@ class GatewayConfig:
                 observer_read=bool(row.get("observerRead", False)),
             )
         state_dir = Path(raw.get("stateDir", default_state_dir())).expanduser()
+        broker_servers = raw.get("mcpBrokerServers", {})
+        if not isinstance(broker_servers, dict) or any(
+            not isinstance(name, str) or not isinstance(server, dict)
+            for name, server in broker_servers.items()
+        ):
+            raise ValueError("mcpBrokerServers must map names to objects")
         return cls(
             state_dir=state_dir,
             projects=projects,
@@ -117,6 +124,7 @@ class GatewayConfig:
             kitty_control_command=raw.get("kittyControlCommand", "sinnix-kitty-control"),
             chrome_control_command=raw.get("chromeControlCommand", "sinnix-chrome-control"),
             beads_command=raw.get("beadsCommand", "bd"),
+            mcp_broker_servers=broker_servers,
             capture_command=raw.get("captureCommand", "sinnix-capture"),
             captures_root=Path(raw.get("capturesRoot", "/realm/data/captures")),
         )

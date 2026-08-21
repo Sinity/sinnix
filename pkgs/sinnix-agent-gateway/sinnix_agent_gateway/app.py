@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Callable, TypeVar
+from typing import Any, Awaitable, Callable, TypeVar
 
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
@@ -20,6 +20,7 @@ from .desktop import DesktopService
 from .files import HostFileService
 from .jobs import JobService
 from .machine_actions import MachineActionService
+from .mcp_broker import McpBrokerService
 from .memory import MemoryService
 from .observe import ObserveService
 from .projects import ProjectService
@@ -82,6 +83,7 @@ class Runtime:
     files: HostFileService
     sessions: SessionLogService
     memory: MemoryService
+    mcp_broker: McpBrokerService
     shell: ShellService
 
     @classmethod
@@ -108,16 +110,11 @@ class Runtime:
             files=HostFileService(config, principal),
             sessions=sessions,
             memory=MemoryService(principal, sessions),
+            mcp_broker=McpBrokerService(config, principal, artifacts),
             shell=ShellService(config, principal),
         )
 
-    def execute(self, operation: str, callback: Callable[[], T]) -> T:
-        try:
-            result = callback()
-        except Exception as exc:
-            message = public_error(exc)
-            self.audit.append(operation, "error", {"error": message})
-            raise ValueError(message) from None
+    def _record_result(self, operation: str, result: Any) -> None:
         payload: dict[str, Any] = {}
         if isinstance(result, dict):
             for key in ("job_id", "artifact_id", "project_id", "receipt_id", "unit"):
@@ -132,6 +129,27 @@ class Runtime:
             if "job_id" in payload:
                 payload["correlation_id"] = payload["job_id"]
         self.audit.append(operation, "ok", payload)
+
+    def execute(self, operation: str, callback: Callable[[], T]) -> T:
+        try:
+            result = callback()
+        except Exception as exc:
+            message = public_error(exc)
+            self.audit.append(operation, "error", {"error": message})
+            raise ValueError(message) from None
+        self._record_result(operation, result)
+        return result
+
+    async def execute_async(
+        self, operation: str, callback: Callable[[], Awaitable[T]]
+    ) -> T:
+        try:
+            result = await callback()
+        except Exception as exc:
+            message = public_error(exc)
+            self.audit.append(operation, "error", {"error": message})
+            raise ValueError(message) from None
+        self._record_result(operation, result)
         return result
 
 
@@ -226,6 +244,35 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             return runtime.execute(
                 "capability_describe",
                 lambda: runtime.capability_index.describe(name=name, kind=kind),
+            )
+
+    if Capability.MCP_READ in runtime.principal.capabilities:
+
+        @mcp.tool(title="List registered MCP servers", annotations=READ_ONLY_TOOL)
+        def mcp_catalog() -> dict[str, Any]:
+            """List registry-derived MCP upstreams and their broker admission state."""
+            return runtime.execute("mcp_catalog", runtime.mcp_broker.catalog)
+
+        @mcp.tool(title="Call read-only upstream MCP tool", annotations=READ_ONLY_TOOL)
+        async def mcp_read(
+            server: str, tool: str, arguments: dict[str, Any]
+        ) -> dict[str, Any]:
+            """Call an upstream tool only when its live manifest declares it read-only."""
+            return await runtime.execute_async(
+                "mcp_read",
+                lambda: runtime.mcp_broker.call(server, tool, arguments, write=False),
+            )
+
+    if Capability.MCP_WRITE in runtime.principal.capabilities:
+
+        @mcp.tool(title="Call writable upstream MCP tool", annotations=DESTRUCTIVE_TOOL)
+        async def mcp_write(
+            server: str, tool: str, arguments: dict[str, Any]
+        ) -> dict[str, Any]:
+            """Call one non-read-only upstream tool through the configured broker."""
+            return await runtime.execute_async(
+                "mcp_write",
+                lambda: runtime.mcp_broker.call(server, tool, arguments, write=True),
             )
 
     if Capability.TASK_READ in runtime.principal.capabilities:
