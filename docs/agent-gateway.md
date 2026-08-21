@@ -58,6 +58,7 @@ The common read surface includes:
 - `gateway_status` and `machine_report`
 - `project_list`, `project_tree`, `project_read`, `project_search`, and `project_diff`
 - `files_read` for bounded host-path stat, reads, and directory listings
+- `session_list`, `session_read`, and `session_search` over authoritative Claude Code and Codex JSONL files
 - `job_list`, `job_status`, and `job_read_output`
 - `artifact_list` and `artifact_read`
 - `audit_tail` and `audit_verify`

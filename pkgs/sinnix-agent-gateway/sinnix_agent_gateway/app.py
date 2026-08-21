@@ -19,6 +19,7 @@ from .observe import ObserveService
 from .projects import ProjectService
 from .redaction import public_error
 from .schemas import AgentLaunchRequest
+from .sessions import SessionLogService
 
 T = TypeVar("T")
 
@@ -65,6 +66,7 @@ class Runtime:
     observe: ObserveService
     captures: CaptureService
     files: HostFileService
+    sessions: SessionLogService
 
     @classmethod
     def create(cls, config: GatewayConfig, principal_name: str) -> "Runtime":
@@ -81,6 +83,7 @@ class Runtime:
             observe=ObserveService(config, principal),
             captures=CaptureService(config, principal),
             files=HostFileService(config, principal),
+            sessions=SessionLogService(config, principal),
         )
 
     def execute(self, operation: str, callback: Callable[[], T]) -> T:
@@ -240,6 +243,35 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     content=content,
                     expected_sha256=expected_sha256,
                 ),
+            )
+
+    if Capability.SESSION_READ in runtime.principal.capabilities:
+
+        @mcp.tool(title="List raw coding sessions", annotations=READ_ONLY_TOOL)
+        def session_list(provider: str, limit: int = 100) -> dict[str, Any]:
+            """List bounded Claude Code or Codex session-log references."""
+            return runtime.execute(
+                "session_list", lambda: runtime.sessions.list(provider, limit)
+            )
+
+        @mcp.tool(title="Read raw coding session", annotations=READ_ONLY_TOOL)
+        def session_read(
+            reference: str, offset: int = 0, max_bytes: int = 64_000
+        ) -> dict[str, Any]:
+            """Read a bounded page from one provider-scoped raw session JSONL."""
+            return runtime.execute(
+                "session_read",
+                lambda: runtime.sessions.read(reference, offset, max_bytes),
+            )
+
+        @mcp.tool(title="Search raw coding sessions", annotations=READ_ONLY_TOOL)
+        def session_search(
+            provider: str, query: str, max_results: int = 100
+        ) -> dict[str, Any]:
+            """Search a bounded prefix of authoritative raw coding-session JSONL files."""
+            return runtime.execute(
+                "session_search",
+                lambda: runtime.sessions.search(provider, query, max_results),
             )
 
     @mcp.tool(title="List attested jobs", annotations=READ_ONLY_TOOL)
