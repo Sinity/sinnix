@@ -459,7 +459,7 @@ screenshot)
     --arg format "$format" \
     --argjson quality "$quality" \
     --argjson full "$full_page" \
-    '{format: $format, quality: $quality, captureBeyondViewport: $full}')
+    '{format: $format, quality: $quality, captureBeyondViewport: ($full == 1)}')
   if [[ $full_page -eq 0 ]]; then
     params=$(echo "$params" | jq -c 'del(.captureBeyondViewport)')
   fi
