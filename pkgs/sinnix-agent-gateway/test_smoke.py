@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import concurrent.futures
 import dataclasses
-import hashlib
 import json
 import os
 import subprocess
@@ -12,10 +11,12 @@ from pathlib import Path
 import anyio
 import pytest
 from mcp import ClientSession
+from pydantic import ValidationError
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from sinnix_agent_gateway import observe as observe_module
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.capabilities import PolicyError
+from sinnix_agent_gateway.files import FileError
 from sinnix_agent_gateway.cli import build_manifest, parser
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.jobs import JobError
@@ -586,9 +587,7 @@ def test_gateway_rejects_runner_job_id_collision(
     assert old_prompt.read_text() == "original"
 
 
-def test_agent_worktree_authorization_accepts_only_linked_worktrees(
-    tmp_path: Path,
-) -> None:
+def test_agent_worktree_authorization_reaches_runner_boundary(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
     subprocess.run(["git", "-C", str(project), "init", "-q"], check=True)
@@ -624,31 +623,76 @@ def test_agent_worktree_authorization_accepts_only_linked_worktrees(
         ],
         check=True,
     )
-    runtime = Runtime.create(
-        GatewayConfig(
-            state_dir=tmp_path / "state",
-            projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
-        ),
-        "agent-control",
+    capture = tmp_path / "runner-argv.json"
+    runner = tmp_path / "runner"
+    runner.write_text(
+        f"#!{sys.executable}\n"
+        "import json, pathlib, sys\n"
+        "args = sys.argv[1:]\n"
+        f"pathlib.Path({str(capture)!r}).write_text(json.dumps(args))\n"
+        "values = dict(zip(args[::2], args[1::2]))\n"
+        "state = pathlib.Path(values['--job-state-dir'])\n"
+        "job = values['--job-id']\n"
+        "launch = values['--launch-id']\n"
+        "(state / f'{job}.json').write_text(json.dumps({'schema_version': 3, 'job_id': job, 'launch_id': launch}))\n"
     )
+    runner.chmod(0o700)
+    cfg = GatewayConfig(
+        state_dir=tmp_path / "state",
+        projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
+        agent_runner=runner,
+    )
+    runtime = Runtime.create(cfg, "agent-control")
 
-    assert runtime.jobs._authorized_agent_worktree(project, str(linked)) == linked
-    with pytest.raises(JobError, match="linked|worktree"):
-        runtime.jobs._authorized_agent_worktree(project, str(tmp_path))
-    prefix = tmp_path / "project-prefix"
-    prefix.mkdir()
-    with pytest.raises(JobError, match="worktree|Git"):
-        runtime.jobs._authorized_agent_worktree(project, str(prefix))
+    result = runtime.jobs.launch_agent(
+        AgentLaunchRequest(
+            project_id="fixture",
+            prompt="prompt",
+            backend="codex",
+            worktree=str(linked),
+        )
+    )
+    args = json.loads(capture.read_text())
+    values = dict(zip(args[::2], args[1::2]))
+    assert result["accepted"] is True
+    assert values["--workdir"] == str(linked)
+    assert values["--registered-project"] == str(project)
+    assert Path(values["--expected-git-common-dir"]).resolve() == (project / ".git").resolve()
 
 
-def test_agent_environment_overlay_is_private_and_digest_only(tmp_path: Path) -> None:
+def test_agent_overlay_is_deferred_before_secret_state_is_created(
+    tmp_path: Path,
+) -> None:
     runtime = Runtime.create(config(tmp_path), "agent-control")
-    path = runtime.jobs.root / "overlay.json"
-    digest = runtime.jobs._write_private_json(path, {"TOKEN": "secret-value"})
+    with pytest.raises(ValidationError):
+        AgentLaunchRequest.model_validate(
+            {
+                "project_id": "fixture",
+                "prompt": "secret prompt",
+                "backend": "codex",
+                "environment_overlay": {"API_TOKEN": "secret-value"},
+            }
+        )
 
-    assert path.stat().st_mode & 0o777 == 0o600
-    assert json.loads(path.read_text()) == {"TOKEN": "secret-value"}
-    assert digest == hashlib.sha256(b'{"TOKEN":"secret-value"}').hexdigest()
+    overlay_paths = list(runtime.jobs.root.glob("*.environment.json"))
+    assert overlay_paths == []
+    observer_files = Runtime.create(runtime.config, "observer").files
+    with pytest.raises(FileError, match="path does not exist"):
+        observer_files.read("read", str(runtime.jobs.root / "not-created.environment.json"))
+
+
+def test_agent_overlay_rejects_reserved_identity_variables(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "agent-control")
+    with pytest.raises(ValidationError):
+        AgentLaunchRequest.model_validate(
+            {
+                "project_id": "fixture",
+                "prompt": "prompt",
+                "backend": "codex",
+                "environment_overlay": {"SINNIX_CORRELATION_ID": "spoofed"},
+            }
+        )
+    assert list(runtime.jobs.root.glob("*.environment.json")) == []
 
 
 def test_agent_environment_is_explicitly_allowlisted(

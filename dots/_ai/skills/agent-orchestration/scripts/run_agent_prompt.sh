@@ -3,6 +3,8 @@ set -euo pipefail
 
 agent=""
 workdir=""
+registered_project=""
+expected_git_common_dir=""
 prompt_file=""
 log_file=""
 json_file=""
@@ -30,8 +32,6 @@ kitty_socket=""
 kitty_window_id=""
 hyprland_address=""
 quota_snapshot_id=""
-environment_file=""
-environment_sha256=""
 memory_high=""
 memory_max=""
 cpu_weight=""
@@ -52,6 +52,8 @@ Usage:
 Required:
   --agent <claude|codex|gemini|grok|antigravity>
   --workdir <path>
+  --registered-project <path>  Registered project checkout for worktree attestation
+  --expected-git-common-dir <path>  Expected resolved Git common directory
   --prompt-file <path>
   --log-file <path>
 
@@ -97,8 +99,6 @@ Attested job options:
   --kitty-window-id <id>
   --hyprland-address <address>
   --quota-snapshot-id <id>
-  --environment-file <path>  Private JSON object of explicit child-environment overrides
-  --environment-sha256 <digest>  Digest of the environment overlay
   --memory-high <limit>
   --memory-max <limit>
   --cpu-weight <1-10000>
@@ -115,6 +115,14 @@ while [[ $# -gt 0 ]]; do
     ;;
   --workdir)
     workdir="${2:?missing value for --workdir}"
+    shift 2
+    ;;
+  --registered-project)
+    registered_project="${2:?missing value for --registered-project}"
+    shift 2
+    ;;
+  --expected-git-common-dir)
+    expected_git_common_dir="${2:?missing value for --expected-git-common-dir}"
     shift 2
     ;;
   --prompt-file)
@@ -203,14 +211,6 @@ while [[ $# -gt 0 ]]; do
     ;;
   --quota-snapshot-id)
     quota_snapshot_id="${2:?missing value for --quota-snapshot-id}"
-    shift 2
-    ;;
-  --environment-file)
-    environment_file="${2:?missing value for --environment-file}"
-    shift 2
-    ;;
-  --environment-sha256)
-    environment_sha256="${2:?missing value for --environment-sha256}"
     shift 2
     ;;
   --memory-high)
@@ -338,20 +338,6 @@ fi
   exit 2
 }
 [[ ${credential_profile} != api ]] || claude_api_key_auth=1
-cleanup_environment_file() {
-  [[ -z ${environment_file} ]] || rm -f -- "${environment_file}"
-}
-trap cleanup_environment_file EXIT
-if [[ -n ${environment_file} ]]; then
-  [[ -n ${environment_sha256} && ${environment_sha256} =~ ^[0-9a-f]{64}$ ]] || {
-    echo "--environment-file requires a SHA-256 digest" >&2
-    exit 2
-  }
-  [[ -f ${environment_file} ]] || {
-    echo "missing environment overlay: ${environment_file}" >&2
-    exit 1
-  }
-fi
 
 umask 077
 mkdir -p "${job_state_dir}" "${job_state_dir}/.reservations" "$(dirname "${log_file}")"
@@ -378,6 +364,33 @@ elif [[ ! -r ${reservation}/launch-id || $(<"${reservation}/launch-id") != "${la
   exit 2
 fi
 worktree="$(cd "${workdir}" && pwd -P)"
+if [[ -n ${registered_project} ]]; then
+  registered_project="$(cd "${registered_project}" && pwd -P)"
+  actual_common_dir="$(git -C "${worktree}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  actual_root="$(git -C "${worktree}" rev-parse --path-format=absolute --show-toplevel 2>/dev/null || true)"
+  if [[ -n ${expected_git_common_dir} ]]; then
+    [[ ${actual_common_dir} == "${expected_git_common_dir}" && ${actual_root} == "${worktree}" ]] || {
+      echo "run_agent_prompt.sh: worktree Git identity changed" >&2
+      exit 125
+    }
+    worktree_attested=0
+    while IFS= read -r line; do
+      if [[ ${line} == "worktree "* && "$(realpath "${line#worktree }")" == "${worktree}" ]]; then
+        worktree_attested=1
+        break
+      fi
+    done < <(git -C "${registered_project}" worktree list --porcelain 2>/dev/null)
+    [[ ${worktree_attested} -eq 1 ]] || {
+      echo "run_agent_prompt.sh: worktree is not registered with the project" >&2
+      exit 125
+    }
+  else
+    [[ -z ${actual_common_dir} || ${worktree} == "${registered_project}" ]] || {
+      echo "run_agent_prompt.sh: unexpected linked worktree identity" >&2
+      exit 125
+    }
+  fi
+fi
 git_common_dir="$(git -C "${worktree}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
 if [[ -n ${git_common_dir} && $(basename "${git_common_dir}") == .git ]]; then
   repo_root="$(dirname "${git_common_dir}")"
@@ -427,8 +440,6 @@ job_args=(
   --kitty-window-id "${kitty_window_id}"
   --hyprland-address "${hyprland_address}"
   --quota-snapshot-id "${quota_snapshot_id}"
-  --environment-sha256 "${environment_sha256}"
-  --agent-executable ""
   --scope-unit "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}"
   --scope-cgroup "${scope_cgroup}"
   --launcher-pid "$$"
@@ -469,9 +480,12 @@ if [[ ${internal_agent_scope} -eq 0 && -z ${SINNIX_AGENT_SCOPED:-} ]]; then
   inner_args=(
     "$0" --internal-agent-scope --job-id "${job_id}" --launch-id "${launch_id}" --job-state-dir "${job_state_dir}"
     --agent "${agent}" --workdir "${workdir}" --prompt-file "${prompt_file}" --log-file "${log_file}"
+  )
+  [[ -z ${registered_project} ]] || inner_args+=(--registered-project "${registered_project}")
+  [[ -z ${expected_git_common_dir} ]] || inner_args+=(--expected-git-common-dir "${expected_git_common_dir}")
+  inner_args+=(
     --timeout-seconds "${timeout_seconds}"
   )
-  [[ -z ${environment_file} ]] || inner_args+=(--environment-file "${environment_file}" --environment-sha256 "${environment_sha256}")
   [[ -z ${model} ]] || inner_args+=(--model "${model}")
   [[ -z ${reasoning_effort} ]] || inner_args+=(--reasoning-effort "${reasoning_effort}")
   [[ -z ${job_role} ]] || inner_args+=(--job-role "${job_role}")
@@ -533,7 +547,6 @@ write_manifest running
 finalize_job() {
   local status=$?
   local lifecycle
-  cleanup_environment_file
   lifecycle="$(recorded_lifecycle)"
   case "${lifecycle}" in
   succeeded | failed | cancelled | timed_out) return 0 ;;
@@ -564,7 +577,6 @@ agent_bin="$(resolve_agent_bin "${agent}")" || {
   echo "${agent} runtime not found" >&2
   exit 1
 }
-job_args+=(--agent-executable "${agent_bin}")
 
 # The agent runs with a scrubbed environment: an allowlist of session
 # variables plus the per-backend additions, carried as an `env -i` prefix on
@@ -576,56 +588,6 @@ done
 if [[ ${agent} == claude && ${claude_api_key_auth} -eq 1 && -n ${ANTHROPIC_API_KEY+x} ]]; then agent_env+=("ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"); fi
 [[ ${skip_agents_render} -eq 0 ]] || agent_env+=(SINNIX_SKIP_AGENTS_RENDER=1)
 [[ ${agent} != codex || -z ${codex_home} ]] || agent_env+=("CODEX_HOME=${codex_home}")
-
-validate_environment_overlay() {
-  python3 - "$environment_file" "$environment_sha256" <<'PY'
-import hashlib
-import json
-import os
-import re
-import stat
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-expected = sys.argv[2]
-metadata = path.lstat()
-if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
-    raise SystemExit("environment overlay must be a mode-0600 regular file")
-if metadata.st_uid != os.getuid():
-    raise SystemExit("environment overlay has an unexpected owner")
-try:
-    value = json.loads(path.read_text(encoding="utf-8"))
-except (OSError, json.JSONDecodeError) as exc:
-    raise SystemExit("environment overlay is malformed") from exc
-if not isinstance(value, dict) or len(value) > 64:
-    raise SystemExit("environment overlay must be an object with at most 64 variables")
-for name, item in value.items():
-    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
-        raise SystemExit("environment overlay contains an invalid variable name")
-    if not isinstance(item, str) or len(item) > 8192 or "\x00" in item:
-        raise SystemExit("environment overlay contains an invalid variable value")
-payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-if hashlib.sha256(payload).hexdigest() != expected:
-    raise SystemExit("environment overlay digest mismatch")
-PY
-}
-
-if [[ -n ${environment_file} ]]; then
-  validate_environment_overlay
-  while IFS= read -r -d '' item; do
-    agent_env+=("$item")
-  done < <(python3 - "$environment_file" <<'PY'
-import json
-import sys
-
-value = json.loads(open(sys.argv[1], encoding="utf-8").read())
-for name, item in value.items():
-    sys.stdout.buffer.write(f"{name}={item}".encode() + b"\0")
-PY
-  )
-  rm -f -- "$environment_file"
-fi
 
 # Per-backend argv, plus the capture plan the supervisor needs: `split` sends
 # stdout to the JSON artifact and stderr to the log, `merged` sends both to
