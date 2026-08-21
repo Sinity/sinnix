@@ -13,6 +13,7 @@ class Capability(StrEnum):
     AUDIT_READ = "audit.read"
     ARTIFACT_READ = "artifact.read"
     MACHINE_READ = "machine.read"
+    MACHINE_ACTION = "machine.action"
     CAPTURE_READ = "capture.read"
     FILE_READ = "file.read"
     FILE_WRITE = "file.write"

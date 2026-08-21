@@ -15,6 +15,7 @@ from .captures import CaptureService
 from .config import GatewayConfig
 from .files import HostFileService
 from .jobs import JobService
+from .machine_actions import MachineActionService
 from .observe import ObserveService
 from .projects import ProjectService
 from .redaction import public_error
@@ -65,6 +66,7 @@ class Runtime:
     audit: AuditService
     jobs: JobService
     observe: ObserveService
+    machine_actions: MachineActionService
     captures: CaptureService
     files: HostFileService
     sessions: SessionLogService
@@ -83,6 +85,7 @@ class Runtime:
             audit=AuditService(config, principal),
             jobs=JobService(config, principal, artifacts),
             observe=ObserveService(config, principal),
+            machine_actions=MachineActionService(config, principal),
             captures=CaptureService(config, principal),
             files=HostFileService(config, principal),
             sessions=SessionLogService(config, principal),
@@ -98,7 +101,7 @@ class Runtime:
             raise ValueError(message) from None
         payload: dict[str, Any] = {}
         if isinstance(result, dict):
-            for key in ("job_id", "artifact_id", "project_id", "unit"):
+            for key in ("job_id", "artifact_id", "project_id", "receipt_id", "unit"):
                 value = result.get(key)
                 if isinstance(value, (str, int, float, bool)):
                     payload[key] = value
@@ -168,6 +171,30 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             "machine_query",
             lambda: runtime.observe.machine_query(operation, cursor, limit),
         )
+
+    if Capability.MACHINE_ACTION in runtime.principal.capabilities:
+
+        @mcp.tool(title="Run typed machine action", annotations=DESTRUCTIVE_TOOL)
+        def machine_action(
+            action: str,
+            target: dict[str, Any],
+            expected_revision: int,
+            idempotency_key: str,
+            operator_reason: str,
+            parameters: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            """Submit one revision-checked, idempotent action to the ops reducer."""
+            return runtime.execute(
+                "machine_action",
+                lambda: runtime.machine_actions.execute(
+                    action,
+                    target,
+                    expected_revision,
+                    idempotency_key,
+                    operator_reason,
+                    parameters,
+                ),
+            )
 
     @mcp.tool(title="List projects", annotations=READ_ONLY_TOOL)
     def project_list() -> dict[str, Any]:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +17,10 @@ DEFAULT_AGENT_CONTROLLER = Path(
 def default_state_dir() -> Path:
     base = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state")))
     return base / "sinnix" / "agent-gateway"
+
+
+def default_ops_socket_path() -> Path:
+    return Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "sinnix" / "ops.sock"
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,7 @@ class GatewayConfig:
     connector_snapshot_path: Path | None = None
     systemd_run_command: str = "systemd-run"
     systemctl_command: str = "systemctl"
+    ops_socket_path: Path = field(default_factory=default_ops_socket_path)
     capture_command: str = "sinnix-capture"
     captures_root: Path = Path("/realm/data/captures")
 
@@ -87,6 +92,7 @@ class GatewayConfig:
             else None,
             systemd_run_command=raw.get("systemdRunCommand", "systemd-run"),
             systemctl_command=raw.get("systemctlCommand", "systemctl"),
+            ops_socket_path=Path(raw.get("opsSocketPath", default_ops_socket_path())),
             capture_command=raw.get("captureCommand", "sinnix-capture"),
             captures_root=Path(raw.get("capturesRoot", "/realm/data/captures")),
         )
