@@ -389,8 +389,10 @@ when a new script is added.
   to it via `~/.config/claude/CLAUDE.md`. There is no render pipeline.
 - Repo convention across the constellation: per-repo `CLAUDE.md` is canonical
   and flat; `AGENTS.md` is a committed symlink to it.
-- Shared skills live in `dots/_ai/skills/`; agent trees (`~/.config/claude/
-skills`, `~/.codex/skills`, `~/.gemini/skills`) are linkFarms over it.
+- Shared skills live in `dots/_ai/skills/`. `~/.config/claude/skills` is an
+  out-of-store root symlink, so its additions, removals, and edits are live
+  immediately. The other client trees are generated linkFarms over the shared
+  roster because Codex additionally merges its local-only `.system` subtree.
   Codex-only system skills: `dots/codex/skills/.system/`.
 - Agent CLI / MCP data lives in `flake/data/`: `mcp-registry.nix` (servers,
   tiers, lean/evidence/full/browser profiles, per-client render) and
