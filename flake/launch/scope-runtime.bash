@@ -105,7 +105,7 @@ if [ "${1:-}" = "--internal-supervise" ]; then
 fi
 
 if [ "$#" -lt 3 ]; then
-  echo "usage: sinnix-scope <class> [--unit <name>] [--agent-property <Name=Value>] [--job-id <uuid>] [--project <id>] [--work-item <id>] -- <command> [args...]" >&2
+  echo "usage: sinnix-scope <class> [--unit <name>] [--agent-property <Name=Value>] [--allow-nested-agent-scope] [--job-id <uuid>] [--project <id>] [--work-item <id>] -- <command> [args...]" >&2
   exit 64
 fi
 
@@ -114,6 +114,7 @@ shift
 
 unit_override=""
 agent_properties=()
+allow_nested_agent_scope=0
 
 validate_agent_property() {
   local property="$1"
@@ -179,6 +180,14 @@ while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
     validate_agent_property "$property"
     agent_properties+=("$property")
     shift 2
+    ;;
+  --allow-nested-agent-scope)
+    [ "$class" = "agent" ] || {
+      echo "sinnix-scope: --allow-nested-agent-scope is valid only for the agent class" >&2
+      exit 64
+    }
+    allow_nested_agent_scope=1
+    shift
     ;;
   --job-id)
     : "${2:?sinnix-scope: --job-id requires a value}"
@@ -268,6 +277,29 @@ if [ "$unscoped_background_xtask" = 1 ]; then
 fi
 
 if grep -q "/$slice" /proc/self/cgroup 2>/dev/null; then
+  if [ "$allow_nested_agent_scope" = 1 ]; then
+    if [ -z "$unit_override" ]; then
+      echo "sinnix-scope: nested agent scope requires --unit" >&2
+      exit 64
+    fi
+    if ! command -v systemd-run >/dev/null 2>&1 || [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+      echo "sinnix-scope: nested agent scope requires the user systemd manager" >&2
+      exit 64
+    fi
+    exec systemd-run \
+      --user \
+      --scope \
+      --quiet \
+      --collect \
+      --same-dir \
+      --unit="$unit_override" \
+      --slice="$slice" \
+      "${property_args[@]}" \
+      -- env \
+      SINNIX_AGENT_SCOPED=1 \
+      SINNIX_AGENT_SCOPE_UNIT="$unit_override" \
+      "${scoped_command[@]}"
+  fi
   if [ -n "$unit_override" ] || [ "${#agent_properties[@]}" -gt 0 ]; then
     echo "sinnix-scope: cannot apply a job scope or overrides from an existing scope" >&2
     exit 64

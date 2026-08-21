@@ -330,6 +330,7 @@ class JobService:
         request_path.chmod(0o600)
         command = [
             scope_command,
+            "--allow-nested-scope",
             "--unit",
             scope_unit,
             "--property",

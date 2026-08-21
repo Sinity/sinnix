@@ -26,6 +26,7 @@ def execution_service(tmp_path: Path) -> tuple[JobService, Path]:
     scope.write_text(
         f"#!{sys.executable}\n"
         "import os, sys\n"
+        "if '--allow-nested-scope' not in sys.argv: raise SystemExit('nested scope flag required')\n"
         "unit = sys.argv[sys.argv.index('--unit') + 1]\n"
         "command = sys.argv[sys.argv.index('--') + 1:]\n"
         "os.environ['SINNIX_AGENT_SCOPE_UNIT'] = unit\n"
