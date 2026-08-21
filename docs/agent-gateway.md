@@ -55,7 +55,7 @@ sinnix-agent-gateway --config /etc/sinnix/agent-gateway.json --principal observe
 
 The common read surface includes:
 
-- `gateway_status` and `machine_report`
+- `gateway_status`, `machine_report`, and `machine_query`
 - `project_list`, `project_tree`, `project_read`, `project_search`, and `project_diff`
 - `files_read` for bounded host-path stat, reads, and directory listings
 - `session_list`, `session_read`, and `session_search` over authoritative Claude Code and Codex JSONL files
@@ -64,6 +64,8 @@ The common read surface includes:
 - `job_list`, `job_status`, and `job_read_output`
 - `artifact_list` and `artifact_read`
 - `audit_tail` and `audit_verify`
+
+`machine_query` selects one bounded section from the canonical `sinnix-observe` report. Its operations are `overview`, `pressure`, `runtime_inventory`, `gateway`, `browser`, `storage`, `ingestion`, `units`, `workloads`, `slices`, and `blocked_tasks`; the array operations use cursor and limit pagination. Every response carries the collector schema, generation time, and observation window. This keeps a large full report from making a small requested section unavailable.
 
 `agent-control` adds `agent_launch` and `job_cancel`. `operator` also adds `files_write`, `project_write`, `project_apply_patch`, and `shell_run`. `shell_run` accepts exact argv, a working directory, bounded environment overlay, timeout, output limit, and an explicit root flag. It uses `env -i` and a bounded base environment, then invokes `sudo -n --` only when root was requested. The returned receipt identifies the transient service unit, selected identity, exit status, timeout, and output-truncation facts. `files_write` supports atomic replacement, append, mkdir, and explicit regular-file removal. A mutation can require the current SHA-256 so concurrent or stale requests fail rather than overwrite newer content.
 

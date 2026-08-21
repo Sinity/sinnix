@@ -159,6 +159,16 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         """Return a bounded machine and runtime report through the canonical sinnix-observe contract."""
         return runtime.execute("machine_report", runtime.observe.machine_report)
 
+    @mcp.tool(title="Query machine state", annotations=READ_ONLY_TOOL)
+    def machine_query(
+        operation: str, cursor: int = 0, limit: int = 100
+    ) -> dict[str, Any]:
+        """Read a bounded, provenance-carrying section from canonical machine evidence."""
+        return runtime.execute(
+            "machine_query",
+            lambda: runtime.observe.machine_query(operation, cursor, limit),
+        )
+
     @mcp.tool(title="List projects", annotations=READ_ONLY_TOOL)
     def project_list() -> dict[str, Any]:
         """List projects available to the active principal without exposing host paths."""
