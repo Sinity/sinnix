@@ -664,7 +664,7 @@ def test_agent_overlay_is_deferred_before_secret_state_is_created(
     tmp_path: Path,
 ) -> None:
     runtime = Runtime.create(config(tmp_path), "agent-control")
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="deferred"):
         AgentLaunchRequest.model_validate(
             {
                 "project_id": "fixture",
@@ -683,7 +683,7 @@ def test_agent_overlay_is_deferred_before_secret_state_is_created(
 
 def test_agent_overlay_rejects_reserved_identity_variables(tmp_path: Path) -> None:
     runtime = Runtime.create(config(tmp_path), "agent-control")
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="reserved"):
         AgentLaunchRequest.model_validate(
             {
                 "project_id": "fixture",
