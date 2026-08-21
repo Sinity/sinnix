@@ -142,7 +142,7 @@ record_summary() {
 
 is_candidate() {
   case "$1" in
-    *"serena start-mcp-server"*|*"mcp-polylogue"*|*"mcp-lynchpin"*|*"mcp-server-"*|*"sinex-mcp-serve"*|*"mcp-firecrawl"*|*"chrome-devtools"*|*"typescript-language-server --stdio"*|*"tsserver.js"*|*"typingsInstaller.js"*|*"pyright-langserver --stdio"*|*"rust-analyzer"*|*"dmypy run"*|*"gopls"*|*"ruff-lsp"*)
+    *"mcp-polylogue"*|*"mcp-lynchpin"*|*"mcp-server-"*|*"sinex-mcp-serve"*|*"mcp-firecrawl"*|*"chrome-devtools"*|*"typescript-language-server --stdio"*|*"tsserver.js"*|*"typingsInstaller.js"*|*"pyright-langserver --stdio"*|*"rust-analyzer"*|*"dmypy run"*|*"gopls"*|*"ruff-lsp"*)
       return 0
       ;;
     *)

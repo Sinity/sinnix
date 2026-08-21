@@ -58,16 +58,6 @@
         ]
       },
       {
-        "matcher": "mcp__serena__*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.local/bin/serena-hooks auto-approve --client=claude-code",
-            "timeout": 15
-          }
-        ]
-      },
-      {
         "matcher": "Bash",
         "hooks": [
           {
@@ -103,11 +93,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "case \"${SINNIX_CLAUDE_PROFILE:-full}\" in full|browser|deepseek|local) ~/.local/bin/serena-hooks cleanup --client=claude-code ;; esac",
-            "timeout": 15
-          },
-          {
-            "type": "command",
             "command": "~/.local/bin/sinnix-mcp-sweep --orphans-only --quiet",
             "timeout": 10
           },
@@ -133,11 +118,6 @@
     "SessionStart": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "case \"${SINNIX_CLAUDE_PROFILE:-full}\" in full|browser|deepseek|local) ~/.local/bin/serena-hooks activate --client=claude-code ;; esac",
-            "timeout": 15
-          },
           {
             "type": "command",
             "command": "~/.local/bin/sinnix-mcp-sweep --orphans-only --quiet",
