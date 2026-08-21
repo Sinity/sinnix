@@ -69,6 +69,12 @@ class CaptureService:
                 "failure_class": "collector_timeout",
                 "reason": "sinnix-capture query timed out",
             }
+        except OSError as exc:
+            return {
+                "available": False,
+                "failure_class": "collector_unavailable",
+                "reason": f"sinnix-capture query is unavailable: {type(exc).__name__}",
+            }
         if result.returncode != 0:
             return {
                 "available": False,

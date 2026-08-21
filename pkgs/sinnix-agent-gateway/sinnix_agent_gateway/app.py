@@ -132,6 +132,7 @@ class Runtime:
                 "receipt_id",
                 "unit",
                 "path",
+                "destination",
                 "operation",
                 "sha256",
                 "previous_sha256",
@@ -521,15 +522,17 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             operation: str,
             path: str,
             content: str | None = None,
+            destination: str | None = None,
             expected_sha256: str | None = None,
         ) -> dict[str, Any]:
-            """Replace, append, create, or remove a host path with a durable receipt."""
+            """Replace, append, create, remove, copy, or move a host path with a receipt."""
             return runtime.execute(
                 "files_write",
                 lambda: runtime.files.write(
                     operation,
                     path,
                     content=content,
+                    destination=destination,
                     expected_sha256=expected_sha256,
                 ),
             )

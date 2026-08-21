@@ -129,11 +129,8 @@ class ObserveService:
         }
 
     def machine_report(self) -> dict[str, Any]:
-        self.principal.require(Capability.MACHINE_READ)
-        collected = self._collect_report()
-        if not collected["available"]:
-            return collected
-        return self._within_response_bound(collected)
+        """Return the bounded overview retained for callers of the old route."""
+        return self.machine_query("overview")
 
     def machine_query(
         self, operation: str, cursor: int = 0, limit: int = 100
