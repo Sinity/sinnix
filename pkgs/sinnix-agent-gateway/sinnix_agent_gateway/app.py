@@ -12,6 +12,7 @@ from .artifacts import ArtifactService
 from .audit import AuditService
 from .browser import BrowserService
 from .capabilities import Capability, Principal
+from .capability_index import CapabilityIndexService
 from .captures import CaptureService
 from .config import GatewayConfig
 from .desktop import DesktopService
@@ -73,6 +74,7 @@ class Runtime:
     desktop: DesktopService
     terminals: TerminalService
     browser: BrowserService
+    capability_index: CapabilityIndexService
     captures: CaptureService
     files: HostFileService
     sessions: SessionLogService
@@ -95,6 +97,7 @@ class Runtime:
             desktop=DesktopService(config, principal),
             terminals=TerminalService(config, principal),
             browser=BrowserService(config, principal),
+            capability_index=CapabilityIndexService(config, principal),
             captures=CaptureService(config, principal),
             files=HostFileService(config, principal),
             sessions=SessionLogService(config, principal),
@@ -180,6 +183,38 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             "machine_query",
             lambda: runtime.observe.machine_query(operation, cursor, limit),
         )
+
+    if Capability.CAPABILITY_READ in runtime.principal.capabilities:
+
+        @mcp.tool(title="Search machine capabilities", annotations=READ_ONLY_TOOL)
+        def capability_search(
+            query: str = "",
+            kind: str | None = None,
+            enabled: bool | None = None,
+            cursor: int = 0,
+            limit: int = 100,
+        ) -> dict[str, Any]:
+            """Search the derived capability index with bounded, provenance-carrying pages."""
+            return runtime.execute(
+                "capability_search",
+                lambda: runtime.capability_index.search(
+                    query=query,
+                    kind=kind,
+                    enabled=enabled,
+                    cursor=cursor,
+                    limit=limit,
+                ),
+            )
+
+        @mcp.tool(title="Describe machine capability", annotations=READ_ONLY_TOOL)
+        def capability_describe(
+            name: str, kind: str | None = None
+        ) -> dict[str, Any]:
+            """Resolve a capability by exact name and optional kind from the derived index."""
+            return runtime.execute(
+                "capability_describe",
+                lambda: runtime.capability_index.describe(name=name, kind=kind),
+            )
 
     if Capability.MACHINE_ACTION in runtime.principal.capabilities:
 

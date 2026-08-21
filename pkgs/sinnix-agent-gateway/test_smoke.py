@@ -56,6 +56,8 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "desktop_read",
         "terminal_read",
         "browser_read",
+        "capability_search",
+        "capability_describe",
     } <= readonly_names
     assert {
         "files_write",
@@ -67,7 +69,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "browser_action",
         "shell_run",
     }.isdisjoint(readonly_names)
-    assert {"agent_launch", "job_cancel"} <= local_names
+    assert {"agent_launch", "job_cancel", "capability_search", "capability_describe"} <= local_names
     assert {
         "desktop_action",
         "desktop_read",
@@ -93,6 +95,8 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "terminal_action",
         "terminal_read",
         "shell_run",
+        "capability_search",
+        "capability_describe",
     } <= operator_names
     assert readonly["sha256"] != local["sha256"] != operator["sha256"]
     assert all(

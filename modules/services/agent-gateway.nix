@@ -74,6 +74,7 @@ mkServiceModule {
         approvedManifestHash = cfg.tunnel.approvedManifestHash;
         approvedManifestPrincipal = cfg.tunnel.principal;
         runtimeInventory = "/etc/sinnix/runtime-inventory.json";
+        capabilityIndex = "/etc/sinnix/capability-index.json";
         agentRunner = "${config.sinnix.paths.dotsRoot}/_ai/skills/agent-orchestration/scripts/run_agent_prompt.sh";
         inherit agentController;
         observeCommand = "${scriptPkgs.sinnix-observe}/bin/sinnix-observe";
