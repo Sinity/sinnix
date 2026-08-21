@@ -82,7 +82,7 @@ mkServiceModule {
           else
             echo "lynchpin: machine telemetry database is absent; skipping lake export" >&2
           fi
-          exec ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.cli.materialize --all
+          exec ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.cli.materialize --all --promote --history all
         '';
       };
       localHotDirs = [
@@ -141,6 +141,10 @@ mkServiceModule {
         ];
         path = [
           pkgs.git
+          # code_snapshot invokes repomix directly. Systemd does not inherit
+          # environment.systemPackages, so this runtime dependency belongs in
+          # the unit PATH rather than only in the interactive CLI feature.
+          pkgs.repomix
           # github_context calls `gh` via shutil.which and records
           # "gh_not_found" for every repo when it is absent -- which is
           # exactly what it did, nightly, unnoticed, until a different
