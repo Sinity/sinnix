@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import uuid
 from pathlib import Path
@@ -82,11 +83,11 @@ class McpBrokerService:
         return server
 
     @staticmethod
-    def _tool(tools: list[Any], name: str) -> Any:
+    def _tool(tools: list[Any], name: str) -> Any | None:
         for tool in tools:
             if tool.name == name:
                 return tool
-        raise McpBrokerError(f"MCP server does not expose tool {name!r}")
+        return None
 
     @staticmethod
     def _response_payload(result: Any) -> dict[str, Any]:
@@ -169,6 +170,21 @@ class McpBrokerService:
             },
         }
 
+    def _store_upstream_stderr(
+        self, directory: Path, server_name: str, tool_name: str
+    ) -> str | None:
+        source = directory / "stderr.log"
+        if not source.exists() or source.stat().st_size == 0:
+            shutil.rmtree(directory, ignore_errors=True)
+            return None
+        self.artifacts.attest_capture(
+            directory,
+            source="mcp-upstream-stderr",
+            target={"server": server_name, "tool": tool_name},
+            files=[source],
+        )
+        return self.artifacts.register(source, kind="mcp-stderr", owner_id=server_name)
+
     async def call(
         self, server_name: str, tool_name: str, arguments: dict[str, Any], *, write: bool
     ) -> dict[str, Any]:
@@ -185,37 +201,58 @@ class McpBrokerService:
             **server["env"],
         }
         parameters, observer_unit = self._parameters(server, environment)
+        stderr_directory = self.config.state_dir / "captures" / uuid.uuid4().hex
+        stderr_directory.mkdir(mode=0o700, parents=True)
+        stderr_path = stderr_directory / "stderr.log"
 
         async def invoke() -> dict[str, Any]:
-            async with stdio_client(parameters) as (read, write_stream):
-                async with ClientSession(read, write_stream) as session:
-                    await session.initialize()
-                    tool = self._tool((await session.list_tools()).tools, tool_name)
-                    read_only = getattr(getattr(tool, "annotations", None), "read_only_hint", None)
-                    if not write and read_only is not True:
-                        raise McpBrokerError(
-                            "MCP tool is not explicitly declared read-only; use mcp_write"
-                        )
-                    if write and read_only is True:
-                        raise McpBrokerError(
-                            "MCP tool is declared read-only; use mcp_read"
-                        )
-                    return self._response_payload(
-                        await session.call_tool(tool_name, arguments)
-                    )
+            tool: Any | None = None
+            response: Any | None = None
+            with stderr_path.open("w", encoding="utf-8") as stderr:
+                async with stdio_client(parameters, errlog=stderr) as (read, write_stream):
+                    async with ClientSession(read, write_stream) as session:
+                        await session.initialize()
+                        tool = self._tool((await session.list_tools()).tools, tool_name)
+                        if tool is not None:
+                            read_only = getattr(
+                                getattr(tool, "annotations", None), "read_only_hint", None
+                            )
+                            if (not write and read_only is True) or (
+                                write and read_only is not True
+                            ):
+                                response = await session.call_tool(tool_name, arguments)
+
+            if tool is None:
+                raise McpBrokerError(f"MCP server does not expose tool {tool_name!r}")
+            read_only = getattr(getattr(tool, "annotations", None), "read_only_hint", None)
+            if not write and read_only is not True:
+                raise McpBrokerError(
+                    "MCP tool is not explicitly declared read-only; use mcp_write"
+                )
+            if write and read_only is True:
+                raise McpBrokerError("MCP tool is declared read-only; use mcp_read")
+            if response is None:
+                raise McpBrokerError("MCP server returned no tool result")
+            return self._response_payload(response)
 
         try:
             response = await asyncio.wait_for(invoke(), timeout=30)
         except McpBrokerError:
             if observer_unit is not None:
                 self._stop(observer_unit)
+            shutil.rmtree(stderr_directory, ignore_errors=True)
             raise
         except Exception as exc:
             if observer_unit is not None:
                 self._stop(observer_unit)
+            artifact_id = self._store_upstream_stderr(
+                stderr_directory, server_name, tool_name
+            )
+            diagnostic = f"; diagnostic artifact {artifact_id}" if artifact_id else ""
             raise McpBrokerError(
-                f"MCP upstream {server_name} is unavailable: {type(exc).__name__}"
+                f"MCP upstream {server_name} is unavailable: {type(exc).__name__}{diagnostic}"
             ) from exc
+        shutil.rmtree(stderr_directory, ignore_errors=True)
         encoded = json.dumps(response, sort_keys=True, separators=(",", ":")).encode()
         result = {
             "server": server_name,

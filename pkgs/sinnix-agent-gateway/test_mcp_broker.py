@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TextIO
 
 import anyio
 import pytest
@@ -16,6 +18,19 @@ from sinnix_agent_gateway.mcp_broker import McpBrokerError, McpBrokerService
 class FakeTransport:
     async def __aenter__(self) -> tuple[object, object]:
         return object(), object()
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+
+class FailingTransport:
+    def __init__(self, stderr: TextIO):
+        self.stderr = stderr
+
+    async def __aenter__(self) -> tuple[object, object]:
+        self.stderr.write("upstream fixture failed\n")
+        self.stderr.flush()
+        raise OSError("fixture launch failure")
 
     async def __aexit__(self, *args: object) -> None:
         return None
@@ -113,7 +128,7 @@ def test_broker_enforces_live_read_only_tool_metadata(
     broker = broker_service(tmp_path, "operator")
     captured = []
 
-    def stdio(parameters: object) -> FakeTransport:
+    def stdio(parameters: object, **_kwargs: object) -> FakeTransport:
         captured.append(parameters)
         return FakeTransport()
 
@@ -139,7 +154,7 @@ def test_observer_broker_runs_upstream_in_read_only_unit(
     broker = broker_service(tmp_path, "observer")
     captured = []
 
-    def stdio(parameters: object) -> FakeTransport:
+    def stdio(parameters: object, **_kwargs: object) -> FakeTransport:
         captured.append(parameters)
         return FakeTransport()
 
@@ -162,7 +177,7 @@ def test_observer_broker_stops_failed_read_only_unit(
     broker = broker_service(tmp_path, "observer")
     stopped = []
     monkeypatch.setattr(
-        "sinnix_agent_gateway.mcp_broker.stdio_client", lambda _params: FakeTransport()
+        "sinnix_agent_gateway.mcp_broker.stdio_client", lambda _params, **_kwargs: FakeTransport()
     )
     monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
     monkeypatch.setattr(broker, "_stop", stopped.append)
@@ -174,11 +189,32 @@ def test_observer_broker_stops_failed_read_only_unit(
     assert stopped[0].startswith("sinnix-gateway-mcp-read-")
 
 
+def test_broker_attests_upstream_stderr_on_transport_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+
+    def stdio(_parameters: object, *, errlog: TextIO) -> FailingTransport:
+        return FailingTransport(errlog)
+
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.stdio_client", stdio)
+
+    with pytest.raises(McpBrokerError, match="diagnostic artifact"):
+        anyio.run(lambda: broker.call("fixture", "lookup", {}, write=False))
+
+    artifacts = broker.artifacts.list()["artifacts"]
+    assert len(artifacts) == 1
+    assert artifacts[0]["kind"] == "mcp-stderr"
+    assert artifacts[0]["owner_id"] == "fixture"
+    artifact = broker.artifacts.read(artifacts[0]["artifact_id"])
+    assert base64.b64decode(artifact["base64"]) == b"upstream fixture failed\n"
+
+
 def test_broker_artifactizes_large_upstream_response(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     broker = broker_service(tmp_path, "observer", max_bytes=10)
-    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.stdio_client", lambda _params: FakeTransport())
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.stdio_client", lambda _params, **_kwargs: FakeTransport())
     monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
 
     result = anyio.run(
