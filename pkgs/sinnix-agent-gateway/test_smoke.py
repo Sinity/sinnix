@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import dataclasses
+import hashlib
 import json
 import os
 import subprocess
@@ -583,6 +584,71 @@ def test_gateway_rejects_runner_job_id_collision(
             AgentLaunchRequest(project_id="fixture", prompt="new", backend="codex")
         )
     assert old_prompt.read_text() == "original"
+
+
+def test_agent_worktree_authorization_accepts_only_linked_worktrees(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.run(["git", "-C", str(project), "init", "-q"], check=True)
+    (project / "tracked.txt").write_text("tracked\n")
+    subprocess.run(["git", "-C", str(project), "add", "tracked.txt"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(project),
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "-qm",
+            "initial",
+        ],
+        check=True,
+    )
+    linked = tmp_path / "linked"
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(project),
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "linked",
+            str(linked),
+        ],
+        check=True,
+    )
+    runtime = Runtime.create(
+        GatewayConfig(
+            state_dir=tmp_path / "state",
+            projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
+        ),
+        "agent-control",
+    )
+
+    assert runtime.jobs._authorized_agent_worktree(project, str(linked)) == linked
+    with pytest.raises(JobError, match="linked|worktree"):
+        runtime.jobs._authorized_agent_worktree(project, str(tmp_path))
+    prefix = tmp_path / "project-prefix"
+    prefix.mkdir()
+    with pytest.raises(JobError, match="worktree|Git"):
+        runtime.jobs._authorized_agent_worktree(project, str(prefix))
+
+
+def test_agent_environment_overlay_is_private_and_digest_only(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "agent-control")
+    path = runtime.jobs.root / "overlay.json"
+    digest = runtime.jobs._write_private_json(path, {"TOKEN": "secret-value"})
+
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert json.loads(path.read_text()) == {"TOKEN": "secret-value"}
+    assert digest == hashlib.sha256(b'{"TOKEN":"secret-value"}').hexdigest()
 
 
 def test_agent_environment_is_explicitly_allowlisted(
