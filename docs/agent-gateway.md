@@ -62,6 +62,7 @@ The common read surface includes:
 - `shell_query` for exact-argument, output-bounded read-only host inspection
 - `shell_run` for exact-argument operator commands in an unrestricted transient user service, with explicit optional `sudo -n` root execution
 - `desktop_read` for current Hyprland, workspace, client, binding, and color-management state
+- `terminal_read` for Kitty terminal inventory and bounded capture reads
 - `job_list`, `job_status`, and `job_read_output`
 - `artifact_list` and `artifact_read`
 - `audit_tail` and `audit_verify`
@@ -71,6 +72,8 @@ The common read surface includes:
 `machine_action` is operator-only. It sends the complete typed request to the running ops reducer over its local Unix socket, including the owner-required revision, idempotency key, reason, target, and parameters. The reducer resolves runtime identities, enforces admission, performs the action, and returns its native receipt. The gateway does not substitute its own service-control path.
 
 `desktop_action` is operator-only. It delegates exact argument vectors to `sinnix-hypr-control` for focus, dispatcher, shortcut, key-state, paste, and runtime-keyword operations. A focus action returns a newly-read active-window postcondition. It does not provide a session restart or teardown operation.
+
+`terminal_action` is operator-only. It delegates exact focus, text send, key send, and command-run vectors to `sinnix-kitty-control` against an explicit Kitty matcher. It does not launch untracked coding agents; those continue to use the attested job route.
 
 `agent-control` adds `agent_launch` and `job_cancel`. `operator` also adds `files_write`, `project_write`, `project_apply_patch`, and `shell_run`. `shell_run` accepts exact argv, a working directory, bounded environment overlay, timeout, output limit, and an explicit root flag. It uses `env -i` and a bounded base environment, then invokes `sudo -n --` only when root was requested. The returned receipt identifies the transient service unit, selected identity, exit status, timeout, and output-truncation facts. `files_write` supports atomic replacement, append, mkdir, and explicit regular-file removal. A mutation can require the current SHA-256 so concurrent or stale requests fail rather than overwrite newer content.
 
