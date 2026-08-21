@@ -11,10 +11,12 @@ from pathlib import Path
 import anyio
 import pytest
 from mcp import ClientSession
+from pydantic import ValidationError
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from sinnix_agent_gateway import observe as observe_module
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.capabilities import PolicyError
+from sinnix_agent_gateway.files import FileError
 from sinnix_agent_gateway.cli import build_manifest, parser
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.jobs import JobError
@@ -583,6 +585,210 @@ def test_gateway_rejects_runner_job_id_collision(
             AgentLaunchRequest(project_id="fixture", prompt="new", backend="codex")
         )
     assert old_prompt.read_text() == "original"
+
+
+def test_launch_agent_unlinks_prompt_when_subprocess_popen_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id = "00000000-0000-4000-8000-000000000002"
+    launch_id = "deadbeefdeadbeefdeadbeefdeadbeef"
+    runner = tmp_path / "runner"
+    runner.write_text("#!/bin/sh\nexit 0\n")
+    # Deliberately not executable: agent_runner.is_file() still passes the
+    # pre-flight check, but subprocess.Popen raises a real PermissionError
+    # (a subclass of OSError) when it tries to exec this file -- no mocking
+    # of Popen itself, just an OS-enforced launch failure.
+    runner.chmod(0o600)
+    cfg = dataclasses.replace(config(tmp_path), agent_runner=runner)
+    runtime = Runtime.create(cfg, "agent-control")
+    monkeypatch.setattr("sinnix_agent_gateway.jobs.uuid.uuid4", lambda: job_id)
+    monkeypatch.setattr("sinnix_agent_gateway.jobs.secrets.token_hex", lambda _n: launch_id)
+
+    prompt_path = runtime.jobs.root / f"{job_id}.{launch_id}.prompt.md"
+    with pytest.raises(JobError, match="failed to launch attested agent job"):
+        runtime.jobs.launch_agent(
+            AgentLaunchRequest(
+                project_id="fixture", prompt="secret prompt body", backend="codex"
+            )
+        )
+
+    assert not prompt_path.exists()
+    leftover = list(runtime.jobs.root.glob(f"{job_id}.*.prompt.md"))
+    assert leftover == [], f"prompt file(s) survived a launch failure: {leftover}"
+    # An observer-scoped principal must not be able to read a prompt that a
+    # failed launch left behind -- verify no readable file remains, not just
+    # that the JobService's own handle is gone.
+    observer_files = Runtime.create(runtime.config, "observer").files
+    with pytest.raises(FileError, match="path does not exist"):
+        observer_files.read("read", str(prompt_path))
+
+
+def test_agent_worktree_authorization_reaches_runner_boundary(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.run(["git", "-C", str(project), "init", "-q"], check=True)
+    (project / "tracked.txt").write_text("tracked\n")
+    subprocess.run(["git", "-C", str(project), "add", "tracked.txt"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(project),
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "-qm",
+            "initial",
+        ],
+        check=True,
+    )
+    linked = tmp_path / "linked"
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(project),
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "linked",
+            str(linked),
+        ],
+        check=True,
+    )
+    capture = tmp_path / "runner-argv.json"
+    runner = tmp_path / "runner"
+    runner.write_text(
+        f"#!{sys.executable}\n"
+        "import json, pathlib, sys\n"
+        "args = sys.argv[1:]\n"
+        f"pathlib.Path({str(capture)!r}).write_text(json.dumps(args))\n"
+        "values = dict(zip(args[::2], args[1::2]))\n"
+        "state = pathlib.Path(values['--job-state-dir'])\n"
+        "job = values['--job-id']\n"
+        "launch = values['--launch-id']\n"
+        "(state / f'{job}.json').write_text(json.dumps({'schema_version': 3, 'job_id': job, 'launch_id': launch}))\n"
+    )
+    runner.chmod(0o700)
+    cfg = GatewayConfig(
+        state_dir=tmp_path / "state",
+        projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
+        agent_runner=runner,
+    )
+    runtime = Runtime.create(cfg, "agent-control")
+
+    result = runtime.jobs.launch_agent(
+        AgentLaunchRequest(
+            project_id="fixture",
+            prompt="prompt",
+            backend="codex",
+            worktree=str(linked),
+        )
+    )
+    args = json.loads(capture.read_text())
+    values = dict(zip(args[::2], args[1::2]))
+    assert result["accepted"] is True
+    assert values["--workdir"] == str(linked)
+    assert values["--registered-project"] == str(project)
+    assert Path(values["--expected-git-common-dir"]).resolve() == (project / ".git").resolve()
+
+
+def test_launch_agent_uses_local_workdir_for_non_git_registered_project(
+    tmp_path: Path,
+) -> None:
+    # A registered project is not required to be a Git checkout (config.py
+    # never enforces that). Before this fix, launch_agent unconditionally
+    # passed --registered-project plus an *empty* --expected-git-common-dir
+    # for such a project -- and the runner's own `${2:?msg}` argument parser
+    # treats an empty value the same as a missing one, so every launch
+    # against a non-Git registered project crashed at argument-parsing time,
+    # before any of the runner's own validation logic ran (reproduced
+    # directly against the runner script; not exercised here since this test
+    # captures argv with a fixture runner rather than invoking the real one).
+    # _authorized_agent_worktree guarantees `worktree` cannot differ from
+    # the registered project in this case (any other requested worktree
+    # fails to validate without a Git common directory to link against), so
+    # --local-workdir is the exact non-attested opt-out for that guarantee,
+    # not a weakening of it.
+    project = tmp_path / "project"
+    project.mkdir()  # deliberately not a Git checkout
+    capture = tmp_path / "runner-argv.json"
+    runner = tmp_path / "runner"
+    runner.write_text(
+        f"#!{sys.executable}\n"
+        "import json, pathlib, sys\n"
+        "args = sys.argv[1:]\n"
+        f"pathlib.Path({str(capture)!r}).write_text(json.dumps(args))\n"
+        "values, i = {}, 0\n"
+        "while i < len(args):\n"
+        "    if args[i] == '--local-workdir':\n"
+        "        values['--local-workdir'] = True\n"
+        "        i += 1\n"
+        "    else:\n"
+        "        values[args[i]] = args[i + 1]\n"
+        "        i += 2\n"
+        "state = pathlib.Path(values['--job-state-dir'])\n"
+        "job = values['--job-id']\n"
+        "launch = values['--launch-id']\n"
+        "(state / f'{job}.json').write_text(json.dumps({'schema_version': 3, 'job_id': job, 'launch_id': launch}))\n"
+    )
+    runner.chmod(0o700)
+    cfg = GatewayConfig(
+        state_dir=tmp_path / "state",
+        projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
+        agent_runner=runner,
+    )
+    runtime = Runtime.create(cfg, "agent-control")
+
+    result = runtime.jobs.launch_agent(
+        AgentLaunchRequest(project_id="fixture", prompt="prompt", backend="codex")
+    )
+    args = json.loads(capture.read_text())
+    assert result["accepted"] is True
+    assert "--local-workdir" in args
+    assert "--registered-project" not in args
+    assert "--expected-git-common-dir" not in args
+    # The crash-inducing case: an empty string ever reaching argv as a flag
+    # value that the runner's `${var:?msg}` parser would reject.
+    assert "" not in args
+
+
+def test_agent_overlay_is_deferred_before_secret_state_is_created(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.create(config(tmp_path), "agent-control")
+    with pytest.raises(ValidationError, match="deferred"):
+        AgentLaunchRequest.model_validate(
+            {
+                "project_id": "fixture",
+                "prompt": "secret prompt",
+                "backend": "codex",
+                "environment_overlay": {"API_TOKEN": "secret-value"},
+            }
+        )
+
+    overlay_paths = list(runtime.jobs.root.glob("*.environment.json"))
+    assert overlay_paths == []
+    observer_files = Runtime.create(runtime.config, "observer").files
+    with pytest.raises(FileError, match="path does not exist"):
+        observer_files.read("read", str(runtime.jobs.root / "not-created.environment.json"))
+
+
+def test_agent_overlay_rejects_reserved_identity_variables(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "agent-control")
+    with pytest.raises(ValidationError, match="reserved"):
+        AgentLaunchRequest.model_validate(
+            {
+                "project_id": "fixture",
+                "prompt": "prompt",
+                "backend": "codex",
+                "environment_overlay": {"SINNIX_CORRELATION_ID": "spoofed"},
+            }
+        )
+    assert list(runtime.jobs.root.glob("*.environment.json")) == []
 
 
 def test_agent_environment_is_explicitly_allowlisted(

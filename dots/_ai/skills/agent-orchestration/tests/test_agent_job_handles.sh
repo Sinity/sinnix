@@ -37,6 +37,7 @@ mkdir -p "${tmp}/bin" "${tmp}/bridge-bin" "${tmp}/scope-bin" "${tmp}/repo" \
 git -C "${tmp}/repo" init -q
 git -C "${tmp}/repo" -c user.name=Test -c user.email=test@example.invalid commit -q --allow-empty -m seed
 git -C "${tmp}/repo" worktree add -q -b agent-test "${tmp}/worktree"
+repo_common_dir="$(git -C "${tmp}/repo" rev-parse --path-format=absolute --git-common-dir)"
 printf 'fake prompt\n' >"${tmp}/prompt.prompt"
 printf 'hold\n' >"${tmp}/hold.prompt"
 
@@ -61,12 +62,18 @@ cat >"${tmp}/bin/codex" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 last=""
+cflag=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --output-last-message) last="$2"; shift 2 ;;
+    -C) cflag="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
+# Record the -C value this invocation received, independent of the scrubbed
+# `env -i` environment the runner execs us under (bare $0 dirname still
+# works): the symlink-canonicalization test reads the most recent line.
+printf '%s\n' "${cflag}" >>"$(cd "$(dirname "$0")/.." && pwd)/codex-invocations.log"
 payload="$(cat)"
 printf 'fake final\n' >"${last}"
 if [[ $payload == *hold* ]]; then sleep 30; fi
@@ -143,7 +150,8 @@ run_job() {
     --polylogue-session-id polylogue-1 --kitty-socket unix:/tmp/kitty \
     --kitty-window-id 42 --hyprland-address address-1 --quota-snapshot-id quota-1 \
     --agent codex --model fake --reasoning-effort high \
-    --workdir "${tmp}/worktree" --prompt-file "${prompt}" \
+    --workdir "${tmp}/worktree" --registered-project "${tmp}/repo" \
+    --expected-git-common-dir "${repo_common_dir}" --prompt-file "${prompt}" \
     --log-file "${tmp}/output/${id}.log" --last-file "${tmp}/output/${id}.final" \
     --memory-high 2G --memory-max 3G --cpu-weight 200 --io-weight 300
 }
@@ -157,6 +165,7 @@ run_backend_job() {
     FAKE_SCOPE_RECEIPT_DIR="${tmp}/scope-receipts" \
     "${runner}" --job-id "${id}" --job-state-dir "${tmp}/state" --agent "${backend}" \
     --model fake --reasoning-effort high --workdir "${tmp}/worktree" \
+    --registered-project "${tmp}/repo" --expected-git-common-dir "${repo_common_dir}" \
     --prompt-file "${prompt}" --log-file "${tmp}/output/${id}.log" \
     --last-file "${tmp}/output/${id}.final"
 }
@@ -173,6 +182,133 @@ jq -e '(.schema_version == 2 or .schema_version == 3) and .backend == "antigravi
 grep -Fxq 'fake grok final' "${tmp}/output/job-grok.final"
 grep -Fxq 'fake antigravity final' "${tmp}/output/job-antigravity.final"
 
+# --registered-project and --expected-git-common-dir are the runner's own
+# authorization boundary (the gateway's JobService always supplies both,
+# unconditionally, for every launch it makes): a direct caller that omits
+# either, supplies a stale common-dir, or points at an unrelated checkout
+# must be refused before anything runs, not silently trusted.
+run_job_variant() {
+  # Runs the runner with the given extra args appended after the base
+  # required set, without --registered-project/--expected-git-common-dir
+  # pre-filled, so each case controls its own identity arguments.
+  local id="$1"
+  shift
+  env -u SINNIX_AGENT_SCOPED -u SINNIX_AGENT_SCOPE_UNIT -u SINNIX_AGENT_SCOPE_CGROUP \
+    PATH="${tmp}/bin:${PATH}" SINNIX_AGENT_SCOPE_EXEC="${tmp}/bin/scope-exec" \
+    FAKE_SCOPE_RECEIPT_DIR="${tmp}/scope-receipts" \
+    "${runner}" --job-id "${id}" --job-state-dir "${tmp}/state" --agent codex --model fake \
+    --prompt-file "${tmp}/prompt.prompt" --log-file "${tmp}/output/${id}.log" \
+    --last-file "${tmp}/output/${id}.final" "$@"
+}
+
+set +e
+run_job_variant job-missing-identity --workdir "${tmp}/worktree"
+missing_identity_status=$?
+set -e
+[[ ${missing_identity_status} -eq 2 ]] || {
+  echo "runner accepted a launch missing --registered-project/--expected-git-common-dir (status ${missing_identity_status})" >&2
+  exit 1
+}
+[[ ! -f ${tmp}/state/job-missing-identity.json ]]
+
+set +e
+run_job_variant job-missing-common-dir --workdir "${tmp}/worktree" --registered-project "${tmp}/repo"
+missing_common_dir_status=$?
+set -e
+[[ ${missing_common_dir_status} -eq 2 ]] || {
+  echo "runner accepted --registered-project with no --expected-git-common-dir (status ${missing_common_dir_status})" >&2
+  exit 1
+}
+
+set +e
+run_job_variant job-mismatched-common-dir --workdir "${tmp}/worktree" \
+  --registered-project "${tmp}/repo" --expected-git-common-dir "${tmp}/repo/.not-git"
+mismatched_status=$?
+set -e
+[[ ${mismatched_status} -eq 125 ]] || {
+  echo "runner accepted a mismatched --expected-git-common-dir (status ${mismatched_status})" >&2
+  exit 1
+}
+[[ ! -f ${tmp}/state/job-mismatched-common-dir.json ]]
+
+git -C "${tmp}" init -q other-repo
+git -C "${tmp}/other-repo" -c user.name=Test -c user.email=test@example.invalid commit -q --allow-empty -m seed
+other_common_dir="$(git -C "${tmp}/other-repo" rev-parse --path-format=absolute --git-common-dir)"
+set +e
+run_job_variant job-unlinked-worktree --workdir "${tmp}/other-repo" \
+  --registered-project "${tmp}/repo" --expected-git-common-dir "${other_common_dir}"
+unlinked_status=$?
+set -e
+[[ ${unlinked_status} -eq 125 ]] || {
+  echo "runner accepted a Git checkout unrelated to --registered-project (status ${unlinked_status})" >&2
+  exit 1
+}
+[[ ! -f ${tmp}/state/job-unlinked-worktree.json ]]
+
+# Execution must bind to the canonical, validated worktree -- not the
+# original (possibly symlinked) --workdir input, which is only used to
+# derive it. A symlink to an authorized worktree must still be accepted
+# (the identity check resolves it), but the agent process itself must run
+# against the real path.
+ln -s "${tmp}/worktree" "${tmp}/worktree-link"
+canonical_worktree="$(cd "${tmp}/worktree" && pwd -P)"
+run_job_variant job-symlink-workdir --workdir "${tmp}/worktree-link" \
+  --registered-project "${tmp}/repo" --expected-git-common-dir "${repo_common_dir}"
+received_cwd="$(tail -n1 "${tmp}/codex-invocations.log")"
+[[ ${received_cwd} == "${canonical_worktree}" ]] || {
+  echo "codex ran against the symlinked --workdir instead of the canonical validated worktree: ${received_cwd} != ${canonical_worktree}" >&2
+  exit 1
+}
+jq -e --arg worktree "${canonical_worktree}" '.worktree == $worktree' "${tmp}/state/job-symlink-workdir.json" >/dev/null
+
+# --local-workdir is the explicit, clearly-named non-attested opt-out for a
+# directory the caller already trusts directly -- it must not be combined
+# with the attested identity pair (ambiguous, refused) and must not silently
+# reappear as a way to omit worktree identity altogether (the required-args
+# check above already covers that: neither form present is still refused).
+set +e
+run_job_variant job-ambiguous-identity --workdir "${tmp}/worktree" --local-workdir \
+  --registered-project "${tmp}/repo" --expected-git-common-dir "${repo_common_dir}"
+ambiguous_status=$?
+set -e
+[[ ${ambiguous_status} -eq 2 ]] || {
+  echo "runner accepted --local-workdir combined with the attested identity pair (status ${ambiguous_status})" >&2
+  exit 1
+}
+[[ ! -f ${tmp}/state/job-ambiguous-identity.json ]]
+
+# A non-Git directory (the documented --skip-git-repo-check use case) and a
+# subdirectory of a Git checkout (which the attested path can never
+# authorize -- it can only attest a whole worktree root) both have no
+# worktree identity to attest; --local-workdir must accept and actually run
+# them, binding execution to the canonical resolved path exactly like the
+# attested path does.
+mkdir -p "${tmp}/plain-dir"
+run_job_variant job-local-plain-dir --workdir "${tmp}/plain-dir" --local-workdir
+jq -e '.lifecycle == "succeeded" and .exit_status == 0' "${tmp}/state/job-local-plain-dir.json" >/dev/null || {
+  jq '{lifecycle, exit_status}' "${tmp}/state/job-local-plain-dir.json" >&2
+  exit 1
+}
+canonical_plain_dir="$(cd "${tmp}/plain-dir" && pwd -P)"
+[[ $(jq -r .worktree "${tmp}/state/job-local-plain-dir.json") == "${canonical_plain_dir}" ]]
+
+mkdir -p "${tmp}/worktree/subdir"
+run_job_variant job-local-subdir --workdir "${tmp}/worktree/subdir" --local-workdir
+jq -e '.lifecycle == "succeeded" and .exit_status == 0' "${tmp}/state/job-local-subdir.json" >/dev/null || {
+  jq '{lifecycle, exit_status}' "${tmp}/state/job-local-subdir.json" >&2
+  exit 1
+}
+
+# Symlink canonicalization applies identically under --local-workdir.
+ln -s "${tmp}/plain-dir" "${tmp}/plain-dir-link"
+canonical_plain_link="$(cd "${tmp}/plain-dir" && pwd -P)"
+run_job_variant job-local-symlink --workdir "${tmp}/plain-dir-link" --local-workdir
+received_local_cwd="$(tail -n1 "${tmp}/codex-invocations.log")"
+[[ ${received_local_cwd} == "${canonical_plain_link}" ]] || {
+  echo "codex ran against the symlinked --local-workdir input instead of the canonical resolved path: ${received_local_cwd} != ${canonical_plain_link}" >&2
+  exit 1
+}
+
 # argv backends (claude/grok/antigravity) get the prompt on the command line,
 # never on the runner's own stdin -- so an interactive launch without an
 # explicit </dev/null must not block waiting for EOF on whatever the runner
@@ -186,6 +322,7 @@ timeout 5 env -u SINNIX_AGENT_SCOPED -u SINNIX_AGENT_SCOPE_UNIT -u SINNIX_AGENT_
   FAKE_SCOPE_RECEIPT_DIR="${tmp}/scope-receipts" \
   "${runner}" --job-id job-grok-notty --job-state-dir "${tmp}/state" --agent grok \
   --model fake --reasoning-effort high --workdir "${tmp}/worktree" \
+  --registered-project "${tmp}/repo" --expected-git-common-dir "${repo_common_dir}" \
   --prompt-file "${tmp}/prompt.prompt" --log-file "${tmp}/output/job-grok-notty.log" \
   --last-file "${tmp}/output/job-grok-notty.final" <&9
 notty_status=$?
@@ -310,14 +447,18 @@ env -u SINNIX_AGENT_SCOPED -u SINNIX_AGENT_SCOPE_UNIT -u SINNIX_AGENT_SCOPE_CGRO
   PATH="${tmp}/bin:${PATH}" SINNIX_AGENT_SCOPE_EXEC="${tmp}/bin/scope-exec" \
   FAKE_SCOPE_RECEIPT_DIR="${tmp}/scope-receipts" \
   "${runner}" --job-id job-collision --launch-id collision-a --job-state-dir "${tmp}/state" \
-  --agent codex --model fake --workdir "${tmp}/worktree" --prompt-file "${tmp}/prompt.prompt" \
+  --agent codex --model fake --workdir "${tmp}/worktree" \
+  --registered-project "${tmp}/repo" --expected-git-common-dir "${repo_common_dir}" \
+  --prompt-file "${tmp}/prompt.prompt" \
   --log-file "${tmp}/output/job-collision.log" --last-file "${tmp}/output/job-collision.final" &
 collision_a=$!
 env -u SINNIX_AGENT_SCOPED -u SINNIX_AGENT_SCOPE_UNIT -u SINNIX_AGENT_SCOPE_CGROUP \
   PATH="${tmp}/bin:${PATH}" SINNIX_AGENT_SCOPE_EXEC="${tmp}/bin/scope-exec" \
   FAKE_SCOPE_RECEIPT_DIR="${tmp}/scope-receipts" \
   "${runner}" --job-id job-collision --launch-id collision-b --job-state-dir "${tmp}/state" \
-  --agent codex --model fake --workdir "${tmp}/worktree" --prompt-file "${tmp}/prompt.prompt" \
+  --agent codex --model fake --workdir "${tmp}/worktree" \
+  --registered-project "${tmp}/repo" --expected-git-common-dir "${repo_common_dir}" \
+  --prompt-file "${tmp}/prompt.prompt" \
   --log-file "${tmp}/output/job-collision.log" --last-file "${tmp}/output/job-collision.final" &
 collision_b=$!
 wait "${collision_a}"
@@ -337,7 +478,8 @@ env -u SINNIX_AGENT_SCOPED -u SINNIX_AGENT_SCOPE_UNIT -u SINNIX_AGENT_SCOPE_CGRO
   PATH="${tmp}/bin:${PATH}" SINNIX_AGENT_SCOPE_EXEC="${tmp}/bin/scope-exec" \
   FAKE_SCOPE_RECEIPT_DIR="${tmp}/scope-receipts" \
   "${runner}" --job-id job-hold --job-state-dir "${tmp}/state" --agent codex --model fake \
-  --workdir "${tmp}/worktree" --prompt-file "${tmp}/hold.prompt" \
+  --workdir "${tmp}/worktree" --registered-project "${tmp}/repo" \
+  --expected-git-common-dir "${repo_common_dir}" --prompt-file "${tmp}/hold.prompt" \
   --log-file "${tmp}/output/job-hold.log" --last-file "${tmp}/output/job-hold.final" &
 hold_pid=$!
 for _ in {1..100}; do

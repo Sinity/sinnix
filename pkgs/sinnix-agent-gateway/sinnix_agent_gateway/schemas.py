@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class GatewayModel(BaseModel):
@@ -18,9 +18,25 @@ class ProjectReadRequest(GatewayModel):
 
 
 class AgentLaunchRequest(GatewayModel):
+    @model_validator(mode="before")
+    @classmethod
+    def reject_agent_environment_overlay(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "environment_overlay" in value:
+            overlay = value["environment_overlay"]
+            names = overlay.keys() if isinstance(overlay, dict) else ()
+            if any(isinstance(name, str) and name.startswith("SINNIX_") for name in names):
+                raise ValueError(
+                    "agent environment overlay cannot override reserved SINNIX_* variables"
+                )
+            raise ValueError(
+                "agent environment overlays are deferred until a service-private transport exists"
+            )
+        return value
+
     project_id: str = Field(min_length=1, max_length=128)
     prompt: str = Field(min_length=1, max_length=200_000)
     backend: str = Field(pattern="^(claude|codex|gemini|grok|antigravity)$")
+    worktree: str | None = Field(default=None, min_length=1, max_length=4096)
     model: str | None = Field(default=None, max_length=256)
     reasoning_effort: str | None = Field(default=None, max_length=32)
     job_role: str | None = Field(default=None, max_length=512)

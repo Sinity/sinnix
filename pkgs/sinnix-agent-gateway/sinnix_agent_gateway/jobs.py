@@ -62,6 +62,72 @@ class JobService:
         environment["SINNIX_AGENT_JOB_STATE_DIR"] = str(self.root)
         return environment
 
+    def _authorized_agent_worktree(
+        self, project_path: Path, requested: str | None
+    ) -> Path:
+        registered = project_path.resolve(strict=True)
+        if requested is None:
+            return registered
+        try:
+            candidate = Path(requested).expanduser().resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise JobError("requested worktree is unavailable") from exc
+        if not candidate.is_dir():
+            raise JobError("requested worktree is not a directory")
+        if candidate == registered:
+            return candidate
+
+        def git_value(path: Path, *args: str) -> str:
+            result = subprocess.run(
+                ["git", "-C", str(path), *args],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                text=True,
+            )
+            if result.returncode != 0:
+                raise JobError("requested worktree is not a Git worktree")
+            return result.stdout.strip()
+
+        try:
+            candidate_root = Path(
+                git_value(
+                    candidate, "rev-parse", "--path-format=absolute", "--show-toplevel"
+                )
+            ).resolve(strict=True)
+            candidate_common = Path(
+                git_value(
+                    candidate, "rev-parse", "--path-format=absolute", "--git-common-dir"
+                )
+            ).resolve(strict=True)
+            registered_common = Path(
+                git_value(
+                    registered, "rev-parse", "--path-format=absolute", "--git-common-dir"
+                )
+            ).resolve(strict=True)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise JobError("requested worktree has an invalid Git identity") from exc
+        if candidate_root != candidate or candidate_common != registered_common:
+            raise JobError("requested worktree is not linked to the registered project")
+
+        listed = subprocess.run(
+            ["git", "-C", str(registered), "worktree", "list", "--porcelain"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            text=True,
+        )
+        if listed.returncode != 0:
+            raise JobError("could not attest registered project worktrees")
+        worktree_paths = {
+            Path(line.removeprefix("worktree ")).resolve()
+            for line in listed.stdout.splitlines()
+            if line.startswith("worktree ")
+        }
+        if candidate not in worktree_paths:
+            raise JobError("requested path is not a linked Git worktree")
+        return candidate
+
     @staticmethod
     def _shell_environment(overlay: dict[str, str] | None) -> dict[str, str]:
         environment = {
@@ -167,8 +233,52 @@ class JobService:
             raise JobError(f"unknown project: {request.project_id}") from exc
         if not project.path.is_dir():
             raise JobError("project checkout is unavailable")
+        worktree = self._authorized_agent_worktree(project.path, request.worktree)
+        common_result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(project.path.resolve()),
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            text=True,
+        )
         if not self.config.agent_runner.is_file():
             raise JobError("agent runner is unavailable")
+
+        if common_result.returncode == 0:
+            # A Git-backed registered project: the runner attests --workdir
+            # against --registered-project/--expected-git-common-dir. This is
+            # the only case where a linked worktree other than the registered
+            # project itself could have been authorized above.
+            expected_git_common_dir = str(Path(common_result.stdout.strip()).resolve())
+            identity_args = [
+                "--registered-project",
+                str(project.path.resolve()),
+                "--expected-git-common-dir",
+                expected_git_common_dir,
+            ]
+        else:
+            # project.path is not a Git checkout at all, so there is no
+            # worktree concept to attest -- and none was authorized above:
+            # _authorized_agent_worktree only returns a path other than the
+            # registered project itself after validating it as a linked Git
+            # worktree, which is impossible when the registered project has
+            # no Git common directory of its own to link against. `worktree`
+            # is therefore guaranteed to equal project.path.resolve() here,
+            # so this is exactly the runner's explicit non-attested opt-out
+            # for a caller-trusted directory, not a weakening of the
+            # attestation boundary. (Passing an empty --expected-git-common-dir
+            # instead -- the prior behavior -- made the runner's own argument
+            # parser abort on every launch against a non-Git registered
+            # project: `${2:?msg}` treats an empty value the same as a
+            # missing one.)
+            identity_args = ["--local-workdir"]
 
         job_id = str(uuid.uuid4())
         launch_id = secrets.token_hex(16)
@@ -182,7 +292,8 @@ class JobService:
             "--agent",
             request.backend,
             "--workdir",
-            str(project.path),
+            str(worktree),
+            *identity_args,
             "--prompt-file",
             str(prompt_path),
             "--log-file",
@@ -262,6 +373,7 @@ class JobService:
                 },
             )
         except OSError as exc:
+            prompt_path.unlink(missing_ok=True)
             raise JobError("failed to launch attested agent job") from exc
         manifest = self._manifest_path(job_id)
         for _ in range(40):
