@@ -587,6 +587,42 @@ def test_gateway_rejects_runner_job_id_collision(
     assert old_prompt.read_text() == "original"
 
 
+def test_launch_agent_unlinks_prompt_when_subprocess_popen_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id = "00000000-0000-4000-8000-000000000002"
+    launch_id = "deadbeefdeadbeefdeadbeefdeadbeef"
+    runner = tmp_path / "runner"
+    runner.write_text("#!/bin/sh\nexit 0\n")
+    # Deliberately not executable: agent_runner.is_file() still passes the
+    # pre-flight check, but subprocess.Popen raises a real PermissionError
+    # (a subclass of OSError) when it tries to exec this file -- no mocking
+    # of Popen itself, just an OS-enforced launch failure.
+    runner.chmod(0o600)
+    cfg = dataclasses.replace(config(tmp_path), agent_runner=runner)
+    runtime = Runtime.create(cfg, "agent-control")
+    monkeypatch.setattr("sinnix_agent_gateway.jobs.uuid.uuid4", lambda: job_id)
+    monkeypatch.setattr("sinnix_agent_gateway.jobs.secrets.token_hex", lambda _n: launch_id)
+
+    prompt_path = runtime.jobs.root / f"{job_id}.{launch_id}.prompt.md"
+    with pytest.raises(JobError, match="failed to launch attested agent job"):
+        runtime.jobs.launch_agent(
+            AgentLaunchRequest(
+                project_id="fixture", prompt="secret prompt body", backend="codex"
+            )
+        )
+
+    assert not prompt_path.exists()
+    leftover = list(runtime.jobs.root.glob(f"{job_id}.*.prompt.md"))
+    assert leftover == [], f"prompt file(s) survived a launch failure: {leftover}"
+    # An observer-scoped principal must not be able to read a prompt that a
+    # failed launch left behind -- verify no readable file remains, not just
+    # that the JobService's own handle is gone.
+    observer_files = Runtime.create(runtime.config, "observer").files
+    with pytest.raises(FileError, match="path does not exist"):
+        observer_files.read("read", str(prompt_path))
+
+
 def test_agent_worktree_authorization_reaches_runner_boundary(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()

@@ -350,6 +350,7 @@ class JobService:
                 },
             )
         except OSError as exc:
+            prompt_path.unlink(missing_ok=True)
             raise JobError("failed to launch attested agent job") from exc
         manifest = self._manifest_path(job_id)
         for _ in range(40):
