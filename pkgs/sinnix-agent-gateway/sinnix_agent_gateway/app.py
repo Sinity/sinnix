@@ -13,6 +13,7 @@ from .audit import AuditService
 from .capabilities import Capability, Principal
 from .captures import CaptureService
 from .config import GatewayConfig
+from .desktop import DesktopService
 from .files import HostFileService
 from .jobs import JobService
 from .machine_actions import MachineActionService
@@ -67,6 +68,7 @@ class Runtime:
     jobs: JobService
     observe: ObserveService
     machine_actions: MachineActionService
+    desktop: DesktopService
     captures: CaptureService
     files: HostFileService
     sessions: SessionLogService
@@ -86,6 +88,7 @@ class Runtime:
             jobs=JobService(config, principal, artifacts),
             observe=ObserveService(config, principal),
             machine_actions=MachineActionService(config, principal),
+            desktop=DesktopService(config, principal),
             captures=CaptureService(config, principal),
             files=HostFileService(config, principal),
             sessions=SessionLogService(config, principal),
@@ -194,6 +197,24 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     operator_reason,
                     parameters,
                 ),
+            )
+
+    if Capability.DESKTOP_READ in runtime.principal.capabilities:
+
+        @mcp.tool(title="Read desktop state", annotations=READ_ONLY_TOOL)
+        def desktop_read(operation: str) -> dict[str, Any]:
+            """Read bounded Hyprland or screen-color state through its owner wrapper."""
+            return runtime.execute(
+                "desktop_read", lambda: runtime.desktop.read(operation)
+            )
+
+    if Capability.DESKTOP_ACTION in runtime.principal.capabilities:
+
+        @mcp.tool(title="Run desktop action", annotations=DESTRUCTIVE_TOOL)
+        def desktop_action(operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
+            """Run one exact operator desktop action through the Hyprland wrapper."""
+            return runtime.execute(
+                "desktop_action", lambda: runtime.desktop.action(operation, arguments)
             )
 
     @mcp.tool(title="List projects", annotations=READ_ONLY_TOOL)
