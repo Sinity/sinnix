@@ -458,6 +458,26 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 ),
             )
 
+        @mcp.tool(title="Start operator shell job", annotations=DESTRUCTIVE_TOOL)
+        def shell_start(
+            argv: list[str],
+            cwd: str = "/",
+            timeout_seconds: int = 3_600,
+            environment: dict[str, str] | None = None,
+            as_root: bool = False,
+        ) -> dict[str, Any]:
+            """Start exact argv as an attested, cancellable operator shell job."""
+            return runtime.execute(
+                "shell_start",
+                lambda: runtime.jobs.start_shell(
+                    argv,
+                    cwd,
+                    timeout_seconds,
+                    environment,
+                    as_root,
+                ),
+            )
+
     @mcp.tool(title="List attested jobs", annotations=READ_ONLY_TOOL)
     def job_list(limit: int = 100) -> dict[str, Any]:
         """List recent attested jobs and report malformed records explicitly."""

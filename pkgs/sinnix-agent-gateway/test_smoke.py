@@ -68,6 +68,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "terminal_action",
         "browser_action",
         "shell_run",
+        "shell_start",
     }.isdisjoint(readonly_names)
     assert {"agent_launch", "job_cancel", "capability_search", "capability_describe"} <= local_names
     assert {
@@ -81,6 +82,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "terminal_action",
         "terminal_read",
         "shell_run",
+        "shell_start",
     }.isdisjoint(local_names)
     assert {
         "files_write",
@@ -95,6 +97,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "terminal_action",
         "terminal_read",
         "shell_run",
+        "shell_start",
         "capability_search",
         "capability_describe",
     } <= operator_names
@@ -334,6 +337,26 @@ def test_runtime_audit_carries_returned_transient_unit(tmp_path: Path) -> None:
     )
     payload = runtime.audit.tail(1)["events"][0]["payload"]
     assert payload == {"unit": "sinnix-gateway-run-fixture.service"}
+
+
+def test_runtime_audit_carries_execution_job_and_scope(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "operator")
+    runtime.execute(
+        "shell_start",
+        lambda: {
+            "job_id": "shell-fixture",
+            "unit": "sinnix-gateway-exec-shell-fixture.scope",
+            "secret": "hidden",
+        },
+    )
+
+    payload = runtime.audit.tail(1)["events"][0]["payload"]
+
+    assert payload == {
+        "job_id": "shell-fixture",
+        "unit": "sinnix-gateway-exec-shell-fixture.scope",
+        "correlation_id": "shell-fixture",
+    }
 
 
 def test_runtime_audit_carries_returned_owner_receipt(tmp_path: Path) -> None:

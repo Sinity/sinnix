@@ -77,6 +77,8 @@ mkServiceModule {
         capabilityIndex = "/etc/sinnix/capability-index.json";
         agentRunner = "${config.sinnix.paths.dotsRoot}/_ai/skills/agent-orchestration/scripts/run_agent_prompt.sh";
         inherit agentController;
+        agentScopeExecCommand = "${scriptPkgs.sinnix-agent-scope-exec}/bin/sinnix-agent-scope-exec";
+        executionJobCommand = "${scriptPkgs.sinnix-agent-gateway}/bin/sinnix-agent-gateway-execution-job";
         observeCommand = "${scriptPkgs.sinnix-observe}/bin/sinnix-observe";
         projects = config.sinnix.projects.entries;
       };
