@@ -5,7 +5,7 @@ let
   # Every server describes itself in one line, the same contract script
   # frontmatter and the module factories carry: the capability index
   # (/etc/sinnix/capability-index.json) renders this registry for a reader who
-  # is asking what "serena" or "firecrawl" even is, and a nameless row there is
+  # is asking what "firecrawl" even is, and a nameless row there is
   # worse than absent. Enforced where it is consumed, so a missing description
   # is a build failure rather than a blank cell on the hub.
   undescribed = lib.attrNames (
@@ -66,37 +66,6 @@ let
         "antigravity"
         "hermes"
       ];
-    };
-
-    serena = {
-      description = "Semantic code navigation: symbol overviews, references, and safe symbol edits";
-      transport = "stdio";
-      tier = "code-semantic";
-      command = "serena";
-      args = [
-        "start-mcp-server"
-        "--project-from-cwd"
-        "--context=ide"
-      ];
-      clients = [
-        "codex"
-        "claude"
-        "gemini"
-        "antigravity"
-      ];
-      claude.args = [
-        "start-mcp-server"
-        "--project-from-cwd"
-        "--context=claude-code"
-      ];
-      codex = {
-        startup_timeout_sec = 15;
-        args = [
-          "start-mcp-server"
-          "--project-from-cwd"
-          "--context=codex"
-        ];
-      };
     };
 
     firecrawl = {
@@ -206,13 +175,11 @@ let
       "remote-core"
       "recall"
       "deep-evidence"
-      "code-semantic"
     ];
     browser = [
       "remote-core"
       "recall"
       "deep-evidence"
-      "code-semantic"
       "browser-mcp"
     ];
     orchestrate = [
@@ -227,7 +194,6 @@ let
     antigravity = [
       "remote-core"
       "recall"
-      "code-semantic"
       "agent-control"
     ];
   };

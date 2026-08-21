@@ -405,7 +405,7 @@ skills`, `~/.codex/skills`, `~/.gemini/skills`) are linkFarms over it.
   backend-env builders (`mkClaudeBackendEnv`/`mkCodexBackendEnv`) the
   deepseek/local lanes parameterize. `mcp.nix`
   (`sinnix.features.dev.mcp-servers`) plus `mcp-tools.nix`/
-  `client-profiles.nix`/`serena.nix`/`browser.nix`/`hooks.nix` own the MCP
+  `client-profiles.nix`/`browser.nix`/`hooks.nix` own the MCP
   registry wiring and per-client (Codex/Gemini) config generation. Only
   `clis.nix`/`mcp.nix` are real NixOS modules; the sibling files are
   plain-nix helpers imported directly, not auto-imported.

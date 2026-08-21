@@ -4,7 +4,7 @@
 #
 # Domain pieces live in sibling plain-nix helpers, imported below:
 # mcp-tools.nix (generic MCP wrappers), client-profiles.nix
-# (registry-driven Codex/Gemini config), serena.nix, browser.nix, hooks.nix.
+# (registry-driven Codex/Gemini config), browser.nix, hooks.nix.
 {
   mkFeatureModule,
   lib,
@@ -88,11 +88,6 @@ mkFeatureModule {
       jsonFormat = pkgs.formats.json { };
       tomlFormat = pkgs.formats.toml { };
       inherit (helpers.data) mcpRegistry;
-
-      serena = import ./serena.nix {
-        inherit lib pkgs scriptPkgs;
-        projectEntries = config.sinnix.projects.entries;
-      };
       browser = import ./browser.nix {
         inherit
           lib
@@ -125,8 +120,6 @@ mkFeatureModule {
         inherit pkgs;
         dotsRoot = config.sinnix.paths.dotsRoot;
       };
-
-      inherit (serena) serenaConfigFile mkSerenaWrapper;
       inherit (browser)
         mcpChromeDevtoolsBin
         desktopControlScripts
@@ -216,11 +209,6 @@ mkFeatureModule {
         sinnix.features.dev.mcp-servers.antigravityMcpConfigSource = antigravityMcpConfigFile;
         sinnix.persistence.home.directories = [
           ".local/state/sinnix/settings-env-lint"
-          {
-            directory = ".local/share/serena";
-            mode = "0700";
-          }
-          ".local/state/serena"
         ];
 
         home-manager.users.${user} =
@@ -284,15 +272,6 @@ mkFeatureModule {
                   run chmod 644 "$HOME/.codex/local.config.toml"
                   run chmod 644 "$HOME/.codex/hooks.json"
                 '';
-                serenaConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                  run mkdir -p "$HOME/.local/share/serena"
-                  if [ -f "$HOME/.local/share/serena/serena_config.yml" ] \
-                    && ! ${pkgs.diffutils}/bin/cmp -s ${lib.escapeShellArg (toString serenaConfigFile)} "$HOME/.local/share/serena/serena_config.yml"; then
-                    run cp "$HOME/.local/share/serena/serena_config.yml" "$HOME/.local/share/serena/serena_config.yml.hm-bak"
-                  fi
-                  run cp ${lib.escapeShellArg (toString serenaConfigFile)} "$HOME/.local/share/serena/serena_config.yml"
-                  run chmod 644 "$HOME/.local/share/serena/serena_config.yml"
-                '';
               };
             };
 
@@ -325,16 +304,6 @@ mkFeatureModule {
                 force = true;
               };
               ".gemini/config/AGENTS.md".source = mkDotsFile "/claude/CLAUDE.md";
-              ".local/bin/serena" = {
-                executable = true;
-                force = true;
-                text = mkSerenaWrapper "serena";
-              };
-              ".local/bin/serena-hooks" = {
-                executable = true;
-                force = true;
-                text = mkSerenaWrapper "serena-hooks";
-              };
               ".local/bin/sinnix-mcp-sweep" = {
                 source = "${scriptPkgs.sinnix-mcp-sweep}/bin/sinnix-mcp-sweep";
                 force = true;

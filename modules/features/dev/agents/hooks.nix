@@ -1,6 +1,6 @@
 # Codex session-lifecycle hooks (SessionStart/UserPromptSubmit/Stop): orphan
-# process reaping, Serena activation/cleanup, and beads/session-recall
-# priming. Plain helper (not a NixOS module) — imported directly by mcp.nix's
+# process reaping and Beads/session-recall priming. Plain helper (not a NixOS
+# module) imported directly by mcp.nix's
 # configFn; the generated file is exposed via the mcp-servers.codexHooksSource
 # option for tests.
 { pkgs, dotsRoot }:
@@ -16,14 +16,6 @@ jsonFormat.generate "codex-hooks.json" {
           {
             type = "command";
             command = "sinnix-mcp-sweep --orphans-only --quiet";
-          }
-          {
-            type = "command";
-            command = ''
-              case "''${SINNIX_CODEX_PROFILE:-full}" in
-                full|browser|deepseek|local) serena-hooks activate --client=codex ;;
-              esac
-            '';
           }
           {
             type = "command";
@@ -90,14 +82,6 @@ jsonFormat.generate "codex-hooks.json" {
           {
             type = "command";
             command = "sinnix-mcp-sweep --orphans-only --quiet";
-          }
-          {
-            type = "command";
-            command = ''
-              case "''${SINNIX_CODEX_PROFILE:-full}" in
-                full|browser|deepseek|local) serena-hooks cleanup --client=codex ;;
-              esac
-            '';
           }
           {
             type = "command";

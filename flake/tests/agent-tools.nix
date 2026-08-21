@@ -191,8 +191,6 @@ in
           ".local/bin/grok-sinnix"
           ".local/bin/agy-sinnix"
           ".local/bin/hermes"
-          ".local/bin/serena"
-          ".local/bin/serena-hooks"
           ".local/bin/bd-prime-if-present"
           ".local/bin/mcp-firecrawl"
           ".local/bin/mcp-chrome-devtools"
@@ -491,8 +489,6 @@ in
               "$HOME/.local/bin/grok-sinnix" \
               "$HOME/.local/bin/agy-sinnix" \
               "$HOME/.local/bin/hermes" \
-              "$HOME/.local/bin/serena" \
-              "$HOME/.local/bin/serena-hooks" \
               "$HOME/.local/bin/bd-prime-if-present"; do
               test -x "$wrapper"
               bash -n "$wrapper"
@@ -501,11 +497,9 @@ in
             jq -e '
               (has("mcpServers") | not) and
               ([.hooks.SessionStart[].hooks[].command]
-                | any(contains("SINNIX_CLAUDE_PROFILE") and contains("serena-hooks activate --client=claude-code"))) and
-              ([.hooks.SessionStart[].hooks[].command]
                 | any(contains("sessionstart-sinex-recall.sh"))) and
               ([.hooks.Stop[].hooks[].command]
-                | any(contains("SINNIX_CLAUDE_PROFILE") and contains("serena-hooks cleanup --client=claude-code")))
+                | any(contains("sinnix-mcp-sweep --orphans-only --quiet")))
             ' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
 
             # Rendered profile configs must match the registry's own computed
@@ -591,8 +585,8 @@ in
             done
 
             jq -e '
-              [.hooks.SessionStart[].hooks[].command]
-              | any(contains("SINNIX_CODEX_PROFILE") and contains("serena-hooks activate --client=codex"))
+              [.hooks.Stop[].hooks[].command]
+              | any(contains("sinnix-mcp-sweep --orphans-only --quiet"))
             ' "$HOME/.codex/hooks.json" >/dev/null
             jq -e '
               [.hooks.SessionStart[].hooks[].command] | index("bd-prime-if-present")

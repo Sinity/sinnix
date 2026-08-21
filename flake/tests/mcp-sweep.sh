@@ -24,7 +24,7 @@ make_process() {
 live_cgroup=/user.slice/user-1000.slice/user@1000.service/sinnix-agent-job-live.scope
 detached_cgroup=/user.slice/user-1000.slice/user@1000.service/sinnix-agent-job-detached.scope
 orphan_cgroup=/user.slice/user-1000.slice/user@1000.service/sinnix-agent-job-orphan.scope
-make_process 101 10 "$live_cgroup" 'serena start-mcp-server' 100
+make_process 101 10 "$live_cgroup" 'mcp-firecrawl' 100
 make_process 102 1 "$detached_cgroup" 'mcp-polylogue' 200
 make_process 103 1 "$orphan_cgroup" 'mcp-lynchpin' 300
 # A helper in a cgroup no manifest attests to: the sweep can neither confirm

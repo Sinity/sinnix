@@ -462,7 +462,7 @@ patterns, workflows) lives in each project's `CLAUDE.md`.
 - **MCP profiles**: registry source of truth is `flake/data/mcp-registry.nix`
   in sinnix; wiring in `modules/features/dev/agents/`. Plain `claude`/`codex`
   = lean profile; `claude-full`/`codex-full` = full (GitHub, Context7,
-  Polylogue, Lynchpin, Serena); `*-browser` adds Chrome DevTools MCP. The
+  Polylogue, Lynchpin); `*-browser` adds Chrome DevTools MCP. The
   bare `~/.local/bin/claude` is deliberately unmanaged (the installer
   clobbers it); `claude` aliases the managed lean wrapper.
 - **Alternate backends**: `claude-deepseek`/`codex-deepseek` (agenix
@@ -590,23 +590,6 @@ For thorough code review or bug hunting, use the `analyze` or `swarm` skill:
 Empirically validated techniques: line-by-line narration (forces attention),
 cross-referencing related functions (e.g. `register()` vs `list()` key-format
 mismatches), checking get→modify→put patterns for races in distributed code.
-
-### Semantic MCPs
-
-Serena is registered for Codex, Claude, Gemini, and VS Code. Default sequence:
-
-1. `rg` for exact literal text and unindexed/generated surfaces.
-2. Serena near an edit boundary: symbol overviews, precise lookup, references
-   grouped by containing symbol, diagnostics, rename, safe-delete, symbol-body
-   replacement.
-
-Serena is configured for `sinex`, `polylogue`, `sinity-lynchpin`, and `sinnix`
-via `.serena/project.yml`; it activates from the current working directory. If
-Serena tools are missing in Codex despite an active config, use tool discovery
-for the exact operation name — lazy loading can hide active tools.
-
-Serena state lives under `~/.local/share/serena` (installs under
-`~/.local/state/serena`).
 
 ## Thinking in Markdown
 

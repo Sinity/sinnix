@@ -56,52 +56,52 @@ Servers: context7, github, lynchpin, polylogue, sinex.
 
 ### full (claude)
 
-Tiers: remote-core, recall, deep-evidence, code-semantic.
-Servers: context7, github, lynchpin, polylogue, serena, sinex.
+Tiers: remote-core, recall, deep-evidence.
+Servers: context7, github, lynchpin, polylogue, sinex.
 
 ### full (codex)
 
-Tiers: remote-core, recall, deep-evidence, code-semantic.
-Servers: context7, github, lynchpin, polylogue, serena, sinex.
+Tiers: remote-core, recall, deep-evidence.
+Servers: context7, github, lynchpin, polylogue, sinex.
 
 ### full (gemini)
 
-Tiers: remote-core, recall, deep-evidence, code-semantic.
-Servers: context7, github, lynchpin, polylogue, serena, sinex.
+Tiers: remote-core, recall, deep-evidence.
+Servers: context7, github, lynchpin, polylogue, sinex.
 
 ### full (antigravity)
 
-Tiers: remote-core, recall, deep-evidence, code-semantic.
-Servers: context7, github, lynchpin, polylogue, serena, sinex.
+Tiers: remote-core, recall, deep-evidence.
+Servers: context7, github, lynchpin, polylogue, sinex.
 
 ### full (hermes)
 
-Tiers: remote-core, recall, deep-evidence, code-semantic.
+Tiers: remote-core, recall, deep-evidence.
 Servers: context7, github, lynchpin, polylogue, sinex.
 
 ### browser (claude)
 
-Tiers: remote-core, recall, deep-evidence, code-semantic, browser-mcp.
-Servers: chrome-devtools, context7, firecrawl, github, lynchpin, polylogue, serena, sinex.
+Tiers: remote-core, recall, deep-evidence, browser-mcp.
+Servers: chrome-devtools, context7, firecrawl, github, lynchpin, polylogue, sinex.
 
 ### browser (codex)
 
-Tiers: remote-core, recall, deep-evidence, code-semantic, browser-mcp.
-Servers: chrome-devtools, context7, github, lynchpin, polylogue, serena, sinex.
+Tiers: remote-core, recall, deep-evidence, browser-mcp.
+Servers: chrome-devtools, context7, github, lynchpin, polylogue, sinex.
 
 ### browser (gemini)
 
-Tiers: remote-core, recall, deep-evidence, code-semantic, browser-mcp.
-Servers: chrome-devtools, context7, github, lynchpin, polylogue, serena, sinex.
+Tiers: remote-core, recall, deep-evidence, browser-mcp.
+Servers: chrome-devtools, context7, github, lynchpin, polylogue, sinex.
 
 ### browser (antigravity)
 
-Tiers: remote-core, recall, deep-evidence, code-semantic, browser-mcp.
-Servers: context7, github, lynchpin, polylogue, serena, sinex.
+Tiers: remote-core, recall, deep-evidence, browser-mcp.
+Servers: context7, github, lynchpin, polylogue, sinex.
 
 ### browser (hermes)
 
-Tiers: remote-core, recall, deep-evidence, code-semantic, browser-mcp.
+Tiers: remote-core, recall, deep-evidence, browser-mcp.
 Servers: context7, firecrawl, github, lynchpin, polylogue, sinex.
 
 ### orchestrate (claude)
@@ -131,79 +131,83 @@ Servers: agent-control, context7, github, lynchpin, polylogue, sinex.
 
 ### antigravity (claude)
 
-Tiers: remote-core, recall, code-semantic, agent-control.
-Servers: agent-control, context7, github, polylogue, serena, sinex.
+Tiers: remote-core, recall, agent-control.
+Servers: agent-control, context7, github, polylogue, sinex.
 
 ### antigravity (codex)
 
-Tiers: remote-core, recall, code-semantic, agent-control.
-Servers: agent-control, context7, github, polylogue, serena, sinex.
+Tiers: remote-core, recall, agent-control.
+Servers: agent-control, context7, github, polylogue, sinex.
 
 ### antigravity (gemini)
 
-Tiers: remote-core, recall, code-semantic, agent-control.
-Servers: agent-control, context7, github, polylogue, serena, sinex.
+Tiers: remote-core, recall, agent-control.
+Servers: agent-control, context7, github, polylogue, sinex.
 
 ### antigravity (antigravity)
 
-Tiers: remote-core, recall, code-semantic, agent-control.
-Servers: agent-control, context7, github, polylogue, serena, sinex.
+Tiers: remote-core, recall, agent-control.
+Servers: agent-control, context7, github, polylogue, sinex.
 
 ### antigravity (hermes)
 
-Tiers: remote-core, recall, code-semantic, agent-control.
+Tiers: remote-core, recall, agent-control.
 Servers: agent-control, context7, github, polylogue, sinex.
 
 ## MCP servers
 
-| Server            | Tier            | Transport | Command or URL                 | Clients                                    |
-| ----------------- | --------------- | --------- | ------------------------------ | ------------------------------------------ |
-| `agent-control`   | `agent-control` | `stdio`   | `sinnix-agent-control-mcp`     | claude, codex, gemini, antigravity, hermes |
-| `chrome-devtools` | `browser-mcp`   | `stdio`   | `mcp-chrome-devtools`          | claude, codex, gemini                      |
-| `context7`        | `remote-core`   | `http`    | `https://mcp.context7.com/mcp` | claude, codex, gemini, antigravity, hermes |
-| `firecrawl`       | `browser-mcp`   | `stdio`   | `mcp-firecrawl`                | claude, hermes                             |
-| `github`          | `remote-core`   | `stdio`   | `npx`                          | claude, codex, gemini, antigravity, hermes |
-| `lynchpin`        | `deep-evidence` | `stdio`   | `mcp-lynchpin`                 | codex, claude, gemini, antigravity, hermes |
-| `polylogue`       | `recall`        | `stdio`   | `mcp-polylogue`                | codex, claude, gemini, antigravity, hermes |
-| `serena`          | `code-semantic` | `stdio`   | `serena`                       | codex, claude, gemini, antigravity         |
-| `sinex`           | `recall`        | `stdio`   | `mcp-sinex`                    | codex, claude, gemini, antigravity, hermes |
+| Server | Tier | Transport | Command or URL | Clients |
+| --- | --- | --- | --- | --- |
+| `agent-control` | `agent-control` | `stdio` | `sinnix-agent-control-mcp` | claude, codex, gemini, antigravity, hermes |
+| `chrome-devtools` | `browser-mcp` | `stdio` | `mcp-chrome-devtools` | claude, codex, gemini |
+| `context7` | `remote-core` | `http` | `https://mcp.context7.com/mcp` | claude, codex, gemini, antigravity, hermes |
+| `firecrawl` | `browser-mcp` | `stdio` | `mcp-firecrawl` | claude, hermes |
+| `github` | `remote-core` | `stdio` | `npx` | claude, codex, gemini, antigravity, hermes |
+| `lynchpin` | `deep-evidence` | `stdio` | `mcp-lynchpin` | codex, claude, gemini, antigravity, hermes |
+| `polylogue` | `recall` | `stdio` | `mcp-polylogue` | codex, claude, gemini, antigravity, hermes |
+| `sinex` | `recall` | `stdio` | `mcp-sinex` | codex, claude, gemini, antigravity, hermes |
 
 ## Agent definitions
 
-| Name     | Description                                                                                         | Model    | Effort   |
-| -------- | --------------------------------------------------------------------------------------------------- | -------- | -------- |
-| `judge`  | Headless structured judge with an explicit refutation attempt and honest unsupported path.          | `sonnet` | `high`   |
-| `lane`   | Worktree-isolated implementation worker. Dispatch prompts carry only task scope and file ownership. | `sonnet` | `high`   |
-| `review` | Read-only adversarial reviewer that cites exact evidence and tests the strongest counterclaim.      | `opus`   | `high`   |
-| `triage` | Read-only evidence worker returning a closed structured verdict.                                    | `haiku`  | `medium` |
+| Name | Description | Model | Effort |
+| --- | --- | --- | --- |
+| `boilerplate-scribe` | | | `haiku` | `` |
+| `judge` | Headless structured judge with an explicit refutation attempt and honest unsupported path. | `sonnet` | `high` |
+| `lane` | Worktree-isolated implementation worker. Dispatch prompts carry only task scope and file ownership. | `sonnet` | `high` |
+| `review` | Read-only adversarial reviewer that cites exact evidence and tests the strongest counterclaim. | `opus` | `high` |
+| `test-coverage-sprint` | | | `sonnet` | `` |
+| `triage` | Read-only evidence worker returning a closed structured verdict. | `haiku` | `medium` |
 
 ## Shared skills
 
-| Skill                      | When to use                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
-| `adversarial-loop`         | Iterate independent adversarial subagent reviews against a closure (diff, PR body, AC matrix) until the reviewer cannot find legitimate gaps. Caps at 5 iterations. Use when finalizing work that has an explicit AC list — issue closures, refactors with invariants, PRs claiming "all of X is now covered".                                                                                                                                                                                                                                                                    |
-| `agent-orchestration`      | >                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `analyze`                  | Interactive codebase analysis with user steering (survey → narrate → synthesize)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `assured-close`            | Audit issue satisfaction using an AC-matrix + adversarial-loop pattern. Use when finalizing any reopened or scope-heavy issue, especially when you want the completion claim to survive future audits. Does not change GitHub issue state unless the operator explicitly requests that separate action.                                                                                                                                                                                                                                                                           |
-| `bead-loop`                | Work a Beads queue continuously — pick the highest-value ready bead, execute it to a merged PR, close with verification, repeat. Use when the user says "work the bead queue", "keep going through bd ready", or invokes it under /loop for cross-session continuation. Requires a repo with a .beads/ workspace.                                                                                                                                                                                                                                                                 |
-| `beads`                    | Use when a repository has a Beads workspace (`.beads/`) or the user asks to find ready work, claim or close tasks, create follow-up issues, inspect blockers, record durable project memory, or recover task context across Claude/Codex sessions.                                                                                                                                                                                                                                                                                                                                |
-| `claude-self-knowledge`    | Self-understanding for Claude agents on this machine — what Claude models are (family, tiers, context/compaction behavior), what the Claude Code harness provides (subagents, forks, teams, hooks, skills, agent defs, headless mode), where local state lives, and the verification-over-recall discipline for capability facts. Use when reasoning about your own capabilities or limits, choosing dispatch mechanics, explaining Claude/Claude Code behavior to the operator, or debugging harness-level surprises (compaction, notifications, permissions, model resolution). |
-| `context-hygiene`          | Record load-bearing task state before context compaction and resume from private evidence. Use when work spans many tool calls, external jobs, Beads tasks, or a context boundary.                                                                                                                                                                                                                                                                                                                                                                                                |
-| `incident-evidence-freeze` | Freeze incident evidence before resolving conflicts, restoring files, or changing services. Use when a worktree is conflicted, an artifact disappeared, recovery may mutate Git or Beads state, or the operator says preserve evidence first. Do not use for ordinary status checks.                                                                                                                                                                                                                                                                                              |
-| `recovery-decision-tree`   | "Recover a missing artifact by checking authorities in order: filesystem and worktree, Git index and reflog, agent session records, Beads JSONL and Dolt, then snapshots and backups. Use when a file, task record, or agent result is missing or conflicted and the recovery source is unclear. Pair with incident-evidence-freeze before mutation."                                                                                                                                                                                                                             |
-| `desktop-control-plane`    | "Control desktop/runtime surfaces for operator workflows: Kitty remote I/O, Hyprland dispatch/inspection, and screenshot diagnostics/workarounds (including HDR washout handling). Use when coding agents need reliable computer-use primitives on Linux Wayland/Hyprland systems."                                                                                                                                                                                                                                                                                               |
-| `drive`                    | Self-driving iterative execution - enhance a goal into the best next move, stress-test it, execute, externalize results, then forge the next self-prompt and continue. Use when the user says "drive", "keep going", "iterate on this", "take it further", wants to nod along while the agent picks directions, or asks for N autonomous iterations. Composes enhance (prompt forging) and grilling (adversarial stress) into a recurrence loop with optional auto-iteration.                                                                                                     |
-| `enhance`                  | Rewrite rough requests into high-leverage prompts while preserving intent. Use for quick prompt polishing, executable code/research prompts, external-agent handoffs, or non-overlapping prompt portfolios with fresh context and honest deliverable contracts.                                                                                                                                                                                                                                                                                                                   |
-| `evidence-harness`         | For bug investigations — build a reproduction harness that measures the suspected behaviour BEFORE touching production code. Use when investigating intermittent or load-dependent bugs, performance regressions, I/O storms, or any case where the user explicitly says "fix what the data implicates, not what the hypothesis flags". Prevents writing code for the wrong suspect.                                                                                                                                                                                              |
-| `greedy-batching`          |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |     |
-| `git-protocol`             | Use when committing, branching, pushing, opening or reviewing pull requests, resolving conflicts, staging files, or applying GitHub repository workflow rules.                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `grilling`                 | Grill the user relentlessly about a plan or design. Use when the user wants to stress-test a plan before building, or uses any 'grill' trigger phrases.                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `html-report`              | Produce agent output for human reading as self-contained interactive HTML instead of markdown — templates, layout system, and interactivity patterns. Use for reports, reviews, censuses, dashboards, plans, incident timelines, comparisons.                                                                                                                                                                                                                                                                                                                                     |
-| `lynchpin`                 | Query the Lynchpin substrate via MCP — 28 tools over DuckDB. Evidence graph, velocity, correlations, closure chains, overlap edges, PR reviews, kind audit, refactor detection, durability, anomalies, calendar.                                                                                                                                                                                                                                                                                                                                                                  |
-| `meta`                     | Meta-level introspection - analyze session, improve setup, persist learnings                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `polylogue`                | Query the Polylogue AI-session archive (Claude, Codex, ChatGPT, Gemini…) for past-work reconstruction. Use when the user references past agent sessions ("what was I doing", "we decided this before", "which session touched file X"), asks for a postmortem of a failed run, wants cost/usage accounting, or after context compaction when history must be recovered from evidence rather than memory.                                                                                                                                                                          |
-| `prompting`                | Prompt-craft reference for authoring prompts aimed at LLMs — subagent dispatches, external-model handoffs, workflow stages, headless judgment calls, MCP/skill instructions. Use when writing or reviewing any nontrivial prompt another model will execute, when a prompt underperforms and needs diagnosis, or when designing reusable prompt templates/agent definitions. Distinct from /enhance (which rewrites a user request into a prompt); this is the underlying craft.                                                                                                  |
-| `recap`                    | Refresh stale session context and prepare a concise handoff. Use after context compaction, when resuming interrupted work, or when the current task, decisions, blockers, and next action are unclear. Do not use for durable project history or ordinary task planning.                                                                                                                                                                                                                                                                                                          |
-| `skill-authoring`          | Design, validate, update, and retire routed Codex skills. Use when creating a skill, repairing weak routing metadata, adding references, or deciding whether an older skill is superseded.                                                                                                                                                                                                                                                                                                                                                                                        |
-| `swarm`                    | Orchestrate parallel subagents to divide and conquer complex tasks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `writing-style`            | Use when writing or editing GitHub issues, pull requests, review comments, commit messages, chat replies, or prose documentation.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Skill | When to use |
+| --- | --- |
+| `adversarial-loop` | Iterate independent adversarial subagent reviews against a closure (diff, PR body, AC matrix) until the reviewer cannot find legitimate gaps. Caps at 5 iterations. Use when finalizing work that has an explicit AC list — issue closures, refactors with invariants, PRs claiming "all of X is now covered". |
+| `agent-orchestration` | > |
+| `analyze` | Interactive codebase analysis with user steering (survey → narrate → synthesize) |
+| `android-device-control` | "Drive an unrooted Android phone as a first-class estate peer: adb over the tailnet, Termux shell, UI automation that survives dialogs, MIUI/HyperOS install and power-management traps, and the settings levers that actually matter. Use when configuring, debloating, capturing from, or remotely controlling a phone — especially a Xiaomi/MIUI device." |
+| `assured-close` | Audit issue satisfaction using an AC-matrix + adversarial-loop pattern. Use when finalizing any reopened or scope-heavy issue, especially when you want the completion claim to survive future audits. Does not change GitHub issue state unless the operator explicitly requests that separate action. |
+| `bead-loop` | Work a Beads queue continuously — pick the highest-value ready bead, execute it to a merged PR, close with verification, repeat. Use when the user says "work the bead queue", "keep going through bd ready", or invokes it under /loop for cross-session continuation. Requires a repo with a .beads/ workspace. |
+| `beads` | Use when a repository has a Beads workspace (`.beads/`) or the user asks to find ready work, claim or close tasks, create follow-up issues, inspect blockers, record durable project memory, or recover task context across Claude/Codex sessions. |
+| `claude-self-knowledge` | Self-understanding for Claude agents on this machine — what Claude models are (family, tiers, context/compaction behavior), what the Claude Code harness provides (subagents, forks, teams, hooks, skills, agent defs, headless mode), where local state lives, and the verification-over-recall discipline for capability facts. Use when reasoning about your own capabilities or limits, choosing dispatch mechanics, explaining Claude/Claude Code behavior to the operator, or debugging harness-level surprises (compaction, notifications, permissions, model resolution). |
+| `context-hygiene` | Record load-bearing task state before context compaction and resume from private evidence. Use when work spans many tool calls, external jobs, Beads tasks, or a context boundary. |
+| `incident-evidence-freeze` | Freeze incident evidence before resolving conflicts, restoring files, or changing services. Use when a worktree is conflicted, an artifact disappeared, recovery may mutate Git or Beads state, or the operator says preserve evidence first. Do not use for ordinary status checks. |
+| `recovery-decision-tree` | "Recover a missing artifact by checking authorities in order: filesystem and worktree, Git index and reflog, agent session records, Beads JSONL and Dolt, then snapshots and backups. Use when a file, task record, or agent result is missing or conflicted and the recovery source is unclear. Pair with incident-evidence-freeze before mutation." |
+| `desktop-control-plane` | "Control desktop/runtime surfaces for operator workflows: Kitty remote I/O, Hyprland dispatch/inspection, and screenshot diagnostics/workarounds (including HDR washout handling). Use when coding agents need reliable computer-use primitives on Linux Wayland/Hyprland systems." |
+| `drive` | Self-driving iterative execution - enhance a goal into the best next move, stress-test it, execute, externalize results, then forge the next self-prompt and continue. Use when the user says "drive", "keep going", "iterate on this", "take it further", wants to nod along while the agent picks directions, or asks for N autonomous iterations. Composes enhance (prompt forging) and grilling (adversarial stress) into a recurrence loop with optional auto-iteration. |
+| `enhance` | Rewrite rough requests into high-leverage prompts while preserving intent. Use for quick prompt polishing, executable code/research prompts, external-agent handoffs, or non-overlapping prompt portfolios with fresh context and honest deliverable contracts. |
+| `enrichment-pass` | > |
+| `evidence-harness` | For bug investigations — build a reproduction harness that measures the suspected behaviour BEFORE touching production code. Use when investigating intermittent or load-dependent bugs, performance regressions, I/O storms, or any case where the user explicitly says "fix what the data implicates, not what the hypothesis flags". Prevents writing code for the wrong suspect. |
+| `greedy-batching` | | |
+| `git-protocol` | Use when committing, branching, pushing, opening or reviewing pull requests, resolving conflicts, staging files, or applying GitHub repository workflow rules. |
+| `grilling` | Grill the user relentlessly about a plan or design. Use when the user wants to stress-test a plan before building, or uses any 'grill' trigger phrases. |
+| `grok` | > |
+| `html-report` | Produce agent output for human reading as self-contained interactive HTML instead of markdown — templates, layout system, and interactivity patterns. Use for reports, reviews, censuses, dashboards, plans, incident timelines, comparisons, and BEFORE publishing any Claude Artifact (this is the "workshop skill" the Artifact tool's own built-in instructions refer to by that name — load this skill instead of the generic artifact-design skill whenever the deliverable is a report/dashboard/census/review rather than a one-off app or landing page). |
+| `lynchpin` | Query the Lynchpin substrate via MCP — 28 tools over DuckDB. Evidence graph, velocity, correlations, closure chains, overlap edges, PR reviews, kind audit, refactor detection, durability, anomalies, calendar. |
+| `meta` | Meta-level introspection - analyze session, improve setup, persist learnings |
+| `polylogue` | Query the Polylogue AI-session archive (Claude, Codex, ChatGPT, Gemini…) for past-work reconstruction. Use when the user references past agent sessions ("what was I doing", "we decided this before", "which session touched file X"), asks for a postmortem of a failed run, wants cost/usage accounting, or after context compaction when history must be recovered from evidence rather than memory. |
+| `prompting` | Prompt-craft reference for authoring prompts aimed at LLMs — subagent dispatches, external-model handoffs, workflow stages, headless judgment calls, MCP/skill instructions. Use when writing or reviewing any nontrivial prompt another model will execute, when a prompt underperforms and needs diagnosis, or when designing reusable prompt templates/agent definitions. Distinct from /enhance (which rewrites a user request into a prompt); this is the underlying craft. |
+| `recap` | Refresh stale session context and prepare a concise handoff. Use after context compaction, when resuming interrupted work, or when the current task, decisions, blockers, and next action are unclear. Do not use for durable project history or ordinary task planning. |
+| `skill-authoring` | Design, validate, update, and retire routed Codex skills. Use when creating a skill, repairing weak routing metadata, adding references, or deciding whether an older skill is superseded. |
+| `swarm` | Orchestrate parallel subagents to divide and conquer complex tasks |
+| `writing-style` | Use when writing or editing GitHub issues, pull requests, review comments, commit messages, chat replies, or prose documentation. |
