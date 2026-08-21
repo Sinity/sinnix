@@ -59,6 +59,7 @@ The common read surface includes:
 - `project_list`, `project_tree`, `project_read`, `project_search`, and `project_diff`
 - `files_read` for bounded host-path stat, reads, and directory listings
 - `session_list`, `session_read`, and `session_search` over authoritative Claude Code and Codex JSONL files
+- `memory_search` and `memory_get` for source-preserving semantic access to available raw coding-session memory
 - `shell_query` for exact-argument, output-bounded read-only host inspection
 - `shell_run` for exact-argument operator commands in an unrestricted transient user service, with explicit optional `sudo -n` root execution
 - `desktop_read` for current Hyprland, workspace, client, binding, and color-management state
@@ -74,6 +75,8 @@ The common read surface includes:
 `machine_query` selects one bounded section from the canonical `sinnix-observe` report. Its operations are `overview`, `pressure`, `runtime_inventory`, `gateway`, `browser`, `storage`, `ingestion`, `units`, `workloads`, `slices`, and `blocked_tasks`; the array operations use cursor and limit pagination. Every response carries the collector schema, generation time, and observation window. This keeps a large full report from making a small requested section unavailable.
 
 `capability_search` and `capability_describe` read the generated `/etc/sinnix/capability-index.json` rather than maintaining another catalog. Search supports query terms, kind, enabled state, and cursor pagination. Every result identifies the index schema, host, and generation revision. It reports the index as unavailable when the running generation has not rendered it.
+
+`memory_search` and `memory_get` retain the raw session provider and source-specific reference in every result. They report the current Polylogue and Sinex upstreams as unavailable and Lynchpin as not yet adapted. They do not fabricate a unified source or copy session JSONL into gateway state.
 
 `machine_action` is operator-only. It sends the complete typed request to the running ops reducer over its local Unix socket, including the owner-required revision, idempotency key, reason, target, and parameters. The reducer resolves runtime identities, enforces admission, performs the action, and returns its native receipt. The gateway does not substitute its own service-control path.
 
