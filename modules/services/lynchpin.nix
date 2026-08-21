@@ -82,7 +82,7 @@ mkServiceModule {
           else
             echo "lynchpin: machine telemetry database is absent; skipping lake export" >&2
           fi
-          exec ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.cli.materialize --all --promote --history all
+          exec ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.cli.materialize --all --promote --history incremental
         '';
       };
       localHotDirs = [
@@ -127,8 +127,9 @@ mkServiceModule {
       };
 
       # Optional: daily substrate materialization.
-      # Runs the full analysis DAG + promotes results to DuckDB. The
-      # substrate is queryable by MCP clients immediately after.
+      # Refreshes bounded per-product tails, then publishes a full coherent
+      # graph by replacing only its affected tail in the candidate generation.
+      # Whole-history replay is an explicit repair operation, never timer work.
       systemd.services.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {
         description = "Lynchpin analysis DAG materialization";
         # A broken ExecStart here fails silently every night; route failures
