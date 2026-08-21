@@ -55,7 +55,7 @@ sinnix-agent-gateway --config /etc/sinnix/agent-gateway.json --principal observe
 
 The common read surface includes:
 
-- `gateway_status`, `machine_report`, and `machine_query`
+- `gateway_status`, `machine_report`, `machine_query`, `capability_search`, and `capability_describe`
 - `project_list`, `project_tree`, `project_read`, `project_search`, and `project_diff`
 - `files_read` for bounded host-path stat, reads, and directory listings
 - `session_list`, `session_read`, and `session_search` over authoritative Claude Code and Codex JSONL files
@@ -69,6 +69,8 @@ The common read surface includes:
 - `audit_tail` and `audit_verify`
 
 `machine_query` selects one bounded section from the canonical `sinnix-observe` report. Its operations are `overview`, `pressure`, `runtime_inventory`, `gateway`, `browser`, `storage`, `ingestion`, `units`, `workloads`, `slices`, and `blocked_tasks`; the array operations use cursor and limit pagination. Every response carries the collector schema, generation time, and observation window. This keeps a large full report from making a small requested section unavailable.
+
+`capability_search` and `capability_describe` read the generated `/etc/sinnix/capability-index.json` rather than maintaining another catalog. Search supports query terms, kind, enabled state, and cursor pagination. Every result identifies the index schema, host, and generation revision. It reports the index as unavailable when the running generation has not rendered it.
 
 `machine_action` is operator-only. It sends the complete typed request to the running ops reducer over its local Unix socket, including the owner-required revision, idempotency key, reason, target, and parameters. The reducer resolves runtime identities, enforces admission, performs the action, and returns its native receipt. The gateway does not substitute its own service-control path.
 

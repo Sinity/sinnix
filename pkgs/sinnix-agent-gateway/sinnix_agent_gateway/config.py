@@ -37,6 +37,7 @@ class GatewayConfig:
     state_dir: Path
     projects: dict[str, ProjectConfig]
     runtime_inventory: Path = Path("/etc/sinnix/runtime-inventory.json")
+    capability_index: Path = Path("/etc/sinnix/capability-index.json")
     agent_runner: Path = DEFAULT_AGENT_RUNNER
     agent_controller: Path = DEFAULT_AGENT_CONTROLLER
     observe_command: str = "sinnix-observe"
@@ -82,6 +83,9 @@ class GatewayConfig:
             projects=projects,
             runtime_inventory=Path(
                 raw.get("runtimeInventory", "/etc/sinnix/runtime-inventory.json")
+            ),
+            capability_index=Path(
+                raw.get("capabilityIndex", "/etc/sinnix/capability-index.json")
             ),
             agent_runner=Path(raw.get("agentRunner", DEFAULT_AGENT_RUNNER)),
             agent_controller=Path(raw.get("agentController", DEFAULT_AGENT_CONTROLLER)),
