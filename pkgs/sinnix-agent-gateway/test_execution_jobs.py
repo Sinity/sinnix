@@ -158,6 +158,7 @@ def test_execution_helper_runs_command_and_writes_attestation(
     assert result == 0
     assert manifest["lifecycle"] == "succeeded"
     assert manifest["launcher"]["scope_unit"] == scope_unit
+    assert manifest["launcher"]["cwd"] == str(Path.cwd().resolve())
     assert (tmp_path / f"{job_id}.log").read_text() == "helper fixture\n"
     assert not request.exists()
 
@@ -311,4 +312,35 @@ def test_shell_cancel_rejects_cgroup_mismatch_before_systemd_stop(
     monkeypatch.setattr(jobs, "_cgroup_for_pid", lambda _pid: "/actual-cgroup")
 
     with pytest.raises(JobError, match="process identity"):
+        jobs.cancel(job_id)
+
+
+def test_shell_cancel_rejects_launcher_cwd_mismatch_before_systemd_stop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jobs, _ = execution_service(tmp_path)
+    job_id = "shell-cancel-cwd"
+    actual_cgroup = jobs._cgroup_for_pid(os.getpid())
+    manifest = {
+        "schema_version": 4,
+        "kind": "shell",
+        "job_id": job_id,
+        "lifecycle": "running",
+        "command": {"cwd": str(tmp_path)},
+        "launcher": {
+            "pid": os.getpid(),
+            "proc_start": proc_start(os.getpid()),
+            "cwd": str(tmp_path),
+            "scope_unit": f"sinnix-gateway-exec-{job_id}.scope",
+            "cgroup": actual_cgroup,
+        },
+    }
+    (jobs.root / f"{job_id}.json").write_text(json.dumps(manifest))
+    monkeypatch.setattr(
+        jobs,
+        "_shell_live",
+        lambda unit: {"available": True, "ControlGroup": actual_cgroup, "unit": unit},
+    )
+
+    with pytest.raises(JobError, match="launcher directory"):
         jobs.cancel(job_id)
