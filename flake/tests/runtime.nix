@@ -389,6 +389,8 @@ in
         );
       groupLuaConfig =
         groupEvaluated.config.home-manager.users.sinity.xdg.configFile."hypr/hyprland.lua".text;
+      groupLuaStartup =
+        groupEvaluated.config.home-manager.users.sinity.xdg.configFile."hypr/sinnix-startup.lua".text;
     in
     {
       # Provably fails when: a surface's `resources` override stops
@@ -437,21 +439,21 @@ in
           ${localModelRosterJson}
           EOF_ROSTER
         '';
-      # Force the actual Home Manager Lua renderer, not just the source
-      # settings. Lua syntax and semantic call families are checked together.
+      # Parse the actual Home Manager-rendered Lua through the compositor.
+      # This exercises the API contract, including structured monitor rules.
       checks.hyprland-lua-generated = pkgs.runCommand "hyprland-lua-generated-check" { } ''
         cat > hyprland.lua <<'EOF_HYPRLAND_LUA'
         ${groupLuaConfig}
         EOF_HYPRLAND_LUA
-        ${pkgs.lua}/bin/lua -e 'assert(loadfile("hyprland.lua"))'
-        grep -Fq 'hl.config(' hyprland.lua
-        grep -Fq 'hl.bind(' hyprland.lua
-        grep -Fq 'hl.window_rule(' hyprland.lua
-        grep -Fq 'hl.layer_rule(' hyprland.lua
-        if grep -Eq 'hyprlang|hyprland\\.conf|noctalia\\.conf' hyprland.lua; then
-          echo "legacy provider syntax leaked into generated Lua" >&2
-          exit 1
-        fi
+        export HOME="$PWD/home"
+        export XDG_CONFIG_HOME="$HOME/.config"
+        install -d -m 0700 "$XDG_CONFIG_HOME/hypr"
+        cat > "$HOME/.config/hypr/sinnix-startup.lua" <<'EOF_HYPRLAND_STARTUP'
+        ${groupLuaStartup}
+        EOF_HYPRLAND_STARTUP
+        export XDG_RUNTIME_DIR="$PWD/runtime"
+        install -d -m 0700 "$XDG_RUNTIME_DIR"
+        ${pkgs.hyprland}/bin/Hyprland --config "$PWD/hyprland.lua" --verify-config
         touch "$out"
       '';
       # Provably fails when: a second bind claims a chord an existing bind

@@ -46,7 +46,6 @@ in
     ./tests/ops-reducer.nix
     ./tests/quota.nix
     ./tests/noctalia.nix
-    ./tests/hyprland-lua.nix
     ./tests/memory-audit.nix
     ./tests/sinex-nats-security.nix
     ./tests/dots-shell.nix

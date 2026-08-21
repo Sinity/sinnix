@@ -75,21 +75,24 @@ lib.mkMerge [
         __GL_VRR_ALLOWED = "0";
       };
 
-      # v1 catch-all — monitorv2 below takes precedence for the primary DP-3
-      # path. Keep the catch-all SDR so unknown/cable-swapped outputs do not
-      # inherit unverified HDR settings.
+      # Keep a safe SDR catch-all for unknown or cable-swapped outputs.
+      # Named monitor rules below override it for the known panel. Hyprland's
+      # Lua API uses hl.monitor for both forms.
       wayland.windowManager.hyprland.settings.monitor = [
-        ",3840x2160@120,auto,1"
-      ];
+        {
+          output = "";
+          mode = "3840x2160@120";
+          position = "auto";
+          scale = 1;
+        }
 
-      # AORUS FO48U OLED on DP-3, 4K120 HDR/10-bit.
-      wayland.windowManager.hyprland.settings.monitorv2 = [
+        # AORUS FO48U OLED on DP-3, 4K120 HDR/10-bit.
         {
           output = "DP-3";
           mode = "3840x2160@120";
           position = "0x0";
           scale = 1;
-          bitdepth = "10";
+          bitdepth = 10;
           cm = "hdr";
           sdrbrightness = 1.4;
           sdrsaturation = 1.0;
@@ -180,15 +183,18 @@ lib.mkMerge [
         LIBVA_DRIVER_NAME = "iHD";
       };
 
-      # v1 catch-all — monitorv2 below takes precedence. Keep this SDR unless
-      # the iGPU path is live-tested separately.
+      # Keep a safe SDR catch-all unless the iGPU path is live-tested
+      # separately. The named rule below selects the known connector.
       wayland.windowManager.hyprland.settings.monitor = [
-        ",3840x2160@120,auto,1"
-      ];
+        {
+          output = "";
+          mode = "3840x2160@120";
+          position = "auto";
+          scale = 1;
+        }
 
-      # AORUS FO48U OLED via Intel iGPU — connector is DP-1 (Intel-assigned)
-      # 4K@120Hz confirmed available via modetest on DP-1
-      wayland.windowManager.hyprland.settings.monitorv2 = [
+        # AORUS FO48U OLED via Intel iGPU. The connector is DP-1 and 4K@120Hz
+        # was confirmed available through modetest.
         {
           output = "DP-1";
           mode = "3840x2160@120";

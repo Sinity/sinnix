@@ -166,7 +166,10 @@ in
             if [ "$(id -un)" = "${user}" ] && [ -z "$DISPLAY" ]; then
               current_tty=$(tty 2>/dev/null || true)
               if [ "$current_tty" = "/dev/tty1" ] && command -v uwsm >/dev/null 2>&1; then
-                exec uwsm start hyprland-uwsm.desktop
+                # UWSM's packaged desktop entry launches Hyprland without a
+                # config argument. Lua is not its default discovery path, so
+                # pass the Home Manager-generated config explicitly.
+                exec uwsm start -e -D Hyprland ${hyprlandPkg}/bin/Hyprland --config "$HOME/.config/hypr/hyprland.lua"
               fi
             fi
           '';
