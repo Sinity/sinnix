@@ -18,6 +18,8 @@ class Capability(StrEnum):
     DESKTOP_ACTION = "desktop.action"
     TERMINAL_READ = "terminal.read"
     TERMINAL_ACTION = "terminal.action"
+    BROWSER_READ = "browser.read"
+    BROWSER_ACTION = "browser.action"
     CAPTURE_READ = "capture.read"
     FILE_READ = "file.read"
     FILE_WRITE = "file.write"
@@ -36,6 +38,7 @@ PRINCIPAL_CAPABILITIES: dict[str, frozenset[Capability]] = {
             Capability.MACHINE_READ,
             Capability.DESKTOP_READ,
             Capability.TERMINAL_READ,
+            Capability.BROWSER_READ,
             Capability.CAPTURE_READ,
             Capability.FILE_READ,
             Capability.SESSION_READ,
