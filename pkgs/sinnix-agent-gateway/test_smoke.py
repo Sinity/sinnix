@@ -52,6 +52,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "session_list",
         "session_read",
         "shell_query",
+        "machine_query",
     } <= readonly_names
     assert {"files_write", "project_write", "agent_launch", "shell_run"}.isdisjoint(
         readonly_names
@@ -541,3 +542,86 @@ def test_machine_report_timeout_is_a_typed_failure(
     monkeypatch.setattr(observe_module.subprocess, "run", timeout)
     result = runtime.observe.machine_report()
     assert result["failure_class"] == "collector_timeout"
+
+
+def test_machine_query_selects_and_pages_large_collector_report(tmp_path: Path) -> None:
+    report = {
+        "schema": "sinnix.observe.v1",
+        "generated_at": "2026-08-21T00:00:00Z",
+        "window": {"start": "2026-08-20T00:00:00Z"},
+        "live_pressure": {"state": "quiet"},
+        "config_drift": {"state": "clean"},
+        "gaps_summary": {"count": 0},
+        "storage": {"available": True},
+        "sources": {"observe": "live"},
+        "below": {"available": True},
+        "systemd_units": [{"unit": f"fixture-{index}.service"} for index in range(100)],
+        "workload_rows": [{"workload": "fixture"}],
+        "resource_slices": [{"slice": "agent.slice"}],
+        "blocked_tasks": [],
+        "runtime_inventory": {"surfaces": []},
+        "agent_gateway": {"available": True},
+        "chrome_io": {"available": True},
+        "polylogue_live_attempts": {"available": False},
+        "sinex_xtask_history": {"available": False},
+    }
+    collector = tmp_path / "observe-fixture"
+    collector.write_text(
+        f"#!{sys.executable}\nimport json\nprint(json.dumps({report!r}))\n"
+    )
+    collector.chmod(0o700)
+    cfg = GatewayConfig(
+        state_dir=tmp_path / "state",
+        projects={},
+        observe_command=str(collector),
+        max_result_bytes=1_024,
+    )
+    runtime = Runtime.create(cfg, "observer")
+
+    assert runtime.observe.machine_report()["failure_class"] == "response_bound"
+    overview = runtime.observe.machine_query("overview")
+    units = runtime.observe.machine_query("units", cursor=20, limit=3)
+
+    assert overview["available"] is True
+    assert overview["source"]["schema"] == "sinnix.observe.v1"
+    assert overview["sections"]["live_pressure"] == {"state": "quiet"}
+    assert units["total"] == 100
+    assert units["cursor"] == 20
+    assert units["next_cursor"] == 23
+    assert [row["unit"] for row in units["rows"]] == [
+        "fixture-20.service",
+        "fixture-21.service",
+        "fixture-22.service",
+    ]
+
+
+def test_machine_query_reduces_page_to_response_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = Runtime.create(
+        GatewayConfig(
+            state_dir=tmp_path / "state",
+            projects={},
+            max_result_bytes=1_024,
+        ),
+        "observer",
+    )
+    report = {
+        "schema": "sinnix.observe.v1",
+        "generated_at": "2026-08-21T00:00:00Z",
+        "window": {},
+        "systemd_units": [
+            {"unit": f"fixture-{index}.service", "detail": "x" * 700}
+            for index in range(3)
+        ],
+    }
+    monkeypatch.setattr(
+        runtime.observe,
+        "_collect_report",
+        lambda: {"available": True, "report": report},
+    )
+
+    result = runtime.observe.machine_query("units", limit=3)
+
+    assert len(result["rows"]) == 1
+    assert result["next_cursor"] == 1

@@ -11,6 +11,32 @@ from .config import GatewayConfig
 
 
 class ObserveService:
+    _ARRAY_OPERATIONS = {
+        "units": "systemd_units",
+        "workloads": "workload_rows",
+        "slices": "resource_slices",
+        "blocked_tasks": "blocked_tasks",
+    }
+    _SECTION_OPERATIONS = {
+        "overview": (
+            "schema",
+            "generated_at",
+            "window",
+            "live_pressure",
+            "config_drift",
+            "gaps_summary",
+            "storage",
+            "sources",
+            "below",
+        ),
+        "pressure": ("live_pressure",),
+        "runtime_inventory": ("runtime_inventory",),
+        "gateway": ("agent_gateway",),
+        "browser": ("chrome_io",),
+        "storage": ("storage",),
+        "ingestion": ("polylogue_live_attempts", "sinex_xtask_history"),
+    }
+
     def __init__(self, config: GatewayConfig, principal: Principal):
         self.config = config
         self.principal = principal
@@ -42,8 +68,10 @@ class ObserveService:
             return "unobserved"
         return "match" if left == right else "mismatch"
 
-    def machine_report(self) -> dict[str, Any]:
-        self.principal.require(Capability.MACHINE_READ)
+    def _collector_bound(self) -> int:
+        return min(max(self.config.max_result_bytes * 8, 1_048_576), 8_388_608)
+
+    def _collect_report(self) -> dict[str, Any]:
         environment = {
             "HOME": os.environ.get("HOME", "/home/sinity"),
             "LANG": os.environ.get("LANG", "C.UTF-8"),
@@ -62,7 +90,7 @@ class ObserveService:
                     env=environment,
                 )
                 output.seek(0)
-                data = output.read(self.config.max_result_bytes + 1)
+                data = output.read(self._collector_bound() + 1)
         except subprocess.TimeoutExpired:
             return {
                 "available": False,
@@ -75,11 +103,11 @@ class ObserveService:
                 "failure_class": "collector_failed",
                 "reason": "sinnix-observe failed",
             }
-        if len(data) > self.config.max_result_bytes:
+        if len(data) > self._collector_bound():
             return {
                 "available": False,
-                "failure_class": "response_bound",
-                "reason": "sinnix-observe exceeded response bound",
+                "failure_class": "collector_response_bound",
+                "reason": "sinnix-observe exceeded collector bound",
             }
         try:
             return {"available": True, "report": json.loads(data)}
@@ -89,6 +117,97 @@ class ObserveService:
                 "failure_class": "malformed_report",
                 "reason": "sinnix-observe returned malformed JSON",
             }
+
+    def _within_response_bound(self, response: dict[str, Any]) -> dict[str, Any]:
+        encoded = json.dumps(response, separators=(",", ":")).encode()
+        if len(encoded) <= self.config.max_result_bytes:
+            return response
+        return {
+            "available": False,
+            "failure_class": "response_bound",
+            "reason": "selected machine response exceeded response bound",
+        }
+
+    def machine_report(self) -> dict[str, Any]:
+        self.principal.require(Capability.MACHINE_READ)
+        collected = self._collect_report()
+        if not collected["available"]:
+            return collected
+        return self._within_response_bound(collected)
+
+    def machine_query(
+        self, operation: str, cursor: int = 0, limit: int = 100
+    ) -> dict[str, Any]:
+        self.principal.require(Capability.MACHINE_READ)
+        if cursor < 0:
+            raise ValueError("cursor must be non-negative")
+        if limit < 1 or limit > 500:
+            raise ValueError("limit must be 1-500")
+        collected = self._collect_report()
+        if not collected["available"]:
+            return collected
+        report = collected["report"]
+        source = {
+            "schema": report.get("schema"),
+            "generated_at": report.get("generated_at"),
+            "window": report.get("window"),
+        }
+        if operation in self._ARRAY_OPERATIONS:
+            key = self._ARRAY_OPERATIONS[operation]
+            rows = report.get(key)
+            if not isinstance(rows, list):
+                return {
+                    "available": False,
+                    "failure_class": "malformed_report",
+                    "reason": f"sinnix-observe section {key} is not an array",
+                }
+            selected = rows[cursor : cursor + limit]
+            while selected:
+                next_cursor = cursor + len(selected)
+                response = {
+                    "available": True,
+                    "operation": operation,
+                    "source": source,
+                    "total": len(rows),
+                    "cursor": cursor,
+                    "next_cursor": next_cursor if next_cursor < len(rows) else None,
+                    "rows": selected,
+                }
+                bounded = self._within_response_bound(response)
+                if bounded["available"]:
+                    return bounded
+                selected.pop()
+            if cursor >= len(rows):
+                return {
+                    "available": True,
+                    "operation": operation,
+                    "source": source,
+                    "total": len(rows),
+                    "cursor": cursor,
+                    "next_cursor": None,
+                    "rows": [],
+                }
+            return {
+                "available": False,
+                "failure_class": "response_bound",
+                "reason": "one machine row exceeded response bound",
+            }
+        try:
+            keys = self._SECTION_OPERATIONS[operation]
+        except KeyError as exc:
+            available = sorted(self._ARRAY_OPERATIONS | self._SECTION_OPERATIONS)
+            raise ValueError(
+                f"unknown machine operation {operation!r}; available: {available}"
+            ) from exc
+        if cursor:
+            raise ValueError("cursor is only valid for array machine operations")
+        response = {
+            "available": True,
+            "operation": operation,
+            "source": source,
+            "sections": {key: report.get(key) for key in keys},
+        }
+        return self._within_response_bound(response)
 
     def gateway_status(
         self,
