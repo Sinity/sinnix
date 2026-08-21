@@ -40,6 +40,8 @@ class GatewayConfig:
     approved_manifest_hash: str | None = None
     approved_manifest_principal: str = "observer"
     connector_snapshot_path: Path | None = None
+    systemd_run_command: str = "systemd-run"
+    systemctl_command: str = "systemctl"
     capture_command: str = "sinnix-capture"
     captures_root: Path = Path("/realm/data/captures")
 
@@ -83,6 +85,8 @@ class GatewayConfig:
             connector_snapshot_path=Path(raw["connectorSnapshotPath"])
             if "connectorSnapshotPath" in raw
             else None,
+            systemd_run_command=raw.get("systemdRunCommand", "systemd-run"),
+            systemctl_command=raw.get("systemctlCommand", "systemctl"),
             capture_command=raw.get("captureCommand", "sinnix-capture"),
             captures_root=Path(raw.get("capturesRoot", "/realm/data/captures")),
         )
