@@ -1,0 +1,286 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Read structured ChatGPT conversation content from explicitly opened Chrome tabs.
+# This script never navigates, activates, submits, edits, or closes a tab.
+
+CHROME_CONTROL="${SINNIX_CHROME_CONTROL:-sinnix-chrome-control}"
+CDP_BASE="${CDP_BASE:-http://127.0.0.1:9222}"
+
+usage() {
+  cat <<'USAGE'
+Usage: sinnix-chatgpt-conversations <command> [options]
+
+Read structured transcripts from ChatGPT conversation tabs already open in the
+operator's Chrome. Every read addresses an explicit CDP page ID. The script
+never navigates, activates, submits, edits, or closes a tab.
+
+Commands:
+  list
+      List currently open ChatGPT conversation tabs with compact turn metadata.
+
+  read <page-id> [--message-start N] [--message-limit N]
+                 [--text-start N] [--text-limit N] [--markdown]
+      Read an ordered window of turns. Text defaults to the first 4,000
+      characters of each selected turn. Response metadata states exactly what
+      was omitted, so use another read with --text-start to page long turns.
+      Set --text-limit 0 to return complete selected turns.
+
+  read-open [read options]
+      Read the selected windows from every currently open ChatGPT conversation
+      tab. Use `list` first when a narrower selection will answer the task.
+
+Examples:
+  sinnix-chatgpt-conversations list
+  sinnix-chatgpt-conversations read A780E4C2AA9208D543C2C43CF8ADC166
+  sinnix-chatgpt-conversations read A780E4C2AA9208D543C2C43CF8ADC166 \
+    --message-start 2 --message-limit 1 --text-limit 0
+  sinnix-chatgpt-conversations read-open --message-limit 3 --text-limit 1200
+USAGE
+}
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    printf 'missing dependency: %s\n' "$1" >&2
+    exit 1
+  }
+}
+
+require_nonnegative_integer() {
+  local value="$1" name="$2"
+  [[ $value =~ ^[0-9]+$ ]] || {
+    printf '%s must be a non-negative integer, got %q\n' "$name" "$value" >&2
+    exit 2
+  }
+}
+
+chatgpt_targets() {
+  curl -fsS --max-time 3 "${CDP_BASE}/json" | jq -c '
+    [ .[]
+      | select(
+          .type == "page"
+          and (.url | test("^https://chatgpt\\.com/c/[^/?#]+"))
+        )
+      | {
+          page_id: .id,
+          title: .title,
+          url: .url,
+          conversation_id: (.url | capture("/c/(?<id>[^/?#]+)").id)
+        }
+    ]
+  '
+}
+
+read -r -d '' SUMMARY_JS <<'JS' || true
+(() => {
+  const compact = value => (value || '').replace(/\s+/g, ' ').trim();
+  const turns = [...document.querySelectorAll('[data-message-author-role]')];
+  return {
+    schema: 'sinnix-chatgpt-conversation-summary-v1',
+    url: location.href,
+    title: document.title,
+    message_count: turns.length,
+    roles: turns.map(turn => turn.dataset.messageAuthorRole || 'unknown'),
+    message_characters: turns.map(turn => (turn.innerText || '').trim().length),
+    attachment_turns: turns.flatMap((turn, index) =>
+      turn.querySelector('[data-testid*="file"], [data-testid*="attachment"], [data-testid*="library"]')
+        ? [index]
+        : []
+    ),
+    text_characters: turns.reduce((total, turn) => total + (turn.innerText || '').trim().length, 0),
+    extracted_at: new Date().toISOString(),
+  };
+})()
+JS
+
+transcript_js() {
+  local message_start="$1" message_limit="$2" text_start="$3" text_limit="$4"
+  cat <<JS
+(() => {
+  const messageStart = ${message_start};
+  const messageLimit = ${message_limit};
+  const textStart = ${text_start};
+  const textLimit = ${text_limit};
+  const compact = value => (value || '').replace(/\\s+/g, ' ').trim();
+  const unique = values => [...new Map(values.map(value => [JSON.stringify(value), value])).values()];
+  const attachment = element => {
+    const testid = element.dataset.testid || null;
+    const kind = element.dataset.libraryFileIconKind || null;
+    let container = element;
+    for (let depth = 0; container && depth < 6; depth += 1, container = container.parentElement) {
+      const label = compact(container.innerText);
+      if (label && label.length <= 512) {
+        const anchor = container.closest('a[href]');
+        return { testid, kind, label, href: anchor ? anchor.href : null };
+      }
+    }
+    return { testid, kind, label: null, href: null };
+  };
+  const turns = [...document.querySelectorAll('[data-message-author-role]')];
+  const selected = turns.slice(messageStart, messageStart + messageLimit);
+  return {
+    schema: 'sinnix-chatgpt-conversation-v1',
+    url: location.href,
+    title: document.title,
+    extracted_at: new Date().toISOString(),
+    available_message_count: turns.length,
+    message_range: {
+      start: messageStart,
+      returned: selected.length,
+      end_exclusive: messageStart + selected.length,
+      remaining_after: Math.max(0, turns.length - messageStart - selected.length),
+    },
+    text_range: { start: textStart, limit: textLimit === 0 ? null : textLimit },
+    messages: selected.map((turn, offset) => {
+      const text = (turn.innerText || '').trim();
+      const textEnd = textLimit === 0 ? text.length : Math.min(text.length, textStart + textLimit);
+      const links = unique([...turn.querySelectorAll('a[href]')]
+        .map(anchor => ({ text: compact(anchor.innerText), href: anchor.href }))
+        .filter(link => link.text || link.href));
+      const attachments = unique([...turn.querySelectorAll('[data-testid*="file"], [data-testid*="attachment"], [data-testid*="library"]')]
+        .map(attachment));
+      return {
+        index: messageStart + offset,
+        message_id: turn.dataset.messageId || turn.closest('[data-turn-id]')?.dataset.turnId || null,
+        role: turn.dataset.messageAuthorRole || 'unknown',
+        text_characters: text.length,
+        text_offset: Math.min(textStart, text.length),
+        text: text.slice(textStart, textEnd),
+        text_truncated: textStart > 0 || textEnd < text.length,
+        links,
+        attachments,
+      };
+    }),
+  };
+})()
+JS
+}
+
+evaluate() {
+  "$CHROME_CONTROL" evaluate "$1" --js "$2"
+}
+
+summary() {
+  local page_id="$1" base
+  base=$(evaluate "$page_id" "$SUMMARY_JS")
+  jq --arg page_id "$page_id" '. + {page_id: $page_id}' <<<"$base"
+}
+
+read_transcript() {
+  local page_id="$1" message_start="$2" message_limit="$3" text_start="$4" text_limit="$5"
+  local transcript
+  transcript=$(evaluate "$page_id" "$(transcript_js "$message_start" "$message_limit" "$text_start" "$text_limit")")
+  jq --arg page_id "$page_id" '. + {page_id: $page_id}' <<<"$transcript"
+}
+
+render_markdown() {
+  jq -r '
+    "# " + .title,
+    "",
+    "- Page ID: `" + .page_id + "`",
+    "- URL: " + .url,
+    "- Available messages: " + (.available_message_count | tostring),
+    "",
+    (.messages[] |
+      "## [" + (.index | tostring) + "] " + .role +
+        (if .message_id then " (`" + .message_id + "`)" else "" end),
+      "",
+      .text,
+      (if .text_truncated then "\n*Text is paged. Continue at character " + ((.text_offset + (.text | length)) | tostring) + ".*" else "" end),
+      (if (.attachments | length) > 0 then "\nAttachments: " + ([.attachments[] | (.label // .testid // "unlabeled attachment")] | join("; ")) else "" end),
+      (if (.links | length) > 0 then "\nLinks: " + ([.links[] | .href] | join(" ")) else "" end),
+      ""
+    )
+  '
+}
+
+parse_read_options() {
+  MESSAGE_START=0
+  MESSAGE_LIMIT=20
+  TEXT_START=0
+  TEXT_LIMIT=4000
+  MARKDOWN=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --message-start)
+        MESSAGE_START="${2:?missing value for --message-start}"
+        shift 2
+        ;;
+      --message-limit)
+        MESSAGE_LIMIT="${2:?missing value for --message-limit}"
+        shift 2
+        ;;
+      --text-start)
+        TEXT_START="${2:?missing value for --text-start}"
+        shift 2
+        ;;
+      --text-limit)
+        TEXT_LIMIT="${2:?missing value for --text-limit}"
+        shift 2
+        ;;
+      --markdown)
+        MARKDOWN=1
+        shift
+        ;;
+      *)
+        printf 'unknown option: %s\n' "$1" >&2
+        exit 2
+        ;;
+    esac
+  done
+  require_nonnegative_integer "$MESSAGE_START" "--message-start"
+  require_nonnegative_integer "$MESSAGE_LIMIT" "--message-limit"
+  require_nonnegative_integer "$TEXT_START" "--text-start"
+  require_nonnegative_integer "$TEXT_LIMIT" "--text-limit"
+}
+
+need_cmd curl
+need_cmd jq
+need_cmd "$CHROME_CONTROL"
+
+command_name="${1:-}"
+shift || true
+case "$command_name" in
+  list)
+    [[ $# -eq 0 ]] || { printf 'list accepts no options\n' >&2; exit 2; }
+    targets=$(chatgpt_targets)
+    while IFS= read -r page_id; do
+      summary "$page_id"
+    done < <(jq -r '.[].page_id' <<<"$targets") | jq -s .
+    ;;
+  read)
+    page_id="${1:-}"
+    [[ -n $page_id ]] || { printf 'read requires a page ID\n' >&2; exit 2; }
+    shift
+    parse_read_options "$@"
+    result=$(read_transcript "$page_id" "$MESSAGE_START" "$MESSAGE_LIMIT" "$TEXT_START" "$TEXT_LIMIT")
+    if [[ $MARKDOWN -eq 1 ]]; then
+      render_markdown <<<"$result"
+    else
+      printf '%s\n' "$result"
+    fi
+    ;;
+  read-open)
+    parse_read_options "$@"
+    targets=$(chatgpt_targets)
+    results=()
+    while IFS= read -r page_id; do
+      results+=("$(read_transcript "$page_id" "$MESSAGE_START" "$MESSAGE_LIMIT" "$TEXT_START" "$TEXT_LIMIT")")
+    done < <(jq -r '.[].page_id' <<<"$targets")
+    if [[ $MARKDOWN -eq 1 ]]; then
+      for result in "${results[@]}"; do
+        render_markdown <<<"$result"
+      done
+    else
+      printf '%s\n' "${results[@]}" | jq -s .
+    fi
+    ;;
+  --help|-h|help|"")
+    usage
+    ;;
+  *)
+    printf 'unknown command: %s\n' "$command_name" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
