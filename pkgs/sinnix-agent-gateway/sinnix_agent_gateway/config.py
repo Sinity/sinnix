@@ -50,6 +50,7 @@ class GatewayConfig:
     hypr_control_command: str = "sinnix-hypr-control"
     screenshot_control_command: str = "sinnix-screenshot-control"
     kitty_control_command: str = "sinnix-kitty-control"
+    chrome_control_command: str = "sinnix-chrome-control"
     capture_command: str = "sinnix-capture"
     captures_root: Path = Path("/realm/data/captures")
 
@@ -101,6 +102,7 @@ class GatewayConfig:
                 "screenshotControlCommand", "sinnix-screenshot-control"
             ),
             kitty_control_command=raw.get("kittyControlCommand", "sinnix-kitty-control"),
+            chrome_control_command=raw.get("chromeControlCommand", "sinnix-chrome-control"),
             capture_command=raw.get("captureCommand", "sinnix-capture"),
             captures_root=Path(raw.get("capturesRoot", "/realm/data/captures")),
         )

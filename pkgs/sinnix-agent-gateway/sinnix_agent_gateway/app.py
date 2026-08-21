@@ -10,6 +10,7 @@ from mcp.types import ToolAnnotations
 
 from .artifacts import ArtifactService
 from .audit import AuditService
+from .browser import BrowserService
 from .capabilities import Capability, Principal
 from .captures import CaptureService
 from .config import GatewayConfig
@@ -71,6 +72,7 @@ class Runtime:
     machine_actions: MachineActionService
     desktop: DesktopService
     terminals: TerminalService
+    browser: BrowserService
     captures: CaptureService
     files: HostFileService
     sessions: SessionLogService
@@ -92,6 +94,7 @@ class Runtime:
             machine_actions=MachineActionService(config, principal),
             desktop=DesktopService(config, principal),
             terminals=TerminalService(config, principal),
+            browser=BrowserService(config, principal),
             captures=CaptureService(config, principal),
             files=HostFileService(config, principal),
             sessions=SessionLogService(config, principal),
@@ -238,6 +241,29 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             """Send one exact operator action to a selected Kitty terminal."""
             return runtime.execute(
                 "terminal_action", lambda: runtime.terminals.action(operation, arguments)
+            )
+
+    if Capability.BROWSER_READ in runtime.principal.capabilities:
+
+        @mcp.tool(title="Read browser state", annotations=READ_ONLY_TOOL)
+        def browser_read(
+            operation: str,
+            page_id: str | None = None,
+            selector: str | None = None,
+        ) -> dict[str, Any]:
+            """Read Chrome state or bounded content without making a page actionable."""
+            return runtime.execute(
+                "browser_read",
+                lambda: runtime.browser.read(operation, page_id, selector),
+            )
+
+    if Capability.BROWSER_ACTION in runtime.principal.capabilities:
+
+        @mcp.tool(title="Run browser action", annotations=DESTRUCTIVE_TOOL)
+        def browser_action(operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
+            """Operate only a gateway-created hidden Chrome agent window."""
+            return runtime.execute(
+                "browser_action", lambda: runtime.browser.action(operation, arguments)
             )
 
     @mcp.tool(title="List projects", annotations=READ_ONLY_TOOL)

@@ -63,6 +63,7 @@ The common read surface includes:
 - `shell_run` for exact-argument operator commands in an unrestricted transient user service, with explicit optional `sudo -n` root execution
 - `desktop_read` for current Hyprland, workspace, client, binding, and color-management state
 - `terminal_read` for Kitty terminal inventory and bounded capture reads
+- `browser_read` for Chrome state and bounded page content
 - `job_list`, `job_status`, and `job_read_output`
 - `artifact_list` and `artifact_read`
 - `audit_tail` and `audit_verify`
@@ -74,6 +75,8 @@ The common read surface includes:
 `desktop_action` is operator-only. It delegates exact argument vectors to `sinnix-hypr-control` for focus, dispatcher, shortcut, key-state, paste, and runtime-keyword operations. A focus action returns a newly-read active-window postcondition. It does not provide a session restart or teardown operation.
 
 `terminal_action` is operator-only. It delegates exact focus, text send, key send, and command-run vectors to `sinnix-kitty-control` against an explicit Kitty matcher. It does not launch untracked coding agents; those continue to use the attested job route.
+
+`browser_action` is operator-only. It first creates an agent window, which the existing wrapper parks on the hidden agent workspace. The gateway persists its returned page ID and allows later navigation, interaction, evaluation, waiting, and closing only against those registered agent targets. It cannot mutate an existing operator tab.
 
 `agent-control` adds `agent_launch` and `job_cancel`. `operator` also adds `files_write`, `project_write`, `project_apply_patch`, and `shell_run`. `shell_run` accepts exact argv, a working directory, bounded environment overlay, timeout, output limit, and an explicit root flag. It uses `env -i` and a bounded base environment, then invokes `sudo -n --` only when root was requested. The returned receipt identifies the transient service unit, selected identity, exit status, timeout, and output-truncation facts. `files_write` supports atomic replacement, append, mkdir, and explicit regular-file removal. A mutation can require the current SHA-256 so concurrent or stale requests fail rather than overwrite newer content.
 

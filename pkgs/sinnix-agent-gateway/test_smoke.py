@@ -55,6 +55,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "machine_query",
         "desktop_read",
         "terminal_read",
+        "browser_read",
     } <= readonly_names
     assert {
         "files_write",
@@ -63,6 +64,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "machine_action",
         "desktop_action",
         "terminal_action",
+        "browser_action",
         "shell_run",
     }.isdisjoint(readonly_names)
     assert {"agent_launch", "job_cancel"} <= local_names
@@ -72,6 +74,8 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "files_read",
         "machine_action",
         "session_list",
+        "browser_action",
+        "browser_read",
         "terminal_action",
         "terminal_read",
         "shell_run",
@@ -84,6 +88,8 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "machine_action",
         "desktop_action",
         "desktop_read",
+        "browser_action",
+        "browser_read",
         "terminal_action",
         "terminal_read",
         "shell_run",
