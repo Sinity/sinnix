@@ -61,6 +61,8 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "capability_search",
         "capability_describe",
         "tasks_read",
+        "memory_search",
+        "memory_get",
     } <= readonly_names
     assert {
         "files_write",
@@ -90,6 +92,8 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "shell_start",
         "tasks_read",
         "tasks_write",
+        "memory_search",
+        "memory_get",
     }.isdisjoint(local_names)
     assert {
         "files_write",
@@ -111,6 +115,8 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "capability_describe",
         "tasks_read",
         "tasks_write",
+        "memory_search",
+        "memory_get",
     } <= operator_names
     assert readonly["sha256"] != local["sha256"] != operator["sha256"]
     assert all(

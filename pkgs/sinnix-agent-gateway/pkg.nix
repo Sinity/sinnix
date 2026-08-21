@@ -155,6 +155,7 @@ python3Packages.buildPythonApplication {
     "sinnix_agent_gateway.audit"
     "sinnix_agent_gateway.beads"
     "sinnix_agent_gateway.jobs"
+    "sinnix_agent_gateway.memory"
     "sinnix_agent_gateway.projects"
   ];
 

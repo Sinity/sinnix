@@ -20,6 +20,7 @@ from .desktop import DesktopService
 from .files import HostFileService
 from .jobs import JobService
 from .machine_actions import MachineActionService
+from .memory import MemoryService
 from .observe import ObserveService
 from .projects import ProjectService
 from .redaction import public_error
@@ -80,12 +81,14 @@ class Runtime:
     captures: CaptureService
     files: HostFileService
     sessions: SessionLogService
+    memory: MemoryService
     shell: ShellService
 
     @classmethod
     def create(cls, config: GatewayConfig, principal_name: str) -> "Runtime":
         principal = Principal.for_name(principal_name)
         artifacts = ArtifactService(config, principal)
+        sessions = SessionLogService(config, principal)
         return cls(
             principal_name=principal_name,
             principal=principal,
@@ -103,7 +106,8 @@ class Runtime:
             capability_index=CapabilityIndexService(config, principal),
             captures=CaptureService(config, principal),
             files=HostFileService(config, principal),
-            sessions=SessionLogService(config, principal),
+            sessions=sessions,
+            memory=MemoryService(principal, sessions),
             shell=ShellService(config, principal),
         )
 
@@ -473,6 +477,24 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             return runtime.execute(
                 "session_search",
                 lambda: runtime.sessions.search(provider, query, max_results),
+            )
+
+        @mcp.tool(title="Search semantic memory", annotations=READ_ONLY_TOOL)
+        def memory_search(
+            query: str, providers: list[str] | None = None, limit: int = 100
+        ) -> dict[str, Any]:
+            """Search available memory sources while retaining source availability and provenance."""
+            return runtime.execute(
+                "memory_search", lambda: runtime.memory.search(query, providers, limit)
+            )
+
+        @mcp.tool(title="Get semantic memory object", annotations=READ_ONLY_TOOL)
+        def memory_get(
+            reference: str, offset: int = 0, max_bytes: int = 64_000
+        ) -> dict[str, Any]:
+            """Read one source-scoped memory object with its original provenance."""
+            return runtime.execute(
+                "memory_get", lambda: runtime.memory.get(reference, offset, max_bytes)
             )
 
     if Capability.SHELL_QUERY in runtime.principal.capabilities:
