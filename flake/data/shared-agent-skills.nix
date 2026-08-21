@@ -6,6 +6,7 @@
   "assured-close"
   "bead-loop"
   "beads"
+  "chatgpt-conversations"
   "claude-self-knowledge"
   "context-hygiene"
   "incident-evidence-freeze"
