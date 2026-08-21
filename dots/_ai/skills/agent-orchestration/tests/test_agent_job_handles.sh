@@ -261,6 +261,54 @@ received_cwd="$(tail -n1 "${tmp}/codex-invocations.log")"
 }
 jq -e --arg worktree "${canonical_worktree}" '.worktree == $worktree' "${tmp}/state/job-symlink-workdir.json" >/dev/null
 
+# --local-workdir is the explicit, clearly-named non-attested opt-out for a
+# directory the caller already trusts directly -- it must not be combined
+# with the attested identity pair (ambiguous, refused) and must not silently
+# reappear as a way to omit worktree identity altogether (the required-args
+# check above already covers that: neither form present is still refused).
+set +e
+run_job_variant job-ambiguous-identity --workdir "${tmp}/worktree" --local-workdir \
+  --registered-project "${tmp}/repo" --expected-git-common-dir "${repo_common_dir}"
+ambiguous_status=$?
+set -e
+[[ ${ambiguous_status} -eq 2 ]] || {
+  echo "runner accepted --local-workdir combined with the attested identity pair (status ${ambiguous_status})" >&2
+  exit 1
+}
+[[ ! -f ${tmp}/state/job-ambiguous-identity.json ]]
+
+# A non-Git directory (the documented --skip-git-repo-check use case) and a
+# subdirectory of a Git checkout (which the attested path can never
+# authorize -- it can only attest a whole worktree root) both have no
+# worktree identity to attest; --local-workdir must accept and actually run
+# them, binding execution to the canonical resolved path exactly like the
+# attested path does.
+mkdir -p "${tmp}/plain-dir"
+run_job_variant job-local-plain-dir --workdir "${tmp}/plain-dir" --local-workdir
+jq -e '.lifecycle == "succeeded" and .exit_status == 0' "${tmp}/state/job-local-plain-dir.json" >/dev/null || {
+  jq '{lifecycle, exit_status}' "${tmp}/state/job-local-plain-dir.json" >&2
+  exit 1
+}
+canonical_plain_dir="$(cd "${tmp}/plain-dir" && pwd -P)"
+[[ $(jq -r .worktree "${tmp}/state/job-local-plain-dir.json") == "${canonical_plain_dir}" ]]
+
+mkdir -p "${tmp}/worktree/subdir"
+run_job_variant job-local-subdir --workdir "${tmp}/worktree/subdir" --local-workdir
+jq -e '.lifecycle == "succeeded" and .exit_status == 0' "${tmp}/state/job-local-subdir.json" >/dev/null || {
+  jq '{lifecycle, exit_status}' "${tmp}/state/job-local-subdir.json" >&2
+  exit 1
+}
+
+# Symlink canonicalization applies identically under --local-workdir.
+ln -s "${tmp}/plain-dir" "${tmp}/plain-dir-link"
+canonical_plain_link="$(cd "${tmp}/plain-dir" && pwd -P)"
+run_job_variant job-local-symlink --workdir "${tmp}/plain-dir-link" --local-workdir
+received_local_cwd="$(tail -n1 "${tmp}/codex-invocations.log")"
+[[ ${received_local_cwd} == "${canonical_plain_link}" ]] || {
+  echo "codex ran against the symlinked --local-workdir input instead of the canonical resolved path: ${received_local_cwd} != ${canonical_plain_link}" >&2
+  exit 1
+}
+
 # argv backends (claude/grok/antigravity) get the prompt on the command line,
 # never on the runner's own stdin -- so an interactive launch without an
 # explicit </dev/null must not block waiting for EOF on whatever the runner
