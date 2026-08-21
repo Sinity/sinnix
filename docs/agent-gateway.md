@@ -57,11 +57,12 @@ The common read surface includes:
 
 - `gateway_status` and `machine_report`
 - `project_list`, `project_tree`, `project_read`, `project_search`, and `project_diff`
+- `files_read` for bounded host-path stat, reads, and directory listings
 - `job_list`, `job_status`, and `job_read_output`
 - `artifact_list` and `artifact_read`
 - `audit_tail` and `audit_verify`
 
-`agent-control` adds `agent_launch` and `job_cancel`. `operator` also adds `project_write` and `project_apply_patch`.
+`agent-control` adds `agent_launch` and `job_cancel`. `operator` also adds `files_write`, `project_write`, and `project_apply_patch`. `files_write` supports atomic replacement, append, mkdir, and explicit regular-file removal. A mutation can require the current SHA-256 so concurrent or stale requests fail rather than overwrite newer content.
 
 ## Project and path authority
 

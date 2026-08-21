@@ -14,6 +14,8 @@ class Capability(StrEnum):
     ARTIFACT_READ = "artifact.read"
     MACHINE_READ = "machine.read"
     CAPTURE_READ = "capture.read"
+    FILE_READ = "file.read"
+    FILE_WRITE = "file.write"
 
 
 PRINCIPAL_CAPABILITIES: dict[str, frozenset[Capability]] = {
@@ -25,6 +27,7 @@ PRINCIPAL_CAPABILITIES: dict[str, frozenset[Capability]] = {
             Capability.ARTIFACT_READ,
             Capability.MACHINE_READ,
             Capability.CAPTURE_READ,
+            Capability.FILE_READ,
         }
     ),
     "agent-control": frozenset(
