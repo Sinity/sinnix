@@ -61,6 +61,7 @@ class FakeSystemdJobs:
     stopped: list[str] = field(default_factory=list)
     properties: dict[str, str] = field(
         default_factory=lambda: {
+            "LoadState": "loaded",
             "ActiveState": "active",
             "SubState": "running",
             "MainPID": "42",
@@ -222,6 +223,22 @@ def test_declared_project_job_is_owned_by_a_transient_service(tmp_path: Path) ->
     assert status.payload.inline["systemd"]["MainPID"] == "42"
     assert cancelled.ok
     assert systemd.stopped == [launch["unit"]]
+
+
+def test_declared_project_job_status_rejects_an_unloaded_unit(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"})
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=DeclaredProjectJobs(systemd))
+
+    response = service.dispatch(
+        request("job.status", "systemd-jobs", {"job_id": str(uuid4())})
+    )
+
+    assert not response.ok
+    assert response.owner == "systemd-jobs"
+    assert response.error is not None
+    assert response.error.code.value == "OPERATION_FAILED"
+    assert "not loaded" in response.error.message
 
 
 def test_declared_project_job_rejects_arbitrary_execution(tmp_path: Path) -> None:
