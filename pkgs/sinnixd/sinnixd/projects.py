@@ -12,6 +12,14 @@ class ProjectConfigError(ValueError):
 
 
 @dataclass(frozen=True)
+class ProjectEnvironment:
+    kind: str
+    command: tuple[str, ...]
+    inherit: tuple[str, ...]
+    unset: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ProjectOperation:
     name: str
     description: str
@@ -40,7 +48,14 @@ class ProjectAdapter:
     root: Path
     descriptor: Path
     digest: str
+    environment: ProjectEnvironment
     operations: tuple[ProjectOperation, ...]
+
+    def operation(self, name: str) -> ProjectOperation:
+        for operation in self.operations:
+            if operation.name == name:
+                return operation
+        raise KeyError(f"unknown project operation: {self.project_id}.{name}")
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -94,6 +109,19 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
     if missing_markers:
         raise ProjectConfigError(f"{descriptor} root marker(s) missing: {', '.join(missing_markers)}")
 
+    environment = raw.get("environment")
+    if not isinstance(environment, Mapping):
+        raise ProjectConfigError(f"{descriptor} requires an [environment] table")
+    environment_kind = environment.get("kind")
+    if not isinstance(environment_kind, str) or not environment_kind:
+        raise ProjectConfigError(f"{descriptor} environment.kind must be non-empty")
+    execution_environment = ProjectEnvironment(
+        kind=environment_kind,
+        command=_string_list(environment.get("command"), "environment.command"),
+        inherit=_optional_string_list(environment.get("inherit"), "environment.inherit"),
+        unset=_optional_string_list(environment.get("unset"), "environment.unset"),
+    )
+
     raw_operations = raw.get("operations", {})
     if not isinstance(raw_operations, Mapping):
         raise ProjectConfigError(f"{descriptor} [operations] must be a table")
@@ -133,6 +161,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         root=root,
         descriptor=descriptor,
         digest="sha256:" + hashlib.sha256(raw_bytes).hexdigest(),
+        environment=execution_environment,
         operations=tuple(operations),
     )
 

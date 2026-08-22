@@ -29,6 +29,15 @@ def parser() -> argparse.ArgumentParser:
     get.add_argument("project_id")
     operations = project_subcommands.add_parser("operations")
     operations.add_argument("project_id")
+    job = subcommands.add_parser("job")
+    job_subcommands = job.add_subparsers(dest="job_command", required=True)
+    start = job_subcommands.add_parser("start")
+    start.add_argument("project_id")
+    start.add_argument("operation")
+    status = job_subcommands.add_parser("status")
+    status.add_argument("job_id")
+    cancel = job_subcommands.add_parser("cancel")
+    cancel.add_argument("job_id")
     return result
 
 
@@ -54,14 +63,24 @@ def main() -> None:
     arguments = parser().parse_args()
     if arguments.command == "status":
         request = _request("runtime.status", "sinnixd", {})
-    elif arguments.project_command == "list":
+    elif arguments.command == "project" and arguments.project_command == "list":
         request = _request("project.list", "project-adapters", {})
-    elif arguments.project_command == "get":
+    elif arguments.command == "project" and arguments.project_command == "get":
         request = _request("project.get", "project-adapters", {"project_id": arguments.project_id})
-    else:
+    elif arguments.command == "project":
         request = _request(
             "project.operations", "project-adapters", {"project_id": arguments.project_id}
         )
+    elif arguments.job_command == "start":
+        request = _request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": arguments.project_id, "operation": arguments.operation},
+        )
+    elif arguments.job_command == "status":
+        request = _request("job.status", "systemd-jobs", {"job_id": arguments.job_id})
+    else:
+        request = _request("job.cancel", "systemd-jobs", {"job_id": arguments.job_id})
     print(json.dumps(call(arguments.socket, request), indent=2, sort_keys=True))
 
 
