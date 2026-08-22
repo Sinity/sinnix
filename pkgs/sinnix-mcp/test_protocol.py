@@ -42,6 +42,21 @@ def test_request_digest_is_stable_for_equivalent_arguments() -> None:
     assert first.digest == second.digest
 
 
+def test_request_rejects_non_object_arguments_and_non_string_identifiers() -> None:
+    common = {
+        "request_id": str(uuid4()),
+        "correlation_id": str(uuid4()),
+        "operation": "lynchpin.materialize.plan",
+        "owner": "lynchpin",
+        "principal": "operator",
+    }
+
+    with pytest.raises(ValueError, match="arguments must be an object"):
+        RequestEnvelope(**common, arguments=[("project_id", "lynchpin")])  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="request_id must be a UUID"):
+        RequestEnvelope(**(common | {"request_id": uuid4()}))  # type: ignore[arg-type]
+
+
 def test_payload_requires_bounded_inline_or_complete_opaque_metadata() -> None:
     with pytest.raises(ValueError, match="exactly one"):
         OpaquePayload()

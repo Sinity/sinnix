@@ -416,8 +416,12 @@ when a new script is added.
   `observer`, `agent-control`, and `operator` authority principals. Transport
   selects its principal explicitly. `sinnix-agent-control-mcp` is a thin local wrapper around that
   implementation. Remote ChatGPT access uses the pinned OpenAI
-  `tunnel-client` user service; the gateway has no custom HTTP/SSE transport
-  or separate PID job substrate.
+  `tunnel-client` user service; the gateway has no custom HTTP/SSE transport.
+  `pkgs/sinnix-mcp` owns canonical references and the shared envelope/owner
+  contract. `modules/services/sinnixd.nix` runs the local `sinnixd` Unix-socket
+  daemon and installs `agentctl`; its initial scope is explicit project-adapter
+  discovery only. It does not claim job, task, Git, or process authority until
+  those owners are migrated to it.
 
 ## Secrets
 

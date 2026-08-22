@@ -1,0 +1,51 @@
+{
+  mkServiceModule,
+  config,
+  helpers,
+  lib,
+  pkgs,
+  ...
+}@args:
+let
+  userName = config.sinnix.user.name;
+  scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+  projectRoot = config.sinnix.paths.projectRoot;
+in
+mkServiceModule {
+  name = "sinnixd";
+  description = "Local Sinnix runtime daemon for agentctl and MCP frontends";
+  surface = {
+    unit = "sinnixd.service";
+    manager = "user";
+    resourceClass = "interactive-agent";
+    observe = {
+      enable = true;
+      restartable = true;
+    };
+  };
+  configFn =
+    { ... }:
+    {
+      environment.systemPackages = [ scriptPkgs.sinnixd ];
+
+      home-manager.users.${userName}.systemd.user.services.sinnixd = {
+        Unit = {
+          Description = "Sinnix local runtime daemon";
+          After = [ "graphical-session.target" ];
+        };
+        Service =
+          (lib.sinnix.mkRuntimeServiceConfig {
+            runtimeInventory = config.sinnix.runtime.inventory;
+            unit = "sinnixd.service";
+          })
+          // {
+            Type = "simple";
+            ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd --socket %t/sinnixd.sock --project-root ${projectRoot}";
+            Restart = "on-failure";
+            RestartSec = "2s";
+            UMask = "0077";
+          };
+        Install.WantedBy = [ "default.target" ];
+      };
+    };
+} args
