@@ -51,19 +51,17 @@ sinnix-agent-gateway-schema observer
 sinnix-agent-gateway --config /etc/sinnix/agent-gateway.json --principal observer info
 ```
 
-`sinnix-agent-gateway-schema` emits a canonical, sorted tool manifest and SHA-256. The selected tunnel principal's manifest is compared with its Nix-approved hash before startup. A local server manifest, an approved Nix manifest, and an externally observed ChatGPT connector snapshot are distinct facts. The private state file `connector-snapshot.json` records an external snapshot with schema `sinnix.gateway-connector-snapshot.v1`, principal, and manifest SHA-256. The gateway reports every comparison as `match`, `mismatch`, or `unobserved`; it does not claim connector parity until an actual product-level observation has been recorded. `gateway_status` also exposes the principal contract hash and the principal-filtered action catalog hash separately, so a stable MCP tool manifest cannot conceal a widened action contract.
+`sinnix-agent-gateway-schema` emits a canonical, sorted tool manifest and SHA-256. The selected tunnel principal's manifest is compared with its Nix-approved hash before startup. A local server manifest, an approved Nix manifest, and an externally observed ChatGPT connector snapshot are distinct facts. The private state file `connector-snapshot.json` records an external snapshot with schema `sinnix.gateway-connector-snapshot.v1`, principal, and manifest SHA-256. The gateway reports every comparison as `match`, `mismatch`, or `unobserved`; it does not claim connector parity until an actual product-level observation has been recorded. `status` also exposes the principal contract hash and the principal-filtered action catalog hash separately, so a stable MCP tool manifest cannot conceal a widened action contract.
 
 ### V2 contract foundation
 
-Gateway V2 converges on the stable verb families `status`, `catalog`, `query`, `get`, `context`, `events`, `wait`, `change`, `operate`, and `run`. During the staged migration, `sinnix://gateway/v2/catalog` is a principal-filtered MCP resource generated from executable declarations rather than a second live-state inventory. It currently publishes canonical templates for project, checkout, bead, job, artifact, receipt, result, machine unit, browser page, terminal, capture lane, session, and context snapshot resources. New owner actions migrate into this catalog before the ten-verb public cutover; legacy MCP tools remain active only until the replacement has parity evidence.
-
-`gateway_status(view="self_check")` runs non-mutating route preflight for configured owner commands and reports each route as `pass`, `degraded`, or `unavailable`, including exact command and failure class. It checks route reachability without opening a second scheduler or executing a mutating owner operation.
+Gateway V2 converges on the stable verb families `status`, `catalog`, `query`, `get`, `context`, `events`, `wait`, `change`, `operate`, and `run`. `status` and `catalog` are the first live target-named tools. Their bindings are validated against the executable action registry at startup: a binding must cover every declared action and match its declared owner, route, and verb. `status` calls the gateway observation owner directly and includes non-mutating configured-route preflight evidence. `catalog` searches the V2 registry directly and is distinct from `mcp_catalog`, which remains the registry-derived inventory of upstream MCP brokers. `sinnix://gateway/v2/catalog` remains a principal-filtered MCP resource generated from the same declarations. It publishes canonical templates for project, checkout, bead, job, artifact, receipt, result, machine unit, browser page, terminal, capture lane, session, and context snapshot resources. Legacy tools remain active only until a replacement has owner-domain parity evidence.
 
 `pkgs/sinnix-mcp` is the shared protocol package for the gateway, future `sinnixd` runtime, project adapters, and MCP owners. It owns the canonical `sinnix://` parser and templates, versioned request and response envelopes, bounded inline-or-opaque payload representation, typed errors, source-generation bindings, and a non-overlapping owner registry. Owner declarations name their authority and lifecycle (`read_only`, `daemon_owned`, `window_gated`, or `operator_confirmed`), so an MCP frontend cannot silently widen a domain owner’s write boundary. Archive-backed owners additionally bind returned facts and receipts to their source reference, generation, and root digest.
 
 The common read surface includes:
 
-- `gateway_status`, `machine_report` (the bounded overview), `machine_query`, `capability_search`, and `capability_describe`
+- `status`, `catalog`, `machine_report` (the bounded overview), `machine_query`, `capability_search`, and `capability_describe`
 - `project_list`, `project_context`, `project_tree`, `project_read`, `project_search`, and `project_diff`
 - `files_read` for bounded host-path stat, reads, and directory listings
 - `session_list`, `session_read`, and `session_search` over authoritative Claude Code and Codex JSONL files
@@ -151,7 +149,7 @@ The runtime key is the agenix secret `openai-tunnel-runtime-key`. Tunnel-managem
 2. Compare `sinnix-agent-gateway-schema observer` with a direct stdio `tools/list` call.
 3. Enable a tunnel only after its ID and dedicated runtime credential exist.
 4. Verify `http://127.0.0.1:3088/healthz` and `/readyz`, then inspect the tunnel logs through systemd.
-5. Create or refresh the ChatGPT connector from the tunnel, approve its exact tool snapshot, and invoke `gateway_status` plus a bounded project read from ChatGPT.
+5. Create or refresh the ChatGPT connector from the tunnel, approve its exact tool snapshot, and invoke `status`, `catalog`, and a bounded project read from ChatGPT.
 6. Record the observed connector tool names and manifest hash separately from the Nix-approved manifest. The observation is required before claiming connector parity.
 
 The old prototype state may be retained under the canonical state root's `legacy/` directory for forensic inspection. It must not be loaded as active jobs, artifacts, repositories, tasks, or audit data.

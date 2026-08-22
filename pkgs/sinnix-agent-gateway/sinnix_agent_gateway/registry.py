@@ -74,6 +74,12 @@ class CatalogRegistry:
                     f"action {action.name!r} refers to unknown resource kinds: {sorted(unknown)}"
                 )
 
+    def action(self, name: str) -> ActionSpec:
+        try:
+            return self._actions_by_name[name]
+        except KeyError as error:
+            raise RegistryError(f"unknown action: {name!r}") from error
+
     def action_catalog_hash(self, principal: str | None = None) -> str:
         actions = [
             action.catalog_row()
