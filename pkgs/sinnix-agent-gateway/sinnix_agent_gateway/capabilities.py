@@ -25,7 +25,6 @@ class Capability(StrEnum):
     FILE_READ = "file.read"
     FILE_WRITE = "file.write"
     SESSION_READ = "session.read"
-    SHELL_QUERY = "shell.query"
     SHELL_RUN = "shell.run"
     TASK_READ = "task.read"
     TASK_WRITE = "task.write"
@@ -48,7 +47,6 @@ PRINCIPAL_CAPABILITIES: dict[str, frozenset[Capability]] = {
             Capability.CAPTURE_READ,
             Capability.FILE_READ,
             Capability.SESSION_READ,
-            Capability.SHELL_QUERY,
             Capability.TASK_READ,
             Capability.MCP_READ,
         }

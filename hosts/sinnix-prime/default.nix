@@ -43,7 +43,7 @@
         # observer manifest, regenerated from the packaged gateway on 2026-08-22.
         # It contains only read-annotated tools, including bounded content,
         # opaque-artifact reads, V2 status, catalog, and route preflight.
-        approvedManifestHash = "c8eabdf643120e1efd338c3724ac9ed54893fe6cc9a5124563aa18cddabac46b";
+        approvedManifestHash = "663aae938821b7283bfcb5b6a054bbd84d80e098a1ebb44bb3f325b324a6e4ec";
         tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
       };
     };

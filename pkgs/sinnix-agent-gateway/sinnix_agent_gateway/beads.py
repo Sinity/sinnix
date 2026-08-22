@@ -8,7 +8,7 @@ from typing import Any
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig, ProjectConfig
-from .execution import ExecutionProfile, OwnerExecution
+from .execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
 class BeadsError(ValueError):
@@ -68,7 +68,7 @@ class BeadsService:
         result = self.execution.run(
             command,
             ExecutionProfile(
-                name="beads",
+                route=OwnerRoute("beads"),
                 timeout_seconds=30,
                 max_stdout_bytes=self.config.max_result_bytes,
                 max_stderr_bytes=self.config.max_result_bytes,

@@ -678,21 +678,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 lambda: runtime.timeline.query(start, end, query, providers, limit),
             )
 
-    if Capability.SHELL_QUERY in runtime.principal.capabilities:
-
-        @mcp.tool(title="Run read-only shell query", annotations=READ_ONLY_TOOL)
-        def shell_query(
-            argv: list[str],
-            cwd: str = "/",
-            timeout_seconds: int = 30,
-            max_bytes: int = 64_000,
-        ) -> dict[str, Any]:
-            """Run exact argv in a transient user service with a read-only filesystem."""
-            return runtime.execute(
-                "shell_query",
-                lambda: runtime.shell.query(argv, cwd, timeout_seconds, max_bytes),
-            )
-
     if Capability.SHELL_RUN in runtime.principal.capabilities:
 
         @mcp.tool(title="Run operator shell command", annotations=DESTRUCTIVE_TOOL)

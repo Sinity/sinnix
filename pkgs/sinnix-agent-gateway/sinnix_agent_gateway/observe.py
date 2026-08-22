@@ -6,7 +6,7 @@ from typing import Any
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from .execution import ExecutionProfile, OwnerExecution
+from .execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
 class ObserveService:
@@ -81,7 +81,7 @@ class ObserveService:
         result = self.execution.run(
             [self.config.observe_command, "--format", "json", "--limit", "20"],
             ExecutionProfile(
-                name="machine-observe",
+                route=OwnerRoute("machine-observe"),
                 timeout_seconds=20,
                 max_stdout_bytes=self._collector_bound(),
                 environment=environment,

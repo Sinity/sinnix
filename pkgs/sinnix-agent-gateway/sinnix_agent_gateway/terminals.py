@@ -5,7 +5,12 @@ from typing import Any
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from .execution import ExecutionProfile, OwnerExecution
+from .execution import (
+    EnvironmentProfile,
+    ExecutionProfile,
+    OwnerExecution,
+    OwnerRoute,
+)
 
 
 class TerminalError(ValueError):
@@ -21,20 +26,29 @@ class TerminalService:
         "last_non_empty_output",
     }
 
-    def __init__(self, config: GatewayConfig, principal: Principal):
+    def __init__(
+        self,
+        config: GatewayConfig,
+        principal: Principal,
+        execution: OwnerExecution | None = None,
+    ):
         self.config = config
         self.principal = principal
-        self.execution = OwnerExecution()
+        self.execution = execution or OwnerExecution()
 
     def _run(self, arguments: list[str]) -> dict[str, Any]:
         result = self.execution.run(
             [self.config.kitty_control_command, *arguments],
             ExecutionProfile(
-                name="terminal-kitty",
+                route=OwnerRoute("terminal-kitty", EnvironmentProfile.TERMINAL),
                 timeout_seconds=30,
                 max_stdout_bytes=self.config.max_result_bytes,
             ),
         )
+        if result.failure_class is not None and result.failure_class.startswith(
+            "environment_unavailable:"
+        ):
+            raise TerminalError(f"Kitty control unavailable: {result.failure_class}")
         if result.failure_class == "command_unavailable:FileNotFoundError":
             raise TerminalError("Kitty control unavailable: FileNotFoundError")
         if result.failure_class == "command_timeout":

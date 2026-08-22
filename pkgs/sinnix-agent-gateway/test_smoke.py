@@ -51,7 +51,6 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "project_read",
         "session_list",
         "session_read",
-        "shell_query",
         "machine_query",
         "desktop_read",
         "desktop_capture",
@@ -78,6 +77,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "shell_run",
         "shell_start",
     }.isdisjoint(readonly_names)
+    assert "shell_query" not in readonly_names
     assert {"agent_launch", "job_cancel", "capability_search", "capability_describe"} <= local_names
     assert {
         "desktop_action",

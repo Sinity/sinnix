@@ -5,7 +5,7 @@ from typing import Any
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from .execution import ExecutionProfile, OwnerExecution
+from .execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
 class CaptureService:
@@ -58,7 +58,7 @@ class CaptureService:
         result = self.execution.run(
             cmd,
             ExecutionProfile(
-                name="capture-query",
+                route=OwnerRoute("capture-query"),
                 timeout_seconds=20,
                 max_stdout_bytes=self.config.max_result_bytes * 4,
             ),
