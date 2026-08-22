@@ -26,7 +26,9 @@ from .observe import ObserveService
 from .project_context import ProjectContextService
 from .projects import ProjectService
 from .redaction import public_error
+from .registry import CatalogSearch, REGISTRY
 from .schemas import AgentLaunchRequest
+from .self_check import GatewaySelfCheck
 from .sessions import SessionLogService
 from .shell import ShellService
 from .terminals import TerminalService
@@ -89,6 +91,7 @@ class Runtime:
     timeline: TimelineService
     mcp_broker: McpBrokerService
     shell: ShellService
+    self_check: GatewaySelfCheck
 
     @classmethod
     def create(cls, config: GatewayConfig, principal_name: str) -> "Runtime":
@@ -120,6 +123,7 @@ class Runtime:
             timeline=TimelineService(principal, sessions),
             mcp_broker=McpBrokerService(config, principal, artifacts),
             shell=ShellService(config, principal),
+            self_check=GatewaySelfCheck(config),
         )
 
     def _record_result(self, operation: str, result: Any) -> None:
@@ -217,9 +221,22 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             "Job IDs and artifact IDs are the only accepted control identities."
         )
 
+    @mcp.resource("sinnix://gateway/v2/catalog")
+    def gateway_v2_catalog() -> str:
+        """Return the principal-filtered V2 contract catalog during migration."""
+        return json.dumps(
+            REGISTRY.search(CatalogSearch(principal=principal_name)),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
     @mcp.tool(title="Gateway status", annotations=READ_ONLY_TOOL)
-    async def gateway_status() -> dict[str, Any]:
-        """Return principal, manifest provenance, transport, runtime state, and contract hash."""
+    async def gateway_status(view: str = "overview") -> dict[str, Any]:
+        """Return gateway contract status or a non-mutating owner-route self-check."""
+        if view == "self_check":
+            return runtime.execute("gateway_self_check", runtime.self_check.run)
+        if view != "overview":
+            raise ValueError("gateway status view must be 'overview' or 'self_check'")
         manifest = canonical_manifest(await mcp.list_tools())
         return runtime.execute(
             "gateway_status",
@@ -227,6 +244,8 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 principal_name,
                 _principal_contract(principal_name),
                 manifest["sha256"],
+                REGISTRY.action_catalog_hash(principal_name),
+                REGISTRY.revision,
             ),
         )
 

@@ -51,7 +51,13 @@ sinnix-agent-gateway-schema observer
 sinnix-agent-gateway --config /etc/sinnix/agent-gateway.json --principal observer info
 ```
 
-`sinnix-agent-gateway-schema` emits a canonical, sorted tool manifest and SHA-256. The selected tunnel principal's manifest is compared with its Nix-approved hash before startup. A local server manifest, an approved Nix manifest, and an externally observed ChatGPT connector snapshot are distinct facts. The private state file `connector-snapshot.json` records an external snapshot with schema `sinnix.gateway-connector-snapshot.v1`, principal, and manifest SHA-256. The gateway reports every comparison as `match`, `mismatch`, or `unobserved`; it does not claim connector parity until an actual product-level observation has been recorded.
+`sinnix-agent-gateway-schema` emits a canonical, sorted tool manifest and SHA-256. The selected tunnel principal's manifest is compared with its Nix-approved hash before startup. A local server manifest, an approved Nix manifest, and an externally observed ChatGPT connector snapshot are distinct facts. The private state file `connector-snapshot.json` records an external snapshot with schema `sinnix.gateway-connector-snapshot.v1`, principal, and manifest SHA-256. The gateway reports every comparison as `match`, `mismatch`, or `unobserved`; it does not claim connector parity until an actual product-level observation has been recorded. `gateway_status` also exposes the principal contract hash and the principal-filtered action catalog hash separately, so a stable MCP tool manifest cannot conceal a widened action contract.
+
+### V2 contract foundation
+
+Gateway V2 converges on the stable verb families `status`, `catalog`, `query`, `get`, `context`, `events`, `wait`, `change`, `operate`, and `run`. During the staged migration, `sinnix://gateway/v2/catalog` is a principal-filtered MCP resource generated from executable declarations rather than a second live-state inventory. It currently publishes canonical templates for project, checkout, bead, job, artifact, receipt, result, machine unit, browser page, terminal, capture lane, session, and context snapshot resources. New owner actions migrate into this catalog before the ten-verb public cutover; legacy MCP tools remain active only until the replacement has parity evidence.
+
+`gateway_status(view="self_check")` runs non-mutating route preflight for configured owner commands and reports each route as `pass`, `degraded`, or `unavailable`, including exact command and failure class. It checks route reachability without opening a second scheduler or executing a mutating owner operation.
 
 The common read surface includes:
 

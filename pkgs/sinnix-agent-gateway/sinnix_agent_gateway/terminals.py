@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import tempfile
 from typing import Any
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
+from .execution import ExecutionProfile, OwnerExecution
 
 
 class TerminalError(ValueError):
@@ -25,27 +24,29 @@ class TerminalService:
     def __init__(self, config: GatewayConfig, principal: Principal):
         self.config = config
         self.principal = principal
+        self.execution = OwnerExecution()
 
     def _run(self, arguments: list[str]) -> dict[str, Any]:
-        try:
-            with tempfile.TemporaryFile() as output:
-                result = subprocess.run(
-                    [self.config.kitty_control_command, *arguments],
-                    stdin=subprocess.DEVNULL,
-                    stdout=output,
-                    stderr=subprocess.STDOUT,
-                    timeout=30,
-                    check=False,
-                )
-                output.seek(0)
-                data = output.read(self.config.max_result_bytes + 1)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise TerminalError(f"Kitty control unavailable: {type(exc).__name__}") from exc
-        if len(data) > self.config.max_result_bytes:
+        result = self.execution.run(
+            [self.config.kitty_control_command, *arguments],
+            ExecutionProfile(
+                name="terminal-kitty",
+                timeout_seconds=30,
+                max_stdout_bytes=self.config.max_result_bytes,
+            ),
+        )
+        if result.failure_class == "command_unavailable:FileNotFoundError":
+            raise TerminalError("Kitty control unavailable: FileNotFoundError")
+        if result.failure_class == "command_timeout":
+            raise TerminalError("Kitty control unavailable: TimeoutExpired")
+        if result.failure_class == "command_output_bound":
             raise TerminalError("Kitty control response exceeded response bound")
-        if result.returncode != 0:
-            raise TerminalError("Kitty control command failed")
-        text = data.decode("utf-8", errors="replace")
+        if result.failure_class is not None:
+            detail = result.stderr_excerpt()
+            raise TerminalError(
+                f"Kitty control command failed: {detail}" if detail else "Kitty control command failed"
+            )
+        text = result.stdout.decode("utf-8", errors="replace")
         try:
             value: Any = json.loads(text)
         except json.JSONDecodeError:

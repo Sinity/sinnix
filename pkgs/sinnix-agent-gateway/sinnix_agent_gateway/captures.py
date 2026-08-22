@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from typing import Any
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
+from .execution import ExecutionProfile, OwnerExecution
 
 
 class CaptureService:
@@ -19,6 +19,7 @@ class CaptureService:
     def __init__(self, config: GatewayConfig, principal: Principal):
         self.config = config
         self.principal = principal
+        self.execution = OwnerExecution()
 
     def _available_lanes(self) -> list[str]:
         root = self.config.captures_root
@@ -54,34 +55,29 @@ class CaptureService:
         for lane in effective_lanes:
             cmd += ["--lane", lane]
 
-        try:
-            result = subprocess.run(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                timeout=20,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
+        result = self.execution.run(
+            cmd,
+            ExecutionProfile(
+                name="capture-query",
+                timeout_seconds=20,
+                max_stdout_bytes=self.config.max_result_bytes * 4,
+            ),
+        )
+        if result.failure_class is not None:
+            failure_class = {
+                "command_timeout": "collector_timeout",
+                "command_unavailable:FileNotFoundError": "collector_unavailable",
+            }.get(result.failure_class, "collector_failed")
             return {
                 "available": False,
-                "failure_class": "collector_timeout",
-                "reason": "sinnix-capture query timed out",
-            }
-        except OSError as exc:
-            return {
-                "available": False,
-                "failure_class": "collector_unavailable",
-                "reason": f"sinnix-capture query is unavailable: {type(exc).__name__}",
-            }
-        if result.returncode != 0:
-            return {
-                "available": False,
-                "failure_class": "collector_failed",
-                "reason": result.stderr[:2000]
-                if result.stderr
-                else "sinnix-capture query failed",
+                "failure_class": failure_class,
+                "reason": result.stderr_excerpt()
+                or (
+                    "sinnix-capture query is unavailable"
+                    if failure_class == "collector_unavailable"
+                    else "sinnix-capture query failed"
+                ),
+                "command": list(result.command),
             }
 
         try:

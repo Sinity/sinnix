@@ -3,15 +3,12 @@ from __future__ import annotations
 import json
 import os
 import re
-import select
-import signal
-import subprocess
-import time
 from pathlib import Path
 from typing import Any
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig, ProjectConfig
+from .execution import ExecutionProfile, OwnerExecution
 
 
 class BeadsError(ValueError):
@@ -25,6 +22,7 @@ class BeadsService:
     def __init__(self, config: GatewayConfig, principal: Principal):
         self.config = config
         self.principal = principal
+        self.execution = OwnerExecution(base_environment={})
 
     @staticmethod
     def _string(value: Any, name: str, maximum: int = 8_192) -> str:
@@ -67,68 +65,28 @@ class BeadsService:
             "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
             "BEADS_ACTOR": f"sinnix-gateway:{self.principal.name}",
         }
-        process = subprocess.Popen(
+        result = self.execution.run(
             command,
-            cwd=project.path,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=environment,
-            start_new_session=True,
+            ExecutionProfile(
+                name="beads",
+                timeout_seconds=30,
+                max_stdout_bytes=self.config.max_result_bytes,
+                max_stderr_bytes=self.config.max_result_bytes,
+                cwd=project.path,
+                environment=environment,
+            ),
         )
-        assert process.stdout is not None
-        assert process.stderr is not None
-        deadline = time.monotonic() + 30
-        stdout = bytearray()
-        stderr = bytearray()
-        streams = {
-            process.stdout.fileno(): stdout,
-            process.stderr.fileno(): stderr,
-        }
-        bounded = False
-        try:
-            while streams:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise subprocess.TimeoutExpired(command, 30)
-                ready, _, _ = select.select(list(streams), [], [], remaining)
-                if not ready:
-                    raise subprocess.TimeoutExpired(command, 30)
-                for descriptor in ready:
-                    destination = streams[descriptor]
-                    chunk = os.read(descriptor, 65_536)
-                    if not chunk:
-                        del streams[descriptor]
-                        continue
-                    destination.extend(chunk)
-                    if len(stdout) + len(stderr) > self.config.max_result_bytes:
-                        bounded = True
-                        break
-                if bounded:
-                    break
-            if bounded:
-                if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    result_code = process.wait(timeout=0.5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    result_code = process.wait()
-            else:
-                result_code = process.wait(timeout=max(0.1, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired as exc:
-            if process.poll() is None:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-            raise BeadsError("Beads operation timed out") from exc
-        if bounded:
+        if result.failure_class == "command_timeout":
+            raise BeadsError("Beads operation timed out")
+        if result.failure_class == "command_output_bound":
             raise BeadsError("Beads response exceeded response bound")
-        text = stdout.decode("utf-8", errors="replace")
-        if result_code != 0:
-            error = (stdout + b"\n" + stderr).decode("utf-8", errors="replace").strip()
+        if result.failure_class is not None:
+            error = (result.stdout + b"\n" + result.stderr).decode(
+                "utf-8", errors="replace"
+            ).strip()
             raise BeadsError(error or "Beads operation failed")
         try:
-            return json.loads(text)
+            return json.loads(result.stdout)
         except json.JSONDecodeError as exc:
             raise BeadsError("Beads did not return JSON") from exc
 
