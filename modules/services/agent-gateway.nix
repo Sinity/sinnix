@@ -10,7 +10,12 @@ let
   userName = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   mcpTools = import ../features/dev/agents/mcp-tools.nix {
-    inherit lib pkgs scriptPkgs config;
+    inherit
+      lib
+      pkgs
+      scriptPkgs
+      config
+      ;
   };
   jsonFormat = pkgs.formats.json { };
   gatewayBin = "${scriptPkgs.sinnix-agent-gateway}/bin/sinnix-agent-gateway";
@@ -70,7 +75,10 @@ mkServiceModule {
     tunnel = {
       enable = lib.mkEnableOption "OpenAI Secure MCP Tunnel";
       principal = lib.mkOption {
-        type = lib.types.enum [ "observer" "operator" ];
+        type = lib.types.enum [
+          "observer"
+          "operator"
+        ];
         default = "observer";
         description = "Gateway principal selected explicitly for this tunnel.";
       };
@@ -99,6 +107,11 @@ mkServiceModule {
         default = null;
         description = "Frozen ChatGPT connector manifest SHA-256 after publication.";
       };
+      approvedActionCatalogHash = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "Frozen principal-scoped V2 action catalog SHA-256 after review.";
+      };
     };
   };
   configFn =
@@ -112,6 +125,7 @@ mkServiceModule {
       configFile = jsonFormat.generate "sinnix-agent-gateway.json" {
         inherit (cfg) stateDir maxResultBytes;
         approvedManifestHash = cfg.tunnel.approvedManifestHash;
+        approvedActionCatalogHash = cfg.tunnel.approvedActionCatalogHash;
         approvedManifestPrincipal = cfg.tunnel.principal;
         runtimeInventory = "/etc/sinnix/runtime-inventory.json";
         capabilityIndex = "/etc/sinnix/capability-index.json";
@@ -145,18 +159,9 @@ mkServiceModule {
         principal="''${1:-observer}"
         exec ${gatewayBin} --config ${configFile} --principal "$principal" manifest
       '';
-      approvedManifestGate = pkgs.writeShellScript "sinnix-agent-gateway-manifest-gate" ''
+      approvalGate = pkgs.writeShellScript "sinnix-agent-gateway-approval-gate" ''
         set -euo pipefail
-        actual="$(${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg cfg.tunnel.principal} manifest | ${pkgs.jq}/bin/jq -r .sha256)"
-        expected=${
-          lib.escapeShellArg (
-            if cfg.tunnel.approvedManifestHash == null then "" else cfg.tunnel.approvedManifestHash
-          )
-        }
-        if [[ "$actual" != "$expected" ]]; then
-          echo "${cfg.tunnel.principal} tool manifest drift: expected $expected, got $actual" >&2
-          exit 1
-        fi
+        exec ${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg cfg.tunnel.principal} approval-check
       '';
       stateReconcile = pkgs.writeShellScript "sinnix-agent-gateway-state-reconcile" ''
         set -euo pipefail
@@ -168,6 +173,11 @@ mkServiceModule {
         {
           assertion = !cfg.tunnel.enable || cfg.tunnel.tunnelId != "";
           message = "sinnix.services.agent-gateway.tunnel.tunnelId must be set when the tunnel is enabled";
+        }
+        {
+          assertion =
+            (cfg.tunnel.approvedManifestHash == null) == (cfg.tunnel.approvedActionCatalogHash == null);
+          message = "sinnix.services.agent-gateway.tunnel approvals must include both the tool manifest and action catalog hashes";
         }
       ];
 
@@ -290,41 +300,40 @@ mkServiceModule {
             StartLimitIntervalSec = 300;
             StartLimitBurst = 8;
           };
-          Service =
-            {
-              Type = "simple";
-              ExecStartPre = [
-                stateReconcile
-              ]
-              ++ lib.optionals (cfg.tunnel.approvedManifestHash != null) [
-                approvedManifestGate
-              ];
-              ExecStart = ''
-                ${tunnelClient}/bin/tunnel-client run \
-                  --control-plane.tunnel-id ${lib.escapeShellArg cfg.tunnel.tunnelId} \
-                  --control-plane.api-key file:%d/runtime-key \
-                  --mcp.command ${lib.escapeShellArg "command=${mcpWrapper}/bin/sinnix-agent-gateway-mcp --principal ${cfg.tunnel.principal},channel=main"} \
-                  --health.listen-addr 127.0.0.1:${toString cfg.tunnel.healthPort} \
-                  --log.format json
-              '';
-              LoadCredential = "runtime-key:${cfg.tunnel.runtimeKeyFile}";
-              Restart = "on-failure";
-              RestartSec = "5s";
-              # launch_agent() fork/execs claude/codex inside this namespace, so
-              # the child inherits this write surface. The observer does not have
-              # JOB_START, while operator authority is selected explicitly.
-              ProtectHome = false;
-              ReadWritePaths = [
-                cfg.stateDir
-              ]
-              ++ lib.sinnix.systemd.agentRuntimeWritePaths { home = "/home/${userName}"; };
-              UMask = "0077";
-            }
-            // lib.optionalAttrs (cfg.tunnel.principal == "observer") {
-              NoNewPrivileges = true;
-              PrivateTmp = true;
-              ProtectSystem = "strict";
-            };
+          Service = {
+            Type = "simple";
+            ExecStartPre = [
+              stateReconcile
+            ]
+            ++ lib.optionals (cfg.tunnel.approvedManifestHash != null) [
+              approvalGate
+            ];
+            ExecStart = ''
+              ${tunnelClient}/bin/tunnel-client run \
+                --control-plane.tunnel-id ${lib.escapeShellArg cfg.tunnel.tunnelId} \
+                --control-plane.api-key file:%d/runtime-key \
+                --mcp.command ${lib.escapeShellArg "command=${mcpWrapper}/bin/sinnix-agent-gateway-mcp --principal ${cfg.tunnel.principal},channel=main"} \
+                --health.listen-addr 127.0.0.1:${toString cfg.tunnel.healthPort} \
+                --log.format json
+            '';
+            LoadCredential = "runtime-key:${cfg.tunnel.runtimeKeyFile}";
+            Restart = "on-failure";
+            RestartSec = "5s";
+            # launch_agent() fork/execs claude/codex inside this namespace, so
+            # the child inherits this write surface. The observer does not have
+            # JOB_START, while operator authority is selected explicitly.
+            ProtectHome = false;
+            ReadWritePaths = [
+              cfg.stateDir
+            ]
+            ++ lib.sinnix.systemd.agentRuntimeWritePaths { home = "/home/${userName}"; };
+            UMask = "0077";
+          }
+          // lib.optionalAttrs (cfg.tunnel.principal == "observer") {
+            NoNewPrivileges = true;
+            PrivateTmp = true;
+            ProtectSystem = "strict";
+          };
           Install.WantedBy = lib.optionals cfg.tunnel.autoStart [ "default.target" ];
         };
       };

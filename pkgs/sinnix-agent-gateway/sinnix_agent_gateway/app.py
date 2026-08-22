@@ -174,6 +174,38 @@ class Runtime:
         status["route_preflight"] = preflight
         return status
 
+    def catalog(self, search: CatalogSearch) -> dict[str, Any]:
+        def resolve_availability(kind: str, name: str) -> tuple[str, str | None]:
+            if kind == "action":
+                return "available", None
+            if name in REGISTRY.action("resources.get").resource_kinds:
+                return "available", None
+            return "unavailable", "no migrated V2 action currently exposes this resource"
+
+        selected_project: dict[str, Any] | None = None
+        if search.project is not None:
+            selected_project = next(
+                (
+                    project
+                    for project in self.projects.list()["projects"]
+                    if project["project_id"] == search.project
+                ),
+                None,
+            )
+            if selected_project is None or not selected_project["available"]:
+                raise ValueError("project is unavailable to this principal")
+        catalog = REGISTRY.search(
+            search, availability_resolver=resolve_availability
+        )
+        if selected_project is not None:
+            catalog["project"] = {
+                **selected_project,
+                "ref": REGISTRY.reference(
+                    "project", {"project_id": selected_project["project_id"]}
+                ),
+            }
+        return catalog
+
     def project_authority(self, project_id: str) -> dict[str, Any]:
         checkouts = self.projects.checkouts(project_id)["checkouts"]
         for checkout in checkouts:
@@ -564,19 +596,21 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             verb: str | None = None,
             effect: str | None = None,
             resource_kind: str | None = None,
+            project: str | None = None,
             availability: str | None = None,
         ) -> dict[str, Any]:
             """Search the principal-filtered V2 resource and executable action catalog."""
             action = target_bindings.action_for_tool("catalog", principal_name)
             return runtime.execute_v2(
                 action,
-                lambda: REGISTRY.search(
+                lambda: runtime.catalog(
                     CatalogSearch(
                         text=text,
                         domain=domain,
                         verb=VerbFamily(verb) if verb is not None else None,
                         effect=EffectMode(effect) if effect is not None else None,
                         resource_kind=resource_kind,
+                        project=project,
                         availability=availability,
                         principal=principal_name,
                     )
@@ -587,6 +621,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     "verb": verb,
                     "effect": effect,
                     "resource_kind": resource_kind,
+                    "project": project,
                     "availability": availability,
                 },
             )

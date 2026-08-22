@@ -15,10 +15,11 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.execution import ExecutionResult, OwnerDiagnosticError
 from sinnix_agent_gateway.capabilities import PolicyError
-from sinnix_agent_gateway.cli import build_manifest, parser
+from sinnix_agent_gateway.cli import build_manifest, parser, verify_approval
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.jobs import JobError
 from sinnix_agent_gateway.projects import ProjectError
+from sinnix_agent_gateway.registry import REGISTRY
 from sinnix_agent_gateway.schemas import AgentLaunchRequest
 
 
@@ -35,6 +36,7 @@ def config(tmp_path: Path, *, observer_read: bool = True) -> GatewayConfig:
             )
         },
         approved_manifest_hash="approved-fixture-hash",
+        approved_action_catalog_hash="catalog-hash",
     )
 
 
@@ -262,6 +264,43 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "gateway.status",
                     "gateway.catalog",
                 ]
+                project_catalog_result = await session.call_tool(
+                    "catalog", {"project": "fixture"}
+                )
+                project_catalog = json.loads(project_catalog_result.content[0].text)["data"]
+                assert project_catalog["project"] == {
+                    "project_id": "fixture",
+                    "available": True,
+                    "default_ref": "master",
+                    "observer_read": True,
+                    "writable": False,
+                    "ref": "sinnix://projects/fixture",
+                }
+                assert {resource["kind"] for resource in project_catalog["resources"]} == {
+                    "project",
+                    "checkout",
+                    "bead",
+                    "task_authority",
+                }
+                assert all(
+                    resource["availability"] == "available"
+                    for resource in project_catalog["resources"]
+                )
+                unavailable_catalog_result = await session.call_tool(
+                    "catalog", {"availability": "unavailable"}
+                )
+                unavailable_catalog = json.loads(
+                    unavailable_catalog_result.content[0].text
+                )["data"]
+                assert unavailable_catalog["actions"] == []
+                assert "terminal" in {
+                    resource["kind"] for resource in unavailable_catalog["resources"]
+                }
+                assert all(
+                    resource["availability_reason"]
+                    == "no migrated V2 action currently exposes this resource"
+                    for resource in unavailable_catalog["resources"]
+                )
                 get_result = await session.call_tool(
                     "get", {"ref": "sinnix://projects/fixture"}
                 )
@@ -616,9 +655,24 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         "observer", "capability-hash", "approved-fixture-hash", "catalog-hash", "v2-test"
     )
     assert status["principal_contract_hash"] == "capability-hash"
+    assert status["tool_manifest_hash"] == "approved-fixture-hash"
+    assert status["action_catalog_hash"] == "catalog-hash"
     assert status["catalog"] == {
         "revision": "v2-test",
-        "action_catalog_hash": "catalog-hash",
+        "live_action_catalog": {
+            "principal": "observer",
+            "sha256": "catalog-hash",
+        },
+        "nix_approved": {
+            "principal": "observer",
+            "sha256": "catalog-hash",
+        },
+        "chatgpt_observed": None,
+        "comparisons": {
+            "live_to_nix_approved": "match",
+            "live_to_chatgpt_observed": "unobserved",
+            "nix_approved_to_chatgpt_observed": "unobserved",
+        },
     }
     assert status["manifests"]["comparisons"] == {
         "live_to_nix_approved": "match",
@@ -633,6 +687,7 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
                 "schema": "sinnix.gateway-connector-snapshot.v1",
                 "principal": "observer",
                 "manifest_sha256": "approved-fixture-hash",
+                "action_catalog_sha256": "catalog-hash",
             }
         )
     )
@@ -640,6 +695,11 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         "observer", "capability-hash", "approved-fixture-hash", "catalog-hash", "v2-test"
     )
     assert set(status["manifests"]["comparisons"].values()) == {"match"}
+    assert status["catalog"]["chatgpt_observed"] == {
+        "principal": "observer",
+        "sha256": "catalog-hash",
+    }
+    assert set(status["catalog"]["comparisons"].values()) == {"match"}
 
     snapshot.write_text(
         json.dumps(
@@ -658,6 +718,23 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         "live_to_chatgpt_observed": "mismatch",
         "nix_approved_to_chatgpt_observed": "mismatch",
     }
+
+
+def test_gateway_status_reports_catalog_approval_drift(tmp_path: Path) -> None:
+    cfg = dataclasses.replace(
+        config(tmp_path), approved_action_catalog_hash="approved-catalog-hash"
+    )
+    runtime = Runtime.create(cfg, "observer")
+
+    status = runtime.observe.gateway_status(
+        "observer", "capability-hash", "approved-fixture-hash", "live-catalog-hash", "v2-test"
+    )
+
+    assert status["catalog"]["nix_approved"] == {
+        "principal": "observer",
+        "sha256": "approved-catalog-hash",
+    }
+    assert status["catalog"]["comparisons"]["live_to_nix_approved"] == "mismatch"
 
 
 def test_gateway_status_reports_broker_route_evidence(
@@ -733,6 +810,9 @@ def test_gateway_status_keeps_unapproved_principal_unobserved(tmp_path: Path) ->
     )
 
     assert status["manifests"]["nix_approved"] is None
+    assert status["catalog"]["nix_approved"] is None
+    assert status["catalog"]["chatgpt_observed"] is None
+    assert set(status["catalog"]["comparisons"].values()) == {"unobserved"}
     assert status["manifests"]["comparisons"] == {
         "live_to_nix_approved": "unobserved",
         "live_to_chatgpt_observed": "unobserved",
@@ -888,7 +968,32 @@ def test_unknown_principal_is_rejected_before_server_creation(tmp_path: Path) ->
         create_server(config(tmp_path), "unknown")
 
 
-def test_cli_rejects_retired_profile_flag() -> None:
+def test_approval_check_requires_the_current_paired_contract(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    approved = dataclasses.replace(
+        cfg,
+        approved_manifest_hash=anyio.run(build_manifest, cfg, "observer")["sha256"],
+        approved_action_catalog_hash=REGISTRY.action_catalog_hash("observer"),
+    )
+
+    assert verify_approval(approved, "observer") == {
+        "principal": "observer",
+        "tool_manifest_hash": approved.approved_manifest_hash,
+        "action_catalog_hash": approved.approved_action_catalog_hash,
+    }
+
+    with pytest.raises(ValueError, match="action catalog drift"):
+        verify_approval(
+            dataclasses.replace(
+                approved, approved_action_catalog_hash="unapproved-catalog"
+            ),
+            "observer",
+        )
+
+
+def test_cli_exposes_catalog_hash_without_retired_profiles() -> None:
+    assert parser().parse_args(["catalog-hash"]).command == "catalog-hash"
+    assert parser().parse_args(["approval-check"]).command == "approval-check"
     with pytest.raises(SystemExit):
         parser().parse_args(["--profile", "observer", "info"])
 
@@ -901,6 +1006,7 @@ def test_config_load_uses_one_project_contract(tmp_path: Path) -> None:
         json.dumps(
             {
                 "stateDir": str(tmp_path / "state"),
+                "approvedActionCatalogHash": "fixture-catalog-hash",
                 "projects": {
                     "fixture": {
                         "path": str(project),
@@ -918,6 +1024,7 @@ def test_config_load_uses_one_project_contract(tmp_path: Path) -> None:
         )
     )
     loaded = GatewayConfig.load(path)
+    assert loaded.approved_action_catalog_hash == "fixture-catalog-hash"
     assert loaded.projects["fixture"].path == project
     assert loaded.projects["fixture"].observer_read is True
     assert loaded.projects["fixture"].devtools_entrypoint == "nix develop"
