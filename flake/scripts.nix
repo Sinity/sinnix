@@ -317,6 +317,8 @@ let
     };
     tunnel-client = pkgs.callPackage ../pkgs/tunnel-client { };
 
+    chatgpt-app = pkgs.callPackage ../pkgs/chatgpt-app { };
+
     sinnix-observe = pkgs.callPackage ../pkgs/sinnix-observe/pkg.nix {
       inherit defaultRuntimeInventoryJson;
     };
