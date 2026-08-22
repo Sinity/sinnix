@@ -270,15 +270,14 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert project_envelope["result"]["action"] == "resources.get"
                 assert project_resource["kind"] == "project"
                 assert project_resource["project"]["project_id"] == "fixture"
-                assert project_resource["checkout_ref"] == (
-                    "sinnix://projects/fixture/checkouts/default"
-                )
-                checkout_result = await session.call_tool(
-                    "get", {"ref": project_resource["checkout_ref"]}
-                )
+                checkout = project_resource["checkouts"][0]
+                assert checkout["ref"] == "sinnix://projects/fixture/checkouts/default"
+                assert checkout["checkout_id"] == "default"
+                assert project_resource["task_authority"]["availability"] == "unavailable"
+                checkout_result = await session.call_tool("get", {"ref": checkout["ref"]})
                 checkout_resource = json.loads(checkout_result.content[0].text)["data"]
                 assert checkout_resource["kind"] == "checkout"
-                assert checkout_resource["checkout"]["checkout_id"] == "default"
+                assert checkout_resource["checkout"]["checkout"]["checkout_id"] == "default"
                 invalid_catalog_result = await session.call_tool(
                     "catalog", {"verb": "unrecognized"}
                 )
@@ -308,6 +307,7 @@ def test_operator_project_writes_do_not_depend_on_observer_visibility(
     tmp_path: Path,
 ) -> None:
     cfg = config(tmp_path, observer_read=False)
+    subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
     runtime = Runtime.create(cfg, "operator")
     target = cfg.projects["fixture"].path / "operator.txt"
 
@@ -355,6 +355,7 @@ def test_project_subprocess_failure_surfaces_bounded_stderr(tmp_path: Path) -> N
 
 def test_project_apply_patch_streams_patch_to_git(tmp_path: Path) -> None:
     cfg = config(tmp_path)
+    subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
     target = cfg.projects["fixture"].path / "tracked.txt"
     target.write_text("before\n")
     runtime = Runtime.create(cfg, "operator")
@@ -819,6 +820,7 @@ def test_gateway_rejects_runner_job_id_collision(
     runner.write_text("#!/bin/sh\nexit 2\n")
     runner.chmod(0o700)
     cfg = dataclasses.replace(config(tmp_path), agent_runner=runner)
+    subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
     runtime = Runtime.create(cfg, "agent-control")
     old_prompt = runtime.jobs.root / f"{job_id}.prompt.md"
     old_prompt.write_text("original")
@@ -831,6 +833,37 @@ def test_gateway_rejects_runner_job_id_collision(
             AgentLaunchRequest(project_id="fixture", prompt="new", backend="codex")
         )
     assert old_prompt.read_text() == "original"
+
+
+def test_agent_launch_records_selected_checkout_ref(tmp_path: Path) -> None:
+    arguments_path = tmp_path / "runner-arguments.json"
+    runner = tmp_path / "runner"
+    runner.write_text(
+        f"#!{sys.executable}\n"
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "arguments = sys.argv[1:]\n"
+        "def option(name): return arguments[arguments.index(name) + 1]\n"
+        f"Path({str(arguments_path)!r}).write_text(json.dumps(arguments))\n"
+        "job_id = option('--job-id')\n"
+        "launch_id = option('--launch-id')\n"
+        "state_dir = Path(option('--job-state-dir'))\n"
+        "state_dir.mkdir(parents=True, exist_ok=True)\n"
+        "(state_dir / f'{job_id}.json').write_text(json.dumps({'schema_version': 2, 'job_id': job_id, 'launch_id': launch_id}))\n"
+    )
+    runner.chmod(0o700)
+    cfg = dataclasses.replace(config(tmp_path), agent_runner=runner)
+    subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
+    runtime = Runtime.create(cfg, "agent-control")
+
+    result = runtime.jobs.launch_agent(
+        AgentLaunchRequest(project_id="fixture", prompt="inspect", backend="codex")
+    )
+
+    assert result["checkout_ref"] == "sinnix://projects/fixture/checkouts/default"
+    arguments = json.loads(arguments_path.read_text())
+    index = arguments.index("--checkout-ref")
+    assert arguments[index + 1] == result["checkout_ref"]
 
 
 def test_agent_environment_is_explicitly_allowlisted(
@@ -865,6 +898,13 @@ def test_config_load_uses_one_project_contract(tmp_path: Path) -> None:
                     "fixture": {
                         "path": str(project),
                         "observerRead": True,
+                        "devtoolsEntrypoint": "nix develop",
+                        "taskAuthority": {
+                            "owner": "beads",
+                            "workspace": str(project / ".beads"),
+                            "database": str(project / ".beads" / "dolt"),
+                            "publicationPolicy": "dolt-sync",
+                        },
                     }
                 },
             }
@@ -873,6 +913,9 @@ def test_config_load_uses_one_project_contract(tmp_path: Path) -> None:
     loaded = GatewayConfig.load(path)
     assert loaded.projects["fixture"].path == project
     assert loaded.projects["fixture"].observer_read is True
+    assert loaded.projects["fixture"].devtools_entrypoint == "nix develop"
+    assert loaded.projects["fixture"].task_authority is not None
+    assert loaded.projects["fixture"].task_authority.database == project / ".beads" / "dolt"
 
 
 def test_config_rejects_retired_project_visibility_fields(tmp_path: Path) -> None:

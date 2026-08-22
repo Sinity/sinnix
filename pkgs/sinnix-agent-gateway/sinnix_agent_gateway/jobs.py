@@ -22,6 +22,8 @@ from .execution import (
     OwnerExecutionStartError,
     OwnerRoute,
 )
+from .projects import ProjectError, ProjectService
+from .registry import REGISTRY
 from .schemas import AgentLaunchRequest
 
 JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -38,11 +40,13 @@ class JobService:
         principal: Principal,
         artifacts: ArtifactService,
         execution: OwnerExecution | None = None,
+        projects: ProjectService | None = None,
     ):
         self.config = config
         self.principal = principal
         self.artifacts = artifacts
         self.execution = execution
+        self.projects = projects or ProjectService(config, principal)
         config.initialize_state()
         self.root = config.state_dir / "jobs"
 
@@ -137,11 +141,22 @@ class JobService:
     def launch_agent(self, request: AgentLaunchRequest) -> dict[str, Any]:
         self.principal.require(Capability.JOB_START)
         try:
-            project = self.config.projects[request.project_id]
-        except KeyError as exc:
-            raise JobError(f"unknown project: {request.project_id}") from exc
-        if not project.path.is_dir():
-            raise JobError("project checkout is unavailable")
+            project = self.projects.code_checkout(
+                request.project_id,
+                request.checkout_id,
+                write=False,
+                require_explicit=True,
+            )
+        except ProjectError as exc:
+            raise JobError(str(exc)) from exc
+        checkout_id = request.checkout_id or "default"
+        checkout_ref = REGISTRY.reference(
+            "checkout",
+            {
+                "project_id": request.project_id,
+                "checkout_id": checkout_id,
+            },
+        )
         if not self.config.agent_runner.is_file():
             raise JobError("agent runner is unavailable")
 
@@ -158,6 +173,8 @@ class JobService:
             request.backend,
             "--workdir",
             str(project.path),
+            "--checkout-ref",
+            checkout_ref,
             "--prompt-file",
             str(prompt_path),
             "--log-file",
@@ -218,6 +235,7 @@ class JobService:
                         **self._environment(),
                         "SINNIX_CORRELATION_ID": job_id,
                         "SINNIX_PROJECT": request.project_id,
+                        "SINNIX_CHECKOUT_ID": checkout_id,
                         **(
                             {"SINNIX_WORK_ITEM": request.work_item}
                             if request.work_item
@@ -260,6 +278,8 @@ class JobService:
             "accepted": True,
             "backend": request.backend,
             "project_id": request.project_id,
+            "checkout_id": checkout_id,
+            "checkout_ref": checkout_ref,
         }
 
     def start_shell(

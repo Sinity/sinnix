@@ -24,12 +24,24 @@ def default_ops_socket_path() -> Path:
 
 
 @dataclass(frozen=True)
+class TaskAuthorityConfig:
+    owner: str
+    workspace: Path
+    database: Path
+    project_uuid: str | None = None
+    publication_policy: str = "local"
+
+
+@dataclass(frozen=True)
 class ProjectConfig:
     project_id: str
     path: Path
     remote: str | None = None
     default_ref: str = "master"
     observer_read: bool = False
+    checkout_discovery: str = "git-worktree"
+    devtools_entrypoint: str | None = None
+    task_authority: TaskAuthorityConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -73,12 +85,81 @@ class GatewayConfig:
                     f"project {project_id} uses retired gateway field(s): {fields}; "
                     "use observerRead"
                 )
+            task_authority_row = row.get("taskAuthority")
+            task_authority: TaskAuthorityConfig | None = None
+            if task_authority_row is not None:
+                if not isinstance(task_authority_row, dict):
+                    raise ValueError(f"project {project_id} taskAuthority must be an object")
+                allowed_authority_fields = {
+                    "owner",
+                    "workspace",
+                    "database",
+                    "projectUuid",
+                    "publicationPolicy",
+                }
+                unsupported_authority_fields = set(task_authority_row).difference(
+                    allowed_authority_fields
+                )
+                if unsupported_authority_fields:
+                    fields = ", ".join(sorted(unsupported_authority_fields))
+                    raise ValueError(
+                        f"project {project_id} taskAuthority has unsupported field(s): {fields}"
+                    )
+                owner = task_authority_row.get("owner")
+                workspace = task_authority_row.get("workspace")
+                database = task_authority_row.get("database")
+                if owner != "beads":
+                    raise ValueError(
+                        f"project {project_id} taskAuthority owner must be 'beads'"
+                    )
+                if not isinstance(workspace, str) or not workspace:
+                    raise ValueError(
+                        f"project {project_id} taskAuthority workspace must be a path"
+                    )
+                if not isinstance(database, str) or not database:
+                    raise ValueError(
+                        f"project {project_id} taskAuthority database must be a path"
+                    )
+                project_uuid = task_authority_row.get("projectUuid")
+                if project_uuid is not None and (
+                    not isinstance(project_uuid, str) or not project_uuid
+                ):
+                    raise ValueError(
+                        f"project {project_id} taskAuthority projectUuid must be a string"
+                    )
+                publication_policy = task_authority_row.get("publicationPolicy", "local")
+                if publication_policy not in {"local", "dolt-sync"}:
+                    raise ValueError(
+                        f"project {project_id} taskAuthority publicationPolicy is invalid"
+                    )
+                task_authority = TaskAuthorityConfig(
+                    owner=owner,
+                    workspace=Path(workspace).resolve(),
+                    database=Path(database).resolve(),
+                    project_uuid=project_uuid,
+                    publication_policy=publication_policy,
+                )
+            checkout_discovery = row.get("checkoutDiscovery", "git-worktree")
+            if checkout_discovery != "git-worktree":
+                raise ValueError(
+                    f"project {project_id} checkoutDiscovery must be 'git-worktree'"
+                )
+            devtools_entrypoint = row.get("devtoolsEntrypoint")
+            if devtools_entrypoint is not None and (
+                not isinstance(devtools_entrypoint, str) or not devtools_entrypoint
+            ):
+                raise ValueError(
+                    f"project {project_id} devtoolsEntrypoint must be a string"
+                )
             projects[project_id] = ProjectConfig(
                 project_id=project_id,
                 path=Path(row["path"]).resolve(),
                 remote=row.get("remote"),
                 default_ref=row.get("defaultRef", "master"),
                 observer_read=bool(row.get("observerRead", False)),
+                checkout_discovery=checkout_discovery,
+                devtools_entrypoint=devtools_entrypoint,
+                task_authority=task_authority,
             )
         state_dir = Path(raw.get("stateDir", default_state_dir())).expanduser()
         broker_servers = raw.get("mcpBrokerServers", {})

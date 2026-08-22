@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -101,21 +103,128 @@ class ProjectService:
             )
         return {"projects": sorted(rows, key=lambda row: row["project_id"])}
 
-    def checkout(self, project_id: str, checkout_id: str) -> dict[str, Any]:
+    @staticmethod
+    def _checkout_id(path: Path, configured_root: Path) -> str:
+        if path == configured_root:
+            return "default"
+        digest = hashlib.sha256(str(path).encode()).hexdigest()[:16]
+        return f"worktree-{digest}"
+
+    @staticmethod
+    def _worktree_records(output: str) -> list[dict[str, str]]:
+        records: list[dict[str, str]] = []
+        current: dict[str, str] = {}
+        for line in output.splitlines():
+            if not line:
+                if current:
+                    records.append(current)
+                    current = {}
+                continue
+            key, separator, value = line.partition(" ")
+            if not separator:
+                raise ProjectError("git worktree returned malformed porcelain")
+            if key in current:
+                raise ProjectError("git worktree returned duplicate porcelain field")
+            current[key] = value
+        if current:
+            records.append(current)
+        return records
+
+    def _checkout_rows(self, project: ProjectConfig) -> list[dict[str, Any]]:
+        if project.checkout_discovery != "git-worktree":
+            raise ProjectError("project checkout discovery is unsupported")
+        configured_root = project.path.resolve(strict=True)
+        output = self._run_bounded(
+            ["git", "worktree", "list", "--porcelain"], project.path
+        )
+        rows: list[dict[str, Any]] = []
+        for record in self._worktree_records(output):
+            raw_path = record.get("worktree")
+            head = record.get("HEAD")
+            if raw_path is None or head is None:
+                raise ProjectError("git worktree record is missing worktree or HEAD")
+            path = Path(raw_path).resolve()
+            if not path.is_dir():
+                continue
+            status = self._run_bounded(
+                ["git", "-C", str(path), "status", "--porcelain=v2", "--branch"],
+                project.path,
+            )
+            branch = None
+            upstream = None
+            for line in status.splitlines():
+                if line.startswith("# branch.head "):
+                    branch = line.removeprefix("# branch.head ")
+                elif line.startswith("# branch.upstream "):
+                    upstream = line.removeprefix("# branch.upstream ")
+            rows.append(
+                {
+                    "checkout_id": self._checkout_id(path, configured_root),
+                    "path": str(path),
+                    "head": head,
+                    "branch": branch,
+                    "upstream": upstream,
+                    "dirty_sha256": hashlib.sha256(status.encode()).hexdigest(),
+                    "lifecycle": "configured-root" if path == configured_root else "linked-worktree",
+                }
+            )
+        rows.sort(key=lambda row: (row["checkout_id"] != "default", row["checkout_id"]))
+        if not rows or rows[0]["checkout_id"] != "default":
+            raise ProjectError("configured project root is not a live Git worktree")
+        return rows
+
+    def checkouts(self, project_id: str) -> dict[str, Any]:
         project = self._project(project_id)
-        if checkout_id != "default":
-            raise ProjectError("unknown configured checkout")
         return {
             "project_id": project.project_id,
-            "checkout_id": "default",
-            "available": True,
-            "summary": self.summary(project_id),
+            "checkouts": self._checkout_rows(project),
         }
 
-    def tree(
-        self, project_id: str, path: str = ".", max_entries: int = 500
-    ) -> dict[str, Any]:
+    def checkout(self, project_id: str, checkout_id: str) -> dict[str, Any]:
         project = self._project(project_id)
+        for checkout in self._checkout_rows(project):
+            if checkout["checkout_id"] == checkout_id:
+                return {
+                    "project_id": project.project_id,
+                    "available": True,
+                    "checkout": checkout,
+                }
+        raise ProjectError("unknown configured checkout")
+
+    def code_checkout(
+        self,
+        project_id: str,
+        checkout_id: str | None,
+        *,
+        write: bool,
+        require_explicit: bool,
+    ) -> ProjectConfig:
+        project = self._project(project_id, write=write)
+        if checkout_id is None:
+            if not require_explicit:
+                return project
+            checkouts = self._checkout_rows(project)
+            if len(checkouts) == 1:
+                return project
+            choices = ", ".join(row["checkout_id"] for row in checkouts)
+            raise ProjectError(f"checkout_id is required; available checkouts: {choices}")
+        if not isinstance(checkout_id, str) or not checkout_id:
+            raise ProjectError("checkout_id must be a non-empty string")
+        for checkout in self._checkout_rows(project):
+            if checkout["checkout_id"] == checkout_id:
+                return replace(project, path=Path(checkout["path"]))
+        raise ProjectError("unknown configured checkout")
+
+    def tree(
+        self,
+        project_id: str,
+        path: str = ".",
+        max_entries: int = 500,
+        checkout_id: str | None = None,
+    ) -> dict[str, Any]:
+        project = self.code_checkout(
+            project_id, checkout_id, write=False, require_explicit=False
+        )
         root = self._safe_path(project, path, existing=True)
         if not root.is_dir():
             raise ProjectError("tree path must be a directory")
@@ -152,8 +261,11 @@ class ProjectService:
         start_line: int = 1,
         end_line: int | None = None,
         max_bytes: int = 64_000,
+        checkout_id: str | None = None,
     ) -> dict[str, Any]:
-        project = self._project(project_id)
+        project = self.code_checkout(
+            project_id, checkout_id, write=False, require_explicit=False
+        )
         target = self._safe_path(project, path, existing=True)
         if not target.is_file() or target.is_symlink():
             raise ProjectError("path must identify a regular project file")
@@ -219,9 +331,15 @@ class ProjectService:
         return text
 
     def search(
-        self, project_id: str, query: str, max_matches: int = 200
+        self,
+        project_id: str,
+        query: str,
+        max_matches: int = 200,
+        checkout_id: str | None = None,
     ) -> dict[str, Any]:
-        project = self._project(project_id)
+        project = self.code_checkout(
+            project_id, checkout_id, write=False, require_explicit=False
+        )
         if not query or len(query) > 1000:
             raise ProjectError("query must contain 1-1000 characters")
         max_matches = max(1, min(max_matches, 1000))
@@ -252,8 +370,12 @@ class ProjectService:
                 break
         return {"matches": matches, "truncated": len(matches) >= max_matches}
 
-    def diff(self, project_id: str, ref: str | None = None) -> dict[str, Any]:
-        project = self._project(project_id)
+    def diff(
+        self, project_id: str, ref: str | None = None, checkout_id: str | None = None
+    ) -> dict[str, Any]:
+        project = self.code_checkout(
+            project_id, checkout_id, write=False, require_explicit=False
+        )
         resolved_ref = None
         if ref is not None:
             if ref.startswith("-") or not re.fullmatch(r"[A-Za-z0-9_./-]{1,200}", ref):
@@ -341,8 +463,12 @@ class ProjectService:
             "latest_commit": commit,
         }
 
-    def write(self, project_id: str, path: str, content: str) -> dict[str, Any]:
-        project = self._project(project_id, write=True)
+    def write(
+        self, project_id: str, path: str, content: str, checkout_id: str | None = None
+    ) -> dict[str, Any]:
+        project = self.code_checkout(
+            project_id, checkout_id, write=True, require_explicit=True
+        )
         target = self._safe_path(project, path, existing=False)
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         temp = target.with_name(f".{target.name}.gateway-tmp")
@@ -351,8 +477,12 @@ class ProjectService:
         temp.replace(target)
         return {"project_id": project_id, "path": path, "bytes": len(content.encode())}
 
-    def apply_patch(self, project_id: str, patch: str) -> dict[str, Any]:
-        project = self._project(project_id, write=True)
+    def apply_patch(
+        self, project_id: str, patch: str, checkout_id: str | None = None
+    ) -> dict[str, Any]:
+        project = self.code_checkout(
+            project_id, checkout_id, write=True, require_explicit=True
+        )
         if len(patch.encode()) > self.config.max_result_bytes:
             raise ProjectError("patch exceeds configured bound")
         safe_env = {

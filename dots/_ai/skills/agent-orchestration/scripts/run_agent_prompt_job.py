@@ -218,6 +218,7 @@ class Job:
             "repo": a.repo,
             "worktree": a.worktree,
             "branch": a.branch,
+            "checkout_ref": null_if_empty(a.checkout_ref),
             "prompt": {"path": a.prompt_path, "sha256": a.prompt_sha256},
             "artifacts": {
                 "log": a.log_path,
@@ -489,6 +490,7 @@ def add_manifest_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--repo", default="")
     parser.add_argument("--worktree", default="")
     parser.add_argument("--branch", default="")
+    parser.add_argument("--checkout-ref", default="")
     parser.add_argument("--prompt-path", default="")
     parser.add_argument("--prompt-sha256", default="")
     parser.add_argument("--log-path", default="")

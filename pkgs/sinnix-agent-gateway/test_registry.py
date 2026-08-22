@@ -191,7 +191,12 @@ def test_resource_get_contract_formats_canonical_project_relationships() -> None
     action = REGISTRY.action_schema("resources.get", "observer")["action"]
 
     assert action["verb"] == "get"
-    assert action["resource_kinds"] == ["project", "checkout", "bead"]
+    assert action["resource_kinds"] == [
+        "project",
+        "checkout",
+        "bead",
+        "task_authority",
+    ]
     assert action["input_schema"]["required"] == ["ref"]
     assert REGISTRY.reference(
         "checkout", {"project_id": "sinnix main", "checkout_id": "default"}

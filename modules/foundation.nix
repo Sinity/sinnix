@@ -185,6 +185,43 @@ in
                       type = types.bool;
                       default = false;
                     };
+                    checkoutDiscovery = mkOption {
+                      type = types.enum [ "git-worktree" ];
+                      default = "git-worktree";
+                      description = "Declared owner used to enumerate code checkouts.";
+                    };
+                    devtoolsEntrypoint = mkOption {
+                      type = types.nullOr types.str;
+                      default = null;
+                      description = "Optional project-native development entrypoint.";
+                    };
+                    taskAuthority = mkOption {
+                      type = types.nullOr (
+                        types.submodule {
+                          options = {
+                            owner = mkOption {
+                              type = types.enum [ "beads" ];
+                              default = "beads";
+                            };
+                            workspace = mkOption { type = types.str; };
+                            database = mkOption { type = types.str; };
+                            projectUuid = mkOption {
+                              type = types.nullOr types.str;
+                              default = null;
+                            };
+                            publicationPolicy = mkOption {
+                              type = types.enum [
+                                "local"
+                                "dolt-sync"
+                              ];
+                              default = "local";
+                            };
+                          };
+                        }
+                      );
+                      default = null;
+                      description = "Optional canonical Beads task authority for this project.";
+                    };
                   };
                 }
               );
@@ -194,6 +231,12 @@ in
                   path = config.sinnix;
                   remote = "https://github.com/Sinity/sinnix.git";
                   observerRead = true;
+                  devtoolsEntrypoint = "nix develop";
+                  taskAuthority = {
+                    workspace = "${config.sinnix}/.beads";
+                    database = "${config.sinnix}/.beads/dolt";
+                    publicationPolicy = "dolt-sync";
+                  };
                 };
                 sinex = {
                   path = config.sinex;

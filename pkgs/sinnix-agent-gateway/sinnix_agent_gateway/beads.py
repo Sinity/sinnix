@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -7,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .capabilities import Capability, Principal
-from .config import GatewayConfig, ProjectConfig
+from .config import GatewayConfig, ProjectConfig, TaskAuthorityConfig
 from .execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
@@ -47,6 +48,57 @@ class BeadsService:
             raise BeadsError(f"project is unavailable to {self.principal.name}")
         if not project.path.is_dir():
             raise BeadsError(f"project checkout is unavailable: {project_id}")
+        return project
+
+    def _authority(
+        self, project_id: str, *, write: bool
+    ) -> tuple[ProjectConfig, TaskAuthorityConfig]:
+        project = self._project(project_id, write=write)
+        authority = project.task_authority
+        if authority is None:
+            raise BeadsError(f"project has no declared Beads task authority: {project_id}")
+        return project, authority
+
+    @staticmethod
+    def _where_payload(value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise BeadsError("Beads where did not return an object")
+        workspace = value.get("path")
+        database = value.get("database_path")
+        if not isinstance(workspace, str) or not isinstance(database, str):
+            raise BeadsError("Beads where did not return path and database_path")
+        return value
+
+    def task_authority_status(self, project_id: str) -> dict[str, Any]:
+        project, authority = self._authority(project_id, write=False)
+        actual = self._where_payload(self._run(project, ["where"], write=False))
+        actual_workspace = Path(actual["path"]).resolve()
+        actual_database = Path(actual["database_path"]).resolve()
+        if actual_workspace != authority.workspace or actual_database != authority.database:
+            raise BeadsError(
+                "task_authority_mismatch: configured Beads workspace or database "
+                "does not match bd where"
+            )
+        status = self._run(project, ["status"], write=False)
+        if not isinstance(status, dict):
+            raise BeadsError("Beads status did not return an object")
+        task_revision = hashlib.sha256(
+            json.dumps(status, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        return {
+            "project_id": project.project_id,
+            "owner": authority.owner,
+            "publication_policy": authority.publication_policy,
+            "project_uuid": authority.project_uuid,
+            "schema_version": actual.get("schema_version"),
+            "revision": task_revision,
+            "summary": status.get("summary"),
+            "attested": True,
+        }
+
+    def _attest_task_authority(self, project_id: str, *, write: bool) -> ProjectConfig:
+        project, _ = self._authority(project_id, write=write)
+        self.task_authority_status(project_id)
         return project
 
     def _run(self, project: ProjectConfig, arguments: list[str], *, write: bool) -> Any:
@@ -101,7 +153,7 @@ class BeadsService:
     def read(
         self, project_id: str, operation: str, arguments: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        project = self._project(project_id, write=False)
+        project = self._attest_task_authority(project_id, write=False)
         arguments = self._arguments(arguments)
         if operation == "list":
             allowed = {"status", "assignee", "label", "limit", "include_closed", "ready"}
@@ -164,7 +216,7 @@ class BeadsService:
         }
 
     def write(self, project_id: str, operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        project = self._project(project_id, write=True)
+        project = self._attest_task_authority(project_id, write=True)
         arguments = self._arguments(arguments)
         if operation == "create":
             allowed = {"title", "description", "type", "priority", "labels", "parent", "dependencies", "append_notes"}

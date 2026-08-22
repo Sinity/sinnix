@@ -19,6 +19,7 @@ class ProjectReadRequest(GatewayModel):
 
 class AgentLaunchRequest(GatewayModel):
     project_id: str = Field(min_length=1, max_length=128)
+    checkout_id: str | None = Field(default=None, min_length=1, max_length=128)
     prompt: str = Field(min_length=1, max_length=200_000)
     backend: str = Field(pattern="^(claude|codex|gemini|grok|antigravity)$")
     model: str | None = Field(default=None, max_length=256)
