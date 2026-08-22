@@ -140,6 +140,40 @@ def test_route_preflight_probes_configured_owner_routes(tmp_path: Path) -> None:
     }
 
 
+def test_route_preflight_probes_two_distinct_capture_roots(tmp_path: Path) -> None:
+    checker = preflight(tmp_path)
+    environment_path = tmp_path / "health" / "environment"
+    environment_path.mkdir(parents=True)
+    (environment_path / "environment-index.jsonl").write_text('{"ts":1,"seq":1}\n')
+    checker.config.runtime_inventory.write_text(
+        json.dumps(
+            {
+                "captures": [
+                    {
+                        "name": "clipboard",
+                        "path": str(tmp_path / "activity" / "clipboard"),
+                    },
+                    {"name": "environment", "path": str(environment_path)},
+                ]
+            }
+        )
+    )
+
+    result = checker.run()
+
+    route = {entry["route"]: entry for entry in result["routes"]}["capture.query"]
+    assert route["status"] == "pass"
+    assert route["probed_roots"] == [
+        str(tmp_path / "activity"),
+        str(tmp_path / "health"),
+    ]
+    assert [probe["command"][-2:] for probe in route["probes"]] == [
+        ["--lane", "clipboard"],
+        ["--lane", "environment"],
+    ]
+    assert all(probe["status"] == "pass" for probe in route["probes"])
+
+
 def test_route_preflight_reports_missing_owner_command(tmp_path: Path) -> None:
     result = preflight(
         tmp_path,

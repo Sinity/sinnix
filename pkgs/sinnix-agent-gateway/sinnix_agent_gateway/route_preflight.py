@@ -89,29 +89,52 @@ class GatewayRoutePreflight:
                 "status": "unavailable",
                 "failure_class": "queryable_lane_unavailable",
             }
-        lane = sorted(lanes)[0]
-        capture = lanes[lane]
-        return self._probe(
-            "capture.query",
-            [
-                self.config.capture_command,
-                "query",
-                "--capture-root",
-                str(capture.root),
-                "--since",
-                "0",
-                "--lane",
-                lane,
-            ],
-            OwnerRoute("capture-query"),
-            "json_lane_summary_list",
-            ExecutionResult.decode_json,
-            lambda value: isinstance(value, list)
-            and any(
-                isinstance(record, dict) and record.get("lane") == lane
-                for record in value
+
+        captures_by_root = {}
+        for lane in sorted(lanes):
+            capture = lanes[lane]
+            captures_by_root.setdefault(capture.root, capture)
+
+        selected_captures = sorted(
+            captures_by_root.values(), key=lambda value: str(value.root)
+        )[:2]
+        probes = []
+        for capture in selected_captures:
+            lane = capture.name
+            probes.append(
+                self._probe(
+                    "capture.query",
+                    [
+                        self.config.capture_command,
+                        "query",
+                        "--capture-root",
+                        str(capture.root),
+                        "--since",
+                        "0",
+                        "--lane",
+                        lane,
+                    ],
+                    OwnerRoute("capture-query"),
+                    "json_lane_summary_list",
+                    ExecutionResult.decode_json,
+                    lambda value: isinstance(value, list)
+                    and any(
+                        isinstance(record, dict) and record.get("lane") == lane
+                        for record in value
+                    ),
+                )
+            )
+
+        if len(probes) == 1:
+            return probes[0]
+        return {
+            "route": "capture.query",
+            "status": (
+                "pass" if all(probe["status"] == "pass" for probe in probes) else "degraded"
             ),
-        )
+            "probed_roots": [str(capture.root) for capture in selected_captures],
+            "probes": probes,
+        }
 
     def run(self) -> dict[str, Any]:
         routes = [
