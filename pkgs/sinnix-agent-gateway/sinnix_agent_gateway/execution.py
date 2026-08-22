@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import selectors
 import signal
@@ -8,7 +9,7 @@ import time
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 
 class EnvironmentProfile(StrEnum):
@@ -66,6 +67,17 @@ class ExecutionResult:
 
     def stderr_excerpt(self) -> str:
         return self.stderr.decode("utf-8", errors="replace").strip()[:2_000]
+
+    def decode_json(self) -> Any:
+        """Decode successful owner output when its contract requires JSON."""
+        return json.loads(self.stdout)
+
+    def decode_json_or_text(self) -> Any:
+        """Decode JSON owner output while preserving plain-text owner responses."""
+        try:
+            return self.decode_json()
+        except json.JSONDecodeError:
+            return self.stdout.decode("utf-8", errors="replace")
 
 
 class OwnerDiagnosticError(ValueError):

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from .artifacts import ArtifactService
@@ -59,12 +58,7 @@ class TerminalService:
             raise TerminalDiagnosticError(
                 self.artifacts.record_owner_diagnostic(route.name, result)
             )
-        text = result.stdout.decode("utf-8", errors="replace")
-        try:
-            value: Any = json.loads(text)
-        except json.JSONDecodeError:
-            value = text
-        return {"result": value}
+        return {"result": result.decode_json_or_text()}
 
     @staticmethod
     def _string(value: Any, name: str, maximum: int = 64_000) -> str:

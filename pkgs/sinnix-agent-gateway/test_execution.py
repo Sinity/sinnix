@@ -59,6 +59,22 @@ def test_owner_execution_streams_stdin_while_collecting_stdout() -> None:
     assert result.stdout == b"tupni hctap yawetag"
 
 
+def test_owner_execution_decodes_json_or_preserves_text_output() -> None:
+    execution = OwnerExecution()
+    json_result = execution.run(
+        [sys.executable, "-c", "print('{\"route\": \"fixture\"}')"],
+        ExecutionProfile(route=OwnerRoute("fixture")),
+    )
+    text_result = execution.run(
+        [sys.executable, "-c", "print('plain fixture output')"],
+        ExecutionProfile(route=OwnerRoute("fixture")),
+    )
+
+    assert json_result.decode_json() == {"route": "fixture"}
+    assert json_result.decode_json_or_text() == {"route": "fixture"}
+    assert text_result.decode_json_or_text() == "plain fixture output\n"
+
+
 def test_owner_execution_profile_omits_ambient_credentials() -> None:
     source = {
         "HOME": "/home/fixture",

@@ -50,12 +50,7 @@ class BrowserService:
             raise BrowserError(
                 f"Chrome control command failed: {detail}" if detail else "Chrome control command failed"
             )
-        text = result.stdout.decode("utf-8", errors="replace")
-        try:
-            value: Any = json.loads(text)
-        except json.JSONDecodeError:
-            value = text
-        return {"result": value}
+        return {"result": result.decode_json_or_text()}
 
     @staticmethod
     def _string(value: Any, name: str, maximum: int = 64_000) -> str:
