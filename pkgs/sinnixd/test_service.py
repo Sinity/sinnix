@@ -494,6 +494,45 @@ def test_capture_caps_persistent_artifacts_and_reports_producer_overflow(tmp_pat
     assert log["artifact_truncated"]
 
 
+def test_logs_report_marker_created_during_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anti-vacuity: sampling overflow before reading misses this interleaving."""
+    jobs = generic_jobs(tmp_path)
+    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    record = jobs.store.load(started["job_id"])
+    record.log_path.write_bytes(b"0123")
+    overflow_path = record.log_path.with_suffix(".overflow")
+    original_open = Path.open
+
+    def interleaving_open(path: Path, *args: object, **kwargs: object):
+        handle = original_open(path, *args, **kwargs)
+        if path != record.log_path or args != ("rb",):
+            return handle
+
+        class MarkerAfterRead:
+            def __enter__(self) -> MarkerAfterRead:
+                return self
+
+            def __exit__(self, *unused: object) -> None:
+                handle.close()
+
+            def seek(self, *args: object) -> int:
+                return handle.seek(*args)
+
+            def read(self, *args: object) -> bytes:
+                content = handle.read(*args)
+                overflow_path.touch()
+                return content
+
+        return MarkerAfterRead()
+
+    monkeypatch.setattr(Path, "open", interleaving_open)
+
+    log = jobs.logs(started["job_id"], max_bytes=4)
+
+    assert log["content"] == "0123"
+    assert log["artifact_truncated"]
+
+
 def test_foreground_specs_redact_argv_and_environment_from_disk(tmp_path: Path) -> None:
     """Anti-vacuity: serializing the launch command or environment exposes this fixture secret."""
     secret_argv = "argv-secret-do-not-persist"
@@ -549,6 +588,37 @@ def test_nonterminal_absence_and_launch_failure_are_distinct_terminal_outcomes(
     assert cancelled["already_terminal"]
     assert not systemd.stopped
     assert waited["state"]["phase"] == expected
+
+
+@pytest.mark.parametrize("mode", ("lost", "launch-failed"))
+def test_terminal_systemd_errors_persist_only_stable_codes(tmp_path: Path, mode: str) -> None:
+    """Anti-vacuity: persisting a SystemdJobError message writes this fixture secret to disk."""
+    secret = "systemd-error-secret-do-not-persist"
+
+    class FailingShow(FakeSystemdJobs):
+        def show(self, unit: str) -> dict[str, str]:
+            raise SystemdJobError(secret)
+
+    class FailingStart(FakeSystemdJobs):
+        def start(self, **kwargs) -> None:
+            raise SystemdJobError(secret)
+
+    jobs = generic_jobs(tmp_path, FailingShow() if mode == "lost" else FailingStart())
+    if mode == "launch-failed":
+        with pytest.raises(SystemdJobError, match=secret):
+            jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+        record = jobs.store.list()[0]
+        status = jobs.get(record.job_id)
+    else:
+        started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+        status = jobs.get(started["job_id"])
+
+    persisted = (tmp_path / "state" / "jobs" / f"{status['job_id']}.json").read_text()
+
+    assert status["state"]["phase"] == mode
+    assert status["state"]["error"] == {"code": "systemd-job-error"}
+    assert secret not in persisted
+    assert '"message"' not in persisted
 
 
 @pytest.mark.parametrize(

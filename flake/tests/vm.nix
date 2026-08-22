@@ -109,13 +109,16 @@ in
             machine.succeed("cat > /realm/project/fixture/parent.sh <<'EOF'\n#!/bin/sh\necho $$ > /home/sinity/.local/state/sinnixd-parent.pid\nsleep 30 &\necho $! > /home/sinity/.local/state/sinnixd-child.pid\nwait\nEOF\nchmod 755 /realm/project/fixture/parent.sh\nchown -R sinity:users /realm/project/fixture")
             machine.succeed(f"{as_user} systemctl --user restart sinnixd.service")
             machine.wait_until_succeeds(f"{as_user} systemctl --user is-active --quiet sinnixd.service")
+            machine.succeed(f"timeout 5 sh -c 'until test -S /run/user/{uid}/sinnixd.sock; do sleep 0.1; done'")
             job_id = machine.succeed(f"{as_user} agentctl job start fixture descendants | jq -r '.payload.value.job_id'").strip()
             machine.wait_until_succeeds("test -s /home/sinity/.local/state/sinnixd-parent.pid && test -s /home/sinity/.local/state/sinnixd-child.pid")
             parent = machine.succeed("cat /home/sinity/.local/state/sinnixd-parent.pid").strip()
             child = machine.succeed("cat /home/sinity/.local/state/sinnixd-child.pid").strip()
+            cancellation_started = int(machine.succeed("date +%s").strip())
             machine.succeed(f"{as_user} agentctl job cancel {job_id} | jq -e '.ok and .payload.value.cancel_requested' >/dev/null")
-            machine.succeed(f"{as_user} agentctl job wait {job_id} | jq -e '.ok and ((.payload.value.state.phase == \"succeeded\" and .payload.value.state.systemd.Result == \"success\") or (.payload.value.state.phase == \"cancelled\" and (.payload.value.state.cancellation.invocation_id? | type == \"string\")))' >/dev/null")
-            machine.wait_until_succeeds(f"! test -e /proc/{parent} && ! test -e /proc/{child}")
+            machine.succeed(f"XDG_RUNTIME_DIR=/run/user/{uid} timeout 5 runuser -u sinity -- agentctl job wait {job_id} --timeout-seconds 3 | jq -e '.ok and (.payload.value.wait_timed_out != true) and .payload.value.state.terminal and .payload.value.state.phase == \"cancelled\"' >/dev/null")
+            machine.succeed(f"timeout 3 sh -c 'until ! test -e /proc/{parent} && ! test -e /proc/{child}; do sleep 0.1; done'")
+            assert int(machine.succeed("date +%s").strip()) - cancellation_started < 5
           '';
         };
         transmission-vm = mkVmCheck system {
