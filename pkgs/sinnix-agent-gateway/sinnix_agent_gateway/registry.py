@@ -21,6 +21,7 @@ class CatalogSearch:
     verb: VerbFamily | None = None
     effect: EffectMode | None = None
     resource_kind: str | None = None
+    availability: str | None = None
     principal: str | None = None
 
 
@@ -80,17 +81,66 @@ class CatalogRegistry:
         except KeyError as error:
             raise RegistryError(f"unknown action: {name!r}") from error
 
-    def action_catalog_hash(self, principal: str | None = None) -> str:
-        actions = [
+    def action_schema(self, name: str, principal: str | None = None) -> dict[str, Any]:
+        action = self.action(name)
+        if principal is not None and principal not in action.principals:
+            raise RegistryError(f"principal {principal!r} cannot read action {name!r}")
+        return {
+            "revision": self.revision,
+            "action": action.catalog_row(),
+        }
+
+    def resource_contract(self, kind: str, principal: str | None = None) -> dict[str, Any]:
+        try:
+            resource = self._resources_by_kind[kind]
+        except KeyError as error:
+            raise RegistryError(f"unknown resource kind: {kind!r}") from error
+        if principal is not None and principal not in resource.principals:
+            raise RegistryError(f"principal {principal!r} cannot read resource {kind!r}")
+        return {
+            "revision": self.revision,
+            "resource": resource.catalog_row(),
+        }
+
+    def documentation_rows(self, principal: str | None = None) -> dict[str, Any]:
+        return {
+            "revision": self.revision,
+            "resources": self._resource_rows(principal=principal),
+            "actions": self._action_rows(principal=principal),
+        }
+
+    def _resource_rows(
+        self,
+        *,
+        principal: str | None = None,
+        resource_kind: str | None = None,
+        availability: str | None = None,
+    ) -> list[dict[str, Any]]:
+        rows = []
+        for resource in self.resources:
+            if principal is not None and principal not in resource.principals:
+                continue
+            if resource_kind is not None and resource.kind != resource_kind:
+                continue
+            row = resource.catalog_row()
+            if availability is not None and row["availability"] != availability:
+                continue
+            rows.append(row)
+        return rows
+
+    def _action_rows(self, *, principal: str | None = None) -> list[dict[str, Any]]:
+        return [
             action.catalog_row()
             for action in self.actions
             if principal is None or principal in action.principals
         ]
+
+    def action_catalog_hash(self, principal: str | None = None) -> str:
         payload = {
             "revision": self.revision,
             "principal": principal,
-            "resources": [resource.catalog_row() for resource in self.resources],
-            "actions": actions,
+            "resources": self._resource_rows(principal=principal),
+            "actions": self._action_rows(principal=principal),
         }
         return hashlib.sha256(_canonical_json(payload).encode()).hexdigest()
 
@@ -132,14 +182,16 @@ class CatalogRegistry:
                 continue
             if search.resource_kind and search.resource_kind not in action.resource_kinds:
                 continue
+            if search.availability and row["availability"] != search.availability:
+                continue
             if search.principal and search.principal not in action.principals:
                 continue
             actions.append(row)
-        resources = [
-            resource.catalog_row()
-            for resource in self.resources
-            if not search.resource_kind or resource.kind == search.resource_kind
-        ]
+        resources = self._resource_rows(
+            principal=search.principal,
+            resource_kind=search.resource_kind,
+            availability=search.availability,
+        )
         return {
             "revision": self.revision,
             "action_catalog_hash": self.action_catalog_hash(search.principal),
@@ -159,6 +211,7 @@ CATALOG_QUERY_SCHEMA: dict[str, Any] = {
         "verb": {"enum": [verb.value for verb in VerbFamily]},
         "effect": {"enum": [effect.value for effect in EffectMode]},
         "resource_kind": {"type": "string", "maxLength": 128},
+        "availability": {"enum": ["declared"]},
     },
 }
 

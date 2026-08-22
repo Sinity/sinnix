@@ -184,11 +184,49 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
             async with ClientSession(read_stream, write_stream) as session:
                 initialized = await session.initialize()
                 tools = await session.list_tools()
+                templates = await session.list_resource_templates()
                 names = {tool.name for tool in tools.tools}
                 assert initialized.server_info.name == "sinnix-agent-gateway"
                 assert {"status", "catalog", "project_read"} <= names
                 assert "project_write" not in names
                 assert "agent_launch" not in names
+                assert {
+                    "sinnix://gateway/v2/actions/{action_name}",
+                    "sinnix://gateway/v2/resources/{resource_kind}",
+                } <= {template.uri_template for template in templates.resource_templates}
+                action_resource = await session.read_resource(
+                    "sinnix://gateway/v2/actions/gateway.catalog"
+                )
+                action_contract = json.loads(action_resource.contents[0].text)
+                resource_resource = await session.read_resource(
+                    "sinnix://gateway/v2/resources/bead"
+                )
+                resource_contract = json.loads(resource_resource.contents[0].text)
+                documentation = await session.read_resource(
+                    "sinnix://gateway/v2/documentation"
+                )
+                documentation_rows = json.loads(documentation.contents[0].text)
+                assert action_contract["action"]["schema_ref"] == (
+                    "sinnix://gateway/v2/actions/gateway.catalog"
+                )
+                assert resource_contract["resource"] == {
+                    "availability": "declared",
+                    "contract_ref": "sinnix://gateway/v2/resources/bead",
+                    "kind": "bead",
+                    "owner": "beads",
+                    "principals": ["agent-control", "observer", "operator"],
+                    "readable_projections": ["summary", "history", "graph"],
+                    "ref_template": "sinnix://projects/{project_id}/beads/{bead_id}",
+                    "supports_query": True,
+                }
+                assert {row["name"] for row in documentation_rows["actions"]} == {
+                    "gateway.catalog",
+                    "gateway.status",
+                }
+                assert all(
+                    "observer" in row["principals"]
+                    for row in documentation_rows["resources"]
+                )
                 result = await session.call_tool("status", {})
                 status = json.loads(result.content[0].text)
                 assert status["principal"] == "observer"
