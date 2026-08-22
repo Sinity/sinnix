@@ -17,7 +17,7 @@ from .capabilities import Capability, Principal
 from .capability_index import CapabilityIndexService
 from .captures import CaptureService
 from .config import GatewayConfig
-from .contracts import EffectMode, VerbFamily
+from .contracts import ActionSpec, EffectMode, VerbFamily
 from .desktop import DesktopService
 from .execution import OwnerDiagnosticError
 from .files import HostFileService
@@ -29,6 +29,7 @@ from .observe import ObserveService
 from .project_context import ProjectContextService
 from .projects import ProjectService
 from .redaction import public_error
+from .results import ResultError, ResultService
 from .route_preflight import GatewayRoutePreflight
 from .registry import CatalogSearch, REGISTRY
 from .schemas import AgentLaunchRequest
@@ -79,6 +80,7 @@ class Runtime:
     project_context: ProjectContextService
     artifacts: ArtifactService
     audit: AuditService
+    results: ResultService
     jobs: JobService
     observe: ObserveService
     machine_actions: MachineActionService
@@ -111,6 +113,7 @@ class Runtime:
             project_context=ProjectContextService(principal, projects, beads),
             artifacts=artifacts,
             audit=AuditService(config, principal),
+            results=ResultService(config, principal),
             jobs=JobService(config, principal, artifacts),
             observe=ObserveService(config, principal),
             machine_actions=MachineActionService(config, principal),
@@ -171,7 +174,7 @@ class Runtime:
         status["route_preflight"] = preflight
         return status
 
-    def _record_result(self, operation: str, result: Any) -> None:
+    def _record_result(self, operation: str, result: Any) -> dict[str, Any]:
         payload: dict[str, Any] = {}
         if isinstance(result, dict):
             for key in (
@@ -211,7 +214,7 @@ class Runtime:
                 payload["artifact_ids"] = artifact_ids
             if "job_id" in payload:
                 payload["correlation_id"] = payload["job_id"]
-        self.audit.append(operation, "ok", payload)
+        return self.audit.append(operation, "ok", payload)
 
     @staticmethod
     def _diagnostic_payload(response: dict[str, object]) -> dict[str, object]:
@@ -227,6 +230,64 @@ class Runtime:
             )
             if key in response
         }
+
+    def _v2_success(self, action: ActionSpec, result: Any) -> dict[str, Any]:
+        self.results.require_payload_bound(result)
+        receipt = self._record_result(action.name, result)
+        return self.results.record(
+            action=action.name,
+            owner=action.owner,
+            route=action.route,
+            outcome="ok",
+            payload=result,
+            receipt=receipt,
+        )
+
+    def _v2_failure(self, action: ActionSpec, exc: Exception) -> dict[str, Any]:
+        if isinstance(exc, OwnerDiagnosticError):
+            details = self._diagnostic_payload(exc.response)
+            error: dict[str, object] = {
+                "code": "owner_diagnostic",
+                "message": "owner route failed",
+                **details,
+            }
+            audit_payload = {"code": "owner_diagnostic", **details}
+        else:
+            code = (
+                exc.failure_class
+                if isinstance(exc, ResultError)
+                else "invalid_request"
+                if isinstance(exc, ValueError)
+                else "internal_error"
+            )
+            message = public_error(exc)
+            error = {"code": code, "message": message}
+            audit_payload = {"code": code, "error": message}
+        receipt = self.audit.append(action.name, "error", audit_payload)
+        return self.results.record(
+            action=action.name,
+            owner=action.owner,
+            route=action.route,
+            outcome="error",
+            payload=error,
+            receipt=receipt,
+        )
+
+    def execute_v2(
+        self, action: ActionSpec, callback: Callable[[], Any]
+    ) -> dict[str, Any]:
+        try:
+            return self._v2_success(action, callback())
+        except Exception as exc:
+            return self._v2_failure(action, exc)
+
+    async def execute_v2_async(
+        self, action: ActionSpec, callback: Callable[[], Awaitable[Any]]
+    ) -> dict[str, Any]:
+        try:
+            return self._v2_success(action, await callback())
+        except Exception as exc:
+            return self._v2_failure(action, exc)
 
     def execute(self, operation: str, callback: Callable[[], T]) -> T:
         try:
@@ -326,6 +387,24 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             separators=(",", ":"),
         )
 
+    @mcp.resource("sinnix://results/{result_id}")
+    def gateway_v2_result(result_id: str) -> str:
+        """Return one immutable V2 result snapshot for the active principal."""
+        return json.dumps(
+            runtime.results.read(result_id),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    @mcp.resource("sinnix://receipts/{receipt_id}")
+    def gateway_v2_receipt(receipt_id: str) -> str:
+        """Return one principal-scoped audit receipt behind its canonical ref."""
+        return json.dumps(
+            runtime.audit.receipt(receipt_id),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
     target_bindings = TargetToolBindings(
         REGISTRY,
         (
@@ -351,8 +430,8 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             """Return the current principal's gateway contract and availability observations."""
             action = target_bindings.action_for_tool("status", principal_name)
             manifest = canonical_manifest(await mcp.list_tools())
-            return await runtime.execute_async(
-                action.name,
+            return await runtime.execute_v2_async(
+                action,
                 lambda: runtime.gateway_status(
                     _principal_contract(principal_name),
                     manifest["sha256"],
@@ -374,8 +453,8 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         ) -> dict[str, Any]:
             """Search the principal-filtered V2 resource and executable action catalog."""
             action = target_bindings.action_for_tool("catalog", principal_name)
-            return runtime.execute(
-                action.name,
+            return runtime.execute_v2(
+                action,
                 lambda: REGISTRY.search(
                     CatalogSearch(
                         text=text,

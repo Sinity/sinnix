@@ -136,6 +136,7 @@ class GatewayConfig:
             self.state_dir / "diagnostics",
             self.state_dir / "jobs",
             self.state_dir / "legacy",
+            self.state_dir / "results",
         ):
             path.mkdir(mode=0o700, parents=True, exist_ok=True)
             path.chmod(0o700)
