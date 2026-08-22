@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any, Callable
 
 from .captures import queryable_capture_lanes
@@ -127,7 +126,7 @@ class GatewayRoutePreflight:
                     "--limit",
                     "1",
                 ],
-                OwnerRoute("machine-observe", EnvironmentProfile.TERMINAL),
+                OwnerRoute("machine-observe"),
                 "json_object_with_schema",
                 ExecutionResult.decode_json,
                 lambda value: self._is_json_object(value, "schema"),
@@ -175,17 +174,18 @@ class GatewayRoutePreflight:
             ),
         ]
         if any(server.get("brokered") for server in self.config.mcp_broker_servers.values()):
-            bus = os.environ.get("DBUS_SESSION_BUS_ADDRESS")
-            runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+            environment, missing = self.execution.environment_for(
+                OwnerRoute("mcp-user-bus", EnvironmentProfile.USER_BUS)
+            )
             routes.append(
                 {
                     "route": "mcp.user_bus",
-                    "status": "pass" if bus and runtime_dir else "degraded",
+                    "status": "pass" if missing is None else "degraded",
                     "failure_class": (
-                        None if bus and runtime_dir else "user_bus_environment_missing"
+                        None if missing is None else "user_bus_environment_missing"
                     ),
-                    "dbus_session_bus_address": bool(bus),
-                    "xdg_runtime_dir": bool(runtime_dir),
+                    "dbus_session_bus_address": "DBUS_SESSION_BUS_ADDRESS" in environment,
+                    "xdg_runtime_dir": "XDG_RUNTIME_DIR" in environment,
                 }
             )
         return {

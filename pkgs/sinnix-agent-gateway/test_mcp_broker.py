@@ -97,6 +97,24 @@ def broker_service(tmp_path: Path, principal_name: str, max_bytes: int = 262_144
     return McpBrokerService(config, principal, ArtifactService(config, principal))
 
 
+def test_observer_catalog_allows_a_broker_without_user_bus_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    broker = broker_service(tmp_path, "observer")
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
+
+    catalog = anyio.run(broker.catalog)
+
+    fixture = next(server for server in catalog["servers"] if server["name"] == "fixture")
+    assert fixture["availability"] == "available"
+
+
 def test_catalog_probes_admitted_servers_and_keeps_exclusions_static(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

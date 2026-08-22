@@ -105,6 +105,29 @@ def test_owner_execution_profile_omits_ambient_credentials() -> None:
     } & environment.keys()
 
 
+def test_owner_execution_user_bus_profile_requires_complete_session_environment() -> None:
+    source = {
+        "HOME": "/home/fixture",
+        "LANG": "C.UTF-8",
+        "PATH": "/fixture/bin",
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+        "XDG_RUNTIME_DIR": "/run/user/1000",
+    }
+    route = OwnerRoute("mcp-fixture", EnvironmentProfile.USER_BUS)
+
+    environment, missing = OwnerExecution(source).environment_for(
+        route, {"FIXTURE": "1"}
+    )
+    unavailable, missing_unavailable = OwnerExecution(
+        {key: value for key, value in source.items() if key != "DBUS_SESSION_BUS_ADDRESS"}
+    ).environment_for(route)
+
+    assert missing is None
+    assert environment == {**source, "FIXTURE": "1"}
+    assert unavailable == {}
+    assert missing_unavailable == "DBUS_SESSION_BUS_ADDRESS"
+
+
 def test_owner_execution_wayland_profile_requires_complete_session_environment() -> None:
     route = OwnerRoute("desktop-fixture", EnvironmentProfile.WAYLAND)
     source = {

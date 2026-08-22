@@ -198,7 +198,7 @@ def test_route_preflight_marks_each_missing_owner_command_unavailable(
 @pytest.mark.parametrize(
     ("missing", "route"),
     [
-        ("XDG_RUNTIME_DIR", "machine.observe"),
+        ("XDG_RUNTIME_DIR", "terminal.kitty"),
         ("WAYLAND_DISPLAY", "desktop.hypr"),
         ("HYPRLAND_INSTANCE_SIGNATURE", "desktop.screenshot"),
     ],
