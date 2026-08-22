@@ -15,7 +15,7 @@ from typing import Any
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from .execution import (
+from sinnix_mcp.execution import (
     EnvironmentProfile,
     ExecutionProfile,
     OwnerExecution,

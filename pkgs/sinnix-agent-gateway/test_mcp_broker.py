@@ -13,7 +13,7 @@ import pytest
 from sinnix_agent_gateway.artifacts import ArtifactService
 from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_agent_gateway.execution import (
+from sinnix_mcp.execution import (
     EnvironmentProfile,
     ExecutionProfile,
     ExecutionResult,

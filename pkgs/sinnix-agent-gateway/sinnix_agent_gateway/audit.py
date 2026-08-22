@@ -5,7 +5,7 @@ import json
 import sqlite3
 import time
 import uuid
-from typing import Any
+from typing import Any, Mapping
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
@@ -47,6 +47,22 @@ class AuditService:
                   payload_json text not null,
                   previous_hash text not null,
                   entry_hash text not null unique
+                )
+                """
+            )
+            connection.execute(
+                """
+                create table if not exists idempotency (
+                  principal text not null,
+                  action text not null,
+                  idempotency_key text not null,
+                  request_sha256 text not null,
+                  state text not null,
+                  response_json text,
+                  receipt_id text,
+                  created_at real not null,
+                  updated_at real not null,
+                  primary key(principal, action, idempotency_key)
                 )
                 """
             )
@@ -99,6 +115,77 @@ class AuditService:
             sequence = connection.execute("select last_insert_rowid()").fetchone()[0]
             connection.execute("commit")
         return {"sequence": sequence, "event_id": event_id, "entry_hash": entry_hash}
+
+    def claim_idempotency(
+        self, action: str, idempotency_key: str, request_sha256: str
+    ) -> tuple[str, dict[str, Any] | None]:
+        """Atomically reserve one mutation identity or return its completed response."""
+        if not action or not idempotency_key:
+            raise ValueError("action and idempotency key are required")
+        now = time.time()
+        with self._connect() as connection:
+            connection.execute("begin immediate")
+            row = connection.execute(
+                "select request_sha256,state,response_json from idempotency where principal = ? and action = ? and idempotency_key = ?",
+                (self.principal.name, action, idempotency_key),
+            ).fetchone()
+            if row is None:
+                connection.execute(
+                    "insert into idempotency(principal,action,idempotency_key,request_sha256,state,response_json,receipt_id,created_at,updated_at) values (?, ?, ?, ?, 'in_progress', null, null, ?, ?)",
+                    (
+                        self.principal.name,
+                        action,
+                        idempotency_key,
+                        request_sha256,
+                        now,
+                        now,
+                    ),
+                )
+                connection.execute("commit")
+                return "new", None
+            if row[0] != request_sha256:
+                connection.execute("commit")
+                return "conflict", None
+            if row[1] != "complete" or row[2] is None:
+                connection.execute("commit")
+                return "in_progress", None
+            try:
+                response = json.loads(row[2])
+            except json.JSONDecodeError as exc:
+                connection.execute("rollback")
+                raise ValueError("stored idempotency response is malformed") from exc
+            connection.execute("commit")
+            return "replay", response
+
+    def complete_idempotency(
+        self,
+        action: str,
+        idempotency_key: str,
+        request_sha256: str,
+        response: Mapping[str, Any],
+    ) -> None:
+        receipt = response.get("receipt")
+        receipt_id = receipt.get("receipt_id") if isinstance(receipt, Mapping) else None
+        if not isinstance(receipt_id, str):
+            raise ValueError("idempotency response requires a receipt")
+        with self._connect() as connection:
+            connection.execute("begin immediate")
+            updated = connection.execute(
+                "update idempotency set state = 'complete', response_json = ?, receipt_id = ?, updated_at = ? where principal = ? and action = ? and idempotency_key = ? and request_sha256 = ? and state = 'in_progress'",
+                (
+                    json.dumps(response, sort_keys=True, separators=(",", ":")),
+                    receipt_id,
+                    time.time(),
+                    self.principal.name,
+                    action,
+                    idempotency_key,
+                    request_sha256,
+                ),
+            ).rowcount
+            if updated != 1:
+                connection.execute("rollback")
+                raise ValueError("idempotency reservation is unavailable")
+            connection.execute("commit")
 
     def receipt(self, receipt_id: str) -> dict[str, Any]:
         """Return one principal-scoped audit event as a canonical receipt."""

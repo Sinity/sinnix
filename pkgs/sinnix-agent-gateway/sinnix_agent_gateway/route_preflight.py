@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 from .captures import queryable_capture_lanes
 from .config import GatewayConfig
-from .execution import (
+from sinnix_mcp.execution import (
     EnvironmentProfile,
     ExecutionProfile,
     ExecutionResult,

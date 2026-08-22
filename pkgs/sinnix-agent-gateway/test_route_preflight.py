@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_agent_gateway.execution import OwnerExecution
+from sinnix_mcp.execution import OwnerExecution
 from sinnix_agent_gateway.route_preflight import GatewayRoutePreflight
 
 

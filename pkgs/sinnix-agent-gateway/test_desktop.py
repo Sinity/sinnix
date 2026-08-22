@@ -10,7 +10,7 @@ from sinnix_agent_gateway.artifacts import ArtifactError, ArtifactService
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.desktop import DesktopDiagnosticError, DesktopService
-from sinnix_agent_gateway.execution import OwnerExecution
+from sinnix_mcp.execution import OwnerExecution
 
 
 def desktop_service(tmp_path: Path, principal_name: str) -> tuple[DesktopService, Path]:

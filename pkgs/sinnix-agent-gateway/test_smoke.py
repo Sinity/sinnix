@@ -13,7 +13,7 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from sinnix_agent_gateway.app import Runtime, create_server
-from sinnix_agent_gateway.execution import ExecutionResult, OwnerDiagnosticError
+from sinnix_mcp.execution import ExecutionResult, OwnerDiagnosticError
 from sinnix_agent_gateway.capabilities import PolicyError
 from sinnix_agent_gateway.cli import build_manifest, parser, verify_approval
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
@@ -236,7 +236,13 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 result = await session.call_tool("status", {})
                 status_envelope = json.loads(result.content[0].text)
                 status = status_envelope["data"]
-                assert status_envelope["schema"] == "sinnix.gateway-result.v2"
+                assert status_envelope["schema"] == "sinnix.gateway-result.v3"
+                assert result.is_error is False
+                assert result.structured_content == status_envelope
+                status_tool = next(tool for tool in tools.tools if tool.name == "status")
+                assert status_tool.output_schema == REGISTRY.action(
+                    "gateway.status"
+                ).output_schema
                 assert status_envelope["result"]["action"] == "gateway.status"
                 assert status_envelope["result"]["outcome"] == "ok"
                 assert status_envelope["receipt"]["ref"].startswith("sinnix://receipts/")
@@ -328,6 +334,8 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "catalog", {"verb": "unrecognized"}
                 )
                 invalid_catalog = json.loads(invalid_catalog_result.content[0].text)
+                assert invalid_catalog_result.is_error is True
+                assert invalid_catalog_result.structured_content == invalid_catalog
                 assert invalid_catalog["result"]["outcome"] == "error"
                 assert invalid_catalog["error"]["code"] == "invalid_request"
                 assert invalid_catalog["receipt"]["ref"].startswith(

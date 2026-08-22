@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .contracts import ActionSpec, EffectMode, ResourceSpec, VerbFamily
+from .schemas import V2ToolEnvelope
 from sinnix_mcp.refs import RefTemplate, SinnixRef
 
 
@@ -250,29 +251,58 @@ class CatalogRegistry:
         }
 
 
-EMPTY_OBJECT_SCHEMA: dict[str, Any] = {"type": "object", "additionalProperties": False}
-RESOURCE_GET_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["ref"],
-    "properties": {
-        "ref": {"type": "string", "minLength": 1, "maxLength": 2_048},
-    },
+REQUEST_CONTROL_PROPERTIES: dict[str, Any] = {
+    "request_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "actor": {"type": "string", "minLength": 1, "maxLength": 256},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 2_000},
+    "idempotency_key": {"type": "string", "minLength": 1, "maxLength": 256},
+    "deadline_at": {"type": "number"},
+    "preconditions": {"type": "object"},
 }
 
-CATALOG_QUERY_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "additionalProperties": False,
-    "properties": {
-        "text": {"type": "string", "maxLength": 512},
-        "domain": {"type": "string", "maxLength": 128},
-        "verb": {"enum": [verb.value for verb in VerbFamily]},
-        "effect": {"enum": [effect.value for effect in EffectMode]},
-        "resource_kind": {"type": "string", "maxLength": 128},
-        "project": {"type": "string", "minLength": 1, "maxLength": 128},
-        "availability": {"enum": ["available", "unavailable"]},
-    },
-}
+
+def _with_request_controls(schema: Mapping[str, Any]) -> dict[str, Any]:
+    if schema.get("type") != "object":
+        raise RegistryError("V2 request schemas must be objects")
+    return {
+        **dict(schema),
+        "properties": {
+            **dict(schema.get("properties", {})),
+            **REQUEST_CONTROL_PROPERTIES,
+        },
+    }
+
+
+EMPTY_OBJECT_SCHEMA: dict[str, Any] = _with_request_controls(
+    {"type": "object", "additionalProperties": False}
+)
+V2_ENVELOPE_SCHEMA: dict[str, Any] = V2ToolEnvelope.model_json_schema()
+RESOURCE_GET_SCHEMA: dict[str, Any] = _with_request_controls(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["ref"],
+        "properties": {
+            "ref": {"type": "string", "minLength": 1, "maxLength": 2_048},
+        },
+    }
+)
+
+CATALOG_QUERY_SCHEMA: dict[str, Any] = _with_request_controls(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "text": {"type": "string", "maxLength": 512},
+            "domain": {"type": "string", "maxLength": 128},
+            "verb": {"enum": [verb.value for verb in VerbFamily]},
+            "effect": {"enum": [effect.value for effect in EffectMode]},
+            "resource_kind": {"type": "string", "maxLength": 128},
+            "project": {"type": "string", "minLength": 1, "maxLength": 128},
+            "availability": {"enum": ["available", "unavailable"]},
+        },
+    }
+)
 
 
 def build_registry() -> CatalogRegistry:
@@ -302,7 +332,7 @@ def build_registry() -> CatalogRegistry:
             effect=EffectMode.READ,
             principals=frozenset({"observer", "agent-control", "operator"}),
             input_schema=EMPTY_OBJECT_SCHEMA,
-            output_schema={"type": "object"},
+            output_schema=V2_ENVELOPE_SCHEMA,
             examples=({"input": {}},),
             documentation="Return independent gateway contract and availability observations.",
         ),
@@ -315,7 +345,7 @@ def build_registry() -> CatalogRegistry:
             effect=EffectMode.READ,
             principals=frozenset({"observer", "agent-control", "operator"}),
             input_schema=CATALOG_QUERY_SCHEMA,
-            output_schema={"type": "object"},
+            output_schema=V2_ENVELOPE_SCHEMA,
             resource_kinds=tuple(resource.kind for resource in resources),
             examples=(
                 {
@@ -336,7 +366,7 @@ def build_registry() -> CatalogRegistry:
             effect=EffectMode.READ,
             principals=frozenset({"observer", "agent-control", "operator"}),
             input_schema=RESOURCE_GET_SCHEMA,
-            output_schema={"type": "object"},
+            output_schema=V2_ENVELOPE_SCHEMA,
             resource_kinds=("project", "checkout", "bead", "task_authority"),
             examples=({"input": {"ref": "sinnix://projects/sinnix"}},),
             documentation="Resolve one canonical project, checkout, Beads task, or task-authority reference.",

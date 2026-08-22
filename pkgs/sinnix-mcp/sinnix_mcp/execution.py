@@ -6,14 +6,15 @@ import selectors
 import signal
 import subprocess
 import time
-from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 
 class EnvironmentProfile(StrEnum):
-    """Minimal parent-environment subsets for direct owner adapters."""
+    """Minimal parent-environment subsets for declared owner adapters."""
 
     PLAIN = "plain"
     AGENT_JOB = "agent-job"
@@ -26,12 +27,7 @@ class EnvironmentProfile(StrEnum):
 
 @dataclass(frozen=True)
 class OwnerRoute:
-    """Declared process-execution context.
-
-    Direct owner routes use the bounded one-shot facade. Durable jobs reuse the
-    declared environment and detached process mechanics while retaining their
-    own manifests, artifacts, and lifecycle authority.
-    """
+    """Declared process-execution context."""
 
     name: str
     environment_profile: EnvironmentProfile = EnvironmentProfile.PLAIN
@@ -39,7 +35,7 @@ class OwnerRoute:
 
 @dataclass(frozen=True)
 class ExecutionProfile:
-    """Declared policy for an ordinary direct owner command."""
+    """Declared policy for a bounded direct owner command."""
 
     route: OwnerRoute
     timeout_seconds: float = 20.0
@@ -106,7 +102,7 @@ class OwnerExecutionStartError(RuntimeError):
 
 
 class OwnerExecution:
-    """Own declared process startup and direct-owner bounded execution."""
+    """Run declared owner processes with bounded output and tree cleanup."""
 
     _REQUIRED_ENVIRONMENT: dict[EnvironmentProfile, tuple[str, ...]] = {
         EnvironmentProfile.PLAIN: (),
@@ -230,7 +226,13 @@ class OwnerExecution:
                 return
             process.wait()
 
-    def run(self, command: Sequence[str], profile: ExecutionProfile) -> ExecutionResult:
+    def run(
+        self,
+        command: Sequence[str],
+        profile: ExecutionProfile,
+        *,
+        stdout_chunk_callback: Callable[[bytes], None] | None = None,
+    ) -> ExecutionResult:
         if not command:
             raise ValueError("owner command cannot be empty")
         normalized = tuple(str(part) for part in command)
@@ -258,6 +260,7 @@ class OwnerExecution:
         combined_output = bytearray()
         pending_stdin = memoryview(profile.stdin_bytes or b"")
         exceeded = False
+        stream_failure: str | None = None
         selector = selectors.DefaultSelector()
         assert process.stdout is not None
         assert process.stderr is not None
@@ -280,8 +283,9 @@ class OwnerExecution:
                         try:
                             written = os.write(key.fd, pending_stdin[:65_536])
                         except BrokenPipeError:
-                            written = 0
-                        pending_stdin = pending_stdin[written:]
+                            pending_stdin = memoryview(b"")
+                        else:
+                            pending_stdin = pending_stdin[written:]
                         if not pending_stdin:
                             selector.unregister(key.fileobj)
                             key.fileobj.close()
@@ -298,22 +302,30 @@ class OwnerExecution:
                             combined_output.extend(chunk[:combined_room])
                         if len(combined_output) > combined_limit:
                             exceeded = True
-                    else:
+                    elif stdout_chunk_callback is None:
                         combined_output.extend(chunk)
-                    limit = (
-                        profile.max_stdout_bytes
-                        if stream == "stdout"
-                        else profile.max_stderr_bytes
-                    )
-                    room = limit + 1 - len(destination)
-                    if room > 0:
-                        destination.extend(chunk[:room])
-                    if len(destination) > limit:
-                        exceeded = True
-                    if exceeded:
+                    if stream == "stdout" and stdout_chunk_callback is not None:
+                        try:
+                            stdout_chunk_callback(chunk)
+                        except Exception:
+                            stream_failure = "command_stream_decode"
+                            self.terminate(process)
+                            break
+                    else:
+                        limit = (
+                            profile.max_stdout_bytes
+                            if stream == "stdout"
+                            else profile.max_stderr_bytes
+                        )
+                        room = limit + 1 - len(destination)
+                        if room > 0:
+                            destination.extend(chunk[:room])
+                        if len(destination) > limit:
+                            exceeded = True
+                    if exceeded or stream_failure is not None:
                         self.terminate(process)
                         break
-                if exceeded:
+                if exceeded or stream_failure is not None:
                     break
         finally:
             selector.close()
@@ -322,7 +334,9 @@ class OwnerExecution:
             if process.poll() is None:
                 self.terminate(process)
         exit_status = process.wait()
-        if timed_out:
+        if stream_failure is not None:
+            failure = stream_failure
+        elif timed_out:
             failure = "command_timeout"
         elif exceeded:
             failure = "command_output_bound"
@@ -344,3 +358,35 @@ class OwnerExecution:
             output_exceeded=exceeded,
             failure_class=failure,
         )
+
+    def run_jsonl(
+        self,
+        command: Sequence[str],
+        profile: ExecutionProfile,
+        on_row: Callable[[Any], None],
+        *,
+        max_row_bytes: int | None = None,
+    ) -> ExecutionResult:
+        """Stream JSONL rows through the one process kernel without result buffering."""
+        pending = bytearray()
+        row_bound = max_row_bytes or profile.max_stdout_bytes
+
+        def consume(chunk: bytes) -> None:
+            pending.extend(chunk)
+            if len(pending) > row_bound and b"\n" not in pending:
+                raise ValueError("JSONL row exceeded stream bound")
+            while (newline := pending.find(b"\n")) >= 0:
+                line = bytes(pending[:newline])
+                del pending[: newline + 1]
+                if len(line) > row_bound:
+                    raise ValueError("JSONL row exceeded stream bound")
+                if not line:
+                    continue
+                on_row(json.loads(line))
+
+        result = self.run(command, profile, stdout_chunk_callback=consume)
+        if result.failure_class is not None:
+            return result
+        if pending:
+            return replace(result, failure_class="command_stream_decode")
+        return result

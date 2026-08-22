@@ -12,7 +12,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from .execution import (
+from sinnix_mcp.execution import (
     EnvironmentProfile,
     ExecutionProfile,
     OwnerExecution,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sys
 
-from sinnix_agent_gateway.execution import (
+from sinnix_mcp.execution import (
     EnvironmentProfile,
     ExecutionProfile,
     OwnerExecution,
@@ -85,6 +85,20 @@ def test_owner_execution_streams_stdin_while_collecting_stdout() -> None:
 
     assert result.available is True
     assert result.stdout == b"tupni hctap yawetag"
+
+
+def test_owner_execution_handles_child_that_closes_stdin() -> None:
+    result = OwnerExecution().run(
+        [sys.executable, "-c", "import os; os.close(0); print('done')"],
+        ExecutionProfile(
+            route=OwnerRoute("fixture"),
+            stdin_bytes=b"unused input",
+            timeout_seconds=1,
+        ),
+    )
+
+    assert result.available is True
+    assert result.stdout == b"done\n"
 
 
 def test_owner_execution_decodes_json_or_preserves_text_output() -> None:
