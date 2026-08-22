@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -349,17 +348,21 @@ class ProjectService:
             "LANG": os.environ.get("LANG", "C.UTF-8"),
             "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
         }
-        result = subprocess.run(
+        result = OwnerExecution(safe_env).run(
             ["git", "apply", "--whitespace=nowarn", "-"],
-            cwd=project.path,
-            input=patch.encode(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=20,
-            check=False,
-            env=safe_env,
+            ExecutionProfile(
+                name="project-apply-patch",
+                cwd=project.path,
+                timeout_seconds=20,
+                max_stdout_bytes=self.config.max_result_bytes,
+                max_stderr_bytes=self.config.max_result_bytes,
+                stdin_bytes=patch.encode(),
+            ),
         )
-        output = result.stdout[: self.config.max_result_bytes].decode(errors="replace")
-        if result.returncode != 0:
-            raise ProjectError(output.strip() or "patch was rejected")
+        if result.timed_out:
+            raise ProjectError("patch application timed out")
+        if result.exit_status != 0:
+            diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+            output = result.stdout.decode("utf-8", errors="replace").strip()
+            raise ProjectError(diagnostic or output or "patch was rejected")
         return {"project_id": project_id, "applied": True}
