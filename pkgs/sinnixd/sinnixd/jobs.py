@@ -25,6 +25,7 @@ MAX_LOG_BYTES = 64_000
 MAX_LOG_ARTIFACT_BYTES = 1_048_576
 JOB_SCHEMA_VERSION = 2
 JOB_UNIT_PREFIX = "sinnixd-job-"
+SYSTEMD_ERROR_CODE = "systemd-job-error"
 
 
 def default_state_dir() -> Path:
@@ -426,7 +427,12 @@ class GenericJobs:
                 self.store.save(
                     self._with_state(
                         record,
-                        {"phase": "launch-failed", "message": str(error), "terminal": True, "observed_at": _timestamp()},
+                        {
+                            "phase": "launch-failed",
+                            "error": {"code": SYSTEMD_ERROR_CODE},
+                            "terminal": True,
+                            "observed_at": _timestamp(),
+                        },
                     )
                 )
                 raise
@@ -526,13 +532,13 @@ class GenericJobs:
             raise ValueError(f"log range must use offset >= 0 and max_bytes between 1 and {MAX_LOG_BYTES}")
         with self.store.locked(job_id):
             record = self.store.load(job_id)
-            overflowed = record.log_path.with_suffix(".overflow").exists()
         try:
             with record.log_path.open("rb") as handle:
                 handle.seek(offset)
                 content = handle.read(max_bytes + 1)
         except FileNotFoundError:
             content = b""
+        overflowed = record.log_path.with_suffix(".overflow").exists()
         return {
             "job_id": job_id,
             "offset": offset,
@@ -549,7 +555,12 @@ class GenericJobs:
         try:
             properties = dict(self.systemd.show(record.unit))
         except SystemdJobError as error:
-            state = {"phase": "lost", "terminal": True, "message": str(error), "observed_at": _timestamp()}
+            state = {
+                "phase": "lost",
+                "error": {"code": SYSTEMD_ERROR_CODE},
+                "terminal": True,
+                "observed_at": _timestamp(),
+            }
         else:
             state = self._classify(properties, record)
         updated = self._with_state(record, state)
