@@ -12,8 +12,8 @@ import anyio
 import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
-from sinnix_agent_gateway import observe as observe_module
 from sinnix_agent_gateway.app import Runtime, create_server
+from sinnix_agent_gateway.execution import ExecutionResult
 from sinnix_agent_gateway.capabilities import PolicyError
 from sinnix_agent_gateway.cli import build_manifest, parser
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
@@ -428,9 +428,13 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
     cfg = config(tmp_path)
     runtime = Runtime.create(cfg, "observer")
     status = runtime.observe.gateway_status(
-        "observer", "capability-hash", "approved-fixture-hash"
+        "observer", "capability-hash", "approved-fixture-hash", "catalog-hash", "v2-test"
     )
-    assert status["capability_contract_hash"] == "capability-hash"
+    assert status["principal_contract_hash"] == "capability-hash"
+    assert status["catalog"] == {
+        "revision": "v2-test",
+        "action_catalog_hash": "catalog-hash",
+    }
     assert status["manifests"]["comparisons"] == {
         "live_to_nix_approved": "match",
         "live_to_chatgpt_observed": "unobserved",
@@ -448,7 +452,7 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         )
     )
     status = runtime.observe.gateway_status(
-        "observer", "capability-hash", "approved-fixture-hash"
+        "observer", "capability-hash", "approved-fixture-hash", "catalog-hash", "v2-test"
     )
     assert set(status["manifests"]["comparisons"].values()) == {"match"}
 
@@ -462,7 +466,7 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         )
     )
     status = runtime.observe.gateway_status(
-        "observer", "capability-hash", "approved-fixture-hash"
+        "observer", "capability-hash", "approved-fixture-hash", "catalog-hash", "v2-test"
     )
     assert status["manifests"]["comparisons"] == {
         "live_to_nix_approved": "match",
@@ -475,7 +479,7 @@ def test_gateway_status_keeps_unapproved_principal_unobserved(tmp_path: Path) ->
     runtime = Runtime.create(config(tmp_path), "operator")
 
     status = runtime.observe.gateway_status(
-        "operator", "capability-hash", "operator-live-hash"
+        "operator", "capability-hash", "operator-live-hash", "catalog-hash", "v2-test"
     )
 
     assert status["manifests"]["nix_approved"] is None
@@ -656,10 +660,18 @@ def test_machine_report_timeout_is_a_typed_failure(
 ) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
 
-    def timeout(*args, **kwargs):
-        raise subprocess.TimeoutExpired("sinnix-observe", 20)
-
-    monkeypatch.setattr(observe_module.subprocess, "run", timeout)
+    monkeypatch.setattr(
+        runtime.observe.execution,
+        "run",
+        lambda *_args, **_kwargs: ExecutionResult(
+            command=("sinnix-observe",),
+            exit_status=-15,
+            stdout=b"",
+            stderr=b"",
+            timed_out=True,
+            failure_class="command_timeout",
+        ),
+    )
     result = runtime.observe.machine_report()
     assert result["failure_class"] == "collector_timeout"
 

@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
-import tempfile
 from typing import Any
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
+from .execution import ExecutionProfile, OwnerExecution
 
 
 class ObserveService:
@@ -40,6 +39,7 @@ class ObserveService:
     def __init__(self, config: GatewayConfig, principal: Principal):
         self.config = config
         self.principal = principal
+        self.execution = OwnerExecution()
 
     def _connector_snapshot(self) -> dict[str, str] | None:
         path = self.config.connector_snapshot_path or (
@@ -78,44 +78,44 @@ class ObserveService:
             "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
             "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"),
         }
-        try:
-            with tempfile.TemporaryFile() as output:
-                result = subprocess.run(
-                    [self.config.observe_command, "--format", "json", "--limit", "20"],
-                    stdin=subprocess.DEVNULL,
-                    stdout=output,
-                    stderr=subprocess.STDOUT,
-                    timeout=20,
-                    check=False,
-                    env=environment,
-                )
-                output.seek(0)
-                data = output.read(self._collector_bound() + 1)
-        except subprocess.TimeoutExpired:
+        result = self.execution.run(
+            [self.config.observe_command, "--format", "json", "--limit", "20"],
+            ExecutionProfile(
+                name="machine-observe",
+                timeout_seconds=20,
+                max_stdout_bytes=self._collector_bound(),
+                environment=environment,
+            ),
+        )
+        if result.failure_class == "command_timeout":
             return {
                 "available": False,
                 "failure_class": "collector_timeout",
                 "reason": "sinnix-observe timed out",
+                "command": list(result.command),
             }
-        if result.returncode != 0:
-            return {
-                "available": False,
-                "failure_class": "collector_failed",
-                "reason": "sinnix-observe failed",
-            }
-        if len(data) > self._collector_bound():
+        if result.failure_class == "command_output_bound":
             return {
                 "available": False,
                 "failure_class": "collector_response_bound",
                 "reason": "sinnix-observe exceeded collector bound",
+                "command": list(result.command),
+            }
+        if result.failure_class is not None:
+            return {
+                "available": False,
+                "failure_class": "collector_failed",
+                "reason": result.stderr_excerpt() or "sinnix-observe failed",
+                "command": list(result.command),
             }
         try:
-            return {"available": True, "report": json.loads(data)}
+            return {"available": True, "report": json.loads(result.stdout)}
         except json.JSONDecodeError:
             return {
                 "available": False,
                 "failure_class": "malformed_report",
                 "reason": "sinnix-observe returned malformed JSON",
+                "command": list(result.command),
             }
 
     def _within_response_bound(self, response: dict[str, Any]) -> dict[str, Any]:
@@ -211,6 +211,8 @@ class ObserveService:
         principal_name: str,
         capability_contract_hash: str,
         live_manifest_hash: str,
+        action_catalog_hash: str,
+        catalog_revision: str,
     ) -> dict[str, Any]:
         self.principal.require(Capability.MACHINE_READ)
         inventory_available = self.config.runtime_inventory.is_file()
@@ -228,7 +230,11 @@ class ObserveService:
         return {
             "status": "ready",
             "principal": principal_name,
-            "capability_contract_hash": capability_contract_hash,
+            "principal_contract_hash": capability_contract_hash,
+            "catalog": {
+                "revision": catalog_revision,
+                "action_catalog_hash": action_catalog_hash,
+            },
             "manifests": {
                 "live_server": {
                     "principal": principal_name,

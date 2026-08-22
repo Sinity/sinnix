@@ -73,7 +73,17 @@ def test_capture_query_reports_a_missing_collector_as_unavailable(tmp_path: Path
     assert result == {
         "available": False,
         "failure_class": "collector_unavailable",
-        "reason": "sinnix-capture query is unavailable: FileNotFoundError",
+        "reason": "sinnix-capture query is unavailable",
+        "command": [
+            str(tmp_path / "missing-sinnix-capture"),
+            "query",
+            "--capture-root",
+            str(root),
+            "--since",
+            "0.0",
+            "--lane",
+            "mpris",
+        ],
     }
 
 

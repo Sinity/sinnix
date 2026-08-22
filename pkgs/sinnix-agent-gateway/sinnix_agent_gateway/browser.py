@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
-import subprocess
-import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -12,6 +10,7 @@ from typing import Any
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
+from .execution import ExecutionProfile, OwnerExecution
 
 
 class BrowserError(ValueError):
@@ -25,31 +24,33 @@ class BrowserService:
         self.config = config
         self.principal = principal
         self.artifacts = artifacts
+        self.execution = OwnerExecution()
 
     @property
     def _targets_path(self) -> Path:
         return self.config.state_dir / "browser-targets.json"
 
     def _run(self, arguments: list[str], timeout: int = 30) -> dict[str, Any]:
-        try:
-            with tempfile.TemporaryFile() as output:
-                result = subprocess.run(
-                    [self.config.chrome_control_command, *arguments],
-                    stdin=subprocess.DEVNULL,
-                    stdout=output,
-                    stderr=subprocess.STDOUT,
-                    timeout=timeout,
-                    check=False,
-                )
-                output.seek(0)
-                data = output.read(self.config.max_result_bytes + 1)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise BrowserError(f"Chrome control unavailable: {type(exc).__name__}") from exc
-        if len(data) > self.config.max_result_bytes:
+        result = self.execution.run(
+            [self.config.chrome_control_command, *arguments],
+            ExecutionProfile(
+                name="browser-chrome",
+                timeout_seconds=timeout,
+                max_stdout_bytes=self.config.max_result_bytes,
+            ),
+        )
+        if result.failure_class == "command_unavailable:FileNotFoundError":
+            raise BrowserError("Chrome control unavailable: FileNotFoundError")
+        if result.failure_class == "command_timeout":
+            raise BrowserError("Chrome control unavailable: TimeoutExpired")
+        if result.failure_class == "command_output_bound":
             raise BrowserError("Chrome control response exceeded response bound")
-        if result.returncode != 0:
-            raise BrowserError("Chrome control command failed")
-        text = data.decode("utf-8", errors="replace")
+        if result.failure_class is not None:
+            detail = result.stderr_excerpt()
+            raise BrowserError(
+                f"Chrome control command failed: {detail}" if detail else "Chrome control command failed"
+            )
+        text = result.stdout.decode("utf-8", errors="replace")
         try:
             value: Any = json.loads(text)
         except json.JSONDecodeError:

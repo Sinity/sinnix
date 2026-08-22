@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import mimetypes
-import subprocess
-import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -11,6 +9,7 @@ from typing import Any
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
+from .execution import ExecutionProfile, OwnerExecution
 
 
 class DesktopError(ValueError):
@@ -34,6 +33,7 @@ class DesktopService:
         self.config = config
         self.principal = principal
         self.artifacts = artifacts
+        self.execution = OwnerExecution()
 
     def _command(self, owner: str, arguments: list[str]) -> list[str]:
         if owner == "hypr":
@@ -43,26 +43,26 @@ class DesktopService:
         raise AssertionError(f"unknown desktop owner {owner}")
 
     def _run(self, owner: str, arguments: list[str]) -> dict[str, Any]:
-        command = self._command(owner, arguments)
-        try:
-            with tempfile.TemporaryFile() as output:
-                result = subprocess.run(
-                    command,
-                    stdin=subprocess.DEVNULL,
-                    stdout=output,
-                    stderr=subprocess.STDOUT,
-                    timeout=15,
-                    check=False,
-                )
-                output.seek(0)
-                data = output.read(self.config.max_result_bytes + 1)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise DesktopError(f"desktop control unavailable: {type(exc).__name__}") from exc
-        if len(data) > self.config.max_result_bytes:
+        result = self.execution.run(
+            self._command(owner, arguments),
+            ExecutionProfile(
+                name=f"desktop-{owner}",
+                timeout_seconds=15,
+                max_stdout_bytes=self.config.max_result_bytes,
+            ),
+        )
+        if result.failure_class == "command_unavailable:FileNotFoundError":
+            raise DesktopError("desktop control unavailable: FileNotFoundError")
+        if result.failure_class == "command_timeout":
+            raise DesktopError("desktop control unavailable: TimeoutExpired")
+        if result.failure_class == "command_output_bound":
             raise DesktopError("desktop control response exceeded response bound")
-        if result.returncode != 0:
-            raise DesktopError("desktop control command failed")
-        text = data.decode("utf-8", errors="replace")
+        if result.failure_class is not None:
+            detail = result.stderr_excerpt()
+            raise DesktopError(
+                f"desktop control command failed: {detail}" if detail else "desktop control command failed"
+            )
+        text = result.stdout.decode("utf-8", errors="replace")
         try:
             value: Any = json.loads(text)
         except json.JSONDecodeError:
