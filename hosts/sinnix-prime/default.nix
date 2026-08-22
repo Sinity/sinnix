@@ -39,10 +39,10 @@
       tunnel = {
         enable = true;
         # Review checkpoint on what reaches remote ChatGPT. This is the reviewed
-        # observer manifest, regenerated from the packaged gateway on 2026-08-21.
-        # It contains only read-annotated tools, including bounded content and
-        # opaque-artifact reads authorized for the observer principal.
-        approvedManifestHash = "865604729fda6738291255ccf8c93a13bc98a93c71eece951d96ee69ff12f37c";
+        # observer manifest, regenerated from the packaged gateway on 2026-08-22.
+        # It contains only read-annotated tools, including bounded content,
+        # opaque-artifact reads, and the non-mutating route self-check.
+        approvedManifestHash = "8ef260221c5cb65128a37ba4b38dbf1264f639c65bff55c11f8eea1dff904946";
         tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
       };
     };
