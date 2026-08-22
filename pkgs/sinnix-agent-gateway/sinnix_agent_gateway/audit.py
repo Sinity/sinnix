@@ -100,6 +100,35 @@ class AuditService:
             connection.execute("commit")
         return {"sequence": sequence, "event_id": event_id, "entry_hash": entry_hash}
 
+    def receipt(self, receipt_id: str) -> dict[str, Any]:
+        """Return one principal-scoped audit event as a canonical receipt."""
+        self.principal.require(Capability.AUDIT_READ)
+        try:
+            receipt_id = str(uuid.UUID(receipt_id))
+        except ValueError as exc:
+            raise ValueError("invalid receipt ID") from exc
+        with self._connect() as connection:
+            row = connection.execute(
+                "select sequence,event_id,occurred_at,profile,operation,outcome,payload_json,previous_hash,entry_hash from events where event_id = ?",
+                (receipt_id,),
+            ).fetchone()
+        if row is None:
+            raise ValueError("unknown receipt")
+        if row[3] != self.principal.name:
+            raise ValueError("receipt is unavailable to this principal")
+        return {
+            "schema": "sinnix.gateway-audit-receipt.v1",
+            "receipt_id": row[1],
+            "sequence": row[0],
+            "occurred_at": row[2],
+            "principal": row[3],
+            "operation": row[4],
+            "outcome": row[5],
+            "payload": json.loads(row[6]),
+            "previous_hash": row[7],
+            "entry_hash": row[8],
+        }
+
     def tail(self, limit: int = 100) -> dict[str, Any]:
         self.principal.require(Capability.AUDIT_READ)
         limit = max(1, min(limit, 1000))

@@ -193,6 +193,8 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert {
                     "sinnix://gateway/v2/actions/{action_name}",
                     "sinnix://gateway/v2/resources/{resource_kind}",
+                    "sinnix://receipts/{receipt_id}",
+                    "sinnix://results/{result_id}",
                 } <= {template.uri_template for template in templates.resource_templates}
                 action_resource = await session.read_resource(
                     "sinnix://gateway/v2/actions/gateway.catalog"
@@ -228,7 +230,12 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     for row in documentation_rows["resources"]
                 )
                 result = await session.call_tool("status", {})
-                status = json.loads(result.content[0].text)
+                status_envelope = json.loads(result.content[0].text)
+                status = status_envelope["data"]
+                assert status_envelope["schema"] == "sinnix.gateway-result.v2"
+                assert status_envelope["result"]["action"] == "gateway.status"
+                assert status_envelope["result"]["outcome"] == "ok"
+                assert status_envelope["receipt"]["ref"].startswith("sinnix://receipts/")
                 assert status["principal"] == "observer"
                 assert status["route_preflight"]["routes"]
                 assert status["manifests"]["live_server"]["sha256"]
@@ -237,12 +244,31 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "live_to_chatgpt_observed": "unobserved",
                     "nix_approved_to_chatgpt_observed": "unobserved",
                 }
+                result_resource = await session.read_resource(
+                    status_envelope["result"]["ref"]
+                )
+                receipt_resource = await session.read_resource(
+                    status_envelope["receipt"]["ref"]
+                )
+                assert json.loads(result_resource.contents[0].text) == status_envelope
+                assert json.loads(receipt_resource.contents[0].text)["outcome"] == "ok"
                 catalog_result = await session.call_tool("catalog", {"text": "gateway"})
-                catalog = json.loads(catalog_result.content[0].text)
+                catalog_envelope = json.loads(catalog_result.content[0].text)
+                catalog = catalog_envelope["data"]
+                assert catalog_envelope["result"]["action"] == "gateway.catalog"
                 assert [action["name"] for action in catalog["actions"]] == [
                     "gateway.status",
                     "gateway.catalog",
                 ]
+                invalid_catalog_result = await session.call_tool(
+                    "catalog", {"verb": "unrecognized"}
+                )
+                invalid_catalog = json.loads(invalid_catalog_result.content[0].text)
+                assert invalid_catalog["result"]["outcome"] == "error"
+                assert invalid_catalog["error"]["code"] == "invalid_request"
+                assert invalid_catalog["receipt"]["ref"].startswith(
+                    "sinnix://receipts/"
+                )
                 mcp_catalog_result = await session.call_tool("mcp_catalog", {})
                 assert json.loads(mcp_catalog_result.content[0].text) == {"servers": []}
 
