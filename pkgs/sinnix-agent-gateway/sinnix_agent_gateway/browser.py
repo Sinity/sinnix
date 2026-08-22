@@ -10,7 +10,7 @@ from typing import Any
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from .execution import ExecutionProfile, OwnerExecution, OwnerRoute
+from sinnix_mcp.execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
 class BrowserError(ValueError):

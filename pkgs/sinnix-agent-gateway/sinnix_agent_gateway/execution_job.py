@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .execution import (
+from sinnix_mcp.execution import (
     EnvironmentProfile,
     ExecutionProfile,
     OwnerExecution,

@@ -9,7 +9,7 @@ from typing import Any
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig, ProjectConfig, TaskAuthorityConfig
-from .execution import ExecutionProfile, OwnerExecution, OwnerRoute
+from sinnix_mcp.execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
 class BeadsError(ValueError):

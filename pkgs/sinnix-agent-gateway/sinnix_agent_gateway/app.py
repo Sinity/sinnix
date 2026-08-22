@@ -2,24 +2,25 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping, TypeVar, cast
 
 from mcp.server import MCPServer
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from .artifacts import ArtifactService
 from .audit import AuditService
 from .beads import BeadsError, BeadsService
 from .bindings import TargetToolBinding, TargetToolBindings
 from .browser import BrowserService
-from .capabilities import Capability, Principal
+from .capabilities import Capability, PolicyError, Principal
 from .capability_index import CapabilityIndexService
 from .captures import CaptureService
 from .config import GatewayConfig
 from .contracts import ActionSpec, EffectMode, VerbFamily
 from .desktop import DesktopService
-from .execution import OwnerDiagnosticError
+from sinnix_mcp.execution import ExecutionProfile, OwnerDiagnosticError, OwnerExecution
 from .files import HostFileService
 from .jobs import JobService
 from .machine_actions import MachineActionService
@@ -29,10 +30,10 @@ from .observe import ObserveService
 from .project_context import ProjectContextService
 from .projects import ProjectService
 from .redaction import public_error
-from .results import ResultError, ResultService
+from .results import ProtocolError, RequestContext, ResultError, ResultService
 from .route_preflight import GatewayRoutePreflight
-from .registry import CatalogSearch, REGISTRY
-from .schemas import AgentLaunchRequest
+from .registry import CatalogSearch, REGISTRY, RegistryError
+from .schemas import AgentLaunchRequest, V2ToolEnvelope
 from .sessions import SessionLogService
 from .shell import ShellService
 from .terminals import TerminalService
@@ -69,6 +70,24 @@ def canonical_manifest(tools: list[Any]) -> dict[str, Any]:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     payload["sha256"] = hashlib.sha256(encoded).hexdigest()
     return payload
+
+
+def v2_tool_result(envelope: Mapping[str, Any]) -> dict[str, Any] | CallToolResult:
+    """Render one validated V2 object as structured MCP content and compatible text."""
+    typed = V2ToolEnvelope.model_validate(envelope)
+    if typed.result.outcome == "ok":
+        return typed.model_dump(mode="json", by_alias=True)
+    serialized = typed.model_dump(mode="json", by_alias=True)
+    return CallToolResult(
+        content=[
+            TextContent(
+                type="text",
+                text=json.dumps(serialized, sort_keys=True, separators=(",", ":")),
+            )
+        ],
+        structured_content=serialized,
+        is_error=True,
+    )
 
 
 @dataclass
@@ -193,7 +212,9 @@ class Runtime:
                 None,
             )
             if selected_project is None or not selected_project["available"]:
-                raise ValueError("project is unavailable to this principal")
+                raise ProtocolError(
+                    "unavailable", "project is unavailable to this principal"
+                )
         catalog = REGISTRY.search(
             search, availability_resolver=resolve_availability
         )
@@ -253,7 +274,10 @@ class Runtime:
         }
 
     def v2_get(self, reference: str) -> dict[str, Any]:
-        resource, values = REGISTRY.resolve(reference)
+        try:
+            resource, values = REGISTRY.resolve(reference)
+        except RegistryError as exc:
+            raise ProtocolError("not_found", "canonical resource was not found") from exc
         canonical_ref = str(resource.ref_template.format(values))
         if resource.kind == "project":
             return {
@@ -333,6 +357,62 @@ class Runtime:
             payload["request_sha256"] = request_sha256
         return self.audit.append(operation, "ok", payload)
 
+    def _record_v2_receipt(
+        self,
+        action: ActionSpec,
+        outcome: str,
+        context: RequestContext,
+        result: Any | None = None,
+        error: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        target_refs: list[str] = []
+        artifact_refs: list[str] = []
+        created_objects: list[str] = []
+        if isinstance(result, Mapping):
+            for key, value in result.items():
+                if key == "ref" and isinstance(value, str) and value.startswith("sinnix://"):
+                    target_refs.append(value)
+                elif key.endswith("_ref") and isinstance(value, str) and value.startswith("sinnix://"):
+                    target_refs.append(value)
+                elif key in {"artifact_id", "diagnostic_artifact_id"} and isinstance(value, str):
+                    artifact_refs.append(f"sinnix://artifacts/{value}")
+                elif key == "created" and value is True:
+                    created_objects.append(action.name)
+        payload = {
+            "schema": "sinnix.gateway-receipt.v2",
+            "action": action.name,
+            "principal": self.principal.name,
+            "actor": context.actor or self.principal.name,
+            "reason": context.reason,
+            "request_id": context.request_id,
+            "correlation_id": context.request_id,
+            "request_sha256": context.request_sha256,
+            "idempotency_key": context.idempotency_key,
+            "target_refs": sorted(set(target_refs)),
+            "owner": action.owner,
+            "owner_route": action.route,
+            "owner_version": REGISTRY.revision,
+            "preconditions": dict(context.preconditions or {}),
+            "before_refs": [],
+            "after_refs": [],
+            "effects": [],
+            "created_objects": created_objects,
+            "artifact_refs": sorted(set(artifact_refs)),
+            "atomicity": (
+                "read_only"
+                if action.effect is EffectMode.READ
+                else "not_atomic"
+                if error and error.get("code") == "partial_completion"
+                else "owner_declared"
+            ),
+            "partial_completion": bool(
+                error and error.get("code") == "partial_completion"
+            ),
+            "compensation": None,
+            "error": dict(error or {}),
+        }
+        return self.audit.append(action.name, outcome, payload)
+
     @staticmethod
     def _diagnostic_payload(response: dict[str, object]) -> dict[str, object]:
         return {
@@ -349,18 +429,41 @@ class Runtime:
         }
 
     @staticmethod
-    def _request_digest(request: Mapping[str, Any]) -> str:
+    def _request_context(request: Mapping[str, Any]) -> RequestContext:
+        raw = dict(request)
+        request_id = raw.pop("request_id", None)
+        actor = raw.get("actor")
+        reason = raw.get("reason")
+        idempotency_key = raw.get("idempotency_key")
+        deadline_at = raw.get("deadline_at")
+        preconditions = raw.get("preconditions")
+        if request_id is not None and not isinstance(request_id, str):
+            raise ProtocolError("invalid_request", "request_id must be a string")
+        for name, value in (("actor", actor), ("reason", reason), ("idempotency_key", idempotency_key)):
+            if value is not None and (not isinstance(value, str) or not value):
+                raise ProtocolError("invalid_request", f"{name} must be a non-empty string")
+        if deadline_at is not None and not isinstance(deadline_at, (int, float)):
+            raise ProtocolError("invalid_request", "deadline_at must be a Unix timestamp")
+        if preconditions is not None and not isinstance(preconditions, Mapping):
+            raise ProtocolError("invalid_request", "preconditions must be an object")
         try:
-            encoded = json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
+            encoded = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
         except (TypeError, ValueError) as exc:
-            raise ValueError("V2 request is not JSON serializable") from exc
-        return hashlib.sha256(encoded).hexdigest()
+            raise ProtocolError("invalid_request", "V2 request is not JSON serializable") from exc
+        return RequestContext.create(
+            hashlib.sha256(encoded).hexdigest(),
+            request_id=request_id,
+            actor=actor,
+            reason=reason,
+            idempotency_key=idempotency_key,
+            deadline_at=float(deadline_at) if deadline_at is not None else None,
+            preconditions=preconditions,
+        )
 
     def _v2_success(
-        self, action: ActionSpec, result: Any, request_sha256: str
+        self, action: ActionSpec, result: Any, context: RequestContext
     ) -> dict[str, Any]:
-        self.results.require_payload_bound(result)
-        receipt = self._record_result(action.name, result, request_sha256)
+        receipt = self._record_v2_receipt(action, "ok", context, result=result)
         return self.results.record(
             action=action.name,
             owner=action.owner,
@@ -368,33 +471,56 @@ class Runtime:
             outcome="ok",
             payload=result,
             receipt=receipt,
-            request_sha256=request_sha256,
+            request=context,
         )
 
     def _v2_failure(
-        self, action: ActionSpec, exc: Exception, request_sha256: str
+        self, action: ActionSpec, exc: Exception, context: RequestContext
     ) -> dict[str, Any]:
         if isinstance(exc, OwnerDiagnosticError):
             details = self._diagnostic_payload(exc.response)
-            error: dict[str, object] = {
-                "code": "owner_diagnostic",
+            diagnostic_id = details.pop("diagnostic_artifact_id", None)
+            error: dict[str, Any] = {
+                "code": "owner_failed",
                 "message": "owner route failed",
-                **details,
+                "details": details,
+                "diagnostic_refs": (
+                    [f"sinnix://artifacts/{diagnostic_id}"]
+                    if isinstance(diagnostic_id, str)
+                    else []
+                ),
             }
-            audit_payload = {"code": "owner_diagnostic", **details}
+        elif isinstance(exc, ProtocolError):
+            error = {
+                "code": exc.code,
+                "message": public_error(exc),
+                "details": exc.details,
+                "diagnostic_refs": exc.diagnostic_refs,
+            }
+        elif isinstance(exc, ResultError):
+            error = {
+                "code": exc.failure_class,
+                "message": public_error(exc),
+                "details": {},
+                "diagnostic_refs": [],
+            }
+        elif isinstance(exc, PolicyError):
+            error = {
+                "code": "policy_denied",
+                "message": public_error(exc),
+                "details": {},
+                "diagnostic_refs": [],
+            }
+        elif isinstance(exc, ValueError):
+            error = {
+                "code": "invalid_request",
+                "message": public_error(exc),
+                "details": {},
+                "diagnostic_refs": [],
+            }
         else:
-            code = (
-                exc.failure_class
-                if isinstance(exc, ResultError)
-                else "invalid_request"
-                if isinstance(exc, ValueError)
-                else "internal_error"
-            )
-            message = public_error(exc)
-            error = {"code": code, "message": message}
-            audit_payload = {"code": code, "error": message}
-        audit_payload["request_sha256"] = request_sha256
-        receipt = self.audit.append(action.name, "error", audit_payload)
+            raise exc
+        receipt = self._record_v2_receipt(action, "error", context, error=error)
         return self.results.record(
             action=action.name,
             owner=action.owner,
@@ -402,8 +528,48 @@ class Runtime:
             outcome="error",
             payload=error,
             receipt=receipt,
-            request_sha256=request_sha256,
+            request=context,
         )
+
+    def _claim_v2_idempotency(
+        self, action: ActionSpec, context: RequestContext
+    ) -> dict[str, Any] | None:
+        if action.effect is EffectMode.READ:
+            return None
+        if not action.supports_idempotency:
+            raise ProtocolError(
+                "invalid_request", "mutating action does not declare idempotency support"
+            )
+        if context.idempotency_key is None:
+            raise ProtocolError("invalid_request", "mutating action requires idempotency_key")
+        state, response = self.audit.claim_idempotency(
+            action.name, context.idempotency_key, context.request_sha256
+        )
+        if state == "new":
+            return None
+        if state == "replay":
+            if not isinstance(response, dict):
+                raise ProtocolError("unavailable", "stored idempotency response is malformed")
+            return response
+        if state == "conflict":
+            raise ProtocolError(
+                "idempotency_conflict",
+                "idempotency key was already used with a different request",
+            )
+        raise ProtocolError(
+            "conflict", "matching idempotency request is still in progress"
+        )
+
+    def _complete_v2_idempotency(
+        self, action: ActionSpec, context: RequestContext, response: Mapping[str, Any]
+    ) -> None:
+        if action.effect is not EffectMode.READ and context.idempotency_key is not None:
+            self.audit.complete_idempotency(
+                action.name,
+                context.idempotency_key,
+                context.request_sha256,
+                response,
+            )
 
     def execute_v2(
         self,
@@ -411,11 +577,22 @@ class Runtime:
         callback: Callable[[], Any],
         request: Mapping[str, Any],
     ) -> dict[str, Any]:
-        request_sha256 = self._request_digest(request)
+        context = RequestContext.create(hashlib.sha256(b"{}").hexdigest())
+        reserved = False
         try:
-            return self._v2_success(action, callback(), request_sha256)
-        except Exception as exc:
-            return self._v2_failure(action, exc, request_sha256)
+            context = self._request_context(request)
+            if context.deadline_at is not None and time.time() >= context.deadline_at:
+                raise ProtocolError("deadline", "request deadline elapsed before execution")
+            replay = self._claim_v2_idempotency(action, context)
+            if replay is not None:
+                return replay
+            reserved = action.effect is not EffectMode.READ
+            response = self._v2_success(action, callback(), context)
+        except (OwnerDiagnosticError, ProtocolError, ResultError, PolicyError, ValueError) as exc:
+            response = self._v2_failure(action, exc, context)
+        if reserved:
+            self._complete_v2_idempotency(action, context, response)
+        return response
 
     async def execute_v2_async(
         self,
@@ -423,11 +600,68 @@ class Runtime:
         callback: Callable[[], Awaitable[Any]],
         request: Mapping[str, Any],
     ) -> dict[str, Any]:
-        request_sha256 = self._request_digest(request)
+        context = RequestContext.create(hashlib.sha256(b"{}").hexdigest())
+        reserved = False
         try:
-            return self._v2_success(action, await callback(), request_sha256)
-        except Exception as exc:
-            return self._v2_failure(action, exc, request_sha256)
+            context = self._request_context(request)
+            if context.deadline_at is not None and time.time() >= context.deadline_at:
+                raise ProtocolError("deadline", "request deadline elapsed before execution")
+            replay = self._claim_v2_idempotency(action, context)
+            if replay is not None:
+                return replay
+            reserved = action.effect is not EffectMode.READ
+            response = self._v2_success(action, await callback(), context)
+        except (OwnerDiagnosticError, ProtocolError, ResultError, PolicyError, ValueError) as exc:
+            response = self._v2_failure(action, exc, context)
+        if reserved:
+            self._complete_v2_idempotency(action, context, response)
+        return response
+
+    def execute_v2_jsonl(
+        self,
+        action: ActionSpec,
+        command: list[str],
+        profile: ExecutionProfile,
+        request: Mapping[str, Any],
+        *,
+        source_revision: str,
+        page_size: int = 100,
+        execution: OwnerExecution | None = None,
+    ) -> dict[str, Any]:
+        """Run a JSONL owner through the shared kernel into an immutable snapshot."""
+        context = RequestContext.create(hashlib.sha256(b"{}").hexdigest())
+        writer = None
+        try:
+            context = self._request_context(request)
+            if context.deadline_at is not None and time.time() >= context.deadline_at:
+                raise ProtocolError("deadline", "request deadline elapsed before execution")
+            writer = self.results.start_snapshot(
+                query_sha256=context.request_sha256,
+                source_revision=source_revision,
+                page_size=page_size,
+            )
+            result = (execution or OwnerExecution()).run_jsonl(
+                command, profile, writer.append
+            )
+            if not result.available:
+                writer.abort()
+                writer = None
+                raise OwnerDiagnosticError(
+                    self.artifacts.record_owner_diagnostic(action.route, result)
+                )
+            receipt = self._record_v2_receipt(action, "ok", context)
+            return self.results.record_snapshot(
+                action=action.name,
+                owner=action.owner,
+                route=action.route,
+                writer=writer,
+                receipt=receipt,
+                request=context,
+            )
+        except (OwnerDiagnosticError, ProtocolError, ResultError, PolicyError, ValueError) as exc:
+            if writer is not None:
+                writer.abort()
+            return self._v2_failure(action, exc, context)
 
     def execute(self, operation: str, callback: Callable[[], T]) -> T:
         try:
@@ -572,11 +806,18 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     if target_bindings.is_visible("status", principal_name):
 
         @mcp.tool(title="Gateway status", annotations=READ_ONLY_TOOL)
-        async def status() -> dict[str, Any]:
+        async def status(
+            request_id: str | None = None,
+            actor: str | None = None,
+            reason: str | None = None,
+            idempotency_key: str | None = None,
+            deadline_at: float | None = None,
+            preconditions: dict[str, Any] | None = None,
+        ) -> V2ToolEnvelope:
             """Return the current principal's gateway contract and availability observations."""
             action = target_bindings.action_for_tool("status", principal_name)
             manifest = canonical_manifest(await mcp.list_tools())
-            return await runtime.execute_v2_async(
+            response = await runtime.execute_v2_async(
                 action,
                 lambda: runtime.gateway_status(
                     _principal_contract(principal_name),
@@ -584,8 +825,16 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     REGISTRY.action_catalog_hash(principal_name),
                     REGISTRY.revision,
                 ),
-                {},
+                {
+                    "request_id": request_id,
+                    "actor": actor,
+                    "reason": reason,
+                    "idempotency_key": idempotency_key,
+                    "deadline_at": deadline_at,
+                    "preconditions": preconditions,
+                },
             )
+            return cast(V2ToolEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("catalog", principal_name):
 
@@ -598,10 +847,16 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             resource_kind: str | None = None,
             project: str | None = None,
             availability: str | None = None,
-        ) -> dict[str, Any]:
+            request_id: str | None = None,
+            actor: str | None = None,
+            reason: str | None = None,
+            idempotency_key: str | None = None,
+            deadline_at: float | None = None,
+            preconditions: dict[str, Any] | None = None,
+        ) -> V2ToolEnvelope:
             """Search the principal-filtered V2 resource and executable action catalog."""
             action = target_bindings.action_for_tool("catalog", principal_name)
-            return runtime.execute_v2(
+            response = runtime.execute_v2(
                 action,
                 lambda: runtime.catalog(
                     CatalogSearch(
@@ -623,20 +878,44 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     "resource_kind": resource_kind,
                     "project": project,
                     "availability": availability,
+                    "request_id": request_id,
+                    "actor": actor,
+                    "reason": reason,
+                    "idempotency_key": idempotency_key,
+                    "deadline_at": deadline_at,
+                    "preconditions": preconditions,
                 },
             )
+            return cast(V2ToolEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("get", principal_name):
 
         @mcp.tool(title="Get V2 resource", annotations=READ_ONLY_TOOL)
-        def get(ref: str) -> dict[str, Any]:
+        def get(
+            ref: str,
+            request_id: str | None = None,
+            actor: str | None = None,
+            reason: str | None = None,
+            idempotency_key: str | None = None,
+            deadline_at: float | None = None,
+            preconditions: dict[str, Any] | None = None,
+        ) -> V2ToolEnvelope:
             """Resolve one canonical project, checkout, or Beads task reference."""
             action = target_bindings.action_for_tool("get", principal_name)
-            return runtime.execute_v2(
+            response = runtime.execute_v2(
                 action,
                 lambda: runtime.v2_get(ref),
-                {"ref": ref},
+                {
+                    "ref": ref,
+                    "request_id": request_id,
+                    "actor": actor,
+                    "reason": reason,
+                    "idempotency_key": idempotency_key,
+                    "deadline_at": deadline_at,
+                    "preconditions": preconditions,
+                },
             )
+            return cast(V2ToolEnvelope, v2_tool_result(response))
 
     @mcp.tool(title="Machine report", annotations=READ_ONLY_TOOL)
     def machine_report() -> dict[str, Any]:

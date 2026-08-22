@@ -10,7 +10,7 @@ from typing import Any
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from .execution import ExecutionResult
+from sinnix_mcp.execution import ExecutionResult
 from .redaction import redact
 
 
