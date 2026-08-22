@@ -617,6 +617,13 @@ in
               runtimeInventory = config.sinnix.runtime.inventory;
               unit = "nats.service";
             };
+            # Bootstrap is a client of NATS, not the NATS daemon. It must use
+            # the same narrowly-owned client credentials as sinexd rather than
+            # requiring the listener account to read them.
+            sinex-nats-bootstrap.serviceConfig = {
+              User = lib.mkForce "sinex";
+              Group = lib.mkForce "sinex";
+            };
             sinex-postgres-dump = {
               description = "Dump Sinex PostgreSQL database for disaster recovery";
               after = [
@@ -761,6 +768,10 @@ in
           # warning at evaluation time.
           wants = [ "network-online.target" ] ++ lib.optionals databasePrepared [ "postgresql.target" ];
         };
+        # PostgreSQL owns its own aggregate target. It otherwise keeps its
+        # Wants= graph alive after sinex-runtime.target stops, leaving the
+        # manually parked runtime half-running.
+        systemd.targets.postgresql.unitConfig.PartOf = [ "sinex-runtime.target" ];
         # Maintenance timers follow the runtime TARGET, not the auto-start
         # POLICY: this host is manual-start by policy but runs 24/7, so gating
         # timers on auto-start masks them and silently kills the DR dump.

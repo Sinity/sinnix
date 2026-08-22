@@ -32,6 +32,7 @@ in
           let
             sources = config.services.sinex.sources;
             sourceIds = map (binding: binding.source_id) config.sinex._sourceBindingsManifest;
+            postgresPartOf = config.systemd.targets.postgresql.unitConfig.PartOf or [ ];
           in
           [
             {
@@ -55,6 +56,10 @@ in
             {
               assertion = !config.services.sinex.automata.enable && !config.services.sinex.shell.kitty.enable;
               message = "The user-mile profile must not start automata or Kitty integration.";
+            }
+            {
+              assertion = lib.elem "sinex-runtime.target" postgresPartOf;
+              message = "Stopping the manual runtime target must also stop PostgreSQL's aggregate target.";
             }
           ];
       };
