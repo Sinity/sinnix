@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import mimetypes
 import uuid
 from pathlib import Path
@@ -71,12 +70,7 @@ class DesktopService:
             raise DesktopDiagnosticError(
                 self.artifacts.record_owner_diagnostic(route.name, result)
             )
-        text = result.stdout.decode("utf-8", errors="replace")
-        try:
-            value: Any = json.loads(text)
-        except json.JSONDecodeError:
-            value = text
-        return {"owner": owner, "result": value}
+        return {"owner": owner, "result": result.decode_json_or_text()}
 
     @staticmethod
     def _string(value: Any, name: str, maximum: int = 8_192) -> str:

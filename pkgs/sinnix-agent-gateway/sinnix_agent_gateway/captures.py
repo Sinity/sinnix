@@ -120,7 +120,7 @@ class CaptureService:
                 }
 
             try:
-                payload = json.loads(result.stdout)
+                payload = result.decode_json()
             except json.JSONDecodeError:
                 return {
                     "available": False,

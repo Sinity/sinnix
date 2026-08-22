@@ -123,7 +123,7 @@ class ObserveService:
                 "command": list(result.command),
             }
         try:
-            return {"available": True, "report": json.loads(result.stdout)}
+            return {"available": True, "report": result.decode_json()}
         except json.JSONDecodeError:
             return {
                 "available": False,
