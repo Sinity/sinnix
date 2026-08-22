@@ -17,6 +17,11 @@ let
     "polylogue"
     "sinex"
   ];
+  mcpBrokerCommands = {
+    lynchpin = "${scriptPkgs.lynchpin-cli}/bin/lynchpin-mcp";
+    polylogue = "${scriptPkgs.polylogue-cli}/bin/polylogue-mcp";
+    sinex = "${scriptPkgs.sinnix-mcp-sinex}/bin/sinnix-mcp-sinex";
+  };
   mcpBrokerServers = lib.mapAttrs (
     name: server:
     let
@@ -28,7 +33,7 @@ let
       inherit brokered;
     }
     // lib.optionalAttrs brokered {
-      command = server.command;
+      command = mcpBrokerCommands.${name};
       args = profile.args or server.args or [ ];
       env = server.env or { };
     }
@@ -111,6 +116,8 @@ mkServiceModule {
         inherit agentController;
         agentScopeExecCommand = "${scriptPkgs.sinnix-agent-scope-exec}/bin/sinnix-agent-scope-exec";
         executionJobCommand = "${scriptPkgs.sinnix-agent-gateway}/bin/sinnix-agent-gateway-execution-job";
+        systemdRunCommand = "${pkgs.systemd}/bin/systemd-run";
+        systemctlCommand = "${pkgs.systemd}/bin/systemctl";
         observeCommand = "${scriptPkgs.sinnix-observe}/bin/sinnix-observe";
         hyprControlCommand = "/home/${userName}/.local/bin/sinnix-hypr-control";
         screenshotControlCommand = "/home/${userName}/.local/bin/sinnix-screenshot-control";
