@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Callable, Mapping
+from urllib.parse import quote
 
 from sinnix_mcp.refs import RefTemplate
+
+KNOWN_PRINCIPALS = frozenset({"observer", "agent-control", "operator"})
 
 JsonSchema = Mapping[str, Any]
 AvailabilityProbe = Callable[[], Mapping[str, Any]]
@@ -40,6 +43,7 @@ class ResourceSpec:
     readable_projections: tuple[str, ...] = ()
     supports_query: bool = False
     availability_probe: AvailabilityProbe | None = field(default=None, compare=False)
+    principals: frozenset[str] = KNOWN_PRINCIPALS
 
     def __post_init__(self) -> None:
         if not self.kind:
@@ -51,14 +55,28 @@ class ResourceSpec:
             )
         if not self.owner:
             raise ValueError(f"resource {self.kind!r} requires an owner")
+        if not self.principals:
+            raise ValueError(f"resource {self.kind!r} requires at least one principal")
+        unknown_principals = self.principals - KNOWN_PRINCIPALS
+        if unknown_principals:
+            raise ValueError(
+                f"resource {self.kind!r} names unknown principals: {sorted(unknown_principals)}"
+            )
+
+    @property
+    def contract_ref(self) -> str:
+        return f"sinnix://gateway/v2/resources/{quote(self.kind, safe='')}"
 
     def catalog_row(self) -> dict[str, Any]:
         return {
             "kind": self.kind,
+            "contract_ref": self.contract_ref,
             "ref_template": self.ref_template.template,
             "owner": self.owner,
+            "principals": sorted(self.principals),
             "readable_projections": list(self.readable_projections),
             "supports_query": self.supports_query,
+            "availability": "declared",
         }
 
 
@@ -95,6 +113,17 @@ class ActionSpec:
             raise ValueError(f"action {self.name!r} requires domain, owner, and route")
         if not self.principals:
             raise ValueError(f"action {self.name!r} requires at least one principal")
+        unknown_principals = self.principals - KNOWN_PRINCIPALS
+        if unknown_principals:
+            raise ValueError(
+                f"action {self.name!r} names unknown principals: {sorted(unknown_principals)}"
+            )
+        if not isinstance(self.input_schema, Mapping) or not self.input_schema.get("type"):
+            raise ValueError(f"action {self.name!r} requires an input JSON Schema")
+        if not isinstance(self.output_schema, Mapping) or not self.output_schema.get("type"):
+            raise ValueError(f"action {self.name!r} requires an output JSON Schema")
+        if len(set(self.resource_kinds)) != len(self.resource_kinds):
+            raise ValueError(f"action {self.name!r} repeats resource kinds")
         if self.effect is EffectMode.READ and self.verb not in {
             VerbFamily.STATUS,
             VerbFamily.CATALOG,
@@ -118,13 +147,19 @@ class ActionSpec:
         if self.receipt_policy not in {"none", "audit", "owner"}:
             raise ValueError(f"action {self.name!r} has unknown receipt policy")
 
+    @property
+    def schema_ref(self) -> str:
+        return f"sinnix://gateway/v2/actions/{quote(self.name, safe='.')}"
+
     def catalog_row(self) -> dict[str, Any]:
         return {
             "name": self.name,
+            "schema_ref": self.schema_ref,
             "verb": self.verb.value,
             "domain": self.domain,
             "owner": self.owner,
             "route": self.route,
+            "availability": "declared",
             "effect": self.effect.value,
             "principals": sorted(self.principals),
             "resource_kinds": list(self.resource_kinds),

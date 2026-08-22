@@ -67,6 +67,35 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
     }
 
 
+def test_resource_contracts_and_discovery_are_principal_filtered() -> None:
+    resources = (
+        ResourceSpec(
+            "shared",
+            RefTemplate("shared", "sinnix://fixtures/shared/{item}"),
+            "fixture",
+            principals=frozenset({"observer", "operator"}),
+        ),
+        ResourceSpec(
+            "operator_only",
+            RefTemplate("operator_only", "sinnix://fixtures/operator/{item}"),
+            "fixture",
+            principals=frozenset({"operator"}),
+        ),
+    )
+    registry = CatalogRegistry(resources, ())
+
+    observer_search = registry.search(CatalogSearch(principal="observer"))
+    observer_documentation = registry.documentation_rows("observer")
+
+    assert [row["kind"] for row in observer_search["resources"]] == ["shared"]
+    assert [row["kind"] for row in observer_documentation["resources"]] == ["shared"]
+    with pytest.raises(RegistryError, match="cannot read resource"):
+        registry.resource_contract("operator_only", "observer")
+    assert registry.resource_contract("operator_only", "operator")["resource"][
+        "kind"
+    ] == "operator_only"
+
+
 def test_action_catalog_hash_changes_when_authority_changes() -> None:
     base = ActionSpec(
         name="fixture.read",
@@ -96,6 +125,51 @@ def test_action_catalog_hash_changes_when_authority_changes() -> None:
     ).action_catalog_hash()
 
 
+def test_catalog_contract_resources_preserve_generated_schema_metadata() -> None:
+    action = REGISTRY.action_schema("gateway.catalog", "observer")
+    resource = REGISTRY.resource_contract("bead")
+    catalog = REGISTRY.search(
+        CatalogSearch(availability="declared", principal="observer")
+    )
+
+    assert action["action"]["schema_ref"] == (
+        "sinnix://gateway/v2/actions/gateway.catalog"
+    )
+    assert action["action"]["input_schema"]["properties"]["availability"] == {
+        "enum": ["declared"]
+    }
+    assert resource["resource"]["contract_ref"] == "sinnix://gateway/v2/resources/bead"
+    assert all(row["availability"] == "declared" for row in catalog["resources"])
+    assert all(row["availability"] == "declared" for row in catalog["actions"])
+
+
+def test_action_contract_rejects_missing_schema_and_unknown_principal() -> None:
+    with pytest.raises(ValueError, match="input JSON Schema"):
+        ActionSpec(
+            name="fixture.read",
+            verb=VerbFamily.QUERY,
+            domain="fixture",
+            owner="fixture",
+            route="fixture.read",
+            effect=EffectMode.READ,
+            principals=frozenset({"observer"}),
+            input_schema={},
+            output_schema={"type": "object"},
+        )
+    with pytest.raises(ValueError, match="unknown principals"):
+        ActionSpec(
+            name="fixture.read",
+            verb=VerbFamily.QUERY,
+            domain="fixture",
+            owner="fixture",
+            route="fixture.read",
+            effect=EffectMode.READ,
+            principals=frozenset({"unrecognized"}),
+            input_schema={"type": "object"},
+            output_schema={"type": "object"},
+        )
+
+
 def test_catalog_search_filters_resource_kind_and_text() -> None:
     result = REGISTRY.search(CatalogSearch(resource_kind="bead", text="catalog"))
 
@@ -103,9 +177,12 @@ def test_catalog_search_filters_resource_kind_and_text() -> None:
     assert result["resources"] == [
         {
             "kind": "bead",
+            "contract_ref": "sinnix://gateway/v2/resources/bead",
             "ref_template": "sinnix://projects/{project_id}/beads/{bead_id}",
             "owner": "beads",
+            "principals": ["agent-control", "observer", "operator"],
             "readable_projections": ["summary", "history", "graph"],
             "supports_query": True,
+            "availability": "declared",
         }
     ]

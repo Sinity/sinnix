@@ -299,6 +299,33 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             separators=(",", ":"),
         )
 
+    @mcp.resource("sinnix://gateway/v2/documentation")
+    def gateway_v2_documentation() -> str:
+        """Return generated V2 resource and action documentation rows."""
+        return json.dumps(
+            REGISTRY.documentation_rows(principal_name),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    @mcp.resource("sinnix://gateway/v2/actions/{action_name}")
+    def gateway_v2_action_schema(action_name: str) -> str:
+        """Return the generated schema and contract for one visible V2 action."""
+        return json.dumps(
+            REGISTRY.action_schema(action_name, principal_name),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    @mcp.resource("sinnix://gateway/v2/resources/{resource_kind}")
+    def gateway_v2_resource_contract(resource_kind: str) -> str:
+        """Return the generated contract for one canonical V2 resource kind."""
+        return json.dumps(
+            REGISTRY.resource_contract(resource_kind, principal_name),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
     target_bindings = TargetToolBindings(
         REGISTRY,
         (
@@ -343,6 +370,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             verb: str | None = None,
             effect: str | None = None,
             resource_kind: str | None = None,
+            availability: str | None = None,
         ) -> dict[str, Any]:
             """Search the principal-filtered V2 resource and executable action catalog."""
             action = target_bindings.action_for_tool("catalog", principal_name)
@@ -355,6 +383,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                         verb=VerbFamily(verb) if verb is not None else None,
                         effect=EffectMode(effect) if effect is not None else None,
                         resource_kind=resource_kind,
+                        availability=availability,
                         principal=principal_name,
                     )
                 ),
