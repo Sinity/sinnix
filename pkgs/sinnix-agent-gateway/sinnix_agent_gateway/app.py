@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, TypeVar, cast
+from typing import Any, Awaitable, Callable, Mapping, TypeVar, cast
 
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
@@ -174,7 +174,41 @@ class Runtime:
         status["route_preflight"] = preflight
         return status
 
-    def _record_result(self, operation: str, result: Any) -> dict[str, Any]:
+    def v2_get(self, reference: str) -> dict[str, Any]:
+        resource, values = REGISTRY.resolve(reference)
+        canonical_ref = str(resource.ref_template.format(values))
+        if resource.kind == "project":
+            project_id = values["project_id"]
+            return {
+                "ref": canonical_ref,
+                "kind": resource.kind,
+                "project": self.projects.summary(project_id),
+                "checkout_ref": REGISTRY.reference(
+                    "checkout",
+                    {"project_id": project_id, "checkout_id": "default"},
+                ),
+            }
+        if resource.kind == "checkout":
+            return {
+                "ref": canonical_ref,
+                "kind": resource.kind,
+                "checkout": self.projects.checkout(
+                    values["project_id"], values["checkout_id"]
+                ),
+            }
+        if resource.kind == "bead":
+            return {
+                "ref": canonical_ref,
+                "kind": resource.kind,
+                "bead": self.beads.read(
+                    values["project_id"], "show", {"id": values["bead_id"]}
+                ),
+            }
+        raise ValueError(f"V2 get does not support resource kind {resource.kind!r}")
+
+    def _record_result(
+        self, operation: str, result: Any, request_sha256: str | None = None
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
         if isinstance(result, dict):
             for key in (
@@ -214,6 +248,8 @@ class Runtime:
                 payload["artifact_ids"] = artifact_ids
             if "job_id" in payload:
                 payload["correlation_id"] = payload["job_id"]
+        if request_sha256 is not None:
+            payload["request_sha256"] = request_sha256
         return self.audit.append(operation, "ok", payload)
 
     @staticmethod
@@ -231,9 +267,19 @@ class Runtime:
             if key in response
         }
 
-    def _v2_success(self, action: ActionSpec, result: Any) -> dict[str, Any]:
+    @staticmethod
+    def _request_digest(request: Mapping[str, Any]) -> str:
+        try:
+            encoded = json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
+        except (TypeError, ValueError) as exc:
+            raise ValueError("V2 request is not JSON serializable") from exc
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _v2_success(
+        self, action: ActionSpec, result: Any, request_sha256: str
+    ) -> dict[str, Any]:
         self.results.require_payload_bound(result)
-        receipt = self._record_result(action.name, result)
+        receipt = self._record_result(action.name, result, request_sha256)
         return self.results.record(
             action=action.name,
             owner=action.owner,
@@ -241,9 +287,12 @@ class Runtime:
             outcome="ok",
             payload=result,
             receipt=receipt,
+            request_sha256=request_sha256,
         )
 
-    def _v2_failure(self, action: ActionSpec, exc: Exception) -> dict[str, Any]:
+    def _v2_failure(
+        self, action: ActionSpec, exc: Exception, request_sha256: str
+    ) -> dict[str, Any]:
         if isinstance(exc, OwnerDiagnosticError):
             details = self._diagnostic_payload(exc.response)
             error: dict[str, object] = {
@@ -263,6 +312,7 @@ class Runtime:
             message = public_error(exc)
             error = {"code": code, "message": message}
             audit_payload = {"code": code, "error": message}
+        audit_payload["request_sha256"] = request_sha256
         receipt = self.audit.append(action.name, "error", audit_payload)
         return self.results.record(
             action=action.name,
@@ -271,23 +321,32 @@ class Runtime:
             outcome="error",
             payload=error,
             receipt=receipt,
+            request_sha256=request_sha256,
         )
 
     def execute_v2(
-        self, action: ActionSpec, callback: Callable[[], Any]
+        self,
+        action: ActionSpec,
+        callback: Callable[[], Any],
+        request: Mapping[str, Any],
     ) -> dict[str, Any]:
+        request_sha256 = self._request_digest(request)
         try:
-            return self._v2_success(action, callback())
+            return self._v2_success(action, callback(), request_sha256)
         except Exception as exc:
-            return self._v2_failure(action, exc)
+            return self._v2_failure(action, exc, request_sha256)
 
     async def execute_v2_async(
-        self, action: ActionSpec, callback: Callable[[], Awaitable[Any]]
+        self,
+        action: ActionSpec,
+        callback: Callable[[], Awaitable[Any]],
+        request: Mapping[str, Any],
     ) -> dict[str, Any]:
+        request_sha256 = self._request_digest(request)
         try:
-            return self._v2_success(action, await callback())
+            return self._v2_success(action, await callback(), request_sha256)
         except Exception as exc:
-            return self._v2_failure(action, exc)
+            return self._v2_failure(action, exc, request_sha256)
 
     def execute(self, operation: str, callback: Callable[[], T]) -> T:
         try:
@@ -420,6 +479,12 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 owner="registry",
                 route="registry.search",
             ),
+            TargetToolBinding(
+                tool_name="get",
+                action_name="resources.get",
+                owner="resolver",
+                route="resources.get",
+            ),
         ),
     )
 
@@ -438,6 +503,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     REGISTRY.action_catalog_hash(principal_name),
                     REGISTRY.revision,
                 ),
+                {},
             )
 
     if target_bindings.is_visible("catalog", principal_name):
@@ -466,6 +532,26 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                         principal=principal_name,
                     )
                 ),
+                {
+                    "text": text,
+                    "domain": domain,
+                    "verb": verb,
+                    "effect": effect,
+                    "resource_kind": resource_kind,
+                    "availability": availability,
+                },
+            )
+
+    if target_bindings.is_visible("get", principal_name):
+
+        @mcp.tool(title="Get V2 resource", annotations=READ_ONLY_TOOL)
+        def get(ref: str) -> dict[str, Any]:
+            """Resolve one canonical project, checkout, or Beads task reference."""
+            action = target_bindings.action_for_tool("get", principal_name)
+            return runtime.execute_v2(
+                action,
+                lambda: runtime.v2_get(ref),
+                {"ref": ref},
             )
 
     @mcp.tool(title="Machine report", annotations=READ_ONLY_TOOL)

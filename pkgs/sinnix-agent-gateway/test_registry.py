@@ -187,6 +187,17 @@ def test_action_contract_rejects_missing_schema_and_unknown_principal() -> None:
         )
 
 
+def test_resource_get_contract_formats_canonical_project_relationships() -> None:
+    action = REGISTRY.action_schema("resources.get", "observer")["action"]
+
+    assert action["verb"] == "get"
+    assert action["resource_kinds"] == ["project", "checkout", "bead"]
+    assert action["input_schema"]["required"] == ["ref"]
+    assert REGISTRY.reference(
+        "checkout", {"project_id": "sinnix main", "checkout_id": "default"}
+    ) == "sinnix://projects/sinnix%20main/checkouts/default"
+
+
 def test_catalog_search_filters_resource_kind_and_text() -> None:
     result = REGISTRY.search(CatalogSearch(resource_kind="bead", text="catalog"))
 

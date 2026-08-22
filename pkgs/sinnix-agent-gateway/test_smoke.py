@@ -148,6 +148,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
 
 def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> None:
     cfg = config(tmp_path)
+    subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
     config_path = tmp_path / "gateway.json"
     config_path.write_text(
         json.dumps(
@@ -187,7 +188,7 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 templates = await session.list_resource_templates()
                 names = {tool.name for tool in tools.tools}
                 assert initialized.server_info.name == "sinnix-agent-gateway"
-                assert {"status", "catalog", "project_read"} <= names
+                assert {"status", "catalog", "get", "project_read"} <= names
                 assert "project_write" not in names
                 assert "agent_launch" not in names
                 assert {
@@ -224,6 +225,7 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert {row["name"] for row in documentation_rows["actions"]} == {
                     "gateway.catalog",
                     "gateway.status",
+                    "resources.get",
                 }
                 assert all(
                     "observer" in row["principals"]
@@ -260,6 +262,23 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "gateway.status",
                     "gateway.catalog",
                 ]
+                get_result = await session.call_tool(
+                    "get", {"ref": "sinnix://projects/fixture"}
+                )
+                project_envelope = json.loads(get_result.content[0].text)
+                project_resource = project_envelope["data"]
+                assert project_envelope["result"]["action"] == "resources.get"
+                assert project_resource["kind"] == "project"
+                assert project_resource["project"]["project_id"] == "fixture"
+                assert project_resource["checkout_ref"] == (
+                    "sinnix://projects/fixture/checkouts/default"
+                )
+                checkout_result = await session.call_tool(
+                    "get", {"ref": project_resource["checkout_ref"]}
+                )
+                checkout_resource = json.loads(checkout_result.content[0].text)["data"]
+                assert checkout_resource["kind"] == "checkout"
+                assert checkout_resource["checkout"]["checkout_id"] == "default"
                 invalid_catalog_result = await session.call_tool(
                     "catalog", {"verb": "unrecognized"}
                 )

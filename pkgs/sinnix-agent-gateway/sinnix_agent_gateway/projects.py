@@ -101,6 +101,17 @@ class ProjectService:
             )
         return {"projects": sorted(rows, key=lambda row: row["project_id"])}
 
+    def checkout(self, project_id: str, checkout_id: str) -> dict[str, Any]:
+        project = self._project(project_id)
+        if checkout_id != "default":
+            raise ProjectError("unknown configured checkout")
+        return {
+            "project_id": project.project_id,
+            "checkout_id": "default",
+            "available": True,
+            "summary": self.summary(project_id),
+        }
+
     def tree(
         self, project_id: str, path: str = ".", max_entries: int = 500
     ) -> dict[str, Any]:

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 import pytest
 
 from sinnix_agent_gateway.app import Runtime
@@ -76,10 +79,12 @@ def test_runtime_v2_envelopes_success_and_public_error(tmp_path) -> None:
     success = runtime.execute_v2(
         action,
         lambda: {"cursor": 0, "next_cursor": None, "total": 1, "rows": ["bead"]},
+        {"text": "bead"},
     )
     failure = runtime.execute_v2(
         action,
         lambda: (_ for _ in ()).throw(ValueError("invalid filter")),
+        {"verb": "invalid"},
     )
 
     assert success["result"]["outcome"] == "ok"
@@ -90,17 +95,28 @@ def test_runtime_v2_envelopes_success_and_public_error(tmp_path) -> None:
         "total": 1,
     }
     assert runtime.results.read(success["result"]["result_id"]) == success
-    assert runtime.audit.receipt(success["receipt"]["receipt_id"])["outcome"] == "ok"
+    request_sha256 = hashlib.sha256(
+        json.dumps({"text": "bead"}, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    success_receipt = runtime.audit.receipt(success["receipt"]["receipt_id"])
+    assert success["result"]["request_sha256"] == request_sha256
+    assert success_receipt["outcome"] == "ok"
+    assert success_receipt["payload"]["request_sha256"] == request_sha256
     assert failure["result"]["outcome"] == "error"
     assert failure["error"] == {"code": "invalid_request", "message": "invalid filter"}
     assert runtime.audit.receipt(failure["receipt"]["receipt_id"])["outcome"] == "error"
+    assert failure["result"]["request_sha256"] == hashlib.sha256(
+        json.dumps({"verb": "invalid"}, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def test_runtime_v2_replaces_an_oversized_owner_payload_with_typed_error(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path, max_result_bytes=1_024), "observer")
     action = REGISTRY.action("gateway.catalog")
 
-    response = runtime.execute_v2(action, lambda: {"rows": ["x" * 2_000]})
+    response = runtime.execute_v2(
+        action, lambda: {"rows": ["x" * 2_000]}, {"text": "large"}
+    )
 
     assert response["result"]["outcome"] == "error"
     assert response["error"]["code"] == "response_bound"
