@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Callable, Mapping
 
-from .refs import RefTemplate
+from sinnix_mcp.refs import RefTemplate
 
 JsonSchema = Mapping[str, Any]
 AvailabilityProbe = Callable[[], Mapping[str, Any]]

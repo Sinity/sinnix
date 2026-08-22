@@ -137,7 +137,10 @@ let
       surfaces = runtimeDefaults.baseSurfaces;
     }
   );
-  agentGatewayPackage = pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix { };
+  sinnixMcpPackage = pkgs.callPackage ../pkgs/sinnix-mcp/pkg.nix { };
+  agentGatewayPackage = pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix {
+    sinnix-mcp = sinnixMcpPackage;
+  };
 
   mkSanitizedPythonWrapper =
     {
@@ -297,6 +300,7 @@ let
       npmDepsHash = "sha256-/duhx34Iiq+7ZOaRTTAWChbGjJhxiVvWOoaLJsH2USc=";
     };
 
+    sinnix-mcp = sinnixMcpPackage;
     sinnix-agent-gateway = agentGatewayPackage;
     sinnix-agent-control-mcp = pkgs.writeShellApplication {
       name = "sinnix-agent-control-mcp";

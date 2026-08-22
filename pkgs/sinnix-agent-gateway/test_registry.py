@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from sinnix_agent_gateway.contracts import ActionSpec, EffectMode, ResourceSpec, VerbFamily
-from sinnix_agent_gateway.refs import RefTemplate, ReferenceError, SinnixRef
+from sinnix_mcp.refs import RefTemplate, ReferenceError, SinnixRef
 from sinnix_agent_gateway.registry import CatalogRegistry, CatalogSearch, RegistryError, REGISTRY
 
 

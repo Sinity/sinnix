@@ -59,6 +59,8 @@ Gateway V2 converges on the stable verb families `status`, `catalog`, `query`, `
 
 `gateway_status(view="self_check")` runs non-mutating route preflight for configured owner commands and reports each route as `pass`, `degraded`, or `unavailable`, including exact command and failure class. It checks route reachability without opening a second scheduler or executing a mutating owner operation.
 
+`pkgs/sinnix-mcp` is the shared protocol package for the gateway, future `sinnixd` runtime, project adapters, and MCP owners. It owns the canonical `sinnix://` parser and templates, versioned request and response envelopes, bounded inline-or-opaque payload representation, typed errors, source-generation bindings, and a non-overlapping owner registry. Owner declarations name their authority and lifecycle (`read_only`, `daemon_owned`, `window_gated`, or `operator_confirmed`), so an MCP frontend cannot silently widen a domain owner’s write boundary. Archive-backed owners additionally bind returned facts and receipts to their source reference, generation, and root digest.
+
 The common read surface includes:
 
 - `gateway_status`, `machine_report` (the bounded overview), `machine_query`, `capability_search`, and `capability_describe`

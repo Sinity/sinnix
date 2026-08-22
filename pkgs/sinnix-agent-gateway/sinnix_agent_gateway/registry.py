@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .contracts import ActionSpec, EffectMode, ResourceSpec, VerbFamily
-from .refs import RefTemplate, SinnixRef
+from sinnix_mcp.refs import RefTemplate, SinnixRef
 
 
 class RegistryError(ValueError):
