@@ -12,6 +12,7 @@ dependencies = ["sinnix-mcp==0.1.0"]
 [project.scripts]
 agentctl = "sinnixd.cli:main"
 sinnixd = "sinnixd.cli:daemon_main"
+sinnixd-capture = "sinnixd.jobs:capture_cli"
 
 [tool.setuptools.packages.find]
 include = ["sinnixd*"]

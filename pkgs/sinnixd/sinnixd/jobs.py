@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import os
 import subprocess
+import sys
 import time
+from contextlib import contextmanager
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from threading import Lock, RLock
+from typing import Any, Iterator, Protocol
 from uuid import UUID, uuid4
 
 from .projects import ProjectAdapter, ProjectOperation
@@ -17,7 +22,8 @@ DEFAULT_TIMEOUT_SECONDS = 3_600
 DEFAULT_WAIT_SECONDS = 30
 MAX_WAIT_SECONDS = 300
 MAX_LOG_BYTES = 64_000
-JOB_SCHEMA_VERSION = 1
+MAX_LOG_ARTIFACT_BYTES = 1_048_576
+JOB_SCHEMA_VERSION = 2
 JOB_UNIT_PREFIX = "sinnixd-job-"
 
 
@@ -74,8 +80,16 @@ class UserSystemdJobs:
             "--slice=agent.slice",
             f"--property=WorkingDirectory={working_directory}",
             f"--property=RuntimeMaxSec={timeout_seconds}s",
-            f"--property=StandardOutput=append:{log_path}",
-            f"--property=StandardError=append:{log_path}",
+            "--property=StandardOutput=journal",
+            "--property=StandardError=journal",
+            "--",
+            str(capture_executable()),
+            "--log-path",
+            str(log_path),
+            "--overflow-path",
+            str(log_path.with_suffix(".overflow")),
+            "--max-bytes",
+            str(MAX_LOG_ARTIFACT_BYTES),
             "--",
             "/run/current-system/sw/bin/env",
             "-i",
@@ -143,12 +157,19 @@ class GenericJobSpec:
     project_id: str | None = None
     operation: str | None = None
     environment_keys: tuple[str, ...] = ()
+    command_digest: str | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in {"declared-operation", "foreground-command"}:
             raise ValueError("job kind is invalid")
-        if not self.command or any(not isinstance(value, str) or not value for value in self.command):
+        if not self.command and not self.command_digest:
+            raise ValueError("job needs a launch command or command digest")
+        if self.command and any(not isinstance(value, str) or not value for value in self.command):
             raise ValueError("job command must be non-empty strings")
+        if self.command_digest is not None and (
+            len(self.command_digest) != 64 or any(value not in "0123456789abcdef" for value in self.command_digest)
+        ):
+            raise ValueError("job command digest is invalid")
         if not isinstance(self.working_directory, str) or not self.working_directory:
             raise ValueError("job working_directory must be non-empty")
         if not 1 <= self.timeout_seconds <= DEFAULT_TIMEOUT_SECONDS:
@@ -162,34 +183,50 @@ class GenericJobSpec:
             raise ValueError("job environment metadata must be non-empty strings")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "kind": self.kind,
-            "command": list(self.command),
             "working_directory": self.working_directory,
             "environment_keys": sorted(set(self.environment) | set(self.environment_keys)),
             "timeout_seconds": self.timeout_seconds,
             "project_id": self.project_id,
             "operation": self.operation,
         }
+        if self.kind == "foreground-command":
+            result["command"] = {
+                "digest": self.command_digest or _command_digest(self.command),
+                "display": "synthetic foreground command",
+            }
+        else:
+            result["command"] = {
+                "display": "declared project operation",
+            }
+        return result
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> GenericJobSpec:
         command = value.get("command")
         environment_keys = value.get("environment_keys")
-        if not isinstance(command, list) or not isinstance(environment_keys, list) or any(
+        if not isinstance(command, Mapping) or not isinstance(environment_keys, list) or any(
             not isinstance(key, str) or not key for key in environment_keys
         ):
             raise JobRecordError("job spec has invalid command or environment metadata")
+        kind = value.get("kind")
+        digest = command.get("digest")
+        if kind == "foreground-command" and not isinstance(digest, str):
+            raise JobRecordError("foreground job spec requires a command digest")
+        if kind == "declared-operation":
+            digest = "0" * 64
         try:
             return cls(
-                kind=value.get("kind"),
-                command=tuple(command),
+                kind=kind,
+                command=(),
                 working_directory=value.get("working_directory"),
                 environment={},
                 timeout_seconds=value.get("timeout_seconds"),
                 project_id=value.get("project_id"),
                 operation=value.get("operation"),
                 environment_keys=tuple(environment_keys),
+                command_digest=digest,
             )
         except ValueError as error:
             raise JobRecordError(str(error)) from error
@@ -203,6 +240,7 @@ class GenericJobRecord:
     log_path: Path
     created_at: str
     cancel_requested_at: str | None = None
+    cancel_requested_invocation_id: str | None = None
     state: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -214,6 +252,7 @@ class GenericJobRecord:
             "artifacts": {"log": str(self.log_path)},
             "created_at": self.created_at,
             "cancel_requested_at": self.cancel_requested_at,
+            "cancel_requested_invocation_id": self.cancel_requested_invocation_id,
             "state": dict(self.state),
         }
 
@@ -238,7 +277,12 @@ class GenericJobRecord:
             raise JobRecordError("job record spec or state is invalid")
         created_at = value.get("created_at")
         cancelled = value.get("cancel_requested_at")
-        if not isinstance(created_at, str) or (cancelled is not None and not isinstance(cancelled, str)):
+        invocation = value.get("cancel_requested_invocation_id")
+        if (
+            not isinstance(created_at, str)
+            or (cancelled is not None and not isinstance(cancelled, str))
+            or (invocation is not None and not isinstance(invocation, str))
+        ):
             raise JobRecordError("job record timestamps are invalid")
         return cls(
             job_id=job_id,
@@ -247,15 +291,18 @@ class GenericJobRecord:
             log_path=log_path,
             created_at=created_at,
             cancel_requested_at=cancelled,
+            cancel_requested_invocation_id=invocation,
             state=dict(state),
         )
 
 
-@dataclass(frozen=True)
+@dataclass
 class GenericJobStore:
     """Durable metadata and artifact paths, never process ownership or queues."""
 
     root: Path
+    _locks: dict[str, RLock] = field(default_factory=dict, init=False, repr=False)
+    _locks_guard: Lock = field(default_factory=Lock, init=False, repr=False)
 
     @property
     def records_root(self) -> Path:
@@ -285,11 +332,19 @@ class GenericJobStore:
                 spec=spec,
                 log_path=log_path.resolve(),
                 created_at=_timestamp(),
-                state={"phase": "created", "observed_at": _timestamp()},
+                state={"phase": "launching", "terminal": False, "observed_at": _timestamp()},
             )
             self.save(record)
             return record
         raise JobRecordError("could not allocate a unique job ID")
+
+    @contextmanager
+    def locked(self, job_id: str) -> Iterator[None]:
+        _ = job_unit_name(job_id)
+        with self._locks_guard:
+            lock = self._locks.setdefault(job_id, RLock())
+        with lock:
+            yield
 
     def load(self, job_id: str) -> GenericJobRecord:
         path = self._record_path(job_id)
@@ -343,25 +398,29 @@ class GenericJobs:
     wait_poll_seconds: float = 0.1
 
     def start(self, spec: GenericJobSpec, job_id: str | None = None) -> dict[str, Any]:
-        record = self.store.create(spec, job_id)
-        try:
-            self.systemd.start(
-                unit=record.unit,
-                command=spec.command,
-                working_directory=spec.working_directory,
-                environment=spec.environment,
-                timeout_seconds=spec.timeout_seconds,
-                log_path=record.log_path,
-            )
-        except SystemdJobError as error:
-            self.store.save(
-                self._with_state(
-                    record,
-                    {"phase": "launch-failed", "message": str(error), "terminal": True, "observed_at": _timestamp()},
+        candidate = job_id or str(uuid4())
+        with self.store.locked(candidate):
+            record = self.store.create(spec, candidate)
+            try:
+                self.systemd.start(
+                    unit=record.unit,
+                    command=spec.command,
+                    working_directory=spec.working_directory,
+                    environment=spec.environment,
+                    timeout_seconds=spec.timeout_seconds,
+                    log_path=record.log_path,
                 )
-            )
-            raise
-        return self._public(record, {"phase": "submitted", "terminal": False})
+            except SystemdJobError as error:
+                self.store.save(
+                    self._with_state(
+                        record,
+                        {"phase": "launch-failed", "message": str(error), "terminal": True, "observed_at": _timestamp()},
+                    )
+                )
+                raise
+            submitted = self._with_state(record, {"phase": "submitted", "terminal": False, "observed_at": _timestamp()})
+            self.store.save(submitted)
+            return self._public(submitted, submitted.state)
 
     def start_declared(
         self,
@@ -415,20 +474,8 @@ class GenericJobs:
         )
 
     def get(self, job_id: str) -> dict[str, Any]:
-        record = self.store.load(job_id)
-        try:
-            properties = dict(self.systemd.show(record.unit))
-        except SystemdJobError as error:
-            state = (
-                {"phase": "cancelled", "terminal": True, "message": str(error), "observed_at": _timestamp()}
-                if record.cancel_requested_at is not None
-                else {"phase": "missing", "terminal": False, "message": str(error), "observed_at": _timestamp()}
-            )
-        else:
-            state = self._classify(properties, record.cancel_requested_at is not None)
-        updated = self._with_state(record, state)
-        self.store.save(updated)
-        return self._public(updated, state)
+        with self.store.locked(job_id):
+            return self._get_locked(job_id)
 
     def list(self) -> dict[str, Any]:
         return {"jobs": [self.get(record.job_id) for record in self.store.list()]}
@@ -446,27 +493,23 @@ class GenericJobs:
             time.sleep(min(self.wait_poll_seconds, max(0.0, deadline - time.monotonic())))
 
     def cancel(self, job_id: str) -> dict[str, Any]:
-        record = self.store.load(job_id)
-        status = self.get(job_id)
-        if status["state"]["terminal"]:
-            return {**status, "cancel_requested": False, "already_terminal": True}
-        self.systemd.stop(record.unit)
-        updated = GenericJobRecord(
-            job_id=record.job_id,
-            unit=record.unit,
-            spec=record.spec,
-            log_path=record.log_path,
-            created_at=record.created_at,
-            cancel_requested_at=_timestamp(),
-            state=record.state,
-        )
-        self.store.save(updated)
-        return {**self.get(job_id), "cancel_requested": True, "already_terminal": False}
+        with self.store.locked(job_id):
+            status = self._get_locked(job_id)
+            if status["state"]["terminal"]:
+                return {**status, "cancel_requested": False, "already_terminal": True}
+            record = self.store.load(job_id)
+            intent = self._with_cancel_intent(record, status["state"].get("systemd", {}).get("InvocationID"))
+            self.store.save(intent)
+            self.systemd.stop(intent.unit)
+            reconciled = self._get_locked(job_id)
+            return {**reconciled, "cancel_requested": True, "already_terminal": False}
 
     def logs(self, job_id: str, *, offset: int = 0, max_bytes: int = MAX_LOG_BYTES) -> dict[str, Any]:
         if offset < 0 or not 1 <= max_bytes <= MAX_LOG_BYTES:
             raise ValueError(f"log range must use offset >= 0 and max_bytes between 1 and {MAX_LOG_BYTES}")
-        record = self.store.load(job_id)
+        with self.store.locked(job_id):
+            record = self.store.load(job_id)
+            overflowed = record.log_path.with_suffix(".overflow").exists()
         try:
             with record.log_path.open("rb") as handle:
                 handle.seek(offset)
@@ -479,28 +522,48 @@ class GenericJobs:
             "content": content[:max_bytes].decode(errors="replace"),
             "next_offset": offset + min(len(content), max_bytes),
             "truncated": len(content) > max_bytes,
+            "artifact_truncated": overflowed,
         }
 
-    def _classify(self, properties: Mapping[str, str], cancel_requested: bool) -> dict[str, Any]:
+    def _get_locked(self, job_id: str) -> dict[str, Any]:
+        record = self.store.load(job_id)
+        if record.state.get("terminal"):
+            return self._public(record, record.state)
+        try:
+            properties = dict(self.systemd.show(record.unit))
+        except SystemdJobError as error:
+            state = {"phase": "lost", "terminal": True, "message": str(error), "observed_at": _timestamp()}
+        else:
+            state = self._classify(properties, record)
+        updated = self._with_state(record, state)
+        self.store.save(updated)
+        return self._public(updated, state)
+
+    def _classify(self, properties: Mapping[str, str], record: GenericJobRecord) -> dict[str, Any]:
         if properties.get("LoadState") != "loaded":
-            if cancel_requested:
-                return {"phase": "cancelled", "terminal": True, "systemd": dict(properties), "observed_at": _timestamp()}
-            return {"phase": "missing", "terminal": False, "systemd": dict(properties), "observed_at": _timestamp()}
+            if record.cancel_requested_at is not None:
+                return {
+                    "phase": "cancelled",
+                    "terminal": True,
+                    "systemd": dict(properties),
+                    "observed_at": _timestamp(),
+                }
+            return {"phase": "missing", "terminal": True, "systemd": dict(properties), "observed_at": _timestamp()}
         active = properties.get("ActiveState", "unknown")
         if active in {"active", "activating", "reloading"}:
             phase = "running"
             terminal = False
         elif active == "deactivating":
-            phase = "cancelling" if cancel_requested else "stopping"
+            phase = "cancelling" if record.cancel_requested_at is not None else "stopping"
             terminal = False
-        elif cancel_requested:
-            phase = "cancelled"
-            terminal = True
         elif properties.get("Result") == "success" and properties.get("ExecMainStatus", "0") == "0":
             phase = "succeeded"
             terminal = True
         elif properties.get("Result") == "timeout":
             phase = "timed_out"
+            terminal = True
+        elif self._cancel_matches(properties, record):
+            phase = "cancelled"
             terminal = True
         else:
             phase = "failed"
@@ -516,7 +579,31 @@ class GenericJobs:
             log_path=record.log_path,
             created_at=record.created_at,
             cancel_requested_at=record.cancel_requested_at,
+            cancel_requested_invocation_id=record.cancel_requested_invocation_id,
             state=dict(state),
+        )
+
+    @staticmethod
+    def _with_cancel_intent(record: GenericJobRecord, invocation_id: Any) -> GenericJobRecord:
+        return GenericJobRecord(
+            job_id=record.job_id,
+            unit=record.unit,
+            spec=record.spec,
+            log_path=record.log_path,
+            created_at=record.created_at,
+            cancel_requested_at=record.cancel_requested_at or _timestamp(),
+            cancel_requested_invocation_id=invocation_id if isinstance(invocation_id, str) else None,
+            state=dict(record.state),
+        )
+
+    @staticmethod
+    def _cancel_matches(properties: Mapping[str, str], record: GenericJobRecord) -> bool:
+        if record.cancel_requested_at is None:
+            return False
+        invocation = properties.get("InvocationID")
+        return (
+            record.cancel_requested_invocation_id is None
+            or invocation == record.cancel_requested_invocation_id
         )
 
     @staticmethod
@@ -532,3 +619,53 @@ class GenericJobs:
             "artifacts": {"log": str(record.log_path)},
             "state": dict(state),
         }
+
+
+def _command_digest(command: Sequence[str]) -> str:
+    return hashlib.sha256("\0".join(command).encode()).hexdigest()
+
+
+def capture_executable() -> Path:
+    module_path = Path(__file__).resolve()
+    if len(module_path.parents) > 4 and module_path.parents[3].name == "lib":
+        return module_path.parents[4] / "bin" / "sinnixd-capture"
+    return Path(sys.executable).with_name("sinnixd-capture")
+
+
+def capture_main(arguments: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="sinnixd-capture")
+    parser.add_argument("--log-path", type=Path, required=True)
+    parser.add_argument("--overflow-path", type=Path, required=True)
+    parser.add_argument("--max-bytes", type=int, required=True)
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+    parsed = parser.parse_args(arguments)
+    if not parsed.command or parsed.command[0] != "--" or not 1 <= parsed.max_bytes <= MAX_LOG_ARTIFACT_BYTES:
+        parser.error("requires --max-bytes within the artifact cap and a command after --")
+    command = parsed.command[1:]
+    parsed.log_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    parsed.overflow_path.unlink(missing_ok=True)
+    remaining = parsed.max_bytes
+    overflowed = False
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    assert process.stdout is not None
+    with parsed.log_path.open("wb") as handle:
+        while chunk := process.stdout.read(65_536):
+            accepted = b""
+            if remaining:
+                accepted = chunk[:remaining]
+                handle.write(accepted)
+                remaining -= len(accepted)
+            overflowed = overflowed or len(chunk) > len(accepted)
+        handle.flush()
+        os.fsync(handle.fileno())
+    if overflowed:
+        parsed.overflow_path.touch(mode=0o600)
+    return process.wait()
+
+
+def capture_cli() -> None:
+    raise SystemExit(capture_main())
+
+
+if __name__ == "__main__":
+    raise SystemExit(capture_main(sys.argv[2:] if len(sys.argv) > 1 and sys.argv[1] == "capture" else None))

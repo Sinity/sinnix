@@ -5,7 +5,8 @@ import socket
 import struct
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Event
+from concurrent.futures import ThreadPoolExecutor
+from threading import BoundedSemaphore, Event
 from typing import Any
 
 from sinnix_mcp import RequestEnvelope
@@ -58,13 +59,15 @@ class UnixSocketServer:
     socket_path: Path
     service: SinnixdService
     connection_timeout_seconds: float = CONNECTION_TIMEOUT_SECONDS
+    max_workers: int = 8
     ready_event: Event | None = None
 
     def serve_once(self) -> None:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
             self._bind(listener)
             try:
-                self._serve_connection(listener)
+                with ThreadPoolExecutor(max_workers=1, thread_name_prefix="sinnixd-rpc") as executor:
+                    self._accept_connection(listener, executor, BoundedSemaphore(1))
             finally:
                 self.socket_path.unlink(missing_ok=True)
 
@@ -73,11 +76,13 @@ class UnixSocketServer:
             self._bind(listener)
             listener.settimeout(ACCEPT_POLL_SECONDS)
             try:
-                while stop_event is None or not stop_event.is_set():
-                    try:
-                        self._serve_connection(listener)
-                    except socket.timeout:
-                        continue
+                with ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix="sinnixd-rpc") as executor:
+                    permits = BoundedSemaphore(self.max_workers)
+                    while stop_event is None or not stop_event.is_set():
+                        try:
+                            self._accept_connection(listener, executor, permits)
+                        except socket.timeout:
+                            continue
             finally:
                 self.socket_path.unlink(missing_ok=True)
 
@@ -90,39 +95,57 @@ class UnixSocketServer:
         if self.ready_event is not None:
             self.ready_event.set()
 
-    def _serve_connection(self, listener: socket.socket) -> None:
+    def _accept_connection(
+        self,
+        listener: socket.socket,
+        executor: ThreadPoolExecutor,
+        permits: BoundedSemaphore,
+    ) -> None:
         connection, _address = listener.accept()
+        if not permits.acquire(blocking=False):
+            connection.close()
+            return
+        executor.submit(self._serve_connection, connection, permits)
+
+    def _serve_connection(self, connection: socket.socket, permits: BoundedSemaphore) -> None:
         with connection:
-            connection.settimeout(self.connection_timeout_seconds)
-            request_id: Any = None
             try:
-                raw = receive_frame(connection)
-                request_id = raw.get("id")
-                if raw.get("jsonrpc") != "2.0" or raw.get("method") != "dispatch":
-                    raise ProtocolError("request must be a JSON-RPC 2.0 dispatch call")
-                params = raw.get("params")
-                if not isinstance(request_id, str) or not isinstance(params, dict):
-                    raise ProtocolError("request requires string id and object params")
-                request = RequestEnvelope(**params)
-                if request.request_id != request_id:
-                    raise ProtocolError("JSON-RPC id must equal envelope request_id")
-                response = self.service.dispatch(request)
-                send_frame(
-                    connection,
-                    {"jsonrpc": "2.0", "id": request_id, "result": response.to_dict()},
-                )
-            except (ConnectionError, OSError, ProtocolError, TypeError, ValueError) as error:
+                connection.settimeout(self.connection_timeout_seconds)
+                request_id: Any = None
                 try:
+                    raw = receive_frame(connection)
+                    request_id = raw.get("id")
+                    if raw.get("jsonrpc") != "2.0" or raw.get("method") != "dispatch":
+                        raise ProtocolError("request must be a JSON-RPC 2.0 dispatch call")
+                    params = raw.get("params")
+                    if not isinstance(request_id, str) or not isinstance(params, dict):
+                        raise ProtocolError("request requires string id and object params")
+                    request = RequestEnvelope(**params)
+                    if request.request_id != request_id:
+                        raise ProtocolError("JSON-RPC id must equal envelope request_id")
+                    response = self.service.dispatch(request)
                     send_frame(
                         connection,
                         {
                             "jsonrpc": "2.0",
                             "id": request_id,
-                            "error": {"code": -32600, "message": str(error)},
+                            "result": response.to_dict(),
                         },
                     )
-                except OSError:
-                    pass
+                except (ConnectionError, OSError, ProtocolError, TypeError, ValueError) as error:
+                    try:
+                        send_frame(
+                            connection,
+                            {
+                                "jsonrpc": "2.0",
+                                "id": request_id,
+                                "error": {"code": -32600, "message": str(error)},
+                            },
+                        )
+                    except OSError:
+                        pass
+            finally:
+                permits.release()
 
 
 def call(socket_path: Path, request: RequestEnvelope) -> dict[str, Any]:
