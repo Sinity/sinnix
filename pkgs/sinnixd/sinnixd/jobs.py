@@ -40,6 +40,30 @@ class JobRecordError(ValueError):
     """Raised when a persisted job record cannot be reconstructed safely."""
 
 
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _ensure_durable_directory(path: Path) -> None:
+    missing: list[Path] = []
+    current = path
+    while not current.exists():
+        missing.append(current)
+        if current.parent == current:
+            raise OSError(f"could not find an existing parent for {path}")
+        current = current.parent
+    for directory in reversed(missing):
+        try:
+            directory.mkdir(mode=0o700)
+        except FileExistsError:
+            continue
+        _fsync_directory(directory.parent)
+
+
 class SystemdJobs(Protocol):
     """The systemd boundary for every durable Sinnixd job."""
 
@@ -128,6 +152,8 @@ class UserSystemdJobs:
             result = subprocess.run(args, check=True, capture_output=True, text=True)
         except FileNotFoundError as error:
             raise SystemdJobError(f"systemd command is unavailable: {args[0]}") from error
+        except OSError as error:
+            raise SystemdJobError(f"systemd command failed: {args[0]}: {error}") from error
         except subprocess.CalledProcessError as error:
             detail = error.stderr.strip() or error.stdout.strip() or str(error)
             raise SystemdJobError(detail) from error
@@ -326,8 +352,8 @@ class GenericJobStore:
         return self.root / "logs"
 
     def create(self, spec: GenericJobSpec, job_id: str | None = None) -> GenericJobRecord:
-        self.records_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self.logs_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _ensure_durable_directory(self.records_root)
+        _ensure_durable_directory(self.logs_root)
         candidates = (job_id,) if job_id is not None else tuple(str(uuid4()) for _ in range(8))
         for candidate in candidates:
             _ = job_unit_name(candidate)
@@ -339,6 +365,7 @@ class GenericJobStore:
                 log_path.touch(mode=0o600, exist_ok=False)
             except FileExistsError:
                 continue
+            _fsync_directory(self.logs_root)
             record = GenericJobRecord(
                 job_id=candidate,
                 unit=job_unit_name(candidate),
@@ -384,7 +411,7 @@ class GenericJobStore:
 
     def save(self, record: GenericJobRecord) -> None:
         path = self._record_path(record.job_id)
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _ensure_durable_directory(path.parent)
         temporary = path.with_suffix(".json.tmp")
         descriptor = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
         try:
@@ -394,6 +421,7 @@ class GenericJobStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, path)
+            _fsync_directory(path.parent)
         finally:
             temporary.unlink(missing_ok=True)
 
@@ -423,18 +451,10 @@ class GenericJobs:
                     timeout_seconds=spec.timeout_seconds,
                     log_path=record.log_path,
                 )
-            except SystemdJobError as error:
-                self.store.save(
-                    self._with_state(
-                        record,
-                        {
-                            "phase": "launch-failed",
-                            "error": {"code": SYSTEMD_ERROR_CODE},
-                            "terminal": True,
-                            "observed_at": _timestamp(),
-                        },
-                    )
-                )
+            except SystemdJobError:
+                reconciled = self._reconcile_launch_error(record)
+                if reconciled is not None:
+                    return reconciled
                 raise
             submitted = self._with_state(record, {"phase": "submitted", "terminal": False, "observed_at": _timestamp()})
             self.store.save(submitted)
@@ -563,6 +583,25 @@ class GenericJobs:
             }
         else:
             state = self._classify(properties, record)
+        updated = self._with_state(record, state)
+        self.store.save(updated)
+        return self._public(updated, state)
+
+    def _reconcile_launch_error(self, record: GenericJobRecord) -> dict[str, Any] | None:
+        try:
+            properties = dict(self.systemd.show(record.unit))
+        except SystemdJobError:
+            return None
+        if properties.get("LoadState") == "not-found":
+            state = {
+                "phase": "launch-failed",
+                "error": {"code": SYSTEMD_ERROR_CODE},
+                "terminal": True,
+                "observed_at": _timestamp(),
+            }
+            self.store.save(self._with_state(record, state))
+            return None
+        state = self._classify(properties, record)
         updated = self._with_state(record, state)
         self.store.save(updated)
         return self._public(updated, state)
