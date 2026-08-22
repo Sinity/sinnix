@@ -254,6 +254,20 @@ def test_project_subprocess_output_is_bounded_before_storage(tmp_path: Path) -> 
     assert len(output.encode()) == 4096
 
 
+def test_project_subprocess_failure_surfaces_bounded_stderr(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "observer")
+
+    with pytest.raises(ProjectError, match="project diagnostic"):
+        runtime.projects._run_bounded(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stderr.write('project diagnostic'); raise SystemExit(2)",
+            ],
+            runtime.config.projects["fixture"].path,
+        )
+
+
 def test_project_diff_rejects_option_injection_before_external_driver(
     tmp_path: Path,
 ) -> None:
