@@ -569,6 +569,71 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
     }
 
 
+def test_gateway_status_reports_broker_route_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = dataclasses.replace(
+        config(tmp_path),
+        mcp_broker_servers={
+            "lynchpin": {"brokered": True},
+            "polylogue": {"brokered": True},
+        },
+    )
+    runtime = Runtime.create(cfg, "observer")
+    monkeypatch.setattr(
+        runtime.route_preflight,
+        "run",
+        lambda: {"status": "ready", "routes": []},
+    )
+
+    async def catalog() -> dict[str, object]:
+        return {
+            "servers": [
+                {
+                    "name": "lynchpin",
+                    "brokered": True,
+                    "availability": "available",
+                    "tool_count": 8,
+                    "read_only_tool_count": 3,
+                },
+                {
+                    "name": "polylogue",
+                    "brokered": True,
+                    "availability": "unavailable",
+                    "failure_class": "upstream_unavailable",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(runtime.mcp_broker, "catalog", catalog)
+    status = anyio.run(
+        runtime.gateway_status,
+        "capability-hash",
+        "approved-fixture-hash",
+        "catalog-hash",
+        "v2-test",
+    )
+
+    assert status["route_preflight"] == {
+        "status": "degraded",
+        "routes": [
+            {
+                "route": "mcp.lynchpin",
+                "status": "pass",
+                "tool_count": 8,
+                "read_only_tool_count": 3,
+            },
+            {
+                "route": "mcp.polylogue",
+                "status": "unavailable",
+                "tool_count": None,
+                "read_only_tool_count": None,
+                "failure_class": "upstream_unavailable",
+            },
+        ],
+    }
+
+
 def test_gateway_status_keeps_unapproved_principal_unobserved(tmp_path: Path) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
 

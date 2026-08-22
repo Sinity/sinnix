@@ -129,7 +129,7 @@ class Runtime:
             route_preflight=GatewayRoutePreflight(config),
         )
 
-    def gateway_status(
+    async def gateway_status(
         self,
         principal_contract_hash: str,
         manifest_hash: str,
@@ -143,7 +143,32 @@ class Runtime:
             action_catalog_hash,
             catalog_revision,
         )
-        status["route_preflight"] = self.route_preflight.run()
+        preflight = self.route_preflight.run()
+        if Capability.MCP_READ in self.principal.capabilities:
+            broker_catalog = await self.mcp_broker.catalog()
+            broker_routes = []
+            for server in broker_catalog["servers"]:
+                if not server.get("brokered"):
+                    continue
+                available = server.get("availability") == "available"
+                route = {
+                    "route": f"mcp.{server['name']}",
+                    "status": "pass" if available else "unavailable",
+                    "tool_count": server.get("tool_count"),
+                    "read_only_tool_count": server.get("read_only_tool_count"),
+                }
+                if not available:
+                    route["failure_class"] = server.get(
+                        "failure_class", "upstream_unavailable"
+                    )
+                broker_routes.append(route)
+            preflight["routes"].extend(broker_routes)
+            preflight["status"] = (
+                "ready"
+                if all(route["status"] == "pass" for route in preflight["routes"])
+                else "degraded"
+            )
+        status["route_preflight"] = preflight
         return status
 
     def _record_result(self, operation: str, result: Any) -> None:
@@ -299,7 +324,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             """Return the current principal's gateway contract and availability observations."""
             action = target_bindings.action_for_tool("status", principal_name)
             manifest = canonical_manifest(await mcp.list_tools())
-            return runtime.execute(
+            return await runtime.execute_async(
                 action.name,
                 lambda: runtime.gateway_status(
                     _principal_contract(principal_name),
