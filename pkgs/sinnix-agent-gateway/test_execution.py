@@ -22,6 +22,34 @@ def test_owner_execution_bounds_stdout_and_terminates_command() -> None:
     assert result.stdout == b"x" * 64
 
 
+def test_owner_execution_preserves_combined_output_order_and_bound() -> None:
+    command = [
+        sys.executable,
+        "-u",
+        "-c",
+        (
+            "import sys, time; "
+            "sys.stdout.write('first\\n'); sys.stdout.flush(); "
+            "time.sleep(0.05); "
+            "sys.stderr.write('second\\n'); sys.stderr.flush()"
+        ),
+    ]
+
+    ordered = OwnerExecution().run(
+        command,
+        ExecutionProfile(route=OwnerRoute("fixture"), max_combined_output_bytes=13),
+    )
+    bounded = OwnerExecution().run(
+        command,
+        ExecutionProfile(route=OwnerRoute("fixture"), max_combined_output_bytes=8),
+    )
+
+    assert ordered.available is True
+    assert ordered.combined_output == b"first\nsecond\n"
+    assert bounded.failure_class == "command_output_bound"
+    assert bounded.combined_output == b"first\nse"
+
+
 def test_owner_execution_terminates_timed_out_command() -> None:
     result = OwnerExecution().run(
         [sys.executable, "-c", "import time; time.sleep(60)"],
