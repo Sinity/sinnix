@@ -278,6 +278,13 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 checkout_resource = json.loads(checkout_result.content[0].text)["data"]
                 assert checkout_resource["kind"] == "checkout"
                 assert checkout_resource["checkout"]["checkout"]["checkout_id"] == "default"
+                context_result = await session.call_tool(
+                    "project_context", {"project_id": "fixture"}
+                )
+                context = json.loads(context_result.content[0].text)
+                assert context["authority"]["canonical_checkout_ref"] == checkout["ref"]
+                assert len(context["authority"]["code_revision"]) == 64
+                assert context["authority"]["task_authority"]["availability"] == "unavailable"
                 invalid_catalog_result = await session.call_tool(
                     "catalog", {"verb": "unrecognized"}
                 )

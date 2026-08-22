@@ -174,57 +174,60 @@ class Runtime:
         status["route_preflight"] = preflight
         return status
 
+    def project_authority(self, project_id: str) -> dict[str, Any]:
+        checkouts = self.projects.checkouts(project_id)["checkouts"]
+        for checkout in checkouts:
+            checkout["ref"] = REGISTRY.reference(
+                "checkout",
+                {
+                    "project_id": project_id,
+                    "checkout_id": checkout["checkout_id"],
+                },
+            )
+        canonical_checkout = next(
+            checkout for checkout in checkouts if checkout["checkout_id"] == "default"
+        )
+        task_authority_ref = REGISTRY.reference(
+            "task_authority", {"project_id": project_id}
+        )
+        try:
+            task_authority: dict[str, Any] = {
+                "availability": "available",
+                "ref": task_authority_ref,
+                "status": self.beads.task_authority_status(project_id),
+            }
+        except BeadsError as exc:
+            task_authority = {
+                "availability": "unavailable",
+                "ref": task_authority_ref,
+                "error": public_error(exc),
+            }
+        code_revision = hashlib.sha256(
+            json.dumps(
+                {
+                    key: canonical_checkout[key]
+                    for key in ("head", "branch", "upstream", "dirty_sha256")
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        return {
+            "project": self.projects.summary(project_id),
+            "canonical_checkout_ref": canonical_checkout["ref"],
+            "code_revision": code_revision,
+            "checkouts": checkouts,
+            "task_authority": task_authority,
+        }
+
     def v2_get(self, reference: str) -> dict[str, Any]:
         resource, values = REGISTRY.resolve(reference)
         canonical_ref = str(resource.ref_template.format(values))
         if resource.kind == "project":
-            project_id = values["project_id"]
-            checkouts = self.projects.checkouts(project_id)["checkouts"]
-            for checkout in checkouts:
-                checkout["ref"] = REGISTRY.reference(
-                    "checkout",
-                    {
-                        "project_id": project_id,
-                        "checkout_id": checkout["checkout_id"],
-                    },
-                )
-            canonical_checkout = next(
-                checkout for checkout in checkouts if checkout["checkout_id"] == "default"
-            )
-            canonical_checkout_ref = canonical_checkout["ref"]
-            code_revision = hashlib.sha256(
-                json.dumps(
-                    {
-                        key: canonical_checkout[key]
-                        for key in ("head", "branch", "upstream", "dirty_sha256")
-                    },
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode()
-            ).hexdigest()
-            task_authority_ref = REGISTRY.reference(
-                "task_authority", {"project_id": project_id}
-            )
-            try:
-                task_authority: dict[str, Any] = {
-                    "availability": "available",
-                    "ref": task_authority_ref,
-                    "status": self.beads.task_authority_status(project_id),
-                }
-            except BeadsError as exc:
-                task_authority = {
-                    "availability": "unavailable",
-                    "ref": task_authority_ref,
-                    "error": public_error(exc),
-                }
             return {
                 "ref": canonical_ref,
                 "kind": resource.kind,
-                "project": self.projects.summary(project_id),
-                "canonical_checkout_ref": canonical_checkout_ref,
-                "code_revision": code_revision,
-                "checkouts": checkouts,
-                "task_authority": task_authority,
+                **self.project_authority(values["project_id"]),
             }
         if resource.kind == "checkout":
             return {
@@ -817,9 +820,28 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     @mcp.tool(title="Get project context", annotations=READ_ONLY_TOOL)
     def project_context(project_id: str) -> dict[str, Any]:
         """Get structured Git and ready-work orientation from existing project owners."""
-        return runtime.execute(
-            "project_context", lambda: runtime.project_context.context(project_id)
-        )
+
+        def read_context() -> dict[str, Any]:
+            context = runtime.project_context.context(project_id)
+            authority = runtime.project_authority(project_id)
+            response = {**context, "authority": authority}
+            if (
+                len(json.dumps(response, sort_keys=True, separators=(",", ":")).encode())
+                <= config.max_result_bytes
+            ):
+                return response
+            return {
+                **context,
+                "authority": {
+                    "availability": "unavailable",
+                    "reason": "project authority exceeded project context response bound",
+                    "ref": REGISTRY.reference(
+                        "project", {"project_id": project_id}
+                    ),
+                },
+            }
+
+        return runtime.execute("project_context", read_context)
 
     @mcp.tool(title="Project tree", annotations=READ_ONLY_TOOL)
     def project_tree(
