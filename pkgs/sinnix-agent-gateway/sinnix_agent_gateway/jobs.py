@@ -5,7 +5,6 @@ import os
 import re
 import secrets
 import shutil
-import signal
 import subprocess
 import tempfile
 import time
@@ -16,6 +15,13 @@ from typing import Any
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
+from .execution import (
+    EnvironmentProfile,
+    ExecutionProfile,
+    OwnerExecution,
+    OwnerExecutionStartError,
+    OwnerRoute,
+)
 from .schemas import AgentLaunchRequest
 
 JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -31,58 +37,37 @@ class JobService:
         config: GatewayConfig,
         principal: Principal,
         artifacts: ArtifactService,
+        execution: OwnerExecution | None = None,
     ):
         self.config = config
         self.principal = principal
         self.artifacts = artifacts
+        self.execution = execution
         config.initialize_state()
         self.root = config.state_dir / "jobs"
 
+    def _execution(self) -> OwnerExecution:
+        return self.execution or OwnerExecution()
+
     def _environment(self) -> dict[str, str]:
-        allowed_names = {
-            "DBUS_SESSION_BUS_ADDRESS",
-            "DISPLAY",
-            "HOME",
-            "LANG",
-            "LC_ALL",
-            "PATH",
-            "SHELL",
-            "SSH_AUTH_SOCK",
-            "TERM",
-            "USER",
-            "WAYLAND_DISPLAY",
-            "XDG_CONFIG_HOME",
-            "XDG_DATA_HOME",
-            "XDG_RUNTIME_DIR",
-            "XDG_STATE_HOME",
-        }
-        environment = {
-            name: value for name, value in os.environ.items() if name in allowed_names
-        }
+        environment, _ = self._execution().environment_for(
+            OwnerRoute("agent-job", EnvironmentProfile.AGENT_JOB)
+        )
         environment["SINNIX_AGENT_JOB_STATE_DIR"] = str(self.root)
         return environment
 
-    @staticmethod
-    def _shell_environment(overlay: dict[str, str] | None) -> dict[str, str]:
-        environment = {
-            "HOME": os.environ.get("HOME", "/home/sinity"),
-            "LANG": os.environ.get("LANG", "C.UTF-8"),
-            "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
-        }
-        for name in ("DBUS_SESSION_BUS_ADDRESS", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"):
-            value = os.environ.get(name)
-            if value:
-                environment[name] = value
-        if overlay is None:
-            return environment
-        if len(overlay) > 64:
-            raise JobError("environment overlay has more than 64 variables")
-        for name, value in overlay.items():
-            if not name or not name.replace("_", "a").isalnum() or not name[0].isalpha():
-                raise JobError(f"invalid environment variable name: {name!r}")
-            if not isinstance(value, str) or len(value) > 8_192:
-                raise JobError(f"invalid environment value for {name}")
-            environment[name] = value
+    def _shell_environment(self, overlay: dict[str, str] | None) -> dict[str, str]:
+        if overlay is not None:
+            if len(overlay) > 64:
+                raise JobError("environment overlay has more than 64 variables")
+            for name, value in overlay.items():
+                if not name or not name.replace("_", "a").isalnum() or not name[0].isalpha():
+                    raise JobError(f"invalid environment variable name: {name!r}")
+                if not isinstance(value, str) or len(value) > 8_192:
+                    raise JobError(f"invalid environment value for {name}")
+        environment, _ = self._execution().environment_for(
+            OwnerRoute("execution-job", EnvironmentProfile.SESSION_OPTIONAL), overlay
+        )
         return environment
 
     @staticmethod
@@ -132,17 +117,7 @@ class JobService:
 
     @staticmethod
     def _abort_launch(process: subprocess.Popen[bytes]) -> None:
-        if process.poll() is not None:
-            return
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-            process.wait(timeout=1)
-        except (ProcessLookupError, subprocess.TimeoutExpired):
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=1)
-            except ProcessLookupError:
-                pass
+        OwnerExecution.terminate(process)
 
     def _load(self, job_id: str) -> dict[str, Any]:
         path = self._manifest_path(job_id)
@@ -234,34 +209,36 @@ class JobService:
                 command.extend([option, value])
 
         try:
-            process = subprocess.Popen(
+            process = self._execution().start(
                 command,
-                stdin=subprocess.DEVNULL,
+                ExecutionProfile(
+                    route=OwnerRoute("agent-job", EnvironmentProfile.AGENT_JOB),
+                    timeout_seconds=request.timeout_seconds + 10,
+                    environment={
+                        **self._environment(),
+                        "SINNIX_CORRELATION_ID": job_id,
+                        "SINNIX_PROJECT": request.project_id,
+                        **(
+                            {"SINNIX_WORK_ITEM": request.work_item}
+                            if request.work_item
+                            else {}
+                        ),
+                        **(
+                            {"SINNIX_PARENT_JOB_ID": request.parent_job_id}
+                            if request.parent_job_id
+                            else {}
+                        ),
+                        **(
+                            {"SINNIX_COORDINATOR_JOB_ID": request.coordinator_job_id}
+                            if request.coordinator_job_id
+                            else {}
+                        ),
+                    },
+                ),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                start_new_session=True,
-                env={
-                    **self._environment(),
-                    "SINNIX_CORRELATION_ID": job_id,
-                    "SINNIX_PROJECT": request.project_id,
-                    **(
-                        {"SINNIX_WORK_ITEM": request.work_item}
-                        if request.work_item
-                        else {}
-                    ),
-                    **(
-                        {"SINNIX_PARENT_JOB_ID": request.parent_job_id}
-                        if request.parent_job_id
-                        else {}
-                    ),
-                    **(
-                        {"SINNIX_COORDINATOR_JOB_ID": request.coordinator_job_id}
-                        if request.coordinator_job_id
-                        else {}
-                    ),
-                },
             )
-        except OSError as exc:
+        except OwnerExecutionStartError as exc:
             raise JobError("failed to launch attested agent job") from exc
         manifest = self._manifest_path(job_id)
         for _ in range(40):
@@ -349,15 +326,17 @@ class JobService:
             scope_unit,
         ]
         try:
-            process = subprocess.Popen(
+            process = self._execution().start(
                 command,
-                stdin=subprocess.DEVNULL,
+                ExecutionProfile(
+                    route=OwnerRoute("execution-job-launch", EnvironmentProfile.AGENT_JOB),
+                    timeout_seconds=timeout_seconds + 10,
+                    environment=self._environment(),
+                ),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                start_new_session=True,
-                env=self._environment(),
             )
-        except OSError as exc:
+        except OwnerExecutionStartError as exc:
             request_path.unlink(missing_ok=True)
             shutil.rmtree(reservation, ignore_errors=True)
             raise JobError("failed to launch execution job") from exc
@@ -388,19 +367,21 @@ class JobService:
         }
 
     def _stop_execution_unit(self, unit: str) -> None:
-        subprocess.run(
+        self._execution().run(
             [self.config.systemctl_command, "--user", "stop", unit],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            env=self._environment(),
+            ExecutionProfile(
+                route=OwnerRoute("execution-job-cancel", EnvironmentProfile.AGENT_JOB),
+                timeout_seconds=5,
+                max_stdout_bytes=16_384,
+                max_stderr_bytes=8_192,
+                environment=self._environment(),
+            ),
         )
 
     def _controller_status(self, job_id: str) -> dict[str, Any]:
         if not self.config.agent_controller.is_file():
             raise JobError("agent controller is unavailable")
-        result = subprocess.run(
+        result = self._execution().run(
             [
                 str(self.config.agent_controller),
                 "--state-dir",
@@ -409,16 +390,18 @@ class JobService:
                 "--job",
                 job_id,
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-            text=True,
-            env=self._environment(),
+            ExecutionProfile(
+                route=OwnerRoute("agent-job-status", EnvironmentProfile.AGENT_JOB),
+                timeout_seconds=20,
+                max_stdout_bytes=self.config.max_result_bytes,
+                max_stderr_bytes=8_192,
+                environment=self._environment(),
+            ),
         )
-        if result.returncode != 0:
-            raise JobError(result.stderr.strip() or "agent status lookup failed")
+        if not result.available:
+            raise JobError(result.stderr_excerpt() or "agent status lookup failed")
         try:
-            value = json.loads(result.stdout)
+            value = result.decode_json()
         except json.JSONDecodeError as exc:
             raise JobError("agent controller returned malformed status") from exc
         if value.get("schema_version") not in {2, 3} or value.get("job_id") != job_id:
@@ -426,7 +409,7 @@ class JobService:
         return value
 
     def _shell_live(self, unit: str) -> dict[str, Any]:
-        result = subprocess.run(
+        result = self._execution().run(
             [
                 self.config.systemctl_command,
                 "--user",
@@ -438,18 +421,19 @@ class JobService:
                 "--property=ControlGroup",
                 "--property=Result",
             ],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            text=True,
-            env=self._environment(),
+            ExecutionProfile(
+                route=OwnerRoute("execution-job-status", EnvironmentProfile.AGENT_JOB),
+                timeout_seconds=5,
+                max_stdout_bytes=16_384,
+                max_stderr_bytes=8_192,
+                environment=self._environment(),
+            ),
         )
-        if result.returncode != 0:
+        if not result.available:
             return {"available": False}
         values = {
             key: value
-            for line in result.stdout.splitlines()
+            for line in result.stdout.decode("utf-8", errors="replace").splitlines()
             if "=" in line
             for key, value in [line.split("=", 1)]
         }
@@ -581,15 +565,17 @@ class JobService:
         manifest["lifecycle"] = "cancel_requested"
         manifest["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._store_shell_manifest(job_id, manifest)
-        result = subprocess.run(
+        result = self._execution().run(
             [self.config.systemctl_command, "--user", "stop", unit],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            env=self._environment(),
+            ExecutionProfile(
+                route=OwnerRoute("execution-job-cancel", EnvironmentProfile.AGENT_JOB),
+                timeout_seconds=5,
+                max_stdout_bytes=16_384,
+                max_stderr_bytes=8_192,
+                environment=self._environment(),
+            ),
         )
-        if result.returncode != 0:
+        if not result.available:
             raise JobError("execution job cancellation was refused")
         manifest["lifecycle"] = "cancelled"
         manifest["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -604,7 +590,7 @@ class JobService:
             return self._cancel_shell(job_id, manifest)
         if not self.config.agent_controller.is_file():
             raise JobError("agent controller is unavailable")
-        result = subprocess.run(
+        result = self._execution().run(
             [
                 str(self.config.agent_controller),
                 "--state-dir",
@@ -613,14 +599,16 @@ class JobService:
                 "--job",
                 job_id,
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-            text=True,
-            env=self._environment(),
+            ExecutionProfile(
+                route=OwnerRoute("agent-job-cancel", EnvironmentProfile.AGENT_JOB),
+                timeout_seconds=20,
+                max_stdout_bytes=16_384,
+                max_stderr_bytes=8_192,
+                environment=self._environment(),
+            ),
         )
-        if result.returncode != 0:
-            raise JobError(result.stderr.strip() or "job cancellation was refused")
+        if not result.available:
+            raise JobError(result.stderr_excerpt() or "job cancellation was refused")
         return {"job_id": job_id, "cancelled": True, "lifecycle": "cancelled"}
 
     def read_output(

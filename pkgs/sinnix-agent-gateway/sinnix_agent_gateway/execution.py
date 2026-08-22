@@ -16,6 +16,7 @@ class EnvironmentProfile(StrEnum):
     """Minimal parent-environment subsets for direct owner adapters."""
 
     PLAIN = "plain"
+    AGENT_JOB = "agent-job"
     TERMINAL = "terminal"
     USER_BUS = "user-bus"
     USER_BUS_OPTIONAL = "user-bus-optional"
@@ -25,10 +26,11 @@ class EnvironmentProfile(StrEnum):
 
 @dataclass(frozen=True)
 class OwnerRoute:
-    """Declared direct-owner execution context.
+    """Declared process-execution context.
 
-    Durable jobs, operator shell execution, and brokered MCP sessions have
-    different lifecycles and do not use this one-shot route contract.
+    Direct owner routes use the bounded one-shot facade. Durable jobs reuse the
+    declared environment and detached process mechanics while retaining their
+    own manifests, artifacts, and lifecycle authority.
     """
 
     name: str
@@ -95,11 +97,20 @@ class OwnerDiagnosticError(ValueError):
         super().__init__(str(response.get("failure_class", "owner_route_failed")))
 
 
+class OwnerExecutionStartError(RuntimeError):
+    """A failed kernel-managed process launch with a typed classification."""
+
+    def __init__(self, failure_class: str):
+        self.failure_class = failure_class
+        super().__init__(failure_class)
+
+
 class OwnerExecution:
-    """Run one direct owner command with one bounded cancellation mechanism."""
+    """Own declared process startup and direct-owner bounded execution."""
 
     _REQUIRED_ENVIRONMENT: dict[EnvironmentProfile, tuple[str, ...]] = {
         EnvironmentProfile.PLAIN: (),
+        EnvironmentProfile.AGENT_JOB: (),
         EnvironmentProfile.TERMINAL: ("XDG_RUNTIME_DIR",),
         EnvironmentProfile.USER_BUS: (
             "DBUS_SESSION_BUS_ADDRESS",
@@ -114,6 +125,20 @@ class OwnerExecution:
         ),
     }
     _OPTIONAL_ENVIRONMENT: dict[EnvironmentProfile, tuple[str, ...]] = {
+        EnvironmentProfile.AGENT_JOB: (
+            "DBUS_SESSION_BUS_ADDRESS",
+            "DISPLAY",
+            "LC_ALL",
+            "SHELL",
+            "SSH_AUTH_SOCK",
+            "TERM",
+            "USER",
+            "WAYLAND_DISPLAY",
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "XDG_RUNTIME_DIR",
+            "XDG_STATE_HOME",
+        ),
         EnvironmentProfile.USER_BUS_OPTIONAL: (
             "DBUS_SESSION_BUS_ADDRESS",
             "XDG_RUNTIME_DIR",
@@ -152,8 +177,44 @@ class OwnerExecution:
             environment.update(overrides)
         return environment, None
 
+    def start(
+        self,
+        command: Sequence[str],
+        profile: ExecutionProfile,
+        *,
+        stdin: Any = subprocess.DEVNULL,
+        stdout: Any = subprocess.PIPE,
+        stderr: Any = subprocess.PIPE,
+    ) -> subprocess.Popen[bytes]:
+        """Start a detached child with the route's declared environment."""
+        if not command:
+            raise OwnerExecutionStartError("command_empty")
+        normalized = tuple(str(part) for part in command)
+        environment, missing_environment = self.environment_for(
+            profile.route, profile.environment
+        )
+        if missing_environment is not None:
+            raise OwnerExecutionStartError(
+                f"environment_unavailable:{missing_environment}"
+            )
+        try:
+            return subprocess.Popen(
+                normalized,
+                stdin=stdin,
+                stdout=stdout,
+                stderr=stderr,
+                cwd=profile.cwd,
+                env=environment,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raise OwnerExecutionStartError(
+                f"command_unavailable:{type(exc).__name__}"
+            ) from exc
+
     @staticmethod
-    def _terminate(process: subprocess.Popen[bytes]) -> None:
+    def terminate(process: subprocess.Popen[bytes]) -> None:
+        """Terminate one detached process group, escalating after one second."""
         if process.poll() is not None:
             return
         try:
@@ -173,38 +234,23 @@ class OwnerExecution:
         if not command:
             raise ValueError("owner command cannot be empty")
         normalized = tuple(str(part) for part in command)
-        environment, missing_environment = self.environment_for(
-            profile.route, profile.environment
-        )
-        if missing_environment is not None:
-            return ExecutionResult(
-                command=normalized,
-                exit_status=None,
-                stdout=b"",
-                stderr=b"",
-                failure_class=f"environment_unavailable:{missing_environment}",
-            )
         try:
-            process = subprocess.Popen(
+            process = self.start(
                 normalized,
+                profile,
                 stdin=(
                     subprocess.PIPE
                     if profile.stdin_bytes is not None
                     else subprocess.DEVNULL
                 ),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=profile.cwd,
-                env=environment,
-                start_new_session=True,
             )
-        except OSError as exc:
+        except OwnerExecutionStartError as exc:
             return ExecutionResult(
                 command=normalized,
                 exit_status=None,
                 stdout=b"",
                 stderr=b"",
-                failure_class=f"command_unavailable:{type(exc).__name__}",
+                failure_class=exc.failure_class,
             )
 
         stdout = bytearray()
@@ -226,7 +272,7 @@ class OwnerExecution:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     timed_out = True
-                    self._terminate(process)
+                    self.terminate(process)
                     break
                 for key, _ in selector.select(min(remaining, 0.1)):
                     stream, destination = key.data
@@ -265,7 +311,7 @@ class OwnerExecution:
                     if len(destination) > limit:
                         exceeded = True
                     if exceeded:
-                        self._terminate(process)
+                        self.terminate(process)
                         break
                 if exceeded:
                     break
@@ -274,7 +320,7 @@ class OwnerExecution:
             if process.stdin is not None:
                 process.stdin.close()
             if process.poll() is None:
-                self._terminate(process)
+                self.terminate(process)
         exit_status = process.wait()
         if timed_out:
             failure = "command_timeout"
