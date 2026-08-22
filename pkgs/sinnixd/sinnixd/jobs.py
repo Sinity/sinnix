@@ -57,10 +57,12 @@ class UserSystemdJobs:
             "--slice=agent.slice",
             f"--property=WorkingDirectory={working_directory}",
             f"--property=RuntimeMaxSec={timeout_seconds}s",
-            "--property=ClearEnvironment=yes",
+            "--",
+            "/run/current-system/sw/bin/env",
+            "-i",
         ]
-        args.extend(f"--setenv={key}={value}" for key, value in sorted(environment.items()))
-        args.extend(["--", *command])
+        args.extend(f"{key}={value}" for key, value in sorted(environment.items()))
+        args.extend(command)
         self._run(args)
 
     def show(self, unit: str) -> Mapping[str, str]:
