@@ -19,7 +19,15 @@ from sinnix_mcp.execution import ExecutionResult
 
 from sinnixd.api import UnixSocketServer, call, receive_frame, send_frame
 from sinnixd.environment import build_environment
-from sinnixd.jobs import GenericJobStore, GenericJobs, SystemdJobError, UserSystemdJobs
+from sinnixd.jobs import (
+    MAX_LOG_ARTIFACT_BYTES,
+    GenericJobStore,
+    GenericJobs,
+    SystemdJobError,
+    UserSystemdJobs,
+    capture_executable,
+    capture_main,
+)
 from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from sinnixd.projects import ProjectCatalog, ProjectConfigError
 from sinnixd.service import SinnixdService
@@ -126,6 +134,14 @@ class FakeSystemdJobs:
 
     def stop(self, unit: str) -> None:
         self.stopped.append(unit)
+        self.properties = {
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "Result": "signal",
+            "ExecMainCode": "killed",
+            "ExecMainStatus": "15",
+            "InvocationID": self.properties.get("InvocationID", "fixture-invocation"),
+        }
 
 
 def generic_jobs(tmp_path: Path, systemd: FakeSystemdJobs | None = None) -> GenericJobs:
@@ -243,8 +259,16 @@ def test_user_systemd_jobs_starts_a_retained_service_with_log_boundary(monkeypat
             "--slice=agent.slice",
             "--property=WorkingDirectory=/work/project",
             "--property=RuntimeMaxSec=123s",
-            f"--property=StandardOutput=append:{tmp_path / 'job.log'}",
-            f"--property=StandardError=append:{tmp_path / 'job.log'}",
+            "--property=StandardOutput=journal",
+            "--property=StandardError=journal",
+            "--",
+            str(capture_executable()),
+            "--log-path",
+            str(tmp_path / "job.log"),
+            "--overflow-path",
+            str(tmp_path / "job.overflow"),
+            "--max-bytes",
+            str(MAX_LOG_ARTIFACT_BYTES),
             "--",
             "/run/current-system/sw/bin/env",
             "-i",
@@ -326,6 +350,7 @@ def test_job_reconciliation_marks_missing_units_without_daemon_owned_state(tmp_p
     assert response.ok
     assert response.payload is not None
     assert response.payload.inline["state"]["phase"] == "missing"
+    assert response.payload.inline["state"]["terminal"]
 
 
 def test_declared_project_job_rejects_arbitrary_execution(tmp_path: Path) -> None:
@@ -425,9 +450,143 @@ def test_logs_are_bounded_and_restart_reconciles_the_same_record(tmp_path: Path)
         "content": "2345",
         "next_offset": 6,
         "truncated": True,
+        "artifact_truncated": False,
     }
     assert [job["job_id"] for job in listed["jobs"]] == [started["job_id"]]
     assert waited["state"]["phase"] == "succeeded"
+
+
+def test_capture_caps_persistent_artifacts_and_reports_producer_overflow(tmp_path: Path) -> None:
+    """Anti-vacuity: removing the bounded writer makes the artifact exceed its fixed cap."""
+    log_path = tmp_path / "overflow.log"
+    overflow_path = tmp_path / "overflow.overflow"
+    producer = ("/bin/sh", "-c", f"head -c {MAX_LOG_ARTIFACT_BYTES + 17} /dev/zero")
+
+    assert capture_main(("--log-path", str(log_path), "--overflow-path", str(overflow_path), "--max-bytes", str(MAX_LOG_ARTIFACT_BYTES), "--", *producer)) == 0
+    assert log_path.stat().st_size == MAX_LOG_ARTIFACT_BYTES
+    assert overflow_path.exists()
+
+    jobs = generic_jobs(tmp_path)
+    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    record = jobs.store.load(started["job_id"])
+    record.log_path.write_bytes(log_path.read_bytes())
+    record.log_path.with_suffix(".overflow").touch()
+    log = jobs.logs(started["job_id"], offset=MAX_LOG_ARTIFACT_BYTES - 2, max_bytes=2)
+    assert log["content"] == "\x00\x00"
+    assert log["next_offset"] == MAX_LOG_ARTIFACT_BYTES
+    assert not log["truncated"]
+    assert log["artifact_truncated"]
+
+
+def test_foreground_specs_redact_argv_and_environment_from_disk(tmp_path: Path) -> None:
+    """Anti-vacuity: serializing the launch command or environment exposes this fixture secret."""
+    secret_argv = "argv-secret-do-not-persist"
+    secret_env = "env-secret-do-not-persist"
+    jobs = generic_jobs(tmp_path)
+    started = jobs.start_foreground(
+        command=("fixture", secret_argv),
+        working_directory=str(tmp_path),
+        environment={"SECRET": secret_env},
+    )
+    raw = (tmp_path / "state" / "jobs" / f"{started['job_id']}.json").read_text()
+    persisted = json.loads(raw)
+    assert secret_argv not in raw
+    assert secret_env not in raw
+    assert persisted["spec"]["command"]["display"] == "synthetic foreground command"
+    assert len(persisted["spec"]["command"]["digest"]) == 64
+
+
+@pytest.mark.parametrize(
+    ("mode", "properties", "expected"),
+    [
+        ("missing", {"LoadState": "not-found", "ActiveState": "inactive"}, "missing"),
+        ("lost", None, "lost"),
+        ("launch-failed", None, "launch-failed"),
+    ],
+)
+def test_nonterminal_absence_and_launch_failure_are_distinct_terminal_outcomes(
+    tmp_path: Path, mode: str, properties: dict[str, str] | None, expected: str
+) -> None:
+    """Anti-vacuity: post-launch loss, missing units, and launch failures have distinct terminal records."""
+    class FailingShow(FakeSystemdJobs):
+        def show(self, unit: str) -> dict[str, str]:
+            raise SystemdJobError("manager unavailable")
+
+    class FailingStart(FakeSystemdJobs):
+        def start(self, **kwargs) -> None:
+            raise SystemdJobError("launch rejected")
+
+    systemd: FakeSystemdJobs = FailingShow() if mode == "lost" else FailingStart() if mode == "launch-failed" else FakeSystemdJobs(properties=properties or {})
+    jobs = generic_jobs(tmp_path, systemd)
+    if mode == "launch-failed":
+        with pytest.raises(SystemdJobError):
+            jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+        record = jobs.store.list()[0]
+        status = jobs.get(record.job_id)
+    else:
+        status = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+        status = jobs.get(status["job_id"])
+    cancelled = jobs.cancel(status["job_id"])
+    waited = jobs.wait(status["job_id"], timeout_seconds=1)
+    assert status["state"]["phase"] == expected
+    assert status["state"]["terminal"]
+    assert cancelled["already_terminal"]
+    assert not systemd.stopped
+    assert waited["state"]["phase"] == expected
+
+
+def test_cancel_persists_intent_before_stop_and_preserves_exit_race(tmp_path: Path) -> None:
+    """Anti-vacuity: moving save after stop loses intent on a stop failure and mislabels an exit as cancelled."""
+    class ExitDuringStop(FakeSystemdJobs):
+        def stop(self, unit: str) -> None:
+            self.stopped.append(unit)
+            self.properties = {"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0", "InvocationID": "fixture-invocation"}
+
+    class StopFails(FakeSystemdJobs):
+        def stop(self, unit: str) -> None:
+            self.stopped.append(unit)
+            raise SystemdJobError("stop interrupted")
+
+    exited = generic_jobs(tmp_path / "exit", ExitDuringStop(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"}))
+    started = exited.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    cancelled = exited.cancel(started["job_id"])
+    assert cancelled["state"]["phase"] == "succeeded"
+
+    crashing = generic_jobs(tmp_path / "crash", StopFails(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"}))
+    started = crashing.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    with pytest.raises(SystemdJobError):
+        crashing.cancel(started["job_id"])
+    record = crashing.store.load(started["job_id"])
+    assert record.cancel_requested_at is not None
+    assert record.cancel_requested_invocation_id == "fixture-invocation"
+
+
+def test_unix_socket_wait_does_not_block_cancel_get_logs_or_start(tmp_path: Path) -> None:
+    """Anti-vacuity: serial accept handling leaves this cancel call blocked behind job.wait."""
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"})
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+    socket_path = tmp_path / "sinnixd.sock"
+    stop_event = threading.Event()
+    thread = start_server(UnixSocketServer(socket_path, service), stop_event=stop_event)
+    started = service.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={}, timeout_seconds=10)
+    wait_result: dict[str, object] = {}
+    waiter = threading.Thread(target=lambda: wait_result.setdefault("value", call(socket_path, request("job.wait", "systemd-jobs", {"job_id": started["job_id"], "timeout_seconds": 2}))), daemon=True)
+    waiter.start()
+    deadline = time.monotonic() + 1
+    while not waiter.is_alive() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    response = call(socket_path, request("job.cancel", "systemd-jobs", {"job_id": started["job_id"]}))
+    get = call(socket_path, request("job.get", "systemd-jobs", {"job_id": started["job_id"]}))
+    logs = call(socket_path, request("job.logs", "systemd-jobs", {"job_id": started["job_id"], "max_bytes": 1}))
+    next_job = service.start_foreground(command=("fixture-next",), working_directory=str(tmp_path), environment={}, timeout_seconds=10)
+    waiter.join(timeout=1)
+    stop_event.set()
+    thread.join(timeout=1)
+    assert response["ok"] and get["ok"] and logs["ok"]
+    assert next_job["job_id"] != started["job_id"]
+    assert not waiter.is_alive()
+    assert wait_result["value"]["payload"]["value"]["state"]["phase"] == "cancelled"
 
 
 def test_job_rpc_get_list_wait_logs_and_cancel_share_one_record(tmp_path: Path) -> None:
