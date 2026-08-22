@@ -164,7 +164,6 @@ def test_user_systemd_jobs_starts_a_retained_service_with_declared_boundary(monk
         [
             "systemd-run",
             "--user",
-            "--service",
             "--quiet",
             "--unit=sinnixd-job-00000000-0000-0000-0000-000000000001.service",
             "--slice=agent.slice",

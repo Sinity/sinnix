@@ -51,7 +51,6 @@ class UserSystemdJobs:
         args = [
             "systemd-run",
             "--user",
-            "--service",
             "--quiet",
             f"--unit={unit}",
             "--slice=agent.slice",
