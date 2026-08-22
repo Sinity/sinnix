@@ -186,18 +186,25 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 tools = await session.list_tools()
                 names = {tool.name for tool in tools.tools}
                 assert initialized.server_info.name == "sinnix-agent-gateway"
-                assert "project_read" in names
+                assert {"status", "catalog", "project_read"} <= names
                 assert "project_write" not in names
                 assert "agent_launch" not in names
-                result = await session.call_tool("gateway_status", {})
+                result = await session.call_tool("status", {})
                 status = json.loads(result.content[0].text)
                 assert status["principal"] == "observer"
+                assert status["route_preflight"]["routes"]
                 assert status["manifests"]["live_server"]["sha256"]
                 assert status["manifests"]["comparisons"] == {
                     "live_to_nix_approved": "unobserved",
                     "live_to_chatgpt_observed": "unobserved",
                     "nix_approved_to_chatgpt_observed": "unobserved",
                 }
+                catalog_result = await session.call_tool("catalog", {"text": "gateway"})
+                catalog = json.loads(catalog_result.content[0].text)
+                assert [action["name"] for action in catalog["actions"]] == [
+                    "gateway.status",
+                    "gateway.catalog",
+                ]
 
     anyio.run(probe)
 

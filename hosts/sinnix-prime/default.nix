@@ -42,8 +42,8 @@
         # Review checkpoint on what reaches remote ChatGPT. This is the reviewed
         # observer manifest, regenerated from the packaged gateway on 2026-08-22.
         # It contains only read-annotated tools, including bounded content,
-        # opaque-artifact reads, and the non-mutating route self-check.
-        approvedManifestHash = "8ef260221c5cb65128a37ba4b38dbf1264f639c65bff55c11f8eea1dff904946";
+        # opaque-artifact reads, V2 status, catalog, and route preflight.
+        approvedManifestHash = "c8eabdf643120e1efd338c3724ac9ed54893fe6cc9a5124563aa18cddabac46b";
         tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
       };
     };

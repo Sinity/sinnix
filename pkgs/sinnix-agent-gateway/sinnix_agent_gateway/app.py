@@ -11,11 +11,13 @@ from mcp.types import ToolAnnotations
 from .artifacts import ArtifactService
 from .audit import AuditService
 from .beads import BeadsService
+from .bindings import TargetToolBinding, TargetToolBindings
 from .browser import BrowserService
 from .capabilities import Capability, Principal
 from .capability_index import CapabilityIndexService
 from .captures import CaptureService
 from .config import GatewayConfig
+from .contracts import EffectMode, VerbFamily
 from .desktop import DesktopService
 from .files import HostFileService
 from .jobs import JobService
@@ -26,9 +28,9 @@ from .observe import ObserveService
 from .project_context import ProjectContextService
 from .projects import ProjectService
 from .redaction import public_error
+from .route_preflight import GatewayRoutePreflight
 from .registry import CatalogSearch, REGISTRY
 from .schemas import AgentLaunchRequest
-from .self_check import GatewaySelfCheck
 from .sessions import SessionLogService
 from .shell import ShellService
 from .terminals import TerminalService
@@ -91,7 +93,7 @@ class Runtime:
     timeline: TimelineService
     mcp_broker: McpBrokerService
     shell: ShellService
-    self_check: GatewaySelfCheck
+    route_preflight: GatewayRoutePreflight
 
     @classmethod
     def create(cls, config: GatewayConfig, principal_name: str) -> "Runtime":
@@ -123,8 +125,25 @@ class Runtime:
             timeline=TimelineService(principal, sessions),
             mcp_broker=McpBrokerService(config, principal, artifacts),
             shell=ShellService(config, principal),
-            self_check=GatewaySelfCheck(config),
+            route_preflight=GatewayRoutePreflight(config),
         )
+
+    def gateway_status(
+        self,
+        principal_contract_hash: str,
+        manifest_hash: str,
+        action_catalog_hash: str,
+        catalog_revision: str,
+    ) -> dict[str, Any]:
+        status = self.observe.gateway_status(
+            self.principal_name,
+            principal_contract_hash,
+            manifest_hash,
+            action_catalog_hash,
+            catalog_revision,
+        )
+        status["route_preflight"] = self.route_preflight.run()
+        return status
 
     def _record_result(self, operation: str, result: Any) -> None:
         payload: dict[str, Any] = {}
@@ -230,24 +249,66 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             separators=(",", ":"),
         )
 
-    @mcp.tool(title="Gateway status", annotations=READ_ONLY_TOOL)
-    async def gateway_status(view: str = "overview") -> dict[str, Any]:
-        """Return gateway contract status or a non-mutating owner-route self-check."""
-        if view == "self_check":
-            return runtime.execute("gateway_self_check", runtime.self_check.run)
-        if view != "overview":
-            raise ValueError("gateway status view must be 'overview' or 'self_check'")
-        manifest = canonical_manifest(await mcp.list_tools())
-        return runtime.execute(
-            "gateway_status",
-            lambda: runtime.observe.gateway_status(
-                principal_name,
-                _principal_contract(principal_name),
-                manifest["sha256"],
-                REGISTRY.action_catalog_hash(principal_name),
-                REGISTRY.revision,
+    target_bindings = TargetToolBindings(
+        REGISTRY,
+        (
+            TargetToolBinding(
+                tool_name="status",
+                action_name="gateway.status",
+                owner="gateway",
+                route="observe.gateway_status",
             ),
-        )
+            TargetToolBinding(
+                tool_name="catalog",
+                action_name="gateway.catalog",
+                owner="registry",
+                route="registry.search",
+            ),
+        ),
+    )
+
+    if target_bindings.is_visible("status", principal_name):
+
+        @mcp.tool(title="Gateway status", annotations=READ_ONLY_TOOL)
+        async def status() -> dict[str, Any]:
+            """Return the current principal's gateway contract and availability observations."""
+            action = target_bindings.action_for_tool("status", principal_name)
+            manifest = canonical_manifest(await mcp.list_tools())
+            return runtime.execute(
+                action.name,
+                lambda: runtime.gateway_status(
+                    _principal_contract(principal_name),
+                    manifest["sha256"],
+                    REGISTRY.action_catalog_hash(principal_name),
+                    REGISTRY.revision,
+                ),
+            )
+
+    if target_bindings.is_visible("catalog", principal_name):
+
+        @mcp.tool(title="Gateway V2 catalog", annotations=READ_ONLY_TOOL)
+        def catalog(
+            text: str | None = None,
+            domain: str | None = None,
+            verb: str | None = None,
+            effect: str | None = None,
+            resource_kind: str | None = None,
+        ) -> dict[str, Any]:
+            """Search the principal-filtered V2 resource and executable action catalog."""
+            action = target_bindings.action_for_tool("catalog", principal_name)
+            return runtime.execute(
+                action.name,
+                lambda: REGISTRY.search(
+                    CatalogSearch(
+                        text=text,
+                        domain=domain,
+                        verb=VerbFamily(verb) if verb is not None else None,
+                        effect=EffectMode(effect) if effect is not None else None,
+                        resource_kind=resource_kind,
+                        principal=principal_name,
+                    )
+                ),
+            )
 
     @mcp.tool(title="Machine report", annotations=READ_ONLY_TOOL)
     def machine_report() -> dict[str, Any]:
