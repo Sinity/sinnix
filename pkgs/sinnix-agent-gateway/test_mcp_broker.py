@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TextIO
+from typing import Sequence, TextIO
 
 import anyio
 import pytest
@@ -13,6 +13,12 @@ import pytest
 from sinnix_agent_gateway.artifacts import ArtifactService
 from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig
+from sinnix_agent_gateway.execution import (
+    EnvironmentProfile,
+    ExecutionProfile,
+    ExecutionResult,
+    OwnerExecution,
+)
 from sinnix_agent_gateway.mcp_broker import McpBrokerError, McpBrokerService
 
 
@@ -22,6 +28,16 @@ class FakeTransport:
 
     async def __aexit__(self, *args: object) -> None:
         return None
+
+
+class RecordingExecution(OwnerExecution):
+    def __init__(self) -> None:
+        self.calls: list[tuple[tuple[str, ...], ExecutionProfile]] = []
+
+    def run(self, command: Sequence[str], profile: ExecutionProfile) -> ExecutionResult:
+        normalized = tuple(command)
+        self.calls.append((normalized, profile))
+        return ExecutionResult(normalized, 0, b"", b"")
 
 
 class FailingTransport:
@@ -95,6 +111,25 @@ def broker_service(tmp_path: Path, principal_name: str, max_bytes: int = 262_144
     )
     principal = Principal.for_name(principal_name)
     return McpBrokerService(config, principal, ArtifactService(config, principal))
+
+
+def test_broker_stop_uses_the_shared_execution_kernel(tmp_path: Path) -> None:
+    broker = broker_service(tmp_path, "observer")
+    execution = RecordingExecution()
+    broker.execution = execution
+
+    broker._stop("sinnix-gateway-mcp-read-fixture.service")
+
+    command, profile = execution.calls[0]
+    assert command == (
+        broker.config.systemctl_command,
+        "--user",
+        "stop",
+        "sinnix-gateway-mcp-read-fixture.service",
+    )
+    assert profile.route.name == "mcp-broker-cancel"
+    assert profile.route.environment_profile == EnvironmentProfile.USER_BUS_OPTIONAL
+    assert profile.timeout_seconds == 5
 
 
 def test_observer_catalog_allows_a_broker_without_user_bus_access(

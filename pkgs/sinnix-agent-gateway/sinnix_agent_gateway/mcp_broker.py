@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
-import subprocess
 import uuid
 from typing import Any
 
@@ -13,7 +12,12 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from .execution import EnvironmentProfile, OwnerExecution, OwnerRoute
+from .execution import (
+    EnvironmentProfile,
+    ExecutionProfile,
+    OwnerExecution,
+    OwnerRoute,
+)
 
 
 class McpBrokerError(ValueError):
@@ -225,12 +229,17 @@ class McpBrokerService:
         )
 
     def _stop(self, unit: str) -> None:
-        subprocess.run(
+        execution = self.execution or OwnerExecution()
+        execution.run(
             [self.config.systemctl_command, "--user", "stop", unit],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
+            ExecutionProfile(
+                route=OwnerRoute(
+                    "mcp-broker-cancel", EnvironmentProfile.USER_BUS_OPTIONAL
+                ),
+                timeout_seconds=5,
+                max_stdout_bytes=16_384,
+                max_stderr_bytes=8_192,
+            ),
         )
 
     def _store_large_response(
