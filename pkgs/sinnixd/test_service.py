@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import pytest
 
+import sinnixd.jobs as jobs_module
 from sinnix_mcp import OpaquePayload, RequestEnvelope, ResponseEnvelope, SinnixRef, SourceBinding
 from sinnix_mcp.execution import ExecutionResult
 
@@ -21,6 +22,7 @@ from sinnixd.api import UnixSocketServer, call, receive_frame, send_frame
 from sinnixd.environment import build_environment
 from sinnixd.jobs import (
     MAX_LOG_ARTIFACT_BYTES,
+    GenericJobSpec,
     GenericJobStore,
     GenericJobs,
     SystemdJobError,
@@ -280,6 +282,28 @@ def test_user_systemd_jobs_starts_a_retained_service_with_log_boundary(monkeypat
             "lint",
         ]
     ]
+
+
+def test_user_systemd_os_error_reconciles_without_persisting_raw_error(monkeypatch, tmp_path: Path) -> None:
+    """Anti-vacuity: raw subprocess OSErrors must enter the systemd reconciliation path."""
+    secret = "systemd-run-os-error-do-not-persist"
+    calls: list[str] = []
+
+    def fake_run(args, **_kwargs):
+        calls.append(args[0])
+        if args[0] == "systemd-run":
+            raise OSError(secret)
+        return SimpleNamespace(stdout="LoadState=loaded\nActiveState=active\nResult=success\n")
+
+    monkeypatch.setattr("sinnixd.jobs.subprocess.run", fake_run)
+    jobs = GenericJobs(UserSystemdJobs(), GenericJobStore(tmp_path / "state"), wait_poll_seconds=0.001)
+
+    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    persisted = (tmp_path / "state" / "jobs" / f"{started['job_id']}.json").read_text()
+
+    assert calls == ["systemd-run", "systemctl"]
+    assert started["state"]["phase"] == "running"
+    assert secret not in persisted
 
 
 def test_declared_and_foreground_jobs_share_the_generic_route(tmp_path: Path) -> None:
@@ -551,12 +575,79 @@ def test_foreground_specs_redact_argv_and_environment_from_disk(tmp_path: Path) 
     assert len(persisted["spec"]["command"]["digest"]) == 64
 
 
+def test_job_store_fsyncs_parent_after_replacing_record(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Anti-vacuity: a file fsync before rename cannot make the renamed entry crash-durable."""
+    store = GenericJobStore(tmp_path / "state")
+    record = store.create(
+        GenericJobSpec(kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={}),
+        "00000000-0000-0000-0000-000000000001",
+    )
+    directory_fd = 10_000
+    events: list[tuple[str, object]] = []
+    original_open = os.open
+    original_close = os.close
+    original_replace = os.replace
+
+    def tracked_open(path, flags, *args):
+        if flags & os.O_DIRECTORY:
+            events.append(("open-directory", Path(path)))
+            return directory_fd
+        return original_open(path, flags, *args)
+
+    def tracked_fsync(descriptor: int) -> None:
+        events.append(("fsync-directory" if descriptor == directory_fd else "fsync-file", descriptor))
+
+    def tracked_close(descriptor: int) -> None:
+        if descriptor == directory_fd:
+            events.append(("close-directory", descriptor))
+            return
+        original_close(descriptor)
+
+    def tracked_replace(source, destination) -> None:
+        events.append(("replace", Path(destination)))
+        original_replace(source, destination)
+
+    monkeypatch.setattr("sinnixd.jobs.os.open", tracked_open)
+    monkeypatch.setattr("sinnixd.jobs.os.fsync", tracked_fsync)
+    monkeypatch.setattr("sinnixd.jobs.os.close", tracked_close)
+    monkeypatch.setattr("sinnixd.jobs.os.replace", tracked_replace)
+
+    store.save(record)
+
+    replace_index = events.index(("replace", store.records_root / f"{record.job_id}.json"))
+    file_fsync_index = next(index for index, event in enumerate(events) if event[0] == "fsync-file")
+    directory_fsync_index = events.index(("fsync-directory", directory_fd))
+    assert file_fsync_index < replace_index < directory_fsync_index
+    assert events[directory_fsync_index - 1] == ("open-directory", store.records_root)
+
+
+def test_job_store_fsyncs_parents_when_creating_state_directories(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Anti-vacuity: mkdir alone can lose a newly established state hierarchy after a crash."""
+    synchronized: list[Path] = []
+    original_fsync_directory = jobs_module._fsync_directory
+
+    def tracked_fsync_directory(path: Path) -> None:
+        synchronized.append(path)
+        original_fsync_directory(path)
+
+    monkeypatch.setattr("sinnixd.jobs._fsync_directory", tracked_fsync_directory)
+    store = GenericJobStore(tmp_path / "state")
+
+    store.create(
+        GenericJobSpec(kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={}),
+        "00000000-0000-0000-0000-000000000002",
+    )
+
+    assert synchronized == [tmp_path, store.root, store.root, store.logs_root, store.records_root]
+
+
 @pytest.mark.parametrize(
     ("mode", "properties", "expected"),
     [
         ("missing", {"LoadState": "not-found", "ActiveState": "inactive"}, "missing"),
         ("lost", None, "lost"),
-        ("launch-failed", None, "launch-failed"),
     ],
 )
 def test_nonterminal_absence_and_launch_failure_are_distinct_terminal_outcomes(
@@ -567,20 +658,10 @@ def test_nonterminal_absence_and_launch_failure_are_distinct_terminal_outcomes(
         def show(self, unit: str) -> dict[str, str]:
             raise SystemdJobError("manager unavailable")
 
-    class FailingStart(FakeSystemdJobs):
-        def start(self, **kwargs) -> None:
-            raise SystemdJobError("launch rejected")
-
-    systemd: FakeSystemdJobs = FailingShow() if mode == "lost" else FailingStart() if mode == "launch-failed" else FakeSystemdJobs(properties=properties or {})
+    systemd: FakeSystemdJobs = FailingShow() if mode == "lost" else FakeSystemdJobs(properties=properties or {})
     jobs = generic_jobs(tmp_path, systemd)
-    if mode == "launch-failed":
-        with pytest.raises(SystemdJobError):
-            jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
-        record = jobs.store.list()[0]
-        status = jobs.get(record.job_id)
-    else:
-        status = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
-        status = jobs.get(status["job_id"])
+    status = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    status = jobs.get(status["job_id"])
     cancelled = jobs.cancel(status["job_id"])
     waited = jobs.wait(status["job_id"], timeout_seconds=1)
     assert status["state"]["phase"] == expected
@@ -588,6 +669,45 @@ def test_nonterminal_absence_and_launch_failure_are_distinct_terminal_outcomes(
     assert cancelled["already_terminal"]
     assert not systemd.stopped
     assert waited["state"]["phase"] == expected
+
+
+def test_start_returns_systemd_state_when_accepted_reply_is_lost(tmp_path: Path) -> None:
+    """Anti-vacuity: an accepted transient unit must not become launch-failed when its reply is lost."""
+    secret = "accepted-but-reply-lost"
+
+    class ReplyLostAfterAccept(FakeSystemdJobs):
+        def start(self, **kwargs) -> None:
+            self.started.append(dict(kwargs))
+            raise SystemdJobError(secret)
+
+    jobs = generic_jobs(tmp_path, ReplyLostAfterAccept())
+
+    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    persisted = (tmp_path / "state" / "jobs" / f"{started['job_id']}.json").read_text()
+
+    assert started["state"]["phase"] == "running"
+    assert started["state"]["systemd"]["LoadState"] == "loaded"
+    assert secret not in persisted
+
+
+def test_start_persists_launch_failed_only_when_systemd_confirms_absence(tmp_path: Path) -> None:
+    """Anti-vacuity: a launch error alone is insufficient evidence that systemd rejected the unit."""
+    secret = "confirmed-absent-launch-error"
+
+    class ConfirmedAbsent(FakeSystemdJobs):
+        def start(self, **kwargs) -> None:
+            raise SystemdJobError(secret)
+
+    jobs = generic_jobs(tmp_path, ConfirmedAbsent(properties={"LoadState": "not-found", "ActiveState": "inactive"}))
+
+    with pytest.raises(SystemdJobError, match=secret):
+        jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+
+    record = jobs.store.list()[0]
+    persisted = (tmp_path / "state" / "jobs" / f"{record.job_id}.json").read_text()
+    assert record.state["phase"] == "launch-failed"
+    assert record.state["error"] == {"code": "systemd-job-error"}
+    assert secret not in persisted
 
 
 @pytest.mark.parametrize("mode", ("lost", "launch-failed"))
@@ -603,7 +723,10 @@ def test_terminal_systemd_errors_persist_only_stable_codes(tmp_path: Path, mode:
         def start(self, **kwargs) -> None:
             raise SystemdJobError(secret)
 
-    jobs = generic_jobs(tmp_path, FailingShow() if mode == "lost" else FailingStart())
+    jobs = generic_jobs(
+        tmp_path,
+        FailingShow() if mode == "lost" else FailingStart(properties={"LoadState": "not-found", "ActiveState": "inactive"}),
+    )
     if mode == "launch-failed":
         with pytest.raises(SystemdJobError, match=secret):
             jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
