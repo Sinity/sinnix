@@ -4,7 +4,7 @@ import hashlib
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from .contracts import ActionSpec, EffectMode, ResourceSpec, VerbFamily
 from sinnix_mcp.refs import RefTemplate, SinnixRef
@@ -14,6 +14,9 @@ class RegistryError(ValueError):
     """Raised when executable catalog declarations cannot form one contract."""
 
 
+CatalogAvailabilityResolver = Callable[[str, str], tuple[str, str | None]]
+
+
 @dataclass(frozen=True)
 class CatalogSearch:
     text: str | None = None
@@ -21,6 +24,7 @@ class CatalogSearch:
     verb: VerbFamily | None = None
     effect: EffectMode | None = None
     resource_kind: str | None = None
+    project: str | None = None
     availability: str | None = None
     principal: str | None = None
 
@@ -121,6 +125,9 @@ class CatalogRegistry:
         principal: str | None = None,
         resource_kind: str | None = None,
         availability: str | None = None,
+        text: str | None = None,
+        project: str | None = None,
+        availability_resolver: CatalogAvailabilityResolver | None = None,
     ) -> list[dict[str, Any]]:
         rows = []
         for resource in self.resources:
@@ -128,7 +135,24 @@ class CatalogRegistry:
                 continue
             if resource_kind is not None and resource.kind != resource_kind:
                 continue
+            if project is not None and "project_id" not in resource.ref_template.variables:
+                continue
             row = resource.catalog_row()
+            searchable = " ".join(
+                [
+                    resource.kind,
+                    resource.owner,
+                    resource.ref_template.template,
+                    *resource.readable_projections,
+                ]
+            ).casefold()
+            if text is not None and text not in searchable:
+                continue
+            if availability_resolver is not None:
+                state, reason = availability_resolver("resource", resource.kind)
+                row["availability"] = state
+                if reason is not None:
+                    row["availability_reason"] = reason
             if availability is not None and row["availability"] != availability:
                 continue
             rows.append(row)
@@ -163,11 +187,23 @@ class CatalogRegistry:
             raise RegistryError(f"ambiguous resource reference: {parsed}")
         return matches[0]
 
-    def search(self, search: CatalogSearch = CatalogSearch()) -> dict[str, Any]:
+    def search(
+        self,
+        search: CatalogSearch = CatalogSearch(),
+        *,
+        availability_resolver: CatalogAvailabilityResolver | None = None,
+    ) -> dict[str, Any]:
         text = search.text.casefold() if search.text else None
         actions = []
         for action in self.actions:
+            if search.principal and search.principal not in action.principals:
+                continue
             row = action.catalog_row()
+            if availability_resolver is not None:
+                state, reason = availability_resolver("action", action.name)
+                row["availability"] = state
+                if reason is not None:
+                    row["availability_reason"] = reason
             searchable = " ".join(
                 [
                     action.name,
@@ -188,20 +224,27 @@ class CatalogRegistry:
                 continue
             if search.resource_kind and search.resource_kind not in action.resource_kinds:
                 continue
-            if search.availability and row["availability"] != search.availability:
+            if search.project and not any(
+                "project_id" in self.resource(kind).ref_template.variables
+                for kind in action.resource_kinds
+            ):
                 continue
-            if search.principal and search.principal not in action.principals:
+            if search.availability and row["availability"] != search.availability:
                 continue
             actions.append(row)
         resources = self._resource_rows(
             principal=search.principal,
             resource_kind=search.resource_kind,
             availability=search.availability,
+            text=text,
+            project=search.project,
+            availability_resolver=availability_resolver,
         )
         return {
             "revision": self.revision,
             "action_catalog_hash": self.action_catalog_hash(search.principal),
             "principal": search.principal,
+            "project": search.project,
             "resources": resources,
             "actions": actions,
         }
@@ -226,7 +269,8 @@ CATALOG_QUERY_SCHEMA: dict[str, Any] = {
         "verb": {"enum": [verb.value for verb in VerbFamily]},
         "effect": {"enum": [effect.value for effect in EffectMode]},
         "resource_kind": {"type": "string", "maxLength": 128},
-        "availability": {"enum": ["declared"]},
+        "project": {"type": "string", "minLength": 1, "maxLength": 128},
+        "availability": {"enum": ["available", "unavailable"]},
     },
 }
 
@@ -277,7 +321,7 @@ def build_registry() -> CatalogRegistry:
                 {
                     "input": {
                         "resource_kind": "bead",
-                        "availability": "declared",
+                        "availability": "available",
                     }
                 },
             ),

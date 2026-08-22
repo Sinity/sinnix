@@ -56,9 +56,15 @@ class ObserveService:
             or not isinstance(snapshot.get("manifest_sha256"), str)
         ):
             return None
+        action_catalog_sha256 = snapshot.get("action_catalog_sha256")
+        if action_catalog_sha256 is not None and not isinstance(
+            action_catalog_sha256, str
+        ):
+            return None
         return {
             "principal": snapshot["principal"],
             "manifest_sha256": snapshot["manifest_sha256"],
+            "action_catalog_sha256": action_catalog_sha256,
         }
 
     @staticmethod
@@ -240,9 +246,19 @@ class ObserveService:
             if self.config.approved_manifest_principal == principal_name
             else None
         )
+        approved_catalog_hash = (
+            self.config.approved_action_catalog_hash
+            if self.config.approved_manifest_principal == principal_name
+            else None
+        )
         snapshot = self._connector_snapshot()
         observed_hash = (
             snapshot["manifest_sha256"]
+            if snapshot is not None and snapshot["principal"] == principal_name
+            else None
+        )
+        observed_catalog_hash = (
+            snapshot["action_catalog_sha256"]
             if snapshot is not None and snapshot["principal"] == principal_name
             else None
         )
@@ -250,9 +266,41 @@ class ObserveService:
             "status": "ready",
             "principal": principal_name,
             "principal_contract_hash": capability_contract_hash,
+            "tool_manifest_hash": live_manifest_hash,
+            "action_catalog_hash": action_catalog_hash,
             "catalog": {
                 "revision": catalog_revision,
-                "action_catalog_hash": action_catalog_hash,
+                "live_action_catalog": {
+                    "principal": principal_name,
+                    "sha256": action_catalog_hash,
+                },
+                "nix_approved": (
+                    {
+                        "principal": self.config.approved_manifest_principal,
+                        "sha256": approved_catalog_hash,
+                    }
+                    if approved_catalog_hash is not None
+                    else None
+                ),
+                "chatgpt_observed": (
+                    {
+                        "principal": principal_name,
+                        "sha256": observed_catalog_hash,
+                    }
+                    if observed_catalog_hash is not None
+                    else None
+                ),
+                "comparisons": {
+                    "live_to_nix_approved": self._comparison(
+                        action_catalog_hash, approved_catalog_hash
+                    ),
+                    "live_to_chatgpt_observed": self._comparison(
+                        action_catalog_hash, observed_catalog_hash
+                    ),
+                    "nix_approved_to_chatgpt_observed": self._comparison(
+                        approved_catalog_hash, observed_catalog_hash
+                    ),
+                },
             },
             "manifests": {
                 "live_server": {

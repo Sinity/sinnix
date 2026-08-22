@@ -57,6 +57,7 @@ class GatewayConfig:
     observe_command: str = "sinnix-observe"
     max_result_bytes: int = 262_144
     approved_manifest_hash: str | None = None
+    approved_action_catalog_hash: str | None = None
     approved_manifest_principal: str = "observer"
     connector_snapshot_path: Path | None = None
     systemd_run_command: str = "systemd-run"
@@ -188,6 +189,7 @@ class GatewayConfig:
             observe_command=raw.get("observeCommand", "sinnix-observe"),
             max_result_bytes=int(raw.get("maxResultBytes", 262_144)),
             approved_manifest_hash=raw.get("approvedManifestHash"),
+            approved_action_catalog_hash=raw.get("approvedActionCatalogHash"),
             approved_manifest_principal=raw.get(
                 "approvedManifestPrincipal", "observer"
             ),

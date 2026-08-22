@@ -137,10 +137,10 @@ def test_catalog_contract_resources_preserve_generated_schema_metadata() -> None
     )
     assert action["action"]["effect"] == "read"
     assert action["action"]["input_schema"]["properties"]["availability"] == {
-        "enum": ["declared"]
+        "enum": ["available", "unavailable"]
     }
     assert action["action"]["examples"] == [
-        {"input": {"resource_kind": "bead", "availability": "declared"}}
+        {"input": {"resource_kind": "bead", "availability": "available"}}
     ]
     assert resource["resource"]["contract_ref"] == "sinnix://gateway/v2/resources/bead"
     assert all(row["availability"] == "declared" for row in catalog["resources"])
@@ -204,9 +204,12 @@ def test_resource_get_contract_formats_canonical_project_relationships() -> None
 
 
 def test_catalog_search_filters_resource_kind_and_text() -> None:
-    result = REGISTRY.search(CatalogSearch(resource_kind="bead", text="catalog"))
+    result = REGISTRY.search(CatalogSearch(resource_kind="bead", text="bead"))
 
-    assert [action["name"] for action in result["actions"]] == ["gateway.catalog"]
+    assert [action["name"] for action in result["actions"]] == [
+        "gateway.catalog",
+        "resources.get",
+    ]
     assert result["resources"] == [
         {
             "kind": "bead",
@@ -219,3 +222,26 @@ def test_catalog_search_filters_resource_kind_and_text() -> None:
             "availability": "declared",
         }
     ]
+
+
+def test_catalog_search_scopes_contracts_to_project_resources() -> None:
+    result = REGISTRY.search(CatalogSearch(project="sinnix"))
+
+    assert result["project"] == "sinnix"
+    assert {resource["kind"] for resource in result["resources"]} == {
+        "project",
+        "checkout",
+        "bead",
+        "task_authority",
+    }
+    assert {action["name"] for action in result["actions"]} == {
+        "gateway.catalog",
+        "resources.get",
+    }
+
+
+def test_catalog_search_applies_text_to_resource_contracts() -> None:
+    result = REGISTRY.search(CatalogSearch(text="scrollback"))
+
+    assert result["actions"] == []
+    assert [resource["kind"] for resource in result["resources"]] == ["terminal"]
