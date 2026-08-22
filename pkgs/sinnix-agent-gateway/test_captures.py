@@ -1,31 +1,51 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
+
 from sinnix_agent_gateway.capabilities import Capability, PolicyError, Principal
 from sinnix_agent_gateway.captures import CaptureService
 from sinnix_agent_gateway.config import GatewayConfig
 
 
-def make_lake(root: Path) -> None:
-    for lane, records in {
-        "mpris": [{"lane": "mpris", "payload": {"title": "song"}}],
-        "clipboard": [{"lane": "clipboard", "payload": {"text": "secret"}}],
-        "router": [{"lane": "router", "payload": {"bytes": 100}}],
-    }.items():
-        lane_dir = root / lane
-        lane_dir.mkdir(parents=True)
-        (lane_dir / "2026-08-13.jsonl").write_text(
-            "\n".join(json.dumps(r) for r in records) + "\n"
+def make_inventory(tmp_path: Path) -> tuple[Path, dict[str, Path]]:
+    activity_root = tmp_path / "activity"
+    machine_root = tmp_path / "machine"
+    lane_paths = {
+        "mpris": activity_root / "mpris",
+        "clipboard": activity_root / "clipboard",
+        "router": machine_root / "router",
+    }
+    for lane, path in lane_paths.items():
+        path.mkdir(parents=True)
+        (path / f"{lane}-index.jsonl").write_text('{"ts":1,"seq":1}\n')
+    inventory = tmp_path / "runtime-inventory.json"
+    inventory.write_text(
+        json.dumps(
+            {
+                "captures": [
+                    {"name": lane, "path": str(path)}
+                    for lane, path in lane_paths.items()
+                ]
+            }
         )
+    )
+    return inventory, lane_paths
 
 
-def config(tmp_path: Path) -> GatewayConfig:
-    root = tmp_path / "captures"
-    make_lake(root)
-    return GatewayConfig(state_dir=tmp_path / "state", projects={}, captures_root=root)
+def config(tmp_path: Path) -> tuple[GatewayConfig, dict[str, Path]]:
+    inventory, lane_paths = make_inventory(tmp_path)
+    return (
+        GatewayConfig(
+            state_dir=tmp_path / "state",
+            projects={},
+            runtime_inventory=inventory,
+        ),
+        lane_paths,
+    )
 
 
 @pytest.mark.parametrize("principal_name", ("observer", "agent-control", "operator"))
@@ -38,13 +58,16 @@ def test_principals_have_full_operator_authorized_capture_read_access(
     principal.require_lane("clipboard")
 
 
-def test_capture_lanes_tool_lists_every_authorized_lane(tmp_path: Path) -> None:
-    service = CaptureService(config(tmp_path), Principal.for_name("observer"))
+def test_capture_lanes_tool_lists_runtime_declared_envelope_lanes(tmp_path: Path) -> None:
+    gateway_config, _ = config(tmp_path)
+    service = CaptureService(gateway_config, Principal.for_name("observer"))
 
     result = service.lanes_visible()
 
-    assert result["lanes"] == ["clipboard", "mpris", "router"]
-    assert result["total_lanes_on_disk"] == 3
+    assert result == {
+        "lanes": ["clipboard", "mpris", "router"],
+        "total_queryable_lanes": 3,
+    }
 
 
 def test_filter_lanes_returns_requested_or_all_authorized_lanes() -> None:
@@ -55,14 +78,66 @@ def test_filter_lanes_returns_requested_or_all_authorized_lanes() -> None:
     assert principal.filter_lanes(None, available) == available
 
 
-def test_capture_query_reports_a_missing_collector_as_unavailable(tmp_path: Path) -> None:
-    root = tmp_path / "captures"
-    make_lake(root)
+def test_capture_query_groups_declared_lanes_by_inventory_root(tmp_path: Path) -> None:
+    gateway_config, lane_paths = config(tmp_path)
+    captured = tmp_path / "collector-commands.jsonl"
+    collector = tmp_path / "sinnix-capture"
+    collector.write_text(
+        f"#!{sys.executable}\n"
+        "import json, pathlib, sys\n"
+        f"with pathlib.Path({str(captured)!r}).open('a') as output:\n"
+        "    output.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "lanes = [sys.argv[index + 1] for index, value in enumerate(sys.argv) if value == '--lane']\n"
+        "print(json.dumps({'records': [{'lane': lane} for lane in lanes]}))\n"
+    )
+    collector.chmod(0o700)
     service = CaptureService(
         GatewayConfig(
-            state_dir=tmp_path / "state",
+            state_dir=gateway_config.state_dir,
             projects={},
-            captures_root=root,
+            runtime_inventory=gateway_config.runtime_inventory,
+            capture_command=str(collector),
+        ),
+        Principal.for_name("observer"),
+    )
+
+    result = service.query(["mpris", "router"])
+
+    assert result == {
+        "records": [{"lane": "mpris"}, {"lane": "router"}],
+        "lanes_queried": ["mpris", "router"],
+        "truncated": False,
+    }
+    commands = [json.loads(line) for line in captured.read_text().splitlines()]
+    assert commands == [
+        [
+            "query",
+            "--capture-root",
+            str(lane_paths["mpris"].parent),
+            "--since",
+            "0.0",
+            "--lane",
+            "mpris",
+        ],
+        [
+            "query",
+            "--capture-root",
+            str(lane_paths["router"].parent),
+            "--since",
+            "0.0",
+            "--lane",
+            "router",
+        ],
+    ]
+
+
+def test_capture_query_reports_missing_collector_for_declared_lane(tmp_path: Path) -> None:
+    gateway_config, lane_paths = config(tmp_path)
+    service = CaptureService(
+        GatewayConfig(
+            state_dir=gateway_config.state_dir,
+            projects={},
+            runtime_inventory=gateway_config.runtime_inventory,
             capture_command=str(tmp_path / "missing-sinnix-capture"),
         ),
         Principal.for_name("observer"),
@@ -78,7 +153,7 @@ def test_capture_query_reports_a_missing_collector_as_unavailable(tmp_path: Path
             str(tmp_path / "missing-sinnix-capture"),
             "query",
             "--capture-root",
-            str(root),
+            str(lane_paths["mpris"].parent),
             "--since",
             "0.0",
             "--lane",

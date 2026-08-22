@@ -57,7 +57,6 @@ class GatewayConfig:
     beads_command: str = "bd"
     mcp_broker_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
     capture_command: str = "sinnix-capture"
-    captures_root: Path = Path("/realm/data/captures")
 
     @classmethod
     def load(cls, path: Path | None) -> "GatewayConfig":
@@ -126,7 +125,6 @@ class GatewayConfig:
             beads_command=raw.get("beadsCommand", "bd"),
             mcp_broker_servers=broker_servers,
             capture_command=raw.get("captureCommand", "sinnix-capture"),
-            captures_root=Path(raw.get("capturesRoot", "/realm/data/captures")),
         )
 
     def initialize_state(self) -> None:
