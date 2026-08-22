@@ -68,6 +68,16 @@ in
             automata = false;
             kitty = false;
           };
+          user-mile = {
+            filesystem = false;
+            terminal = true;
+            browser = false;
+            desktop = false;
+            system = false;
+            document = false;
+            automata = false;
+            kitty = false;
+          };
           capture = {
             filesystem = true;
             terminal = true;
@@ -512,6 +522,13 @@ in
             bootstrap.restartPolicy = "no";
           };
         };
+      })
+
+      # The first-user-mile trial is deliberately one source domain. Upstream
+      # enables static imports by default, which would otherwise add the Git
+      # and Raindrop importers even while every non-terminal domain is disabled.
+      (lib.mkIf (runtimeEnabled && cfg.activationProfile == "user-mile") {
+        services.sinex.sources.staticImports = lib.mkForce { };
       })
 
       # Workstation policy that sinex itself does not own: resource class

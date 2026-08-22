@@ -48,6 +48,7 @@ in
     ./tests/noctalia.nix
     ./tests/memory-audit.nix
     ./tests/sinex-nats-security.nix
+    ./tests/sinex-user-mile.nix
     ./tests/dots-shell.nix
     ./tests/earlyoom.nix
   ];
