@@ -33,6 +33,9 @@ in
             sources = config.services.sinex.sources;
             sourceIds = map (binding: binding.source_id) config.sinex._sourceBindingsManifest;
             postgresPartOf = config.systemd.targets.postgresql.unitConfig.PartOf or [ ];
+            natsTlsEnvironment = lib.filter (
+              value: lib.hasPrefix "SINEX_NATS_REQUIRE_TLS=" value
+            ) config.systemd.services.sinexd.serviceConfig.Environment;
           in
           [
             {
@@ -60,6 +63,10 @@ in
             {
               assertion = lib.elem "sinex-runtime.target" postgresPartOf;
               message = "Stopping the manual runtime target must also stop PostgreSQL's aggregate target.";
+            }
+            {
+              assertion = lib.last natsTlsEnvironment == "SINEX_NATS_REQUIRE_TLS=true";
+              message = "Sinexd must receive a Clap-compatible effective NATS TLS boolean.";
             }
           ];
       };
