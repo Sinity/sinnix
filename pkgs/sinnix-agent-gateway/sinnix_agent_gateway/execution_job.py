@@ -5,12 +5,19 @@ import hashlib
 import json
 import os
 import re
-import signal
 import subprocess
 import tempfile
 import time
 from pathlib import Path
 from typing import Any
+
+from .execution import (
+    EnvironmentProfile,
+    ExecutionProfile,
+    OwnerExecution,
+    OwnerExecutionStartError,
+    OwnerRoute,
+)
 
 JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
@@ -136,30 +143,28 @@ class ExecutionJob:
         self.store(document)
         self.event("running")
         with log_path.open("wb") as output:
-            process = subprocess.Popen(
-                command,
-                stdin=subprocess.DEVNULL,
-                stdout=output,
-                stderr=subprocess.STDOUT,
-                cwd=request["cwd"],
-                env=request["environment"],
-                start_new_session=True,
-            )
+            execution = OwnerExecution(request["environment"])
+            try:
+                process = execution.start(
+                    command,
+                    ExecutionProfile(
+                        route=OwnerRoute(
+                            "execution-job", EnvironmentProfile.SESSION_OPTIONAL
+                        ),
+                        timeout_seconds=request["timeout_seconds"],
+                        cwd=Path(request["cwd"]),
+                    ),
+                    stdout=output,
+                    stderr=subprocess.STDOUT,
+                )
+            except OwnerExecutionStartError as exc:
+                output.write(f"execution launch failed: {exc.failure_class}\n".encode())
+                self.update("failed", 1)
+                return 1
             try:
                 exit_status = process.wait(timeout=request["timeout_seconds"])
             except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                    process.wait()
+                execution.terminate(process)
                 self.update("timed_out", 124)
                 return 124
         if exit_status < 0:

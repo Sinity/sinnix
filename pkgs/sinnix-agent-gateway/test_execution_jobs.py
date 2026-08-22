@@ -11,6 +11,7 @@ import pytest
 from sinnix_agent_gateway.artifacts import ArtifactService
 from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig
+from sinnix_agent_gateway.execution import OwnerExecution
 from sinnix_agent_gateway.execution_job import main as execution_job_main
 from sinnix_agent_gateway.jobs import JobError, JobService
 
@@ -126,10 +127,19 @@ def test_execution_helper_runs_command_and_writes_attestation(
             {
                 "job_id": job_id,
                 "launch_id": launch_id,
-                "argv": [sys.executable, "-c", "print('helper fixture')"],
+                "argv": [
+                    sys.executable,
+                    "-c",
+                    "import os; print(os.environ['WAYLAND_DISPLAY'])",
+                ],
                 "cwd": str(tmp_path),
                 "identity": "user",
-                "environment": dict(os.environ),
+                "environment": {
+                    "HOME": "/home/fixture",
+                    "LANG": "C.UTF-8",
+                    "PATH": "/fixture/bin",
+                    "WAYLAND_DISPLAY": "fixture-wayland",
+                },
                 "timeout_seconds": 1,
             }
         )
@@ -159,7 +169,7 @@ def test_execution_helper_runs_command_and_writes_attestation(
     assert manifest["lifecycle"] == "succeeded"
     assert manifest["launcher"]["scope_unit"] == scope_unit
     assert manifest["launcher"]["cwd"] == str(Path.cwd().resolve())
-    assert (tmp_path / f"{job_id}.log").read_text() == "helper fixture\n"
+    assert (tmp_path / f"{job_id}.log").read_text() == "fixture-wayland\n"
     assert not request.exists()
 
 
@@ -211,6 +221,14 @@ def test_execution_helper_records_timeout(
 
 def test_start_shell_creates_attested_execution_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     jobs, captured = execution_service(tmp_path)
+    calls = []
+    original_start = OwnerExecution.start
+
+    def record_start(self: OwnerExecution, *args: object, **kwargs: object) -> object:
+        calls.append(args[1])
+        return original_start(self, *args, **kwargs)
+
+    monkeypatch.setattr(OwnerExecution, "start", record_start)
     monkeypatch.setenv("SINNIX_GATEWAY_PROBE_SECRET", "must-not-propagate")
 
     result = jobs.start_shell(["printf", "fixture"], cwd=str(tmp_path))
@@ -223,6 +241,7 @@ def test_start_shell_creates_attested_execution_job(tmp_path: Path, monkeypatch:
     assert request["argv"] == ["printf", "fixture"]
     assert request["identity"] == "user"
     assert "SINNIX_GATEWAY_PROBE_SECRET" not in request["environment"]
+    assert any(getattr(profile.route, "name", None) == "execution-job-launch" for profile in calls)
     assert manifest["schema_version"] == 4
     assert manifest["kind"] == "shell"
 
