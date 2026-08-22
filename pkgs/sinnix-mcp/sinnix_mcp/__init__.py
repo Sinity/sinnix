@@ -10,6 +10,7 @@ from .protocol import (
     RequestEnvelope,
     ResponseEnvelope,
     SourceBinding,
+    response_envelope_from_dict,
 )
 from .refs import RefTemplate, ReferenceError, SinnixRef
 
@@ -29,4 +30,5 @@ __all__ = [
     "ResponseEnvelope",
     "SinnixRef",
     "SourceBinding",
+    "response_envelope_from_dict",
 ]
