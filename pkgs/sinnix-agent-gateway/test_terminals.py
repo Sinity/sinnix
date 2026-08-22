@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import base64
 import json
 import sys
 from pathlib import Path
 
 import pytest
 
+from sinnix_agent_gateway.artifacts import ArtifactService
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.execution import OwnerExecution
-from sinnix_agent_gateway.terminals import TerminalError, TerminalService
+from sinnix_agent_gateway.terminals import (
+    TerminalDiagnosticError,
+    TerminalError,
+    TerminalService,
+)
 
 
 def terminal_service(tmp_path: Path, principal_name: str) -> tuple[TerminalService, Path]:
@@ -36,7 +42,8 @@ def terminal_service(tmp_path: Path, principal_name: str) -> tuple[TerminalServi
             "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
         }
     )
-    return TerminalService(config, Principal.for_name(principal_name), execution), captured
+    principal = Principal.for_name(principal_name)
+    return TerminalService(config, principal, ArtifactService(config, principal), execution), captured
 
 
 def commands(path: Path) -> list[list[str]]:
@@ -78,3 +85,23 @@ def test_terminal_requires_runtime_directory_before_launch(tmp_path: Path) -> No
 
     with pytest.raises(TerminalError, match="environment_unavailable:XDG_RUNTIME_DIR"):
         terminals.read("list")
+
+
+def test_terminal_failure_writes_redacted_diagnostic_artifact(tmp_path: Path) -> None:
+    terminals, _ = terminal_service(tmp_path, "observer")
+    runner = Path(terminals.config.kitty_control_command)
+    runner.write_text("#!/bin/sh\nprintf 'token=fixture-secret\\n' >&2\nexit 23\n")
+    runner.chmod(0o700)
+
+    with pytest.raises(TerminalDiagnosticError) as caught:
+        terminals.read("list")
+
+    response = caught.value.response
+    assert response["failure_class"] == "command_failed"
+    assert response["exit_status"] == 23
+    artifact = terminals.artifacts.read(str(response["diagnostic_artifact_id"]))
+    diagnostic = json.loads(base64.b64decode(artifact["base64"]))
+    assert artifact["kind"] == "owner-diagnostic"
+    assert diagnostic["route"] == "terminal-kitty"
+    assert diagnostic["stderr_excerpt"] == "token=[REDACTED]"
+    assert "command" not in diagnostic

@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
 from .execution import (
     EnvironmentProfile,
     ExecutionProfile,
+    OwnerDiagnosticError,
     OwnerExecution,
     OwnerRoute,
 )
@@ -15,6 +17,11 @@ from .execution import (
 
 class TerminalError(ValueError):
     pass
+
+
+class TerminalDiagnosticError(TerminalError, OwnerDiagnosticError):
+    def __init__(self, response: dict[str, object]):
+        OwnerDiagnosticError.__init__(self, response)
 
 
 class TerminalService:
@@ -30,35 +37,27 @@ class TerminalService:
         self,
         config: GatewayConfig,
         principal: Principal,
+        artifacts: ArtifactService,
         execution: OwnerExecution | None = None,
     ):
         self.config = config
         self.principal = principal
+        self.artifacts = artifacts
         self.execution = execution or OwnerExecution()
 
     def _run(self, arguments: list[str]) -> dict[str, Any]:
+        route = OwnerRoute("terminal-kitty", EnvironmentProfile.TERMINAL)
         result = self.execution.run(
             [self.config.kitty_control_command, *arguments],
             ExecutionProfile(
-                route=OwnerRoute("terminal-kitty", EnvironmentProfile.TERMINAL),
+                route=route,
                 timeout_seconds=30,
                 max_stdout_bytes=self.config.max_result_bytes,
             ),
         )
-        if result.failure_class is not None and result.failure_class.startswith(
-            "environment_unavailable:"
-        ):
-            raise TerminalError(f"Kitty control unavailable: {result.failure_class}")
-        if result.failure_class == "command_unavailable:FileNotFoundError":
-            raise TerminalError("Kitty control unavailable: FileNotFoundError")
-        if result.failure_class == "command_timeout":
-            raise TerminalError("Kitty control unavailable: TimeoutExpired")
-        if result.failure_class == "command_output_bound":
-            raise TerminalError("Kitty control response exceeded response bound")
         if result.failure_class is not None:
-            detail = result.stderr_excerpt()
-            raise TerminalError(
-                f"Kitty control command failed: {detail}" if detail else "Kitty control command failed"
+            raise TerminalDiagnosticError(
+                self.artifacts.record_owner_diagnostic(route.name, result)
             )
         text = result.stdout.decode("utf-8", errors="replace")
         try:

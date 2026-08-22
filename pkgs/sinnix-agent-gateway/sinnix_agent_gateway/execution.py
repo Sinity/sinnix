@@ -68,6 +68,14 @@ class ExecutionResult:
         return self.stderr.decode("utf-8", errors="replace").strip()[:2_000]
 
 
+class OwnerDiagnosticError(ValueError):
+    """A direct owner failure with a safe response and private artifact."""
+
+    def __init__(self, response: dict[str, object]):
+        self.response = response
+        super().__init__(str(response.get("failure_class", "owner_route_failed")))
+
+
 class OwnerExecution:
     """Run one direct owner command with one bounded cancellation mechanism."""
 

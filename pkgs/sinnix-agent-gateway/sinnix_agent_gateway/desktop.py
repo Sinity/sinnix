@@ -12,6 +12,7 @@ from .config import GatewayConfig
 from .execution import (
     EnvironmentProfile,
     ExecutionProfile,
+    OwnerDiagnosticError,
     OwnerExecution,
     OwnerRoute,
 )
@@ -19,6 +20,11 @@ from .execution import (
 
 class DesktopError(ValueError):
     pass
+
+
+class DesktopDiagnosticError(DesktopError, OwnerDiagnosticError):
+    def __init__(self, response: dict[str, object]):
+        OwnerDiagnosticError.__init__(self, response)
 
 
 class DesktopService:
@@ -52,30 +58,18 @@ class DesktopService:
         raise AssertionError(f"unknown desktop owner {owner}")
 
     def _run(self, owner: str, arguments: list[str]) -> dict[str, Any]:
+        route = OwnerRoute(f"desktop-{owner}", EnvironmentProfile.WAYLAND)
         result = self.execution.run(
             self._command(owner, arguments),
             ExecutionProfile(
-                route=OwnerRoute(
-                    f"desktop-{owner}", EnvironmentProfile.WAYLAND
-                ),
+                route=route,
                 timeout_seconds=15,
                 max_stdout_bytes=self.config.max_result_bytes,
             ),
         )
-        if result.failure_class is not None and result.failure_class.startswith(
-            "environment_unavailable:"
-        ):
-            raise DesktopError(f"desktop control unavailable: {result.failure_class}")
-        if result.failure_class == "command_unavailable:FileNotFoundError":
-            raise DesktopError("desktop control unavailable: FileNotFoundError")
-        if result.failure_class == "command_timeout":
-            raise DesktopError("desktop control unavailable: TimeoutExpired")
-        if result.failure_class == "command_output_bound":
-            raise DesktopError("desktop control response exceeded response bound")
         if result.failure_class is not None:
-            detail = result.stderr_excerpt()
-            raise DesktopError(
-                f"desktop control command failed: {detail}" if detail else "desktop control command failed"
+            raise DesktopDiagnosticError(
+                self.artifacts.record_owner_diagnostic(route.name, result)
             )
         text = result.stdout.decode("utf-8", errors="replace")
         try:
