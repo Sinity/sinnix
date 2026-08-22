@@ -62,6 +62,7 @@ mkFeatureModule {
             aria2
             lnch
             libnotify
+            scriptPkgs.chatgpt-app
             scriptPkgs.media-preview-cache
           ];
 
