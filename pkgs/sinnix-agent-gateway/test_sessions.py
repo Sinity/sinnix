@@ -20,6 +20,27 @@ def session_service(tmp_path: Path) -> tuple[SessionLogService, Path]:
     return service, root
 
 
+def test_default_codex_source_is_the_canonical_sessions_root(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    session_root = home / ".codex" / "sessions"
+    session_root.mkdir(parents=True)
+    (session_root / "session.jsonl").write_text('{"text":"session"}\n')
+    (home / ".codex" / "history.jsonl").write_text('{"text":"history"}\n')
+    sources = SessionLogService.default_sources(home)
+    service = SessionLogService(
+        GatewayConfig(state_dir=tmp_path / "state", projects={}),
+        Principal.for_name("observer"),
+        sources=sources,
+    )
+
+    listed = service.list("codex")
+
+    assert sources[1] == SessionSource("codex", session_root)
+    assert [entry["reference"] for entry in listed["sessions"]] == [
+        "codex:session.jsonl"
+    ]
+
+
 def test_session_list_read_and_search_preserve_provider_reference(tmp_path: Path) -> None:
     service, root = session_service(tmp_path)
     session = root / "project" / "session.jsonl"
