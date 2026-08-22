@@ -205,6 +205,8 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "gateway.status",
                     "gateway.catalog",
                 ]
+                mcp_catalog_result = await session.call_tool("mcp_catalog", {})
+                assert json.loads(mcp_catalog_result.content[0].text) == {"servers": []}
 
     anyio.run(probe)
 

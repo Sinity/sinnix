@@ -35,26 +35,108 @@ class McpBrokerService:
             raise McpBrokerError(f"{name} must be a bounded non-empty string")
         return value
 
-    def catalog(self) -> dict[str, Any]:
+    async def catalog(self) -> dict[str, Any]:
+        """Return current upstream availability from bounded MCP handshakes."""
         self.principal.require(Capability.MCP_READ)
-        servers = []
-        for name, row in sorted(self.config.mcp_broker_servers.items()):
-            if not isinstance(row, dict):
-                continue
-            server = {
-                "name": name,
-                "description": row.get("description"),
-                "transport": row.get("transport"),
-                "tier": row.get("tier"),
-                "brokered": row.get("brokered") is True,
+        rows = sorted(self.config.mcp_broker_servers.items())
+        probes = await asyncio.gather(
+            *(self._catalog_server(name, row) for name, row in rows if isinstance(row, dict))
+        )
+        return {"servers": list(probes)}
+
+    async def _catalog_server(self, name: str, row: dict[str, Any]) -> dict[str, Any]:
+        server = {
+            "name": name,
+            "description": row.get("description"),
+            "transport": row.get("transport"),
+            "tier": row.get("tier"),
+            "brokered": row.get("brokered") is True,
+        }
+        if row.get("brokered") is not True:
+            return {
+                **server,
+                "availability": "unavailable",
+                "reason": row.get("reason", "not admitted to the broker"),
             }
-            if row.get("brokered") is True:
-                server["availability"] = "unprobed"
-            else:
-                server["availability"] = "unavailable"
-                server["reason"] = row.get("reason", "not admitted to the broker")
-            servers.append(server)
-        return {"servers": servers}
+        try:
+            configured = self._server(name)
+        except McpBrokerError as exc:
+            return {
+                **server,
+                "availability": "unavailable",
+                "failure_class": "configuration_error",
+                "reason": str(exc),
+            }
+        return {**server, **await self._probe(configured, name)}
+
+    def _environment(self, server: dict[str, Any]) -> dict[str, str]:
+        environment = {
+            "HOME": str(Path.home()),
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
+            **server["env"],
+        }
+        for name in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"):
+            value = os.environ.get(name)
+            if value:
+                environment.setdefault(name, value)
+        return environment
+
+    async def _probe(self, server: dict[str, Any], server_name: str) -> dict[str, Any]:
+        """Prove one upstream can initialize and disclose its live tools."""
+        parameters, observer_unit = self._parameters(server, self._environment(server))
+        stderr_directory = self.config.state_dir / "captures" / uuid.uuid4().hex
+        stderr_directory.mkdir(mode=0o700, parents=True)
+        stderr_path = stderr_directory / "stderr.log"
+
+        async def inspect() -> tuple[int, int]:
+            with stderr_path.open("w", encoding="utf-8") as stderr:
+                async with stdio_client(parameters, errlog=stderr) as (read, write_stream):
+                    async with ClientSession(read, write_stream) as session:
+                        await session.initialize()
+                        tools = (await session.list_tools()).tools
+            return len(tools), sum(
+                getattr(getattr(tool, "annotations", None), "read_only_hint", None)
+                is True
+                for tool in tools
+            )
+
+        try:
+            tool_count, read_only_tool_count = await asyncio.wait_for(inspect(), timeout=5)
+        except asyncio.TimeoutError:
+            if observer_unit is not None:
+                self._stop(observer_unit)
+            artifact_id = self._store_upstream_stderr(
+                stderr_directory, server_name, "tools/list"
+            )
+            result: dict[str, Any] = {
+                "availability": "unavailable",
+                "failure_class": "timeout",
+                "reason": "upstream did not complete initialize and tools/list within 5 seconds",
+            }
+            if artifact_id is not None:
+                result["diagnostic_artifact_id"] = artifact_id
+            return result
+        except Exception:
+            if observer_unit is not None:
+                self._stop(observer_unit)
+            artifact_id = self._store_upstream_stderr(
+                stderr_directory, server_name, "tools/list"
+            )
+            result = {
+                "availability": "unavailable",
+                "failure_class": "upstream_unavailable",
+                "reason": "upstream did not complete initialize and tools/list",
+            }
+            if artifact_id is not None:
+                result["diagnostic_artifact_id"] = artifact_id
+            return result
+        shutil.rmtree(stderr_directory, ignore_errors=True)
+        return {
+            "availability": "available",
+            "tool_count": tool_count,
+            "read_only_tool_count": read_only_tool_count,
+        }
 
     def _server(self, name: str) -> dict[str, Any]:
         name = self._string(name, "server", 128)
@@ -197,17 +279,7 @@ class McpBrokerService:
         if not isinstance(arguments, dict):
             raise McpBrokerError("arguments must be an object")
         server = self._server(server_name)
-        environment = {
-            "HOME": str(Path.home()),
-            "LANG": os.environ.get("LANG", "C.UTF-8"),
-            "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
-            **server["env"],
-        }
-        for name in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"):
-            value = os.environ.get(name)
-            if value:
-                environment.setdefault(name, value)
-        parameters, observer_unit = self._parameters(server, environment)
+        parameters, observer_unit = self._parameters(server, self._environment(server))
         stderr_directory = self.config.state_dir / "captures" / uuid.uuid4().hex
         stderr_directory.mkdir(mode=0o700, parents=True)
         stderr_path = stderr_directory / "stderr.log"

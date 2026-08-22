@@ -382,9 +382,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     if Capability.MCP_READ in runtime.principal.capabilities:
 
         @mcp.tool(title="List registered MCP servers", annotations=READ_ONLY_TOOL)
-        def mcp_catalog() -> dict[str, Any]:
-            """List registry-derived MCP upstreams and their broker admission state."""
-            return runtime.execute("mcp_catalog", runtime.mcp_broker.catalog)
+        async def mcp_catalog() -> dict[str, Any]:
+            """List registry-derived MCP upstreams and their live availability."""
+            return await runtime.execute_async("mcp_catalog", runtime.mcp_broker.catalog)
 
         @mcp.tool(title="Call read-only upstream MCP tool", annotations=READ_ONLY_TOOL)
         async def mcp_read(
