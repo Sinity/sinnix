@@ -138,6 +138,9 @@ let
     }
   );
   sinnixMcpPackage = pkgs.callPackage ../pkgs/sinnix-mcp/pkg.nix { };
+  sinnixdPackage = pkgs.callPackage ../pkgs/sinnixd/pkg.nix {
+    sinnix-mcp = sinnixMcpPackage;
+  };
   agentGatewayPackage = pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix {
     sinnix-mcp = sinnixMcpPackage;
   };
@@ -301,6 +304,7 @@ let
     };
 
     sinnix-mcp = sinnixMcpPackage;
+    sinnixd = sinnixdPackage;
     sinnix-agent-gateway = agentGatewayPackage;
     sinnix-agent-control-mcp = pkgs.writeShellApplication {
       name = "sinnix-agent-control-mcp";

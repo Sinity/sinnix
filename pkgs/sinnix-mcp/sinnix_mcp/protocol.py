@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Mapping
+from types import MappingProxyType
+from typing import Any
 from uuid import UUID
 
 from .refs import SinnixRef
@@ -30,9 +32,11 @@ def _canonical_json(value: Any) -> bytes:
 
 
 def _validate_uuid(name: str, value: str) -> None:
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a UUID")
     try:
         UUID(value)
-    except ValueError as error:
+    except (TypeError, ValueError, AttributeError) as error:
         raise ValueError(f"{name} must be a UUID") from error
 
 
@@ -121,13 +125,22 @@ class RequestEnvelope:
             raise ValueError(f"unsupported request schema: {self.schema}")
         _validate_uuid("request_id", self.request_id)
         _validate_uuid("correlation_id", self.correlation_id)
-        if not self.operation or "." not in self.operation:
+        if not isinstance(self.operation, str) or not self.operation or "." not in self.operation:
             raise ValueError("operation must be a dotted canonical name")
+        if not isinstance(self.owner, str) or not isinstance(self.principal, str):
+            raise ValueError("request requires owner and principal")
         if not self.owner or not self.principal:
             raise ValueError("request requires owner and principal")
-        if self.idempotency_key is not None and not self.idempotency_key:
-            raise ValueError("idempotency_key cannot be empty")
-        _ = _canonical_json(dict(self.arguments))
+        if self.idempotency_key is not None:
+            if not isinstance(self.idempotency_key, str) or not self.idempotency_key:
+                raise ValueError("idempotency_key cannot be empty")
+        if not isinstance(self.arguments, Mapping):
+            raise ValueError("arguments must be an object")
+        arguments = dict(self.arguments)
+        if not all(isinstance(key, str) for key in arguments):
+            raise ValueError("arguments keys must be strings")
+        _ = _canonical_json(arguments)
+        object.__setattr__(self, "arguments", MappingProxyType(arguments))
 
     @property
     def digest(self) -> str:

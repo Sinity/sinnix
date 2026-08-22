@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sinnixd"
+version = "0.1.0"
+description = "Sinnix local runtime daemon and agentctl client"
+requires-python = ">=3.12"
+dependencies = ["sinnix-mcp==0.1.0"]
+
+[project.scripts]
+agentctl = "sinnixd.cli:main"
+sinnixd = "sinnixd.cli:daemon_main"
+
+[tool.setuptools.packages.find]
+include = ["sinnixd*"]
