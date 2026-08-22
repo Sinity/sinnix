@@ -3,15 +3,13 @@ from __future__ import annotations
 import json
 import os
 import re
-import select
-import signal
 import subprocess
-import time
 from pathlib import Path
 from typing import Any
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig, ProjectConfig
+from .execution import ExecutionProfile, OwnerExecution
 
 
 class ProjectError(ValueError):
@@ -189,55 +187,24 @@ class ProjectService:
             "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
             "GIT_OPTIONAL_LOCKS": "0",
         }
-        process = subprocess.Popen(
+        result = OwnerExecution(safe_env).run(
             command,
-            cwd=cwd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env=safe_env,
-            start_new_session=True,
+            ExecutionProfile(
+                name="project-read",
+                cwd=cwd,
+                timeout_seconds=timeout,
+                max_stdout_bytes=self.config.max_result_bytes,
+                max_stderr_bytes=self.config.max_result_bytes,
+            ),
         )
-        assert process.stdout is not None
-        deadline = time.monotonic() + timeout
-        data = bytearray()
-        bounded = False
-        try:
-            while len(data) <= self.config.max_result_bytes:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise subprocess.TimeoutExpired(command, timeout)
-                ready, _, _ = select.select([process.stdout], [], [], remaining)
-                if not ready:
-                    raise subprocess.TimeoutExpired(command, timeout)
-                chunk = os.read(
-                    process.stdout.fileno(),
-                    min(65_536, self.config.max_result_bytes + 1 - len(data)),
-                )
-                if not chunk:
-                    break
-                data.extend(chunk)
-            bounded = len(data) > self.config.max_result_bytes
-            if bounded:
-                if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    result_code = process.wait(timeout=0.5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    result_code = process.wait()
-            else:
-                result_code = process.wait(
-                    timeout=max(0.1, deadline - time.monotonic())
-                )
-        except subprocess.TimeoutExpired as exc:
-            if process.poll() is None:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-            raise ProjectError("project operation timed out") from exc
-        text = data[: self.config.max_result_bytes].decode("utf-8", errors="replace")
-        if not bounded and result_code not in (0, 1):
-            raise ProjectError(text.strip() or "project operation failed")
+        text = result.stdout.decode("utf-8", errors="replace")
+        if result.timed_out:
+            raise ProjectError("project operation timed out")
+        if result.output_exceeded:
+            return text
+        if result.exit_status not in (0, 1):
+            diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+            raise ProjectError(diagnostic or text.strip() or "project operation failed")
         return text
 
     def search(
