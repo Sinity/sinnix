@@ -419,9 +419,10 @@ when a new script is added.
   `tunnel-client` user service; the gateway has no custom HTTP/SSE transport.
   `pkgs/sinnix-mcp` owns canonical references and the shared envelope/owner
   contract. `modules/services/sinnixd.nix` runs the local `sinnixd` Unix-socket
-  daemon and installs `agentctl`; its initial scope is explicit project-adapter
-  discovery only. It does not claim job, task, Git, or process authority until
-  those owners are migrated to it.
+  daemon and installs `agentctl`; it discovers explicit project adapters and
+  launches only their declared operations as transient user services. Systemd
+  owns process lifecycle, cgroups, results, cancellation, and journal evidence;
+  `sinnixd` has no job queue, task, Git, or arbitrary-process authority.
 
 ## Secrets
 

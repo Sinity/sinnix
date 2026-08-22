@@ -4,18 +4,23 @@
 
 ## Current vertical slice
 
-The first deployed slice is intentionally read-only:
+The deployed slice discovers explicit project adapters and can launch only their declared operations:
 
 ```text
 agentctl status
 agentctl project list
 agentctl project get sinnix
 agentctl project operations sinnix
+agentctl job start sinnix lint
+agentctl job status <job-id>
+agentctl job cancel <job-id>
 ```
 
-It discovers only explicit `.agentctl/project.toml` adapters passed by the service. It does not scan arbitrary directories. Each descriptor is schema-versioned, identifies its repository root markers, and publishes named operation metadata without executing it.
+It discovers only `.agentctl/project.toml` adapters passed by the service. It does not scan arbitrary directories. Each descriptor is schema-versioned, identifies its repository root markers, declares the execution environment, and publishes named operation metadata.
 
-The initial daemon does not yet own jobs, workspaces, agents, task mutation, service leases, Git operations, or process cancellation. Those move only after their existing authorities can be cut over to the same durable job identity. Until then, the gateway’s legacy job surface remains active and no parallel scheduler is claimed.
+`job start` accepts a project ID and one declared operation name, never an arbitrary command. It creates one transient user `.service` unit in `agent.slice`; systemd remains authoritative for the process, cgroup, timeout, result, cancellation, and journal evidence. A job ID deterministically derives its unit name, so status and cancellation survive a `sinnixd` restart without a daemon-owned process record.
+
+The daemon still does not own job queues, retries, task mutation, service leases, Git operations, arbitrary shells, or generic workspaces. Descriptor pool, cache, and exclusivity metadata remain descriptive until their existing authorities move behind an explicit shared contract. The gateway’s legacy job surface remains active while replacement parity is built.
 
 ## Shared protocol
 

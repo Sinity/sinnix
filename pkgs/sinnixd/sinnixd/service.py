@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from sinnix_mcp import (
@@ -15,6 +15,7 @@ from sinnix_mcp import (
     ResponseEnvelope,
 )
 
+from .jobs import DeclaredProjectJobs, SystemdJobError, UserSystemdJobs
 from .projects import ProjectCatalog
 
 
@@ -28,6 +29,7 @@ class SinnixdService:
     """
 
     projects: ProjectCatalog
+    jobs: DeclaredProjectJobs = field(default_factory=lambda: DeclaredProjectJobs(UserSystemdJobs()))
     version: str = "0.1.0"
 
     @property
@@ -50,6 +52,14 @@ class SinnixdService:
                     versions=frozenset({1}),
                     documentation="Declared project adapter discovery and operation catalog.",
                 ),
+                OwnerSpec(
+                    namespace="job",
+                    owner="systemd-jobs",
+                    authority=Authority.SYSTEMD,
+                    lifecycle=Lifecycle.DAEMON_OWNED,
+                    versions=frozenset({1}),
+                    documentation="Declared project operations owned by transient user services.",
+                ),
             ]
         )
 
@@ -65,9 +75,11 @@ class SinnixdService:
                     ErrorCode.AUTHORITY_MISMATCH,
                     f"operation {request.operation!r} belongs to {owner.owner!r}, not {request.owner!r}",
                 )
-            payload = self._dispatch(request.operation, request.arguments)
+            payload = self._dispatch(request.operation, request.arguments, request.correlation_id)
         except KeyError as error:
             return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
+        except SystemdJobError as error:
+            return self._error(request, owner_name, ErrorCode.OPERATION_FAILED, str(error))
         except ValueError as error:
             return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
         try:
@@ -81,7 +93,12 @@ class SinnixdService:
             payload=bounded_payload,
         )
 
-    def _dispatch(self, operation: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+    def _dispatch(
+        self,
+        operation: str,
+        arguments: Mapping[str, Any],
+        correlation_id: str,
+    ) -> dict[str, Any]:
         if operation == "runtime.status":
             return {
                 "version": self.version,
@@ -104,7 +121,34 @@ class SinnixdService:
                 "project_id": project.project_id,
                 "operations": [operation.catalog_row() for operation in project.operations],
             }
+        if operation == "job.start":
+            project_id = self._job_argument(arguments, "project_id")
+            operation_name = self._job_argument(arguments, "operation")
+            if set(arguments) != {"project_id", "operation"}:
+                raise ValueError("job.start accepts only project_id and operation")
+            project = self.projects.get(project_id)
+            return self.jobs.start(
+                project=project,
+                operation=project.operation(operation_name),
+                correlation_id=correlation_id,
+            )
+        if operation == "job.status":
+            return self.jobs.status(self._single_job_id(arguments, "job.status"))
+        if operation == "job.cancel":
+            return self.jobs.cancel(self._single_job_id(arguments, "job.cancel"))
         raise ValueError(f"unsupported operation: {operation}")
+
+    @staticmethod
+    def _job_argument(arguments: Mapping[str, Any], name: str) -> str:
+        value = arguments.get(name)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"job operation requires {name}")
+        return value
+
+    def _single_job_id(self, arguments: Mapping[str, Any], operation: str) -> str:
+        if set(arguments) != {"job_id"}:
+            raise ValueError(f"{operation} accepts only job_id")
+        return self._job_argument(arguments, "job_id")
 
     def _error(
         self,
