@@ -16,6 +16,7 @@ from sinnix_mcp import (
     ResponseEnvelope,
     SinnixRef,
     SourceBinding,
+    response_envelope_from_dict,
 )
 
 
@@ -108,6 +109,40 @@ def test_response_preserves_source_generation_and_error_shape() -> None:
             "details": {"kind": "inline", "value": {}},
         },
     }
+
+
+def test_response_parser_round_trips_strict_external_owner_envelopes() -> None:
+    response = ResponseEnvelope(
+        request_id=str(uuid4()),
+        correlation_id=str(uuid4()),
+        owner="polylogue-archive",
+        payload=OpaquePayload.bounded({"archive": {"sessions": 2}}),
+        source_bindings=(
+            SourceBinding(
+                SinnixRef.parse("sinnix://polylogue/archive"),
+                "generation-1",
+                "sha256:" + "b" * 64,
+            ),
+        ),
+    )
+
+    assert response_envelope_from_dict(response.to_dict()) == response
+    with pytest.raises(ValueError, match="invalid fields"):
+        response_envelope_from_dict(response.to_dict() | {"unexpected": True})
+    malformed_error = response.to_dict() | {"ok": False}
+    malformed_error.pop("payload")
+    with pytest.raises(ValueError, match="outcome"):
+        response_envelope_from_dict(malformed_error)
+    malformed_size = response.to_dict()
+    malformed_size["payload"] = {
+        "kind": "opaque",
+        "ref": "sinnix://artifacts/fixture",
+        "digest": "sha256:" + "b" * 64,
+        "media_type": "application/json",
+        "size_bytes": True,
+    }
+    with pytest.raises(ValueError, match="size_bytes"):
+        response_envelope_from_dict(malformed_size)
 
 
 def test_owner_registry_rejects_overlapping_namespaces_and_wrong_versions() -> None:

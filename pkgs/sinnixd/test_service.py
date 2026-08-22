@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import socket
 import threading
 from dataclasses import dataclass, field
@@ -7,11 +8,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
-from sinnix_mcp import RequestEnvelope
+import pytest
+
+from sinnix_mcp import OpaquePayload, RequestEnvelope, ResponseEnvelope, SinnixRef, SourceBinding
+from sinnix_mcp.execution import ExecutionResult
 
 from sinnixd.api import UnixSocketServer, call, receive_frame, send_frame
 from sinnixd.jobs import DeclaredProjectJobs, UserSystemdJobs
-from sinnixd.projects import ProjectCatalog
+from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
+from sinnixd.projects import ProjectCatalog, ProjectConfigError
 from sinnixd.service import SinnixdService
 
 
@@ -40,6 +45,26 @@ pool = "normal"
 result = "exit"
 cache = "tree+environment"
 exclusive_keys = ["fixture:check"]
+"""
+    )
+
+
+def write_owner_adapter(root: Path) -> None:
+    write_adapter(root)
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + """
+[owner_adapters.polylogue_archive]
+namespace = "polylogue.archive"
+owner = "polylogue-archive"
+authority = "owner"
+lifecycle = "read_only"
+protocol_versions = [1]
+source_scoped = true
+source_ref = "sinnix://polylogue/archive"
+exec = ["polylogue-agentctl-adapter"]
+documentation = "Bounded Polylogue archive status."
 """
     )
 
@@ -94,6 +119,42 @@ class FakeSystemdJobs:
 
     def stop(self, unit: str) -> None:
         self.stopped.append(unit)
+
+
+@dataclass
+class FakeOwnerAdapters:
+    response: ResponseEnvelope
+    calls: list[dict[str, object]] = field(default_factory=list)
+
+    def call(self, *, project, adapter, request) -> ResponseEnvelope:
+        self.calls.append({"project": project, "adapter": adapter, "request": request})
+        return self.response
+
+
+@dataclass
+class FakeExecution:
+    result: ExecutionResult
+    calls: list[tuple[tuple[str, ...], object]] = field(default_factory=list)
+
+    def run(self, command, profile) -> ExecutionResult:
+        self.calls.append((tuple(command), profile))
+        return self.result
+
+
+def start_server(
+    server: UnixSocketServer,
+    *,
+    once: bool = False,
+    stop_event: threading.Event | None = None,
+) -> threading.Thread:
+    ready = threading.Event()
+    server.ready_event = ready
+    target = server.serve_once if once else server.serve_forever
+    args = () if once or stop_event is None else (stop_event,)
+    thread = threading.Thread(target=target, args=args, daemon=True)
+    thread.start()
+    assert ready.wait(1), "Unix socket server did not begin listening"
+    return thread
 
 
 def test_project_catalog_is_explicit_and_operation_catalog_is_bounded(tmp_path: Path) -> None:
@@ -276,17 +337,156 @@ def test_declared_project_job_rejects_arbitrary_execution(tmp_path: Path) -> Non
     assert direct_argv.error.code.value == "INVALID_ARGUMENT"
 
 
+def test_source_scoped_owner_adapter_is_registered_and_forwards_exact_response(tmp_path: Path) -> None:
+    write_owner_adapter(tmp_path)
+    source = SourceBinding(
+        source_ref=SinnixRef.parse("sinnix://polylogue/archive"),
+        generation="fixture-generation",
+        root_digest="sha256:" + "1" * 64,
+    )
+    request_value = request(
+        "polylogue.archive.status",
+        "polylogue-archive",
+        {"scope": "archive"},
+    )
+    owner_response = ResponseEnvelope(
+        request_id=request_value.request_id,
+        correlation_id=request_value.correlation_id,
+        owner="polylogue-archive",
+        payload=OpaquePayload.bounded({"archive": {"sessions": 2}}),
+        source_bindings=(source,),
+    )
+    adapters = FakeOwnerAdapters(owner_response)
+    service = SinnixdService(ProjectCatalog([tmp_path]), owner_adapters=adapters)
+
+    response = service.dispatch(request_value)
+
+    assert response == owner_response
+    assert service.owners.resolve("polylogue.archive.status").source_scoped
+    assert adapters.calls[0]["adapter"].source_ref == source.source_ref
+    assert adapters.calls[0]["project"].project_id == "fixture"
+
+    wrong_owner = service.dispatch(
+        request("polylogue.archive.status", "wrong-owner", {"scope": "archive"})
+    )
+    assert wrong_owner.error is not None
+    assert wrong_owner.error.code.value == "AUTHORITY_MISMATCH"
+
+
+def test_owner_adapters_reject_duplicate_authority_namespaces(tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    write_owner_adapter(first)
+    write_owner_adapter(second)
+    descriptor = second / ".agentctl" / "project.toml"
+    descriptor.write_text(descriptor.read_text().replace('id = "fixture"', 'id = "second"'))
+
+    with pytest.raises(ProjectConfigError, match="duplicate owner namespace"):
+        SinnixdService(ProjectCatalog([first, second]))
+
+
+def test_declared_owner_adapter_runs_fixed_command_and_enforces_source_binding(tmp_path: Path) -> None:
+    write_owner_adapter(tmp_path)
+    project, adapter = ProjectCatalog([tmp_path]).owner_adapter("polylogue.archive.status")
+    source = SourceBinding(
+        source_ref=SinnixRef.parse("sinnix://polylogue/archive"),
+        generation="fixture-generation",
+        root_digest="sha256:" + "2" * 64,
+    )
+    request_value = request(
+        "polylogue.archive.status",
+        "polylogue-archive",
+        {"scope": "archive", "expected_source_binding": source.to_dict()},
+    )
+    response = ResponseEnvelope(
+        request_id=request_value.request_id,
+        correlation_id=request_value.correlation_id,
+        owner="polylogue-archive",
+        payload=OpaquePayload.bounded({"archive": {"sessions": 2}}),
+        source_bindings=(source,),
+    )
+    execution = FakeExecution(
+        ExecutionResult(
+            command=(),
+            exit_status=0,
+            stdout=json.dumps(response.to_dict()).encode(),
+            stderr=b"",
+        )
+    )
+
+    result = DeclaredOwnerAdapters(execution).call(
+        project=project,
+        adapter=adapter,
+        request=request_value,
+    )
+
+    command, profile = execution.calls[0]
+    forwarded = json.loads(profile.stdin_bytes)
+    assert result == response
+    assert command[:7] == (
+        "/run/current-system/sw/bin/systemd-run",
+        "--user",
+        "--quiet",
+        "--collect",
+        "--wait",
+        "--pipe",
+        f"--unit=sinnixd-owner-{request_value.request_id}.service",
+    )
+    assert command[-3:] == ("fixture-env", "--command", "polylogue-agentctl-adapter")
+    assert forwarded["arguments"] == {"scope": "archive"}
+
+    wrong_precondition = request(
+        "polylogue.archive.status",
+        "polylogue-archive",
+        {
+            "scope": "archive",
+            "expected_source_binding": {
+                **source.to_dict(),
+                "source_ref": "sinnix://polylogue/other",
+            },
+        },
+    )
+    with pytest.raises(OwnerAdapterError, match="different source"):
+        DeclaredOwnerAdapters(execution).call(
+            project=project,
+            adapter=adapter,
+            request=wrong_precondition,
+        )
+    assert len(execution.calls) == 1
+
+    wrong_source = ResponseEnvelope(
+        request_id=request_value.request_id,
+        correlation_id=request_value.correlation_id,
+        owner="polylogue-archive",
+        payload=OpaquePayload.bounded({"archive": {"sessions": 2}}),
+        source_bindings=(
+            SourceBinding(
+                source_ref=SinnixRef.parse("sinnix://polylogue/other"),
+                generation=source.generation,
+                root_digest=source.root_digest,
+            ),
+        ),
+    )
+    execution.result = ExecutionResult(
+        command=(),
+        exit_status=0,
+        stdout=json.dumps(wrong_source.to_dict()).encode(),
+        stderr=b"",
+    )
+    with pytest.raises(OwnerAdapterError, match="wrong source"):
+        DeclaredOwnerAdapters(execution).call(
+            project=project,
+            adapter=adapter,
+            request=request_value,
+        )
+
+
 def test_unix_socket_server_round_trips_the_common_envelope(tmp_path: Path) -> None:
     write_adapter(tmp_path / "project")
     socket_path = tmp_path / "sinnixd.sock"
     service = SinnixdService(ProjectCatalog([tmp_path / "project"]))
     server = UnixSocketServer(socket_path, service)
-    thread = threading.Thread(target=server.serve_once, daemon=True)
-    thread.start()
-    for _ in range(100):
-        if socket_path.exists():
-            break
-        threading.Event().wait(0.01)
+    thread = start_server(server, once=True)
 
     response = call(socket_path, request("runtime.status", "sinnixd"))
     thread.join(timeout=1)
@@ -300,12 +500,7 @@ def test_unix_socket_server_returns_json_rpc_errors_without_crashing(tmp_path: P
     write_adapter(tmp_path / "project")
     socket_path = tmp_path / "sinnixd.sock"
     server = UnixSocketServer(socket_path, SinnixdService(ProjectCatalog([tmp_path / "project"])))
-    thread = threading.Thread(target=server.serve_once, daemon=True)
-    thread.start()
-    for _ in range(100):
-        if socket_path.exists():
-            break
-        threading.Event().wait(0.01)
+    thread = start_server(server, once=True)
 
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.connect(str(socket_path))
@@ -341,12 +536,7 @@ def test_unix_socket_server_continues_after_malformed_and_stalled_clients(tmp_pa
         connection_timeout_seconds=0.05,
     )
     stop_event = threading.Event()
-    thread = threading.Thread(target=server.serve_forever, args=(stop_event,), daemon=True)
-    thread.start()
-    for _ in range(100):
-        if socket_path.exists():
-            break
-        threading.Event().wait(0.01)
+    thread = start_server(server, stop_event=stop_event)
 
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.connect(str(socket_path))

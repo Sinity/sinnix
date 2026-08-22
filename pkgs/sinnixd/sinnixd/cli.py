@@ -38,6 +38,12 @@ def parser() -> argparse.ArgumentParser:
     status.add_argument("job_id")
     cancel = job_subcommands.add_parser("cancel")
     cancel.add_argument("job_id")
+    owner = subcommands.add_parser("owner")
+    owner_subcommands = owner.add_subparsers(dest="owner_command", required=True)
+    call_owner = owner_subcommands.add_parser("call")
+    call_owner.add_argument("owner")
+    call_owner.add_argument("operation")
+    call_owner.add_argument("--arguments-json", default="{}")
     return result
 
 
@@ -71,16 +77,24 @@ def main() -> None:
         request = _request(
             "project.operations", "project-adapters", {"project_id": arguments.project_id}
         )
-    elif arguments.job_command == "start":
+    elif arguments.command == "job" and arguments.job_command == "start":
         request = _request(
             "job.start",
             "systemd-jobs",
             {"project_id": arguments.project_id, "operation": arguments.operation},
         )
-    elif arguments.job_command == "status":
+    elif arguments.command == "job" and arguments.job_command == "status":
         request = _request("job.status", "systemd-jobs", {"job_id": arguments.job_id})
-    else:
+    elif arguments.command == "job":
         request = _request("job.cancel", "systemd-jobs", {"job_id": arguments.job_id})
+    else:
+        try:
+            owner_arguments = json.loads(arguments.arguments_json)
+        except json.JSONDecodeError as error:
+            parser().error(f"--arguments-json must be valid JSON: {error.msg}")
+        if not isinstance(owner_arguments, dict):
+            parser().error("--arguments-json must be a JSON object")
+        request = _request(arguments.operation, arguments.owner, owner_arguments)
     print(json.dumps(call(arguments.socket, request), indent=2, sort_keys=True))
 
 

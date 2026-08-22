@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -175,12 +174,7 @@ class DeclaredProjectJobs:
         job_id: str,
         correlation_id: str,
     ) -> dict[str, str]:
-        environment = {
-            key: os.environ[key]
-            for key in project.environment.inherit
-            if key in os.environ and key not in project.environment.unset
-        }
-        environment["PATH"] = os.environ.get("PATH", "/run/current-system/sw/bin")
+        environment = project.environment.values()
         environment.update(
             {
                 "SINNIXD_JOB_ID": job_id,

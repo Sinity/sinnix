@@ -221,3 +221,125 @@ class ResponseEnvelope:
         else:
             result["error"] = self.error.to_dict() if self.error else None
         return result
+
+
+def _opaque_payload_from_dict(value: Any) -> OpaquePayload:
+    if not isinstance(value, Mapping):
+        raise ValueError("payload must be an object")
+    kind = value.get("kind")
+    if kind == "inline":
+        if set(value) != {"kind", "value"}:
+            raise ValueError("inline payload has invalid fields")
+        return OpaquePayload.bounded(value["value"])
+    if kind == "opaque":
+        expected = {"kind", "ref", "digest", "media_type", "size_bytes"}
+        if set(value) != expected:
+            raise ValueError("opaque payload has invalid fields")
+        ref = value["ref"]
+        digest = value["digest"]
+        media_type = value["media_type"]
+        size_bytes = value["size_bytes"]
+        if not isinstance(ref, str) or not isinstance(digest, str) or not isinstance(media_type, str):
+            raise ValueError("opaque payload fields must be strings")
+        if not isinstance(size_bytes, int) or isinstance(size_bytes, bool):
+            raise ValueError("opaque payload size_bytes must be an integer")
+        return OpaquePayload(
+            ref=SinnixRef.parse(ref),
+            digest=digest,
+            media_type=media_type,
+            size_bytes=size_bytes,
+        )
+    raise ValueError("payload kind must be inline or opaque")
+
+
+def response_envelope_from_dict(value: Any) -> ResponseEnvelope:
+    """Parse and strictly validate a response from an external owner adapter."""
+    if not isinstance(value, Mapping):
+        raise ValueError("response must be an object")
+    common = {
+        "schema",
+        "request_id",
+        "correlation_id",
+        "owner",
+        "ok",
+        "source_bindings",
+        "receipt_ref",
+    }
+    present = set(value)
+    if not common.issubset(present) or present - (common | {"payload", "error"}):
+        raise ValueError("response has invalid fields")
+    schema = value["schema"]
+    if not isinstance(schema, int) or isinstance(schema, bool):
+        raise ValueError("response schema must be an integer")
+    for field in ("request_id", "correlation_id", "owner"):
+        if not isinstance(value[field], str):
+            raise ValueError(f"response {field} must be a string")
+    ok = value["ok"]
+    if not isinstance(ok, bool):
+        raise ValueError("response ok must be a boolean")
+    has_payload = "payload" in value
+    has_error = "error" in value
+    if (ok and (not has_payload or has_error)) or (
+        not ok and (has_payload or not has_error)
+    ):
+        raise ValueError("response outcome does not match payload or error")
+    source_values = value["source_bindings"]
+    if not isinstance(source_values, list):
+        raise ValueError("response source_bindings must be a list")
+    source_bindings: list[SourceBinding] = []
+    for binding in source_values:
+        if not isinstance(binding, Mapping) or set(binding) != {"source_ref", "generation", "root_digest"}:
+            raise ValueError("response source binding has invalid fields")
+        source_ref = binding["source_ref"]
+        generation = binding["generation"]
+        root_digest = binding["root_digest"]
+        if not all(isinstance(item, str) for item in (source_ref, generation, root_digest)):
+            raise ValueError("response source binding fields must be strings")
+        source_bindings.append(
+            SourceBinding(
+                source_ref=SinnixRef.parse(source_ref),
+                generation=generation,
+                root_digest=root_digest,
+            )
+        )
+    receipt_ref = value["receipt_ref"]
+    if receipt_ref is not None and not isinstance(receipt_ref, str):
+        raise ValueError("response receipt_ref must be a string or null")
+    if ok:
+        payload = _opaque_payload_from_dict(value["payload"])
+        return ResponseEnvelope(
+            request_id=value["request_id"],
+            correlation_id=value["correlation_id"],
+            owner=value["owner"],
+            payload=payload,
+            source_bindings=tuple(source_bindings),
+            receipt_ref=SinnixRef.parse(receipt_ref) if receipt_ref else None,
+            schema=value["schema"],
+        )
+    error_value = value["error"]
+    if not isinstance(error_value, Mapping) or set(error_value) != {"schema", "code", "message", "details"}:
+        raise ValueError("response error has invalid fields")
+    error_schema = error_value["schema"]
+    if not isinstance(error_schema, int) or isinstance(error_schema, bool):
+        raise ValueError("response error schema must be an integer")
+    if not isinstance(error_value["message"], str):
+        raise ValueError("response error message must be a string")
+    try:
+        code = ErrorCode(error_value["code"])
+    except (TypeError, ValueError) as error:
+        raise ValueError("response error code is invalid") from error
+    details = _opaque_payload_from_dict(error_value["details"])
+    return ResponseEnvelope(
+        request_id=value["request_id"],
+        correlation_id=value["correlation_id"],
+        owner=value["owner"],
+        error=ErrorEnvelope(
+            code=code,
+            message=error_value["message"],
+            details=details,
+            schema=error_value["schema"],
+        ),
+        source_bindings=tuple(source_bindings),
+        receipt_ref=SinnixRef.parse(receipt_ref) if receipt_ref else None,
+        schema=value["schema"],
+    )

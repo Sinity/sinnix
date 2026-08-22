@@ -58,6 +58,7 @@ class UnixSocketServer:
     socket_path: Path
     service: SinnixdService
     connection_timeout_seconds: float = CONNECTION_TIMEOUT_SECONDS
+    ready_event: Event | None = None
 
     def serve_once(self) -> None:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
@@ -86,6 +87,8 @@ class UnixSocketServer:
         listener.bind(str(self.socket_path))
         self.socket_path.chmod(0o600)
         listener.listen()
+        if self.ready_event is not None:
+            self.ready_event.set()
 
     def _serve_connection(self, listener: socket.socket) -> None:
         connection, _address = listener.accept()
