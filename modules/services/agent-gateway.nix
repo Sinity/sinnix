@@ -9,6 +9,9 @@
 let
   userName = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+  mcpTools = import ../features/dev/agents/mcp-tools.nix {
+    inherit lib pkgs scriptPkgs config;
+  };
   jsonFormat = pkgs.formats.json { };
   gatewayBin = "${scriptPkgs.sinnix-agent-gateway}/bin/sinnix-agent-gateway";
   tunnelClient = scriptPkgs.tunnel-client;
@@ -18,8 +21,8 @@ let
     "sinex"
   ];
   mcpBrokerCommands = {
-    lynchpin = "${scriptPkgs.lynchpin-cli}/bin/lynchpin-mcp";
-    polylogue = "${scriptPkgs.polylogue-cli}/bin/polylogue-mcp";
+    lynchpin = "${mcpTools.mcpLynchpinBin}/bin/mcp-lynchpin";
+    polylogue = "${mcpTools.mcpPolylogueBin}/bin/mcp-polylogue";
     sinex = "${scriptPkgs.sinnix-mcp-sinex}/bin/sinnix-mcp-sinex";
   };
   mcpBrokerServers = lib.mapAttrs (
