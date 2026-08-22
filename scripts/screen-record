@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Record the full HDR desktop at native 4K120 with default audio
+# runtimeInputs: bash coreutils gpu-screen-recorder
+
+set -euo pipefail
+
+target="DP-3"
+resolution="3840x2160"
+fps="120"
+output_dir="/realm/inbox"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: sinnix-screen-record [options]
+
+Record the native HDR desktop to a timestamped Matroska file. Stop recording
+with Ctrl-C; GPU Screen Recorder finalizes the file on exit.
+
+Options:
+  --target OUTPUT       Monitor connector (default: DP-3)
+  --resolution WxH      Output resolution limit (default: 3840x2160)
+  --fps FPS             Capture framerate (default: 120)
+  --output-dir DIR      Destination directory (default: /realm/inbox)
+  -h, --help            Show this help
+
+Environment overrides: SINNIX_SCREEN_RECORD_TARGET, SINNIX_SCREEN_RECORD_RESOLUTION,
+SINNIX_SCREEN_RECORD_FPS, SINNIX_SCREEN_RECORD_OUTPUT_DIR.
+EOF
+}
+
+target="${SINNIX_SCREEN_RECORD_TARGET:-$target}"
+resolution="${SINNIX_SCREEN_RECORD_RESOLUTION:-$resolution}"
+fps="${SINNIX_SCREEN_RECORD_FPS:-$fps}"
+output_dir="${SINNIX_SCREEN_RECORD_OUTPUT_DIR:-$output_dir}"
+
+while (($#)); do
+  case "$1" in
+    --target)
+      target="$2"
+      shift 2
+      ;;
+    --resolution)
+      resolution="$2"
+      shift 2
+      ;;
+    --fps)
+      fps="$2"
+      shift 2
+      ;;
+    --output-dir)
+      output_dir="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "sinnix-screen-record: unknown option: $1" >&2
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+mkdir -p "$output_dir"
+output="$output_dir/Video_$(date +%Y-%m-%d_%H-%M-%S).mkv"
+
+echo "Recording $target at ${resolution}@${fps} HDR -> $output" >&2
+echo "Press Ctrl-C to stop and finalize the file." >&2
+
+gpu-screen-recorder \
+  -w "$target" \
+  -s "$resolution" \
+  -f "$fps" \
+  -k hevc_hdr \
+  -c matroska \
+  -ac opus \
+  -a default_output \
+  -q medium \
+  -tune performance \
+  -fm vfr \
+  -cr full \
+  -cursor yes \
+  -encoder gpu \
+  -fallback-cpu-encoding no \
+  -restore-portal-session no \
+  -o "$output"
