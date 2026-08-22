@@ -41,6 +41,7 @@
     activationProfile = lib.mkOption {
       type = lib.types.enum [
         "foundation"
+        "user-mile"
         "capture"
         "full"
       ];
@@ -48,9 +49,11 @@
       description = ''
         High-level deployment profile used to map the upstream
         <literal>services.sinex</literal> node toggles. <literal>foundation</literal>
-        enables only core services plus filesystem/system collectors,
-        <literal>capture</literal> adds terminal capture and baseline automata,
-        and <literal>full</literal> enables the workstation-facing desktop path.
+        enables only core services plus filesystem/system collectors.
+        <literal>user-mile</literal> is the bounded daily-use trial: it ingests
+        only Atuin terminal history and runs no automata. <literal>capture</literal>
+        adds terminal capture and baseline automata, and <literal>full</literal>
+        enables the workstation-facing desktop path.
       '';
     };
     environment = lib.mkOption {

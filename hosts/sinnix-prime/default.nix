@@ -184,7 +184,11 @@
       # graphical boot transaction.
       autoStart = false;
       provisionDatabase = true;
-      activationProfile = "full";
+      # A bounded daily-use trial: Atuin terminal history reaches
+      # sinex_search_events without enabling the full workstation capture and
+      # automata graph. The delayed timer stays inert until this loop has
+      # survived its one-week observation window.
+      activationProfile = "user-mile";
       environment = "prod";
       filesystem.watchPaths = [
         "/realm/project"
