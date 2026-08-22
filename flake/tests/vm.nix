@@ -114,6 +114,7 @@ in
             parent = machine.succeed("cat /home/sinity/.local/state/sinnixd-parent.pid").strip()
             child = machine.succeed("cat /home/sinity/.local/state/sinnixd-child.pid").strip()
             machine.succeed(f"{as_user} agentctl job cancel {job_id} | jq -e '.ok and .payload.value.cancel_requested' >/dev/null")
+            machine.succeed(f"{as_user} agentctl job wait {job_id} | jq -e '.ok and ((.payload.value.state.phase == \"succeeded\" and .payload.value.state.systemd.Result == \"success\") or (.payload.value.state.phase == \"cancelled\" and (.payload.value.state.cancellation.invocation_id? | type == \"string\")))' >/dev/null")
             machine.wait_until_succeeds(f"! test -e /proc/{parent} && ! test -e /proc/{child}")
           '';
         };

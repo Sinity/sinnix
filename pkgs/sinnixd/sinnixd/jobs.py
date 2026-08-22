@@ -241,6 +241,8 @@ class GenericJobRecord:
     created_at: str
     cancel_requested_at: str | None = None
     cancel_requested_invocation_id: str | None = None
+    cancel_stop_acknowledged_at: str | None = None
+    cancel_stop_acknowledged_invocation_id: str | None = None
     state: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -253,6 +255,8 @@ class GenericJobRecord:
             "created_at": self.created_at,
             "cancel_requested_at": self.cancel_requested_at,
             "cancel_requested_invocation_id": self.cancel_requested_invocation_id,
+            "cancel_stop_acknowledged_at": self.cancel_stop_acknowledged_at,
+            "cancel_stop_acknowledged_invocation_id": self.cancel_stop_acknowledged_invocation_id,
             "state": dict(self.state),
         }
 
@@ -278,10 +282,16 @@ class GenericJobRecord:
         created_at = value.get("created_at")
         cancelled = value.get("cancel_requested_at")
         invocation = value.get("cancel_requested_invocation_id")
+        stop_acknowledged = value.get("cancel_stop_acknowledged_at")
+        stop_invocation = value.get("cancel_stop_acknowledged_invocation_id")
         if (
             not isinstance(created_at, str)
             or (cancelled is not None and not isinstance(cancelled, str))
             or (invocation is not None and not isinstance(invocation, str))
+            or (stop_acknowledged is not None and not isinstance(stop_acknowledged, str))
+            or (stop_invocation is not None and not isinstance(stop_invocation, str))
+            or (stop_acknowledged is None) != (stop_invocation is None)
+            or (stop_acknowledged is not None and (cancelled is None or stop_invocation != invocation))
         ):
             raise JobRecordError("job record timestamps are invalid")
         return cls(
@@ -292,6 +302,8 @@ class GenericJobRecord:
             created_at=created_at,
             cancel_requested_at=cancelled,
             cancel_requested_invocation_id=invocation,
+            cancel_stop_acknowledged_at=stop_acknowledged,
+            cancel_stop_acknowledged_invocation_id=stop_invocation,
             state=dict(state),
         )
 
@@ -501,6 +513,11 @@ class GenericJobs:
             intent = self._with_cancel_intent(record, status["state"].get("systemd", {}).get("InvocationID"))
             self.store.save(intent)
             self.systemd.stop(intent.unit)
+            acknowledged = self._with_stop_acknowledgement(
+                intent,
+                status["state"].get("systemd", {}).get("InvocationID"),
+            )
+            self.store.save(acknowledged)
             reconciled = self._get_locked(job_id)
             return {**reconciled, "cancel_requested": True, "already_terminal": False}
 
@@ -541,11 +558,12 @@ class GenericJobs:
 
     def _classify(self, properties: Mapping[str, str], record: GenericJobRecord) -> dict[str, Any]:
         if properties.get("LoadState") != "loaded":
-            if record.cancel_requested_at is not None:
+            if self._stop_acknowledgement_matches(record):
                 return {
                     "phase": "cancelled",
                     "terminal": True,
                     "systemd": dict(properties),
+                    "cancellation": self._stop_acknowledgement(record),
                     "observed_at": _timestamp(),
                 }
             return {"phase": "missing", "terminal": True, "systemd": dict(properties), "observed_at": _timestamp()}
@@ -580,6 +598,8 @@ class GenericJobs:
             created_at=record.created_at,
             cancel_requested_at=record.cancel_requested_at,
             cancel_requested_invocation_id=record.cancel_requested_invocation_id,
+            cancel_stop_acknowledged_at=record.cancel_stop_acknowledged_at,
+            cancel_stop_acknowledged_invocation_id=record.cancel_stop_acknowledged_invocation_id,
             state=dict(state),
         )
 
@@ -593,6 +613,26 @@ class GenericJobs:
             created_at=record.created_at,
             cancel_requested_at=record.cancel_requested_at or _timestamp(),
             cancel_requested_invocation_id=invocation_id if isinstance(invocation_id, str) else None,
+            cancel_stop_acknowledged_at=record.cancel_stop_acknowledged_at,
+            cancel_stop_acknowledged_invocation_id=record.cancel_stop_acknowledged_invocation_id,
+            state=dict(record.state),
+        )
+
+    @staticmethod
+    def _with_stop_acknowledgement(record: GenericJobRecord, invocation_id: Any) -> GenericJobRecord:
+        invocation = invocation_id if isinstance(invocation_id, str) else None
+        if invocation is None or invocation != record.cancel_requested_invocation_id:
+            return record
+        return GenericJobRecord(
+            job_id=record.job_id,
+            unit=record.unit,
+            spec=record.spec,
+            log_path=record.log_path,
+            created_at=record.created_at,
+            cancel_requested_at=record.cancel_requested_at,
+            cancel_requested_invocation_id=record.cancel_requested_invocation_id,
+            cancel_stop_acknowledged_at=_timestamp(),
+            cancel_stop_acknowledged_invocation_id=invocation,
             state=dict(record.state),
         )
 
@@ -602,9 +642,27 @@ class GenericJobs:
             return False
         invocation = properties.get("InvocationID")
         return (
-            record.cancel_requested_invocation_id is None
-            or invocation == record.cancel_requested_invocation_id
+            isinstance(invocation, str)
+            and invocation == record.cancel_requested_invocation_id
+            and properties.get("Result") == "signal"
         )
+
+    @staticmethod
+    def _stop_acknowledgement_matches(record: GenericJobRecord) -> bool:
+        return (
+            record.cancel_stop_acknowledged_at is not None
+            and record.cancel_stop_acknowledged_invocation_id is not None
+            and record.cancel_stop_acknowledged_invocation_id == record.cancel_requested_invocation_id
+        )
+
+    @staticmethod
+    def _stop_acknowledgement(record: GenericJobRecord) -> dict[str, str]:
+        assert record.cancel_stop_acknowledged_at is not None
+        assert record.cancel_stop_acknowledged_invocation_id is not None
+        return {
+            "stop_acknowledged_at": record.cancel_stop_acknowledged_at,
+            "invocation_id": record.cancel_stop_acknowledged_invocation_id,
+        }
 
     @staticmethod
     def _public(record: GenericJobRecord, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -649,17 +707,17 @@ def capture_main(arguments: Sequence[str] | None = None) -> int:
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     assert process.stdout is not None
     with parsed.log_path.open("wb") as handle:
-        while chunk := process.stdout.read(65_536):
+        while chunk := process.stdout.read1(65_536):
             accepted = b""
             if remaining:
                 accepted = chunk[:remaining]
                 handle.write(accepted)
                 remaining -= len(accepted)
-            overflowed = overflowed or len(chunk) > len(accepted)
+            if len(chunk) > len(accepted) and not overflowed:
+                parsed.overflow_path.touch(mode=0o600)
+                overflowed = True
         handle.flush()
         os.fsync(handle.fileno())
-    if overflowed:
-        parsed.overflow_path.touch(mode=0o600)
     return process.wait()
 
 
