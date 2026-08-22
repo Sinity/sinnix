@@ -9,7 +9,7 @@ import pytest
 from sinnix_agent_gateway.artifacts import ArtifactError, ArtifactService
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_agent_gateway.desktop import DesktopError, DesktopService
+from sinnix_agent_gateway.desktop import DesktopDiagnosticError, DesktopService
 from sinnix_agent_gateway.execution import OwnerExecution
 
 
@@ -106,8 +106,14 @@ def test_desktop_requires_wayland_environment_before_launch(tmp_path: Path) -> N
     desktop, _ = desktop_service(tmp_path, "observer")
     desktop.execution = OwnerExecution({})
 
-    with pytest.raises(DesktopError, match="environment_unavailable:XDG_RUNTIME_DIR"):
+    with pytest.raises(DesktopDiagnosticError) as caught:
         desktop.read("clients")
+
+    response = caught.value.response
+    assert response["failure_class"] == "environment_unavailable:XDG_RUNTIME_DIR"
+    assert response["route"] == "desktop-hypr"
+    artifact = desktop.artifacts.read(str(response["diagnostic_artifact_id"]))
+    assert artifact["kind"] == "owner-diagnostic"
 
 
 def test_artifact_rejects_unreceipted_capture_source(tmp_path: Path) -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, TypeVar
+from typing import Any, Awaitable, Callable, TypeVar, cast
 
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
@@ -19,6 +19,7 @@ from .captures import CaptureService
 from .config import GatewayConfig
 from .contracts import EffectMode, VerbFamily
 from .desktop import DesktopService
+from .execution import OwnerDiagnosticError
 from .files import HostFileService
 from .jobs import JobService
 from .machine_actions import MachineActionService
@@ -114,7 +115,7 @@ class Runtime:
             observe=ObserveService(config, principal),
             machine_actions=MachineActionService(config, principal),
             desktop=DesktopService(config, principal, artifacts),
-            terminals=TerminalService(config, principal),
+            terminals=TerminalService(config, principal, artifacts),
             browser=BrowserService(config, principal, artifacts),
             beads=beads,
             capability_index=CapabilityIndexService(config, principal),
@@ -184,9 +185,27 @@ class Runtime:
                 payload["correlation_id"] = payload["job_id"]
         self.audit.append(operation, "ok", payload)
 
+    @staticmethod
+    def _diagnostic_payload(response: dict[str, object]) -> dict[str, object]:
+        return {
+            key: response[key]
+            for key in (
+                "failure_class",
+                "route",
+                "exit_status",
+                "timed_out",
+                "output_exceeded",
+                "diagnostic_artifact_id",
+            )
+            if key in response
+        }
+
     def execute(self, operation: str, callback: Callable[[], T]) -> T:
         try:
             result = callback()
+        except OwnerDiagnosticError as exc:
+            self.audit.append(operation, "error", self._diagnostic_payload(exc.response))
+            return cast(T, {"operation": operation, **exc.response})
         except Exception as exc:
             message = public_error(exc)
             self.audit.append(operation, "error", {"error": message})
@@ -199,6 +218,9 @@ class Runtime:
     ) -> T:
         try:
             result = await callback()
+        except OwnerDiagnosticError as exc:
+            self.audit.append(operation, "error", self._diagnostic_payload(exc.response))
+            return cast(T, {"operation": operation, **exc.response})
         except Exception as exc:
             message = public_error(exc)
             self.audit.append(operation, "error", {"error": message})

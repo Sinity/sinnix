@@ -13,7 +13,7 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from sinnix_agent_gateway.app import Runtime, create_server
-from sinnix_agent_gateway.execution import ExecutionResult
+from sinnix_agent_gateway.execution import ExecutionResult, OwnerDiagnosticError
 from sinnix_agent_gateway.capabilities import PolicyError
 from sinnix_agent_gateway.cli import build_manifest, parser
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
@@ -388,6 +388,37 @@ def test_audit_chain_survives_concurrent_writers(tmp_path: Path) -> None:
     assert len(verification["head_hash"]) == 64
     assert {event["principal"] for event in runtime.audit.tail(240)["events"]} == {
         "observer"
+    }
+
+
+def test_runtime_returns_owner_diagnostic_and_audits_its_reference(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "observer")
+    response = {
+        "available": False,
+        "failure_class": "command_timeout",
+        "route": "terminal-kitty",
+        "exit_status": None,
+        "timed_out": True,
+        "output_exceeded": False,
+        "diagnostic_artifact_id": "fixture-artifact",
+    }
+
+    def fail() -> None:
+        raise OwnerDiagnosticError(response)
+
+    assert runtime.execute("terminal_read", fail) == {
+        "operation": "terminal_read",
+        **response,
+    }
+    event = runtime.audit.tail(1)["events"][0]
+    assert event["outcome"] == "error"
+    assert event["payload"] == {
+        "failure_class": "command_timeout",
+        "route": "terminal-kitty",
+        "exit_status": None,
+        "timed_out": True,
+        "output_exceeded": False,
+        "diagnostic_artifact_id": "fixture-artifact",
     }
 
 
