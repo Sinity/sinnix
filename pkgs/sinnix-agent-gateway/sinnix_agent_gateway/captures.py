@@ -19,6 +19,35 @@ class CaptureLane:
     root: Path
 
 
+def queryable_capture_lanes(runtime_inventory: Path) -> dict[str, CaptureLane]:
+    """Discover collector-compatible lanes from the runtime inventory."""
+    try:
+        inventory = json.loads(runtime_inventory.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    captures = inventory.get("captures")
+    if not isinstance(captures, list):
+        return {}
+    lanes: dict[str, CaptureLane] = {}
+    for row in captures:
+        if not isinstance(row, dict):
+            continue
+        name = row.get("name")
+        path = row.get("path")
+        if not isinstance(name, str) or not name or not isinstance(path, str):
+            continue
+        lane_path = Path(path)
+        index_path = lane_path / f"{name}-index.jsonl"
+        if (
+            not lane_path.is_absolute()
+            or not lane_path.is_dir()
+            or not index_path.is_file()
+        ):
+            continue
+        lanes[name] = CaptureLane(name=name, root=lane_path.parent)
+    return lanes
+
+
 class CaptureService:
     """Query declared sinnix-capture sidecar indexes without owning a lane registry."""
 
@@ -28,31 +57,7 @@ class CaptureService:
         self.execution = OwnerExecution()
 
     def _available_lanes(self) -> dict[str, CaptureLane]:
-        try:
-            inventory = json.loads(self.config.runtime_inventory.read_text())
-        except (OSError, json.JSONDecodeError):
-            return {}
-        captures = inventory.get("captures")
-        if not isinstance(captures, list):
-            return {}
-        lanes: dict[str, CaptureLane] = {}
-        for row in captures:
-            if not isinstance(row, dict):
-                continue
-            name = row.get("name")
-            path = row.get("path")
-            if not isinstance(name, str) or not name or not isinstance(path, str):
-                continue
-            lane_path = Path(path)
-            index_path = lane_path / f"{name}-index.jsonl"
-            if (
-                not lane_path.is_absolute()
-                or not lane_path.is_dir()
-                or not index_path.is_file()
-            ):
-                continue
-            lanes[name] = CaptureLane(name=name, root=lane_path.parent)
-        return lanes
+        return queryable_capture_lanes(self.config.runtime_inventory)
 
     def lanes_visible(self) -> dict[str, Any]:
         """List runtime-declared envelope lanes visible to this principal."""
