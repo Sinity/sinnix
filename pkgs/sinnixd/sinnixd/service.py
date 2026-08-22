@@ -16,7 +16,7 @@ from sinnix_mcp import (
 )
 from sinnix_mcp.execution import OwnerExecution
 
-from .jobs import DeclaredProjectJobs, SystemdJobError, UserSystemdJobs
+from .jobs import GenericJobStore, GenericJobs, JobRecordError, SystemdJobError, UserSystemdJobs, default_state_dir
 from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from .projects import ProjectCatalog
 
@@ -31,7 +31,9 @@ class SinnixdService:
     """
 
     projects: ProjectCatalog
-    jobs: DeclaredProjectJobs = field(default_factory=lambda: DeclaredProjectJobs(UserSystemdJobs()))
+    jobs: GenericJobs = field(
+        default_factory=lambda: GenericJobs(UserSystemdJobs(), GenericJobStore(default_state_dir()))
+    )
     owner_adapters: DeclaredOwnerAdapters = field(
         default_factory=lambda: DeclaredOwnerAdapters(OwnerExecution())
     )
@@ -65,7 +67,7 @@ class SinnixdService:
                 authority=Authority.SYSTEMD,
                 lifecycle=Lifecycle.DAEMON_OWNED,
                 versions=frozenset({1}),
-                documentation="Declared project operations owned by transient user services.",
+                documentation="Durable generic jobs reconciled from transient user services.",
             ),
         )
         return OwnerRegistry((*builtin, *(adapter.spec for adapter in self.projects.owner_adapters())))
@@ -95,7 +97,7 @@ class SinnixdService:
                 ErrorCode(error.code.upper()),
                 str(error),
             )
-        except SystemdJobError as error:
+        except (JobRecordError, SystemdJobError) as error:
             return self._error(request, owner_name, ErrorCode.OPERATION_FAILED, str(error))
         except ValueError as error:
             return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
@@ -144,16 +146,54 @@ class SinnixdService:
             if set(arguments) != {"project_id", "operation"}:
                 raise ValueError("job.start accepts only project_id and operation")
             project = self.projects.get(project_id)
-            return self.jobs.start(
+            return self.jobs.start_declared(
                 project=project,
                 operation=project.operation(operation_name),
                 correlation_id=correlation_id,
             )
-        if operation == "job.status":
-            return self.jobs.status(self._single_job_id(arguments, "job.status"))
+        if operation == "job.get":
+            return self.jobs.get(self._single_job_id(arguments, "job.get"))
+        if operation == "job.list":
+            if arguments:
+                raise ValueError("job.list accepts no arguments")
+            return self.jobs.list()
+        if operation == "job.wait":
+            job_id = self._job_argument(arguments, "job_id")
+            timeout_seconds = arguments.get("timeout_seconds", 30)
+            if set(arguments) - {"job_id", "timeout_seconds"}:
+                raise ValueError("job.wait accepts job_id and optional timeout_seconds")
+            if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool):
+                raise ValueError("job.wait timeout_seconds must be an integer")
+            return self.jobs.wait(job_id, timeout_seconds)
+        if operation == "job.logs":
+            job_id = self._job_argument(arguments, "job_id")
+            offset = arguments.get("offset", 0)
+            max_bytes = arguments.get("max_bytes", 64_000)
+            if set(arguments) - {"job_id", "offset", "max_bytes"}:
+                raise ValueError("job.logs accepts job_id, optional offset, and optional max_bytes")
+            if any(not isinstance(value, int) or isinstance(value, bool) for value in (offset, max_bytes)):
+                raise ValueError("job.logs offset and max_bytes must be integers")
+            return self.jobs.logs(job_id, offset=offset, max_bytes=max_bytes)
         if operation == "job.cancel":
             return self.jobs.cancel(self._single_job_id(arguments, "job.cancel"))
         raise ValueError(f"unsupported operation: {operation}")
+
+    def start_foreground(
+        self,
+        *,
+        command: tuple[str, ...],
+        working_directory: str,
+        environment: Mapping[str, str],
+        timeout_seconds: int,
+    ) -> dict[str, Any]:
+        """Create an internal foreground job without widening the RPC authority."""
+
+        return self.jobs.start_foreground(
+            command=command,
+            working_directory=working_directory,
+            environment=environment,
+            timeout_seconds=timeout_seconds,
+        )
 
     @staticmethod
     def _job_argument(arguments: Mapping[str, Any], name: str) -> str:

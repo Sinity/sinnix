@@ -9,6 +9,7 @@ from uuid import uuid4
 from sinnix_mcp import RequestEnvelope
 
 from .api import UnixSocketServer, call
+from .jobs import GenericJobStore, GenericJobs, UserSystemdJobs, default_state_dir
 from .projects import ProjectCatalog
 from .service import SinnixdService
 
@@ -34,8 +35,16 @@ def parser() -> argparse.ArgumentParser:
     start = job_subcommands.add_parser("start")
     start.add_argument("project_id")
     start.add_argument("operation")
-    status = job_subcommands.add_parser("status")
-    status.add_argument("job_id")
+    get = job_subcommands.add_parser("get")
+    get.add_argument("job_id")
+    job_subcommands.add_parser("list")
+    wait = job_subcommands.add_parser("wait")
+    wait.add_argument("job_id")
+    wait.add_argument("--timeout-seconds", type=int, default=30)
+    logs = job_subcommands.add_parser("logs")
+    logs.add_argument("job_id")
+    logs.add_argument("--offset", type=int, default=0)
+    logs.add_argument("--max-bytes", type=int, default=64_000)
     cancel = job_subcommands.add_parser("cancel")
     cancel.add_argument("job_id")
     owner = subcommands.add_parser("owner")
@@ -50,6 +59,7 @@ def parser() -> argparse.ArgumentParser:
 def daemon_parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="sinnixd")
     result.add_argument("--socket", type=Path, default=default_socket_path())
+    result.add_argument("--state-dir", type=Path, default=default_state_dir())
     result.add_argument("--project-root", type=Path, action="append", required=True)
     return result
 
@@ -83,8 +93,22 @@ def main() -> None:
             "systemd-jobs",
             {"project_id": arguments.project_id, "operation": arguments.operation},
         )
-    elif arguments.command == "job" and arguments.job_command == "status":
-        request = _request("job.status", "systemd-jobs", {"job_id": arguments.job_id})
+    elif arguments.command == "job" and arguments.job_command == "get":
+        request = _request("job.get", "systemd-jobs", {"job_id": arguments.job_id})
+    elif arguments.command == "job" and arguments.job_command == "list":
+        request = _request("job.list", "systemd-jobs", {})
+    elif arguments.command == "job" and arguments.job_command == "wait":
+        request = _request(
+            "job.wait",
+            "systemd-jobs",
+            {"job_id": arguments.job_id, "timeout_seconds": arguments.timeout_seconds},
+        )
+    elif arguments.command == "job" and arguments.job_command == "logs":
+        request = _request(
+            "job.logs",
+            "systemd-jobs",
+            {"job_id": arguments.job_id, "offset": arguments.offset, "max_bytes": arguments.max_bytes},
+        )
     elif arguments.command == "job":
         request = _request("job.cancel", "systemd-jobs", {"job_id": arguments.job_id})
     else:
@@ -100,5 +124,8 @@ def main() -> None:
 
 def daemon_main() -> None:
     arguments = daemon_parser().parse_args()
-    service = SinnixdService(ProjectCatalog(arguments.project_root))
+    service = SinnixdService(
+        ProjectCatalog(arguments.project_root),
+        jobs=GenericJobs(UserSystemdJobs(), GenericJobStore(arguments.state_dir)),
+    )
     UnixSocketServer(arguments.socket, service).serve_forever()

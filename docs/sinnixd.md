@@ -12,13 +12,18 @@ agentctl project list
 agentctl project get sinnix
 agentctl project operations sinnix
 agentctl job start sinnix lint
-agentctl job status <job-id>
+agentctl job get <job-id>
+agentctl job list
+agentctl job wait <job-id>
+agentctl job logs <job-id> --max-bytes 64000
 agentctl job cancel <job-id>
 ```
 
 It discovers only `.agentctl/project.toml` adapters passed by the service. It does not scan arbitrary directories. Each descriptor is schema-versioned, identifies its repository root markers, declares the execution environment, and publishes named operation metadata.
 
-`job start` accepts a project ID and one declared operation name, never an arbitrary command. It creates one transient user `.service` unit in `agent.slice`; systemd remains authoritative for the process, cgroup, timeout, result, cancellation, and journal evidence. A job ID deterministically derives its unit name, so status and cancellation survive a `sinnixd` restart without a daemon-owned process record.
+`job start` accepts a project ID and one declared operation name, never an arbitrary command. Declared operations and internal synthetic foreground commands construct the same durable generic-job spec, record, transient user `.service` launch, log artifact, reconciliation, wait, and cancellation route. The public AgentCTL RPC surface exposes only declared operations.
+
+Each record is stored under `$XDG_STATE_HOME/sinnixd` and contains reconstructible launch metadata plus its bounded-read log artifact path. It does not own a PID, process state, queue, task, workspace, or retry policy. A job ID deterministically derives its unit name. After a daemon restart, `get`, `list`, `wait`, and `cancel` reload the record and reconcile with the user manager. Systemd remains authoritative for the process, cgroup, timeout, terminal result, cancellation, and journal evidence.
 
 ## Source-scoped owner adapters
 
@@ -26,7 +31,7 @@ A project descriptor can declare a source-scoped, read-only owner adapter in `[o
 
 The first reserved contract is `polylogue.archive.status`, owned by `polylogue-archive` and bound to `sinnix://polylogue/archive`. A successful response must use the same request and correlation IDs, retain the declared owner identity, carry exactly one matching source binding, and use a bounded inline or opaque payload. An optional `expected_source_binding` request field is an AgentCTL precondition. When present, the returned generation and root digest must match it exactly. The adapter owns archive semantics and availability errors. AgentCTL owns transport, validation, systemd lifecycle, and result bounds.
 
-The daemon still does not own job queues, retries, task mutation, service leases, Git operations, arbitrary shells, or generic workspaces. Descriptor pool, cache, and exclusivity metadata remain descriptive until their existing authorities move behind an explicit shared contract. The gateway’s legacy job surface remains active while replacement parity is built.
+The daemon still does not own job queues, retries, task mutation, service leases, Git operations, arbitrary shells, admission policy, or generic workspaces. Descriptor pool, cache, and exclusivity metadata remain descriptive until their existing authorities move behind an explicit shared contract. The gateway’s legacy controllers remain downstream and are unchanged here.
 
 ## Shared protocol
 
