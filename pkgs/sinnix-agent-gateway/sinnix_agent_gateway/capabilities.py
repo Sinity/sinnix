@@ -68,9 +68,8 @@ PRINCIPAL_CAPABILITIES: dict[str, frozenset[Capability]] = {
 }
 
 
-# Holding CAPTURE_READ permits capture queries. The lane table carries
-# resource-level authority beyond the capability. None grants every lane under
-# captures_root.
+# Holding CAPTURE_READ permits capture queries. The runtime inventory's lane
+# table carries resource-level authority beyond this capability.
 PRINCIPAL_LANE_ACCESS: dict[str, frozenset[str] | None] = {
     "observer": None,
     "agent-control": None,

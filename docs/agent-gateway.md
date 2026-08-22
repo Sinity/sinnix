@@ -70,6 +70,7 @@ The common read surface includes:
 - `memory_search` and `memory_get` for source-preserving semantic access to available raw coding-session memory
 - `timeline_query` for source-preserving coding-session timeline evidence
 - `mcp_catalog` and `mcp_read` for registry-derived upstream MCP discovery and explicitly read-only upstream tools
+- `capture_lanes` and `capture_query` for runtime-inventory-declared `sinnix-capture` lanes with sidecar indexes
 - `desktop_read` for current Hyprland, workspace, client, binding, and color-management state
 - `desktop_capture` for output-only screenshots returned as opaque artifacts
 - `terminal_read` for Kitty terminal inventory and bounded capture reads
