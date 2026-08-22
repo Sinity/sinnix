@@ -40,20 +40,14 @@ let
       FIRECRAWL_API_KEY = firecrawlSecretPath;
     };
   };
-  # `home.file` text for the Lynchpin/Polylogue/Sinex MCP wrappers. These are
-  # plain launch scripts (no HM-scoped `config` needed) so they live here
-  # alongside the other generic MCP tool wrappers rather than inline in
-  # mcp.nix's home-manager body.
-  mcpLynchpinText = ''
-    #!${pkgs.runtimeShell}
+  mcpLynchpinBin = pkgs.writeShellScriptBin "mcp-lynchpin" ''
     set -euo pipefail
     export LYNCHPIN_REPO_ROOT=/realm/project/sinity-lynchpin
     export LYNCHPIN_LOCAL_ROOT=/realm/project/sinity-lynchpin/.lynchpin
     export PYTHONPATH="$LYNCHPIN_REPO_ROOT''${PYTHONPATH:+:$PYTHONPATH}"
     exec ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.mcp.cli "$@"
   '';
-  mcpPolylogueText = ''
-    #!${pkgs.runtimeShell}
+  mcpPolylogueBin = pkgs.writeShellScriptBin "mcp-polylogue" ''
     set -euo pipefail
     # The polylogue repo's .claude/settings.json pins POLYLOGUE_ARCHIVE_ROOT
     # to the cloud-lane fixture (/tmp/polylogue-archive), and that env leaks
@@ -68,12 +62,24 @@ let
     fi
     exec ${scriptPkgs.polylogue-cli}/bin/polylogue-mcp "$@"
   '';
+  # The user-facing files stay tiny out-of-store launchers, while the gateway
+  # consumes the identical store-backed commands directly.
+  mcpLynchpinText = ''
+    #!${pkgs.runtimeShell}
+    exec ${mcpLynchpinBin}/bin/mcp-lynchpin "$@"
+  '';
+  mcpPolylogueText = ''
+    #!${pkgs.runtimeShell}
+    exec ${mcpPolylogueBin}/bin/mcp-polylogue "$@"
+  '';
 in
 {
   inherit
     mkRuntimeSecretExports
     mkMcpWrapper
     mcpFirecrawlBin
+    mcpLynchpinBin
+    mcpPolylogueBin
     mcpLynchpinText
     mcpPolylogueText
     ;
