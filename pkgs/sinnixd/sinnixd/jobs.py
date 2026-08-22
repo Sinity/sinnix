@@ -21,6 +21,7 @@ from .projects import ProjectAdapter, ProjectOperation
 DEFAULT_TIMEOUT_SECONDS = 3_600
 DEFAULT_WAIT_SECONDS = 30
 MAX_WAIT_SECONDS = 300
+SYSTEMD_COMMAND_TIMEOUT_SECONDS = 0.25
 MAX_LOG_BYTES = 64_000
 MAX_LOG_ARTIFACT_BYTES = 1_048_576
 JOB_SCHEMA_VERSION = 2
@@ -78,7 +79,12 @@ class SystemdJobs(Protocol):
         log_path: Path,
     ) -> None: ...
 
-    def show(self, unit: str) -> Mapping[str, str]: ...
+    def show(
+        self,
+        unit: str,
+        *,
+        timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+    ) -> Mapping[str, str]: ...
 
     def stop(self, unit: str) -> None: ...
 
@@ -123,7 +129,12 @@ class UserSystemdJobs:
         args.extend(command)
         self._run(args)
 
-    def show(self, unit: str) -> Mapping[str, str]:
+    def show(
+        self,
+        unit: str,
+        *,
+        timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+    ) -> Mapping[str, str]:
         output = self._run(
             [
                 "systemctl",
@@ -139,7 +150,8 @@ class UserSystemdJobs:
                 "--property=ExecMainStatus",
                 "--property=ControlGroup",
                 "--property=InvocationID",
-            ]
+            ],
+            timeout_seconds=timeout_seconds,
         )
         return dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
 
@@ -147,11 +159,22 @@ class UserSystemdJobs:
         self._run(["systemctl", "--user", "stop", unit])
 
     @staticmethod
-    def _run(args: Sequence[str]) -> str:
+    def _run(args: Sequence[str], *, timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS) -> str:
+        timeout_seconds = min(timeout_seconds, SYSTEMD_COMMAND_TIMEOUT_SECONDS)
+        if timeout_seconds <= 0:
+            raise ValueError("systemd command timeout must be positive")
         try:
-            result = subprocess.run(args, check=True, capture_output=True, text=True)
+            result = subprocess.run(
+                args,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+            )
         except FileNotFoundError as error:
             raise SystemdJobError(f"systemd command is unavailable: {args[0]}") from error
+        except subprocess.TimeoutExpired as error:
+            raise SystemdJobError("systemd command timed out") from error
         except OSError as error:
             raise SystemdJobError(f"systemd command failed: {args[0]}: {error}") from error
         except subprocess.CalledProcessError as error:
@@ -452,10 +475,7 @@ class GenericJobs:
                     log_path=record.log_path,
                 )
             except SystemdJobError:
-                reconciled = self._reconcile_launch_error(record)
-                if reconciled is not None:
-                    return reconciled
-                raise
+                return self._reconcile_launch_error(record)
             submitted = self._with_state(record, {"phase": "submitted", "terminal": False, "observed_at": _timestamp()})
             self.store.save(submitted)
             return self._public(submitted, submitted.state)
@@ -523,7 +543,16 @@ class GenericJobs:
             raise ValueError(f"wait timeout_seconds must be between 1 and {MAX_WAIT_SECONDS}")
         deadline = time.monotonic() + timeout_seconds
         while True:
-            status = self.get(job_id)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                with self.store.locked(job_id):
+                    record = self.store.load(job_id)
+                    return {**self._public(record, record.state), "wait_timed_out": True}
+            with self.store.locked(job_id):
+                status = self._get_locked(
+                    job_id,
+                    systemd_timeout_seconds=min(SYSTEMD_COMMAND_TIMEOUT_SECONDS, remaining),
+                )
             if status["state"]["terminal"]:
                 return status
             if time.monotonic() >= deadline:
@@ -568,17 +597,24 @@ class GenericJobs:
             "artifact_truncated": overflowed,
         }
 
-    def _get_locked(self, job_id: str) -> dict[str, Any]:
+    def _get_locked(
+        self,
+        job_id: str,
+        *,
+        systemd_timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+    ) -> dict[str, Any]:
         record = self.store.load(job_id)
         if record.state.get("terminal"):
             return self._public(record, record.state)
         try:
-            properties = dict(self.systemd.show(record.unit))
-        except SystemdJobError as error:
+            properties = dict(
+                self.systemd.show(record.unit, timeout_seconds=systemd_timeout_seconds)
+            )
+        except SystemdJobError:
             state = {
-                "phase": "lost",
+                "phase": "launch-unknown" if record.state.get("phase") == "launch-unknown" else "lost",
                 "error": {"code": SYSTEMD_ERROR_CODE},
-                "terminal": True,
+                "terminal": record.state.get("phase") != "launch-unknown",
                 "observed_at": _timestamp(),
             }
         else:
@@ -587,11 +623,19 @@ class GenericJobs:
         self.store.save(updated)
         return self._public(updated, state)
 
-    def _reconcile_launch_error(self, record: GenericJobRecord) -> dict[str, Any] | None:
+    def _reconcile_launch_error(self, record: GenericJobRecord) -> dict[str, Any]:
         try:
             properties = dict(self.systemd.show(record.unit))
         except SystemdJobError:
-            return None
+            state = {
+                "phase": "launch-unknown",
+                "error": {"code": SYSTEMD_ERROR_CODE},
+                "terminal": False,
+                "observed_at": _timestamp(),
+            }
+            updated = self._with_state(record, state)
+            self.store.save(updated)
+            return self._public(updated, state)
         if properties.get("LoadState") == "not-found":
             state = {
                 "phase": "launch-failed",
@@ -599,8 +643,9 @@ class GenericJobs:
                 "terminal": True,
                 "observed_at": _timestamp(),
             }
-            self.store.save(self._with_state(record, state))
-            return None
+            updated = self._with_state(record, state)
+            self.store.save(updated)
+            return self._public(updated, state)
         state = self._classify(properties, record)
         updated = self._with_state(record, state)
         self.store.save(updated)
@@ -608,6 +653,14 @@ class GenericJobs:
 
     def _classify(self, properties: Mapping[str, str], record: GenericJobRecord) -> dict[str, Any]:
         if properties.get("LoadState") != "loaded":
+            if record.state.get("phase") == "launch-unknown":
+                return {
+                    "phase": "launch-failed",
+                    "error": {"code": SYSTEMD_ERROR_CODE},
+                    "terminal": True,
+                    "systemd": dict(properties),
+                    "observed_at": _timestamp(),
+                }
             if self._stop_acknowledgement_matches(record):
                 return {
                     "phase": "cancelled",
