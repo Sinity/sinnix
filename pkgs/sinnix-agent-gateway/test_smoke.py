@@ -433,6 +433,25 @@ def test_runtime_audit_carries_returned_job_correlation(tmp_path: Path) -> None:
     assert payload == {"job_id": "job-correlation", "correlation_id": "job-correlation"}
 
 
+def test_runtime_audit_carries_upstream_mcp_target(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "observer")
+    runtime.execute(
+        "mcp_read",
+        lambda: {
+            "server": "fixture",
+            "tool": "fixture_read",
+            "mode": "read",
+            "secret": "hidden",
+        },
+    )
+
+    assert runtime.audit.tail(1)["events"][0]["payload"] == {
+        "server": "fixture",
+        "tool": "fixture_read",
+        "mode": "read",
+    }
+
+
 def test_runtime_audit_carries_returned_transient_unit(tmp_path: Path) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
     runtime.execute(

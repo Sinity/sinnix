@@ -172,6 +172,9 @@ class Runtime:
                 "cancelled",
                 "already_terminal",
                 "kind",
+                "server",
+                "tool",
+                "mode",
             ):
                 value = result.get(key)
                 if isinstance(value, (str, int, float, bool)):
