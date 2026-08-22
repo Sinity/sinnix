@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import socket
+import subprocess
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,7 +18,8 @@ from sinnix_mcp import OpaquePayload, RequestEnvelope, ResponseEnvelope, SinnixR
 from sinnix_mcp.execution import ExecutionResult
 
 from sinnixd.api import UnixSocketServer, call, receive_frame, send_frame
-from sinnixd.jobs import DeclaredProjectJobs, UserSystemdJobs
+from sinnixd.environment import build_environment
+from sinnixd.jobs import GenericJobStore, GenericJobs, SystemdJobError, UserSystemdJobs
 from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from sinnixd.projects import ProjectCatalog, ProjectConfigError
 from sinnixd.service import SinnixdService
@@ -102,6 +107,7 @@ class FakeSystemdJobs:
         working_directory: str,
         environment: dict[str, str],
         timeout_seconds: int,
+        log_path: Path,
     ) -> None:
         self.started.append(
             {
@@ -110,6 +116,7 @@ class FakeSystemdJobs:
                 "working_directory": working_directory,
                 "environment": environment,
                 "timeout_seconds": timeout_seconds,
+                "log_path": log_path,
             }
         )
 
@@ -119,6 +126,10 @@ class FakeSystemdJobs:
 
     def stop(self, unit: str) -> None:
         self.stopped.append(unit)
+
+
+def generic_jobs(tmp_path: Path, systemd: FakeSystemdJobs | None = None) -> GenericJobs:
+    return GenericJobs(systemd or FakeSystemdJobs(), GenericJobStore(tmp_path / "state"), wait_poll_seconds=0.001)
 
 
 @dataclass
@@ -205,7 +216,7 @@ def test_owner_mismatch_is_a_typed_error(tmp_path: Path) -> None:
     assert missing.error.code.value == "INVALID_ARGUMENT"
 
 
-def test_user_systemd_jobs_starts_a_retained_service_with_declared_boundary(monkeypatch) -> None:
+def test_user_systemd_jobs_starts_a_retained_service_with_log_boundary(monkeypatch, tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
     def fake_run(args, **_kwargs):
@@ -220,6 +231,7 @@ def test_user_systemd_jobs_starts_a_retained_service_with_declared_boundary(monk
         working_directory="/work/project",
         environment={"HOME": "/home/sinity", "SINNIXD_JOB_ID": "job"},
         timeout_seconds=123,
+        log_path=tmp_path / "job.log",
     )
 
     assert calls == [
@@ -231,6 +243,8 @@ def test_user_systemd_jobs_starts_a_retained_service_with_declared_boundary(monk
             "--slice=agent.slice",
             "--property=WorkingDirectory=/work/project",
             "--property=RuntimeMaxSec=123s",
+            f"--property=StandardOutput=append:{tmp_path / 'job.log'}",
+            f"--property=StandardError=append:{tmp_path / 'job.log'}",
             "--",
             "/run/current-system/sw/bin/env",
             "-i",
@@ -244,12 +258,13 @@ def test_user_systemd_jobs_starts_a_retained_service_with_declared_boundary(monk
     ]
 
 
-def test_declared_project_job_is_owned_by_a_transient_service(tmp_path: Path) -> None:
+def test_declared_and_foreground_jobs_share_the_generic_route(tmp_path: Path) -> None:
+    """Anti-vacuity: deleting GenericJobs.start makes both launch assertions fail."""
     write_adapter(tmp_path)
     systemd = FakeSystemdJobs()
     service = SinnixdService(
         ProjectCatalog([tmp_path]),
-        jobs=DeclaredProjectJobs(systemd, timeout_seconds=123),
+        jobs=generic_jobs(tmp_path, systemd),
     )
 
     started = service.dispatch(
@@ -265,46 +280,57 @@ def test_declared_project_job_is_owned_by_a_transient_service(tmp_path: Path) ->
     launch = started.payload.inline
     assert launch["unit"].startswith("sinnixd-job-")
     assert launch["unit"].endswith(".service")
-    assert launch["command"] == ["fixture-env", "--command", "fixture-check"]
+    assert launch["kind"] == "declared-operation"
     assert len(systemd.started) == 1
     assert systemd.started[0]["working_directory"] == str(tmp_path.resolve())
-    assert systemd.started[0]["timeout_seconds"] == 123
+    assert systemd.started[0]["timeout_seconds"] == 3_600
     assert systemd.started[0]["environment"]["SINNIXD_JOB_ID"] == launch["job_id"]
     assert systemd.started[0]["environment"]["SINNIXD_OPERATION"] == "check"
 
-    status = service.dispatch(
-        request("job.status", "systemd-jobs", {"job_id": launch["job_id"]})
+    foreground = service.start_foreground(
+        command=("fixture-foreground",),
+        working_directory=str(tmp_path),
+        environment={"EMPTY": ""},
+        timeout_seconds=123,
     )
+    assert foreground["kind"] == "foreground-command"
+    assert len(systemd.started) == 2
+    assert systemd.started[0]["command"] == ("fixture-env", "--command", "fixture-check")
+    assert systemd.started[1]["command"] == ("fixture-foreground",)
+    foreground_record = service.jobs.store.load(foreground["job_id"])
+    assert foreground_record.spec.to_dict()["environment_keys"] == ["EMPTY", "SINNIXD_JOB_ID"]
+
+    status = service.dispatch(request("job.get", "systemd-jobs", {"job_id": launch["job_id"]}))
     cancelled = service.dispatch(
         request("job.cancel", "systemd-jobs", {"job_id": launch["job_id"]})
     )
 
     assert status.ok
     assert status.payload is not None
-    assert status.payload.inline["systemd"]["MainPID"] == "42"
+    assert status.payload.inline["state"]["systemd"]["MainPID"] == "42"
     assert cancelled.ok
     assert systemd.stopped == [launch["unit"]]
 
 
-def test_declared_project_job_status_rejects_an_unloaded_unit(tmp_path: Path) -> None:
+def test_job_reconciliation_marks_missing_units_without_daemon_owned_state(tmp_path: Path) -> None:
+    """Anti-vacuity: deleting GenericJobs.get's systemd.show call loses the missing phase."""
     write_adapter(tmp_path)
     systemd = FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"})
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=DeclaredProjectJobs(systemd))
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
 
-    response = service.dispatch(
-        request("job.status", "systemd-jobs", {"job_id": str(uuid4())})
-    )
+    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"}))
+    assert started.payload is not None
 
-    assert not response.ok
-    assert response.owner == "systemd-jobs"
-    assert response.error is not None
-    assert response.error.code.value == "OPERATION_FAILED"
-    assert "not loaded" in response.error.message
+    response = service.dispatch(request("job.get", "systemd-jobs", {"job_id": started.payload.inline["job_id"]}))
+
+    assert response.ok
+    assert response.payload is not None
+    assert response.payload.inline["state"]["phase"] == "missing"
 
 
 def test_declared_project_job_rejects_arbitrary_execution(tmp_path: Path) -> None:
     write_adapter(tmp_path)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=DeclaredProjectJobs(FakeSystemdJobs()))
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
 
     wrong_owner = service.dispatch(
         request(
@@ -335,6 +361,139 @@ def test_declared_project_job_rejects_arbitrary_execution(tmp_path: Path) -> Non
     assert unknown_operation.error.code.value == "INVALID_ARGUMENT"
     assert direct_argv.error is not None
     assert direct_argv.error.code.value == "INVALID_ARGUMENT"
+
+
+def test_environment_builder_keeps_empty_values_distinct_from_unset() -> None:
+    """Anti-vacuity: replacing membership checks with truthiness drops the empty EMPTY value."""
+    environment = build_environment(
+        inherit=("EMPTY", "PRESENT", "MISSING", "REMOVED"),
+        unset=("REMOVED",),
+        source={"PATH": "", "EMPTY": "", "PRESENT": "value", "REMOVED": "secret"},
+    )
+
+    assert environment == {"PATH": "", "EMPTY": "", "PRESENT": "value"}
+
+
+@pytest.mark.parametrize(
+    ("properties", "expected"),
+    [
+        ({"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}, "succeeded"),
+        ({"LoadState": "loaded", "ActiveState": "inactive", "Result": "timeout", "ExecMainStatus": "9"}, "timed_out"),
+        ({"LoadState": "loaded", "ActiveState": "failed", "Result": "exit-code", "ExecMainStatus": "1"}, "failed"),
+    ],
+)
+def test_terminal_result_classification_comes_from_systemd(
+    tmp_path: Path, properties: dict[str, str], expected: str
+) -> None:
+    """Anti-vacuity: deleting GenericJobs._classify breaks the terminal phase assertion."""
+    systemd = FakeSystemdJobs(properties=properties)
+    jobs = generic_jobs(tmp_path, systemd)
+    started = jobs.start_foreground(
+        command=("fixture",),
+        working_directory=str(tmp_path),
+        environment={"PATH": ""},
+    )
+
+    status = jobs.get(started["job_id"])
+
+    assert status["state"]["phase"] == expected
+    assert status["state"]["terminal"]
+
+
+def test_logs_are_bounded_and_restart_reconciles_the_same_record(tmp_path: Path) -> None:
+    """Anti-vacuity: deleting the persisted record or GenericJobs.logs breaks restart reads."""
+    systemd = FakeSystemdJobs(
+        properties={"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}
+    )
+    jobs = generic_jobs(tmp_path, systemd)
+    started = jobs.start_foreground(
+        command=("fixture",),
+        working_directory=str(tmp_path),
+        environment={"PATH": ""},
+    )
+    record = jobs.store.load(started["job_id"])
+    record.log_path.write_text("0123456789")
+
+    log = jobs.logs(started["job_id"], offset=2, max_bytes=4)
+    restarted = GenericJobs(systemd, jobs.store, wait_poll_seconds=0.001)
+    listed = restarted.list()
+    waited = restarted.wait(started["job_id"], timeout_seconds=1)
+
+    assert log == {
+        "job_id": started["job_id"],
+        "offset": 2,
+        "content": "2345",
+        "next_offset": 6,
+        "truncated": True,
+    }
+    assert [job["job_id"] for job in listed["jobs"]] == [started["job_id"]]
+    assert waited["state"]["phase"] == "succeeded"
+
+
+def test_job_rpc_get_list_wait_logs_and_cancel_share_one_record(tmp_path: Path) -> None:
+    """Anti-vacuity: deleting any RPC route prevents its shared job ID from resolving."""
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs(
+        properties={"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}
+    )
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"}))
+    assert started.payload is not None
+    job_id = started.payload.inline["job_id"]
+
+    get = service.dispatch(request("job.get", "systemd-jobs", {"job_id": job_id}))
+    listed = service.dispatch(request("job.list", "systemd-jobs"))
+    waited = service.dispatch(request("job.wait", "systemd-jobs", {"job_id": job_id, "timeout_seconds": 1}))
+    logs = service.dispatch(request("job.logs", "systemd-jobs", {"job_id": job_id, "max_bytes": 10}))
+    cancelled = service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": job_id}))
+
+    assert all(response.ok for response in (get, listed, waited, logs, cancelled))
+    assert listed.payload is not None
+    assert listed.payload.inline["jobs"][0]["job_id"] == job_id
+    assert cancelled.payload is not None
+    assert cancelled.payload.inline["already_terminal"]
+
+
+def test_real_user_systemd_service_cgroup_cancels_descendants(tmp_path: Path) -> None:
+    """Anti-vacuity: this enters systemd-run/systemctl; replacing the launcher with a subprocess leaves the child alive."""
+    if shutil.which("systemd-run") is None or shutil.which("systemctl") is None:
+        pytest.skip("systemd user tools are unavailable")
+    manager = subprocess.run(["systemctl", "--user", "show-environment"], capture_output=True, text=True, check=False)
+    if manager.returncode != 0:
+        pytest.skip("a usable user systemd manager is unavailable")
+
+    child_pid = tmp_path / "child.pid"
+    script = tmp_path / "spawn-child.sh"
+    script.write_text("#!/bin/sh\nsleep 30 &\necho $! > \"$1\"\necho lifecycle-output\nwait\n")
+    script.chmod(0o700)
+    jobs = GenericJobs(UserSystemdJobs(), GenericJobStore(tmp_path / "state"), wait_poll_seconds=0.05)
+    started: dict[str, object] | None = None
+    try:
+        started = jobs.start_foreground(
+            command=("/bin/sh", str(script), str(child_pid)),
+            working_directory=str(tmp_path),
+            environment=build_environment(source=os.environ),
+            timeout_seconds=60,
+        )
+        deadline = time.monotonic() + 5
+        while not child_pid.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert child_pid.exists()
+        status = jobs.get(str(started["job_id"]))
+        assert status["state"]["systemd"]["ControlGroup"].endswith(str(started["unit"]))
+
+        cancelled = jobs.cancel(str(started["job_id"]))
+        terminal = jobs.wait(str(started["job_id"]), timeout_seconds=5)
+        pid = int(child_pid.read_text().strip())
+        assert cancelled["cancel_requested"]
+        assert terminal["state"]["phase"] == "cancelled"
+        assert not Path(f"/proc/{pid}").exists()
+    finally:
+        if started is not None:
+            try:
+                UserSystemdJobs().stop(str(started["unit"]))
+            except SystemdJobError:
+                pass
 
 
 def test_source_scoped_owner_adapter_is_registered_and_forwards_exact_response(tmp_path: Path) -> None:

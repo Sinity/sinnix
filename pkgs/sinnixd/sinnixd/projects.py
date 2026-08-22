@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from sinnix_mcp import Authority, Lifecycle, OwnerRegistry, OwnerSpec, SinnixRef
+
+from .environment import build_environment
 
 
 class ProjectConfigError(ValueError):
@@ -22,13 +23,7 @@ class ProjectEnvironment:
     unset: tuple[str, ...]
 
     def values(self) -> dict[str, str]:
-        environment = {
-            key: os.environ[key]
-            for key in self.inherit
-            if key in os.environ and key not in self.unset
-        }
-        environment["PATH"] = os.environ.get("PATH", "/run/current-system/sw/bin")
-        return environment
+        return build_environment(inherit=self.inherit, unset=self.unset)
 
 
 @dataclass(frozen=True)

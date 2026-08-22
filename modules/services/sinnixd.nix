@@ -27,6 +27,7 @@ mkServiceModule {
     { ... }:
     {
       environment.systemPackages = [ scriptPkgs.sinnixd ];
+      sinnix.persistence.home.directories = [ ".local/state/sinnixd" ];
 
       home-manager.users.${userName}.systemd.user.services.sinnixd = {
         Unit = {
@@ -40,7 +41,7 @@ mkServiceModule {
           })
           // {
             Type = "simple";
-            ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd --socket %t/sinnixd.sock --project-root ${projectRoot}";
+            ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd --socket %t/sinnixd.sock --state-dir %S/sinnixd --project-root ${projectRoot}";
             Restart = "on-failure";
             RestartSec = "2s";
             UMask = "0077";
