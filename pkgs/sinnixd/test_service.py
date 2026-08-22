@@ -22,6 +22,7 @@ from sinnixd.api import UnixSocketServer, call, receive_frame, send_frame
 from sinnixd.environment import build_environment
 from sinnixd.jobs import (
     MAX_LOG_ARTIFACT_BYTES,
+    SYSTEMD_COMMAND_TIMEOUT_SECONDS,
     GenericJobSpec,
     GenericJobStore,
     GenericJobs,
@@ -130,7 +131,12 @@ class FakeSystemdJobs:
             }
         )
 
-    def show(self, unit: str) -> dict[str, str]:
+    def show(
+        self,
+        unit: str,
+        *,
+        timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+    ) -> dict[str, str]:
         assert unit.startswith("sinnixd-job-")
         return self.properties
 
@@ -235,10 +241,10 @@ def test_owner_mismatch_is_a_typed_error(tmp_path: Path) -> None:
 
 
 def test_user_systemd_jobs_starts_a_retained_service_with_log_boundary(monkeypatch, tmp_path: Path) -> None:
-    calls: list[list[str]] = []
+    calls: list[tuple[list[str], dict[str, object]]] = []
 
-    def fake_run(args, **_kwargs):
-        calls.append(list(args))
+    def fake_run(args, **kwargs):
+        calls.append((list(args), kwargs))
         return SimpleNamespace(stdout="")
 
     monkeypatch.setattr("sinnixd.jobs.subprocess.run", fake_run)
@@ -252,7 +258,7 @@ def test_user_systemd_jobs_starts_a_retained_service_with_log_boundary(monkeypat
         log_path=tmp_path / "job.log",
     )
 
-    assert calls == [
+    assert [args for args, _kwargs in calls] == [
         [
             "systemd-run",
             "--user",
@@ -282,6 +288,53 @@ def test_user_systemd_jobs_starts_a_retained_service_with_log_boundary(monkeypat
             "lint",
         ]
     ]
+    assert calls[0][1] == {
+        "check": True,
+        "capture_output": True,
+        "text": True,
+        "timeout": SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+    }
+
+
+def test_user_systemd_calls_use_finite_timeouts_and_redact_timeout_details(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Anti-vacuity: omitting subprocess timeouts leaves a control worker held by a stuck user manager."""
+    calls: list[dict[str, object]] = []
+
+    def fake_run(args, **kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(stdout="LoadState=loaded\nActiveState=active\n")
+
+    monkeypatch.setattr("sinnixd.jobs.subprocess.run", fake_run)
+    systemd = UserSystemdJobs()
+    systemd.start(
+        unit="sinnixd-job-00000000-0000-0000-0000-000000000001.service",
+        command=("fixture",),
+        working_directory=str(tmp_path),
+        environment={},
+        timeout_seconds=1,
+        log_path=tmp_path / "job.log",
+    )
+    systemd.show("sinnixd-job-00000000-0000-0000-0000-000000000001.service")
+    systemd.stop("sinnixd-job-00000000-0000-0000-0000-000000000001.service")
+
+    assert [call["timeout"] for call in calls] == [
+        SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+        SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+        SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+    ]
+
+    secret = "timeout-command-detail-must-not-escape"
+
+    def timed_out(args, **kwargs):
+        raise subprocess.TimeoutExpired([*args, secret], kwargs["timeout"])
+
+    monkeypatch.setattr("sinnixd.jobs.subprocess.run", timed_out)
+    with pytest.raises(SystemdJobError) as error:
+        systemd.show("sinnixd-job-00000000-0000-0000-0000-000000000001.service")
+    assert str(error.value) == "systemd command timed out"
+    assert secret not in str(error.value)
 
 
 def test_user_systemd_os_error_reconciles_without_persisting_raw_error(monkeypatch, tmp_path: Path) -> None:
@@ -655,7 +708,12 @@ def test_nonterminal_absence_and_launch_failure_are_distinct_terminal_outcomes(
 ) -> None:
     """Anti-vacuity: post-launch loss, missing units, and launch failures have distinct terminal records."""
     class FailingShow(FakeSystemdJobs):
-        def show(self, unit: str) -> dict[str, str]:
+        def show(
+            self,
+            unit: str,
+            *,
+            timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+        ) -> dict[str, str]:
             raise SystemdJobError("manager unavailable")
 
     systemd: FakeSystemdJobs = FailingShow() if mode == "lost" else FakeSystemdJobs(properties=properties or {})
@@ -700,11 +758,11 @@ def test_start_persists_launch_failed_only_when_systemd_confirms_absence(tmp_pat
 
     jobs = generic_jobs(tmp_path, ConfirmedAbsent(properties={"LoadState": "not-found", "ActiveState": "inactive"}))
 
-    with pytest.raises(SystemdJobError, match=secret):
-        jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
-
-    record = jobs.store.list()[0]
+    result = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    record = jobs.store.load(result["job_id"])
     persisted = (tmp_path / "state" / "jobs" / f"{record.job_id}.json").read_text()
+    assert result["unit"] == record.unit
+    assert result["state"]["phase"] == "launch-failed"
     assert record.state["phase"] == "launch-failed"
     assert record.state["error"] == {"code": "systemd-job-error"}
     assert secret not in persisted
@@ -716,7 +774,12 @@ def test_terminal_systemd_errors_persist_only_stable_codes(tmp_path: Path, mode:
     secret = "systemd-error-secret-do-not-persist"
 
     class FailingShow(FakeSystemdJobs):
-        def show(self, unit: str) -> dict[str, str]:
+        def show(
+            self,
+            unit: str,
+            *,
+            timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+        ) -> dict[str, str]:
             raise SystemdJobError(secret)
 
     class FailingStart(FakeSystemdJobs):
@@ -728,10 +791,7 @@ def test_terminal_systemd_errors_persist_only_stable_codes(tmp_path: Path, mode:
         FailingShow() if mode == "lost" else FailingStart(properties={"LoadState": "not-found", "ActiveState": "inactive"}),
     )
     if mode == "launch-failed":
-        with pytest.raises(SystemdJobError, match=secret):
-            jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
-        record = jobs.store.list()[0]
-        status = jobs.get(record.job_id)
+        status = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
     else:
         started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
         status = jobs.get(started["job_id"])
@@ -742,6 +802,161 @@ def test_terminal_systemd_errors_persist_only_stable_codes(tmp_path: Path, mode:
     assert status["state"]["error"] == {"code": "systemd-job-error"}
     assert secret not in persisted
     assert '"message"' not in persisted
+
+
+def test_launch_unknown_reconciles_to_observed_success_through_get_and_wait(tmp_path: Path) -> None:
+    """Anti-vacuity: launch uncertainty must retain its identity until systemd later answers."""
+    class ReplyAndFirstShowLost(FakeSystemdJobs):
+        show_is_unavailable = True
+
+        def start(self, **kwargs) -> None:
+            self.started.append(dict(kwargs))
+            raise SystemdJobError("reply unavailable")
+
+        def show(
+            self,
+            unit: str,
+            *,
+            timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+        ) -> dict[str, str]:
+            if self.show_is_unavailable:
+                raise SystemdJobError("manager unavailable")
+            return super().show(unit, timeout_seconds=timeout_seconds)
+
+    systemd = ReplyAndFirstShowLost()
+    jobs = generic_jobs(tmp_path, systemd)
+    uncertain = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    persisted = jobs.store.load(uncertain["job_id"])
+
+    assert uncertain["unit"] == persisted.unit
+    assert uncertain["state"]["phase"] == "launch-unknown"
+    assert uncertain["state"]["error"] == {"code": "systemd-job-error"}
+    assert not uncertain["state"]["terminal"]
+
+    systemd.show_is_unavailable = False
+    systemd.properties = {"LoadState": "loaded", "ActiveState": "active", "Result": "success"}
+    running = jobs.get(uncertain["job_id"])
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+    }
+    succeeded = jobs.wait(uncertain["job_id"], timeout_seconds=1)
+
+    assert running["job_id"] == uncertain["job_id"]
+    assert running["unit"] == uncertain["unit"]
+    assert running["state"]["phase"] == "running"
+    assert succeeded["job_id"] == uncertain["job_id"]
+    assert succeeded["state"]["phase"] == "succeeded"
+
+
+def test_launch_unknown_reconciles_to_launch_failed_when_systemd_confirms_absence(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: unavailable reconciliation must not relabel confirmed absence as ordinary missing."""
+    class ReplyAndFirstShowLost(FakeSystemdJobs):
+        show_is_unavailable = True
+
+        def start(self, **kwargs) -> None:
+            raise SystemdJobError("reply unavailable")
+
+        def show(
+            self,
+            unit: str,
+            *,
+            timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+        ) -> dict[str, str]:
+            if self.show_is_unavailable:
+                raise SystemdJobError("manager unavailable")
+            return super().show(unit, timeout_seconds=timeout_seconds)
+
+    systemd = ReplyAndFirstShowLost()
+    jobs = generic_jobs(tmp_path, systemd)
+    uncertain = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    systemd.show_is_unavailable = False
+    systemd.properties = {"LoadState": "not-found", "ActiveState": "inactive"}
+
+    failed = jobs.get(uncertain["job_id"])
+
+    assert failed["job_id"] == uncertain["job_id"]
+    assert failed["unit"] == uncertain["unit"]
+    assert failed["state"]["phase"] == "launch-failed"
+    assert failed["state"]["terminal"]
+
+
+def test_launch_unknown_cancel_reconciles_the_same_job_id(tmp_path: Path) -> None:
+    """Anti-vacuity: cancellation must operate on the durable uncertain launch record."""
+    class ReplyAndFirstShowLost(FakeSystemdJobs):
+        show_is_unavailable = True
+
+        def start(self, **kwargs) -> None:
+            raise SystemdJobError("reply unavailable")
+
+        def show(
+            self,
+            unit: str,
+            *,
+            timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+        ) -> dict[str, str]:
+            if self.show_is_unavailable:
+                raise SystemdJobError("manager unavailable")
+            return super().show(unit, timeout_seconds=timeout_seconds)
+
+    systemd = ReplyAndFirstShowLost(
+        properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"}
+    )
+    jobs = generic_jobs(tmp_path, systemd)
+    uncertain = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    systemd.show_is_unavailable = False
+
+    cancelled = jobs.cancel(uncertain["job_id"])
+
+    assert systemd.stopped == [uncertain["unit"]]
+    assert cancelled["job_id"] == uncertain["job_id"]
+    assert cancelled["unit"] == uncertain["unit"]
+    assert cancelled["state"]["phase"] == "cancelled"
+
+
+def test_job_wait_caps_manager_calls_at_its_remaining_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: a blocked manager call must consume at most the wait's remaining budget."""
+    clock = [0.0]
+
+    class UnavailableSystemd(FakeSystemdJobs):
+        timeouts: list[float] = []
+
+        def start(self, **kwargs) -> None:
+            raise SystemdJobError("reply unavailable")
+
+        def show(
+            self,
+            unit: str,
+            *,
+            timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+        ) -> dict[str, str]:
+            self.timeouts.append(timeout_seconds)
+            clock[0] += timeout_seconds
+            raise SystemdJobError("manager unavailable")
+
+    monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("sinnixd.jobs.time.sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    systemd = UnavailableSystemd()
+    jobs = GenericJobs(systemd, GenericJobStore(tmp_path / "state"), wait_poll_seconds=0.1)
+    uncertain = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    systemd.timeouts.clear()
+    clock[0] = 0.0
+
+    timed_out = jobs.wait(uncertain["job_id"], timeout_seconds=1)
+
+    assert timed_out["job_id"] == uncertain["job_id"]
+    assert timed_out["state"]["phase"] == "launch-unknown"
+    assert timed_out["wait_timed_out"]
+    assert systemd.timeouts
+    assert all(0 < timeout <= SYSTEMD_COMMAND_TIMEOUT_SECONDS for timeout in systemd.timeouts)
+    assert clock[0] == 1.0
 
 
 @pytest.mark.parametrize(
