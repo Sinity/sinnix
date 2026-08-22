@@ -12,13 +12,18 @@ agentctl project list
 agentctl project get sinnix
 agentctl project operations sinnix
 agentctl job start sinnix lint
-agentctl job status <job-id>
+agentctl job get <job-id>
+agentctl job list
+agentctl job wait <job-id>
+agentctl job logs <job-id> --max-bytes 64000
 agentctl job cancel <job-id>
 ```
 
 It discovers only `.agentctl/project.toml` adapters passed by the service. It does not scan arbitrary directories. Each descriptor is schema-versioned, identifies its repository root markers, declares the execution environment, and publishes named operation metadata.
 
-`job start` accepts a project ID and one declared operation name, never an arbitrary command. It creates one transient user `.service` unit in `agent.slice`; systemd remains authoritative for the process, cgroup, timeout, result, cancellation, and journal evidence. A job ID deterministically derives its unit name, so status and cancellation survive a `sinnixd` restart without a daemon-owned process record.
+`job start` accepts a project ID and one declared operation name, never an arbitrary command. Declared operations and internal synthetic foreground commands construct the same durable generic-job spec, record, transient user `.service` launch, log artifact, reconciliation, wait, and cancellation route. The public AgentCTL RPC surface exposes only declared operations.
+
+Each record is stored under `$XDG_STATE_HOME/sinnixd` and contains safe operation identity, environment key names, and its bounded-read log artifact path. Record replacement fsyncs the containing directory, and newly created state directories are synchronized before they contain durable evidence. Internal foreground argv is launch-only: the durable record has only a SHA-256 digest and constant display metadata, never raw argv or environment values. The systemd-launched capture helper drains output but writes at most 1 MiB per job; it creates its overflow marker with the first discarded byte, so a live log reader can see truncation before the producer exits. It does not own a PID, process state, queue, task, workspace, or retry policy. A job ID deterministically derives its unit name. Every `systemd-run` and `systemctl` call has a short finite bound. `job.wait` caps each reconciliation call to its remaining deadline, so a stalled user manager cannot hold a wait or reserved control worker indefinitely. After a daemon restart, `get`, `list`, `wait`, and `cancel` reload the record and reconcile with the user manager. If `systemd-run` loses its reply but `show` finds the transient unit, `job start` returns the reconciled systemd state. If both the launch reply and its first reconciliation are unavailable, `job start` returns a durable nonterminal `launch-unknown` result with the stable job ID and unit. Later `get`, `wait`, and `cancel` use that same identity to reconcile it. A later observed unit produces its ordinary systemd state, while a confirmed absent unit becomes terminal `launch-failed`. Later missing or unreachable units after a confirmed launch are terminal `missing` or `lost` results. Cancellation persists its intent before asking systemd to stop the service, then preserves an observed systemd success, timeout, or failure result. A `cancelled` result needs matching systemd signal evidence, or a durably recorded successful stop acknowledgement for the observed invocation when systemd has already garbage-collected the transient unit. Systemd remains authoritative for the process, cgroup, timeout, terminal result, cancellation, and journal evidence.
 
 ## Source-scoped owner adapters
 
@@ -26,7 +31,7 @@ A project descriptor can declare a source-scoped, read-only owner adapter in `[o
 
 The first reserved contract is `polylogue.archive.status`, owned by `polylogue-archive` and bound to `sinnix://polylogue/archive`. A successful response must use the same request and correlation IDs, retain the declared owner identity, carry exactly one matching source binding, and use a bounded inline or opaque payload. An optional `expected_source_binding` request field is an AgentCTL precondition. When present, the returned generation and root digest must match it exactly. The adapter owns archive semantics and availability errors. AgentCTL owns transport, validation, systemd lifecycle, and result bounds.
 
-The daemon still does not own job queues, retries, task mutation, service leases, Git operations, arbitrary shells, or generic workspaces. Descriptor pool, cache, and exclusivity metadata remain descriptive until their existing authorities move behind an explicit shared contract. The gateway’s legacy job surface remains active while replacement parity is built.
+The daemon still does not own job queues, retries, task mutation, service leases, Git operations, arbitrary shells, admission policy, or generic workspaces. Descriptor pool, cache, and exclusivity metadata remain descriptive until their existing authorities move behind an explicit shared contract. The gateway’s legacy controllers remain downstream and are unchanged here.
 
 ## Shared protocol
 
