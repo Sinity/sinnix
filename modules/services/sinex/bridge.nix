@@ -739,6 +739,10 @@ in
                 # Nix module options.
                 "SINEX_EVENT_ENGINE_REJECT_INITIAL_REPLAY=false"
                 "SINEX_EVENT_ENGINE_STARTUP_CATCH_UP_MAX_CONCURRENT=1"
+                # The pinned Sinex Nix module emits `1` for this boolean, but
+                # the daemon's top-level Clap argument accepts only true/false.
+                # A later Environment= assignment wins in systemd.
+                "SINEX_NATS_REQUIRE_TLS=true"
               ];
               # Bounded drain window: forced kills replay cleanly via
               # JetStream, so bounding activation stalls beats waiting on a
