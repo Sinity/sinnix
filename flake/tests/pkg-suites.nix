@@ -94,6 +94,12 @@
         # test_project_tree_and_read_reject_symlink_escape ("DID NOT RAISE
         # ProjectError"; 1 failed, 23 passed); reverted after confirming red.
         sinnix-agent-gateway-suite = scriptRegistry.packageSet.sinnix-agent-gateway;
+
+        # Provably fails when: a syntactically valid job ID whose unit is not
+        # loaded is represented as a successful completed job. The package
+        # suite enters the systemd status adapter and asserts the typed owner
+        # failure instead.
+        sinnixd-suite = scriptRegistry.packageSet.sinnixd;
       };
     };
 }

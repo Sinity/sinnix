@@ -71,6 +71,7 @@ class UserSystemdJobs:
                 "--user",
                 "show",
                 unit,
+                "--property=LoadState",
                 "--property=ActiveState",
                 "--property=SubState",
                 "--property=MainPID",
@@ -152,10 +153,13 @@ class DeclaredProjectJobs:
 
     def status(self, job_id: str) -> dict[str, Any]:
         unit = job_unit_name(job_id)
+        properties = dict(self.systemd.show(unit))
+        if properties.get("LoadState") != "loaded":
+            raise SystemdJobError(f"job unit is not loaded: {unit}")
         return {
             "job_id": job_id,
             "unit": unit,
-            "systemd": dict(self.systemd.show(unit)),
+            "systemd": properties,
         }
 
     def cancel(self, job_id: str) -> dict[str, Any]:
