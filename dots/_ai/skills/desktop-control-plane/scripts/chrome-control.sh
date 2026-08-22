@@ -226,10 +226,12 @@ status)
 # creation, not by matching a class or a title. Every window of one Chrome
 # process carries the same class, so a windowrule cannot tell this window from
 # the operator's; and a title match would race the page's own title changes.
-# The address that appears is unambiguous, and `movetoworkspacesilent` moves
-# it without pulling the operator's view along with it. Chrome may still finish
-# mapping its native window after CDP returns, so success requires observing
-# that exact address on the hidden workspace after the move.
+# The whole create-to-park transaction is serialized because concurrent callers
+# would otherwise diff the same client set and both select one new address.
+# `movetoworkspacesilent` moves that unique address without pulling the
+# operator's view along with it. Chrome may still finish mapping its native
+# window after CDP returns, so success requires observing that exact address on
+# the hidden workspace after the move.
 agent-window)
   url="about:blank"
   while [[ $# -gt 0 ]]; do
@@ -248,6 +250,17 @@ agent-window)
   ws_url=$(get_browser_ws_url)
   [[ -n $ws_url ]] || {
     echo "browser websocket unavailable: ${CDP_BASE}" >&2
+    exit 1
+  }
+  command -v flock >/dev/null 2>&1 || {
+    echo "agent-window requires flock" >&2
+    exit 1
+  }
+
+  agent_window_runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  exec {agent_window_lock_fd}>"${agent_window_runtime_dir}/sinnix-chrome-agent-window.lock"
+  flock -w 15 "$agent_window_lock_fd" || {
+    echo "timed out waiting to create an agent browser window" >&2
     exit 1
   }
 
