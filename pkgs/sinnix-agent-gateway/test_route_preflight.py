@@ -5,6 +5,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.execution import OwnerExecution
 from sinnix_agent_gateway.route_preflight import GatewayRoutePreflight
@@ -39,6 +41,9 @@ def make_owner_command(tmp_path: Path) -> str:
         "    value = []\n"
         "elif arguments == ['status']:\n"
         "    value = {'Browser': 'fixture'}\n"
+        "elif arguments == ['--version']:\n"
+        "    print('fixture')\n"
+        "    sys.exit()\n"
         "else:\n"
         "    value = {'schema': 'fixture'}\n"
         "print(json.dumps(value))\n"
@@ -82,7 +87,24 @@ def test_route_preflight_probes_configured_owner_routes(tmp_path: Path) -> None:
 
     assert result["status"] == "ready"
     routes = {route["route"]: route for route in result["routes"]}
-    assert routes["machine.observe"]["status"] == "pass"
+    assert routes["machine.observe"] == {
+        "route": "machine.observe",
+        "command": [
+            str(tmp_path / "owner-command"),
+            "--format",
+            "json",
+            "--section",
+            "pressure",
+            "--limit",
+            "1",
+        ],
+        "decoder": "json_object_with_schema",
+        "timeout_seconds": 5,
+        "stdout_bytes": len('{"schema": "fixture"}\n'),
+        "stderr_bytes": 0,
+        "exit_status": 0,
+        "status": "pass",
+    }
     assert routes["capture.query"] == {
         "route": "capture.query",
         "command": [
@@ -106,6 +128,16 @@ def test_route_preflight_probes_configured_owner_routes(tmp_path: Path) -> None:
     assert routes["desktop.screenshot"]["decoder"] == "json_object_with_tools"
     assert routes["terminal.kitty"]["decoder"] == "json_list"
     assert routes["browser.chrome"]["decoder"] == "json_object_with_browser"
+    assert routes["beads"] == {
+        "route": "beads",
+        "command": [str(tmp_path / "owner-command"), "--version"],
+        "decoder": "non_empty_text",
+        "timeout_seconds": 5,
+        "stdout_bytes": len("fixture\n"),
+        "stderr_bytes": 0,
+        "exit_status": 0,
+        "status": "pass",
+    }
 
 
 def test_route_preflight_reports_missing_owner_command(tmp_path: Path) -> None:
@@ -136,6 +168,61 @@ def test_route_preflight_reports_missing_owner_command(tmp_path: Path) -> None:
         "status": "unavailable",
         "failure_class": "command_unavailable:FileNotFoundError",
     }
+
+
+@pytest.mark.parametrize(
+    ("field", "route"),
+    [
+        ("observe_command", "machine.observe"),
+        ("capture_command", "capture.query"),
+        ("hypr_control_command", "desktop.hypr"),
+        ("screenshot_control_command", "desktop.screenshot"),
+        ("kitty_control_command", "terminal.kitty"),
+        ("chrome_control_command", "browser.chrome"),
+        ("beads_command", "beads"),
+    ],
+)
+def test_route_preflight_marks_each_missing_owner_command_unavailable(
+    tmp_path: Path, field: str, route: str
+) -> None:
+    missing = "/definitely/missing/gateway-owner"
+
+    result = preflight(tmp_path, **{field: missing}).run()
+
+    row = {entry["route"]: entry for entry in result["routes"]}[route]
+    assert row["status"] == "unavailable"
+    assert row["failure_class"] == "command_unavailable:FileNotFoundError"
+    assert row["command"][0] == missing
+
+
+@pytest.mark.parametrize(
+    ("missing", "route"),
+    [
+        ("XDG_RUNTIME_DIR", "machine.observe"),
+        ("WAYLAND_DISPLAY", "desktop.hypr"),
+        ("HYPRLAND_INSTANCE_SIGNATURE", "desktop.screenshot"),
+    ],
+)
+def test_route_preflight_marks_required_owner_environment_unavailable(
+    tmp_path: Path, missing: str, route: str
+) -> None:
+    checker = preflight(tmp_path)
+    environment = {
+        "HOME": str(tmp_path),
+        "LANG": "C.UTF-8",
+        "PATH": os.environ["PATH"],
+        "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
+        "WAYLAND_DISPLAY": "wayland-fixture",
+        "HYPRLAND_INSTANCE_SIGNATURE": "fixture",
+    }
+    environment.pop(missing)
+    checker.execution = OwnerExecution(environment)
+
+    result = checker.run()
+
+    row = {entry["route"]: entry for entry in result["routes"]}[route]
+    assert row["status"] == "unavailable"
+    assert row["failure_class"] == f"environment_unavailable:{missing}"
 
 
 def test_route_preflight_reports_missing_broker_environment(tmp_path: Path, monkeypatch) -> None:
