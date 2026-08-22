@@ -19,6 +19,7 @@ class EnvironmentProfile(StrEnum):
     TERMINAL = "terminal"
     USER_BUS = "user-bus"
     USER_BUS_OPTIONAL = "user-bus-optional"
+    SESSION_OPTIONAL = "session-optional"
     WAYLAND = "wayland"
 
 
@@ -42,6 +43,7 @@ class ExecutionProfile:
     timeout_seconds: float = 20.0
     max_stdout_bytes: int = 262_144
     max_stderr_bytes: int = 8_192
+    max_combined_output_bytes: int | None = None
     cwd: Path | None = None
     environment: Mapping[str, str] = field(default_factory=dict)
     stdin_bytes: bytes | None = None
@@ -51,6 +53,8 @@ class ExecutionProfile:
             raise ValueError("execution timeout must be positive")
         if self.max_stdout_bytes < 1 or self.max_stderr_bytes < 1:
             raise ValueError("execution output bounds must be positive")
+        if self.max_combined_output_bytes is not None and self.max_combined_output_bytes < 1:
+            raise ValueError("combined execution output bound must be positive")
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,7 @@ class ExecutionResult:
     exit_status: int | None
     stdout: bytes
     stderr: bytes
+    combined_output: bytes = b""
     timed_out: bool = False
     output_exceeded: bool = False
     failure_class: str | None = None
@@ -101,6 +106,7 @@ class OwnerExecution:
             "XDG_RUNTIME_DIR",
         ),
         EnvironmentProfile.USER_BUS_OPTIONAL: (),
+        EnvironmentProfile.SESSION_OPTIONAL: (),
         EnvironmentProfile.WAYLAND: (
             "XDG_RUNTIME_DIR",
             "WAYLAND_DISPLAY",
@@ -110,6 +116,11 @@ class OwnerExecution:
     _OPTIONAL_ENVIRONMENT: dict[EnvironmentProfile, tuple[str, ...]] = {
         EnvironmentProfile.USER_BUS_OPTIONAL: (
             "DBUS_SESSION_BUS_ADDRESS",
+            "XDG_RUNTIME_DIR",
+        ),
+        EnvironmentProfile.SESSION_OPTIONAL: (
+            "DBUS_SESSION_BUS_ADDRESS",
+            "WAYLAND_DISPLAY",
             "XDG_RUNTIME_DIR",
         ),
     }
@@ -198,6 +209,7 @@ class OwnerExecution:
 
         stdout = bytearray()
         stderr = bytearray()
+        combined_output = bytearray()
         pending_stdin = memoryview(profile.stdin_bytes or b"")
         exceeded = False
         selector = selectors.DefaultSelector()
@@ -233,6 +245,15 @@ class OwnerExecution:
                         selector.unregister(key.fileobj)
                         continue
                     assert destination is not None
+                    if profile.max_combined_output_bytes is not None:
+                        combined_limit = profile.max_combined_output_bytes
+                        combined_room = combined_limit + 1 - len(combined_output)
+                        if combined_room > 0:
+                            combined_output.extend(chunk[:combined_room])
+                        if len(combined_output) > combined_limit:
+                            exceeded = True
+                    else:
+                        combined_output.extend(chunk)
                     limit = (
                         profile.max_stdout_bytes
                         if stream == "stdout"
@@ -243,6 +264,7 @@ class OwnerExecution:
                         destination.extend(chunk[:room])
                     if len(destination) > limit:
                         exceeded = True
+                    if exceeded:
                         self._terminate(process)
                         break
                 if exceeded:
@@ -267,6 +289,11 @@ class OwnerExecution:
             exit_status=exit_status,
             stdout=bytes(stdout[: profile.max_stdout_bytes]),
             stderr=bytes(stderr[: profile.max_stderr_bytes]),
+            combined_output=bytes(
+                combined_output[: profile.max_combined_output_bytes]
+                if profile.max_combined_output_bytes is not None
+                else combined_output
+            ),
             timed_out=timed_out,
             output_exceeded=exceeded,
             failure_class=failure,
