@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
 from .capabilities import Capability, Principal
@@ -74,12 +73,6 @@ class ObserveService:
     def _collect_report(
         self, operation: str, cursor: int = 0, page_limit: int = 100
     ) -> dict[str, Any]:
-        environment = {
-            "HOME": os.environ.get("HOME", "/home/sinity"),
-            "LANG": os.environ.get("LANG", "C.UTF-8"),
-            "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
-            "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"),
-        }
         result = self.execution.run(
             [
                 self.config.observe_command,
@@ -98,7 +91,6 @@ class ObserveService:
                 route=OwnerRoute("machine-observe"),
                 timeout_seconds=20,
                 max_stdout_bytes=self._collector_bound(),
-                environment=environment,
             ),
         )
         if result.failure_class == "command_timeout":

@@ -17,6 +17,8 @@ class EnvironmentProfile(StrEnum):
 
     PLAIN = "plain"
     TERMINAL = "terminal"
+    USER_BUS = "user-bus"
+    USER_BUS_OPTIONAL = "user-bus-optional"
     WAYLAND = "wayland"
 
 
@@ -94,10 +96,21 @@ class OwnerExecution:
     _REQUIRED_ENVIRONMENT: dict[EnvironmentProfile, tuple[str, ...]] = {
         EnvironmentProfile.PLAIN: (),
         EnvironmentProfile.TERMINAL: ("XDG_RUNTIME_DIR",),
+        EnvironmentProfile.USER_BUS: (
+            "DBUS_SESSION_BUS_ADDRESS",
+            "XDG_RUNTIME_DIR",
+        ),
+        EnvironmentProfile.USER_BUS_OPTIONAL: (),
         EnvironmentProfile.WAYLAND: (
             "XDG_RUNTIME_DIR",
             "WAYLAND_DISPLAY",
             "HYPRLAND_INSTANCE_SIGNATURE",
+        ),
+    }
+    _OPTIONAL_ENVIRONMENT: dict[EnvironmentProfile, tuple[str, ...]] = {
+        EnvironmentProfile.USER_BUS_OPTIONAL: (
+            "DBUS_SESSION_BUS_ADDRESS",
+            "XDG_RUNTIME_DIR",
         ),
     }
 
@@ -105,21 +118,27 @@ class OwnerExecution:
         source = os.environ if base_environment is None else base_environment
         self.base_environment = dict(source)
 
-    def _environment(
-        self, profile: ExecutionProfile
+    def environment_for(
+        self, route: OwnerRoute, overrides: Mapping[str, str] | None = None
     ) -> tuple[dict[str, str], str | None]:
+        """Build the declared minimal environment without launching a command."""
         source = self.base_environment
         environment = {
             "HOME": source.get("HOME", str(Path.home())),
             "LANG": source.get("LANG", "C.UTF-8"),
             "PATH": source.get("PATH", "/run/current-system/sw/bin"),
         }
-        for name in self._REQUIRED_ENVIRONMENT[profile.route.environment_profile]:
+        for name in self._REQUIRED_ENVIRONMENT[route.environment_profile]:
             value = source.get(name)
             if not value:
                 return {}, name
             environment[name] = value
-        environment.update(profile.environment)
+        for name in self._OPTIONAL_ENVIRONMENT.get(route.environment_profile, ()):
+            value = source.get(name)
+            if value:
+                environment[name] = value
+        if overrides is not None:
+            environment.update(overrides)
         return environment, None
 
     @staticmethod
@@ -143,7 +162,9 @@ class OwnerExecution:
         if not command:
             raise ValueError("owner command cannot be empty")
         normalized = tuple(str(part) for part in command)
-        environment, missing_environment = self._environment(profile)
+        environment, missing_environment = self.environment_for(
+            profile.route, profile.environment
+        )
         if missing_environment is not None:
             return ExecutionResult(
                 command=normalized,

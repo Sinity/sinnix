@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import shutil
 import subprocess
 import uuid
-from pathlib import Path
 from typing import Any
 
 from mcp import ClientSession
@@ -15,6 +13,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
+from .execution import EnvironmentProfile, OwnerExecution, OwnerRoute
 
 
 class McpBrokerError(ValueError):
@@ -23,11 +22,16 @@ class McpBrokerError(ValueError):
 
 class McpBrokerService:
     def __init__(
-        self, config: GatewayConfig, principal: Principal, artifacts: ArtifactService
+        self,
+        config: GatewayConfig,
+        principal: Principal,
+        artifacts: ArtifactService,
+        execution: OwnerExecution | None = None,
     ):
         self.config = config
         self.principal = principal
         self.artifacts = artifacts
+        self.execution = execution
 
     @staticmethod
     def _string(value: Any, name: str, maximum: int = 8_192) -> str:
@@ -67,24 +71,27 @@ class McpBrokerService:
                 "failure_class": "configuration_error",
                 "reason": str(exc),
             }
-        return {**server, **await self._probe(configured, name)}
+        environment = self._environment(configured)
+        return {**server, **await self._probe(configured, name, environment)}
 
     def _environment(self, server: dict[str, Any]) -> dict[str, str]:
-        environment = {
-            "HOME": str(Path.home()),
-            "LANG": os.environ.get("LANG", "C.UTF-8"),
-            "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
-            **server["env"],
-        }
-        for name in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"):
-            value = os.environ.get(name)
-            if value:
-                environment.setdefault(name, value)
+        route = OwnerRoute(
+            "mcp-broker",
+            (
+                EnvironmentProfile.USER_BUS_OPTIONAL
+                if self.principal.name == "observer"
+                else EnvironmentProfile.PLAIN
+            ),
+        )
+        execution = self.execution or OwnerExecution()
+        environment, _ = execution.environment_for(route, server["env"])
         return environment
 
-    async def _probe(self, server: dict[str, Any], server_name: str) -> dict[str, Any]:
+    async def _probe(
+        self, server: dict[str, Any], server_name: str, environment: dict[str, str]
+    ) -> dict[str, Any]:
         """Prove one upstream can initialize and disclose its live tools."""
-        parameters, observer_unit = self._parameters(server, self._environment(server))
+        parameters, observer_unit = self._parameters(server, environment)
         stderr_directory = self.config.state_dir / "captures" / uuid.uuid4().hex
         stderr_directory.mkdir(mode=0o700, parents=True)
         stderr_path = stderr_directory / "stderr.log"
