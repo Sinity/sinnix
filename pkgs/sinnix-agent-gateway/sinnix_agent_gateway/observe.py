@@ -71,7 +71,9 @@ class ObserveService:
     def _collector_bound(self) -> int:
         return min(max(self.config.max_result_bytes * 8, 1_048_576), 8_388_608)
 
-    def _collect_report(self) -> dict[str, Any]:
+    def _collect_report(
+        self, operation: str, cursor: int = 0, page_limit: int = 100
+    ) -> dict[str, Any]:
         environment = {
             "HOME": os.environ.get("HOME", "/home/sinity"),
             "LANG": os.environ.get("LANG", "C.UTF-8"),
@@ -79,7 +81,19 @@ class ObserveService:
             "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"),
         }
         result = self.execution.run(
-            [self.config.observe_command, "--format", "json", "--limit", "20"],
+            [
+                self.config.observe_command,
+                "--format",
+                "json",
+                "--limit",
+                "20",
+                "--section",
+                operation,
+                "--cursor",
+                str(cursor),
+                "--page-limit",
+                str(page_limit),
+            ],
             ExecutionProfile(
                 route=OwnerRoute("machine-observe"),
                 timeout_seconds=20,
@@ -140,7 +154,68 @@ class ObserveService:
             raise ValueError("cursor must be non-negative")
         if limit < 1 or limit > 500:
             raise ValueError("limit must be 1-500")
-        collected = self._collect_report()
+        available = self._ARRAY_OPERATIONS | self._SECTION_OPERATIONS
+        if operation not in available:
+            raise ValueError(
+                f"unknown machine operation {operation!r}; available: {sorted(available)}"
+            )
+        if operation not in self._ARRAY_OPERATIONS and cursor:
+            raise ValueError("cursor is only valid for array machine operations")
+        if operation in self._ARRAY_OPERATIONS:
+            key = self._ARRAY_OPERATIONS[operation]
+            page_limit = limit
+            while True:
+                collected = self._collect_report(operation, cursor, page_limit)
+                if not collected["available"]:
+                    return collected
+                report = collected["report"]
+                source = {
+                    "schema": report.get("schema"),
+                    "generated_at": report.get("generated_at"),
+                    "window": report.get("window"),
+                }
+                page = report.get(key)
+                if not isinstance(page, dict):
+                    return {
+                        "available": False,
+                        "failure_class": "malformed_report",
+                        "reason": f"sinnix-observe section {key} is not a page",
+                    }
+                rows = page.get("rows")
+                total = page.get("total")
+                next_cursor = page.get("next_cursor")
+                if (
+                    not isinstance(rows, list)
+                    or not isinstance(total, int)
+                    or not isinstance(page.get("cursor"), int)
+                    or page["cursor"] != cursor
+                    or (next_cursor is not None and not isinstance(next_cursor, int))
+                ):
+                    return {
+                        "available": False,
+                        "failure_class": "malformed_report",
+                        "reason": f"sinnix-observe section {key} has an invalid page",
+                    }
+                response = {
+                    "available": True,
+                    "operation": operation,
+                    "source": source,
+                    "total": total,
+                    "cursor": cursor,
+                    "next_cursor": next_cursor,
+                    "rows": rows,
+                }
+                bounded = self._within_response_bound(response)
+                if bounded["available"]:
+                    return bounded
+                if len(rows) <= 1:
+                    return {
+                        "available": False,
+                        "failure_class": "response_bound",
+                        "reason": "one machine row exceeded response bound",
+                    }
+                page_limit = len(rows) - 1
+        collected = self._collect_report(operation)
         if not collected["available"]:
             return collected
         report = collected["report"]
@@ -149,55 +224,7 @@ class ObserveService:
             "generated_at": report.get("generated_at"),
             "window": report.get("window"),
         }
-        if operation in self._ARRAY_OPERATIONS:
-            key = self._ARRAY_OPERATIONS[operation]
-            rows = report.get(key)
-            if not isinstance(rows, list):
-                return {
-                    "available": False,
-                    "failure_class": "malformed_report",
-                    "reason": f"sinnix-observe section {key} is not an array",
-                }
-            selected = rows[cursor : cursor + limit]
-            while selected:
-                next_cursor = cursor + len(selected)
-                response = {
-                    "available": True,
-                    "operation": operation,
-                    "source": source,
-                    "total": len(rows),
-                    "cursor": cursor,
-                    "next_cursor": next_cursor if next_cursor < len(rows) else None,
-                    "rows": selected,
-                }
-                bounded = self._within_response_bound(response)
-                if bounded["available"]:
-                    return bounded
-                selected.pop()
-            if cursor >= len(rows):
-                return {
-                    "available": True,
-                    "operation": operation,
-                    "source": source,
-                    "total": len(rows),
-                    "cursor": cursor,
-                    "next_cursor": None,
-                    "rows": [],
-                }
-            return {
-                "available": False,
-                "failure_class": "response_bound",
-                "reason": "one machine row exceeded response bound",
-            }
-        try:
-            keys = self._SECTION_OPERATIONS[operation]
-        except KeyError as exc:
-            available = sorted(self._ARRAY_OPERATIONS | self._SECTION_OPERATIONS)
-            raise ValueError(
-                f"unknown machine operation {operation!r}; available: {available}"
-            ) from exc
-        if cursor:
-            raise ValueError("cursor is only valid for array machine operations")
+        keys = self._SECTION_OPERATIONS[operation]
         response = {
             "available": True,
             "operation": operation,

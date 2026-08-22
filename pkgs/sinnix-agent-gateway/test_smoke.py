@@ -793,7 +793,25 @@ def test_machine_query_selects_and_pages_large_collector_report(tmp_path: Path) 
     }
     collector = tmp_path / "observe-fixture"
     collector.write_text(
-        f"#!{sys.executable}\nimport json\nprint(json.dumps({report!r}))\n"
+        f"""#!{sys.executable}
+import json
+import sys
+
+report = {report!r}
+section = sys.argv[sys.argv.index("--section") + 1]
+if section == "units":
+    cursor = int(sys.argv[sys.argv.index("--cursor") + 1])
+    page_limit = int(sys.argv[sys.argv.index("--page-limit") + 1])
+    rows = report["systemd_units"]
+    next_cursor = cursor + len(rows[cursor : cursor + page_limit])
+    report["systemd_units"] = {{
+        "total": len(rows),
+        "cursor": cursor,
+        "next_cursor": next_cursor if next_cursor < len(rows) else None,
+        "rows": rows[cursor : cursor + page_limit],
+    }}
+print(json.dumps(report))
+"""
     )
     collector.chmod(0o700)
     cfg = GatewayConfig(
@@ -824,6 +842,49 @@ def test_machine_query_selects_and_pages_large_collector_report(tmp_path: Path) 
     ]
 
 
+def test_machine_query_requests_owner_selected_section(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = Runtime.create(config(tmp_path), "observer")
+    calls = []
+    report = {
+        "schema": "sinnix.observe.v1",
+        "generated_at": "2026-08-21T00:00:00Z",
+        "window": {},
+        "systemd_units": {"total": 0, "cursor": 0, "next_cursor": None, "rows": []},
+    }
+    monkeypatch.setattr(
+        runtime.observe.execution,
+        "run",
+        lambda command, _profile: calls.append(command)
+        or ExecutionResult(
+            command=tuple(command),
+            exit_status=0,
+            stdout=json.dumps(report).encode(),
+            stderr=b"",
+        ),
+    )
+
+    result = runtime.observe.machine_query("units")
+
+    assert result["available"] is True
+    assert calls == [
+        [
+            runtime.config.observe_command,
+            "--format",
+            "json",
+            "--limit",
+            "20",
+            "--section",
+            "units",
+            "--cursor",
+            "0",
+            "--page-limit",
+            "100",
+        ]
+    ]
+
+
 def test_machine_query_reduces_page_to_response_bound(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -835,20 +896,30 @@ def test_machine_query_reduces_page_to_response_bound(
         ),
         "observer",
     )
-    report = {
-        "schema": "sinnix.observe.v1",
-        "generated_at": "2026-08-21T00:00:00Z",
-        "window": {},
-        "systemd_units": [
-            {"unit": f"fixture-{index}.service", "detail": "x" * 700}
-            for index in range(3)
-        ],
-    }
-    monkeypatch.setattr(
-        runtime.observe,
-        "_collect_report",
-        lambda: {"available": True, "report": report},
-    )
+    rows = [
+        {"unit": f"fixture-{index}.service", "detail": "x" * 700}
+        for index in range(3)
+    ]
+
+    def collect(_operation: str, cursor: int, page_limit: int) -> dict[str, object]:
+        selected = rows[cursor : cursor + page_limit]
+        next_cursor = cursor + len(selected)
+        return {
+            "available": True,
+            "report": {
+                "schema": "sinnix.observe.v1",
+                "generated_at": "2026-08-21T00:00:00Z",
+                "window": {},
+                "systemd_units": {
+                    "total": len(rows),
+                    "cursor": cursor,
+                    "next_cursor": next_cursor if next_cursor < len(rows) else None,
+                    "rows": selected,
+                },
+            },
+        }
+
+    monkeypatch.setattr(runtime.observe, "_collect_report", collect)
 
     result = runtime.observe.machine_query("units", limit=3)
 

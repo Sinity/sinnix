@@ -81,7 +81,7 @@ The common read surface includes:
 - `artifact_list` and `artifact_read`
 - `audit_tail` and `audit_verify`
 
-`machine_query` selects one bounded section from the canonical `sinnix-observe` report. Its operations are `overview`, `pressure`, `runtime_inventory`, `gateway`, `browser`, `storage`, `ingestion`, `units`, `workloads`, `slices`, and `blocked_tasks`; the array operations use cursor and limit pagination. Every response carries the collector schema, generation time, and observation window. This keeps a large full report from making a small requested section unavailable.
+`machine_query` requests one bounded section from the canonical `sinnix-observe` owner. Its operations are `overview`, `pressure`, `runtime_inventory`, `gateway`, `browser`, `storage`, `ingestion`, `units`, `workloads`, `slices`, and `blocked_tasks`; the array operations use cursor and limit pagination. The owner runs only the collectors required for a non-overview section. Every response carries the collector schema, generation time, and observation window. This keeps a large full report from making a small requested section unavailable.
 
 `capability_search` and `capability_describe` read the generated `/etc/sinnix/capability-index.json` rather than maintaining another catalog. Search supports query terms, kind, enabled state, and cursor pagination. Every result identifies the index schema, host, and generation revision. It reports the index as unavailable when the running generation has not rendered it.
 
