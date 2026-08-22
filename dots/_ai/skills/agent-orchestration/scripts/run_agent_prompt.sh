@@ -30,6 +30,7 @@ kitty_socket=""
 kitty_window_id=""
 hyprland_address=""
 quota_snapshot_id=""
+checkout_ref=""
 memory_high=""
 memory_max=""
 cpu_weight=""
@@ -95,6 +96,7 @@ Attested job options:
   --kitty-window-id <id>
   --hyprland-address <address>
   --quota-snapshot-id <id>
+  --checkout-ref <canonical-ref>
   --memory-high <limit>
   --memory-max <limit>
   --cpu-weight <1-10000>
@@ -199,6 +201,10 @@ while [[ $# -gt 0 ]]; do
     ;;
   --quota-snapshot-id)
     quota_snapshot_id="${2:?missing value for --quota-snapshot-id}"
+    shift 2
+    ;;
+  --checkout-ref)
+    checkout_ref="${2:?missing value for --checkout-ref}"
     shift 2
     ;;
   --memory-high)
@@ -401,6 +407,7 @@ job_args=(
   --kitty-window-id "${kitty_window_id}"
   --hyprland-address "${hyprland_address}"
   --quota-snapshot-id "${quota_snapshot_id}"
+  --checkout-ref "${checkout_ref}"
   --scope-unit "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}"
   --scope-cgroup "${scope_cgroup}"
   --launcher-pid "$$"
@@ -457,6 +464,7 @@ if [[ ${internal_agent_scope} -eq 0 && -z ${SINNIX_AGENT_SCOPED:-} ]]; then
   [[ -z ${kitty_window_id} ]] || inner_args+=(--kitty-window-id "${kitty_window_id}")
   [[ -z ${hyprland_address} ]] || inner_args+=(--hyprland-address "${hyprland_address}")
   [[ -z ${quota_snapshot_id} ]] || inner_args+=(--quota-snapshot-id "${quota_snapshot_id}")
+  [[ -z ${checkout_ref} ]] || inner_args+=(--checkout-ref "${checkout_ref}")
   [[ -z ${memory_high} ]] || inner_args+=(--memory-high "${memory_high}")
   [[ -z ${memory_max} ]] || inner_args+=(--memory-max "${memory_max}")
   [[ -z ${cpu_weight} ]] || inner_args+=(--cpu-weight "${cpu_weight}")

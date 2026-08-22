@@ -10,7 +10,7 @@ from mcp.types import ToolAnnotations
 
 from .artifacts import ArtifactService
 from .audit import AuditService
-from .beads import BeadsService
+from .beads import BeadsError, BeadsService
 from .bindings import TargetToolBinding, TargetToolBindings
 from .browser import BrowserService
 from .capabilities import Capability, Principal
@@ -114,7 +114,7 @@ class Runtime:
             artifacts=artifacts,
             audit=AuditService(config, principal),
             results=ResultService(config, principal),
-            jobs=JobService(config, principal, artifacts),
+            jobs=JobService(config, principal, artifacts, projects=projects),
             observe=ObserveService(config, principal),
             machine_actions=MachineActionService(config, principal),
             desktop=DesktopService(config, principal, artifacts),
@@ -179,14 +179,52 @@ class Runtime:
         canonical_ref = str(resource.ref_template.format(values))
         if resource.kind == "project":
             project_id = values["project_id"]
+            checkouts = self.projects.checkouts(project_id)["checkouts"]
+            for checkout in checkouts:
+                checkout["ref"] = REGISTRY.reference(
+                    "checkout",
+                    {
+                        "project_id": project_id,
+                        "checkout_id": checkout["checkout_id"],
+                    },
+                )
+            canonical_checkout = next(
+                checkout for checkout in checkouts if checkout["checkout_id"] == "default"
+            )
+            canonical_checkout_ref = canonical_checkout["ref"]
+            code_revision = hashlib.sha256(
+                json.dumps(
+                    {
+                        key: canonical_checkout[key]
+                        for key in ("head", "branch", "upstream", "dirty_sha256")
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+            task_authority_ref = REGISTRY.reference(
+                "task_authority", {"project_id": project_id}
+            )
+            try:
+                task_authority: dict[str, Any] = {
+                    "availability": "available",
+                    "ref": task_authority_ref,
+                    "status": self.beads.task_authority_status(project_id),
+                }
+            except BeadsError as exc:
+                task_authority = {
+                    "availability": "unavailable",
+                    "ref": task_authority_ref,
+                    "error": public_error(exc),
+                }
             return {
                 "ref": canonical_ref,
                 "kind": resource.kind,
                 "project": self.projects.summary(project_id),
-                "checkout_ref": REGISTRY.reference(
-                    "checkout",
-                    {"project_id": project_id, "checkout_id": "default"},
-                ),
+                "canonical_checkout_ref": canonical_checkout_ref,
+                "code_revision": code_revision,
+                "checkouts": checkouts,
+                "task_authority": task_authority,
             }
         if resource.kind == "checkout":
             return {
@@ -202,6 +240,14 @@ class Runtime:
                 "kind": resource.kind,
                 "bead": self.beads.read(
                     values["project_id"], "show", {"id": values["bead_id"]}
+                ),
+            }
+        if resource.kind == "task_authority":
+            return {
+                "ref": canonical_ref,
+                "kind": resource.kind,
+                "task_authority": self.beads.task_authority_status(
+                    values["project_id"]
                 ),
             }
         raise ValueError(f"V2 get does not support resource kind {resource.kind!r}")
@@ -777,11 +823,15 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
 
     @mcp.tool(title="Project tree", annotations=READ_ONLY_TOOL)
     def project_tree(
-        project_id: str, path: str = ".", max_entries: int = 500
+        project_id: str,
+        path: str = ".",
+        max_entries: int = 500,
+        checkout_id: str | None = None,
     ) -> dict[str, Any]:
         """List a bounded project-relative directory tree without following symlinks."""
         return runtime.execute(
-            "project_tree", lambda: runtime.projects.tree(project_id, path, max_entries)
+            "project_tree",
+            lambda: runtime.projects.tree(project_id, path, max_entries, checkout_id),
         )
 
     @mcp.tool(title="Read project file", annotations=READ_ONLY_TOOL)
@@ -791,30 +841,36 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         start_line: int = 1,
         end_line: int | None = None,
         max_bytes: int = 64_000,
+        checkout_id: str | None = None,
     ) -> dict[str, Any]:
         """Read a bounded line range from a regular project file."""
         return runtime.execute(
             "project_read",
             lambda: runtime.projects.read(
-                project_id, path, start_line, end_line, max_bytes
+                project_id, path, start_line, end_line, max_bytes, checkout_id
             ),
         )
 
     @mcp.tool(title="Search project", annotations=READ_ONLY_TOOL)
     def project_search(
-        project_id: str, query: str, max_matches: int = 200
+        project_id: str,
+        query: str,
+        max_matches: int = 200,
+        checkout_id: str | None = None,
     ) -> dict[str, Any]:
         """Search project text with bounded results and safe leading-dash handling."""
         return runtime.execute(
             "project_search",
-            lambda: runtime.projects.search(project_id, query, max_matches),
+            lambda: runtime.projects.search(project_id, query, max_matches, checkout_id),
         )
 
     @mcp.tool(title="Project diff", annotations=READ_ONLY_TOOL)
-    def project_diff(project_id: str, ref: str | None = None) -> dict[str, Any]:
+    def project_diff(
+        project_id: str, ref: str | None = None, checkout_id: str | None = None
+    ) -> dict[str, Any]:
         """Return a bounded Git diff for an allowlisted project."""
         return runtime.execute(
-            "project_diff", lambda: runtime.projects.diff(project_id, ref)
+            "project_diff", lambda: runtime.projects.diff(project_id, ref, checkout_id)
         )
 
     if Capability.FILE_READ in runtime.principal.capabilities:
@@ -1037,6 +1093,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             project_id: str,
             prompt: str,
             backend: str,
+            checkout_id: str | None = None,
             model: str | None = None,
             reasoning_effort: str | None = None,
             job_role: str | None = None,
@@ -1047,6 +1104,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             """Launch an attested native coding-agent job in an allowlisted project."""
             request = AgentLaunchRequest(
                 project_id=project_id,
+                checkout_id=checkout_id,
                 prompt=prompt,
                 backend=backend,
                 model=model,
@@ -1070,19 +1128,26 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     if Capability.PROJECT_WRITE in runtime.principal.capabilities:
 
         @mcp.tool(title="Write project file", annotations=DESTRUCTIVE_TOOL)
-        def project_write(project_id: str, path: str, content: str) -> dict[str, Any]:
+        def project_write(
+            project_id: str,
+            path: str,
+            content: str,
+            checkout_id: str | None = None,
+        ) -> dict[str, Any]:
             """Atomically write one project-relative file under operator policy."""
             return runtime.execute(
                 "project_write",
-                lambda: runtime.projects.write(project_id, path, content),
+                lambda: runtime.projects.write(project_id, path, content, checkout_id),
             )
 
         @mcp.tool(title="Apply project patch", annotations=DESTRUCTIVE_TOOL)
-        def project_apply_patch(project_id: str, patch: str) -> dict[str, Any]:
+        def project_apply_patch(
+            project_id: str, patch: str, checkout_id: str | None = None
+        ) -> dict[str, Any]:
             """Apply a bounded Git patch under operator policy."""
             return runtime.execute(
                 "project_apply_patch",
-                lambda: runtime.projects.apply_patch(project_id, patch),
+                lambda: runtime.projects.apply_patch(project_id, patch, checkout_id),
             )
 
     return mcp

@@ -236,6 +236,7 @@ def build_registry() -> CatalogRegistry:
         ResourceSpec("project", RefTemplate("project", "sinnix://projects/{project_id}"), "projects", ("summary", "git", "tree"), True),
         ResourceSpec("checkout", RefTemplate("checkout", "sinnix://projects/{project_id}/checkouts/{checkout_id}"), "projects", ("summary", "git", "files"), True),
         ResourceSpec("bead", RefTemplate("bead", "sinnix://projects/{project_id}/beads/{bead_id}"), "beads", ("summary", "history", "graph"), True),
+        ResourceSpec("task_authority", RefTemplate("task_authority", "sinnix://projects/{project_id}/task-authority"), "beads", ("status",), False),
         ResourceSpec("job", RefTemplate("job", "sinnix://jobs/{job_id}"), "jobs", ("summary", "output", "manifest"), True),
         ResourceSpec("artifact", RefTemplate("artifact", "sinnix://artifacts/{artifact_id}"), "artifacts", ("metadata", "content"), True),
         ResourceSpec("receipt", RefTemplate("receipt", "sinnix://receipts/{receipt_id}"), "audit", ("summary",), True),
@@ -292,9 +293,9 @@ def build_registry() -> CatalogRegistry:
             principals=frozenset({"observer", "agent-control", "operator"}),
             input_schema=RESOURCE_GET_SCHEMA,
             output_schema={"type": "object"},
-            resource_kinds=("project", "checkout", "bead"),
+            resource_kinds=("project", "checkout", "bead", "task_authority"),
             examples=({"input": {"ref": "sinnix://projects/sinnix"}},),
-            documentation="Resolve one canonical project, checkout, or Beads task reference.",
+            documentation="Resolve one canonical project, checkout, Beads task, or task-authority reference.",
         ),
     )
     return CatalogRegistry(resources, actions)
