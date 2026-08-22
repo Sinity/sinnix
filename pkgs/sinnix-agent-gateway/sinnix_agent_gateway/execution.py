@@ -24,6 +24,7 @@ class ExecutionProfile:
     max_stderr_bytes: int = 8_192
     cwd: Path | None = None
     environment: Mapping[str, str] = field(default_factory=dict)
+    stdin_bytes: bytes | None = None
 
     def __post_init__(self) -> None:
         if self.timeout_seconds <= 0:
@@ -82,7 +83,11 @@ class OwnerExecution:
         try:
             process = subprocess.Popen(
                 normalized,
-                stdin=subprocess.DEVNULL,
+                stdin=(
+                    subprocess.PIPE
+                    if profile.stdin_bytes is not None
+                    else subprocess.DEVNULL
+                ),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 cwd=profile.cwd,
@@ -100,12 +105,15 @@ class OwnerExecution:
 
         stdout = bytearray()
         stderr = bytearray()
+        pending_stdin = memoryview(profile.stdin_bytes or b"")
         exceeded = False
         selector = selectors.DefaultSelector()
         assert process.stdout is not None
         assert process.stderr is not None
-        selector.register(process.stdout, selectors.EVENT_READ, stdout)
-        selector.register(process.stderr, selectors.EVENT_READ, stderr)
+        selector.register(process.stdout, selectors.EVENT_READ, ("stdout", stdout))
+        selector.register(process.stderr, selectors.EVENT_READ, ("stderr", stderr))
+        if process.stdin is not None:
+            selector.register(process.stdin, selectors.EVENT_WRITE, ("stdin", None))
         deadline = time.monotonic() + profile.timeout_seconds
         timed_out = False
         try:
@@ -116,14 +124,25 @@ class OwnerExecution:
                     self._terminate(process)
                     break
                 for key, _ in selector.select(min(remaining, 0.1)):
+                    stream, destination = key.data
+                    if stream == "stdin":
+                        try:
+                            written = os.write(key.fd, pending_stdin[:65_536])
+                        except BrokenPipeError:
+                            written = 0
+                        pending_stdin = pending_stdin[written:]
+                        if not pending_stdin:
+                            selector.unregister(key.fileobj)
+                            key.fileobj.close()
+                        continue
                     chunk = os.read(key.fd, 65_536)
                     if not chunk:
                         selector.unregister(key.fileobj)
                         continue
-                    destination = key.data
+                    assert destination is not None
                     limit = (
                         profile.max_stdout_bytes
-                        if destination is stdout
+                        if stream == "stdout"
                         else profile.max_stderr_bytes
                     )
                     room = limit + 1 - len(destination)
@@ -137,6 +156,8 @@ class OwnerExecution:
                     break
         finally:
             selector.close()
+            if process.stdin is not None:
+                process.stdin.close()
             if process.poll() is None:
                 self._terminate(process)
         exit_status = process.wait()

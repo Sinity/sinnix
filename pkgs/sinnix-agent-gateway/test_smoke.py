@@ -268,6 +268,27 @@ def test_project_subprocess_failure_surfaces_bounded_stderr(tmp_path: Path) -> N
         )
 
 
+def test_project_apply_patch_streams_patch_to_git(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    target = cfg.projects["fixture"].path / "tracked.txt"
+    target.write_text("before\n")
+    runtime = Runtime.create(cfg, "operator")
+
+    result = runtime.projects.apply_patch(
+        "fixture",
+        """diff --git a/tracked.txt b/tracked.txt
+--- a/tracked.txt
++++ b/tracked.txt
+@@ -1 +1 @@
+-before
++after
+""",
+    )
+
+    assert result == {"project_id": "fixture", "applied": True}
+    assert target.read_text() == "after\n"
+
+
 def test_project_diff_rejects_option_injection_before_external_driver(
     tmp_path: Path,
 ) -> None:

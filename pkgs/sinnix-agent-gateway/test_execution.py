@@ -34,3 +34,17 @@ def test_owner_execution_reports_unavailable_command() -> None:
 
     assert result.available is False
     assert result.failure_class == "command_unavailable:FileNotFoundError"
+
+
+def test_owner_execution_streams_stdin_while_collecting_stdout() -> None:
+    result = OwnerExecution().run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read()[::-1])",
+        ],
+        ExecutionProfile(name="fixture", stdin_bytes=b"gateway patch input"),
+    )
+
+    assert result.available is True
+    assert result.stdout == b"tupni hctap yawetag"
