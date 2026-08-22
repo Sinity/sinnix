@@ -122,9 +122,15 @@ class ResultService:
         outcome: str,
         payload: Any,
         receipt: Mapping[str, Any],
+        request_sha256: str | None = None,
     ) -> dict[str, Any]:
         if outcome not in {"ok", "error"}:
             raise ResultError("result outcome must be ok or error")
+        if request_sha256 is not None and (
+            len(request_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in request_sha256)
+        ):
+            raise ResultError("request digest is malformed", "result_malformed")
         self.require_payload_bound(payload)
         result_id = str(uuid.uuid4())
         observed_at = time.time()
@@ -139,6 +145,7 @@ class ResultService:
                 "route": route,
                 "outcome": outcome,
                 "observed_at": observed_at,
+                "request_sha256": request_sha256,
             },
             "receipt": self._receipt(receipt),
             "page": self._page(payload),

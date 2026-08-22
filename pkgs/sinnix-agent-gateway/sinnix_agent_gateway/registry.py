@@ -81,6 +81,15 @@ class CatalogRegistry:
         except KeyError as error:
             raise RegistryError(f"unknown action: {name!r}") from error
 
+    def resource(self, kind: str) -> ResourceSpec:
+        try:
+            return self._resources_by_kind[kind]
+        except KeyError as error:
+            raise RegistryError(f"unknown resource kind: {kind!r}") from error
+
+    def reference(self, kind: str, values: dict[str, str]) -> str:
+        return str(self.resource(kind).ref_template.format(values))
+
     def action_schema(self, name: str, principal: str | None = None) -> dict[str, Any]:
         action = self.action(name)
         if principal is not None and principal not in action.principals:
@@ -91,10 +100,7 @@ class CatalogRegistry:
         }
 
     def resource_contract(self, kind: str, principal: str | None = None) -> dict[str, Any]:
-        try:
-            resource = self._resources_by_kind[kind]
-        except KeyError as error:
-            raise RegistryError(f"unknown resource kind: {kind!r}") from error
+        resource = self.resource(kind)
         if principal is not None and principal not in resource.principals:
             raise RegistryError(f"principal {principal!r} cannot read resource {kind!r}")
         return {
@@ -202,6 +208,15 @@ class CatalogRegistry:
 
 
 EMPTY_OBJECT_SCHEMA: dict[str, Any] = {"type": "object", "additionalProperties": False}
+RESOURCE_GET_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["ref"],
+    "properties": {
+        "ref": {"type": "string", "minLength": 1, "maxLength": 2_048},
+    },
+}
+
 CATALOG_QUERY_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -266,6 +281,20 @@ def build_registry() -> CatalogRegistry:
                 },
             ),
             documentation="Search the generated V2 resource and action catalog.",
+        ),
+        ActionSpec(
+            name="resources.get",
+            verb=VerbFamily.GET,
+            domain="resources",
+            owner="resolver",
+            route="resources.get",
+            effect=EffectMode.READ,
+            principals=frozenset({"observer", "agent-control", "operator"}),
+            input_schema=RESOURCE_GET_SCHEMA,
+            output_schema={"type": "object"},
+            resource_kinds=("project", "checkout", "bead"),
+            examples=({"input": {"ref": "sinnix://projects/sinnix"}},),
+            documentation="Resolve one canonical project, checkout, or Beads task reference.",
         ),
     )
     return CatalogRegistry(resources, actions)

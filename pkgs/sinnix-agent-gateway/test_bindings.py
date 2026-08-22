@@ -11,6 +11,7 @@ from sinnix_agent_gateway.registry import CatalogRegistry, REGISTRY, RegistryErr
 VALID_BINDINGS = (
     TargetToolBinding("status", "gateway.status", "gateway", "observe.gateway_status"),
     TargetToolBinding("catalog", "gateway.catalog", "registry", "registry.search"),
+    TargetToolBinding("get", "resources.get", "resolver", "resources.get"),
 )
 
 
@@ -19,13 +20,14 @@ def test_target_tool_bindings_cover_every_declared_action() -> None:
 
     assert bindings.action_for_tool("status") is REGISTRY.action("gateway.status")
     assert bindings.action_for_tool("catalog") is REGISTRY.action("gateway.catalog")
+    assert bindings.action_for_tool("get") is REGISTRY.action("resources.get")
 
 
 def test_target_tool_bindings_enforce_declared_principal() -> None:
     status = replace(REGISTRY.action("gateway.status"), principals=frozenset({"observer"}))
     registry = CatalogRegistry(
         REGISTRY.resources,
-        (status, REGISTRY.action("gateway.catalog")),
+        (status, REGISTRY.action("gateway.catalog"), REGISTRY.action("resources.get")),
     )
     bindings = TargetToolBindings(registry, VALID_BINDINGS)
 
@@ -42,6 +44,7 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
             (
                 TargetToolBinding("status", "gateway.status", "registry", "observe.gateway_status"),
                 VALID_BINDINGS[1],
+                VALID_BINDINGS[2],
             ),
             "does not match action 'gateway.status' owner",
         ),
@@ -49,6 +52,7 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
             (
                 TargetToolBinding("status", "gateway.status", "gateway", "registry.search"),
                 VALID_BINDINGS[1],
+                VALID_BINDINGS[2],
             ),
             "does not match action 'gateway.status' route",
         ),
@@ -56,6 +60,7 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
             (
                 TargetToolBinding("status", "gateway.unknown", "gateway", "gateway.unknown"),
                 VALID_BINDINGS[1],
+                VALID_BINDINGS[2],
             ),
             "unknown actions",
         ),
@@ -63,6 +68,7 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
             (
                 VALID_BINDINGS[0],
                 TargetToolBinding("status", "gateway.catalog", "registry", "registry.search"),
+                VALID_BINDINGS[2],
             ),
             "unique tool names",
         ),
