@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
-from pathlib import Path
 from typing import Any, Callable
 
 from .captures import queryable_capture_lanes
 from .config import GatewayConfig
-from .execution import EnvironmentProfile, ExecutionProfile, OwnerExecution, OwnerRoute
+from .execution import (
+    EnvironmentProfile,
+    ExecutionProfile,
+    ExecutionResult,
+    OwnerExecution,
+    OwnerRoute,
+)
 
 
 class GatewayRoutePreflight:
@@ -20,45 +24,13 @@ class GatewayRoutePreflight:
         self.config = config
         self.execution = execution or OwnerExecution()
 
-    @staticmethod
-    def _command_check(name: str, command: str) -> dict[str, Any]:
-        path = Path(command)
-        resolved = path if path.is_absolute() else shutil.which(command)
-        if resolved is None:
-            return {
-                "route": name,
-                "status": "unavailable",
-                "failure_class": "command_unavailable",
-                "command": command,
-            }
-        resolved_path = Path(resolved)
-        if not resolved_path.exists():
-            return {
-                "route": name,
-                "status": "unavailable",
-                "failure_class": "command_unavailable",
-                "command": str(resolved_path),
-            }
-        if not resolved_path.is_file() or not os.access(resolved_path, os.X_OK):
-            return {
-                "route": name,
-                "status": "unavailable",
-                "failure_class": "command_not_executable",
-                "command": str(resolved_path),
-            }
-        return {
-            "route": name,
-            "status": "pass",
-            "command": str(resolved_path),
-            "absolute_configured_path": path.is_absolute(),
-        }
-
-    def _probe_json(
+    def _probe(
         self,
         name: str,
         command: list[str],
         route: OwnerRoute,
         decoder: str,
+        decode: Callable[[ExecutionResult], Any],
         valid: Callable[[Any], bool],
         timeout_seconds: int = 5,
     ) -> dict[str, Any]:
@@ -91,7 +63,7 @@ class GatewayRoutePreflight:
                 "failure_class": result.failure_class,
             }
         try:
-            payload = result.decode_json()
+            payload = decode(result)
         except json.JSONDecodeError:
             return {
                 **evidence,
@@ -120,7 +92,7 @@ class GatewayRoutePreflight:
             }
         lane = sorted(lanes)[0]
         capture = lanes[lane]
-        return self._probe_json(
+        return self._probe(
             "capture.query",
             [
                 self.config.capture_command,
@@ -134,6 +106,7 @@ class GatewayRoutePreflight:
             ],
             OwnerRoute("capture-query"),
             "json_lane_summary_list",
+            ExecutionResult.decode_json,
             lambda value: isinstance(value, list)
             and any(
                 isinstance(record, dict) and record.get("lane") == lane
@@ -143,37 +116,63 @@ class GatewayRoutePreflight:
 
     def run(self) -> dict[str, Any]:
         routes = [
-            self._command_check("machine.observe", self.config.observe_command),
+            self._probe(
+                "machine.observe",
+                [
+                    self.config.observe_command,
+                    "--format",
+                    "json",
+                    "--section",
+                    "pressure",
+                    "--limit",
+                    "1",
+                ],
+                OwnerRoute("machine-observe", EnvironmentProfile.TERMINAL),
+                "json_object_with_schema",
+                ExecutionResult.decode_json,
+                lambda value: self._is_json_object(value, "schema"),
+            ),
             self._capture_probe(),
-            self._probe_json(
+            self._probe(
                 "desktop.hypr",
                 [self.config.hypr_control_command, "screenshot-probe"],
                 OwnerRoute("desktop-hypr", EnvironmentProfile.WAYLAND),
                 "json_object_with_focused",
+                ExecutionResult.decode_json,
                 lambda value: self._is_json_object(value, "focused"),
             ),
-            self._probe_json(
+            self._probe(
                 "desktop.screenshot",
                 [self.config.screenshot_control_command, "probe"],
                 OwnerRoute("desktop-screenshot", EnvironmentProfile.WAYLAND),
                 "json_object_with_tools",
+                ExecutionResult.decode_json,
                 lambda value: self._is_json_object(value, "tools"),
             ),
-            self._probe_json(
+            self._probe(
                 "terminal.kitty",
                 [self.config.kitty_control_command, "list", "--json"],
                 OwnerRoute("terminal-kitty", EnvironmentProfile.TERMINAL),
                 "json_list",
+                ExecutionResult.decode_json,
                 lambda value: isinstance(value, list),
             ),
-            self._probe_json(
+            self._probe(
                 "browser.chrome",
                 [self.config.chrome_control_command, "status"],
                 OwnerRoute("browser-chrome"),
                 "json_object_with_browser",
+                ExecutionResult.decode_json,
                 lambda value: self._is_json_object(value, "Browser"),
             ),
-            self._command_check("beads", self.config.beads_command),
+            self._probe(
+                "beads",
+                [self.config.beads_command, "--version"],
+                OwnerRoute("beads"),
+                "non_empty_text",
+                ExecutionResult.decode_json_or_text,
+                lambda value: isinstance(value, str) and bool(value.strip()),
+            ),
         ]
         if any(server.get("brokered") for server in self.config.mcp_broker_servers.values()):
             bus = os.environ.get("DBUS_SESSION_BUS_ADDRESS")
