@@ -59,6 +59,8 @@ Gateway V2 converges on the stable verb families `status`, `catalog`, `query`, `
 
 `pkgs/sinnix-mcp` is the shared protocol package for the gateway, future `sinnixd` runtime, project adapters, and MCP owners. It owns the canonical `sinnix://` parser and templates, versioned request and response envelopes, bounded inline-or-opaque payload representation, typed errors, source-generation bindings, and a non-overlapping owner registry. Owner declarations name their authority and lifecycle (`read_only`, `daemon_owned`, `window_gated`, or `operator_confirmed`), so an MCP frontend cannot silently widen a domain owner’s write boundary. Archive-backed owners additionally bind returned facts and receipts to their source reference, generation, and root digest.
 
+Fixed direct gateway owners use declared environment profiles rather than the tunnel process environment. Plain routes receive a minimal base environment. Kitty routes additionally require the runtime directory, while Hyprland and screenshot routes also require the Wayland display and Hyprland instance signature. Gateway credentials are never inherited by these child processes.
+
 The common read surface includes:
 
 - `status`, `catalog`, `machine_report` (the bounded overview), `machine_query`, `capability_search`, and `capability_describe`
@@ -68,8 +70,6 @@ The common read surface includes:
 - `memory_search` and `memory_get` for source-preserving semantic access to available raw coding-session memory
 - `timeline_query` for source-preserving coding-session timeline evidence
 - `mcp_catalog` and `mcp_read` for registry-derived upstream MCP discovery and explicitly read-only upstream tools
-- `shell_query` for exact-argument, output-bounded read-only host inspection
-- `shell_run` for exact-argument operator commands in an unrestricted transient user service, with explicit optional `sudo -n` root execution
 - `desktop_read` for current Hyprland, workspace, client, binding, and color-management state
 - `desktop_capture` for output-only screenshots returned as opaque artifacts
 - `terminal_read` for Kitty terminal inventory and bounded capture reads

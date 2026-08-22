@@ -6,19 +6,36 @@ import signal
 import subprocess
 import time
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Mapping, Sequence
 
 
-@dataclass(frozen=True)
-class ExecutionProfile:
-    """Declared policy for an ordinary owner command.
+class EnvironmentProfile(StrEnum):
+    """Minimal parent-environment subsets for direct owner adapters."""
 
-    Durable agent and shell jobs retain their existing attested lifecycle. This
-    profile is the shared substrate for bounded, synchronous owner adapters.
+    PLAIN = "plain"
+    TERMINAL = "terminal"
+    WAYLAND = "wayland"
+
+
+@dataclass(frozen=True)
+class OwnerRoute:
+    """Declared direct-owner execution context.
+
+    Durable jobs, operator shell execution, and brokered MCP sessions have
+    different lifecycles and do not use this one-shot route contract.
     """
 
     name: str
+    environment_profile: EnvironmentProfile = EnvironmentProfile.PLAIN
+
+
+@dataclass(frozen=True)
+class ExecutionProfile:
+    """Declared policy for an ordinary direct owner command."""
+
+    route: OwnerRoute
     timeout_seconds: float = 20.0
     max_stdout_bytes: int = 262_144
     max_stderr_bytes: int = 8_192
@@ -54,8 +71,36 @@ class ExecutionResult:
 class OwnerExecution:
     """Run one direct owner command with one bounded cancellation mechanism."""
 
+    _REQUIRED_ENVIRONMENT: dict[EnvironmentProfile, tuple[str, ...]] = {
+        EnvironmentProfile.PLAIN: (),
+        EnvironmentProfile.TERMINAL: ("XDG_RUNTIME_DIR",),
+        EnvironmentProfile.WAYLAND: (
+            "XDG_RUNTIME_DIR",
+            "WAYLAND_DISPLAY",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+        ),
+    }
+
     def __init__(self, base_environment: Mapping[str, str] | None = None):
-        self.base_environment = dict(base_environment or os.environ)
+        source = os.environ if base_environment is None else base_environment
+        self.base_environment = dict(source)
+
+    def _environment(
+        self, profile: ExecutionProfile
+    ) -> tuple[dict[str, str], str | None]:
+        source = self.base_environment
+        environment = {
+            "HOME": source.get("HOME", str(Path.home())),
+            "LANG": source.get("LANG", "C.UTF-8"),
+            "PATH": source.get("PATH", "/run/current-system/sw/bin"),
+        }
+        for name in self._REQUIRED_ENVIRONMENT[profile.route.environment_profile]:
+            value = source.get(name)
+            if not value:
+                return {}, name
+            environment[name] = value
+        environment.update(profile.environment)
+        return environment, None
 
     @staticmethod
     def _terminate(process: subprocess.Popen[bytes]) -> None:
@@ -78,8 +123,15 @@ class OwnerExecution:
         if not command:
             raise ValueError("owner command cannot be empty")
         normalized = tuple(str(part) for part in command)
-        environment = dict(self.base_environment)
-        environment.update(profile.environment)
+        environment, missing_environment = self._environment(profile)
+        if missing_environment is not None:
+            return ExecutionResult(
+                command=normalized,
+                exit_status=None,
+                stdout=b"",
+                stderr=b"",
+                failure_class=f"environment_unavailable:{missing_environment}",
+            )
         try:
             process = subprocess.Popen(
                 normalized,

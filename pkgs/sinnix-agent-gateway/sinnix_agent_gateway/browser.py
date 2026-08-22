@@ -10,7 +10,7 @@ from typing import Any
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from .execution import ExecutionProfile, OwnerExecution
+from .execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
 class BrowserError(ValueError):
@@ -34,7 +34,7 @@ class BrowserService:
         result = self.execution.run(
             [self.config.chrome_control_command, *arguments],
             ExecutionProfile(
-                name="browser-chrome",
+                route=OwnerRoute("browser-chrome"),
                 timeout_seconds=timeout,
                 max_stdout_bytes=self.config.max_result_bytes,
             ),

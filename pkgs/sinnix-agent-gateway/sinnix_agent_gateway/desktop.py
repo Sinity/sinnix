@@ -9,7 +9,12 @@ from typing import Any
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from .execution import ExecutionProfile, OwnerExecution
+from .execution import (
+    EnvironmentProfile,
+    ExecutionProfile,
+    OwnerExecution,
+    OwnerRoute,
+)
 
 
 class DesktopError(ValueError):
@@ -28,12 +33,16 @@ class DesktopService:
     }
 
     def __init__(
-        self, config: GatewayConfig, principal: Principal, artifacts: ArtifactService
+        self,
+        config: GatewayConfig,
+        principal: Principal,
+        artifacts: ArtifactService,
+        execution: OwnerExecution | None = None,
     ):
         self.config = config
         self.principal = principal
         self.artifacts = artifacts
-        self.execution = OwnerExecution()
+        self.execution = execution or OwnerExecution()
 
     def _command(self, owner: str, arguments: list[str]) -> list[str]:
         if owner == "hypr":
@@ -46,11 +55,17 @@ class DesktopService:
         result = self.execution.run(
             self._command(owner, arguments),
             ExecutionProfile(
-                name=f"desktop-{owner}",
+                route=OwnerRoute(
+                    f"desktop-{owner}", EnvironmentProfile.WAYLAND
+                ),
                 timeout_seconds=15,
                 max_stdout_bytes=self.config.max_result_bytes,
             ),
         )
+        if result.failure_class is not None and result.failure_class.startswith(
+            "environment_unavailable:"
+        ):
+            raise DesktopError(f"desktop control unavailable: {result.failure_class}")
         if result.failure_class == "command_unavailable:FileNotFoundError":
             raise DesktopError("desktop control unavailable: FileNotFoundError")
         if result.failure_class == "command_timeout":

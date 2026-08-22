@@ -8,7 +8,7 @@ from typing import Any
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig, ProjectConfig
-from .execution import ExecutionProfile, OwnerExecution
+from .execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
 class ProjectError(ValueError):
@@ -189,11 +189,12 @@ class ProjectService:
         result = OwnerExecution(safe_env).run(
             command,
             ExecutionProfile(
-                name="project-read",
+                route=OwnerRoute("project-read"),
                 cwd=cwd,
                 timeout_seconds=timeout,
                 max_stdout_bytes=self.config.max_result_bytes,
                 max_stderr_bytes=self.config.max_result_bytes,
+                environment={"GIT_OPTIONAL_LOCKS": "0"},
             ),
         )
         text = result.stdout.decode("utf-8", errors="replace")
@@ -351,7 +352,7 @@ class ProjectService:
         result = OwnerExecution(safe_env).run(
             ["git", "apply", "--whitespace=nowarn", "-"],
             ExecutionProfile(
-                name="project-apply-patch",
+                route=OwnerRoute("project-apply-patch"),
                 cwd=project.path,
                 timeout_seconds=20,
                 max_stdout_bytes=self.config.max_result_bytes,

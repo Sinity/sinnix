@@ -77,7 +77,6 @@ class ShellService:
         cwd: str,
         timeout_seconds: int,
         max_bytes: int,
-        read_only: bool,
         environment: dict[str, str] | None,
         as_root: bool,
     ) -> dict[str, Any]:
@@ -106,16 +105,6 @@ class ShellService:
             f"--property=RuntimeMaxSec={timeout_seconds}",
             f"--property=WorkingDirectory={workdir}",
         ]
-        if read_only:
-            command.extend(
-                [
-                    "--property=ReadOnlyPaths=/",
-                    "--property=PrivateTmp=true",
-                    "--property=NoNewPrivileges=true",
-                    "--property=ProtectSystem=strict",
-                    "--property=ProtectHome=read-only",
-                ]
-            )
         command.extend(
             [
                 "--",
@@ -180,27 +169,6 @@ class ShellService:
             "output": output[:max_bytes].decode("utf-8", errors="replace"),
         }
 
-    def query(
-        self,
-        argv: list[str],
-        cwd: str = "/",
-        timeout_seconds: int = 30,
-        max_bytes: int = 64_000,
-    ) -> dict[str, Any]:
-        self.principal.require(Capability.SHELL_QUERY)
-        if timeout_seconds < 1 or timeout_seconds > 300:
-            raise ShellError("timeout_seconds must be 1-300")
-        return self._execute(
-            unit_prefix="sinnix-gateway-query",
-            argv=argv,
-            cwd=cwd,
-            timeout_seconds=timeout_seconds,
-            max_bytes=max_bytes,
-            read_only=True,
-            environment=None,
-            as_root=False,
-        )
-
     def run(
         self,
         argv: list[str],
@@ -217,7 +185,6 @@ class ShellService:
             cwd=cwd,
             timeout_seconds=timeout_seconds,
             max_bytes=max_bytes,
-            read_only=False,
             environment=environment,
             as_root=as_root,
         )
