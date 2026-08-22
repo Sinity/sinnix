@@ -58,6 +58,19 @@ stdenv.mkDerivation rec {
     autoPatchelfHook
   ];
 
+  # The upstream bundle ships optional Qt shims and musl/architecture
+  # variants for hardware integrations. They are not loaded by the native
+  # glibc Electron path on this system and are intentionally not Nix-patched.
+  autoPatchelfIgnoreMissingDeps = [
+    "libQt5Core.so.5"
+    "libQt5Gui.so.5"
+    "libQt5Widgets.so.5"
+    "libQt6Core.so.6"
+    "libQt6Gui.so.6"
+    "libQt6Widgets.so.6"
+    "libc.musl-x86_64.so.1"
+  ];
+
   # These are the NixOS equivalents of the shared-library dependencies in
   # OpenAI's Debian package. The application keeps its Electron/Chromium
   # payload bundled; autoPatchelfHook supplies the host-side ABI paths.
