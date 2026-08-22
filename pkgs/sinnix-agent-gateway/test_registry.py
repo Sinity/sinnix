@@ -135,9 +135,13 @@ def test_catalog_contract_resources_preserve_generated_schema_metadata() -> None
     assert action["action"]["schema_ref"] == (
         "sinnix://gateway/v2/actions/gateway.catalog"
     )
+    assert action["action"]["effect"] == "read"
     assert action["action"]["input_schema"]["properties"]["availability"] == {
         "enum": ["declared"]
     }
+    assert action["action"]["examples"] == [
+        {"input": {"resource_kind": "bead", "availability": "declared"}}
+    ]
     assert resource["resource"]["contract_ref"] == "sinnix://gateway/v2/resources/bead"
     assert all(row["availability"] == "declared" for row in catalog["resources"])
     assert all(row["availability"] == "declared" for row in catalog["actions"])
@@ -167,6 +171,19 @@ def test_action_contract_rejects_missing_schema_and_unknown_principal() -> None:
             principals=frozenset({"unrecognized"}),
             input_schema={"type": "object"},
             output_schema={"type": "object"},
+        )
+    with pytest.raises(ValueError, match="examples require an input object"):
+        ActionSpec(
+            name="fixture.read",
+            verb=VerbFamily.QUERY,
+            domain="fixture",
+            owner="fixture",
+            route="fixture.read",
+            effect=EffectMode.READ,
+            principals=frozenset({"observer"}),
+            input_schema={"type": "object"},
+            output_schema={"type": "object"},
+            examples=({},),
         )
 
 

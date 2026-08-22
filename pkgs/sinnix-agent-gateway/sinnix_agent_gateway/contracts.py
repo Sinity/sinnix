@@ -124,6 +124,13 @@ class ActionSpec:
             raise ValueError(f"action {self.name!r} requires an output JSON Schema")
         if len(set(self.resource_kinds)) != len(self.resource_kinds):
             raise ValueError(f"action {self.name!r} repeats resource kinds")
+        for example in self.examples:
+            if not isinstance(example, Mapping) or not isinstance(
+                example.get("input"), Mapping
+            ):
+                raise ValueError(
+                    f"action {self.name!r} examples require an input object"
+                )
         if self.effect is EffectMode.READ and self.verb not in {
             VerbFamily.STATUS,
             VerbFamily.CATALOG,

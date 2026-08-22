@@ -243,6 +243,7 @@ def build_registry() -> CatalogRegistry:
             principals=frozenset({"observer", "agent-control", "operator"}),
             input_schema=EMPTY_OBJECT_SCHEMA,
             output_schema={"type": "object"},
+            examples=({"input": {}},),
             documentation="Return independent gateway contract and availability observations.",
         ),
         ActionSpec(
@@ -256,6 +257,14 @@ def build_registry() -> CatalogRegistry:
             input_schema=CATALOG_QUERY_SCHEMA,
             output_schema={"type": "object"},
             resource_kinds=tuple(resource.kind for resource in resources),
+            examples=(
+                {
+                    "input": {
+                        "resource_kind": "bead",
+                        "availability": "declared",
+                    }
+                },
+            ),
             documentation="Search the generated V2 resource and action catalog.",
         ),
     )
