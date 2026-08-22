@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TextIO
@@ -96,10 +97,17 @@ def broker_service(tmp_path: Path, principal_name: str, max_bytes: int = 262_144
     return McpBrokerService(config, principal, ArtifactService(config, principal))
 
 
-def test_catalog_reports_registry_admission_without_connecting(tmp_path: Path) -> None:
-    broker = broker_service(tmp_path, "observer")
+def test_catalog_probes_admitted_servers_and_keeps_exclusions_static(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
 
-    assert broker.catalog() == {
+    assert anyio.run(broker.catalog) == {
         "servers": [
             {
                 "name": "blocked",
@@ -116,10 +124,87 @@ def test_catalog_reports_registry_admission_without_connecting(tmp_path: Path) -
                 "transport": "stdio",
                 "tier": "evidence",
                 "brokered": True,
-                "availability": "unprobed",
+                "availability": "available",
+                "tool_count": 1,
+                "read_only_tool_count": 1,
             },
         ]
     }
+
+
+def write_stdio_fixture(tmp_path: Path, source: str) -> Path:
+    fixture = tmp_path / "fixture_mcp.py"
+    fixture.write_text(source)
+    return fixture
+
+
+def test_catalog_probes_real_stdio_mcp_fixture(tmp_path: Path) -> None:
+    broker = broker_service(tmp_path, "operator")
+    fixture = write_stdio_fixture(
+        tmp_path,
+        """import json
+import sys
+
+for line in sys.stdin:
+    request = json.loads(line)
+    if request[\"method\"] == \"initialize\":
+        result = {
+            \"protocolVersion\": request[\"params\"][\"protocolVersion\"],
+            \"capabilities\": {\"tools\": {}},
+            \"serverInfo\": {\"name\": \"fixture\", \"version\": \"1\"},
+        }
+    elif request[\"method\"] == \"tools/list\":
+        result = {
+            \"tools\": [{
+                \"name\": \"fixture_read\",
+                \"description\": \"Fixture read tool\",
+                \"inputSchema\": {\"type\": \"object\", \"properties\": {}},
+                \"annotations\": {\"readOnlyHint\": True},
+            }]
+        }
+    else:
+        continue
+    print(json.dumps({\"jsonrpc\": \"2.0\", \"id\": request[\"id\"], \"result\": result}), flush=True)
+""",
+    )
+    broker.config.mcp_broker_servers["fixture"].update(
+        command=sys.executable, args=[str(fixture)]
+    )
+
+    result = anyio.run(broker.catalog)
+
+    assert result["servers"][1] == {
+        "name": "fixture",
+        "description": "Fixture server",
+        "transport": "stdio",
+        "tier": "evidence",
+        "brokered": True,
+        "availability": "available",
+        "tool_count": 1,
+        "read_only_tool_count": 1,
+    }
+
+
+def test_catalog_attests_real_stdio_probe_failure(tmp_path: Path) -> None:
+    broker = broker_service(tmp_path, "operator")
+    fixture = write_stdio_fixture(
+        tmp_path,
+        """import sys
+sys.stderr.write(\"fixture launch failed\\n\")
+sys.exit(17)
+""",
+    )
+    broker.config.mcp_broker_servers["fixture"].update(
+        command=sys.executable, args=[str(fixture)]
+    )
+
+    result = anyio.run(broker.catalog)
+    fixture_result = result["servers"][1]
+
+    assert fixture_result["availability"] == "unavailable"
+    assert fixture_result["failure_class"] == "upstream_unavailable"
+    artifact = broker.artifacts.read(fixture_result["diagnostic_artifact_id"])
+    assert base64.b64decode(artifact["base64"]) == b"fixture launch failed\n"
 
 
 def test_broker_enforces_live_read_only_tool_metadata(
