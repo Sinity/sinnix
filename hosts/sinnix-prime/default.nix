@@ -43,7 +43,7 @@
         # manifest was regenerated from the packaged gateway on 2026-08-23.
         # It exposes seven principal-filtered read tools: status, catalog,
         # context, canonical get, query, events, and bounded job wait.
-        approvedManifestHash = "9bd5a0abff7f5f06afe88bf05b67d800bd2c88d0bfe93e111bf1da48aeca36fe";
+        approvedManifestHash = "d53ec91b705b696d1056a3a12e9a62deb8e878fab4ba7a09641fc8760f07cfd1";
         approvedActionCatalogHash = "16af8f71f4328e66aecb00c876b64e51bbcbad1b5b3718a86139a276e882165e";
         tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
       };
