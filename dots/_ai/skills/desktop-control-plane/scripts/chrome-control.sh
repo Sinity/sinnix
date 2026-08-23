@@ -271,7 +271,7 @@ agent-window)
     before=$(hyprctl clients -j 2>/dev/null | jq -r '.[].address' | sort)
   fi
 
-  params=$(jq -nc --arg url "$url" '{url: $url, newWindow: true}')
+  params=$(jq -nc --arg url "$url" '{url: $url, newWindow: true, background: true}')
   response=$(cdp_send "$ws_url" "Target.createTarget" "$params")
   if jq -e '.error' >/dev/null 2>&1 <<<"$response"; then
     jq . <<<"$response" >&2
