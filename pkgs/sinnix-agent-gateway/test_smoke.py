@@ -248,6 +248,11 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "gateway.status",
                     "gateway.catalog",
                 } <= {action["name"] for action in catalog["actions"]}
+
+                query_tool = next(tool for tool in tools.tools if tool.name == "query")
+                assert "action_name" in query_tool.input_schema["required"]
+                assert "default" not in query_tool.input_schema["properties"]["action_name"]
+                assert "projects.list" in (query_tool.description or "")
                 project_catalog_result = await session.call_tool(
                     "catalog", {"project": "fixture"}
                 )
@@ -303,7 +308,12 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert checkout_resource["kind"] == "checkout"
                 assert checkout_resource["checkout"]["checkout"]["checkout_id"] == "default"
                 query_result = await session.call_tool(
-                    "query", {"ref": checkout["ref"], "query": "fixture"}
+                    "query",
+                    {
+                        "action_name": "projects.query",
+                        "ref": checkout["ref"],
+                        "query": "fixture",
+                    },
                 )
                 query_envelope = json.loads(query_result.content[0].text)
                 assert query_envelope["result"]["action"] == "projects.query"
@@ -313,6 +323,15 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "sinnix://projects/fixture",
                     checkout["ref"],
                 ]
+                project_list_result = await session.call_tool(
+                    "query", {"action_name": "projects.list"}
+                )
+                project_list_envelope = json.loads(project_list_result.content[0].text)
+                assert project_list_envelope["result"]["action"] == "projects.list"
+                assert [
+                    project["project_id"]
+                    for project in project_list_envelope["data"]["projects"]
+                ] == ["fixture"]
                 context_result = await session.call_tool(
                     "context", {"ref": "sinnix://projects/fixture"}
                 )
