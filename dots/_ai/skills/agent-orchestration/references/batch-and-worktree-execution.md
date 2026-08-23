@@ -45,15 +45,21 @@ agents report patches or commit only by explicit instruction.
    which case the agent runs directly in the main checkout and its diff is
    not isolated (confirmed incident, polylogue 2026-08-01: an agent's
    unreviewed schema-regeneration output landed directly in the
-   coordinator's live tree). In repos with `devtools`:
-   `devtools workspace verify-worktree <path> --expect-branch <branch>`.
+   coordinator's live tree). For AgentCTL-managed workspaces, use
+   `agentctl workspace get <workspace-id>` and require `identity_matches`,
+   the expected path and branch, and the exact reported HEAD.
 
 ### Post-agent merge checklist
 
-1. Verify the worktree branch has commits: `git log <branch> --oneline -5`
-2. If no commits, check working tree: `git -C <worktree> status --short`
-3. Cherry-pick or diff-apply if the agent committed to the wrong branch
-4. `git worktree remove` stale worktrees after merging
+1. Verify the workspace's reported exact HEAD and clean/dirty state with
+   `agentctl workspace get <workspace-id>`.
+2. Checkpoint dirty work before recovery or integration; do not copy changes
+   between checkouts as a substitute for preserving their Git identity.
+3. Use `agentctl workspace stack`/`restack` for dependent histories and the
+   publish/land path for independent delivery.
+4. After merge, use `agentctl workspace finish <workspace-id>`; for abandoned
+   work use guarded `reap` only after its checkpoint/divergence evidence is
+   resolved.
 
 ### Foreground-only execution
 
