@@ -227,12 +227,14 @@ status)
 # entire point -- the operator's logins are the agent's logins, with nothing
 # to sync and nothing to go stale.
 #
-# The window is identified by DIFFING Hyprland's client list across the
-# creation, not by matching a class or a title. Every window of one Chrome
-# process carries the same class, so a windowrule cannot tell this window from
-# the operator's; and a title match would race the page's own title changes.
-# The whole create-to-park transaction is serialized because concurrent callers
-# would otherwise diff the same client set and both select one new address.
+# The window is identified by first creating the target at a unique marker
+# document, then matching that marker in Hyprland before any caller URL is
+# loaded. Every window of one Chrome process carries the same class, and a
+# before/after client diff becomes ambiguous if another window maps during the
+# transaction. The marker binds the CDP target to exactly one compositor
+# client; only after that client is parked do we navigate to the caller URL.
+# The whole create-to-park transaction is serialized so concurrent marker
+# windows cannot compete for compositor placement and stability checks.
 # `movetoworkspacesilent` moves that unique address without pulling the
 # operator's view along with it. Chrome may still finish mapping its native
 # window after CDP returns, so success requires observing that exact address on
@@ -270,13 +272,24 @@ agent-window)
   }
 
   hyprland_available="false"
-  before=""
-  if command -v hyprctl >/dev/null 2>&1; then
-    hyprland_available="true"
-    before=$(hyprctl clients -j 2>/dev/null | jq -r '.[].address' | sort)
-  fi
+  command -v hyprctl >/dev/null 2>&1 && hyprland_available="true"
 
-  params=$(jq -nc --arg url "$url" '{url: $url, newWindow: true, background: true}')
+  marker="sinnix-agent-window-${BASHPID}-${RANDOM}-${RANDOM}"
+  marker_url="data:text/html,<title>${marker}</title>"
+
+  page_id=""
+  retain_created_target="false"
+  close_created_target() {
+    [[ -n $page_id ]] || return 0
+    close_params=$(jq -nc --arg target_id "$page_id" '{targetId: $target_id}')
+    cdp_send "$ws_url" "Target.closeTarget" "$close_params" >/dev/null 2>&1 || true
+  }
+  cleanup_failed_agent_window() {
+    [[ $retain_created_target == "true" ]] || close_created_target
+  }
+  trap cleanup_failed_agent_window EXIT
+
+  params=$(jq -nc --arg url "$marker_url" '{url: $url, newWindow: true, background: true}')
   response=$(cdp_send "$ws_url" "Target.createTarget" "$params")
   if jq -e '.error' >/dev/null 2>&1 <<<"$response"; then
     jq . <<<"$response" >&2
@@ -284,19 +297,18 @@ agent-window)
   fi
   page_id=$(jq -r '.result.targetId' <<<"$response")
 
-  close_created_target() {
-    close_params=$(jq -nc --arg target_id "$page_id" '{targetId: $target_id}')
-    cdp_send "$ws_url" "Target.closeTarget" "$close_params" >/dev/null 2>&1 || true
-  }
-
   parked="false"
   addr=""
   if [[ $hyprland_available == "true" ]]; then
     for _ in {1..40}; do
       sleep 0.1
-      after=$(hyprctl clients -j 2>/dev/null | jq -r '.[].address' | sort)
-      addr=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | awk 'NR == 1 { print; exit }')
-      [[ -n $addr ]] && break
+      matches=$(hyprctl clients -j 2>/dev/null | jq -r --arg marker "$marker" \
+        '[.[] | select(.class == "google-chrome" and (.title | contains($marker))) | .address] | unique | .[]')
+      match_count=$(wc -l <<<"$matches")
+      if [[ $match_count -eq 1 && -n $matches ]]; then
+        addr="$matches"
+        break
+      fi
     done
 
     if [[ -n $addr ]]; then
@@ -321,14 +333,29 @@ agent-window)
     fi
   fi
 
+  if [[ $parked == "true" ]]; then
+    page_ws_url=$(get_ws_url "$page_id")
+    if [[ -z $page_ws_url ]]; then
+      echo "parked agent target disappeared before navigation" >&2
+      exit 1
+    fi
+    navigate_params=$(jq -nc --arg url "$url" '{url: $url}')
+    navigate_response=$(cdp_send "$page_ws_url" "Page.navigate" "$navigate_params")
+    if jq -e '.error' >/dev/null 2>&1 <<<"$navigate_response"; then
+      jq . <<<"$navigate_response" >&2
+      exit 1
+    fi
+  fi
+
   jq -nc --arg id "$page_id" --arg url "$url" --argjson parked "$parked" \
     --arg ws "$AGENT_WORKSPACE" --arg key "$SUMMON_BINDING" \
     '{id: $id, url: $url, parked: $parked, workspace: $ws, show_with: $key}'
   if [[ $parked != "true" ]]; then
-    close_created_target
     echo "window ${page_id} opened but was not verified on ${AGENT_WORKSPACE}" >&2
     exit 1
   fi
+  retain_created_target="true"
+  trap - EXIT
   ;;
 
 toggle-agent-workspace)
