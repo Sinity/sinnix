@@ -6,14 +6,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-DEFAULT_AGENT_RUNNER = Path(
-    "/home/sinity/.config/hermes/skills/agent-orchestration/scripts/run_agent_prompt.sh"
-)
-DEFAULT_AGENT_CONTROLLER = Path(
-    "/home/sinity/.config/hermes/skills/agent-orchestration/scripts/agent_job_control.sh"
-)
-
-
 def default_state_dir() -> Path:
     base = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state")))
     return base / "sinnix" / "agent-gateway"
@@ -21,6 +13,10 @@ def default_state_dir() -> Path:
 
 def default_ops_socket_path() -> Path:
     return Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "sinnix" / "ops.sock"
+
+
+def default_sinnixd_socket_path() -> Path:
+    return Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "sinnixd.sock"
 
 
 @dataclass(frozen=True)
@@ -50,10 +46,7 @@ class GatewayConfig:
     projects: dict[str, ProjectConfig]
     runtime_inventory: Path = Path("/etc/sinnix/runtime-inventory.json")
     capability_index: Path = Path("/etc/sinnix/capability-index.json")
-    agent_runner: Path = DEFAULT_AGENT_RUNNER
-    agent_controller: Path = DEFAULT_AGENT_CONTROLLER
-    agent_scope_exec_command: str = "sinnix-agent-scope-exec"
-    execution_job_command: str = "sinnix-agent-gateway-execution-job"
+    sinnixd_socket: Path = field(default_factory=default_sinnixd_socket_path)
     observe_command: str = "sinnix-observe"
     max_result_bytes: int = 262_144
     approved_manifest_hash: str | None = None
@@ -178,14 +171,7 @@ class GatewayConfig:
             capability_index=Path(
                 raw.get("capabilityIndex", "/etc/sinnix/capability-index.json")
             ),
-            agent_runner=Path(raw.get("agentRunner", DEFAULT_AGENT_RUNNER)),
-            agent_controller=Path(raw.get("agentController", DEFAULT_AGENT_CONTROLLER)),
-            agent_scope_exec_command=raw.get(
-                "agentScopeExecCommand", "sinnix-agent-scope-exec"
-            ),
-            execution_job_command=raw.get(
-                "executionJobCommand", "sinnix-agent-gateway-execution-job"
-            ),
+            sinnixd_socket=Path(raw.get("sinnixdSocket", default_sinnixd_socket_path())),
             observe_command=raw.get("observeCommand", "sinnix-observe"),
             max_result_bytes=int(raw.get("maxResultBytes", 262_144)),
             approved_manifest_hash=raw.get("approvedManifestHash"),
@@ -217,7 +203,6 @@ class GatewayConfig:
             self.state_dir / "artifacts",
             self.state_dir / "captures",
             self.state_dir / "diagnostics",
-            self.state_dir / "jobs",
             self.state_dir / "legacy",
             self.state_dir / "results",
         ):
