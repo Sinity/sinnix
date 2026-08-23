@@ -67,9 +67,9 @@ Descriptor `result` is executable contract data. `exit` remains log-only. `json`
 
 ## Canonical task authority
 
-Every registered project has one Beads authority at `$SINNIXD_TASK_STATE_ROOT/<project>`, defaulting to `/realm/state/tasks/<project>`. Sinnixd passes the exact `<project>/dolt` database through `bd --db` for every task read, mutation, reconcile, and snapshot. The Git checkout remains the working directory for project environment semantics, but neither its branch nor `.beads/issues.jsonl` participates in authority selection. `task.snapshot` exports records from the canonical database into its response; it does not write the checkout export.
+Every registered project has one standalone Beads authority workspace at `$SINNIXD_TASK_STATE_ROOT/<project>`, defaulting to `/realm/state/tasks/<project>`, with its physical database at `<project>/.beads/dolt`. Sinnixd sets `BEADS_DIR` to that canonical `.beads` directory for every task read, mutation, reconcile, and snapshot while retaining the registered checkout as the command CWD and project identity. It never uses `--db`: Beads 1.1 treats an existing path there as a legacy embedded workspace and rejects it. The checkout's `.beads/redirect` points to the same authority for native `bd` clients and worktrees; neither its branch nor `.beads/issues.jsonl` participates in task authority selection. `task.snapshot` exports records from the canonical workspace into its response; it does not write a checkout export.
 
-An authority remains unavailable until `<project>/authority.json` attests one completed cutover. The receipt binds the project ID, canonical and source database paths, equal SHA-256 digests of source and destination exports, and equal issue-row counts. The source `.beads/dolt` must then be a symlink to the canonical database. Sinnixd rejects a missing or malformed receipt, unequal verification evidence, a missing canonical database, or a separate source database. This makes interrupted bootstrap and dual live authorities fail closed.
+An authority remains unavailable until `<project>/authority.json` attests one completed cutover. The receipt binds the project ID, canonical and source database paths, equal SHA-256 digests of source and destination exports, and equal issue-row counts. The source `.beads/dolt` must be absent and the source `.beads/redirect` must resolve to the canonical `.beads` directory. Sinnixd rejects a missing or malformed receipt, unequal verification evidence, a missing canonical database, or an ambiguous source. This makes interrupted bootstrap and dual live authorities fail closed.
 
 The migration is an operator maintenance action and must run once per project. Stop Sinnixd first, ensure no direct `bd` client can write the project, and confirm the source Dolt server is stopped. The following is the exact Sinnix cutover; substitute the project ID and root for Polylogue and Sinex. It retains the original database as `legacy-dolt-pre-cutover` and does not delete either copy.
 
@@ -79,9 +79,10 @@ project_id=sinnix
 project_root=/realm/project/sinnix
 task_state_root=/realm/state/tasks
 authority_root="$task_state_root/$project_id"
+authority_beads="$authority_root/.beads"
 source_database="$project_root/.beads/dolt"
-staging_database="$authority_root/dolt.staging"
-canonical_database="$authority_root/dolt"
+staging_database="$authority_beads/dolt.staging"
+canonical_database="$authority_beads/dolt"
 scratch_dir="$(mktemp -d "/realm/tmp/work/task-cutover.${project_id}.XXXXXX")"
 
 systemctl --user stop sinnixd.service
@@ -89,30 +90,31 @@ bd --directory "$project_root" dolt stop
 test "$(bd --directory "$project_root" dolt status --json | jq -r .running)" = false
 test -d "$source_database"
 test ! -e "$authority_root"
-install -d -m 0700 "$authority_root"
+install -d -m 0700 "$authority_root" "$authority_beads"
 
 bd --directory "$project_root" --readonly export >"$scratch_dir/source.jsonl"
 source_rows="$(bd --directory "$project_root" --readonly sql 'SELECT COUNT(*) AS row_count FROM issues' --json | jq -er '.[0].row_count')"
 bd --directory "$project_root" dolt stop
 test "$(bd --directory "$project_root" dolt status --json | jq -r .running)" = false
 
-install -m 0600 "$project_root/.beads/config.yaml" "$authority_root/config.yaml"
-install -m 0600 "$project_root/.beads/metadata.json" "$authority_root/metadata.json"
-cp -a -- "$source_database" "$staging_database"
-diff --recursive --brief --no-dereference "$source_database" "$staging_database"
+install -m 0600 "$project_root/.beads/config.yaml" "$authority_beads/config.yaml"
+install -m 0600 "$project_root/.beads/metadata.json" "$authority_beads/metadata.json"
+rsync -a --exclude='*/.dolt/git-remote-cache/' -- "$source_database/" "$staging_database/"
+diff --recursive --brief --no-dereference --exclude=git-remote-cache "$source_database" "$staging_database"
 
-bd --directory "$project_root" --db "$staging_database" --readonly export >"$scratch_dir/destination.jsonl"
-destination_rows="$(bd --directory "$project_root" --db "$staging_database" --readonly sql 'SELECT COUNT(*) AS row_count FROM issues' --json | jq -er '.[0].row_count')"
-bd --directory "$project_root" --db "$staging_database" dolt stop
+mv "$staging_database" "$canonical_database"
+mv "$source_database" "$authority_root/legacy-dolt-pre-cutover"
+printf '1.1.0\n' > "$authority_beads/.local_version"
+printf '%s\n' "$authority_beads" > "$project_root/.beads/redirect"
+bd --directory "$authority_root" dolt start
+bd --directory "$authority_root" --readonly export >"$scratch_dir/destination.jsonl"
+destination_rows="$(bd --directory "$authority_root" --readonly sql 'SELECT COUNT(*) AS row_count FROM issues' --json | jq -er '.[0].row_count')"
+bd --directory "$authority_root" dolt stop
 cmp "$scratch_dir/source.jsonl" "$scratch_dir/destination.jsonl"
 test "$source_rows" -eq "$destination_rows"
 source_digest="sha256:$(sha256sum "$scratch_dir/source.jsonl" | awk '{print $1}')"
 destination_digest="sha256:$(sha256sum "$scratch_dir/destination.jsonl" | awk '{print $1}')"
 test "$source_digest" = "$destination_digest"
-
-mv "$staging_database" "$canonical_database"
-mv "$source_database" "$authority_root/legacy-dolt-pre-cutover"
-ln -s "$canonical_database" "$source_database"
 receipt_tmp="$authority_root/.authority.json.tmp"
 jq -n \
   --arg project_id "$project_id" \
@@ -126,7 +128,8 @@ jq -n \
   >"$receipt_tmp"
 chmod 0600 "$receipt_tmp"
 mv "$receipt_tmp" "$authority_root/authority.json"
-test "$(readlink -f "$source_database")" = "$canonical_database"
+test ! -e "$source_database"
+test "$(cat "$project_root/.beads/redirect")" = "$authority_beads"
 systemctl --user start sinnixd.service
 ```
 
