@@ -356,7 +356,12 @@ JOBS_QUERY_SCHEMA: dict[str, Any] = _with_request_controls(
                         "minimum": 1,
                         "maximum": 1_000,
                         "default": 100,
-                    }
+                    },
+                    "cursor": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512,
+                    },
                 },
             }
         },
@@ -428,9 +433,9 @@ AGENT_RUN_SCHEMA: dict[str, Any] = _with_request_controls(
             "reasoning_effort": {"type": "string", "minLength": 1, "maxLength": 32},
             "timeout_seconds": {
                 "type": "integer",
-                "minimum": 30,
-                "maximum": 86_400,
-                "default": 14_400,
+                "minimum": 1,
+                "maximum": 3_600,
+                "default": 3_600,
             },
             "credential_profile": {
                 "enum": ["subscription", "api"],
@@ -1086,7 +1091,6 @@ def build_registry() -> CatalogRegistry:
             output_schema=V2_ENVELOPE_SCHEMA,
             resource_kinds=("project", "bead", "task_authority"),
             supports_idempotency=True,
-            supports_precondition=True,
             receipt_policy="audit",
             examples=({"input": {"ref": "sinnix://projects/sinnix", "operation": "comment", "parameters": {"id": "sinnix-example", "text": "recorded by the operator"}, "idempotency_key": "bead-comment-example"}},),
             documentation="Perform one structured, attested Beads mutation for a canonical project.",
@@ -1322,15 +1326,19 @@ def build_registry() -> CatalogRegistry:
         ),
     )
     def with_failure_contract(action: ActionSpec) -> ActionSpec:
-        failures = set(BASE_TYPED_FAILURES)
-        # Every V2 verb accepts request preconditions, including reads. The
-        # runtime rejects a failed check before calling the owner.
-        failures.add("precondition_failed")
+        failures = set(BASE_TYPED_FAILURES) | {"deadline"}
+        if action.supports_precondition:
+            failures.add("precondition_failed")
         if action.supports_idempotency:
-            failures.add("idempotency_conflict")
+            failures.update({"conflict", "idempotency_conflict"})
         if action.name in {"mcp.change", "mcp.query", "projects.change"}:
             failures.add("unsupported_capability")
-        return replace(action, failure_codes=frozenset(failures))
+        schema = dict(action.input_schema)
+        properties = dict(schema.get("properties", {}))
+        if not action.supports_precondition:
+            properties.pop("preconditions", None)
+        schema["properties"] = properties
+        return replace(action, input_schema=schema, failure_codes=frozenset(failures))
 
     return CatalogRegistry(
         resources,

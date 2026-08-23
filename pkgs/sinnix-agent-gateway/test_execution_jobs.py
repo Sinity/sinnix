@@ -152,6 +152,7 @@ def test_public_v2_job_verbs_dispatch_catalog_bound_owner(
         "job.get",
         "job.cancel",
     ]
+    assert daemon.calls[0].arguments["timeout_seconds"] == 3_600
 
 
 def test_v2_shell_run_wait_and_get_forward_one_daemon_job_identity(
@@ -379,7 +380,7 @@ def test_v2_agent_run_and_cancel_preserve_daemon_cancellation_truth(
             backend="codex",
             model="gpt-5.6-terra",
             reasoning_effort="high",
-            timeout_seconds=14_400,
+            timeout_seconds=3_600,
             credential_profile="subscription",
         ),
         {
@@ -418,7 +419,7 @@ def test_v2_agent_run_and_cancel_preserve_daemon_cancellation_truth(
         "model": "gpt-5.6-terra",
         "effort": "high",
         "credential_profile": "subscription",
-        "timeout_seconds": 14_400,
+        "timeout_seconds": 3_600,
         "result": "last-message",
     }
 
@@ -433,6 +434,11 @@ def test_v2_jobs_query_bounds_daemon_job_list_and_preserves_job_refs(tmp_path: P
             "limit": 1,
             "total": 2,
             "truncated": True,
+            "next_cursor": "cursor-fixture",
+            "snapshot": {
+                "ordering": "created_at_desc_job_id_desc",
+                "ceiling": ["2026-08-23T00:00:00+00:00", "first"],
+            },
         }
     }
 
@@ -453,6 +459,11 @@ def test_v2_jobs_query_bounds_daemon_job_list_and_preserves_job_refs(tmp_path: P
         "limit": 1,
         "total": 2,
         "truncated": True,
+        "next_cursor": "cursor-fixture",
+        "snapshot": {
+            "ordering": "created_at_desc_job_id_desc",
+            "ceiling": ["2026-08-23T00:00:00+00:00", "first"],
+        },
     }
     assert [request.operation for request in daemon.calls] == ["job.list"]
     assert daemon.calls[0].arguments == {"limit": 1}

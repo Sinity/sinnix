@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -293,6 +294,47 @@ def test_mutation_idempotency_replays_receipt_without_second_owner_write(tmp_pat
     assert writes == ["owner write"]
     assert replay == first
     assert conflict["error"]["code"] == "idempotency_conflict"
+
+
+def test_declared_deadline_and_idempotency_failures_persist_bounded_envelopes(tmp_path) -> None:
+    runtime = Runtime.create(config(tmp_path), "agent-control")
+    action = REGISTRY.action("agents.run")
+    request = {
+        "project_id": "fixture",
+        "prompt": "inspect fixture",
+        "backend": "codex",
+        "model": "gpt-5.6-terra",
+        "reasoning_effort": "high",
+        "idempotency_key": "agent-failure-fixture",
+    }
+
+    deadline = runtime.execute_v2(
+        action,
+        lambda: pytest.fail("expired request reached the owner"),
+        {**request, "deadline_at": time.time() - 1},
+    )
+    first = runtime.execute_v2(action, lambda: {"job_id": "first"}, request)
+    conflict = runtime.execute_v2(
+        action,
+        lambda: pytest.fail("conflicting request reached the owner"),
+        {**request, "prompt": "different request"},
+    )
+    unexpected = runtime.execute_v2(
+        action,
+        lambda: (_ for _ in ()).throw(RuntimeError("owner implementation bug")),
+        {**request, "idempotency_key": "unexpected-owner-fixture"},
+    )
+
+    assert first["result"]["outcome"] == "ok"
+    for response, code in (
+        (deadline, "deadline"),
+        (conflict, "idempotency_conflict"),
+        (unexpected, "owner_failed"),
+    ):
+        assert response["error"]["code"] == code
+        assert response["result"]["outcome"] == "error"
+        assert response["receipt"]["receipt_id"]
+        assert runtime.results.read(response["result"]["result_id"]) == response
 
 
 def test_concurrent_matching_idempotency_returns_conflict_then_replays(tmp_path) -> None:

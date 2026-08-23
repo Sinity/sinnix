@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import fcntl
 import hashlib
 import json
@@ -40,6 +41,8 @@ MAX_LOG_ARTIFACT_BYTES = 1_048_576
 MAX_RESULT_BYTES = 64_000
 JOB_SCHEMA_VERSION = 5
 JOB_UNIT_PREFIX = "sinnixd-job-"
+JOB_LIST_CURSOR_SCHEMA_VERSION = 1
+MAX_JOB_LIST_CURSOR_BYTES = 512
 SYSTEMD_ERROR_CODE = "systemd-job-error"
 ADMISSION_SCHEMA_VERSION = 1
 MAX_ADMISSION_CACHE_ENTRIES = 128
@@ -74,6 +77,66 @@ class JobResultError(ValueError):
 
 class JobResultLimitError(JobResultError):
     """Raised when a valid declared result exceeds the caller's response bound."""
+
+
+class JobPageCursorError(ValueError):
+    """Raised when a job-list continuation does not bind its original view."""
+
+
+def _job_order_key(record: "GenericJobRecord") -> tuple[str, str]:
+    return record.created_at, record.job_id
+
+
+def _encode_job_list_cursor(
+    *, principal: str, snapshot: tuple[str, str], after: tuple[str, str]
+) -> str:
+    payload = {
+        "schema": JOB_LIST_CURSOR_SCHEMA_VERSION,
+        "principal": principal,
+        "snapshot": list(snapshot),
+        "after": list(after),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(encoded).decode().rstrip("=")
+
+
+def _decode_job_list_cursor(
+    cursor: str, *, principal: str
+) -> tuple[tuple[str, str], tuple[str, str]]:
+    if (
+        not isinstance(cursor, str)
+        or not cursor
+        or len(cursor.encode()) > MAX_JOB_LIST_CURSOR_BYTES
+    ):
+        raise JobPageCursorError("job list cursor is invalid")
+    try:
+        decoded = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
+        value = json.loads(decoded)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise JobPageCursorError("job list cursor is invalid") from error
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != {"schema", "principal", "snapshot", "after"}
+        or value["schema"] != JOB_LIST_CURSOR_SCHEMA_VERSION
+        or value["principal"] != principal
+    ):
+        raise JobPageCursorError("job list cursor does not belong to this principal")
+
+    def pair(name: str) -> tuple[str, str]:
+        candidate = value[name]
+        if (
+            not isinstance(candidate, list)
+            or len(candidate) != 2
+            or any(not isinstance(item, str) for item in candidate)
+        ):
+            raise JobPageCursorError("job list cursor is invalid")
+        return candidate[0], candidate[1]
+
+    snapshot = pair("snapshot")
+    after = pair("after")
+    if after > snapshot:
+        raise JobPageCursorError("job list cursor is invalid")
+    return snapshot, after
 
 
 def _open_private_parent(path: Path) -> int:
@@ -1596,17 +1659,23 @@ class GenericJobs:
         correlation_id: str,
         parameters: Mapping[str, Any],
         checkout: RegisteredCheckout | None = None,
+        principal: str = "operator",
     ) -> dict[str, Any]:
+        if principal not in {"agent-control", "operator"}:
+            raise ValueError("declared operations require agent-control or operator principal")
         if checkout is not None and checkout.project_id != project.project_id:
             raise ValueError("declared job checkout belongs to another project")
         with self._admission_lock:
-            return self._start_declared_locked(project, operation, correlation_id, parameters, checkout, ())
+            return self._start_declared_locked(
+                project, operation, correlation_id, principal, parameters, checkout, ()
+            )
 
     def _start_declared_locked(
         self,
         project: ProjectAdapter,
         operation: ProjectOperation,
         correlation_id: str,
+        principal: str,
         parameters: Mapping[str, Any],
         checkout: RegisteredCheckout | None,
         lineage: tuple[str, ...],
@@ -1614,7 +1683,15 @@ class GenericJobs:
         if operation.name in lineage:
             raise ValueError("declared operation dependency cycle")
         dependency_ids = tuple(
-            self._start_declared_locked(project, project.operation(name), correlation_id, {}, checkout, (*lineage, operation.name))["job_id"]
+            self._start_declared_locked(
+                project,
+                project.operation(name),
+                correlation_id,
+                principal,
+                {},
+                checkout,
+                (*lineage, operation.name),
+            )["job_id"]
             for name in operation.dependencies
         )
         operation_argv, parameter_digest = operation.derive_argv(parameters)
@@ -1669,6 +1746,7 @@ class GenericJobs:
                 kind="declared-operation", command=(*project.environment.command, *operation_argv),
                 working_directory=str(workdir), environment=launch_environment, project_id=project.project_id,
                 operation=operation.name, parameter_digest=parameter_digest,
+                principal=principal,
                 timeout_seconds=operation.timeout_seconds,
                 checkout=checkout.to_dict() if checkout is not None else None,
                 result_kind={"exit": "exit-status", "json": "json", "pytest": "pytest"}[operation.result],
@@ -1896,6 +1974,7 @@ class GenericJobs:
         working_directory: str,
         environment: Mapping[str, str],
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+        principal: str = "agent-control",
     ) -> dict[str, Any]:
         job_id = str(uuid4())
         job_environment = dict(environment)
@@ -1907,6 +1986,7 @@ class GenericJobs:
                 working_directory=working_directory,
                 environment=job_environment,
                 timeout_seconds=timeout_seconds,
+                principal=principal,
             ),
             job_id,
         )
@@ -1920,21 +2000,65 @@ class GenericJobs:
             self._admit_locked()
         return status
 
-    def list(self, *, limit: int = 100) -> dict[str, Any]:
+    def list(
+        self,
+        *,
+        principal: str = "operator",
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
         if not 1 <= limit <= 1_000:
             raise ValueError("job list limit must be between 1 and 1000")
         with self._admission_lock:
             self._admit_locked()
-        total = self.store.count()
-        records = self.store.list(limit=limit)
+        records = sorted(
+            (
+                record
+                for record in self.store.list()
+                if principal == "operator" or record.spec.principal == principal
+            ),
+            key=_job_order_key,
+            reverse=True,
+        )
+        if cursor is None:
+            snapshot = _job_order_key(records[0]) if records else ("", "")
+            after: tuple[str, str] | None = None
+        else:
+            snapshot, after = _decode_job_list_cursor(cursor, principal=principal)
+        snapshot_records = [
+            record for record in records if _job_order_key(record) <= snapshot
+        ]
+        if after is not None:
+            snapshot_records = [
+                record
+                for record in snapshot_records
+                if _job_order_key(record) < after
+            ]
+        page_records = snapshot_records[: limit + 1]
+        has_more = len(page_records) > limit
+        records = page_records[:limit]
+        next_cursor = (
+            _encode_job_list_cursor(
+                principal=principal,
+                snapshot=snapshot,
+                after=_job_order_key(records[-1]),
+            )
+            if has_more and records
+            else None
+        )
         return {
             "jobs": [
                 self._public(record, record.state) if record.state.get("terminal") else self.get(record.job_id)
                 for record in records
             ],
             "limit": limit,
-            "total": total,
-            "truncated": total > len(records),
+            "total": len(snapshot_records) if after is None else None,
+            "truncated": has_more,
+            "next_cursor": next_cursor,
+            "snapshot": {
+                "ordering": "created_at_desc_job_id_desc",
+                "ceiling": list(snapshot),
+            },
         }
 
     def wait(self, job_id: str, timeout_seconds: int = DEFAULT_WAIT_SECONDS) -> dict[str, Any]:

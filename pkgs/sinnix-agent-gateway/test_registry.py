@@ -134,17 +134,23 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
 
 
 def test_action_failure_contracts_follow_public_controls_and_owner_capabilities() -> None:
-    read_failures = BASE_TYPED_FAILURES | {"precondition_failed"}
+    read_failures = BASE_TYPED_FAILURES | {"deadline"}
 
     assert REGISTRY.action("jobs.query").typed_failures == read_failures
     assert REGISTRY.action("agents.run").typed_failures == read_failures | {
+        "conflict",
         "idempotency_conflict"
     }
     assert REGISTRY.action("mcp.change").typed_failures == read_failures | {
+        "conflict",
         "idempotency_conflict",
         "unsupported_capability",
     }
-    assert "deadline" not in REGISTRY.action("jobs.query").typed_failures
+    assert "precondition_failed" in REGISTRY.action("jobs.cancel").typed_failures
+    assert "precondition_failed" not in REGISTRY.action("jobs.query").typed_failures
+    for action in REGISTRY.actions:
+        properties = action.input_schema["properties"]
+        assert ("preconditions" in properties) is action.supports_precondition
 
 
 def test_every_retained_owner_capability_has_a_read_action_and_resource_route() -> None:

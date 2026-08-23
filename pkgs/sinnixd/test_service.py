@@ -1244,7 +1244,7 @@ def request(
     operation: str,
     owner: str,
     arguments: dict[str, object] | None = None,
-    principal: str = "test",
+    principal: str = "operator",
     *,
     idempotency_key: str | None = None,
 ) -> RequestEnvelope:
@@ -4481,6 +4481,98 @@ def test_job_rpc_get_list_wait_logs_and_cancel_share_one_record(tmp_path: Path) 
     assert not listed.payload.inline["truncated"]
     assert cancelled.payload is not None
     assert cancelled.payload.inline["already_terminal"]
+
+
+def test_job_owner_boundary_filters_before_pagination_and_denies_cross_principal_access(
+    tmp_path: Path,
+) -> None:
+    """Only a job creator or the operator reaches any job control path."""
+    write_adapter(tmp_path)
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]),
+        jobs=generic_jobs(tmp_path, FakeSystemdJobs()),
+    )
+
+    def start(principal: str) -> str:
+        response = service.jobs.start(
+            GenericJobSpec(
+                kind="foreground-command",
+                command=("fixture",),
+                working_directory=str(tmp_path),
+                environment={},
+                timeout_seconds=60,
+                principal=principal,
+            )
+        )
+        return response["job_id"]
+
+    agent_job = start("agent-control")
+    operator_jobs = [start("operator"), start("operator")]
+
+    observer_list = service.dispatch(
+        request("job.list", "systemd-jobs", {"limit": 1}, principal="observer")
+    )
+    assert observer_list.ok and observer_list.payload is not None
+    assert observer_list.payload.inline["jobs"] == []
+    assert observer_list.payload.inline["total"] == 0
+
+    for operation, arguments in (
+        ("job.get", {"job_id": operator_jobs[0]}),
+        ("job.wait", {"job_id": operator_jobs[0], "timeout_seconds": 1}),
+        ("job.logs", {"job_id": operator_jobs[0]}),
+        ("job.result", {"job_id": operator_jobs[0]}),
+        ("job.cancel", {"job_id": operator_jobs[0]}),
+    ):
+        denied = service.dispatch(
+            request(operation, "systemd-jobs", arguments, principal="observer")
+        )
+        assert denied.error is not None
+        assert denied.error.code is ErrorCode.POLICY_DENIED
+
+    agent_list = service.dispatch(
+        request("job.list", "systemd-jobs", {"limit": 10}, principal="agent-control")
+    )
+    assert agent_list.ok and agent_list.payload is not None
+    assert [row["job_id"] for row in agent_list.payload.inline["jobs"]] == [agent_job]
+    assert service.dispatch(
+        request("job.get", "systemd-jobs", {"job_id": agent_job}, principal="agent-control")
+    ).ok
+    agent_denied = service.dispatch(
+        request("job.get", "systemd-jobs", {"job_id": operator_jobs[0]}, principal="agent-control")
+    )
+    assert agent_denied.error is not None
+    assert agent_denied.error.code is ErrorCode.POLICY_DENIED
+
+    seen: list[str] = []
+    cursor: str | None = None
+    while True:
+        arguments: dict[str, object] = {"limit": 1}
+        if cursor is not None:
+            arguments["cursor"] = cursor
+        page = service.dispatch(
+            request("job.list", "systemd-jobs", arguments, principal="operator")
+        )
+        assert page.ok and page.payload is not None
+        seen.extend(row["job_id"] for row in page.payload.inline["jobs"])
+        cursor = page.payload.inline["next_cursor"]
+        if cursor is not None and len(seen) == 1:
+            rebound = service.dispatch(
+                request(
+                    "job.list",
+                    "systemd-jobs",
+                    {"limit": 1, "cursor": cursor},
+                    principal="agent-control",
+                )
+            )
+            assert rebound.error is not None
+            assert rebound.error.code is ErrorCode.INVALID_ARGUMENT
+        if cursor is None:
+            break
+    assert set(seen) == {agent_job, *operator_jobs}
+    assert len(seen) == 3
+    assert service.dispatch(
+        request("job.get", "systemd-jobs", {"job_id": agent_job}, principal="operator")
+    ).ok
 
 
 def test_real_user_systemd_service_cgroup_cancels_descendants(tmp_path: Path) -> None:

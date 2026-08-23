@@ -42,6 +42,18 @@ def test_legacy_to_v2_parity_is_exhaustive_and_registry_bound() -> None:
     assert {row["receipt_policy"] for row in contract["rows"]} == {"audit", "owner"}
 
 
+def test_parity_map_preserves_the_checked_in_historical_order() -> None:
+    package_root = Path(__file__).parent
+    manifest = json.loads(
+        (package_root / "sinnix_agent_gateway" / "legacy_manifest_v1.json").read_text()
+    )
+    rows = legacy_parity_contract(REGISTRY)["rows"]
+
+    assert len(manifest["tools"]) == 49
+    assert [row["legacy_tool"] for row in rows] == manifest["tools"]
+    assert list(V2_MIGRATIONS) == manifest["tools"]
+
+
 def test_job_list_and_agent_launch_have_visible_v2_replacements() -> None:
     rows = {row["legacy_tool"]: row for row in legacy_parity_contract(REGISTRY)["rows"]}
 

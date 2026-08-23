@@ -585,7 +585,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                         backend=backend,
                         model=model,
                         reasoning_effort=reasoning_effort,
-                        timeout_seconds=14_400 if timeout_seconds is None else timeout_seconds,
+                        timeout_seconds=3_600 if timeout_seconds is None else timeout_seconds,
                         credential_profile=credential_profile,
                     )
                 elif action.name == "operations.run":
