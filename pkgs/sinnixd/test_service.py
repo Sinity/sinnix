@@ -17,7 +17,7 @@ import pytest
 
 import sinnixd.jobs as jobs_module
 import sinnixd.cli as cli_module
-from sinnix_mcp import OpaquePayload, RequestEnvelope, ResponseEnvelope, SinnixRef, SourceBinding
+from sinnix_mcp import ErrorCode, OpaquePayload, RequestEnvelope, ResponseEnvelope, SinnixRef, SourceBinding
 from sinnix_mcp.execution import EnvironmentProfile, ExecutionResult
 
 from sinnixd.api import UnixSocketServer, call, receive_frame, send_frame
@@ -39,7 +39,7 @@ from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from sinnixd.projects import ProjectCatalog, ProjectConfigError, parse_worktree_records
 from sinnixd.runner import RunnerError, _revalidate_checkout
 from sinnixd.service import SinnixdService
-from sinnixd.tasks import FLOCK_EXECUTABLE, MAX_TASK_OUTPUT_BYTES, TaskService
+from sinnixd.tasks import FLOCK_EXECUTABLE, MAX_TASK_OUTPUT_BYTES, TaskError, TaskService
 from sinnixd.workspaces import GitWorkspaces, WorkspaceStore
 
 
@@ -60,11 +60,11 @@ def test_agentctl_exit_status_matches_response_envelope(
     (
         (("agentctl", "task", "list", "fixture", "--status", "open"), "task.list", {"project_id": "fixture", "status": "open", "limit": 100}),
         (("agentctl", "task", "get", "fixture", "fixture-1"), "task.get", {"project_id": "fixture", "task_id": "fixture-1"}),
-        (("agentctl", "task", "claim", "fixture", "fixture-1"), "task.claim", {"project_id": "fixture", "task_id": "fixture-1"}),
-        (("agentctl", "task", "note", "fixture", "fixture-1", "note"), "task.note", {"project_id": "fixture", "task_id": "fixture-1", "text": "note"}),
-        (("agentctl", "task", "relate", "fixture", "fixture-1", "fixture-2"), "task.relate", {"project_id": "fixture", "task_id": "fixture-1", "related_task_id": "fixture-2"}),
-        (("agentctl", "task", "complete", "fixture", "fixture-1", "--reason", "done"), "task.complete", {"project_id": "fixture", "task_id": "fixture-1", "reason": "done"}),
-        (("agentctl", "task", "release", "fixture", "fixture-1", "--if-assignee", "worker"), "task.release", {"project_id": "fixture", "task_id": "fixture-1", "if_assignee": "worker"}),
+        (("agentctl", "task", "claim", "fixture", "fixture-1", "--request-id", "request-1"), "task.claim", {"project_id": "fixture", "task_id": "fixture-1"}),
+        (("agentctl", "task", "note", "fixture", "fixture-1", "note", "--request-id", "request-1"), "task.note", {"project_id": "fixture", "task_id": "fixture-1", "text": "note"}),
+        (("agentctl", "task", "relate", "fixture", "fixture-1", "fixture-2", "--request-id", "request-1"), "task.relate", {"project_id": "fixture", "task_id": "fixture-1", "related_task_id": "fixture-2"}),
+        (("agentctl", "task", "complete", "fixture", "fixture-1", "--reason", "done", "--request-id", "request-1"), "task.complete", {"project_id": "fixture", "task_id": "fixture-1", "reason": "done"}),
+        (("agentctl", "task", "release", "fixture", "fixture-1", "--if-assignee", "worker", "--request-id", "request-1"), "task.release", {"project_id": "fixture", "task_id": "fixture-1", "if_assignee": "worker"}),
         (("agentctl", "task", "reconcile", "fixture"), "task.reconcile", {"project_id": "fixture"}),
         (("agentctl", "task", "snapshot", "fixture"), "task.snapshot", {"project_id": "fixture"}),
     ),
@@ -87,6 +87,13 @@ def test_agentctl_task_commands_map_to_task_envelopes(
     assert outbound.owner == "task-backend"
     assert outbound.principal == "operator"
     assert dict(outbound.arguments) == payload
+    expected_key = "request-1" if operation in {"task.claim", "task.note", "task.relate", "task.complete", "task.release"} else None
+    assert outbound.idempotency_key == expected_key
+
+
+def test_agentctl_task_mutations_require_a_stable_request_id() -> None:
+    with pytest.raises(SystemExit):
+        cli_module.parser().parse_args(["task", "claim", "fixture", "fixture-1"])
 
 
 def write_adapter(root: Path) -> None:
@@ -154,7 +161,12 @@ documentation = "Bounded Polylogue archive status."
 
 
 def request(
-    operation: str, owner: str, arguments: dict[str, object] | None = None, principal: str = "test"
+    operation: str,
+    owner: str,
+    arguments: dict[str, object] | None = None,
+    principal: str = "test",
+    *,
+    idempotency_key: str | None = None,
 ) -> RequestEnvelope:
     return RequestEnvelope(
         request_id=str(uuid4()),
@@ -163,6 +175,7 @@ def request(
         owner=owner,
         principal=principal,
         arguments=arguments or {},
+        idempotency_key=idempotency_key,
     )
 
 
@@ -378,12 +391,89 @@ def test_task_mutations_map_to_fixed_beads_argv(
         operation=operation,
         arguments={"project_id": "fixture", **arguments},
         principal="agent-control",
+        mutation_id="request-1",
     )
 
     assert result == {"project_id": "fixture", "operation": operation, "result": {"ok": True}}
     assert boundary.calls == [
         (("--directory", str(tmp_path), "--json", *expected), tmp_path)
     ]
+
+
+@pytest.mark.parametrize(
+    ("operation", "arguments"),
+    (
+        ("task.claim", {"task_id": "fixture-1"}),
+        ("task.note", {"task_id": "fixture-1", "text": "append once"}),
+        ("task.relate", {"task_id": "fixture-1", "related_task_id": "fixture-2"}),
+        ("task.complete", {"task_id": "fixture-1", "reason": "verified"}),
+        ("task.release", {"task_id": "fixture-1", "if_assignee": "worker"}),
+    ),
+)
+def test_task_mutation_replays_committed_outcome_after_response_fault(
+    tmp_path: Path,
+    operation: str,
+    arguments: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Anti-vacuity: retry enters SinnixdService and cannot reach the Beads boundary again."""
+    write_adapter(tmp_path)
+    jobs = generic_jobs(tmp_path)
+    boundary = FakeTaskBoundary([task_result({"committed": operation})])
+    tasks = TaskService(ProjectCatalog([tmp_path]), jobs, boundary)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs, tasks=tasks)
+    payload = {"project_id": "fixture", **arguments}
+
+    def fail_after_commit(outcome: dict[str, object]) -> None:
+        assert outcome["result"] == {"committed": operation}
+        raise TaskError(ErrorCode.OPERATION_FAILED, "simulated response fault")
+
+    monkeypatch.setattr(tasks, "_after_mutation_commit", fail_after_commit)
+    failed = service.dispatch(
+        request(operation, "task-backend", payload, "agent-control", idempotency_key="request-1")
+    )
+    assert failed.error is not None
+    assert failed.error.code.value == "OPERATION_FAILED"
+    assert len(boundary.calls) == 1
+
+    monkeypatch.setattr(tasks, "_after_mutation_commit", lambda outcome: None)
+    replayed = service.dispatch(
+        request(operation, "task-backend", payload, "agent-control", idempotency_key="request-1")
+    )
+    assert replayed.ok and replayed.payload is not None
+    assert replayed.payload.inline == {
+        "project_id": "fixture",
+        "operation": operation,
+        "result": {"committed": operation},
+    }
+    assert len(boundary.calls) == 1
+    journal = list((jobs.store.root / "task-outcomes").rglob("*.json"))
+    assert len(journal) == 1
+    assert "append once" not in journal[0].read_text()
+
+
+def test_task_mutation_distinct_request_ids_apply_independently(tmp_path: Path) -> None:
+    service, boundary = task_service(
+        tmp_path,
+        FakeTaskBoundary([task_result({"attempt": 1}), task_result({"attempt": 2})]),
+    )
+
+    first = service.execute(
+        operation="task.note",
+        arguments={"project_id": "fixture", "task_id": "fixture-1", "text": "first"},
+        principal="agent-control",
+        mutation_id="request-1",
+    )
+    second = service.execute(
+        operation="task.note",
+        arguments={"project_id": "fixture", "task_id": "fixture-1", "text": "second"},
+        principal="agent-control",
+        mutation_id="request-2",
+    )
+
+    assert first["result"] == {"attempt": 1}
+    assert second["result"] == {"attempt": 2}
+    assert len(boundary.calls) == 2
 
 
 def test_task_reconcile_returns_a_durable_fixed_command_receipt(tmp_path: Path) -> None:
@@ -399,6 +489,7 @@ def test_task_reconcile_returns_a_durable_fixed_command_receipt(tmp_path: Path) 
         operation="task.claim",
         arguments={"project_id": "fixture", "task_id": "fixture-1"},
         principal="agent-control",
+        mutation_id="request-1",
     )
     response = service.dispatch(request("task.reconcile", "task-backend", {"project_id": "fixture"}, "agent-control"))
 
@@ -479,6 +570,7 @@ def test_task_mutations_are_serialized_per_project(tmp_path: Path) -> None:
                 operation="task.claim",
                 arguments={"project_id": "fixture", "task_id": task_id},
                 principal="agent-control",
+                mutation_id=f"request-{task_id}",
             )
         except BaseException as error:
             errors.append(error)
@@ -534,12 +626,16 @@ def test_task_rejects_unauthorized_principals_and_invalid_arguments(tmp_path: Pa
     invalid = service.dispatch(
         request("task.get", "task-backend", {"project_id": "fixture", "task_id": "--bad", "extra": True}, "observer")
     )
+    missing_request_id = service.dispatch(
+        request("task.claim", "task-backend", {"project_id": "fixture", "task_id": "fixture-1"}, "agent-control")
+    )
     unknown = service.dispatch(
         request("task.list", "task-backend", {"project_id": "missing"}, "observer")
     )
 
     assert denied.error is not None and denied.error.code.value == "POLICY_DENIED"
     assert invalid.error is not None and invalid.error.code.value == "INVALID_ARGUMENT"
+    assert missing_request_id.error is not None and missing_request_id.error.code.value == "INVALID_ARGUMENT"
     assert unknown.error is not None and unknown.error.code.value == "INVALID_ARGUMENT"
     assert not tasks.boundary.calls
 
