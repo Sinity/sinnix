@@ -25,7 +25,10 @@ TASK_TIMEOUT_SECONDS = 30
 TASK_RECONCILE_TIMEOUT_SECONDS = DEFAULT_TIMEOUT_SECONDS
 BEADS_EXECUTABLE = "bd"
 FLOCK_EXECUTABLE = "/run/current-system/sw/bin/flock"
+DEFAULT_TASK_STATE_ROOT = Path("/realm/state/tasks")
+TASK_AUTHORITY_RECEIPT = "authority.json"
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _READ_PRINCIPALS = frozenset({"observer", "agent-control", "operator"})
 _WRITE_PRINCIPALS = frozenset({"agent-control", "operator"})
 _MUTATIONS = frozenset(
@@ -55,6 +58,88 @@ class TaskError(ValueError):
     def __init__(self, code: ErrorCode, message: str):
         self.code = code
         super().__init__(message)
+
+
+def default_task_state_root() -> Path:
+    return Path(os.environ.get("SINNIXD_TASK_STATE_ROOT", str(DEFAULT_TASK_STATE_ROOT)))
+
+
+@dataclass(frozen=True)
+class TaskAuthority:
+    """One activated external task authority, bound by a verified cutover receipt."""
+
+    project_id: str
+    root: Path
+    database: Path
+    source_database: Path
+
+    @classmethod
+    def load(cls, state_root: Path, project: ProjectAdapter) -> TaskAuthority:
+        root = state_root / project.project_id
+        database = root / "dolt"
+        receipt_path = root / TASK_AUTHORITY_RECEIPT
+        try:
+            receipt = json.loads(receipt_path.read_text())
+        except FileNotFoundError as error:
+            raise TaskError(ErrorCode.OWNER_UNAVAILABLE, "task authority is not activated") from error
+        except (OSError, json.JSONDecodeError) as error:
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task authority receipt is unavailable") from error
+        expected_fields = {"schema", "project_id", "database", "source_database", "verification"}
+        if not isinstance(receipt, dict) or set(receipt) != expected_fields:
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task authority receipt is malformed")
+        source_database_value = receipt["source_database"]
+        if not isinstance(source_database_value, str) or not Path(source_database_value).is_absolute():
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task authority receipt is malformed")
+        source_database = Path(source_database_value)
+        if (
+            receipt["schema"] != 1
+            or receipt["project_id"] != project.project_id
+            or receipt["database"] != str(database)
+        ):
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task authority receipt is malformed")
+        verification = receipt["verification"]
+        verification_fields = {
+            "source_export_sha256",
+            "destination_export_sha256",
+            "source_rows",
+            "destination_rows",
+        }
+        if not isinstance(verification, dict) or set(verification) != verification_fields:
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task authority receipt is malformed")
+        source_digest = verification["source_export_sha256"]
+        destination_digest = verification["destination_export_sha256"]
+        source_rows = verification["source_rows"]
+        destination_rows = verification["destination_rows"]
+        if (
+            not isinstance(source_digest, str)
+            or not _SHA256_RE.fullmatch(source_digest)
+            or source_digest != destination_digest
+            or isinstance(source_rows, bool)
+            or not isinstance(source_rows, int)
+            or source_rows < 0
+            or source_rows != destination_rows
+        ):
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task authority verification is incomplete")
+        if root.is_symlink() or database.is_symlink() or not database.is_dir():
+            raise TaskError(ErrorCode.OWNER_UNAVAILABLE, "canonical task database is unavailable")
+        try:
+            canonical_database = database.resolve(strict=True)
+        except OSError as error:
+            raise TaskError(ErrorCode.OWNER_UNAVAILABLE, "canonical task database is unavailable") from error
+        if not source_database.is_symlink():
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task authority cutover is ambiguous")
+        try:
+            active_source = source_database.resolve(strict=True)
+        except OSError as error:
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task authority cutover is ambiguous") from error
+        if active_source != canonical_database:
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task authority cutover is ambiguous")
+        return cls(
+            project_id=project.project_id,
+            root=root,
+            database=database,
+            source_database=source_database,
+        )
 
 
 @dataclass(frozen=True)
@@ -213,10 +298,13 @@ class TaskService:
     jobs: GenericJobs
     boundary: TaskCommandBoundary = field(default_factory=BeadsCommandBoundary)
     outcomes: TaskOutcomeJournal | None = None
+    task_state_root: Path = field(default_factory=default_task_state_root)
     _locks_guard: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _project_locks: dict[str, threading.Lock] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if not self.task_state_root.is_absolute():
+            raise ValueError("task state root must be absolute")
         if self.outcomes is None:
             self.outcomes = TaskOutcomeJournal(self.jobs.store.root / "task-outcomes")
 
@@ -353,7 +441,16 @@ class TaskService:
         readonly: bool,
         json_lines: bool = False,
     ) -> Any:
-        argv = ("--directory", str(project.root), "--json", *( ("--readonly",) if readonly else () ), *command)
+        authority = self._authority(project)
+        argv = (
+            "--directory",
+            str(project.root),
+            "--db",
+            str(authority.database),
+            "--json",
+            *(("--readonly",) if readonly else ()),
+            *command,
+        )
         result = self.boundary.run(
             argv=argv,
             cwd=project.root,
@@ -388,6 +485,7 @@ class TaskService:
 
         job_id = str(uuid4())
         lock_path = self._lock_path(project)
+        authority = self._authority(project)
         environment = project.environment.values()
         environment.update(
             {
@@ -406,6 +504,8 @@ class TaskService:
                     BEADS_EXECUTABLE,
                     "--directory",
                     str(project.root),
+                    "--db",
+                    str(authority.database),
                     "--json",
                     "sync",
                     "--no-adopt",
@@ -452,6 +552,9 @@ class TaskService:
     def _lock_for(self, project_id: str) -> threading.Lock:
         with self._locks_guard:
             return self._project_locks.setdefault(project_id, threading.Lock())
+
+    def _authority(self, project: ProjectAdapter) -> TaskAuthority:
+        return TaskAuthority.load(self.task_state_root, project)
 
     def _lock_path(self, project: ProjectAdapter) -> Path:
         self.jobs.store.root.mkdir(mode=0o700, parents=True, exist_ok=True)

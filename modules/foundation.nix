@@ -234,7 +234,7 @@ in
                   devtoolsEntrypoint = "nix develop";
                   taskAuthority = {
                     workspace = "${config.sinnix}/.beads";
-                    database = "${config.sinnix}/.beads/dolt";
+                    database = "${config.stateRoot}/tasks/sinnix/dolt";
                     publicationPolicy = "dolt-sync";
                   };
                 };
@@ -242,11 +242,21 @@ in
                   path = config.sinex;
                   remote = "https://github.com/Sinity/sinex.git";
                   observerRead = true;
+                  taskAuthority = {
+                    workspace = "${config.sinex}/.beads";
+                    database = "${config.stateRoot}/tasks/sinex/dolt";
+                    publicationPolicy = "dolt-sync";
+                  };
                 };
                 polylogue = {
                   path = config.polylogue;
                   remote = "https://github.com/Sinity/polylogue.git";
                   observerRead = true;
+                  taskAuthority = {
+                    workspace = "${config.polylogue}/.beads";
+                    database = "${config.stateRoot}/tasks/polylogue/dolt";
+                    publicationPolicy = "dolt-sync";
+                  };
                 };
                 lynchpin = {
                   path = config.lynchpin;
