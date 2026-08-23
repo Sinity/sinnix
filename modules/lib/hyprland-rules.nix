@@ -52,7 +52,10 @@ let
       inherit name;
       match = lib.optionalAttrs (rule ? namespace) { namespace = rule.namespace; };
     }
-    // (lib.optionalAttrs (rule.blur or false) { blur = true; })
+    # Unlike the one-way toggles below, blur can deliberately override a
+    # client-side blur request. Preserve an explicit false in the generated
+    # Lua rule instead of dropping it as if the option were absent.
+    // (lib.optionalAttrs (rule ? blur) { blur = rule.blur; })
     // (lib.optionalAttrs (rule ? ignoreAlpha) { ignore_alpha = rule.ignoreAlpha; })
     // (lib.optionalAttrs (rule.noAnim or false) { no_anim = true; })
     // (lib.optionalAttrs (rule.xray or false) { xray = true; })
