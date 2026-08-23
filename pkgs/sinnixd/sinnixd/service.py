@@ -313,6 +313,14 @@ class SinnixdService:
                 raise ValueError("workspace finish requires agent-control or operator principal")
             assert self.delivery is not None
             return self.delivery.finish(self._single_workspace_id(arguments, "workspace.finish"))
+        if operation == "workspace.finish-integrated":
+            if principal not in {"agent-control", "operator"} or set(arguments) != {"workspace_id", "target_ref"}:
+                raise ValueError("workspace.finish-integrated requires agent-control or operator plus workspace_id and target_ref")
+            assert self.workspaces is not None
+            return self.workspaces.finish_integrated(
+                self._job_argument(arguments, "workspace_id"),
+                self._job_argument(arguments, "target_ref"),
+            )
         if operation == "job.start":
             project_id = self._job_argument(arguments, "project_id")
             operation_name = self._job_argument(arguments, "operation")

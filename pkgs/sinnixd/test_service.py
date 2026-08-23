@@ -43,7 +43,7 @@ from sinnixd.projects import ProjectCatalog, ProjectConfigError, parse_worktree_
 from sinnixd.runner import RunnerError, _revalidate_checkout
 from sinnixd.service import SinnixdService
 from sinnixd.tasks import FLOCK_EXECUTABLE, MAX_TASK_OUTPUT_BYTES, TaskError, TaskService
-from sinnixd.workspaces import GitWorkspaces, WorkspaceStore
+from sinnixd.workspaces import GitWorkspaces, WorkspaceError, WorkspaceStore
 
 
 @pytest.mark.parametrize(("ok", "expected"), ((True, 0), (False, 1)))
@@ -117,6 +117,30 @@ def test_agentctl_workspace_dispose_maps_to_a_typed_envelope(
     assert outbound.owner == "git-workspaces"
     assert outbound.principal == "agent-control"
     assert dict(outbound.arguments) == {"workspace_id": "workspace-1"}
+
+
+def test_agentctl_workspace_finish_integrated_maps_target_to_a_typed_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, RequestEnvelope] = {}
+
+    def fake_call(socket_path, request_value):
+        captured["request"] = request_value
+        return {"schema": 1, "ok": True}
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["agentctl", "workspace", "finish-integrated", "workspace-1", "--target", "abc123"],
+    )
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    outbound = captured["request"]
+    assert outbound.operation == "workspace.finish-integrated"
+    assert outbound.owner == "git-workspaces"
+    assert outbound.principal == "agent-control"
+    assert dict(outbound.arguments) == {"workspace_id": "workspace-1", "target_ref": "abc123"}
 
 
 def test_agentctl_job_start_maps_parameters_json_to_the_typed_request(
@@ -1667,11 +1691,51 @@ def test_workspace_dispose_deletes_a_clean_no_pr_branch_without_checkpoint_conte
     assert disposed.payload.inline["disposed"]
     assert disposed.payload.inline["deleted_branch"] == workspace["branch"]
     assert not Path(workspace["path"]).exists()
+    assert not (service.workspaces.store.checkpoints_root / workspace["workspace_id"] / checkpoint["checkpoint_id"]).exists()
+    assert service.workspaces.list("fixture") == {"workspaces": []}
+
+
+def test_workspace_finish_integrated_accepts_cherry_picked_tree_and_rejects_missing_change(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Fixture"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "fixture@example.test"], check=True)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    workspace = service.workspaces.create(
+        project_id="fixture", name="integrated", branch="feature/integrated", base="HEAD"
+    )
+    workspace_path = Path(workspace["path"])
+    (workspace_path / "integrated.txt").write_text("represented exactly\n")
+    subprocess.run(["git", "-C", str(workspace_path), "add", "integrated.txt"], check=True)
+    subprocess.run(["git", "-C", str(workspace_path), "commit", "--quiet", "-m", "integrated"], check=True)
+
+    with pytest.raises(WorkspaceError, match="not fully represented"):
+        service.workspaces.finish_integrated(workspace["workspace_id"], "master")
+
+    source_head = subprocess.run(
+        ["git", "-C", str(workspace_path), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(["git", "-C", str(tmp_path), "cherry-pick", source_head], check=True, capture_output=True)
+    target_head = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "update-ref", "refs/remotes/origin/master", target_head], check=True
+    )
+
+    finished = service.workspaces.finish_integrated(workspace["workspace_id"], target_head)
+
+    assert finished == {
+        "workspace_id": workspace["workspace_id"],
+        "finished": True,
+        "head": source_head,
+        "integration_target": target_head,
+    }
+    assert not workspace_path.exists()
+    assert not service.workspaces.list()["workspaces"]
     assert subprocess.run(
         ["git", "-C", str(tmp_path), "show-ref", "--verify", "--quiet", f"refs/heads/{workspace['branch']}"]
     ).returncode == 1
-    assert not (service.workspaces.store.checkpoints_root / workspace["workspace_id"] / checkpoint["checkpoint_id"]).exists()
-    assert service.workspaces.list("fixture") == {"workspaces": []}
 
 
 def test_workspace_dispose_refuses_dirty_divergent_unpublished_and_checkpoint_only_content(tmp_path: Path) -> None:
