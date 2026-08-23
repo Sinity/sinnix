@@ -43,6 +43,12 @@ The service passes a declarative, non-empty `sinnix.services.sinnixd.projectRoot
 
 `job start` accepts a project ID, one declared operation name, an optional workspace binding, and an optional JSON parameters object. It never accepts an arbitrary command. Its optional workspace binding launches in that registered checkout and durably records the checkout ID and exact starting HEAD, so later publication can reject stale verification. Declared operations and internal synthetic foreground commands construct the same durable generic-job spec, record, transient user `.service` launch, log artifact, reconciliation, wait, and cancellation route. The only additional public starts are the constrained typed contracts below.
 
+## Declared-operation timeout contract
+
+An operation may declare `timeout_seconds` as a positive integer. Omission keeps the 3,600-second default. Declared operations may use at most 14,400 seconds (four hours), which is enough for finite full suites while still providing a fixed systemd deadline. Descriptor parsing rejects booleans, non-integers, zero, negative values, and values above that maximum. The catalog, job response, durable job spec, recovery path, and `RuntimeMaxSec` all carry this one descriptor-owned value. Gateway and MCP clients receive the same catalog and job metadata; they do not accept a second timeout override.
+
+The longer maximum applies only to `declared-operation` jobs. `agentctl shell`, `agentctl agent`, internal foreground commands, and source-scoped owner adapters retain their existing bounds. In particular, shell and attested-agent jobs remain capped at 3,600 seconds, and the contract runner validates that identity before execution. Declared operations execute through the fixed capture launcher rather than that typed-job runner, so extending a suite cannot widen arbitrary command authority.
+
 ## Declared-operation parameters and results
 
 Operation parameters are descriptor-owned. The server accepts only parameter names and types declared under that operation, converts them to a fixed argument vector without a shell, and rejects unknown fields, malformed values, missing bounds, and values beyond those bounds. There is no caller-controlled argv, environment, working directory, or timeout on this route.
@@ -206,4 +212,4 @@ The daemon does not own service leases, arbitrary shells beyond the typed operat
 
 All requests and responses use `sinnix-mcp` v1. Every request carries an explicit principal, canonical dotted operation, owner, request ID, and correlation ID. Responses preserve owner identity, typed errors, bounded payloads, and optional source-generation bindings. `OwnerRegistry` rejects overlapping operation namespaces, so a frontend cannot silently choose an owner for a domain operation.
 
-Project adapters are the local semantic boundary. A descriptor declares what an operation means, its pool, dependencies, result contract, cache policy, exclusivity keys, resource seed, and scratch policy. The daemon supplies admission and lifecycle mechanics. It does not infer semantics from a command basename.
+Project adapters are the local semantic boundary. A descriptor declares what an operation means, its pool, timeout, dependencies, result contract, cache policy, exclusivity keys, resource seed, and scratch policy. The daemon supplies admission and lifecycle mechanics. It does not infer semantics from a command basename.

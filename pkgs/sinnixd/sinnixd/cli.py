@@ -10,6 +10,7 @@ from sinnix_mcp import ErrorCode, ErrorEnvelope, RequestEnvelope, ResponseEnvelo
 
 from .api import ProtocolError, SinnixdClientError, UnixSocketServer, call
 from .jobs import GenericJobStore, GenericJobs, UserSystemdJobs, default_state_dir
+from .limits import DEFAULT_TIMEOUT_SECONDS
 from .projects import ProjectCatalog
 from .service import SinnixdService
 
@@ -27,7 +28,7 @@ def parser() -> argparse.ArgumentParser:
     shell.add_argument("--project", required=True)
     shell.add_argument("--checkout", required=True)
     shell.add_argument("--cwd", default=".")
-    shell.add_argument("--timeout-seconds", type=int, default=3_600)
+    shell.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     shell.add_argument("argv", nargs=argparse.REMAINDER)
     agent = subcommands.add_parser("agent")
     agent.add_argument("--project", required=True)
@@ -37,7 +38,7 @@ def parser() -> argparse.ArgumentParser:
     agent.add_argument("--model", required=True)
     agent.add_argument("--effort", required=True)
     agent.add_argument("--credential-profile", default="subscription")
-    agent.add_argument("--timeout-seconds", type=int, default=3_600)
+    agent.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     project = subcommands.add_parser("project")
     project_subcommands = project.add_subparsers(dest="project_command", required=True)
     project_subcommands.add_parser("list")

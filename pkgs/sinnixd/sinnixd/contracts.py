@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 from uuid import uuid4
 
-from .jobs import DEFAULT_TIMEOUT_SECONDS, GenericJobSpec, GenericJobs
+from .jobs import GenericJobSpec, GenericJobs
+from .limits import maximum_timeout_seconds, valid_timeout_seconds
 from .projects import ProjectCatalog, RegisteredCheckout
 
 
@@ -177,8 +178,9 @@ class TypedJobContracts:
         timeout_seconds: int,
         result_kind: str,
     ) -> dict[str, Any]:
-        if not 1 <= timeout_seconds <= DEFAULT_TIMEOUT_SECONDS:
-            raise ContractError(f"job timeout_seconds must be between 1 and {DEFAULT_TIMEOUT_SECONDS}")
+        maximum_timeout = maximum_timeout_seconds(kind)
+        if not valid_timeout_seconds(timeout_seconds, kind=kind):
+            raise ContractError(f"job timeout_seconds must be between 1 and {maximum_timeout}")
         input_path = self.inputs_root / f"{job_id}.json"
         self._write_private(input_path, json.dumps(private, sort_keys=True, separators=(",", ":")).encode())
         environment = self._environment(checkout, job_id, principal, timeout_seconds)
