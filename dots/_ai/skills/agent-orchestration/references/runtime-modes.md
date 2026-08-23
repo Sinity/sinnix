@@ -242,8 +242,9 @@ mid-run.
 
 Use Kitty only when a human or coordinator needs a visible prompt run with
 process-level interruption. `launch_agent_tabs.sh` still invokes the
-non-interactive prompt runner; use `agent_instance_control.sh` or a manually
-launched interactive agent when conversational mid-turn steering is required.
+non-interactive prompt runner. Use `sinnix-kitty-control` from
+`desktop-control-plane`, or a manually launched interactive agent, when
+conversational mid-turn steering is required.
 The launcher uses `kitty @ launch --keep-focus`, so dispatch does not take focus
 from the operator. Route separate OS windows silently when isolation is useful:
 
