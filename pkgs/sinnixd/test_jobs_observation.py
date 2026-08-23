@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 from pathlib import Path
 
@@ -270,6 +270,35 @@ def test_stop_timeout_then_collected_unit_reconciles_after_restart(tmp_path: Pat
     cancelled = restarted.get(started["job_id"])
     assert cancelled["state"]["phase"] == "cancelled"
     assert cancelled["state"]["terminal"]
+
+
+def test_collected_cancel_without_ack_terminalizes_after_reconciliation_grace(tmp_path: Path) -> None:
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "not-found",
+            "ActiveState": "inactive",
+            "InvocationID": "",
+            "Result": "success",
+            "ExecMainStatus": "0",
+        }
+    )
+    jobs = generic_jobs(tmp_path, systemd)
+    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    record = jobs.store.load(started["job_id"])
+    jobs.store.save(
+        replace(
+            jobs._with_cancel_intent(record, "fixture-invocation"),
+            cancel_requested_at="2000-01-01T00:00:00+00:00",
+        )
+    )
+
+    terminal = jobs.get(started["job_id"])
+    restarted = GenericJobs(systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.1)
+
+    assert terminal["state"]["phase"] == "outcome-unknown"
+    assert terminal["state"]["terminal"]
+    assert terminal["state"]["outcome_evidence"] == "unit-collected-after-cancellation-grace"
+    assert restarted.get(started["job_id"])["state"] == terminal["state"]
 
 
 @pytest.mark.parametrize(

@@ -25,6 +25,7 @@ DEFAULT_TIMEOUT_SECONDS = 3_600
 DEFAULT_WAIT_SECONDS = 30
 MAX_WAIT_SECONDS = 300
 SYSTEMD_COMMAND_TIMEOUT_SECONDS = 0.25
+CANCEL_OUTCOME_RECONCILIATION_GRACE_SECONDS = 300
 MAX_LOG_BYTES = 64_000
 MAX_LOG_ARTIFACT_BYTES = 1_048_576
 MAX_RESULT_BYTES = 64_000
@@ -1373,11 +1374,17 @@ class GenericJobs:
                     "observed_at": _timestamp(),
                 }
             if record.cancel_requested_at is not None:
+                terminal = self._cancellation_reconciliation_grace_expired(record)
                 return {
                     "phase": "outcome-unknown",
-                    "terminal": False,
+                    "terminal": terminal,
                     "systemd": dict(properties),
                     "cancellation": self._cancel_intent(record),
+                    **(
+                        {"outcome_evidence": "unit-collected-after-cancellation-grace"}
+                        if terminal
+                        else {}
+                    ),
                     "observed_at": _timestamp(),
                 }
             return {"phase": "missing", "terminal": True, "systemd": dict(properties), "observed_at": _timestamp()}
@@ -1409,6 +1416,18 @@ class GenericJobs:
             phase = "failed"
             terminal = True
         return {"phase": phase, "terminal": terminal, "systemd": dict(properties), "observed_at": _timestamp()}
+
+    @staticmethod
+    def _cancellation_reconciliation_grace_expired(record: GenericJobRecord) -> bool:
+        if record.cancel_requested_at is None:
+            return False
+        try:
+            requested_at = datetime.fromisoformat(record.cancel_requested_at)
+        except ValueError:
+            return False
+        if requested_at.tzinfo is None:
+            return False
+        return (datetime.now(UTC) - requested_at).total_seconds() >= CANCEL_OUTCOME_RECONCILIATION_GRACE_SECONDS
 
     def _terminal_state_requires_reconciliation(self, record: GenericJobRecord) -> bool:
         phase = record.state.get("phase")
