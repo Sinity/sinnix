@@ -6,16 +6,21 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
+from uuid import uuid4
 
 from sinnix_mcp import ErrorCode
 from sinnix_mcp.execution import ExecutionProfile, ExecutionResult, OwnerExecution, OwnerRoute
 
+from .jobs import DEFAULT_TIMEOUT_SECONDS, GenericJobSpec, GenericJobs
 from .projects import ProjectAdapter, ProjectCatalog
 
 
 MAX_TASK_OUTPUT_BYTES = 200_000
 MAX_TASK_STDERR_BYTES = 8_192
 TASK_TIMEOUT_SECONDS = 30
+TASK_RECONCILE_TIMEOUT_SECONDS = DEFAULT_TIMEOUT_SECONDS
+BEADS_EXECUTABLE = "bd"
+FLOCK_EXECUTABLE = "/run/current-system/sw/bin/flock"
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _READ_PRINCIPALS = frozenset({"observer", "agent-control", "operator"})
 _WRITE_PRINCIPALS = frozenset({"agent-control", "operator"})
@@ -42,7 +47,13 @@ class TaskError(ValueError):
 class TaskCommandBoundary(Protocol):
     """Injectable process boundary for the current task backend."""
 
-    def run(self, *, argv: tuple[str, ...], cwd: Path) -> ExecutionResult: ...
+    def run(
+        self,
+        *,
+        argv: tuple[str, ...],
+        cwd: Path,
+        lock_path: Path | None = None,
+    ) -> ExecutionResult: ...
 
 
 @dataclass(frozen=True)
@@ -52,9 +63,18 @@ class BeadsCommandBoundary:
     execution: OwnerExecution = field(default_factory=OwnerExecution)
     executable: str = "bd"
 
-    def run(self, *, argv: tuple[str, ...], cwd: Path) -> ExecutionResult:
+    def run(
+        self,
+        *,
+        argv: tuple[str, ...],
+        cwd: Path,
+        lock_path: Path | None = None,
+    ) -> ExecutionResult:
+        command = (self.executable, *argv)
+        if lock_path is not None:
+            command = (FLOCK_EXECUTABLE, "--exclusive", str(lock_path), *command)
         return self.execution.run(
-            (self.executable, *argv),
+            command,
             ExecutionProfile(
                 route=OwnerRoute("task-backend"),
                 timeout_seconds=TASK_TIMEOUT_SECONDS,
@@ -71,6 +91,7 @@ class TaskService:
     """Backend-neutral AgentCTL task operations over the current Beads backend."""
 
     projects: ProjectCatalog
+    jobs: GenericJobs
     boundary: TaskCommandBoundary = field(default_factory=BeadsCommandBoundary)
     _locks_guard: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _project_locks: dict[str, threading.Lock] = field(default_factory=dict, init=False, repr=False)
@@ -142,7 +163,7 @@ class TaskService:
             result = self._run(project, tuple(command), readonly=False)
         elif operation == "task.reconcile":
             self._require_exact(arguments, {"project_id"}, operation)
-            result = self._run(project, ("sync", "--no-adopt"), readonly=False)
+            result = self._start_reconcile(project)
         elif operation == "task.snapshot":
             self._require_exact(arguments, {"project_id"}, operation)
             result = self._run(project, ("export",), readonly=True, json_lines=True)
@@ -159,7 +180,11 @@ class TaskService:
         json_lines: bool = False,
     ) -> Any:
         argv = ("--directory", str(project.root), "--json", *( ("--readonly",) if readonly else () ), *command)
-        result = self.boundary.run(argv=argv, cwd=project.root)
+        result = self.boundary.run(
+            argv=argv,
+            cwd=project.root,
+            lock_path=None if readonly else self._lock_path(project),
+        )
         if result.timed_out or result.failure_class == "command_timeout":
             raise TaskError(ErrorCode.OWNER_UNAVAILABLE, "task backend timed out")
         if (
@@ -183,6 +208,42 @@ class TaskService:
             return json.loads(result.stdout)
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
             raise TaskError(ErrorCode.RESULT_INVALID, "task backend returned invalid JSON") from error
+
+    def _start_reconcile(self, project: ProjectAdapter) -> dict[str, Any]:
+        """Schedule the fixed Beads reconciliation outside the owner request."""
+
+        job_id = str(uuid4())
+        lock_path = self._lock_path(project)
+        environment = project.environment.values()
+        environment.update(
+            {
+                "SINNIXD_JOB_ID": job_id,
+                "SINNIXD_PROJECT_ID": project.project_id,
+                "SINNIXD_OPERATION": "task.reconcile",
+            }
+        )
+        return self.jobs.start(
+            GenericJobSpec(
+                kind="foreground-command",
+                command=(
+                    FLOCK_EXECUTABLE,
+                    "--exclusive",
+                    str(lock_path),
+                    BEADS_EXECUTABLE,
+                    "--directory",
+                    str(project.root),
+                    "--json",
+                    "sync",
+                    "--no-adopt",
+                ),
+                working_directory=str(project.root),
+                environment=environment,
+                timeout_seconds=TASK_RECONCILE_TIMEOUT_SECONDS,
+                project_id=project.project_id,
+                operation="task.reconcile",
+            ),
+            job_id,
+        )
 
     def _list_command(self, arguments: dict[str, Any]) -> tuple[str, ...]:
         self._require_allowed(
@@ -217,6 +278,10 @@ class TaskService:
     def _lock_for(self, project_id: str) -> threading.Lock:
         with self._locks_guard:
             return self._project_locks.setdefault(project_id, threading.Lock())
+
+    def _lock_path(self, project: ProjectAdapter) -> Path:
+        self.jobs.store.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        return self.jobs.store.root / f"task-{project.project_id}.lock"
 
     @staticmethod
     def _authorize(principal: str, *, write: bool) -> None:

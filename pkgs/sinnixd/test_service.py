@@ -24,6 +24,7 @@ from sinnixd.api import UnixSocketServer, call, receive_frame, send_frame
 from sinnixd.environment import build_environment
 from sinnixd.delivery import DeliveryError, GitHubDelivery
 from sinnixd.jobs import (
+    DEFAULT_TIMEOUT_SECONDS,
     MAX_LOG_ARTIFACT_BYTES,
     SYSTEMD_COMMAND_TIMEOUT_SECONDS,
     GenericJobSpec,
@@ -38,7 +39,7 @@ from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from sinnixd.projects import ProjectCatalog, ProjectConfigError, parse_worktree_records
 from sinnixd.runner import RunnerError, _revalidate_checkout
 from sinnixd.service import SinnixdService
-from sinnixd.tasks import MAX_TASK_OUTPUT_BYTES, TaskService
+from sinnixd.tasks import FLOCK_EXECUTABLE, MAX_TASK_OUTPUT_BYTES, TaskService
 from sinnixd.workspaces import GitWorkspaces, WorkspaceStore
 
 
@@ -295,14 +296,16 @@ class FakeExecution:
 class FakeTaskBoundary:
     results: list[ExecutionResult]
     calls: list[tuple[tuple[str, ...], Path]] = field(default_factory=list)
+    lock_paths: list[Path | None] = field(default_factory=list)
     entered: threading.Event | None = None
     release: threading.Event | None = None
     active: int = 0
     max_active: int = 0
     _guard: threading.Lock = field(default_factory=threading.Lock)
 
-    def run(self, *, argv: tuple[str, ...], cwd: Path) -> ExecutionResult:
+    def run(self, *, argv: tuple[str, ...], cwd: Path, lock_path: Path | None = None) -> ExecutionResult:
         self.calls.append((argv, cwd))
+        self.lock_paths.append(lock_path)
         with self._guard:
             self.active += 1
             self.max_active = max(self.max_active, self.active)
@@ -327,7 +330,7 @@ def task_result(value: object) -> ExecutionResult:
 def task_service(tmp_path: Path, boundary: FakeTaskBoundary | None = None) -> tuple[TaskService, FakeTaskBoundary]:
     write_adapter(tmp_path)
     fake = boundary or FakeTaskBoundary([task_result({"ok": True})])
-    return TaskService(ProjectCatalog([tmp_path]), fake), fake
+    return TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path), fake), fake
 
 
 def test_task_reads_resolve_catalog_projects_and_use_readonly_fixed_argv(tmp_path: Path) -> None:
@@ -364,7 +367,6 @@ def test_task_reads_resolve_catalog_projects_and_use_readonly_fixed_argv(tmp_pat
         ("task.relate", {"task_id": "fixture-1", "related_task_id": "fixture-2"}, ("dep", "relate", "fixture-1", "fixture-2")),
         ("task.complete", {"task_id": "fixture-1", "reason": "verified"}, ("close", "fixture-1", "--reason", "verified")),
         ("task.release", {"task_id": "fixture-1", "reason": "stopped", "if_assignee": "worker"}, ("unclaim", "fixture-1", "--reason", "stopped", "--if-assignee", "worker")),
-        ("task.reconcile", {}, ("sync", "--no-adopt")),
     ),
 )
 def test_task_mutations_map_to_fixed_beads_argv(
@@ -382,6 +384,63 @@ def test_task_mutations_map_to_fixed_beads_argv(
     assert boundary.calls == [
         (("--directory", str(tmp_path), "--json", *expected), tmp_path)
     ]
+
+
+def test_task_reconcile_returns_a_durable_fixed_command_receipt(tmp_path: Path) -> None:
+    """Anti-vacuity: a slow sync must not run through the 30-second task boundary."""
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    boundary = FakeTaskBoundary([task_result({"ok": True})])
+    tasks = TaskService(ProjectCatalog([tmp_path]), jobs, boundary)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs, tasks=tasks)
+
+    claimed = tasks.execute(
+        operation="task.claim",
+        arguments={"project_id": "fixture", "task_id": "fixture-1"},
+        principal="agent-control",
+    )
+    response = service.dispatch(request("task.reconcile", "task-backend", {"project_id": "fixture"}, "agent-control"))
+
+    assert claimed["result"] == {"ok": True}
+    assert response.ok and response.payload is not None
+    payload = response.payload.inline
+    assert payload["project_id"] == "fixture"
+    assert payload["operation"] == "task.reconcile"
+    receipt = payload["result"]
+    assert isinstance(receipt, dict)
+    job_id = receipt["job_id"]
+    assert isinstance(job_id, str)
+    lock_path = jobs.store.root / "task-fixture.lock"
+    assert boundary.lock_paths == [lock_path]
+    assert boundary.calls == [
+        (("--directory", str(tmp_path), "--json", "update", "fixture-1", "--claim"), tmp_path)
+    ]
+    assert len(systemd.started) == 1
+    launched = systemd.started[0]
+    assert launched["unit"] == receipt["unit"]
+    assert launched["command"] == (
+        FLOCK_EXECUTABLE,
+        "--exclusive",
+        str(lock_path),
+        "bd",
+        "--directory",
+        str(tmp_path),
+        "--json",
+        "sync",
+        "--no-adopt",
+    )
+    assert launched["working_directory"] == str(tmp_path)
+    assert launched["timeout_seconds"] == DEFAULT_TIMEOUT_SECONDS
+    environment = launched["environment"]
+    assert isinstance(environment, dict)
+    assert environment["SINNIXD_JOB_ID"] == job_id
+    assert environment["SINNIXD_PROJECT_ID"] == "fixture"
+    assert environment["SINNIXD_OPERATION"] == "task.reconcile"
+    record = jobs.store.load(job_id)
+    assert record.spec.project_id == "fixture"
+    assert record.spec.operation == "task.reconcile"
+    assert record.spec.to_dict()["command"]["display"] == "synthetic foreground command"
 
 
 def test_task_snapshot_parses_jsonl_without_writing_a_store(tmp_path: Path) -> None:
@@ -452,7 +511,7 @@ def test_task_backend_failures_map_to_clean_error_envelopes(
     tmp_path: Path, backend_result: ExecutionResult, expected_code: str
 ) -> None:
     write_adapter(tmp_path)
-    tasks = TaskService(ProjectCatalog([tmp_path]), FakeTaskBoundary([backend_result]))
+    tasks = TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path), FakeTaskBoundary([backend_result]))
     service = SinnixdService(ProjectCatalog([tmp_path]), tasks=tasks)
 
     response = service.dispatch(
@@ -466,7 +525,7 @@ def test_task_backend_failures_map_to_clean_error_envelopes(
 
 def test_task_rejects_unauthorized_principals_and_invalid_arguments(tmp_path: Path) -> None:
     write_adapter(tmp_path)
-    tasks = TaskService(ProjectCatalog([tmp_path]), FakeTaskBoundary([task_result({"ok": True})]))
+    tasks = TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path), FakeTaskBoundary([task_result({"ok": True})]))
     service = SinnixdService(ProjectCatalog([tmp_path]), tasks=tasks)
 
     denied = service.dispatch(

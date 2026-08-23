@@ -55,7 +55,7 @@ class SinnixdService:
             assert self.workspaces is not None
             object.__setattr__(self, "delivery", GitHubDelivery(self.projects, self.workspaces, self.jobs))
         if self.tasks is None:
-            object.__setattr__(self, "tasks", TaskService(self.projects))
+            object.__setattr__(self, "tasks", TaskService(self.projects, jobs=self.jobs))
         _ = self.owners
 
     @property
