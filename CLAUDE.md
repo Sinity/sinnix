@@ -422,11 +422,16 @@ when a new script is added.
   daemon. `pkgs/sinnix-mcp` owns canonical references and the shared
   envelope/owner contract. `modules/services/sinnixd.nix` runs the local
   `sinnixd` Unix-socket daemon and installs `agentctl`; it loads only the
-  declaratively listed project roots (Sinnix and Polylogue by default), then
+  declaratively listed project roots (Sinnix, Polylogue, and Sinex by default), then
   discovers their explicit adapters and launches only their declared operations as transient
   user services. Systemd owns process lifecycle, cgroups, results,
-  cancellation, and journal evidence; `sinnixd` has no job queue, task, Git,
-  or arbitrary-process authority. Its
+  cancellation, and journal evidence; `sinnixd` has no job queue, Git history,
+  or arbitrary-process authority. Its task facade binds every registered project
+  to one Beads database under `/realm/state/tasks/<project>`, selected with an
+  explicit database path rather than checkout discovery. A verified cutover
+  receipt and a legacy-path symlink are both required, so a stale checkout JSONL,
+  incomplete bootstrap, or separate legacy database cannot become live authority.
+  Snapshot export remains a read-only operation over that database. Its
   only non-declared execution contracts are typed `operator-shell` and
   `attested-agent` jobs: both bind an explicit principal and registered Git
   checkout, use the durable generic-job record and transient user service,

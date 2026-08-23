@@ -432,6 +432,29 @@ class FakeTaskBoundary:
         return self.results.pop(0)
 
 
+@dataclass
+class CanonicalTaskBoundary:
+    tasks: dict[str, dict[str, object]]
+    calls: list[tuple[tuple[str, ...], Path]] = field(default_factory=list)
+    databases: list[Path] = field(default_factory=list)
+
+    def run(self, *, argv: tuple[str, ...], cwd: Path, lock_path: Path | None = None) -> ExecutionResult:
+        self.calls.append((argv, cwd))
+        database = Path(argv[argv.index("--db") + 1])
+        self.databases.append(database)
+        command_offset = argv.index("--json") + 1
+        if argv[command_offset : command_offset + 1] == ("--readonly",):
+            command_offset += 1
+        command = argv[command_offset:]
+        if command[:1] == ("update",) and command[2:] == ("--claim",):
+            task = self.tasks[command[1]]
+            task["status"] = "claimed"
+            return task_result(dict(task))
+        if command[:1] == ("show",):
+            return task_result(dict(self.tasks[command[1]]))
+        raise AssertionError(f"unexpected canonical task command: {command}")
+
+
 def task_result(value: object) -> ExecutionResult:
     return ExecutionResult(
         command=(),
@@ -441,10 +464,53 @@ def task_result(value: object) -> ExecutionResult:
     )
 
 
+def activate_task_authority(
+    project_root: Path,
+    state_root: Path,
+    *,
+    source_database: Path | None = None,
+    rows: int = 1,
+    digest: str = "sha256:" + "a" * 64,
+) -> Path:
+    authority_root = state_root / "fixture"
+    database = authority_root / "dolt"
+    database.mkdir(mode=0o700, parents=True)
+    source_database = source_database or project_root / ".beads" / "dolt"
+    source_database.parent.mkdir(parents=True, exist_ok=True)
+    source_database.symlink_to(database, target_is_directory=True)
+    (authority_root / "authority.json").write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "project_id": "fixture",
+                "database": str(database),
+                "source_database": str(source_database),
+                "verification": {
+                    "source_export_sha256": digest,
+                    "destination_export_sha256": digest,
+                    "source_rows": rows,
+                    "destination_rows": rows,
+                },
+            }
+        )
+    )
+    return database
+
+
 def task_service(tmp_path: Path, boundary: FakeTaskBoundary | None = None) -> tuple[TaskService, FakeTaskBoundary]:
     write_adapter(tmp_path)
     fake = boundary or FakeTaskBoundary([task_result({"ok": True})])
-    return TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path), fake), fake
+    task_state_root = tmp_path / "task-state"
+    activate_task_authority(tmp_path, task_state_root)
+    return (
+        TaskService(
+            ProjectCatalog([tmp_path]),
+            generic_jobs(tmp_path),
+            fake,
+            task_state_root=task_state_root,
+        ),
+        fake,
+    )
 
 
 def test_task_reads_resolve_catalog_projects_and_use_readonly_fixed_argv(tmp_path: Path) -> None:
@@ -466,7 +532,8 @@ def test_task_reads_resolve_catalog_projects_and_use_readonly_fixed_argv(tmp_pat
 
     assert listed["result"] == {"issues": [{"id": "fixture-1"}]}
     assert fetched["result"] == {"id": "fixture-1"}
-    prefix = ("--directory", str(tmp_path), "--json", "--readonly")
+    database = tmp_path / "task-state" / "fixture" / "dolt"
+    prefix = ("--directory", str(tmp_path), "--db", str(database), "--json", "--readonly")
     assert boundary.calls == [
         ((*prefix, "list", "--flat", "--status", "open", "--limit", "20"), tmp_path),
         ((*prefix, "show", "fixture-1"), tmp_path),
@@ -496,8 +563,9 @@ def test_task_mutations_map_to_fixed_beads_argv(
     )
 
     assert result == {"project_id": "fixture", "operation": operation, "result": {"ok": True}}
+    database = tmp_path / "task-state" / "fixture" / "dolt"
     assert boundary.calls == [
-        (("--directory", str(tmp_path), "--json", *expected), tmp_path)
+        (("--directory", str(tmp_path), "--db", str(database), "--json", *expected), tmp_path)
     ]
 
 
@@ -521,7 +589,9 @@ def test_task_mutation_replays_committed_outcome_after_response_fault(
     write_adapter(tmp_path)
     jobs = generic_jobs(tmp_path)
     boundary = FakeTaskBoundary([task_result({"committed": operation})])
-    tasks = TaskService(ProjectCatalog([tmp_path]), jobs, boundary)
+    task_state_root = tmp_path / "task-state"
+    activate_task_authority(tmp_path, task_state_root)
+    tasks = TaskService(ProjectCatalog([tmp_path]), jobs, boundary, task_state_root=task_state_root)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs, tasks=tasks)
     payload = {"project_id": "fixture", **arguments}
 
@@ -583,7 +653,9 @@ def test_task_reconcile_returns_a_durable_fixed_command_receipt(tmp_path: Path) 
     systemd = FakeSystemdJobs()
     jobs = generic_jobs(tmp_path, systemd)
     boundary = FakeTaskBoundary([task_result({"ok": True})])
-    tasks = TaskService(ProjectCatalog([tmp_path]), jobs, boundary)
+    task_state_root = tmp_path / "task-state"
+    activate_task_authority(tmp_path, task_state_root)
+    tasks = TaskService(ProjectCatalog([tmp_path]), jobs, boundary, task_state_root=task_state_root)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs, tasks=tasks)
 
     claimed = tasks.execute(
@@ -605,8 +677,21 @@ def test_task_reconcile_returns_a_durable_fixed_command_receipt(tmp_path: Path) 
     assert isinstance(job_id, str)
     lock_path = jobs.store.root / "task-fixture.lock"
     assert boundary.lock_paths == [lock_path]
+    database = task_state_root / "fixture" / "dolt"
     assert boundary.calls == [
-        (("--directory", str(tmp_path), "--json", "update", "fixture-1", "--claim"), tmp_path)
+        (
+            (
+                "--directory",
+                str(tmp_path),
+                "--db",
+                str(database),
+                "--json",
+                "update",
+                "fixture-1",
+                "--claim",
+            ),
+            tmp_path,
+        )
     ]
     assert len(systemd.started) == 1
     launched = systemd.started[0]
@@ -618,6 +703,8 @@ def test_task_reconcile_returns_a_durable_fixed_command_receipt(tmp_path: Path) 
         "bd",
         "--directory",
         str(tmp_path),
+        "--db",
+        str(database),
         "--json",
         "sync",
         "--no-adopt",
@@ -653,8 +740,12 @@ def test_task_snapshot_parses_jsonl_without_writing_a_store(tmp_path: Path) -> N
         "operation": "task.snapshot",
         "result": [{"id": "fixture-1"}, {"id": "fixture-2"}],
     }
+    database = tmp_path / "task-state" / "fixture" / "dolt"
     assert boundary.calls == [
-        (("--directory", str(tmp_path), "--json", "--readonly", "export"), tmp_path)
+        (
+            ("--directory", str(tmp_path), "--db", str(database), "--json", "--readonly", "export"),
+            tmp_path,
+        )
     ]
 
 
@@ -691,6 +782,116 @@ def test_task_mutations_are_serialized_per_project(tmp_path: Path) -> None:
     assert len(boundary.calls) == 2
 
 
+def test_divergent_worktrees_share_canonical_authority_and_ignore_stale_jsonl(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    write_adapter(repository)
+    (repository / "modules" / "fixture.nix").write_text("{}\n")
+    snapshots = repository / ".beads" / "issues.jsonl"
+    snapshots.parent.mkdir()
+    snapshots.write_text('{"id":"fixture-1","status":"open"}\n')
+    initialize_git_checkout(repository)
+    subprocess.run(["git", "-C", str(repository), "branch", "stale-checkout"], check=True)
+    snapshots.write_text('{"id":"fixture-1","status":"closed"}\n')
+    subprocess.run(["git", "-C", str(repository), "add", ".beads/issues.jsonl"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "newer snapshot",
+        ],
+        check=True,
+    )
+    stale_checkout = tmp_path / "stale-checkout"
+    subprocess.run(
+        ["git", "-C", str(repository), "worktree", "add", "--quiet", str(stale_checkout), "stale-checkout"],
+        check=True,
+    )
+    assert snapshots.read_text() != (stale_checkout / ".beads" / "issues.jsonl").read_text()
+
+    task_state_root = tmp_path / "task-state"
+    database = activate_task_authority(repository, task_state_root)
+    boundary = CanonicalTaskBoundary({"fixture-1": {"id": "fixture-1", "status": "closed"}})
+    primary = TaskService(
+        ProjectCatalog([repository]),
+        generic_jobs(tmp_path / "primary-jobs"),
+        boundary,
+        task_state_root=task_state_root,
+    )
+    stale = TaskService(
+        ProjectCatalog([stale_checkout]),
+        generic_jobs(tmp_path / "stale-jobs"),
+        boundary,
+        task_state_root=task_state_root,
+    )
+
+    primary.execute(
+        operation="task.claim",
+        arguments={"project_id": "fixture", "task_id": "fixture-1"},
+        principal="agent-control",
+        mutation_id="claim-fixture-1",
+    )
+    observed = stale.execute(
+        operation="task.get",
+        arguments={"project_id": "fixture", "task_id": "fixture-1"},
+        principal="observer",
+    )
+
+    assert observed["result"] == {"id": "fixture-1", "status": "claimed"}
+    assert boundary.databases == [database, database]
+    assert [cwd for _, cwd in boundary.calls] == [repository, stale_checkout]
+    assert json.loads((stale_checkout / ".beads" / "issues.jsonl").read_text())["status"] == "open"
+
+
+def test_task_authority_refuses_unverified_or_dual_authority(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    task_state_root = tmp_path / "task-state"
+    boundary = FakeTaskBoundary([task_result({"id": "fixture-1"})])
+    tasks = TaskService(
+        ProjectCatalog([tmp_path]),
+        generic_jobs(tmp_path),
+        boundary,
+        task_state_root=task_state_root,
+    )
+    request = {
+        "operation": "task.get",
+        "arguments": {"project_id": "fixture", "task_id": "fixture-1"},
+        "principal": "observer",
+    }
+
+    with pytest.raises(TaskError, match="not activated") as missing:
+        tasks.execute(**request)
+    assert missing.value.code == ErrorCode.OWNER_UNAVAILABLE
+
+    database = activate_task_authority(tmp_path, task_state_root)
+    receipt_path = task_state_root / "fixture" / "authority.json"
+    receipt = json.loads(receipt_path.read_text())
+    receipt["verification"]["destination_rows"] = 2
+    receipt_path.write_text(json.dumps(receipt))
+    with pytest.raises(TaskError, match="verification is incomplete") as unverified:
+        tasks.execute(**request)
+    assert unverified.value.code == ErrorCode.OPERATION_FAILED
+
+    receipt["verification"]["destination_rows"] = 1
+    receipt_path.write_text(json.dumps(receipt))
+    source_database = tmp_path / ".beads" / "dolt"
+    source_database.unlink()
+    source_database.mkdir()
+    with pytest.raises(TaskError, match="ambiguous") as dual:
+        tasks.execute(**request)
+    assert dual.value.code == ErrorCode.OPERATION_FAILED
+    assert database.is_dir()
+    assert not boundary.calls
+
+
 @pytest.mark.parametrize(
     ("backend_result", "expected_code"),
     (
@@ -704,7 +905,14 @@ def test_task_backend_failures_map_to_clean_error_envelopes(
     tmp_path: Path, backend_result: ExecutionResult, expected_code: str
 ) -> None:
     write_adapter(tmp_path)
-    tasks = TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path), FakeTaskBoundary([backend_result]))
+    task_state_root = tmp_path / "task-state"
+    activate_task_authority(tmp_path, task_state_root)
+    tasks = TaskService(
+        ProjectCatalog([tmp_path]),
+        generic_jobs(tmp_path),
+        FakeTaskBoundary([backend_result]),
+        task_state_root=task_state_root,
+    )
     service = SinnixdService(ProjectCatalog([tmp_path]), tasks=tasks)
 
     response = service.dispatch(
@@ -718,7 +926,14 @@ def test_task_backend_failures_map_to_clean_error_envelopes(
 
 def test_task_rejects_unauthorized_principals_and_invalid_arguments(tmp_path: Path) -> None:
     write_adapter(tmp_path)
-    tasks = TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path), FakeTaskBoundary([task_result({"ok": True})]))
+    task_state_root = tmp_path / "task-state"
+    activate_task_authority(tmp_path, task_state_root)
+    tasks = TaskService(
+        ProjectCatalog([tmp_path]),
+        generic_jobs(tmp_path),
+        FakeTaskBoundary([task_result({"ok": True})]),
+        task_state_root=task_state_root,
+    )
     service = SinnixdService(ProjectCatalog([tmp_path]), tasks=tasks)
 
     denied = service.dispatch(
