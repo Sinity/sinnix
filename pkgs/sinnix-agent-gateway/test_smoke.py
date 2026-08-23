@@ -17,10 +17,8 @@ from sinnix_mcp.execution import ExecutionResult, OwnerDiagnosticError
 from sinnix_agent_gateway.capabilities import PolicyError
 from sinnix_agent_gateway.cli import build_manifest, parser, verify_approval
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
-from sinnix_agent_gateway.jobs import JobError
 from sinnix_agent_gateway.projects import ProjectError
 from sinnix_agent_gateway.registry import REGISTRY
-from sinnix_agent_gateway.schemas import AgentLaunchRequest
 
 
 def config(tmp_path: Path, *, observer_read: bool = True) -> GatewayConfig:
@@ -131,6 +129,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "mcp_read",
         "mcp_write",
     } <= operator_names
+    assert "agent_launch" not in operator_names
     assert "project_context" in readonly_names & local_names & operator_names
     assert readonly["sha256"] != local["sha256"] != operator["sha256"]
     assert all(
@@ -600,13 +599,13 @@ def test_runtime_audit_carries_returned_transient_unit(tmp_path: Path) -> None:
     assert payload == {"unit": "sinnix-gateway-run-fixture.service"}
 
 
-def test_runtime_audit_carries_execution_job_and_scope(tmp_path: Path) -> None:
+def test_runtime_audit_carries_daemon_job_identity(tmp_path: Path) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
     runtime.execute(
         "shell_start",
         lambda: {
             "job_id": "shell-fixture",
-            "unit": "sinnix-gateway-exec-shell-fixture.scope",
+            "unit": "sinnixd-job-shell-fixture.service",
             "secret": "hidden",
         },
     )
@@ -615,7 +614,7 @@ def test_runtime_audit_carries_execution_job_and_scope(tmp_path: Path) -> None:
 
     assert payload == {
         "job_id": "shell-fixture",
-        "unit": "sinnix-gateway-exec-shell-fixture.scope",
+        "unit": "sinnixd-job-shell-fixture.service",
         "correlation_id": "shell-fixture",
     }
 
@@ -831,9 +830,20 @@ def test_gateway_status_keeps_unapproved_principal_unobserved(tmp_path: Path) ->
 def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:
     cfg = config(tmp_path)
     runtime = Runtime.create(cfg, "agent-control")
-    source = cfg.state_dir / "jobs" / "job.log"
+    directory = cfg.state_dir / "diagnostics" / "fixture"
+    directory.mkdir(parents=True)
+    source = directory / "fixture.log"
     source.write_bytes(b"abcdef")
     source.chmod(0o600)
+    (directory / "receipt.json").write_text(
+        json.dumps(
+            {
+                "schema": "sinnix.gateway-diagnostic-receipt.v1",
+                "diagnostic_id": "fixture",
+                "files": [source.name],
+            }
+        )
+    )
     first = runtime.artifacts.register(source, kind="log", owner_id="job-a")
     second = runtime.artifacts.register(source, kind="log", owner_id="job-a")
     assert first != second
@@ -841,134 +851,6 @@ def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:
     chunk = runtime.artifacts.read(first, offset=3, max_bytes=3)
     assert chunk["base64"] == "ZGVm"
     assert "source" not in chunk
-
-
-def test_malformed_job_records_are_visible(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "agent-control")
-    (runtime.jobs.root / "broken.json").write_text("{not-json")
-    result = runtime.jobs.list()
-    assert result["jobs"] == []
-    assert result["malformed_records"][0]["record"] == "broken.json"
-
-
-def test_job_list_preserves_schema_three_manifests(tmp_path: Path) -> None:
-    controller = tmp_path / "agent-job-control"
-    controller.write_text(
-        f"#!{sys.executable}\n"
-        "import pathlib, sys\n"
-        "print((pathlib.Path(sys.argv[2]) / f'{sys.argv[5]}.json').read_text())\n"
-    )
-    controller.chmod(0o700)
-    cfg = dataclasses.replace(config(tmp_path), agent_controller=controller)
-    runtime = Runtime.create(cfg, "agent-control")
-    manifest = {
-        "schema_version": 3,
-        "job_id": "schema-three-job",
-        "lifecycle": "completed",
-        "launcher": {"scope_unit": "sinnix-agent-job-schema-three-job.scope"},
-    }
-    (runtime.jobs.root / "schema-three-job.json").write_text(json.dumps(manifest))
-
-    result = runtime.jobs.list()
-
-    assert [job["job_id"] for job in result["jobs"]] == ["schema-three-job"]
-    assert result["malformed_records"] == []
-
-
-def test_gateway_status_uses_shared_native_controller(tmp_path: Path) -> None:
-    controller = tmp_path / "agent-job-control"
-    controller.write_text(
-        f"#!{sys.executable}\n"
-        "import json, pathlib, sys\n"
-        "value=json.loads((pathlib.Path(sys.argv[2]) / f'{sys.argv[5]}.json').read_text())\n"
-        "value['lifecycle']='timed_out'\n"
-        "value['live']={'available':True,'Result':'timeout','MemoryHigh':'2G'}\n"
-        "print(json.dumps(value))\n"
-    )
-    controller.chmod(0o700)
-    cfg = dataclasses.replace(config(tmp_path), agent_controller=controller)
-    runtime = Runtime.create(cfg, "agent-control")
-    manifest = {
-        "schema_version": 2,
-        "job_id": "deadline-job",
-        "lifecycle": "running",
-        "launcher": {
-            "pid": 1,
-            "proc_start": "1",
-            "scope_unit": "sinnix-agent-job-deadline-job.scope",
-            "cgroup": "/fixture",
-        },
-        "worktree": str(cfg.projects["fixture"].path),
-    }
-    (runtime.jobs.root / "deadline-job.json").write_text(json.dumps(manifest))
-    status = runtime.jobs.status("deadline-job")
-    assert status["lifecycle"] == "timed_out"
-    assert status["live"]["Result"] == "timeout"
-    assert status["live"]["MemoryHigh"] == "2G"
-
-
-def test_gateway_rejects_runner_job_id_collision(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    job_id = "00000000-0000-4000-8000-000000000001"
-    runner = tmp_path / "runner"
-    runner.write_text("#!/bin/sh\nexit 2\n")
-    runner.chmod(0o700)
-    cfg = dataclasses.replace(config(tmp_path), agent_runner=runner)
-    subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
-    runtime = Runtime.create(cfg, "agent-control")
-    old_prompt = runtime.jobs.root / f"{job_id}.prompt.md"
-    old_prompt.write_text("original")
-    (runtime.jobs.root / f"{job_id}.json").write_text(
-        json.dumps({"schema_version": 2, "job_id": job_id, "launch_id": "original"})
-    )
-    monkeypatch.setattr("sinnix_agent_gateway.jobs.uuid.uuid4", lambda: job_id)
-    with pytest.raises(JobError, match="collision"):
-        runtime.jobs.launch_agent(
-            AgentLaunchRequest(project_id="fixture", prompt="new", backend="codex")
-        )
-    assert old_prompt.read_text() == "original"
-
-
-def test_agent_launch_records_selected_checkout_ref(tmp_path: Path) -> None:
-    arguments_path = tmp_path / "runner-arguments.json"
-    runner = tmp_path / "runner"
-    runner.write_text(
-        f"#!{sys.executable}\n"
-        "import json, sys\n"
-        "from pathlib import Path\n"
-        "arguments = sys.argv[1:]\n"
-        "def option(name): return arguments[arguments.index(name) + 1]\n"
-        f"Path({str(arguments_path)!r}).write_text(json.dumps(arguments))\n"
-        "job_id = option('--job-id')\n"
-        "launch_id = option('--launch-id')\n"
-        "state_dir = Path(option('--job-state-dir'))\n"
-        "state_dir.mkdir(parents=True, exist_ok=True)\n"
-        "(state_dir / f'{job_id}.json').write_text(json.dumps({'schema_version': 2, 'job_id': job_id, 'launch_id': launch_id}))\n"
-    )
-    runner.chmod(0o700)
-    cfg = dataclasses.replace(config(tmp_path), agent_runner=runner)
-    subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
-    runtime = Runtime.create(cfg, "agent-control")
-
-    result = runtime.jobs.launch_agent(
-        AgentLaunchRequest(project_id="fixture", prompt="inspect", backend="codex")
-    )
-
-    assert result["checkout_ref"] == "sinnix://projects/fixture/checkouts/default"
-    arguments = json.loads(arguments_path.read_text())
-    index = arguments.index("--checkout-ref")
-    assert arguments[index + 1] == result["checkout_ref"]
-
-
-def test_agent_environment_is_explicitly_allowlisted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("SINNIX_GATEWAY_PROBE_SECRET", "must-not-propagate")
-    runtime = Runtime.create(config(tmp_path), "agent-control")
-    environment = runtime.jobs._environment()
-    assert "SINNIX_GATEWAY_PROBE_SECRET" not in environment
-    assert "PATH" in environment
 
 
 def test_unknown_principal_is_rejected_before_server_creation(tmp_path: Path) -> None:
