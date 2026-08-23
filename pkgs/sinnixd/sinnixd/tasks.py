@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import threading
 from dataclasses import dataclass, field
@@ -10,13 +12,15 @@ from uuid import uuid4
 
 from sinnix_mcp import ErrorCode
 from sinnix_mcp.execution import ExecutionProfile, ExecutionResult, OwnerExecution, OwnerRoute
+from sinnix_lib.lock import flock
 
-from .jobs import DEFAULT_TIMEOUT_SECONDS, GenericJobSpec, GenericJobs
+from .jobs import DEFAULT_TIMEOUT_SECONDS, GenericJobSpec, GenericJobs, _ensure_durable_directory, _fsync_directory
 from .projects import ProjectAdapter, ProjectCatalog
 
 
 MAX_TASK_OUTPUT_BYTES = 200_000
 MAX_TASK_STDERR_BYTES = 8_192
+MAX_TASK_OUTCOME_BYTES = MAX_TASK_OUTPUT_BYTES + 4_096
 TASK_TIMEOUT_SECONDS = 30
 TASK_RECONCILE_TIMEOUT_SECONDS = DEFAULT_TIMEOUT_SECONDS
 BEADS_EXECUTABLE = "bd"
@@ -34,6 +38,15 @@ _MUTATIONS = frozenset(
         "task.reconcile",
     }
 )
+_IDEMPOTENT_MUTATIONS = frozenset(
+    {
+        "task.claim",
+        "task.note",
+        "task.relate",
+        "task.complete",
+        "task.release",
+    }
+)
 
 
 class TaskError(ValueError):
@@ -42,6 +55,112 @@ class TaskError(ValueError):
     def __init__(self, code: ErrorCode, message: str):
         self.code = code
         super().__init__(message)
+
+
+@dataclass(frozen=True)
+class TaskOutcomeJournal:
+    """Durable, backend-neutral outcomes for idempotent task mutations."""
+
+    root: Path
+
+    def lock_path(self, project_id: str) -> Path:
+        return self.root / "locks" / f"{self._component(project_id)}.lock"
+
+    def load(
+        self,
+        *,
+        project_id: str,
+        operation: str,
+        task_id: str,
+        request_id: str,
+        arguments_digest: str,
+    ) -> dict[str, Any] | None:
+        path = self._path(project_id, operation, task_id, request_id)
+        try:
+            value = json.loads(path.read_text())
+        except FileNotFoundError:
+            return None
+        except (OSError, json.JSONDecodeError) as error:
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task outcome journal is unavailable") from error
+        if not isinstance(value, dict) or set(value) != {
+            "schema",
+            "project_id",
+            "operation",
+            "task_id",
+            "request_id",
+            "arguments_digest",
+            "outcome",
+        }:
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task outcome journal is malformed")
+        if (
+            value["schema"] != 1
+            or value["project_id"] != project_id
+            or value["operation"] != operation
+            or value["task_id"] != task_id
+            or value["request_id"] != request_id
+        ):
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task outcome journal is malformed")
+        if value["arguments_digest"] != arguments_digest:
+            raise TaskError(ErrorCode.INVALID_ARGUMENT, "request_id belongs to a different task mutation")
+        outcome = value["outcome"]
+        if not isinstance(outcome, dict) or set(outcome) != {"project_id", "operation", "result"}:
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task outcome journal is malformed")
+        if outcome["project_id"] != project_id or outcome["operation"] != operation:
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task outcome journal is malformed")
+        return outcome
+
+    def save(
+        self,
+        *,
+        project_id: str,
+        operation: str,
+        task_id: str,
+        request_id: str,
+        arguments_digest: str,
+        outcome: dict[str, Any],
+    ) -> None:
+        value = {
+            "schema": 1,
+            "project_id": project_id,
+            "operation": operation,
+            "task_id": task_id,
+            "request_id": request_id,
+            "arguments_digest": arguments_digest,
+            "outcome": outcome,
+        }
+        try:
+            encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+        except (TypeError, ValueError) as error:
+            raise TaskError(ErrorCode.RESULT_INVALID, "task backend returned invalid JSON") from error
+        if len(encoded) > MAX_TASK_OUTCOME_BYTES:
+            raise TaskError(ErrorCode.RESOURCE_EXHAUSTED, "task outcome exceeds the storage bound")
+        path = self._path(project_id, operation, task_id, request_id)
+        _ensure_durable_directory(path.parent)
+        temporary = path.with_suffix(".json.tmp")
+        try:
+            descriptor = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(encoded)
+                handle.write(b"\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            _fsync_directory(path.parent)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _path(self, project_id: str, operation: str, task_id: str, request_id: str) -> Path:
+        return (
+            self.root
+            / self._component(project_id)
+            / self._component(operation)
+            / self._component(task_id)
+            / f"{self._component(request_id)}.json"
+        )
+
+    @staticmethod
+    def _component(value: str) -> str:
+        return hashlib.sha256(value.encode()).hexdigest()
 
 
 class TaskCommandBoundary(Protocol):
@@ -93,8 +212,13 @@ class TaskService:
     projects: ProjectCatalog
     jobs: GenericJobs
     boundary: TaskCommandBoundary = field(default_factory=BeadsCommandBoundary)
+    outcomes: TaskOutcomeJournal | None = None
     _locks_guard: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _project_locks: dict[str, threading.Lock] = field(default_factory=dict, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.outcomes is None:
+            self.outcomes = TaskOutcomeJournal(self.jobs.store.root / "task-outcomes")
 
     def execute(
         self,
@@ -102,6 +226,7 @@ class TaskService:
         operation: str,
         arguments: dict[str, Any] | Any,
         principal: str,
+        mutation_id: str | None = None,
     ) -> dict[str, Any]:
         if not isinstance(arguments, dict):
             raise TaskError(ErrorCode.INVALID_ARGUMENT, "task arguments must be an object")
@@ -110,8 +235,54 @@ class TaskService:
         project = self._project(arguments)
         if write:
             with self._lock_for(project.project_id):
+                if operation in _IDEMPOTENT_MUTATIONS:
+                    return self._execute_idempotent_mutation(
+                        project,
+                        operation,
+                        arguments,
+                        self._mutation_id(mutation_id),
+                    )
                 return self._execute(project, operation, arguments)
         return self._execute(project, operation, arguments)
+
+    def _execute_idempotent_mutation(
+        self,
+        project: ProjectAdapter,
+        operation: str,
+        arguments: dict[str, Any],
+        request_id: str,
+    ) -> dict[str, Any]:
+        command = self._mutation_command(operation, arguments)
+        task_id = self._task_id(arguments["task_id"])
+        arguments_digest = "sha256:" + hashlib.sha256(
+            json.dumps(arguments, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        assert self.outcomes is not None
+        with flock(self.outcomes.lock_path(project.project_id)):
+            prior = self.outcomes.load(
+                project_id=project.project_id,
+                operation=operation,
+                task_id=task_id,
+                request_id=request_id,
+                arguments_digest=arguments_digest,
+            )
+            if prior is not None:
+                return prior
+            outcome = {
+                "project_id": project.project_id,
+                "operation": operation,
+                "result": self._run(project, command, readonly=False),
+            }
+            self.outcomes.save(
+                project_id=project.project_id,
+                operation=operation,
+                task_id=task_id,
+                request_id=request_id,
+                arguments_digest=arguments_digest,
+                outcome=outcome,
+            )
+            self._after_mutation_commit(outcome)
+            return outcome
 
     def _execute(
         self,
@@ -125,42 +296,8 @@ class TaskService:
         elif operation == "task.get":
             self._require_exact(arguments, {"project_id", "task_id"}, operation)
             result = self._run(project, ("show", self._task_id(arguments["task_id"])), readonly=True)
-        elif operation == "task.claim":
-            self._require_exact(arguments, {"project_id", "task_id"}, operation)
-            result = self._run(project, ("update", self._task_id(arguments["task_id"]), "--claim"), readonly=False)
-        elif operation == "task.note":
-            self._require_exact(arguments, {"project_id", "task_id", "text"}, operation)
-            result = self._run(
-                project,
-                ("note", self._task_id(arguments["task_id"]), self._string(arguments["text"], "text", 32_000)),
-                readonly=False,
-            )
-        elif operation == "task.relate":
-            self._require_exact(arguments, {"project_id", "task_id", "related_task_id"}, operation)
-            result = self._run(
-                project,
-                (
-                    "dep",
-                    "relate",
-                    self._task_id(arguments["task_id"]),
-                    self._task_id(arguments["related_task_id"], "related_task_id"),
-                ),
-                readonly=False,
-            )
-        elif operation == "task.complete":
-            self._require_allowed(arguments, {"project_id", "task_id", "reason"}, {"project_id", "task_id"}, operation)
-            command = ["close", self._task_id(arguments["task_id"])]
-            if "reason" in arguments:
-                command.extend(("--reason", self._string(arguments["reason"], "reason", 32_000)))
-            result = self._run(project, tuple(command), readonly=False)
-        elif operation == "task.release":
-            self._require_allowed(arguments, {"project_id", "task_id", "reason", "if_assignee"}, {"project_id", "task_id"}, operation)
-            command = ["unclaim", self._task_id(arguments["task_id"])]
-            if "reason" in arguments:
-                command.extend(("--reason", self._string(arguments["reason"], "reason", 32_000)))
-            if "if_assignee" in arguments:
-                command.extend(("--if-assignee", self._string(arguments["if_assignee"], "if_assignee", 256)))
-            result = self._run(project, tuple(command), readonly=False)
+        elif operation in _IDEMPOTENT_MUTATIONS:
+            result = self._run(project, self._mutation_command(operation, arguments), readonly=False)
         elif operation == "task.reconcile":
             self._require_exact(arguments, {"project_id"}, operation)
             result = self._start_reconcile(project)
@@ -170,6 +307,43 @@ class TaskService:
         else:
             raise TaskError(ErrorCode.INVALID_ARGUMENT, f"unsupported task operation: {operation}")
         return {"project_id": project.project_id, "operation": operation, "result": result}
+
+    def _mutation_command(self, operation: str, arguments: dict[str, Any]) -> tuple[str, ...]:
+        if operation == "task.claim":
+            self._require_exact(arguments, {"project_id", "task_id"}, operation)
+            return ("update", self._task_id(arguments["task_id"]), "--claim")
+        if operation == "task.note":
+            self._require_exact(arguments, {"project_id", "task_id", "text"}, operation)
+            return ("note", self._task_id(arguments["task_id"]), self._string(arguments["text"], "text", 32_000))
+        if operation == "task.relate":
+            self._require_exact(arguments, {"project_id", "task_id", "related_task_id"}, operation)
+            return (
+                "dep",
+                "relate",
+                self._task_id(arguments["task_id"]),
+                self._task_id(arguments["related_task_id"], "related_task_id"),
+            )
+        if operation == "task.complete":
+            self._require_allowed(arguments, {"project_id", "task_id", "reason"}, {"project_id", "task_id"}, operation)
+            command = ["close", self._task_id(arguments["task_id"])]
+            if "reason" in arguments:
+                command.extend(("--reason", self._string(arguments["reason"], "reason", 32_000)))
+            return tuple(command)
+        if operation == "task.release":
+            self._require_allowed(arguments, {"project_id", "task_id", "reason", "if_assignee"}, {"project_id", "task_id"}, operation)
+            command = ["unclaim", self._task_id(arguments["task_id"])]
+            if "reason" in arguments:
+                command.extend(("--reason", self._string(arguments["reason"], "reason", 32_000)))
+            if "if_assignee" in arguments:
+                command.extend(("--if-assignee", self._string(arguments["if_assignee"], "if_assignee", 256)))
+            return tuple(command)
+        raise AssertionError(f"unsupported idempotent mutation: {operation}")
+
+    @staticmethod
+    def _after_mutation_commit(outcome: dict[str, Any]) -> None:
+        """Test seam for simulating a response failure after durable persistence."""
+
+        _ = outcome
 
     def _run(
         self,
@@ -282,6 +456,12 @@ class TaskService:
     def _lock_path(self, project: ProjectAdapter) -> Path:
         self.jobs.store.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         return self.jobs.store.root / f"task-{project.project_id}.lock"
+
+    def _mutation_id(self, value: str | None) -> str:
+        value = self._string(value, "request_id", 128)
+        if not _ID_RE.fullmatch(value):
+            raise TaskError(ErrorCode.INVALID_ARGUMENT, "request_id is malformed")
+        return value
 
     @staticmethod
     def _authorize(principal: str, *, write: bool) -> None:

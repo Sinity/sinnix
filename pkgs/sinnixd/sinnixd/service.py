@@ -119,7 +119,13 @@ class SinnixdService:
             if owner.source_scoped:
                 project, adapter = self.projects.owner_adapter(request.operation)
                 return self.owner_adapters.call(project=project, adapter=adapter, request=request)
-            payload = self._dispatch(request.operation, request.arguments, request.correlation_id, request.principal)
+            payload = self._dispatch(
+                request.operation,
+                request.arguments,
+                request.correlation_id,
+                request.principal,
+                request.idempotency_key,
+            )
         except KeyError as error:
             return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
         except OwnerAdapterError as error:
@@ -154,6 +160,7 @@ class SinnixdService:
         arguments: Mapping[str, Any],
         correlation_id: str,
         principal: str,
+        idempotency_key: str | None,
     ) -> dict[str, Any]:
         if operation == "runtime.status":
             return {
@@ -179,7 +186,12 @@ class SinnixdService:
             }
         if operation.startswith("task."):
             assert self.tasks is not None
-            return self.tasks.execute(operation=operation, arguments=dict(arguments), principal=principal)
+            return self.tasks.execute(
+                operation=operation,
+                arguments=dict(arguments),
+                principal=principal,
+                mutation_id=idempotency_key,
+            )
         if operation == "workspace.list":
             if set(arguments) - {"project_id"}:
                 raise ValueError("workspace.list accepts optional project_id")

@@ -132,6 +132,7 @@ def parser() -> argparse.ArgumentParser:
         command_parser = task_subcommands.add_parser(command)
         command_parser.add_argument("project_id")
         command_parser.add_argument("task_id")
+        command_parser.add_argument("--request-id", required=True)
         if command in {"complete", "release"}:
             command_parser.add_argument("--reason")
         if command == "release":
@@ -140,10 +141,12 @@ def parser() -> argparse.ArgumentParser:
     task_note.add_argument("project_id")
     task_note.add_argument("task_id")
     task_note.add_argument("text")
+    task_note.add_argument("--request-id", required=True)
     task_relate = task_subcommands.add_parser("relate")
     task_relate.add_argument("project_id")
     task_relate.add_argument("task_id")
     task_relate.add_argument("related_task_id")
+    task_relate.add_argument("--request-id", required=True)
     for command in ("reconcile", "snapshot"):
         command_parser = task_subcommands.add_parser(command)
         command_parser.add_argument("project_id")
@@ -160,7 +163,12 @@ def daemon_parser() -> argparse.ArgumentParser:
 
 
 def _request(
-    operation: str, owner: str, arguments: dict[str, object], principal: str = "local-cli"
+    operation: str,
+    owner: str,
+    arguments: dict[str, object],
+    principal: str = "local-cli",
+    *,
+    idempotency_key: str | None = None,
 ) -> RequestEnvelope:
     return RequestEnvelope(
         request_id=str(uuid4()),
@@ -169,6 +177,7 @@ def _request(
         owner=owner,
         principal=principal,
         arguments=arguments,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -370,7 +379,14 @@ def main() -> int:
                     task_arguments["reason"] = arguments.reason
                 if arguments.task_command == "release" and arguments.if_assignee is not None:
                     task_arguments["if_assignee"] = arguments.if_assignee
-        request = _request(f"task.{arguments.task_command}", "task-backend", task_arguments, "operator")
+        mutation_id = getattr(arguments, "request_id", None)
+        request = _request(
+            f"task.{arguments.task_command}",
+            "task-backend",
+            task_arguments,
+            "operator",
+            idempotency_key=mutation_id,
+        )
     else:
         try:
             owner_arguments = json.loads(arguments.arguments_json)
