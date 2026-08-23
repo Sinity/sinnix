@@ -11,10 +11,12 @@ from typing import Any, Callable
 
 from sinnix_mcp import RequestEnvelope, ResponseEnvelope, response_envelope_from_dict
 
+from .jobs import DEFAULT_WAIT_SECONDS, MAX_WAIT_SECONDS
 from .service import SinnixdService
 
 MAX_FRAME_BYTES = 1_048_576
 CONNECTION_TIMEOUT_SECONDS = 5.0
+WAIT_TRANSPORT_MARGIN_SECONDS = 5.0
 ACCEPT_POLL_SECONDS = 0.1
 RESERVED_CONTROL_WORKERS = 2
 
@@ -57,6 +59,19 @@ def send_frame(connection: socket.socket, value: dict[str, Any]) -> None:
     if len(payload) > MAX_FRAME_BYTES:
         raise ProtocolError("response frame exceeds its bound")
     connection.sendall(struct.pack("!I", len(payload)) + payload)
+
+
+def _response_timeout_seconds(request: RequestEnvelope) -> float:
+    if request.operation != "job.wait":
+        return CONNECTION_TIMEOUT_SECONDS
+    timeout_seconds = request.arguments.get("timeout_seconds", DEFAULT_WAIT_SECONDS)
+    if (
+        not isinstance(timeout_seconds, int)
+        or isinstance(timeout_seconds, bool)
+        or not 1 <= timeout_seconds <= MAX_WAIT_SECONDS
+    ):
+        return CONNECTION_TIMEOUT_SECONDS
+    return timeout_seconds + WAIT_TRANSPORT_MARGIN_SECONDS
 
 
 @dataclass
@@ -163,6 +178,7 @@ class UnixSocketServer:
             if request.operation == "job.wait" and wait_executor is not None and wait_permits is not None:
                 if not wait_permits.acquire(blocking=False):
                     raise ProtocolError("job.wait capacity is exhausted")
+                connection.settimeout(_response_timeout_seconds(request))
                 wait_executor.submit(self._serve_wait_connection, connection, request_id, request, wait_permits)
                 handed_off = True
             else:
@@ -213,6 +229,7 @@ class UnixSocketServer:
 
 def call(socket_path: Path, request: RequestEnvelope) -> dict[str, Any]:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(CONNECTION_TIMEOUT_SECONDS)
         connection.connect(str(socket_path))
         send_frame(
             connection,
@@ -223,6 +240,7 @@ def call(socket_path: Path, request: RequestEnvelope) -> dict[str, Any]:
                 "params": request.to_dict(),
             },
         )
+        connection.settimeout(_response_timeout_seconds(request))
         response = receive_frame(connection)
     if response.get("jsonrpc") != "2.0" or response.get("id") != request.request_id:
         raise ProtocolError("response does not match the request")

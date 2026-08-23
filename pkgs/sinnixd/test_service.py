@@ -21,7 +21,15 @@ import sinnixd.cli as cli_module
 from sinnix_mcp import ErrorCode, OpaquePayload, RequestEnvelope, ResponseEnvelope, SinnixRef, SourceBinding
 from sinnix_mcp.execution import EnvironmentProfile, ExecutionResult
 
-from sinnixd.api import SinnixdClient, SinnixdClientError, UnixSocketServer, call, receive_frame, send_frame
+from sinnixd.api import (
+    WAIT_TRANSPORT_MARGIN_SECONDS,
+    SinnixdClient,
+    SinnixdClientError,
+    UnixSocketServer,
+    call,
+    receive_frame,
+    send_frame,
+)
 from sinnixd.environment import build_environment
 from sinnixd.delivery import DeliveryError, GitHubDelivery
 from sinnixd.jobs import (
@@ -3068,39 +3076,85 @@ def test_cancelled_missing_unit_distinguishes_acknowledged_and_ambiguous_stop(tm
     assert not crash_reconciled["state"]["terminal"]
 
 
-def test_unix_socket_wait_saturation_reserves_cancel_get_logs_and_start(tmp_path: Path) -> None:
-    """Anti-vacuity: running waits on control workers blocks socket RPCs at full wait capacity."""
+def test_agentctl_wait_returns_a_timed_out_envelope_past_control_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Anti-vacuity: the CLI must decode a normal timed-out wait response after control framing has expired."""
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"})
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    socket_path = tmp_path / "sinnixd.sock"
+    stop_event = threading.Event()
+    server = UnixSocketServer(socket_path, service, connection_timeout_seconds=0.05)
+    wait_timeouts: list[float | None] = []
+    original_wait_connection = server._serve_wait_connection
+
+    def observe_wait_connection(*args, **kwargs) -> None:
+        wait_timeouts.append(args[0].gettimeout())
+        original_wait_connection(*args, **kwargs)
+
+    server._serve_wait_connection = observe_wait_connection  # type: ignore[method-assign]
+    thread = start_server(server, stop_event=stop_event)
+    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["agentctl", "--socket", str(socket_path), "job", "wait", started["job_id"], "--timeout-seconds", "1"],
+    )
+    try:
+        assert cli_module.main() == 0
+    finally:
+        stop_event.set()
+        thread.join(timeout=2)
+
+    response = json.loads(capsys.readouterr().out)
+    assert not thread.is_alive()
+    assert wait_timeouts == [1 + WAIT_TRANSPORT_MARGIN_SECONDS]
+    assert response["ok"]
+    assert response["payload"]["value"]["state"]["phase"] == "running"
+    assert response["payload"]["value"]["wait_timed_out"]
+
+
+def test_unix_socket_wait_workers_outlive_control_timeout_and_reserve_control_capacity(tmp_path: Path) -> None:
+    """Anti-vacuity: every wait worker holds a bounded long socket while control RPCs and capacity errors remain responsive."""
     write_adapter(tmp_path)
     systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"})
     jobs = generic_jobs(tmp_path, systemd)
     wait_started = threading.Event()
-    release_waits = threading.Event()
     wait_lock = threading.Lock()
     active_waits = 0
+    original_wait = jobs.wait
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    socket_path = tmp_path / "sinnixd.sock"
+    stop_event = threading.Event()
+    server = UnixSocketServer(socket_path, service, connection_timeout_seconds=0.05, max_workers=8)
+    wait_timeouts: list[float | None] = []
+    original_wait_connection = server._serve_wait_connection
 
-    def blocking_wait(job_id: str, timeout_seconds: int = 30) -> dict[str, object]:
+    def counted_wait(job_id: str, timeout_seconds: int = 30) -> dict[str, object]:
         nonlocal active_waits
         with wait_lock:
             active_waits += 1
             if active_waits == server.wait_worker_count:
                 wait_started.set()
-        assert release_waits.wait(timeout=2)
-        return jobs.get(job_id)
+        return original_wait(job_id, timeout_seconds)
 
-    jobs.wait = blocking_wait  # type: ignore[method-assign]
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
-    socket_path = tmp_path / "sinnixd.sock"
-    stop_event = threading.Event()
-    server = UnixSocketServer(socket_path, service, max_workers=8)
+    def observe_wait_connection(*args, **kwargs) -> None:
+        wait_timeouts.append(args[0].gettimeout())
+        original_wait_connection(*args, **kwargs)
+
+    jobs.wait = counted_wait  # type: ignore[method-assign]
+    server._serve_wait_connection = observe_wait_connection  # type: ignore[method-assign]
     thread = start_server(server, stop_event=stop_event)
-    started = call(socket_path, request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"}))
-    job_id = started["payload"]["value"]["job_id"]
+    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    job_id = started["job_id"]
     wait_results: list[dict[str, object]] = []
     wait_errors: list[Exception] = []
 
     def run_wait() -> None:
         try:
-            wait_results.append(call(socket_path, request("job.wait", "systemd-jobs", {"job_id": job_id, "timeout_seconds": 2})))
+            wait_results.append(call(socket_path, request("job.wait", "systemd-jobs", {"job_id": job_id, "timeout_seconds": 1})))
         except Exception as error:
             wait_errors.append(error)
 
@@ -3108,22 +3162,38 @@ def test_unix_socket_wait_saturation_reserves_cancel_get_logs_and_start(tmp_path
     for waiter in waiters:
         waiter.start()
     assert wait_started.wait(timeout=1)
-    response = call(socket_path, request("job.cancel", "systemd-jobs", {"job_id": job_id}))
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.connect(str(socket_path))
+        capacity_request = request("job.wait", "systemd-jobs", {"job_id": job_id, "timeout_seconds": 1})
+        send_frame(
+            connection,
+            {
+                "jsonrpc": "2.0",
+                "id": capacity_request.request_id,
+                "method": "dispatch",
+                "params": capacity_request.to_dict(),
+            },
+        )
+        capacity = receive_frame(connection)
+    status = call(socket_path, request("runtime.status", "sinnixd"))
     get = call(socket_path, request("job.get", "systemd-jobs", {"job_id": job_id}))
-    logs = call(socket_path, request("job.logs", "systemd-jobs", {"job_id": job_id, "max_bytes": 1}))
-    next_job = call(socket_path, request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"}))
-    release_waits.set()
     for waiter in waiters:
-        waiter.join(timeout=1)
+        waiter.join(timeout=2)
     stop_event.set()
-    thread.join(timeout=1)
-    assert response["ok"] and get["ok"] and logs["ok"]
-    assert next_job["ok"]
-    assert next_job["payload"]["value"]["job_id"] != job_id
+    thread.join(timeout=2)
+    assert capacity == {
+        "jsonrpc": "2.0",
+        "id": capacity_request.request_id,
+        "error": {"code": -32600, "message": "job.wait capacity is exhausted"},
+    }
+    assert status["ok"] and get["ok"]
     assert not wait_errors
     assert all(not waiter.is_alive() for waiter in waiters)
     assert len(wait_results) == server.wait_worker_count
-    assert all(result["payload"]["value"]["state"]["phase"] == "cancelled" for result in wait_results)
+    assert not thread.is_alive()
+    assert wait_timeouts == [1 + WAIT_TRANSPORT_MARGIN_SECONDS] * server.wait_worker_count
+    assert all(result["payload"]["value"]["state"]["phase"] == "running" for result in wait_results)
+    assert all(result["payload"]["value"]["wait_timed_out"] for result in wait_results)
 
 
 def test_job_rpc_get_list_wait_logs_and_cancel_share_one_record(tmp_path: Path) -> None:
