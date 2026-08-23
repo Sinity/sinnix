@@ -187,13 +187,11 @@ def test_joins_classifiers() -> None:
     assert joins.project_for_unit("btrbk.service") == "backup"
     assert joins.project_for_unit("unknown.service") is None
     assert joins.project_for_text("running xtask check") == "sinex"
+    assert joins.infer_resource_class_from_cgroup("/sys/fs/cgroup/build.slice") is None
+    assert joins.infer_resource_class_from_cgroup("/sys/fs/cgroup/agent.slice") is None
     assert (
-        joins.infer_resource_class_from_cgroup("/sys/fs/cgroup/build.slice")
-        == "developer-build"
-    )
-    assert (
-        joins.infer_resource_class_from_cgroup("/sys/fs/cgroup/agent.slice")
-        == "interactive-agent"
+        joins.infer_resource_class_from_cgroup("/sys/fs/cgroup/system.slice")
+        == "system"
     )
     assert (
         joins.infer_resource_class_from_cgroup("/sys/fs/cgroup/notbuild.slice") is None
