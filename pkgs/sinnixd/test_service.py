@@ -961,7 +961,7 @@ def test_exact_head_verified_workspace_publishes_lands_and_finishes_without_a_pr
     finished = delivery.finish(workspace["workspace_id"])
 
     assert published["published"] and landed["landed"] and finished["finished"]
-    assert any(command[:3] == ["git", "-C", str(path)] and "push" in command for command in calls)
+    assert any(command[-7:-4] == ["git", "-C", str(path)] and "push" in command for command in calls)
     assert any(command[:3] == ["gh", "pr", "create"] for command in calls)
     assert any(command[:3] == ["gh", "pr", "merge"] for command in calls)
     assert not path.exists()
