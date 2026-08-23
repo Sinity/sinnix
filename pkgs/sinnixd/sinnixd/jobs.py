@@ -114,6 +114,11 @@ def _write_private_marker(path: Path) -> None:
     with _open_private_artifact(path) as handle:
         handle.flush()
         os.fsync(handle.fileno())
+    _fsync_directory(path.parent)
+
+
+def _completion_marker_path(log_path: Path) -> Path:
+    return log_path.with_suffix(".complete")
 
 
 def _fsync_directory(path: Path) -> None:
@@ -824,7 +829,7 @@ class GenericJobs:
         systemd_timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         record = self.store.load(job_id)
-        if record.state.get("terminal"):
+        if record.state.get("terminal") and not self._terminal_state_requires_reconciliation(record):
             return self._public(record, record.state)
         try:
             properties = dict(
@@ -886,6 +891,14 @@ class GenericJobs:
                     "systemd": dict(properties),
                     "observed_at": _timestamp(),
                 }
+            if self._has_authoritative_result(record):
+                return {
+                    "phase": "succeeded",
+                    "terminal": True,
+                    "systemd": dict(properties),
+                    "result_evidence": "completed",
+                    "observed_at": _timestamp(),
+                }
             if self._stop_acknowledgement_matches(record):
                 return {
                     "phase": "cancelled",
@@ -894,11 +907,12 @@ class GenericJobs:
                     "cancellation": self._stop_acknowledgement(record),
                     "observed_at": _timestamp(),
                 }
-            if properties.get("Result") == "success" and properties.get("ExecMainStatus", "0") == "0":
+            if record.cancel_requested_at is not None:
                 return {
-                    "phase": "succeeded",
-                    "terminal": True,
+                    "phase": "outcome-unknown",
+                    "terminal": False,
                     "systemd": dict(properties),
+                    "cancellation": self._cancel_intent(record),
                     "observed_at": _timestamp(),
                 }
             return {"phase": "missing", "terminal": True, "systemd": dict(properties), "observed_at": _timestamp()}
@@ -909,7 +923,7 @@ class GenericJobs:
         elif active == "deactivating":
             phase = "cancelling" if record.cancel_requested_at is not None else "stopping"
             terminal = False
-        elif properties.get("Result") == "success" and properties.get("ExecMainStatus", "0") == "0":
+        elif properties.get("Result") == "success" and properties.get("ExecMainStatus") == "0":
             phase = "succeeded"
             terminal = True
         elif properties.get("Result") == "timeout":
@@ -922,6 +936,42 @@ class GenericJobs:
             phase = "failed"
             terminal = True
         return {"phase": phase, "terminal": terminal, "systemd": dict(properties), "observed_at": _timestamp()}
+
+    def _terminal_state_requires_reconciliation(self, record: GenericJobRecord) -> bool:
+        phase = record.state.get("phase")
+        properties = record.state.get("systemd")
+        if not isinstance(properties, Mapping):
+            properties = {}
+        if phase == "succeeded" and properties.get("LoadState") != "loaded":
+            return not self._has_authoritative_result(record)
+        if phase == "cancelled" and not self._stop_acknowledgement_matches(record):
+            return properties.get("LoadState") != "loaded" or not self._cancel_matches(properties, record)
+        return False
+
+    @staticmethod
+    def _has_authoritative_result(record: GenericJobRecord) -> bool:
+        if record.result_path is None or not _completion_marker_path(record.log_path).is_file():
+            return False
+        try:
+            with record.result_path.open("rb") as handle:
+                content = handle.read(MAX_RESULT_BYTES + 1)
+        except OSError:
+            return False
+        if (
+            not content
+            or len(content) > MAX_RESULT_BYTES
+            or record.result_path.with_suffix(".overflow").exists()
+        ):
+            return False
+        if record.spec.result_kind == "last-message":
+            return True
+        if record.spec.result_kind not in {"json", "pytest"}:
+            return False
+        try:
+            value = json.loads(content.decode())
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return False
+        return isinstance(value, dict)
 
     @staticmethod
     def _with_state(record: GenericJobRecord, state: Mapping[str, Any]) -> GenericJobRecord:
@@ -941,6 +991,8 @@ class GenericJobs:
 
     @staticmethod
     def _with_cancel_intent(record: GenericJobRecord, invocation_id: Any) -> GenericJobRecord:
+        existing_intent = record.cancel_requested_at is not None
+        observed_invocation = invocation_id if isinstance(invocation_id, str) and invocation_id else None
         return GenericJobRecord(
             job_id=record.job_id,
             unit=record.unit,
@@ -949,7 +1001,9 @@ class GenericJobs:
             result_path=record.result_path,
             created_at=record.created_at,
             cancel_requested_at=record.cancel_requested_at or _timestamp(),
-            cancel_requested_invocation_id=invocation_id if isinstance(invocation_id, str) else None,
+            cancel_requested_invocation_id=(
+                record.cancel_requested_invocation_id if existing_intent else observed_invocation
+            ),
             cancel_stop_acknowledged_at=record.cancel_stop_acknowledged_at,
             cancel_stop_acknowledged_invocation_id=record.cancel_stop_acknowledged_invocation_id,
             state=dict(record.state),
@@ -1001,6 +1055,14 @@ class GenericJobs:
             "stop_acknowledged_at": record.cancel_stop_acknowledged_at,
             "invocation_id": record.cancel_stop_acknowledged_invocation_id,
         }
+
+    @staticmethod
+    def _cancel_intent(record: GenericJobRecord) -> dict[str, str]:
+        assert record.cancel_requested_at is not None
+        intent = {"requested_at": record.cancel_requested_at}
+        if record.cancel_requested_invocation_id is not None:
+            intent["invocation_id"] = record.cancel_requested_invocation_id
+        return intent
 
     @staticmethod
     def _public(record: GenericJobRecord, state: Mapping[str, Any]) -> dict[str, Any]:
@@ -1115,11 +1177,14 @@ def capture_main(arguments: Sequence[str] | None = None) -> int:
         if result_handle is not None:
             result_handle.flush()
             os.fsync(result_handle.fileno())
-        return process.wait()
+        return_code = process.wait()
     finally:
         log_handle.close()
         if result_handle is not None:
             result_handle.close()
+    if return_code == 0:
+        _write_private_marker(_completion_marker_path(parsed.log_path))
+    return return_code
 
 
 def capture_cli() -> None:
