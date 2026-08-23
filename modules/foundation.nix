@@ -262,6 +262,11 @@ in
                   path = config.lynchpin;
                   remote = "https://github.com/Sinity/sinity-lynchpin.git";
                   observerRead = true;
+                  taskAuthority = {
+                    workspace = "${config.lynchpin}/.beads";
+                    database = "${cfg.paths.stateRoot}/tasks/lynchpin/.beads/dolt";
+                    publicationPolicy = "local";
+                  };
                 };
               };
               description = "Canonical project metadata consumed by agent and evidence surfaces.";
