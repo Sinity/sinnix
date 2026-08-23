@@ -44,8 +44,8 @@
         # It contains only read-annotated tools, including bounded content,
         # opaque-artifact reads, V3 status, catalog, canonical get, checkout selection,
         # and route preflight.
-        approvedManifestHash = "6ac9d69543f6eb39de386ac7010940675c898216693a3f05ae252eef36d3a98c";
-        approvedActionCatalogHash = "544aff46f0d318e5b3e48c568c6d577f5bf9ef779d7e1ad59d8d40a7f8c286dc";
+        approvedManifestHash = "9bef2c34f7b80ed2f63a8060fdd82f5d8728492d3718f9c77712d256e574ef03";
+        approvedActionCatalogHash = "644fd9157cab370576994b519bace367c44ad5798b43f0cae17f86ec4140aa57";
         tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
       };
     };
