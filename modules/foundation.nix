@@ -234,7 +234,7 @@ in
                   devtoolsEntrypoint = "nix develop";
                   taskAuthority = {
                     workspace = "${config.sinnix}/.beads";
-                    database = "${config.stateRoot}/tasks/sinnix/dolt";
+                    database = "${cfg.paths.stateRoot}/tasks/sinnix/.beads/dolt";
                     publicationPolicy = "dolt-sync";
                   };
                 };
@@ -244,7 +244,7 @@ in
                   observerRead = true;
                   taskAuthority = {
                     workspace = "${config.sinex}/.beads";
-                    database = "${config.stateRoot}/tasks/sinex/dolt";
+                    database = "${cfg.paths.stateRoot}/tasks/sinex/.beads/dolt";
                     publicationPolicy = "dolt-sync";
                   };
                 };
@@ -254,7 +254,7 @@ in
                   observerRead = true;
                   taskAuthority = {
                     workspace = "${config.polylogue}/.beads";
-                    database = "${config.stateRoot}/tasks/polylogue/dolt";
+                    database = "${cfg.paths.stateRoot}/tasks/polylogue/.beads/dolt";
                     publicationPolicy = "dolt-sync";
                   };
                 };
