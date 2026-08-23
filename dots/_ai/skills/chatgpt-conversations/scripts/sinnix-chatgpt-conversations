@@ -34,6 +34,16 @@ Commands:
       Read the selected windows from every currently open ChatGPT conversation
       tab. Use `list` first when a narrower selection will answer the task.
 
+  locate <attachment-label> [--root DIR ...]
+      Find a conversation attachment's file on the local machine. Uploaded
+      files always originated here, and generated bundles are often already
+      downloaded, so search local disks before considering a browser
+      download. Strips trailing kind words (File, Document, Zip Archive, ...)
+      from the label, then searches exact name, the name with collision
+      suffixes like " (1)" added or removed, and finally a de-parenthesized
+      core substring. Default roots: /realm/inbox, /realm/tmp,
+      /realm/data/exports, the user and /realm trash directories, and $HOME.
+
 Examples:
   sinnix-chatgpt-conversations list
   sinnix-chatgpt-conversations read A780E4C2AA9208D543C2C43CF8ADC166
@@ -292,6 +302,51 @@ parse_read_options() {
   require_nonnegative_integer "$TEXT_LIMIT" "--text-limit"
 }
 
+locate_attachment() {
+  local label="$1"
+  shift
+  local roots=("$@")
+  [[ ${#roots[@]} -gt 0 ]] || roots=(
+    /realm/inbox
+    /realm/tmp
+    /realm/data/exports
+    "$HOME/.local/share/Trash"
+    /realm/.Trash-1000
+    "$HOME"
+  )
+  local existing=()
+  for root in "${roots[@]}"; do
+    [[ -d $root ]] && existing+=("$root")
+  done
+  local name core stem
+  name=$(sed -E 's/[[:space:]]+(File|Document|Zip Archive|Archive|Image|PDF|Spreadsheet|Presentation|Text)$//' <<<"$label")
+  name=$(sed -E 's/^[[:space:]]+|[[:space:]]+$//g' <<<"$name")
+  # collision-suffix variant: drop parenthesized groups, collapse doubled dots
+  core=$(sed -E 's/[[:space:]]*\([^)]*\)//g; s/\.\.+/./g' <<<"$name")
+  # substring stem: shortest prefix up to the first parenthesis or extension
+  stem=${name%%(*}
+  stem=${stem%.}
+  emit_matches() {
+    local kind="$1" pattern="$2" fixed="$3"
+    local args=(-HI --absolute-path --max-results 40)
+    [[ $fixed == fixed ]] && args+=(-F)
+    fd "${args[@]}" "$pattern" "${existing[@]}" 2>/dev/null \
+      | while IFS= read -r path; do
+          jq -cn --arg kind "$kind" --arg path "$path" \
+            --arg size "$(stat -c %s "$path" 2>/dev/null || echo '')" \
+            --arg mtime "$(stat -c %y "$path" 2>/dev/null || echo '')" \
+            '{match: $kind, path: $path, size: ($size | tonumber? // null), mtime: $mtime}'
+        done
+  }
+  {
+    emit_matches exact "$name" fixed
+    [[ $core != "$name" && -n $core ]] && emit_matches collision-variant "$core" fixed
+    [[ -n $stem && $stem != "$name" && ${#stem} -ge 6 ]] && emit_matches core-substring "$stem" fixed
+  } | jq -s 'unique_by(.path)
+      | sort_by((if .match == "exact" then 0 elif .match == "collision-variant" then 1 else 2 end), .path)
+      | {schema: "sinnix-chatgpt-attachment-locate-v1", query: "'"$(sed 's/"/\\"/g' <<<"$label")"'", matches: .}'
+}
+
 need_cmd curl
 need_cmd jq
 need_cmd "$CHROME_CONTROL"
@@ -329,6 +384,26 @@ case "$command_name" in
     else
       printf '%s\n' "$result"
     fi
+    ;;
+  locate)
+    label="${1:-}"
+    [[ -n $label ]] || { printf 'locate requires an attachment label or filename\n' >&2; exit 2; }
+    shift
+    roots=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --root)
+          roots+=("${2:?missing value for --root}")
+          shift 2
+          ;;
+        *)
+          printf 'unknown option for locate: %s\n' "$1" >&2
+          exit 2
+          ;;
+      esac
+    done
+    need_cmd fd
+    locate_attachment "$label" "${roots[@]}"
     ;;
   read-open)
     parse_read_options "$@"
