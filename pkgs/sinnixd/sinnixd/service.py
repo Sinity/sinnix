@@ -21,6 +21,7 @@ from .jobs import GenericJobStore, GenericJobs, JobRecordError, SystemdJobError,
 from .contracts import TypedJobContracts
 from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from .projects import ProjectCatalog
+from .workspaces import GitWorkspaces, WorkspaceError, WorkspaceStore
 
 
 @dataclass(frozen=True)
@@ -41,8 +42,11 @@ class SinnixdService:
     )
     version: str = "0.2.0"
     native_runner: Path = Path("/home/sinity/.config/hermes/skills/agent-orchestration/scripts/run_agent_prompt.sh")
+    workspaces: GitWorkspaces | None = None
 
     def __post_init__(self) -> None:
+        if self.workspaces is None:
+            object.__setattr__(self, "workspaces", GitWorkspaces(self.projects, WorkspaceStore(self.jobs.store.root)))
         _ = self.owners
 
     @property
@@ -71,6 +75,14 @@ class SinnixdService:
                 lifecycle=Lifecycle.DAEMON_OWNED,
                 versions=frozenset({1}),
                 documentation="Durable generic jobs reconciled from transient user services.",
+            ),
+            OwnerSpec(
+                namespace="workspace",
+                owner="git-workspaces",
+                authority=Authority.OWNER,
+                lifecycle=Lifecycle.DAEMON_OWNED,
+                versions=frozenset({1}),
+                documentation="Durable workspace relationships over Git-owned linked worktrees.",
             ),
         )
         return OwnerRegistry((*builtin, *(adapter.spec for adapter in self.projects.owner_adapters())))
@@ -102,6 +114,8 @@ class SinnixdService:
             )
         except (JobRecordError, SystemdJobError) as error:
             return self._error(request, owner_name, ErrorCode.OPERATION_FAILED, str(error))
+        except WorkspaceError as error:
+            return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
         except ValueError as error:
             return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
         try:
@@ -144,6 +158,45 @@ class SinnixdService:
                 "project_id": project.project_id,
                 "operations": [operation.catalog_row() for operation in project.operations],
             }
+        if operation == "workspace.list":
+            if set(arguments) - {"project_id"}:
+                raise ValueError("workspace.list accepts optional project_id")
+            project_id = arguments.get("project_id")
+            if project_id is not None and (not isinstance(project_id, str) or not project_id):
+                raise ValueError("workspace.list project_id must be non-empty")
+            assert self.workspaces is not None
+            return self.workspaces.list(project_id)
+        if operation == "workspace.get":
+            assert self.workspaces is not None
+            return self.workspaces.get(self._single_workspace_id(arguments, "workspace.get"))
+        if operation == "workspace.create":
+            if principal not in {"agent-control", "operator"}:
+                raise ValueError("workspace creation requires agent-control or operator principal")
+            required = {"project_id", "name", "branch", "base"}
+            if set(arguments) != required:
+                raise ValueError("workspace.create requires project_id, name, branch, and nullable base")
+            base = arguments.get("base")
+            if base is not None and (not isinstance(base, str) or not base):
+                raise ValueError("workspace.create base must be null or non-empty")
+            assert self.workspaces is not None
+            return self.workspaces.create(
+                project_id=self._job_argument(arguments, "project_id"),
+                name=self._job_argument(arguments, "name"),
+                branch=self._job_argument(arguments, "branch"),
+                base=base,
+            )
+        if operation == "workspace.adopt":
+            if principal not in {"agent-control", "operator"}:
+                raise ValueError("workspace adoption requires agent-control or operator principal")
+            required = {"project_id", "checkout_id", "name"}
+            if set(arguments) != required:
+                raise ValueError("workspace.adopt requires project_id, checkout_id, and name")
+            assert self.workspaces is not None
+            return self.workspaces.adopt(
+                project_id=self._job_argument(arguments, "project_id"),
+                checkout_id=self._job_argument(arguments, "checkout_id"),
+                name=self._job_argument(arguments, "name"),
+            )
         if operation == "job.start":
             project_id = self._job_argument(arguments, "project_id")
             operation_name = self._job_argument(arguments, "operation")
@@ -243,6 +296,15 @@ class SinnixdService:
 
     def _cleanup_terminal(self, response: Mapping[str, Any]) -> dict[str, Any]:
         return self.job_contracts.cleanup_terminal(response)
+
+    @staticmethod
+    def _single_workspace_id(arguments: Mapping[str, Any], operation: str) -> str:
+        if set(arguments) != {"workspace_id"}:
+            raise ValueError(f"{operation} requires workspace_id")
+        value = arguments.get("workspace_id")
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"{operation} workspace_id must be non-empty")
+        return value
 
     @staticmethod
     def _job_argument(arguments: Mapping[str, Any], name: str) -> str:

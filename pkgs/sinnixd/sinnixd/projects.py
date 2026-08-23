@@ -16,6 +16,31 @@ class ProjectConfigError(ValueError):
     """Raised when a project adapter is missing or violates the v1 contract."""
 
 
+def parse_worktree_records(output: str) -> tuple[dict[str, str], ...]:
+    """Parse Git's porcelain records, including flag-only fields."""
+    value_fields = {"worktree", "HEAD", "branch"}
+    flag_fields = {"bare", "detached", "locked", "prunable"}
+    records: list[dict[str, str]] = []
+    record: dict[str, str] = {}
+    for line in output.splitlines():
+        if not line:
+            if record:
+                records.append(record)
+                record = {}
+            continue
+        key, separator, value = line.partition(" ")
+        if key in record or key not in value_fields | flag_fields:
+            raise ProjectConfigError("git worktree returned malformed porcelain")
+        if key in value_fields and (not separator or not value):
+            raise ProjectConfigError("git worktree returned malformed porcelain")
+        if key in flag_fields and separator and key not in {"locked", "prunable"}:
+            raise ProjectConfigError("git worktree returned malformed porcelain")
+        record[key] = value
+    if record:
+        records.append(record)
+    return tuple(records)
+
+
 @dataclass(frozen=True)
 class RegisteredCheckout:
     """A Git-worktree identity revalidated at the execution boundary."""
@@ -35,6 +60,38 @@ class RegisteredCheckout:
             "path": str(self.path),
             "git_common_dir": str(self.git_common_dir),
             "head": self.head,
+        }
+
+
+@dataclass(frozen=True)
+class WorkspacePolicy:
+    provider: str
+    root: Path
+    default_base: str
+    identity_check: tuple[str, ...]
+    checkpoint_untracked: bool
+
+    def catalog_row(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "root": str(self.root),
+            "default_base": self.default_base,
+            "identity_check": list(self.identity_check),
+            "checkpoint_untracked": self.checkpoint_untracked,
+        }
+
+
+@dataclass(frozen=True)
+class ConflictPolicy:
+    exact_files: tuple[str, ...]
+    generated_surfaces: tuple[str, ...]
+    semantic_slots: tuple[str, ...]
+
+    def catalog_row(self) -> dict[str, list[str]]:
+        return {
+            "exact_files": list(self.exact_files),
+            "generated_surfaces": list(self.generated_surfaces),
+            "semantic_slots": list(self.semantic_slots),
         }
 
 
@@ -96,6 +153,8 @@ class ProjectAdapter:
     descriptor: Path
     digest: str
     environment: ProjectEnvironment
+    workspace: WorkspacePolicy | None
+    conflicts: ConflictPolicy
     operations: tuple[ProjectOperation, ...]
     owner_adapters: tuple[ProjectOwnerAdapter, ...] = ()
 
@@ -112,6 +171,8 @@ class ProjectAdapter:
             "root": str(self.root),
             "descriptor": str(self.descriptor),
             "digest": self.digest,
+            "workspace": self.workspace.catalog_row() if self.workspace is not None else None,
+            "conflicts": self.conflicts.catalog_row(),
             "operations": [operation.catalog_row() for operation in self.operations],
             "owner_adapters": [adapter.catalog_row() for adapter in self.owner_adapters],
         }
@@ -241,6 +302,47 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         unset=_optional_string_list(environment.get("unset"), "environment.unset"),
     )
 
+    raw_workspace = raw.get("workspace")
+    workspace: WorkspacePolicy | None = None
+    if raw_workspace is not None:
+        if not isinstance(raw_workspace, Mapping):
+            raise ProjectConfigError(f"{descriptor} [workspace] must be a table")
+        allowed_workspace = {"provider", "root", "default_base", "identity_check", "checkpoint_untracked"}
+        if set(raw_workspace) - allowed_workspace:
+            raise ProjectConfigError(f"{descriptor} [workspace] contains unknown fields")
+        provider = raw_workspace.get("provider")
+        workspace_root = raw_workspace.get("root")
+        default_base = raw_workspace.get("default_base")
+        checkpoint_untracked = raw_workspace.get("checkpoint_untracked")
+        if provider != "git-worktree":
+            raise ProjectConfigError(f"{descriptor} workspace.provider must be git-worktree")
+        if not isinstance(workspace_root, str) or not Path(workspace_root).is_absolute():
+            raise ProjectConfigError(f"{descriptor} workspace.root must be an absolute path")
+        if not isinstance(default_base, str) or not default_base:
+            raise ProjectConfigError(f"{descriptor} workspace.default_base must be non-empty")
+        if not isinstance(checkpoint_untracked, bool):
+            raise ProjectConfigError(f"{descriptor} workspace.checkpoint_untracked must be boolean")
+        workspace = WorkspacePolicy(
+            provider=provider,
+            root=Path(workspace_root),
+            default_base=default_base,
+            identity_check=_string_list(raw_workspace.get("identity_check"), "workspace.identity_check"),
+            checkpoint_untracked=checkpoint_untracked,
+        )
+
+    raw_conflicts = raw.get("conflicts", {})
+    if not isinstance(raw_conflicts, Mapping) or set(raw_conflicts) - {
+        "exact_files", "generated_surfaces", "semantic_slots"
+    }:
+        raise ProjectConfigError(f"{descriptor} [conflicts] is invalid")
+    conflicts = ConflictPolicy(
+        exact_files=_optional_string_list(raw_conflicts.get("exact_files"), "conflicts.exact_files"),
+        generated_surfaces=_optional_string_list(
+            raw_conflicts.get("generated_surfaces"), "conflicts.generated_surfaces"
+        ),
+        semantic_slots=_optional_string_list(raw_conflicts.get("semantic_slots"), "conflicts.semantic_slots"),
+    )
+
     owner_adapters = _owner_adapters(raw, descriptor)
     raw_operations = raw.get("operations", {})
     if not isinstance(raw_operations, Mapping):
@@ -282,6 +384,8 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         descriptor=descriptor,
         digest="sha256:" + hashlib.sha256(raw_bytes).hexdigest(),
         environment=execution_environment,
+        workspace=workspace,
+        conflicts=conflicts,
         operations=tuple(operations),
         owner_adapters=owner_adapters,
     )
@@ -321,24 +425,6 @@ class ProjectCatalog:
         return result.stdout
 
     @staticmethod
-    def _worktree_records(output: str) -> tuple[dict[str, str], ...]:
-        records: list[dict[str, str]] = []
-        record: dict[str, str] = {}
-        for line in output.splitlines():
-            if not line:
-                if record:
-                    records.append(record)
-                    record = {}
-                continue
-            key, separator, value = line.partition(" ")
-            if not separator or key in record:
-                raise ProjectConfigError("git worktree returned malformed porcelain")
-            record[key] = value
-        if record:
-            records.append(record)
-        return tuple(records)
-
-    @staticmethod
     def _checkout_id(path: Path, configured_root: Path) -> str:
         if path == configured_root:
             return "default"
@@ -347,7 +433,7 @@ class ProjectCatalog:
     def checkouts(self, project_id: str) -> tuple[RegisteredCheckout, ...]:
         project = self.get(project_id)
         root = project.root.resolve(strict=True)
-        records = self._worktree_records(self._git(root, "worktree", "list", "--porcelain"))
+        records = parse_worktree_records(self._git(root, "worktree", "list", "--porcelain"))
         checkouts: list[RegisteredCheckout] = []
         for record in records:
             raw_path = record.get("worktree")

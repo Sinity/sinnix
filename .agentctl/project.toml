@@ -13,6 +13,7 @@ unset = ["PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "_PYTHON_SYSCONFIGDATA_NAME"
 
 [workspace]
 provider = "git-worktree"
+root = "/realm/worktrees"
 default_base = "origin/master"
 identity_check = ["git", "diff", "--quiet", "--", "flake.nix"]
 checkpoint_untracked = true
