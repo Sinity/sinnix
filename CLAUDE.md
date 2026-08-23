@@ -472,7 +472,7 @@ config in `secrets.nix` (repo root).
   Ephemeral btrfs root `@` (initrd rollback + pre-wipe snapshots), `/persist`
   bind-mounts, `@sinex` nodatacow subvol for Postgres, `/realm` NVMe data
   volume. Journald persistent at `/realm/state/journal` (plain directory —
-  a nested subvol was invisible to btrbk/borg for months), SystemMaxUse=64G,
+  a nested subvol was invisible to btrbk/borg for months), SystemMaxUse=100G,
   kernel audit routed to auditd only. fTPM broken →
   systemd-tpm2-setup masked. `sinnix.services.hub`
   (`modules/services/hub.nix`, docs/hub.md) is the browser front door:
