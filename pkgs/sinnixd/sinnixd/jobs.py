@@ -40,6 +40,10 @@ class SystemdJobError(RuntimeError):
     """Raised when systemd cannot create or inspect a transient job service."""
 
 
+class SystemdJobTimeout(SystemdJobError):
+    """Raised only when the bounded systemd subprocess times out."""
+
+
 class JobRecordError(ValueError):
     """Raised when a persisted job record cannot be reconstructed safely."""
 
@@ -268,7 +272,15 @@ class UserSystemdJobs:
             ],
             timeout_seconds=timeout_seconds,
         )
-        return dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+        properties: dict[str, str] = {}
+        for line in output.splitlines():
+            key, separator, value = line.partition("=")
+            if not key or not separator:
+                raise SystemdJobError("systemd show output is malformed")
+            properties[key] = value
+        if "LoadState" not in properties:
+            raise SystemdJobError("systemd show output is malformed")
+        return properties
 
     def stop(self, unit: str) -> None:
         self._run(["systemctl", "--user", "stop", unit])
@@ -289,7 +301,7 @@ class UserSystemdJobs:
         except FileNotFoundError as error:
             raise SystemdJobError(f"systemd command is unavailable: {args[0]}") from error
         except subprocess.TimeoutExpired as error:
-            raise SystemdJobError("systemd command timed out") from error
+            raise SystemdJobTimeout("systemd command timed out") from error
         except OSError as error:
             raise SystemdJobError(f"systemd command failed: {args[0]}: {error}") from error
         except subprocess.CalledProcessError as error:
@@ -858,9 +870,11 @@ class GenericJobs:
             properties = dict(
                 self.systemd.show(record.unit, timeout_seconds=systemd_timeout_seconds)
             )
-        except SystemdJobError:
+        except SystemdJobTimeout:
             if wait_deadline is not None and time.monotonic() >= wait_deadline:
                 return self._public(record, record.state)
+            state = self._observation_unknown_state()
+        except SystemdJobError:
             state = self._observation_unknown_state()
         else:
             state = self._classify(properties, record)
