@@ -733,6 +733,18 @@ class GenericJobStore:
         if path.parent != root or path.name != record.job_id:
             raise JobRecordError("job scratch artifact escapes owned root")
         if path.exists():
+            # Test tools may deliberately remove write bits from fixtures under
+            # TMPDIR. The terminal job owns this entire bounded tree, so restore
+            # owner traversal/write permission before removing it. Never follow
+            # symlinks while doing so.
+            path.chmod(path.stat().st_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+            for directory, names, _files in os.walk(path, followlinks=False):
+                current = Path(directory)
+                current.chmod(current.stat().st_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+                for name in names:
+                    child = current / name
+                    if not child.is_symlink():
+                        child.chmod(child.stat().st_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
             shutil.rmtree(path)
             _fsync_directory(root)
 
