@@ -97,6 +97,23 @@ class WorkspaceStore:
                 raise WorkspaceError("workspace name or path is already registered")
             rows.append(record.to_dict())
 
+    def remove(self, workspace_id: str) -> WorkspaceRecord:
+        default = {"schema_version": WORKSPACE_SCHEMA_VERSION, "workspaces": []}
+        with modify_json(self.index, default, mode=0o600) as payload:
+            if not isinstance(payload, dict) or payload.get("schema_version") != WORKSPACE_SCHEMA_VERSION:
+                raise WorkspaceError("workspace index schema is invalid")
+            rows = payload.get("workspaces")
+            if not isinstance(rows, list):
+                raise WorkspaceError("workspace index rows are invalid")
+            records = [WorkspaceRecord.from_dict(row) for row in rows]
+            removed = next((record for record in records if record.workspace_id == workspace_id), None)
+            if removed is None:
+                raise KeyError(f"unknown workspace: {workspace_id}")
+            payload["workspaces"] = [
+                record.to_dict() for record in records if record.workspace_id != workspace_id
+            ]
+            return removed
+
 
 class GitWorkspaces:
     def __init__(self, projects: ProjectCatalog, store: WorkspaceStore) -> None:
@@ -163,6 +180,40 @@ class GitWorkspaces:
             self.store.put(record)
         return self._status(record)
 
+    def reap(self, workspace_id: str) -> dict[str, Any]:
+        with flock(self.mutation_lock):
+            record = self._record(workspace_id)
+            status = self._status(record)
+            if status["state"] == "missing":
+                self.store.remove(workspace_id)
+                return {"workspace_id": workspace_id, "reaped": True, "relationship_only": True}
+            if not record.managed:
+                raise WorkspaceError("adopted workspaces cannot be reaped")
+            if status["dirty"] or not status["identity_matches"]:
+                raise WorkspaceError("workspace is dirty or its branch identity changed")
+            project = self._project(record.project_id)
+            assert project.workspace is not None
+            head = status["head"]
+            if not isinstance(head, str) or self._git(
+                project.root,
+                "merge-base",
+                "--is-ancestor",
+                head,
+                project.workspace.default_base,
+                check=False,
+            ).returncode != 0:
+                raise WorkspaceError("workspace HEAD is not contained in the declared base")
+            removed = self._git(project.root, "worktree", "remove", str(record.path), check=False)
+            if removed.returncode != 0:
+                raise WorkspaceError(removed.stderr.strip() or "git worktree remove failed")
+            self.store.remove(workspace_id)
+            return {
+                "workspace_id": workspace_id,
+                "reaped": True,
+                "relationship_only": False,
+                "retained_branch": record.branch,
+            }
+
     def _status(self, record: WorkspaceRecord) -> dict[str, Any]:
         row = record.to_dict()
         try:
@@ -179,7 +230,7 @@ class GitWorkspaces:
                     "identity_matches": branch == record.branch,
                 }
             )
-        except (KeyError, WorkspaceError):
+        except (FileNotFoundError, KeyError, WorkspaceError):
             row.update({"state": "missing", "checkout_id": None, "head": None, "current_branch": None, "dirty": None, "identity_matches": False})
         return row
 

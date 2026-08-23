@@ -438,7 +438,9 @@ when a new script is added.
   AgentCTL creates or adopts a canonical linked worktree and derives current
   HEAD, branch, membership, and dirty state from Git on every read. It does not
   duplicate Git history or hosted review/merge state. Checkpoint, publication,
-  landing, and reap remain the next lifecycle slices.
+  landing remain the next lifecycle slices. Safe reap removes only clean,
+  branch-matching, base-contained AgentCTL-created worktrees and retains their
+  branches; adopted or divergent worktrees remain operator-owned.
 
 ## Secrets
 

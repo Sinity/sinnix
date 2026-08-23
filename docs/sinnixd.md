@@ -15,6 +15,7 @@ agentctl workspace list --project sinnix
 agentctl workspace create sinnix my-lane --branch feature/my-lane
 agentctl workspace adopt sinnix worktree-0123456789abcdef adopted-lane
 agentctl workspace get <workspace-id>
+agentctl workspace reap <workspace-id>
 agentctl job start sinnix lint
 agentctl job get <job-id>
 agentctl job list
@@ -50,7 +51,7 @@ The first reserved contract is `polylogue.archive.status`, owned by `polylogue-a
 
 Projects may declare a `git-worktree` policy with one absolute workspace root, a default base, an identity check, and checkpoint intent. AgentCTL can create a named linked worktree beneath that exact root or adopt an already registered linked worktree. It stores only the durable relationship: project, stable workspace ID, canonical path, branch, base, creation time, and whether AgentCTL created it. Git remains authoritative for refs, HEAD, worktree membership, and dirty state, which are re-read for every status response.
 
-Create and adopt require the `agent-control` or `operator` principal. Names are bounded path-safe identifiers, branches pass `git check-ref-format`, bases must resolve to commits, the configured root cannot be adopted, and duplicate names or paths fail closed under a shared mutation lock. A daemon restart reloads the relationship index and derives current state from Git. Checkpoint, restore, stacking, publication, landing, and reap are not part of this first slice.
+Create, adopt, and reap require the `agent-control` or `operator` principal. Names are bounded path-safe identifiers, branches pass `git check-ref-format`, bases must resolve to commits, the configured root cannot be adopted, and duplicate names or paths fail closed under a shared mutation lock. A daemon restart reloads the relationship index and derives current state from Git. Reap forgets an already-missing relationship, or removes only an AgentCTL-created worktree that is clean, still on its recorded branch, and whose HEAD is contained in the declared base. It retains the branch for explicit review. Adopted, dirty, divergent, and identity-changed worktrees are preserved. Checkpoint, restore, stacking, publication, and landing are not part of this slice.
 
 The daemon still does not own job queues, retries, task mutation, service leases, arbitrary shells beyond the typed operator contract, admission policy, Git history, hosted review state, or merge state. Descriptor pool, cache, and exclusivity metadata remain descriptive until their existing authorities move behind an explicit shared contract. The gateway’s legacy controllers remain downstream and are unchanged here.
 
