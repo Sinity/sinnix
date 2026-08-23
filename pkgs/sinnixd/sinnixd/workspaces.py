@@ -1,20 +1,29 @@
 from __future__ import annotations
 
 import re
+import hashlib
+import io
+import os
+import shutil
 import subprocess
+import tarfile
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
 
-from sinnix_lib.atomic_json import modify_json, read_json
+from sinnix_lib.atomic_json import modify_json, read_json, write_json_atomic
 from sinnix_lib.lock import flock
 
 from .projects import ProjectAdapter, ProjectCatalog, RegisteredCheckout
 
 
 WORKSPACE_SCHEMA_VERSION = 1
+CHECKPOINT_SCHEMA_VERSION = 1
+MAX_CHECKPOINT_BYTES = 64 * 1024 * 1024
+MAX_UNTRACKED_FILES = 4096
 _NAME = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?\Z")
 
 
@@ -68,10 +77,40 @@ class WorkspaceRecord:
         )
 
 
+@dataclass(frozen=True)
+class CheckpointRecord:
+    checkpoint_id: str
+    workspace_id: str
+    project_id: str
+    head: str
+    branch: str
+    created_at: str
+    staged_sha256: str
+    unstaged_sha256: str
+    untracked_sha256: str
+    untracked_files: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "checkpoint_id": self.checkpoint_id,
+            "workspace_id": self.workspace_id,
+            "project_id": self.project_id,
+            "head": self.head,
+            "branch": self.branch,
+            "created_at": self.created_at,
+            "staged_sha256": self.staged_sha256,
+            "unstaged_sha256": self.unstaged_sha256,
+            "untracked_sha256": self.untracked_sha256,
+            "untracked_files": list(self.untracked_files),
+        }
+
+
 class WorkspaceStore:
     def __init__(self, root: Path) -> None:
         self.root = root / "workspaces"
         self.index = self.root / "index.json"
+        self.checkpoints_root = self.root / "checkpoints"
 
     def records(self) -> tuple[WorkspaceRecord, ...]:
         payload = read_json(self.index, {"schema_version": WORKSPACE_SCHEMA_VERSION, "workspaces": []})
@@ -112,7 +151,47 @@ class WorkspaceStore:
             payload["workspaces"] = [
                 record.to_dict() for record in records if record.workspace_id != workspace_id
             ]
-            return removed
+        shutil.rmtree(self.checkpoints_root / workspace_id, ignore_errors=True)
+        return removed
+
+    def checkpoint_path(self, workspace_id: str, checkpoint_id: str) -> Path:
+        return self.checkpoints_root / workspace_id / checkpoint_id
+
+    def put_checkpoint(self, record: CheckpointRecord, staged: bytes, unstaged: bytes, untracked: bytes) -> None:
+        root = self.checkpoint_path(record.workspace_id, record.checkpoint_id)
+        root.mkdir(mode=0o700, parents=True)
+        for name, content in (("staged.patch", staged), ("unstaged.patch", unstaged), ("untracked.tar", untracked)):
+            self._write_private(root / name, content)
+        write_json_atomic(root / "record.json", record.to_dict(), mode=0o600, fsync=True)
+
+    def checkpoint(self, workspace_id: str, checkpoint_id: str) -> tuple[CheckpointRecord, Path]:
+        root = self.checkpoint_path(workspace_id, checkpoint_id)
+        value = read_json(root / "record.json")
+        if not isinstance(value, Mapping) or value.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
+            raise WorkspaceError("checkpoint record is unavailable or invalid")
+        files = value.get("untracked_files")
+        fields = (
+            "checkpoint_id", "workspace_id", "project_id", "head", "branch", "created_at",
+            "staged_sha256", "unstaged_sha256", "untracked_sha256",
+        )
+        if any(not isinstance(value.get(field), str) or not value[field] for field in fields):
+            raise WorkspaceError("checkpoint record fields are invalid")
+        if not isinstance(files, list) or any(not isinstance(item, str) or not item for item in files):
+            raise WorkspaceError("checkpoint untracked manifest is invalid")
+        return CheckpointRecord(*(value[field] for field in fields), tuple(files)), root
+
+    @staticmethod
+    def _write_private(path: Path, content: bytes) -> None:
+        descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
 
 
 class GitWorkspaces:
@@ -214,6 +293,54 @@ class GitWorkspaces:
                 "retained_branch": record.branch,
             }
 
+    def checkpoint(self, workspace_id: str) -> dict[str, Any]:
+        with flock(self.mutation_lock):
+            record = self._record(workspace_id)
+            checkout, project = self._available(record)
+            assert project.workspace is not None
+            staged = self._git_bytes(checkout.path, "diff", "--cached", "--binary", "HEAD", "--")
+            unstaged = self._git_bytes(checkout.path, "diff", "--binary", "--")
+            untracked_files = self._untracked(checkout.path)
+            if untracked_files and not project.workspace.checkpoint_untracked:
+                raise WorkspaceError("project policy forbids checkpointing untracked files")
+            untracked = self._archive_untracked(checkout.path, untracked_files)
+            if sum(map(len, (staged, unstaged, untracked))) > MAX_CHECKPOINT_BYTES:
+                raise WorkspaceError("checkpoint exceeds the configured byte bound")
+            checkpoint = CheckpointRecord(
+                checkpoint_id=str(uuid4()),
+                workspace_id=record.workspace_id,
+                project_id=record.project_id,
+                head=checkout.head,
+                branch=record.branch,
+                created_at=datetime.now(UTC).isoformat(),
+                staged_sha256=self._digest(staged),
+                unstaged_sha256=self._digest(unstaged),
+                untracked_sha256=self._digest(untracked),
+                untracked_files=untracked_files,
+            )
+            self.store.put_checkpoint(checkpoint, staged, unstaged, untracked)
+            return checkpoint.to_dict()
+
+    def restore(self, workspace_id: str, checkpoint_id: str) -> dict[str, Any]:
+        with flock(self.mutation_lock):
+            record = self._record(workspace_id)
+            checkout, project = self._available(record)
+            checkpoint, root = self.store.checkpoint(workspace_id, checkpoint_id)
+            if checkpoint.workspace_id != record.workspace_id or checkpoint.project_id != record.project_id:
+                raise WorkspaceError("checkpoint authority does not match workspace")
+            if checkout.head != checkpoint.head or record.branch != checkpoint.branch:
+                raise WorkspaceError("checkpoint source HEAD or branch no longer matches workspace")
+            if self._git(checkout.path, "status", "--porcelain", "--untracked-files=all").stdout:
+                raise WorkspaceError("checkpoint restore requires a clean workspace")
+            self._identity_check(project, checkout.path)
+            staged = self._verified_artifact(root / "staged.patch", checkpoint.staged_sha256)
+            unstaged = self._verified_artifact(root / "unstaged.patch", checkpoint.unstaged_sha256)
+            untracked = self._verified_artifact(root / "untracked.tar", checkpoint.untracked_sha256)
+            self._apply_patch(checkout.path, staged, index=True)
+            self._apply_patch(checkout.path, unstaged, index=False)
+            self._extract_untracked(checkout.path, untracked, checkpoint.untracked_files)
+            return {"workspace_id": workspace_id, "checkpoint_id": checkpoint_id, "restored": True}
+
     def _status(self, record: WorkspaceRecord) -> dict[str, Any]:
         row = record.to_dict()
         try:
@@ -245,6 +372,94 @@ class GitWorkspaces:
         if project.workspace is None:
             raise WorkspaceError(f"project {project_id!r} does not declare workspace policy")
         return project
+
+    def _available(self, record: WorkspaceRecord) -> tuple[RegisteredCheckout, ProjectAdapter]:
+        project = self._project(record.project_id)
+        checkout = self._checkout_by_path(record.project_id, record.path)
+        if self._branch(checkout.path) != record.branch:
+            raise WorkspaceError("workspace branch identity changed")
+        return checkout, project
+
+    def _identity_check(self, project: ProjectAdapter, path: Path) -> None:
+        assert project.workspace is not None
+        result = subprocess.run(project.workspace.identity_check, cwd=path, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            raise WorkspaceError("workspace identity check failed")
+
+    @classmethod
+    def _git_bytes(cls, path: Path, *arguments: str) -> bytes:
+        try:
+            result = subprocess.run(["git", "-C", str(path), *arguments], capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError) as error:
+            raise WorkspaceError("Git checkpoint operation failed") from error
+        if result.returncode != 0:
+            raise WorkspaceError(result.stderr.decode(errors="replace").strip() or "Git checkpoint operation failed")
+        return result.stdout
+
+    @classmethod
+    def _untracked(cls, path: Path) -> tuple[str, ...]:
+        raw = cls._git_bytes(path, "ls-files", "-z", "--others", "--exclude-standard")
+        try:
+            files = tuple(item.decode() for item in raw.split(b"\0") if item)
+        except UnicodeDecodeError as error:
+            raise WorkspaceError("untracked checkpoint paths must be UTF-8") from error
+        if len(files) > MAX_UNTRACKED_FILES or any(Path(item).is_absolute() or ".." in Path(item).parts for item in files):
+            raise WorkspaceError("untracked checkpoint manifest exceeds its safety bounds")
+        return files
+
+    @staticmethod
+    def _archive_untracked(root: Path, files: tuple[str, ...]) -> bytes:
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w") as archive:
+            for relative in files:
+                source = root / relative
+                try:
+                    metadata = source.lstat()
+                except OSError as error:
+                    raise WorkspaceError("untracked checkpoint file disappeared") from error
+                if not source.is_file() or source.is_symlink() or metadata.st_size > MAX_CHECKPOINT_BYTES:
+                    raise WorkspaceError("untracked checkpoint entries must be bounded regular files")
+                archive.add(source, arcname=relative, recursive=False)
+                if buffer.tell() > MAX_CHECKPOINT_BYTES:
+                    raise WorkspaceError("untracked checkpoint archive exceeds its byte bound")
+        return buffer.getvalue()
+
+    @staticmethod
+    def _extract_untracked(root: Path, content: bytes, expected: tuple[str, ...]) -> None:
+        with tarfile.open(fileobj=io.BytesIO(content), mode="r:") as archive:
+            members = archive.getmembers()
+            if tuple(member.name for member in members) != expected:
+                raise WorkspaceError("checkpoint archive does not match its manifest")
+            for member in members:
+                target = (root / member.name).resolve(strict=False)
+                if root.resolve() not in target.parents or member.issym() or member.islnk() or not member.isfile():
+                    raise WorkspaceError("checkpoint archive contains an unsafe entry")
+            archive.extractall(root, members=members, filter="data")
+
+    @classmethod
+    def _apply_patch(cls, root: Path, content: bytes, *, index: bool) -> None:
+        if not content:
+            return
+        arguments = ["git", "-C", str(root), "apply"]
+        if index:
+            arguments.append("--index")
+        result = subprocess.run(arguments, input=content, capture_output=True, timeout=30)
+        if result.returncode != 0:
+            raise WorkspaceError(result.stderr.decode(errors="replace").strip() or "checkpoint patch failed")
+
+    @staticmethod
+    def _verified_artifact(path: Path, digest: str) -> bytes:
+        try:
+            content = path.read_bytes()
+        except OSError as error:
+            raise WorkspaceError("checkpoint artifact is unavailable") from error
+        if GitWorkspaces._digest(content) != digest:
+            raise WorkspaceError("checkpoint artifact digest mismatch")
+        return content
+
+    @staticmethod
+    def _digest(content: bytes) -> str:
+        return "sha256:" + hashlib.sha256(content).hexdigest()
 
     def _checkout_by_path(self, project_id: str, path: Path) -> RegisteredCheckout:
         resolved = path.resolve(strict=True)

@@ -62,6 +62,11 @@ def parser() -> argparse.ArgumentParser:
     workspace_adopt.add_argument("name")
     workspace_reap = workspace_subcommands.add_parser("reap")
     workspace_reap.add_argument("workspace_id")
+    workspace_checkpoint = workspace_subcommands.add_parser("checkpoint")
+    workspace_checkpoint.add_argument("workspace_id")
+    workspace_restore = workspace_subcommands.add_parser("restore")
+    workspace_restore.add_argument("workspace_id")
+    workspace_restore.add_argument("checkpoint_id")
     job = subcommands.add_parser("job")
     job_subcommands = job.add_subparsers(dest="job_command", required=True)
     start = job_subcommands.add_parser("start")
@@ -193,11 +198,25 @@ def main() -> None:
             },
             "agent-control",
         )
-    elif arguments.command == "workspace":
+    elif arguments.command == "workspace" and arguments.workspace_command == "reap":
         request = _request(
             "workspace.reap",
             "git-workspaces",
             {"workspace_id": arguments.workspace_id},
+            "agent-control",
+        )
+    elif arguments.command == "workspace" and arguments.workspace_command == "checkpoint":
+        request = _request(
+            "workspace.checkpoint",
+            "git-workspaces",
+            {"workspace_id": arguments.workspace_id},
+            "agent-control",
+        )
+    elif arguments.command == "workspace":
+        request = _request(
+            "workspace.restore",
+            "git-workspaces",
+            {"workspace_id": arguments.workspace_id, "checkpoint_id": arguments.checkpoint_id},
             "agent-control",
         )
     elif arguments.command == "job" and arguments.job_command == "start":
