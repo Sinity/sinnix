@@ -91,6 +91,9 @@ read -r -d '' SUMMARY_JS <<'JS' || true
         ? [index]
         : []
     ),
+    canvas_turns: turns.flatMap((turn, index) =>
+      turn.querySelector('[data-testid="writing-block-container"]') ? [index] : []
+    ),
     text_characters: turns.reduce((total, turn) => total + (turn.innerText || '').trim().length, 0),
     extracted_at: new Date().toISOString(),
   };
@@ -159,6 +162,18 @@ transcript_js() {
         .filter(link => link.text || link.href));
       const attachmentNodes = [...turn.querySelectorAll('[data-testid*="file"], [data-testid*="attachment"], [data-testid*="library"]')];
       const attachments = unique(attachmentNodes.map(attachment));
+      const canvases = [...turn.querySelectorAll('[data-testid="writing-block-container"]')].map((block, canvasIndex) => {
+        const blockText = (block.innerText || '').trim();
+        const heading = block.querySelector('h1, h2');
+        const offset = blockText ? text.indexOf(blockText) : -1;
+        return {
+          index: canvasIndex,
+          block_id: block.id || null,
+          title: heading ? compact(heading.innerText) : null,
+          text_characters: blockText.length,
+          text_offset: offset >= 0 ? offset : null,
+        };
+      });
       return {
         index: messageStart + offset,
         message_id: turn.dataset.messageId || turn.closest('[data-turn-id]')?.dataset.turnId || null,
@@ -169,6 +184,7 @@ transcript_js() {
         text_truncated: textStart > 0 || textEnd < text.length,
         links,
         attachments,
+        canvases,
       };
     }),
   };
@@ -213,6 +229,7 @@ render_markdown() {
       .text,
       (if .text_truncated then "\n*Text is paged. Continue at character " + ((.text_offset + (.text | length)) | tostring) + ".*" else "" end),
       (if (.attachments | length) > 0 then "\nAttachments: " + ([.attachments[] | (.label // .testid // "unlabeled attachment")] | join("; ")) else "" end),
+      (if ((.canvases // []) | length) > 0 then "\nCanvases: " + ([.canvases[] | ((.title // "untitled canvas") + " (" + (.text_characters | tostring) + " chars, inline in turn text" + (if .text_offset != null then " at offset " + (.text_offset | tostring) else "" end) + ")")] | join("; ")) else "" end),
       (if (.links | length) > 0 then "\nLinks: " + ([.links[] | .href] | join(" ")) else "" end),
       ""
     )
