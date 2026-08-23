@@ -651,6 +651,79 @@ def test_workspace_status_exposes_branch_drift_and_dirty_state(tmp_path: Path) -
     assert not observed["identity_matches"]
 
 
+def test_workspace_reap_forgets_missing_and_removes_only_clean_contained_managed_worktrees(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    missing = service.workspaces.create(
+        project_id="fixture", name="missing-lane", branch="feature/missing-lane", base="HEAD"
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "worktree", "remove", missing["path"]],
+        check=True,
+        capture_output=True,
+    )
+
+    forgotten = service.dispatch(
+        request(
+            "workspace.reap",
+            "git-workspaces",
+            {"workspace_id": missing["workspace_id"]},
+            "operator",
+        )
+    )
+    clean = service.workspaces.create(
+        project_id="fixture", name="clean-lane", branch="feature/clean-lane", base="HEAD"
+    )
+    reaped = service.workspaces.reap(clean["workspace_id"])
+
+    assert forgotten.ok and forgotten.payload is not None
+    assert forgotten.payload.inline["relationship_only"]
+    assert reaped["reaped"] and not reaped["relationship_only"]
+    assert not Path(clean["path"]).exists()
+    assert service.workspaces.list("fixture") == {"workspaces": []}
+
+
+def test_workspace_reap_preserves_dirty_divergent_and_adopted_worktrees(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    dirty = service.workspaces.create(
+        project_id="fixture", name="dirty-lane", branch="feature/dirty-lane", base="HEAD"
+    )
+    dirty_path = Path(dirty["path"])
+    (dirty_path / "operator.txt").write_text("preserve\n")
+    divergent = service.workspaces.create(
+        project_id="fixture", name="divergent-lane", branch="feature/divergent-lane", base="HEAD"
+    )
+    divergent_path = Path(divergent["path"])
+    (divergent_path / "committed.txt").write_text("unique\n")
+    subprocess.run(["git", "-C", str(divergent_path), "add", "committed.txt"], check=True)
+    subprocess.run(
+        [
+            "git", "-C", str(divergent_path), "-c", "user.name=Fixture", "-c",
+            "user.email=fixture@example.test", "commit", "--quiet", "-m", "diverge",
+        ],
+        check=True,
+    )
+    external = tmp_path / "external-reap"
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "worktree", "add", "-b", "feature/external-reap", str(external), "HEAD"],
+        check=True,
+        capture_output=True,
+    )
+    checkout = next(item for item in service.projects.checkouts("fixture") if item.path == external)
+    adopted = service.workspaces.adopt(project_id="fixture", checkout_id=checkout.checkout_id, name="adopted-reap")
+
+    for workspace_id in (dirty["workspace_id"], divergent["workspace_id"], adopted["workspace_id"]):
+        with pytest.raises(ValueError):
+            service.workspaces.reap(workspace_id)
+
+    assert (dirty_path / "operator.txt").read_text() == "preserve\n"
+    assert divergent_path.is_dir()
+    assert external.is_dir()
+
+
 def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: Path) -> None:
     """Anti-vacuity: typed contracts must reach GenericJobs, not a second controller."""
     write_adapter(tmp_path)

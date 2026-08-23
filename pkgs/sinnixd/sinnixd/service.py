@@ -197,6 +197,11 @@ class SinnixdService:
                 checkout_id=self._job_argument(arguments, "checkout_id"),
                 name=self._job_argument(arguments, "name"),
             )
+        if operation == "workspace.reap":
+            if principal not in {"agent-control", "operator"}:
+                raise ValueError("workspace reap requires agent-control or operator principal")
+            assert self.workspaces is not None
+            return self.workspaces.reap(self._single_workspace_id(arguments, "workspace.reap"))
         if operation == "job.start":
             project_id = self._job_argument(arguments, "project_id")
             operation_name = self._job_argument(arguments, "operation")
