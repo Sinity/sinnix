@@ -361,7 +361,7 @@ def test_task_reads_resolve_catalog_projects_and_use_readonly_fixed_argv(tmp_pat
     (
         ("task.claim", {"task_id": "fixture-1"}, ("update", "fixture-1", "--claim")),
         ("task.note", {"task_id": "fixture-1", "text": "append this"}, ("note", "fixture-1", "append this")),
-        ("task.relate", {"task_id": "fixture-1", "related_task_id": "fixture-2"}, ("link", "fixture-1", "fixture-2", "--type", "related")),
+        ("task.relate", {"task_id": "fixture-1", "related_task_id": "fixture-2"}, ("dep", "relate", "fixture-1", "fixture-2")),
         ("task.complete", {"task_id": "fixture-1", "reason": "verified"}, ("close", "fixture-1", "--reason", "verified")),
         ("task.release", {"task_id": "fixture-1", "reason": "stopped", "if_assignee": "worker"}, ("unclaim", "fixture-1", "--reason", "stopped", "--if-assignee", "worker")),
         ("task.reconcile", {}, ("sync", "--no-adopt")),

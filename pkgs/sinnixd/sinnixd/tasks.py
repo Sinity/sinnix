@@ -119,11 +119,10 @@ class TaskService:
             result = self._run(
                 project,
                 (
-                    "link",
+                    "dep",
+                    "relate",
                     self._task_id(arguments["task_id"]),
                     self._task_id(arguments["related_task_id"], "related_task_id"),
-                    "--type",
-                    "related",
                 ),
                 readonly=False,
             )
