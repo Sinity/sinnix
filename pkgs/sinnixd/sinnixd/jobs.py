@@ -63,11 +63,11 @@ def _open_private_parent(path: Path) -> int:
     return parent_descriptor
 
 
-def _private_regular_artifact(descriptor: int, path: Path) -> None:
+def _private_regular_artifact(descriptor: int, path: Path, *, require_private_mode: bool = True) -> None:
     artifact = os.fstat(descriptor)
     if (
         artifact.st_uid != os.getuid()
-        or artifact.st_mode & 0o077
+        or (require_private_mode and artifact.st_mode & 0o077)
         or not stat.S_ISREG(artifact.st_mode)
         or artifact.st_nlink != 1
     ):
@@ -108,6 +108,32 @@ def _open_preallocated_private_artifact(path: Path) -> Any:
         os.close(descriptor)
         raise
     return os.fdopen(descriptor, "wb")
+
+
+def _read_private_artifact(path: Path, max_bytes: int, *, offset: int = 0) -> bytes | None:
+    """Read one bounded, private regular artifact without following a replacement link."""
+    try:
+        parent_descriptor = _open_private_parent(path)
+    except OSError:
+        return None
+    try:
+        try:
+            descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_descriptor)
+        except OSError:
+            return None
+        try:
+            _private_regular_artifact(descriptor, path, require_private_mode=False)
+            with os.fdopen(descriptor, "rb") as handle:
+                descriptor = -1
+                handle.seek(offset)
+                return handle.read(max_bytes + 1)
+        except OSError:
+            return None
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+    finally:
+        os.close(parent_descriptor)
 
 
 def _write_private_marker(path: Path) -> None:
@@ -769,12 +795,9 @@ class GenericJobs:
             raise ValueError(f"log range must use offset >= 0 and max_bytes between 1 and {MAX_LOG_BYTES}")
         with self.store.locked(job_id):
             record = self.store.load(job_id)
-        try:
-            with record.log_path.open("rb") as handle:
-                handle.seek(offset)
-                content = handle.read(max_bytes + 1)
-        except FileNotFoundError:
-            content = b""
+        content = _read_private_artifact(record.log_path, max_bytes, offset=offset)
+        if content is None:
+            raise JobResultError("job log artifact is unavailable")
         overflowed = record.log_path.with_suffix(".overflow").exists()
         return {
             "job_id": job_id,
@@ -792,19 +815,17 @@ class GenericJobs:
             record = self.store.load(job_id)
         if record.result_path is None:
             raise ValueError("job has no result artifact")
-        try:
-            with record.result_path.open("rb") as handle:
-                content = handle.read(MAX_RESULT_BYTES + 1)
-        except FileNotFoundError:
-            content = b""
+        content = _read_private_artifact(record.result_path, MAX_RESULT_BYTES)
+        if content is None:
+            raise JobResultError("job result artifact is unavailable")
         artifact = {
             "ref": f"sinnix://jobs/{job_id}/artifacts/result",
             "max_bytes": MAX_RESULT_BYTES,
             "kind": record.spec.result_kind,
         }
+        if len(content) > MAX_RESULT_BYTES or record.result_path.with_suffix(".overflow").exists():
+            raise JobResultError("job result exceeds the artifact limit")
         if record.spec.result_kind in {"json", "pytest"}:
-            if len(content) > MAX_RESULT_BYTES or record.result_path.with_suffix(".overflow").exists():
-                raise JobResultError("job JSON result exceeds the artifact limit")
             if len(content) > max_bytes:
                 raise JobResultLimitError("job JSON result exceeds the requested response limit")
             try:
@@ -916,6 +937,14 @@ class GenericJobs:
                     "observed_at": _timestamp(),
                 }
             return {"phase": "missing", "terminal": True, "systemd": dict(properties), "observed_at": _timestamp()}
+        if self._has_schema_v3_native_success(record, properties):
+            return {
+                "phase": "succeeded",
+                "terminal": True,
+                "systemd": dict(properties),
+                "result_evidence": "native-v3",
+                "observed_at": _timestamp(),
+            }
         active = properties.get("ActiveState", "unknown")
         if active in {"active", "activating", "reloading"}:
             phase = "running"
@@ -949,16 +978,13 @@ class GenericJobs:
         return False
 
     @staticmethod
-    def _has_authoritative_result(record: GenericJobRecord) -> bool:
-        if record.result_path is None or not _completion_marker_path(record.log_path).is_file():
+    def _has_valid_result_artifact(record: GenericJobRecord) -> bool:
+        if record.result_path is None:
             return False
-        try:
-            with record.result_path.open("rb") as handle:
-                content = handle.read(MAX_RESULT_BYTES + 1)
-        except OSError:
-            return False
+        content = _read_private_artifact(record.result_path, MAX_RESULT_BYTES)
         if (
-            not content
+            content is None
+            or not content
             or len(content) > MAX_RESULT_BYTES
             or record.result_path.with_suffix(".overflow").exists()
         ):
@@ -972,6 +998,22 @@ class GenericJobs:
         except (UnicodeDecodeError, json.JSONDecodeError):
             return False
         return isinstance(value, dict)
+
+    def _has_authoritative_result(self, record: GenericJobRecord) -> bool:
+        return _completion_marker_path(record.log_path).is_file() and self._has_valid_result_artifact(record)
+
+    def _has_schema_v3_native_success(self, record: GenericJobRecord, properties: Mapping[str, str]) -> bool:
+        return (
+            record.spec.kind == "attested-agent"
+            and record.spec.result_kind == "last-message"
+            and record.cancel_requested_at is None
+            and properties.get("ActiveState") == "inactive"
+            and properties.get("Result") == "success"
+            and record.state.get("lifecycle") == "succeeded"
+            and record.state.get("exit_status") == 0
+            and not isinstance(record.state.get("exit_status"), bool)
+            and self._has_valid_result_artifact(record)
+        )
 
     @staticmethod
     def _with_state(record: GenericJobRecord, state: Mapping[str, Any]) -> GenericJobRecord:

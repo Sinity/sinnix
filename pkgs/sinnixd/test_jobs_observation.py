@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from sinnixd.jobs import (
     GenericJobSpec,
     GenericJobStore,
     GenericJobs,
+    JobResultError,
     SystemdJobError,
     capture_main,
 )
@@ -293,3 +295,107 @@ def test_capture_completion_marker_requires_zero_exit(
 
     assert returned == exit_code
     assert log_path.with_suffix(".complete").exists() is completed
+
+
+def test_schema_v3_native_success_reconciles_after_restart_without_exec_main_status(tmp_path: Path) -> None:
+    """Evidence harness: a retained inactive unit must retain schema-v3 native completion evidence."""
+    job_id = "74e64cb4-282e-4b27-b4b1-af052b268161"
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "SubState": "dead",
+            "Result": "success",
+        }
+    )
+    jobs = generic_jobs(tmp_path, systemd)
+    started = jobs.start(
+        GenericJobSpec(
+            kind="attested-agent",
+            command=("fixture",),
+            working_directory=str(tmp_path),
+            environment={},
+            principal="agent-control",
+            checkout={
+                "project_id": "fixture",
+                "project_path": str(tmp_path),
+                "checkout_id": "default",
+                "path": str(tmp_path),
+                "git_common_dir": str(tmp_path / ".git"),
+                "head": "a" * 40,
+            },
+            result_kind="last-message",
+        ),
+        job_id,
+    )
+    record_path = tmp_path / "state" / "jobs" / f"{job_id}.json"
+    record = jobs.store.load(started["job_id"])
+    assert record.result_path is not None
+    record.result_path.write_text("native-agent-result")
+    legacy = record.to_dict()
+    legacy["schema_version"] = 3
+    legacy["state"] = {
+        "phase": "running",
+        "terminal": False,
+        "lifecycle": "succeeded",
+        "exit_status": 0,
+        "observed_at": "2026-08-23T08:58:52+00:00",
+    }
+    record_path.write_text(json.dumps(legacy))
+
+    restarted = GenericJobs(systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.1)
+    reconciled = restarted.get(job_id)
+
+    assert reconciled["state"]["phase"] == "succeeded"
+    assert reconciled["state"]["terminal"]
+    assert reconciled["state"]["result_evidence"] == "native-v3"
+    assert restarted.result(job_id)["content"] == "native-agent-result"
+
+
+@pytest.mark.parametrize("artifact", ("log", "result"))
+def test_malformed_artifacts_fail_closed_without_exposing_private_paths(tmp_path: Path, artifact: str) -> None:
+    """Evidence harness: a malformed durable artifact must not expose its path through retrieval."""
+    jobs = generic_jobs(tmp_path, FakeSystemdJobs())
+    started = jobs.start(
+        GenericJobSpec(
+            kind="foreground-command",
+            command=("fixture",),
+            working_directory=str(tmp_path),
+            environment={},
+            result_kind="last-message",
+        )
+    )
+    record = jobs.store.load(started["job_id"])
+    path = record.log_path if artifact == "log" else record.result_path
+    assert path is not None
+    path.unlink(missing_ok=True)
+    path.mkdir()
+
+    with pytest.raises(JobResultError) as error:
+        if artifact == "log":
+            jobs.logs(started["job_id"])
+        else:
+            jobs.result(started["job_id"])
+
+    assert str(path) not in str(error.value)
+
+
+def test_log_reader_passes_the_requested_bounded_range_to_the_safe_artifact_reader(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Anti-vacuity: log offsets must seek before reading instead of expanding the read bound."""
+    jobs = generic_jobs(tmp_path, FakeSystemdJobs())
+    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    observed: list[tuple[int, int]] = []
+
+    def read_window(path: Path, max_bytes: int, *, offset: int = 0) -> bytes:
+        observed.append((offset, max_bytes))
+        assert path == jobs.store.load(started["job_id"]).log_path
+        return b"range"
+
+    monkeypatch.setattr("sinnixd.jobs._read_private_artifact", read_window)
+
+    log = jobs.logs(started["job_id"], offset=4096, max_bytes=5)
+
+    assert observed == [(4096, 5)]
+    assert log["content"] == "range"
