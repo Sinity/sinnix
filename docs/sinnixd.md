@@ -27,6 +27,7 @@ agentctl workspace finish <workspace-id>
 agentctl workspace dispose <workspace-id>
 agentctl workspace reap <workspace-id>
 agentctl job start sinnix lint
+agentctl job start sinnix sinex_cache_prebuild
 agentctl job start sinex check_default --parameters-json '{"full":true,"package":["sinexd","xtask"]}'
 agentctl job start polylogue verify_quick --workspace <workspace-id>
 agentctl job get <job-id>
@@ -41,7 +42,7 @@ agentctl agent --project sinnix --checkout default --prompt-file ./prompt.md --b
 
 The service passes a declarative, non-empty `sinnix.services.sinnixd.projectRoots` list as repeated `--project-root` arguments. It defaults to the Sinnix, Polylogue, and Sinex roots. Sinnixd loads only those `.agentctl/project.toml` adapters and does not scan arbitrary directories. Each descriptor is schema-versioned, identifies its repository root markers, declares the execution environment, and publishes named operation metadata.
 
-`job start` accepts a project ID, one declared operation name, an optional workspace binding, and an optional JSON parameters object. It never accepts an arbitrary command. Its optional workspace binding launches in that registered checkout and durably records the checkout ID and exact starting HEAD, so later publication can reject stale verification. Declared operations and internal synthetic foreground commands construct the same durable generic-job spec, record, transient user `.service` launch, log artifact, reconciliation, wait, and cancellation route. The only additional public starts are the constrained typed contracts below.
+`job start` accepts a project ID, one declared operation name, an optional workspace binding, and an optional JSON parameters object. It never accepts an arbitrary command. Its optional workspace binding launches in that registered checkout and durably records the checkout ID and exact starting HEAD, so later publication can reject stale verification. Declared operations and internal synthetic foreground commands construct the same durable generic-job spec, record, transient user `.service` launch, log artifact, reconciliation, wait, and cancellation route. A descriptor may set a bounded `timeout_seconds`; that becomes the transient service limit, rather than a caller-controlled duration. The only additional public starts are the constrained typed contracts below.
 
 ## Declared-operation timeout contract
 

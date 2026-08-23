@@ -321,13 +321,13 @@ def write_process(
 def fake_proc(tmp_path: Path) -> Path:
     proc = tmp_path / "proc"
     proc.mkdir()
-    agent_scope = (
+    agent_job = (
         "/user.slice/user-1000.slice/user@1000.service/agent.slice/"
-        "sinnix-agent-bd-1786988205604048771-1061646.scope"
+        "sinnixd-job-fixture-bd.service"
     )
     # The measured C3 shape: modest resident set, enormous swap.
     write_process(
-        proc, 101, "bd", 8_388_608, 20_316_160, agent_scope, "bd list --limit 500"
+        proc, 101, "bd", 8_388_608, 20_316_160, agent_job, "bd list --limit 500"
     )
     # Bigger resident set, no swap at all -- what an RSS-ordered table calls
     # the worst offender.
@@ -347,7 +347,7 @@ def fake_proc(tmp_path: Path) -> Path:
         6_291_456,
         1_048_576,
         "/user.slice/user-1000.slice/user@1000.service/build.slice/"
-        "sinnix-build-cargo-1786988205604048771-9.scope",
+        "sinnixd-job-fixture-build.service",
         "rustc --edition 2021 src/main.rs",
     )
     # A tool invocation placed inside a build: cheap to re-run in isolation,
@@ -359,7 +359,7 @@ def fake_proc(tmp_path: Path) -> Path:
         2_097_152,
         0,
         "/user.slice/user-1000.slice/user@1000.service/nix-build.slice/"
-        "sinnix-nix-build-nix-1786988205604048771-11.scope",
+        "sinnixd-job-fixture-nix.service",
         "git fetch --all",
     )
     # A kernel thread: no VmRSS at all, and it must not appear.
@@ -397,7 +397,7 @@ def test_cheapness_says_what_a_kill_costs_not_how_big_it_is(fake_proc: Path) -> 
     assert rows["rustc"].cheapness == pressure.CHEAPNESS_EXPENSIVE
     assert rows["chrome"].cheapness == pressure.CHEAPNESS_SESSION
     assert rows["git"].cheapness == pressure.CHEAPNESS_EXPENSIVE
-    assert rows["bd"].unit.endswith(".scope")
+    assert rows["bd"].unit == "sinnixd-job-fixture-bd.service"
     assert rows["bd"].slice_unit == "agent.slice"
     # Version-suffixed interpreters and prefix-named model servers are the two
     # shapes an exact-name set silently misses; both are C2 victims on the
@@ -418,31 +418,8 @@ def test_cheapness_says_what_a_kill_costs_not_how_big_it_is(fake_proc: Path) -> 
     )
 
 
-def test_scopes_resolve_to_lanes_a_person_can_choose_between() -> None:
-    """ "Which lane is expendable" is unanswerable about
-    `sinnix-agent-1785530197414290568-596681.scope`.
-
-    Mutation: print the unit name instead of resolving it and every assertion
-    below reads back the raw scope.
-    """
-    assert (
-        pressure.lane_of("sinnix-agent-bd-1786988205604048771-1061646.scope")
-        == "agent · bd"
-    )
-    # The live scope's own checkout wins where the reducer has it: two agent
-    # lanes differ by where they are working, not by the binary they ran.
-    assert (
-        pressure.lane_of(
-            "sinnix-build-cargo-178698820560404877-9.scope",
-            scopes_by_unit={
-                "sinnix-build-cargo-178698820560404877-9.scope": {
-                    "command": "xtask test",
-                    "project": "sinex",
-                }
-            },
-        )
-        == "build · sinex"
-    )
+def test_agentctl_services_resolve_to_human_job_lanes() -> None:
+    """The job record carries the identity an operator can act on."""
     assert (
         pressure.lane_of(
             "sinnixd-job-abc.service",
@@ -465,7 +442,6 @@ def test_scopes_resolve_to_lanes_a_person_can_choose_between() -> None:
 
 INVENTORY: dict[str, Any] = {
     "schema": "sinnix-runtime-inventory-v1",
-    "commandClasses": {name: {} for name in ("agent", "build", "nix-build")},
     "surfaces": {
         "borgbackup-job-realm": {
             "unit": "borgbackup-job-realm.service",
@@ -527,20 +503,10 @@ def test_park_is_offered_exactly_where_the_action_api_resolves_the_unit() -> Non
     assert "park freezes a running cgroup" in idle
 
 
-def test_the_hog_table_offers_scope_stop_and_names_the_verb_it_lacks(
+def test_the_hog_table_offers_admitted_process_stop_and_names_the_gap(
     fake_proc: Path,
 ) -> None:
-    """A scope button may exist only where the action API's own name-shape
-    admission accepts the unit; a per-process stop button may exist only on
-    a re-runnable row whose live cgroup the action API would actually admit
-    (sinnix-mble).
-
-    Mutation: emit a stop button for any row with a unit and the app-scope
-    Chrome row gets one the API answers 403 to; drop the missing-verb prose and
-    the page silently implies the whole-scope stop is the only granularity;
-    offer the process button on a row outside the admitted cgroups and it
-    answers 403 too.
-    """
+    """A process button exists only when the action API would admit it."""
     rows = {row.comm: row for row in pressure.scan_processes(limit=4, proc=fake_proc)}
     admitted = process_admitted_slices(INVENTORY)
     # agent.slice and build.slice are admitted unconditionally, with no
@@ -548,26 +514,24 @@ def test_the_hog_table_offers_scope_stop_and_names_the_verb_it_lacks(
     # depend on the inventory carrying it.
     assert admitted == {"agent.slice", "build.slice"}
 
-    cheap = hog_row(rows["bd"], {}, {}, admitted)
-    assert "act('stop','scope','sinnix-agent-bd-" in cheap
-    assert "stop the whole scope" in cheap
+    cheap = hog_row(rows["bd"], {}, admitted)
     # bd is re-runnable AND in agent.slice, which is admitted: it gets the
     # process button, carrying exactly the pid/start_ticks this row observed.
     assert (
         f"act('stop','process',{{pid: {rows['bd'].pid}, "
         f"start_ticks: {rows['bd'].start_ticks}}},this)" in cheap
     )
-    assert "act('stop','scope'" not in hog_row(rows["chrome"], {}, {}, admitted)
+    assert "act('stop','process'" not in hog_row(rows["chrome"], {}, admitted)
     # rustc is classified EXPENSIVE (build.slice precedence over the command
     # name), not RERUNNABLE, so it never gets a process-stop button even
     # though build.slice is admitted.
-    assert "act('stop','process'" not in hog_row(rows["rustc"], {}, {}, admitted)
+    assert "act('stop','process'" not in hog_row(rows["rustc"], {}, admitted)
     # A re-runnable command outside every admitted slice (a bare `git`
     # running as some system.slice service, say) gets no button -- and the
     # row says why, rather than silently withholding it.
     outside_admission = replace(rows["bd"], slice_unit="system.slice", unit="")
     assert outside_admission.cheapness == pressure.CHEAPNESS_RERUNNABLE
-    outside_row = hog_row(outside_admission, {}, {}, admitted)
+    outside_row = hog_row(outside_admission, {}, admitted)
     assert "act('stop','process'" not in outside_row
     assert "no process-stop button" in outside_row
 

@@ -7,9 +7,8 @@ set -euo pipefail
 
 # Parkable set derives from the LIVE runtime inventory: every system-manager
 # backup-maintenance service is by declaration heavy, deferrable, and safe to
-# freeze. Reading the inventory at runtime is correct here (unlike the
-# retired static-class interpretation sinnix-scope did): the inventory IS the
-# current generation's contract and changes with it, so a new backup job is
+# freeze. Reading the inventory at runtime is correct here: the inventory IS
+# the current generation's contract and changes with it, so a new backup job is
 # parkable the moment it registers, with no second list to update. The
 # literal fallback covers a host where the inventory is unreadable.
 inventory_file="${SINNIX_RUNTIME_INVENTORY:-/etc/sinnix/runtime-inventory.json}"

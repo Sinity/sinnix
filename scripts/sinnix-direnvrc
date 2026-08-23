@@ -72,141 +72,6 @@ _sinnix_project_kind() {
   esac
 }
 
-_sinnix_path_without() {
-  local remove="$1"
-  local old_ifs="$IFS"
-  local part
-  local next=""
-  IFS=:
-  for part in $PATH; do
-    [ "$part" = "$remove" ] && continue
-    next="$next${next:+:}$part"
-  done
-  IFS="$old_ifs"
-  printf '%s' "$next"
-}
-
-_sinnix_write_scope_wrapper() {
-  local wrapper="$1"
-  cat > "$wrapper" <<'SINNIX_SCOPE_WRAPPER'
-#!/usr/bin/env bash
-set -euo pipefail
-
-# Command-to-class resolution for the classes that name their own commands
-# (runtime-defaults' `commandMatchers`). The case body below is rendered at
-# evaluation time by `renderDirenvrc` -- see modules/features/cli/core.nix --
-# so a wrapped command does not shell out to jq against the serialized
-# runtime inventory on every invocation.
-_sinnix_command_class() {
-  case "$1" in
-@SINNIX_COMMAND_CLASS_CASE@
-  esac
-}
-
-cmd="${0##*/}"
-case "$cmd" in
-  just)
-    # just is an orchestration frontend. Commands it launches (pytest, nix,
-    # cargo, etc.) are independently wrapped and retain their own build/lease
-    # classification; the frontend itself should not monopolize the lease.
-    class="background"
-    ;;
-  nix | nixos-rebuild)
-    class="nix-build"
-    if [ "$cmd" = nix ]; then
-      _runtime_class=""
-      if [ "${1:-}" = develop ]; then
-        _command=""
-        _awaiting_command=0
-        _skip_develop=1
-        for _arg in "$@"; do
-          if [ "$_skip_develop" = 1 ]; then
-            _skip_develop=0
-            continue
-          fi
-          if [ "$_awaiting_command" = 1 ]; then
-            _command="${_arg##*/}"
-            break
-          fi
-          case "$_arg" in
-            --command)
-              _awaiting_command=1
-              ;;
-            --command=*)
-              _command="${_arg#--command=}"
-              _command="${_command##*/}"
-              break
-              ;;
-          esac
-        done
-        if [ -n "$_command" ]; then
-          _runtime_class="$(_sinnix_command_class "$_command")"
-        fi
-      fi
-      if [ -n "$_runtime_class" ]; then
-        class="$_runtime_class"
-      fi
-    fi
-    ;;
-  polylogue | sqlite3 | duckdb) class="background" ;;
-  *) class="build" ;;
-esac
-
-_sinnix_scope_path_without_dir() {
-  local drop_dir="$1"
-  local input_path="$2"
-  local old_ifs="$IFS"
-  local part
-  local next=""
-  IFS=:
-  for part in $input_path; do
-    if [ "$part" = "$drop_dir" ]; then
-      continue
-    fi
-    if [ -z "$next" ]; then
-      next="$part"
-    else
-      next="$next:$part"
-    fi
-  done
-  IFS="$old_ifs"
-  printf '%s' "$next"
-}
-
-wrapper_dir="${SINNIX_SCOPE_WRAPPER_DIR:-}"
-if [ -z "$wrapper_dir" ]; then
-  wrapper_dir="$(cd -P -- "$(dirname -- "$0")" && pwd)"
-fi
-export PATH="$(_sinnix_scope_path_without_dir "$wrapper_dir" "${SINNIX_SCOPE_ORIGINAL_PATH:-$PATH}")"
-
-if [ -n "${SINNIX_SCOPE_WRAPPER_ACTIVE:-}" ]; then
-  cmd_path="$(command -v -- "$cmd" 2>/dev/null || true)"
-  if [ -z "$cmd_path" ]; then
-    echo "sinnix-scope wrapper: unable to locate unwrapped $cmd" >&2
-    exit 127
-  fi
-  exec "$cmd_path" "$@"
-fi
-
-export SINNIX_SCOPE_WRAPPER_ACTIVE=1
-
-scope_bin="${SINNIX_SCOPE_BIN:-}"
-if [ -z "$scope_bin" ]; then
-  scope_bin="$(command -v sinnix-scope 2>/dev/null || true)"
-fi
-# No checkout fallback: the launcher is generated (flake/launch.nix), so there
-# is no scripts/sinnix-scope to reach for when it is absent from PATH. An
-# unwrapped exec below is the honest outcome in that case.
-
-if [ -n "$scope_bin" ] && [ -x "$scope_bin" ]; then
-  exec "$scope_bin" "$class" -- "$cmd" "$@"
-fi
-
-exec "$cmd" "$@"
-SINNIX_SCOPE_WRAPPER
-  chmod +x "$wrapper"
-}
-
 _sinnix_setup_sinex_dev_cache() {
   local project_root="$1"
   local sinex_user
@@ -319,106 +184,18 @@ _sinnix_ensure_sinex_dev_watcher() {
   disown 2>/dev/null || true
 }
 
-_sinnix_project_scope_setup() {
+_sinnix_project_environment_setup() {
   local project_kind
   project_kind="$(_sinnix_project_kind)" || return 0
 
   local project_root
   project_root="$(_sinnix_project_root)" || return 0
 
-  local wrapper_dir
-  wrapper_dir="$(direnv_layout_dir)/sinnix-scope/bin"
-  mkdir -p "$wrapper_dir"
-  _sinnix_write_scope_wrapper "$wrapper_dir/.sinnix-scope-wrapper"
-
-  local commands=()
   case "$project_kind" in
     sinex)
       _sinnix_setup_sinex_dev_cache "$project_root"
-      commands=(
-        cargo cargo-nextest nextest
-        pytest py.test
-        nix nixos-rebuild
-        ninja cmake meson make just
-        git-annex xtask
-        sqlite3 duckdb
-      )
-      ;;
-    polylogue)
-      commands=(
-        pytest py.test uv
-        nix nixos-rebuild
-        make just
-        sqlite3 duckdb
-        polylogue
-      )
-      ;;
-    sinnix)
-      commands=(
-        nix nixos-rebuild
-        check just make
-        sqlite3 duckdb
-      )
-      ;;
-    lynchpin)
-      commands=(
-        pytest py.test uv
-        nix nixos-rebuild
-        make just
-        sqlite3 duckdb
-      )
-      ;;
-    rust-project)
-      commands=(
-        cargo cargo-nextest nextest
-        nix nixos-rebuild
-        make just ninja cmake meson
-        sqlite3 duckdb
-      )
-      ;;
-    python-project)
-      commands=(
-        pytest py.test uv
-        nix nixos-rebuild
-        make just
-        sqlite3 duckdb
-      )
-      ;;
-    web-project)
-      commands=(
-        npm pnpm yarn bun
-        nix nixos-rebuild
-        make just
-        sqlite3 duckdb
-      )
-      ;;
-    data-project | realm-project)
-      commands=(
-        nix nixos-rebuild
-        cargo cargo-nextest nextest
-        pytest py.test uv
-        npm pnpm yarn bun
-        make just ninja cmake meson
-        sqlite3 duckdb
-      )
       ;;
   esac
-
-  local command_name
-  for command_name in "${commands[@]}"; do
-    ln -sfn .sinnix-scope-wrapper "$wrapper_dir/$command_name"
-  done
-
-  export SINNIX_SCOPE_ORIGINAL_PATH="$(_sinnix_path_without "$wrapper_dir")"
-  export SINNIX_SCOPE_WRAPPER_DIR="$wrapper_dir"
-  export PATH="$SINNIX_SCOPE_ORIGINAL_PATH"
-  if declare -F PATH_add >/dev/null 2>&1; then
-    PATH_add "$wrapper_dir"
-  else
-    export PATH="$wrapper_dir:$PATH"
-  fi
-  export SINNIX_SCOPE_WRAPPER_PROJECT="$project_kind"
-  export SINNIX_SCOPE_WRAPPER_PROJECT_ROOT="$project_root"
 }
 
 # nix-direnv (3.1.2) registers a GC root for every flake input by shelling
@@ -471,12 +248,12 @@ if declare -F use_flake >/dev/null 2>&1 && ! declare -F _sinnix_original_use_fla
     # (direnv reload, a .envrc that calls it more than once) must not flush
     # a previous call's leftover queue against this call's layout dir.
     _sinnix_flake_input_roots=()
-    _sinnix_project_scope_setup
+    _sinnix_project_environment_setup
     _sinnix_original_use_flake "$@"
     local status=$?
     _sinnix_flush_flake_input_roots
     if [ "$status" -eq 0 ]; then
-      _sinnix_project_scope_setup
+      _sinnix_project_environment_setup
     fi
     return "$status"
   }

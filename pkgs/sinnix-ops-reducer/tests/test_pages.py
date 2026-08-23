@@ -1,19 +1,9 @@
 """Behaviour checks for the hub pages the reducer renders.
 
-Two things here are real contracts rather than restatements of the code
-(carried over from an earlier render-on-timer test suite when the renderer
-moved into this package):
-
-  1. The scope command reducer is a parser. `sinnix-scope` hands systemd a
-     launch line wrapped in `env`, assignments, `nice`, `ionice`, a supervisor
-     re-exec and possibly `nix develop --command`; the workload view is only
-     worth reading if what comes out the other side is the command the operator
-     typed. Every case below is a shape observed on the live host.
-
-  2. The control surface mirrors the action API's admission rule: a lifecycle
-     button may exist only where the runtime inventory declares
-     `observe.restartable`. If these two ever disagree the hub starts offering
-     buttons the action API answers with 403.
+The control surface mirrors the action API's admission rule: a lifecycle
+button may exist only where the runtime inventory declares
+`observe.restartable`. If these two ever disagree the hub starts offering
+buttons the action API answers with 403.
 """
 
 from __future__ import annotations
@@ -21,15 +11,11 @@ from __future__ import annotations
 from typing import Any
 
 from sinnix_ops_reducer import pages
-from sinnix_ops_reducer.pages.probes import project_of, scope_class, shorten_command
+from sinnix_ops_reducer.pages.probes import project_of
 from sinnix_ops_reducer.pages.services import lifecycle_controls, policy_controls
-from sinnix_ops_reducer.pages.work import scope_block
-
-CLASSES = ["nix-build", "background", "build", "agent"]
 
 INVENTORY: dict[str, Any] = {
     "schema": "sinnix-runtime-inventory-v1",
-    "commandClasses": {name: {} for name in CLASSES},
     "surfaces": {
         "controllable": {
             "unit": "controllable.service",
@@ -61,52 +47,10 @@ MANIFEST: dict[str, Any] = {
 }
 
 
-def test_shorten_command_reduces_launch_wrappers() -> None:
-    assert (
-        shorten_command(
-            "/nix/store/aaa-bash-5.3/bin/bash /nix/store/bbb-sinnix-scope-script "
-            "--internal-supervise -- nice -n 5 ionice -c 2 -n 7 -- xtask test -p sinexd"
-        )
-        == "xtask test -p sinexd"
-    )
-    assert (
-        shorten_command(
-            "/nix/store/aaa-bash-5.3/bin/bash /nix/store/bbb-sinnix-scope-script "
-            "--internal-supervise -- nice -n 10 ionice -c 3 -- nix develop --command xtask test"
-        )
-        == "xtask test"
-    )
-    assert (
-        shorten_command(
-            "/nix/store/ccc-coreutils/bin/env SINNIX_AGENT_SCOPED=1 SINNIX_AGENT_SCOPE_UNIT= "
-            "/home/operator/.local/state/codex/launch.sh --profile lean"
-        )
-        == "launch.sh --profile lean"
-    )
-    assert (
-        shorten_command(
-            "nats-server -js -c /var/cache/project/dev-state/config/nats/nats.conf"
-        )
-        == "nats-server -js -c …/nats/nats.conf"
-    )
-    assert shorten_command(None) == "unnamed command"
-
-
 def test_project_of_names_checkouts_and_worktrees() -> None:
     assert project_of("/realm/project/sinex/crates") == "sinex"
     assert project_of("/realm/worktrees/agent-123/src") == "agent-123"
     assert project_of("/var/tmp") is None
-
-
-def test_scope_class_prefers_the_longest_matching_class() -> None:
-    ordered = sorted(CLASSES, key=len, reverse=True)
-    assert (
-        scope_class("sinnix-nix-build-1786553380794796579-1234.scope", ordered)
-        == "nix-build"
-    )
-    assert (
-        scope_class("sinnix-build-1786553380794796579-1234.scope", ordered) == "build"
-    )
 
 
 def test_every_route_renders_a_complete_document_without_a_snapshot() -> None:
@@ -177,53 +121,6 @@ def test_policy_controls_only_offer_declared_properties() -> None:
     assert "act('reset_policy','unit','x.service'" in controls
 
 
-def test_scope_controls_distinguish_plain_scopes_from_attested_jobs() -> None:
-    plain = scope_block(
-        {
-            "unit": "sinnix-build-123-456.scope",
-            "manager": "user",
-            "job_id": None,
-            "class": "build",
-            "slice": "build.slice",
-            "memory": None,
-            "memory_high": None,
-            "memory_max": None,
-            "elapsed": 5.0,
-            "command": "xtask test",
-            "cwd": "/realm/project/sinex",
-            "project": "sinex",
-        },
-        {},
-        {},
-    )
-    assert "act('stop','scope','sinnix-build-123-456.scope'" in plain
-    job = scope_block(
-        {
-            "unit": "sinnixd-job-abc.service",
-            "manager": "user",
-            "job_id": "abc",
-            "class": None,
-            "slice": "agent.slice",
-            "memory": None,
-            "memory_high": None,
-            "memory_max": None,
-            "elapsed": 5.0,
-            "command": "claude",
-            "cwd": None,
-            "project": None,
-        },
-        {
-            "abc": {
-                "contract": {"backend": "claude", "model": "sonnet"},
-                "checkout": {"path": "/realm/worktrees/abc"},
-            }
-        },
-        {},
-    )
-    assert "act('interrupt','job_id','abc'" in job
-    assert "act('stop','scope'" not in job
-
-
 def test_work_page_uses_agentctl_lifecycle_and_keeps_live_job_interrupts() -> None:
     snapshot = {
         "state": {
@@ -237,12 +134,22 @@ def test_work_page_uses_agentctl_lifecycle_and_keeps_live_job_interrupts() -> No
                         "checkout": {"path": "/realm/project/sinnix"},
                         "contract": {"backend": "codex", "model": "fixture", "effort": "high"},
                         "state": {"phase": "running", "terminal": False},
-                    }
+                    },
+                    {
+                        "job_id": "prebuild-1",
+                        "kind": "declared-operation",
+                        "operation": "sinex_cache_prebuild",
+                        "project_id": "sinnix",
+                        "created_at": "2026-08-23T10:00:00Z",
+                        "state": {"phase": "running", "terminal": False},
+                    },
                 ],
                 "truncated": False,
             }
         }
     }
     html = pages.render("/work/", MANIFEST, snapshot, INVENTORY, "fixture")
-    assert "AgentCTL attested jobs" in html
+    assert "AgentCTL jobs, recently" in html
+    assert "sinex_cache_prebuild" in html
     assert "act('interrupt','job_id','agent-1'" in html
+    assert "act('interrupt','job_id','prebuild-1'" not in html

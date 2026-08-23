@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import secrets
 import signal
 import subprocess
@@ -24,55 +23,27 @@ from .reducer import now_iso
 # migration idempotent -- see ActionService._migrate_legacy_receipts.
 RECEIPTS_MIGRATION_SCHEMA = "sinnix-ops-action-receipts-migration-v1"
 
-# Properties captured for a receipt's previous_state/resulting_state on
-# unit and scope targets -- the target's own live systemd shape, not the
+# Properties captured for a receipt's previous_state/resulting_state on unit
+# targets -- the target's own live systemd shape, not the
 # whole reducer snapshot (see ActionService._target_state).
 UNIT_STATE_PROPERTIES = ("LoadState", "ActiveState", "SubState")
-
-# Ad-hoc `sinnix-scope` transient scopes (build.slice/agent.slice/etc placements
-# created by the generated sinnix-scope launcher (flake/launch.nix), distinct
-# from attested AgentCTL jobs
-# which use the `sinnixd-job-<id>.service` namespace and the job_id target
-# instead). Admission for these is structural, not inventory-registered: the
-# name must match the launcher's own naming convention
-# (`sinnix-<commandClass>-<timestamp>-<pid>.scope`) AND the unit must resolve
-# live via systemctl (see _resolve_scope) -- name-matching alone is not trust,
-# a dead or renamed unit is rejected too.
-# The launcher names transient scopes
-# sinnix-<class>-<identity>-<epoch_ns>-<pid>.scope, where <identity> is the
-# launched command's own name, sanitized to [A-Za-z0-9_.-] and capped at 40
-# chars (flake/launch/scope-runtime.bash). The identity segment arrived
-# 2026-08-13 (sinnix-1ei); this pattern lagged without it and admitted
-# nothing for five days -- every live stop-scope action 403'd on name shape.
-SCOPE_UNIT_PATTERN = re.compile(
-    r"^sinnix-(agent|build|background|gpu-runtime|nix-build|system)"
-    r"-[A-Za-z0-9_.-]{1,40}-\d+-\d+\.scope$"
-)
-
-# Scope targets support only the reversible verb: `systemctl stop` on a scope
-# sends SIGTERM and escalates to SIGKILL on its own timeout, so no explicit
-# kill/escalate verb exists here.
-SCOPE_ACTIONS = {"stop"}
 
 # Process targets support only stop -- see sinnix-mble / C3 in the
 # 2026-08-18 pressure incident taxonomy. This is the one granularity the
 # rest of the API cannot express: a runaway `rg` or `bd list` costs nothing
-# to kill, but the finest existing target is the whole scope, which takes
-# the owning agent session with it. Bounded the same way as everything
-# else here -- attested identity, admission by cgroup membership, a
-# receipt -- rather than a private kill path.
+# to kill. Bounded the same way as everything else here: attested identity,
+# admission by cgroup membership, and a receipt rather than a private kill
+# path.
 PROCESS_ACTIONS = {"stop"}
 
 # A `{"process": {"pid": N, "start_ticks": M}}` target is admitted for
 # `stop` only when the live cgroup it currently belongs to is one of these.
 # `agent.slice` / `build.slice` are named explicitly (not derived from the
-# inventory's ManagedOOMMemoryPressure marker) because the whole point of
-# this verb is to reach *inside* an interactive agent's own scope without
-# stopping the scope itself -- agent.slice is deliberately left uncapped
-# and unmarked so a shared ceiling never throttles a healthy agent behind a
-# busy one (runtime-defaults.nix), so it would not appear in the
-# sacrificial set below even though its children are exactly what this verb
-# exists to reach.
+# inventory's ManagedOOMMemoryPressure marker) because an interactive agent
+# process is eligible for this bounded action even though agent.slice is
+# deliberately left uncapped and unmarked. A shared ceiling would throttle a
+# healthy agent behind a busy one, so the slice would not appear in the
+# sacrificial set below despite containing processes this verb may reach.
 PROCESS_ADMITTED_BASE_SLICES = frozenset({"agent.slice", "build.slice"})
 
 # SIGTERM first, escalate to SIGKILL only if the same process (same
@@ -259,13 +230,13 @@ def validate_request(value: Any) -> dict[str, Any]:
     if (
         not isinstance(target, dict)
         or not target
-        or set(target) - {"job_id", "unit", "scope", "process"}
+        or set(target) - {"job_id", "unit", "process"}
     ):
-        raise ActionError("target must contain only job_id, unit, scope, or process")
-    if sum(key in target for key in ("job_id", "unit", "scope", "process")) != 1:
+        raise ActionError("target must contain only job_id, unit, or process")
+    if sum(key in target for key in ("job_id", "unit", "process")) != 1:
         raise ActionError(
             "target must identify exactly one attested job, runtime unit, "
-            "scope, or process"
+            "or process"
         )
     if "process" in target:
         process = target["process"]
@@ -296,8 +267,6 @@ def validate_request(value: Any) -> dict[str, Any]:
         raise ActionError("parameters must be an object")
     if "job_id" in target and action not in {"focus", "interrupt"}:
         raise ActionError("job targets only support focus and interrupt")
-    if "scope" in target and action not in SCOPE_ACTIONS:
-        raise ActionError("scope targets only support stop")
     if action == "focus" and "unit" in target:
         raise ActionError("focus requires an attested job target")
     if (
@@ -352,7 +321,6 @@ class ActionService:
             Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None
         ) = None,
         agent_jobs: AgentCtlClient | None = None,
-        scope_prober: Callable[[str], str | None] | None = None,
         unit_state_prober: Callable[[str, str], dict[str, str]] | None = None,
         process_prober: (Callable[[int], tuple[int, str, str] | None] | None) = None,
         self_pid: int | None = None,
@@ -377,7 +345,6 @@ class ActionService:
         )
         self.adapter = adapter or self._live_adapter
         self.agent_jobs = agent_jobs or AgentCtlClient()
-        self.scope_prober = scope_prober or self._live_scope_prober
         self.unit_state_prober = unit_state_prober or self._live_unit_state_prober
         self.process_prober = process_prober or self._live_process_prober
         # os.getpid() at construction time, not per-call: the reducer's own
@@ -461,8 +428,6 @@ class ActionService:
             if job.get("kind") != "attested-agent":
                 raise ActionError("job target is not an attested agent job", 403)
             return {"kind": "job", "job": job}
-        if "scope" in target:
-            return self._resolve_scope(target["scope"])
         if "process" in target:
             process = target["process"]
             return self._resolve_process(process["pid"], process["start_ticks"])
@@ -486,46 +451,6 @@ class ActionService:
             raise ActionError("runtime unit is not restartable", 403)
         return {"kind": "unit", "surface": surface}
 
-    def _resolve_scope(self, unit: str) -> dict[str, Any]:
-        """Admit a sinnix-scope transient unit: name-shape AND live-state, not
-        either alone. A name match on a unit that has already exited (or never
-        existed) is exactly the stale-target case expected_revision plus this
-        check must both reject."""
-        if not SCOPE_UNIT_PATTERN.match(unit):
-            raise ActionError(
-                "scope target does not match a sinnix-placed transient scope name",
-                403,
-            )
-        manager = self.scope_prober(unit)
-        if manager is None:
-            raise ActionError("scope unit is not a live sinnix-placed scope", 403)
-        return {"kind": "scope", "unit": unit, "manager": manager}
-
-    def _live_scope_prober(self, unit: str) -> str | None:
-        for manager in ("user", "system"):
-            command = ["systemctl"]
-            if manager == "user":
-                command.append("--user")
-            command += ["show", unit, "--property=LoadState,ActiveState"]
-            try:
-                result = subprocess.run(
-                    command, capture_output=True, text=True, timeout=5, check=False
-                )
-            except (OSError, subprocess.TimeoutExpired) as error:
-                raise ActionError(
-                    f"scope verification unavailable: {type(error).__name__}", 503
-                ) from error
-            if result.returncode != 0:
-                continue
-            properties = dict(
-                line.split("=", 1) for line in result.stdout.splitlines() if "=" in line
-            )
-            if properties.get("LoadState") == "loaded" and properties.get(
-                "ActiveState"
-            ) in {"active", "activating"}:
-                return manager
-        return None
-
     def _live_unit_state_prober(self, unit: str, manager: str) -> dict[str, str]:
         return show_units(
             [unit], user=(manager == "user"), properties=UNIT_STATE_PROPERTIES
@@ -544,9 +469,8 @@ class ActionService:
         Admission is by live cgroup membership, not by process name or
         command-line heuristics: a name list is not a containment boundary
         (the taxonomy this verb was designed against is explicit about
-        that). Only `agent.slice` / `build.slice` (the classes sinnix-scope
-        places interactive/build work into) and slices the inventory itself
-        marks sacrificial admit a stop. A process with no slice segment at
+        that). Only `agent.slice` / `build.slice` and slices the inventory
+        itself marks sacrificial admit a stop. A process with no slice segment at
         all (a PID 1 direct child, e.g. `init.scope`) falls out of this
         check the same way anything else outside the admitted set does --
         there is no separate PID 1 special case to maintain."""
@@ -607,8 +531,8 @@ class ActionService:
     def _stop_process(self, resolved: dict[str, Any]) -> dict[str, Any]:
         """SIGTERM, then SIGKILL only if the same identity (pid AND
         start_ticks) is still alive after `process_stop_grace_seconds`. Hand
-        rolled rather than shelling out to `systemctl stop` (as the scope
-        adapter does) because a bare pid is not a systemd unit -- there is
+        rolled rather than shelling out to `systemctl stop` because a bare
+        pid is not a systemd unit -- there is
         nothing for systemctl to target. Re-checks identity on every poll,
         not just liveness, so a pid that exits and is immediately reused by
         an unrelated process during the grace window is never mistaken for
@@ -670,7 +594,7 @@ class ActionService:
 
     def _target_state(self, resolved: dict[str, Any]) -> dict[str, Any]:
         """The resolved target's OWN prior/current state, not the whole
-        reducer snapshot -- a stop-scope receipt used to embed 25KB+ of
+        reducer snapshot -- a prior receipt used to embed 25KB+ of
         unrelated agent-gateway job histories and per-process IO because
         previous_state/resulting_state copied `snapshot["state"]` wholesale
         (sinnix-rd69). The full snapshot stays reachable by its sequence
@@ -678,15 +602,6 @@ class ActionService:
         kind = resolved.get("kind")
         if kind == "job":
             return {"kind": "job", "job": self._job_state(resolved.get("job"))}
-        if kind == "scope":
-            unit = resolved.get("unit")
-            manager = resolved.get("manager", "system")
-            return {
-                "kind": "scope",
-                "unit": unit,
-                "manager": manager,
-                "systemd": self.unit_state_prober(unit, manager) if unit else {},
-            }
         if kind == "unit":
             surface = resolved.get("surface") or {}
             unit = surface.get("unit")
@@ -789,7 +704,7 @@ class ActionService:
             },
             "previous_state": previous_target_state,
             # Re-probed after the adapter ran, not the same pre-action copy:
-            # for unit/scope targets this reflects the systemctl state the
+            # for unit targets this reflects the systemctl state the
             # action actually produced. Job interrupts carry the typed
             # AgentCTL cancellation response, so record that authoritative
             # state instead of a stale pre-action snapshot.
@@ -820,16 +735,6 @@ class ActionService:
                 return {"name": action, "job": self.agent_jobs.cancel(job_id)}
             except AgentCtlError as error:
                 raise ActionError(f"AgentCTL cancellation failed: {error}", 503) from error
-        elif resolved.get("kind") == "scope":
-            # stop, not kill: systemctl stop on a scope sends SIGTERM to every
-            # process in it and escalates to SIGKILL on its own timeout, which
-            # is the reversible-first semantics this action wants.
-            command = [
-                "systemctl",
-                "--user" if resolved["manager"] == "user" else "--system",
-                "stop",
-                resolved["unit"],
-            ]
         elif resolved.get("kind") == "process":
             # Not a systemd unit -- there is nothing for systemctl to
             # target, so this is the one adapter branch that does not shell

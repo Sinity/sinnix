@@ -273,8 +273,8 @@ in
               message = "Every socket-proxy front door must set an explicit activation trigger limit rather than inheriting systemd's short default window";
             }
             {
-              # The inventory is what sinnix-scope/sinnix-observe and the hub
-              # read; the units are what systemd runs. Checking them against
+              # The inventory is what sinnix-observe and the hub read; the
+              # units are what systemd runs. Checking them against
               # each other catches drift without pinning any port literal
               # here (which would only force a two-place edit).
               assertion = builtins.all (
@@ -370,6 +370,33 @@ in
           ];
       };
       aiActivationEvaluated = evalTestSpec system aiActivationSpec;
+      sinexCachePrebuildSpec = mkFeatureTest {
+        name = "sinex-cache-prebuild-agentctl";
+        feature = "sinnix.features.cli.polylogue.enable";
+        extraModules = [
+          ({ ... }: {
+            sinnix.services.sinex-cache-prebuild.enable = true;
+          })
+        ];
+        # The scheduled trigger must submit the declared operation, not start
+        # a host-scoped build directly. The descriptor itself is checked in
+        # agentctl-operation-contract; this check exercises its rendered
+        # systemd submission route.
+        assertions =
+          config:
+          let
+            service = config.systemd.user.services.sinex-cache-prebuild.serviceConfig;
+          in
+          [
+            {
+              assertion =
+                lib.hasInfix "/bin/agentctl job start sinnix sinex_cache_prebuild" service.ExecStart
+                && service.TimeoutStartSec == "1min";
+              message = "the Sinex cache-prebuild timer must submit the bounded named AgentCTL operation";
+            }
+          ];
+      };
+      sinexCachePrebuildEvaluated = evalTestSpec system sinexCachePrebuildSpec;
       groupSpec = mkFeatureTest {
         name = "hyprland-groups";
         feature = "sinnix.features.desktop.hyprland.enable";
@@ -412,6 +439,19 @@ in
         cat > "$out" <<'EOF_INVENTORY'
         ${builtins.toJSON aiActivationEvaluated.config.sinnix.runtime.inventory}
         EOF_INVENTORY
+      '';
+      # Provably fails when the scheduled cache prebuild bypasses the named
+      # AgentCTL project operation or keeps the old build-length timeout on
+      # the short submission unit. The spec forces the rendered user service.
+      checks.sinex-cache-prebuild-agentctl = pkgs.runCommand "sinex-cache-prebuild-agentctl-check" { } ''
+        printf '%s\n' ${
+          lib.escapeShellArg (
+            builtins.toJSON {
+              execStart =
+                sinexCachePrebuildEvaluated.config.systemd.user.services.sinex-cache-prebuild.serviceConfig.ExecStart;
+            }
+          )
+        } > "$out"
       '';
       # Provably fails when: Muse Glimmer is added to the Ollama load
       # roster (the packaged Ollama cannot load its architecture), or

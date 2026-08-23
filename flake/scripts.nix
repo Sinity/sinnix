@@ -42,11 +42,6 @@ let
       # @sinnix-phone-dispatcher in its own runtimeInputs and resolves here,
       # same pattern as sinnix-steer above.
       sinnix-phone-dispatcher = externalPackages.sinnix-phone-dispatcher;
-      # Launch policy is rendered at eval from commandClasses (flake/launch.nix),
-      # so sinnix-scope is no longer a file under scripts/. Scripts naming
-      # @sinnix-scope resolve to the generated dispatcher, same pattern as
-      # @sinnix-steer above.
-      sinnix-scope = externalPackages.sinnix-scope;
       # Sinnix's bd, not nixpkgs'. A script naming bare `beads` in its
       # frontmatter gets pkgs.beads (1.0.3), whose `export` has no -C flag --
       # which failed as a usage dump swallowed by `|| true`.
@@ -59,18 +54,7 @@ let
   };
   discovered = discovery.discover (inputs.self + "/scripts");
 
-  # The launcher is generated from the command-class table rather than
-  # discovered under scripts/ (flake/launch.nix), but it is an operator verb
-  # like any other packaged script: keep it in the registry so `sinnix help`
-  # lists it and `sinnix scope <class> -- ...` dispatches.
   registry = discovered.registry // {
-    sinnix-scope = {
-      description = "Place commands in Sinnix resource-control scopes";
-      package = externalPackages.sinnix-scope;
-      runtimeInputs = [ ];
-      tier = "default";
-      owner = "flake/launch.nix";
-    };
     # Same shape for the steering CLI: its source moved into the steering
     # workspace, but it remains an operator verb — keep it in the registry so
     # `sinnix help` lists it and `sinnix steer ...` dispatches.
@@ -90,7 +74,6 @@ let
     sinnix = import ./cli-dispatcher.nix { inherit lib pkgs registry; };
   };
   runtimeDefaults = import ./data/runtime-defaults.nix { inherit lib; };
-  launch = import ./launch.nix { inherit lib pkgs runtimeDefaults; };
   mcpRegistry = import ./data/mcp-registry.nix { inherit lib; };
   sharedAgentSkills = import ./data/shared-agent-skills.nix;
   agentEnvironmentData = pkgs.writeText "sinnix-agent-environment-data.json" (
@@ -361,10 +344,6 @@ let
       '';
       meta.description = "Steering store CLI — intentions, forecasts, activities, rituals";
     };
-
-    # The command-class launcher, generated from runtime-defaults' commandClasses
-    # rather than interpreting them at runtime. See flake/launch.nix.
-    sinnix-scope = launch.dispatcher;
 
     sinnix-cockpit = pkgs.callPackage ../pkgs/sinnix-cockpit/pkg.nix { };
 

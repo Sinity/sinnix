@@ -476,7 +476,6 @@ def test_v2_change_preserves_project_patch_owner_contract(tmp_path) -> None:
     [
         ("sinnix://jobs/job-1", {"job_id": "job-1"}),
         ("sinnix://machine/units/user/fixture.service", {"unit": "fixture.service"}),
-        ("sinnix://scopes/sinnix-agent-fixture.scope", {"scope": "sinnix-agent-fixture.scope"}),
         ("sinnix://processes/42/123", {"process": {"pid": 42, "start_ticks": 123}}),
     ],
 )

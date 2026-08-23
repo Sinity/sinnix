@@ -118,7 +118,6 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "receipt",
         "result",
         "machine_unit",
-        "scope",
         "process",
         "browser_page",
         "terminal",
@@ -416,7 +415,7 @@ def test_change_and_operate_contracts_bind_closed_canonical_owner_targets() -> N
     assert operate["effect"] == "operate"
     assert operate["owner"] == "ops-reducer"
     assert operate["route"] == "ops.actions.execute"
-    assert operate["resource_kinds"] == ["job", "machine_unit", "scope", "process"]
+    assert operate["resource_kinds"] == ["job", "machine_unit", "process"]
     assert operate["supports_idempotency"] is True
     assert operate["supports_precondition"] is True
     assert operate["input_schema"]["properties"]["preconditions"] == {

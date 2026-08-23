@@ -1551,6 +1551,35 @@ def test_declared_and_foreground_jobs_share_the_generic_route(tmp_path: Path) ->
     assert systemd.stopped == [launch["unit"]]
 
 
+def test_declared_operation_timeout_contract_reaches_systemd(tmp_path: Path) -> None:
+    """Anti-vacuity: a descriptor timeout must become the transient unit bound."""
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + """
+[operations.long_running]
+description = "Run a bounded long fixture operation"
+exec = ["fixture-long"]
+pool = "bulk"
+result = "exit"
+cache = "none"
+timeout_seconds = 7200
+"""
+    )
+    systemd = FakeSystemdJobs()
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+
+    started = service.dispatch(
+        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "long_running"})
+    )
+
+    assert started.ok and started.payload is not None
+    assert started.payload.inline["timeout_seconds"] == 7200
+    assert systemd.started[0]["command"] == ("fixture-env", "--command", "fixture-long")
+    assert systemd.started[0]["timeout_seconds"] == 7200
+
+
 def test_declared_parameters_canonicalize_argv_and_persist_only_the_digest(tmp_path: Path) -> None:
     """Anti-vacuity: parameter ordering must affect neither argv identity nor durable record contents."""
     write_adapter(tmp_path)

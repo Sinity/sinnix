@@ -101,7 +101,6 @@ def test_runtime_inventory_fallback_excludes_retired_slices(monkeypatch) -> None
     inventory = runtime_inventory.load_inventory()
     assert inventory["schema"] == "sinnix-runtime-inventory-v1"
     assert inventory["classes"]
-    assert inventory["commandClasses"]
     assert ("system", "system-critical.slice") in runtime_inventory.observed_slices()
     assert (
         "system",

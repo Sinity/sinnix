@@ -197,10 +197,10 @@ One contract governs unit placement and observability:
 
 - `flake/data/runtime-defaults.nix` defines resource **classes**
   (interactive-access, observability, capture-runtime, capture-substrate,
-  backup-maintenance, background-maintenance, developer-build, system),
-  command classes (agent/build/background/nix-build → slices), slice budgets
-  (agent.slice is protected CPUWeight=400/MemoryLow=3G; build/nix-build are
-  sacrificial MemoryHigh=22G/Max=28G), and the env allowlist.
+  backup-maintenance, background-maintenance, developer-build, system), slice
+  budgets (agent.slice is protected CPUWeight=400/MemoryLow=3G;
+  build/nix-build are sacrificial MemoryHigh=22G/Max=28G), and the env
+  allowlist.
 - Modules declare `sinnix.runtime.surfaces.<name> = { unit, manager, kind,
 resourceClass, observe, captures }`. Eval-time assertions reject duplicate
   units, kind/suffix mismatches, and unknown classes. `kind` is always a real
@@ -224,17 +224,11 @@ resourceClass, observe, captures }`. Eval-time assertions reject duplicate
   one dedup state with the `sinnix-unit-failure-notify@` OnFailure path.
   When adding a daemon: declare the surface, apply `mkRuntimeServiceConfig`,
   done — no ad-hoc Nice/IOWeight overrides.
-- **Launch policy is rendered, not interpreted.** `flake/launch.nix` generates
-  the `sinnix-scope` launcher from `commandClasses`: one `apply_class_policy`
-  shell function whose branches carry the baked slice, nice/ionice, systemd
-  properties and env defaults, prepended to the runtime half in
-  `flake/launch/scope-runtime.bash` (argument parsing, cgroup checks,
-  unit-name synthesis, the scope supervisor). `renderDirenvrc` does the same
-  for the devshell command wrappers' class resolver. Nothing reads
-  `/etc/sinnix/runtime-inventory.json` to _place_ a process — the inventory
-  carries `commandClasses` for observability only. A class that is not in the
-  table is a usage error naming the classes that are; adding one is a table
-  edit, not a launcher edit.
+- **Direct commands stay direct.** The runtime inventory describes declared
+  services and never places an arbitrary command. Scheduled or heavy work is
+  submitted as a named operation from the registered project's
+  `.agentctl/project.toml`; Sinnixd owns the resulting transient service,
+  cgroup, lifecycle, cancellation, result, and bounded timeout contract.
 - Concurrency is governed by slice memory caps and weights, not
   serialization; the only build-path lock is `/tmp/sinnix-switch.lock`, a
   correctness guard against two activations racing on the system profile.
@@ -251,8 +245,7 @@ truth for lock/containment/preflight shared by devshell binaries and
 - `script-registry.nix` (the ONE evaluation of it, published via
   `_module.args` and a per-host `pkgs.sinnixScriptRegistry` overlay — never
   re-import scripts.nix directly),
-  `launch.nix` + `launch/scope-runtime.bash` (the generated `sinnix-scope`
-  launcher — see Runtime Governance), `packages.nix` (public package surface),
+  `packages.nix` (public package surface),
   `tests.nix` + `tests-runtime.nix` + `test-lib.nix` + `tests/*.{nix,sh}` (the
   individual checks), `router.nix` (sinnix-gw), `deploy.nix` (colmena +
   nixos-anywhere), `overlay/package/*.nix` (per-package overlays),
@@ -280,8 +273,8 @@ or `pkgs/<name>/` for real derivations.
   sinex master bump doesn't pay that compile synchronously:
   `sinnix.services.sinex-cache-prebuild` (enabled on sinnix-prime) is a
   periodic timer that diffs flake.lock's sinex revision against a state
-  file, and on a move builds + cache-pushes it async under
-  `sinnix-scope nix-build` (sinnix-m9v).
+  file, and on a move submits the named `sinex_cache_prebuild` AgentCTL
+  operation.
 - `lynchpin` and `steering` are local `git+file://` inputs;
   sinex/polylogue/scribe-tap/yt-polisher/phone-app come from GitHub so
   deploys don't consume local checkout state. One-off local testing:
@@ -479,7 +472,7 @@ config in `secrets.nix` (repo root).
   Caddy in the user manager serving `/reports/` off disk and proxying every
   other path to the ops-reducer, which renders every hub page on request
   from state it already holds — the system dashboard, `/work/` (semantic
-  workload view over scopes, the project ledger and gateway jobs),
+  workload view over the project ledger and AgentCTL jobs),
   `/services/`, `/ai/`, `/shaders/`, `/capabilities/` (the capability index
   joined with live health and census usage), `/pressure/` (regime banner +
   swap-headroom-first widgets from the 2026-08-18 incident taxonomy; the

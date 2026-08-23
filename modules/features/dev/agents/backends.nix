@@ -8,7 +8,6 @@
   scriptPkgs,
   agentRuntimePath,
   hermesRuntimePath,
-  agentScopeExec,
   sinnixCfg,
   user,
 }:
@@ -190,7 +189,7 @@ let
           claude_args+=(--add-dir "/home/${user}")
         fi
 
-        exec ${agentScopeExec} "$STATE/launch.sh" "''${claude_args[@]}" "$@"
+        exec "$STATE/launch.sh" "''${claude_args[@]}" "$@"
       '';
       executable = true;
       force = true;
@@ -198,7 +197,7 @@ let
   # Claude Code launched through Clodex's advertised selective proxy. Clodex
   # owns the ChatGPT/Codex-plan OAuth flow and local MITM CA; this wrapper
   # retains the normal managed Claude Code command shape so MCP, hooks, scratch
-  # placement, and agent.slice containment remain identical to native lanes.
+  # and MCP setup remain identical to native lanes.
   mkClodexWrapper =
     {
       mcpConfigName ? "mcp",
@@ -256,14 +255,12 @@ let
         # publish clodex-claude as an npm bin, so invoke its bundled wrapper
         # with the managed Node runtime directly.
         export CLODEX_REQUIRE_SERVER=1
-        exec ${agentScopeExec} ${pkgs.nodejs}/bin/node "$CLODEX_STATE/npm/lib/node_modules/@bman654/clodex/dist/claude-wrapper.js" "$claude_binary" "''${claude_args[@]}" "$@"
+        exec ${pkgs.nodejs}/bin/node "$CLODEX_STATE/npm/lib/node_modules/@bman654/clodex/dist/claude-wrapper.js" "$claude_binary" "''${claude_args[@]}" "$@"
       '';
       executable = true;
       force = true;
     };
   # This is invoked by Claude Code for agents-view and background children.
-  # It deliberately does not create a nested agent scope because those child
-  # processes already inherit their parent's cgroup.
   mkClodexChildWrapper = {
     text = ''
       #!/usr/bin/env bash
@@ -290,7 +287,6 @@ let
     force = true;
   };
   # The user service owns resource placement, so this server launcher does
-  # not call sinnix-agent-scope-exec.
   mkClodexServerWrapper = {
     text = ''
       #!/usr/bin/env bash
@@ -331,7 +327,7 @@ let
         export SINNIX_CODEX_PROFILE=${lib.escapeShellArg profile}
         codex_args=(--profile ${lib.escapeShellArg profile})
 
-        exec ${agentScopeExec} "$STATE/launch.sh" "''${codex_args[@]}" "$@"
+        exec "$STATE/launch.sh" "''${codex_args[@]}" "$@"
       '';
       executable = true;
       force = true;
@@ -345,7 +341,7 @@ let
         echo "grok-sinnix: install the official Grok CLI first: curl -fsSL https://x.ai/cli/install.sh | bash" >&2
         exit 1
       fi
-      exec ${agentScopeExec} "$HOME/.grok/bin/grok" "$@"
+      exec "$HOME/.grok/bin/grok" "$@"
     '';
     executable = true;
     force = true;
@@ -359,7 +355,7 @@ let
         echo "agy-sinnix: install the official Antigravity CLI first: curl -fsSL https://antigravity.google/cli/install.sh | bash" >&2
         exit 1
       fi
-      exec ${agentScopeExec} "$HOME/.local/bin/agy" "$@"
+      exec "$HOME/.local/bin/agy" "$@"
     '';
     executable = true;
     force = true;

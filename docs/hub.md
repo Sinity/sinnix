@@ -38,39 +38,22 @@ one firewall entry and always works.
 `/work/` answers "what is this machine doing right now?" in sentences, not in a
 process list. It can, because sinnix already names its own work:
 
-- **Project commands in flight** come from the project ledger the devshell
-  wrappers write — the same records lynchpin reads. A row is
+- **Project commands in flight** come from the project ledger. A row is
   "sinex is running `test`, in flight 3m 14s, developer-build".
-- **Scopes** are the transient units `sinnix-scope` creates. The unit name
-  carries the command class (`sinnix-build-…`, `sinnix-nix-build-…`), so a
-  scope is never anonymous, and the scope's leader process supplies the command
-  and working directory that turn it into "`xtask test -p sinexd` in `sinex`".
-  Launch wrappers (`env`, `nice`, `ionice`, the scope supervisor, `nix develop
---command`) are stripped so the line reads as what was typed.
-- **Memory against the ceiling that binds it.** Agent scopes carry their own
-  8G/12G cap; a build scope does not, so the figure shown is against
-  `build.slice`'s. Slice budgets get their own card, because "how much of the
-  sacrificial budget is spent" is the question that predicts a stall.
-- **AgentCTL jobs** are matched to their `sinnixd-job-*.service` unit by job
-  id, so a live job shows its backend, model, registered checkout, and elapsed
-  time from the canonical Sinnixd record.
-
-Long-lived scopes are labelled as such rather than filtered out. A devshell
-Postgres or a Dolt server that has sat in `build.slice` for a week is not
-"nothing" — it is spending the same budget the next compile wants.
+- **AgentCTL jobs** show the declared operation or attested agent, registered
+  checkout, lifecycle, and cancellation control from the canonical Sinnixd
+  record.
+- **Slice budgets** show the resource policy carried by declared services and
+  AgentCTL jobs.
 
 ### What the page can and cannot do
 
 Lifecycle control goes through the reducer's action API and nowhere else, so
 the page can only offer what that API accepts: `start`/`stop`/`restart` on an
 attested inventory unit that declares `observe.restartable`, `interrupt` on an
-AgentCTL attested agent job, `stop` on an admitted `sinnix-scope` placement, and `stop`
-on an admitted `{pid, start_ticks}` process (sinnix-pl37, sinnix-mble — see
-"Unshackling the hub" below). An ad-hoc scope is admitted by name-shape
-(`sinnix-<class>-<identity>-<epoch_ns>-<pid>.scope`) plus live systemd state,
-not by pre-registration, so a running compile is visible and stoppable without
-the reducer having to know about it in advance. A process is admitted by live
-cgroup membership — only inside `agent.slice`, `build.slice`, or a slice the
+AgentCTL attested agent job, and `stop` on an admitted `{pid, start_ticks}`
+process (sinnix-mble — see "Unshackling the hub" below). A process is admitted
+by live cgroup membership — only inside `agent.slice`, `build.slice`, or a slice the
 runtime inventory itself marks sacrificial — never by name, so the button is
 only offered where the action would actually be accepted. Two gaps remain
 and stay named rather than papered over: a slice-level policy change
@@ -101,8 +84,6 @@ its place:
   a re-runnable tool invocation (`rg`, `bd list`, `git diff`) is free to stop,
   an expensive job or model server is not, and session processes are summed in
   one row rather than given rows they would take from something actionable.
-  Scopes are resolved to lanes — a checkout name, a gateway job's backend and
-  model — because "which lane is expendable" is unanswerable about a scope UUID.
 - **A scheduled-pressure strip** off the timer table: borg, btrbk, the scrubs
   and the SQLite dumps, with how long each one's last run took. This class of
   IO pressure is declared in advance, so the page predicts rather than alarms.
@@ -116,8 +97,7 @@ reported as `stalled`, because the warning has already been missed.
 
 Buttons exist only where the bounded action API admits the target: `park` with
 its own thaw deadline on a _running_ backup unit the runtime inventory carries,
-`stop` on a scope whose name the API's admission rule accepts, and — on hog
-rows the cost column classifies re-runnable — `stop` on the one process
+and — on hog rows the cost column classifies re-runnable — `stop` on the one process
 (`{pid, start_ticks}`), so reclaiming a runaway `rg` no longer means stopping
 its whole agent session. The pin is re-verified against `/proc/<pid>/stat`
 at execution time (a mismatch means the pid was reused and is refused, never
@@ -230,7 +210,7 @@ because a shader can make the screen unreadable and the way out must not depend
 on finding a terminal.
 
 Making it clickable is a reducer change: a shader target with its own
-attestation, the same shape the scope target took. It is not a hub change.
+attestation. It is not a hub change.
 
 The page also carries the two facts that are easy to get wrong about screen
 shaders here, because there is nowhere better to put them. Hyprland pins the
@@ -290,11 +270,8 @@ and conflict by design. See `docs/local-ai-activation.md`.
 
 ## Unshackling the hub
 
-Operator directive (2026-08-13, sinnix-pl37): "do want hub to be powerful,
-why wouldn't I esp when it is my smartphone and my pc and nothing else? again
-POWER." The scope-target and process-target admission rules above are that
-directive's main body — the reducer widened, never a second control plane.
-The rest of that bead was deciding which of the reducer's other verbs
+The process-target admission rule above keeps the reducer as the only control
+plane. The remaining verbs
 (`freeze`/`thaw`/`park`/`set_policy`/`reset_policy`, already implemented and
 already unit-only) belong on a page:
 
@@ -420,11 +397,9 @@ state those pages show, so the timer bought nothing but staleness: a page is
 now as current as the moment it was asked for.
 
 Inputs are the reducer's live snapshot, the runtime inventory, a Nix-generated
-manifest, live systemd state, and — for the workload view — the scope cgroups
-and their leader processes. A missing input degrades the page rather than
-failing the request: with no reducer snapshot, `/work/` still shows live scopes
-straight from systemd, and `/` says plainly that it cannot tell you whether
-anything is wrong.
+manifest, and live systemd state. A missing input degrades the page rather than
+failing the request: `/` says plainly when it cannot tell whether anything is
+wrong.
 
 Serving the pages over the reducer's Unix socket is what keeps the auth model
 intact. The reducer treats that socket as authorized — it is 0600 in the

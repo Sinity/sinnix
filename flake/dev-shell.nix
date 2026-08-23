@@ -40,44 +40,6 @@
         avoidRepoCwdForActivation
         switchFallback
         ;
-      # Wrapper for nix that serializes heavy subcommands (build, flake check)
-      # behind the same lock as switch/boot/test. Passes through all other
-      # subcommands (eval, develop, shell, run, fmt, flake update, etc.)
-      # without any lock overhead.
-      nixWrapper = pkgs.writeShellScriptBin "nix" ''
-        set -euo pipefail
-        _cmd="''${1:-}"
-        _sub="''${2:-}"
-        # Decide whether this invocation is nested inside a rebuild that already
-        # holds the lock. Two independent signals, because neither alone covers
-        # every path:
-        #   - SINNIX_REBUILD_ACTIVE=1 is set by switch/boot/test for the build
-        #     phase, which runs as the same user — the env survives that hop.
-        #   - It does NOT survive the user→root sudo hop that nh makes for the
-        #     privileged activation step, which re-invokes us as root to run
-        #     `nix build --profile /nix/var/nix/profiles/system …`. That nested
-        #     root call must also skip locking: re-acquiring would either EACCES
-        #     on the sticky-/tmp lockfile (fs.protected_regular forbids root
-        #     opening the user-owned lock) or self-deadlock on the non-blocking
-        #     flock the parent switch already holds. `--profile` reliably marks
-        #     that profile-install build.
-        _nested="''${SINNIX_REBUILD_ACTIVE:-}"
-        case " $* " in *" --profile "*) _nested=1 ;; esac
-        if [ -z "$_nested" ]; then
-          if [ "$_cmd" = "build" ] || { [ "$_cmd" = "flake" ] && [ "$_sub" = "check" ]; }; then
-            exec 9>/tmp/sinnix-switch.lock
-            if ! ${pkgs.util-linux}/bin/flock --nonblock 9; then
-              echo "nix $1: another heavy nix operation is running — queued behind it (waiting for the lock)" >&2
-              ${pkgs.util-linux}/bin/flock 9
-            fi
-          fi
-        fi
-        if [ "$_cmd" = "build" ] || { [ "$_cmd" = "flake" ] && [ "$_sub" = "check" ]; }; then
-          export NIX_CONFIG="eval-cache = false"
-        fi
-        exec ${pkgs.nix}/bin/nix "$@"
-      '';
-
       mkNhCommand =
         name: action:
         pkgs.writeShellScriptBin name ''
@@ -263,9 +225,6 @@
         name = "nixos-config-dev";
 
         packages = [
-          # nix wrapper must come first — shadows system nix to serialize heavy ops
-          nixWrapper
-
           # Version control
           pkgs.git
           pkgs.gh
@@ -289,6 +248,9 @@
           pkgs.fd
           pkgs.ripgrep
           scriptPkgs.lsp-root
+          # Declared AgentCTL operation body. It is intentionally available
+          # by name in the project environment, never as a command shim.
+          scriptPkgs.sinnix-sinex-cache-prebuild
 
           # Help
           help

@@ -14,8 +14,8 @@ refuses three things every conventional monitor shows:
   * no button where no action exists -- the spike regime has a ~2 minute lead
     time and no verb fast enough, and the page says so instead of pretending.
 
-The action surface is the existing bounded API, unchanged: `park` with a
-deadline on the scheduled backup units, `stop` on an admissible sinnix scope.
+The action surface is the existing bounded API: `park` with a deadline on the
+scheduled backup units and `stop` on an admitted individual process.
 Where the taxonomy named an action the API cannot express -- a process-level
 stop, a MemoryHigh change on a slice -- the page names the gap. That is the
 /shaders/ doctrine: report, and say why the button is absent.
@@ -27,8 +27,7 @@ import time
 from typing import Any
 
 from .. import pressure as pressure_model
-from ..actions import SCOPE_UNIT_PATTERN, process_admitted_slices
-from .probes import collect_scopes
+from ..actions import process_admitted_slices
 from .shell import (
     ACTION_SCRIPT,
     badge,
@@ -72,7 +71,7 @@ MISSING_VERBS_NOTE = (
     "<strong>Per-process stop</strong> is live on the re-runnable rows below "
     "(sinnix-mble): stopping a runaway <code>rg</code> or <code>bd list</code> "
     "is costless and correct, and it now reaches the one process rather than "
-    "the whole scope. It is admitted by cgroup membership, not by name — only "
+    "the parent workload. It is admitted by cgroup membership, not by name — only "
     "processes currently inside <code>agent.slice</code>, "
     "<code>build.slice</code>, or a slice the runtime inventory marks "
     "sacrificial can be targeted — so the button is offered only where the "
@@ -243,10 +242,9 @@ def available_card(reading: pressure_model.Sample) -> str:
 def hog_row(
     process: pressure_model.Process,
     jobs_by_id: dict[str, dict[str, Any]],
-    scopes_by_unit: dict[str, dict[str, Any]],
     admitted_slices: frozenset[str] | set[str] = frozenset(),
 ) -> str:
-    lane = pressure_model.lane_of(process.unit, jobs_by_id, scopes_by_unit)
+    lane = pressure_model.lane_of(process.unit, jobs_by_id)
     meta = [
         badge(process.cheapness, CHEAPNESS_TONE.get(process.cheapness, "muted")),
         f"{esc(bytes_human(process.rss_kb * 1024))} resident",
@@ -275,11 +273,6 @@ def hog_row(
         # build.slice, or a sacrificial slice answers 403. Say so rather than
         # silently withholding the button.
         meta.append(badge("no process-stop button (cgroup not admitted)", "muted"))
-    if SCOPE_UNIT_PATTERN.match(process.unit):
-        controls += (
-            f"<button class=\"act danger\" onclick=\"act('stop','scope',"
-            f"'{esc(process.unit)}',this)\">stop the whole scope</button>"
-        )
     tone = ""
     if process.swap_kb > process.rss_kb and process.swap_kb > 1024 * 1024:
         tone = "warn"
@@ -317,7 +310,6 @@ def session_summary(processes: list[pressure_model.Process]) -> str:
 def hogs_card(
     processes: list[pressure_model.Process],
     jobs_by_id: dict[str, dict[str, Any]],
-    scopes_by_unit: dict[str, dict[str, Any]],
     admitted_slices: frozenset[str] | set[str] = frozenset(),
 ) -> str:
     if not processes:
@@ -333,7 +325,7 @@ def hogs_card(
         if process.cheapness == pressure_model.CHEAPNESS_SESSION
     ]
     blocks = "".join(
-        hog_row(process, jobs_by_id, scopes_by_unit, admitted_slices)
+        hog_row(process, jobs_by_id, admitted_slices)
         for process in actionable[:HOG_ROWS]
     )
     blocks += session_summary(session)
@@ -445,19 +437,11 @@ def render_pressure(
         for job in (jobs if isinstance(jobs, list) else [])
         if isinstance(job, dict) and job.get("job_id")
     }
-    scopes_by_unit = {
-        str(entry["unit"]): entry
-        for entry in collect_scopes(inventory)
-        if entry.get("unit")
-    }
-
     body = regime_banner(regime)
     body += headroom_card(reading)
     body += stall_card(reading)
     body += io_card(reading)
-    body += hogs_card(
-        processes, jobs_by_id, scopes_by_unit, process_admitted_slices(inventory)
-    )
+    body += hogs_card(processes, jobs_by_id, process_admitted_slices(inventory))
     body += scheduled_card(runs, parkable_units(inventory))
     body += available_card(reading)
     body += log_card()
