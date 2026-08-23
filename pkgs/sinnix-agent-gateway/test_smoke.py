@@ -71,25 +71,22 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "files_write",
         "project_write",
         "change",
-        "agent_launch",
         "machine_action",
         "operate",
         "desktop_action",
         "terminal_action",
         "browser_action",
-        "shell_run",
-        "shell_start",
         "run",
     }.isdisjoint(readonly_names)
     assert "shell_query" not in readonly_names
     assert {"project_context", "project_search", "audit_tail"}.isdisjoint(readonly_names)
     assert {
-        "job_cancel",
         "capability_search",
         "capability_describe",
         "wait",
+        "run",
+        "operate",
     } <= local_names
-    assert "run" not in local_names
     assert {
         "desktop_action",
         "desktop_read",
@@ -97,16 +94,12 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "files_read",
         "machine_action",
         "change",
-        "operate",
         "session_list",
         "browser_action",
         "browser_read",
         "browser_capture",
         "terminal_action",
         "terminal_read",
-        "shell_run",
-        "shell_start",
-        "run",
         "tasks_read",
         "tasks_write",
         "memory_search",
@@ -129,8 +122,6 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "browser_capture",
         "terminal_action",
         "terminal_read",
-        "shell_run",
-        "shell_start",
         "run",
         "wait",
         "capability_search",
@@ -144,15 +135,11 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "mcp_read",
         "mcp_write",
     } <= operator_names
-    assert "agent_launch" not in operator_names
     assert {"project_write", "project_apply_patch", "machine_action"}.isdisjoint(operator_names)
     assert {
         "change",
         "operate",
         "run",
-        "job_cancel",
-        "shell_run",
-        "shell_start",
         "files_write",
         "tasks_write",
         "mcp_write",
@@ -165,8 +152,8 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         if row["annotations"]["readOnlyHint"] is False
     }
     assert {
-        "agent_launch",
-        "job_cancel",
+        "run",
+        "operate",
     } == {
         row["name"]
         for row in local["tools"]
@@ -175,12 +162,13 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
     assert "context" in readonly_names & local_names & operator_names
     run_tool = next(row for row in operator["tools"] if row["name"] == "run")
     wait_tool = next(row for row in readonly["tools"] if row["name"] == "wait")
-    assert set(run_tool["inputSchema"]["required"]) >= {
-        "project_id",
-        "checkout_id",
-        "argv",
+    assert set(run_tool["inputSchema"]["required"]) == {
+        "action_name",
         "idempotency_key",
     }
+    assert {"argv", "prompt", "backend", "model", "reasoning_effort"} <= set(
+        run_tool["inputSchema"]["properties"]
+    )
     assert set(run_tool["inputSchema"]["properties"]).isdisjoint(
         {"environment", "as_root", "command", "unit"}
     )
@@ -248,7 +236,6 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert initialized.server_info.name == "sinnix-agent-gateway"
                 assert {"status", "catalog", "get", "wait", "project_read"} <= names
                 assert "project_write" not in names
-                assert "agent_launch" not in names
                 assert {
                     "sinnix://gateway/v2/actions/{action_name}",
                     "sinnix://gateway/v2/resources/{resource_kind}",
@@ -669,7 +656,7 @@ def test_runtime_returns_owner_diagnostic_and_audits_its_reference(tmp_path: Pat
 def test_runtime_audit_carries_returned_job_correlation(tmp_path: Path) -> None:
     runtime = Runtime.create(config(tmp_path), "agent-control")
     runtime.execute(
-        "agent_launch", lambda: {"job_id": "job-correlation", "secret": "hidden"}
+        "agents.run", lambda: {"job_id": "job-correlation", "secret": "hidden"}
     )
     payload = runtime.audit.tail(1)["events"][0]["payload"]
     assert payload == {"job_id": "job-correlation", "correlation_id": "job-correlation"}
@@ -697,7 +684,7 @@ def test_runtime_audit_carries_upstream_mcp_target(tmp_path: Path) -> None:
 def test_runtime_audit_carries_returned_transient_unit(tmp_path: Path) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
     runtime.execute(
-        "shell_run",
+        "shell.run",
         lambda: {"unit": "sinnix-gateway-run-fixture.service", "secret": "hidden"},
     )
     payload = runtime.audit.tail(1)["events"][0]["payload"]
@@ -707,7 +694,7 @@ def test_runtime_audit_carries_returned_transient_unit(tmp_path: Path) -> None:
 def test_runtime_audit_carries_daemon_job_identity(tmp_path: Path) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
     runtime.execute(
-        "shell_start",
+        "shell.run",
         lambda: {
             "job_id": "shell-fixture",
             "unit": "sinnixd-job-shell-fixture.service",

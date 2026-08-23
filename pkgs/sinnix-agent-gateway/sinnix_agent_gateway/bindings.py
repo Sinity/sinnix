@@ -37,16 +37,15 @@ class TargetToolBindings:
         self._bindings_by_action = {
             binding.action_name: binding for binding in self.bindings
         }
-        self._bindings_by_tool = {
-            binding.tool_name: binding for binding in self.bindings
-        }
+        self._bindings_by_tool: dict[str, tuple[TargetToolBinding, ...]] = {}
+        for binding in self.bindings:
+            self._bindings_by_tool.setdefault(binding.tool_name, ())
+            self._bindings_by_tool[binding.tool_name] += (binding,)
         self._validate()
 
     def _validate(self) -> None:
         if len(self._bindings_by_action) != len(self.bindings):
             raise RegistryError("target tool bindings must name each action once")
-        if len(self._bindings_by_tool) != len(self.bindings):
-            raise RegistryError("target tool bindings must have unique tool names")
         declared_actions = {action.name for action in self.registry.actions}
         bound_actions = set(self._bindings_by_action)
         unknown = bound_actions - declared_actions
@@ -77,11 +76,33 @@ class TargetToolBindings:
                     f"verb {action.verb.value!r}"
                 )
 
-    def action_for_tool(self, tool_name: str, principal: str | None = None):
+    def action_for_tool(
+        self,
+        tool_name: str,
+        action_name: str | None = None,
+        principal: str | None = None,
+    ):
         try:
-            binding = self._bindings_by_tool[tool_name]
+            bindings = self._bindings_by_tool[tool_name]
         except KeyError as error:
             raise RegistryError(f"no target tool binding for {tool_name!r}") from error
+        if action_name is None:
+            if len(bindings) != 1:
+                raise RegistryError(
+                    f"target tool {tool_name!r} requires a declared action selector"
+                )
+            binding = bindings[0]
+        else:
+            try:
+                binding = next(
+                    binding
+                    for binding in bindings
+                    if binding.action_name == action_name
+                )
+            except StopIteration as error:
+                raise RegistryError(
+                    f"action {action_name!r} is not bound to target tool {tool_name!r}"
+                ) from error
         action = self.registry.action(binding.action_name)
         if principal is not None and principal not in action.principals:
             raise RegistryError(
@@ -90,4 +111,10 @@ class TargetToolBindings:
         return action
 
     def is_visible(self, tool_name: str, principal: str) -> bool:
-        return principal in self.action_for_tool(tool_name).principals
+        try:
+            return any(
+                principal in self.registry.action(binding.action_name).principals
+                for binding in self._bindings_by_tool[tool_name]
+            )
+        except KeyError:
+            return False

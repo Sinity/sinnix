@@ -5,10 +5,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import anyio
 import pytest
 from sinnix_mcp import RequestEnvelope
 
-from sinnix_agent_gateway.app import Runtime
+from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.jobs import JobError, JobService
@@ -236,12 +237,101 @@ def runtime_with_daemon(
     return runtime, daemon
 
 
+def test_public_v2_job_verbs_dispatch_catalog_bound_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, daemon = runtime_with_daemon(tmp_path, "agent-control")
+    operator_runtime, operator_daemon = runtime_with_daemon(tmp_path, "operator")
+    job_id = "3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
+    daemon.responses = {
+        "job.agent.start": {"job_id": job_id, "state": {"phase": "running"}},
+        "job.get": {"job_id": job_id, "state": {"phase": "running"}},
+        "job.cancel": {
+            "job_id": job_id,
+            "cancel_requested": False,
+            "state": {"phase": "running"},
+        },
+    }
+    monkeypatch.setattr(
+        Runtime,
+        "create",
+        classmethod(
+            lambda _cls, _config, principal_name: {
+                "agent-control": runtime,
+                "operator": operator_runtime,
+            }[principal_name]
+        ),
+    )
+    server = create_server(runtime.config, "agent-control")
+    operator_server = create_server(operator_runtime.config, "operator")
+
+    async def invoke(
+        target: Any, name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        response = await target.call_tool(name, arguments)
+        assert response.structured_content is not None
+        return response.structured_content
+
+    started = anyio.run(
+        invoke,
+        server,
+        "run",
+        {
+            "action_name": "agents.run",
+            "idempotency_key": "public-agent-fixture",
+            "project_id": "fixture",
+            "prompt": "inspect fixture",
+            "backend": "codex",
+            "model": "gpt-5.6-terra",
+            "reasoning_effort": "high",
+        },
+    )
+    cancelled = anyio.run(
+        invoke,
+        server,
+        "operate",
+        {
+            "action_name": "jobs.cancel",
+            "idempotency_key": "public-cancel-fixture",
+            "ref": f"sinnix://jobs/{job_id}",
+            "preconditions": {"expected_phase": "running"},
+        },
+    )
+    rejected = anyio.run(
+        invoke,
+        operator_server,
+        "run",
+        {
+            "action_name": "agents.run",
+            "idempotency_key": "public-agent-denied",
+            "project_id": "fixture",
+            "prompt": "must not launch",
+            "backend": "codex",
+            "model": "gpt-5.6-terra",
+            "reasoning_effort": "high",
+        },
+    )
+
+    assert started["result"]["action"] == "agents.run"
+    assert started["data"]["ref"] == f"sinnix://jobs/{job_id}"
+    assert cancelled["result"]["action"] == "jobs.cancel"
+    assert cancelled["data"]["cancel"]["cancel_requested"] is False
+    assert rejected["error"]["code"] == "policy_denied"
+    assert operator_daemon.calls == []
+    assert [request.operation for request in daemon.calls] == [
+        "job.agent.start",
+        "job.get",
+        "job.cancel",
+    ]
+
+
 def test_v2_run_and_wait_forward_the_same_daemon_job_identity(tmp_path: Path) -> None:
     runtime, daemon = runtime_with_daemon(tmp_path, "operator")
     job_id = "3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
     daemon.responses = {
         "job.shell.start": {"job_id": job_id, "state": {"phase": "running"}},
         "job.wait": {"job_id": job_id, "state": {"phase": "succeeded"}},
+        "job.logs": {"job_id": job_id, "content": "fixture output"},
     }
 
     run_action = REGISTRY.action("shell.run")
@@ -274,6 +364,11 @@ def test_v2_run_and_wait_forward_the_same_daemon_job_identity(tmp_path: Path) ->
         lambda: runtime.v2_wait(started["data"]["ref"], 30),
         {"ref": started["data"]["ref"], "timeout_seconds": 30},
     )
+    output = runtime.execute_v2(
+        REGISTRY.action("resources.get"),
+        lambda: runtime.v2_get(started["data"]["ref"], "log", 0, 64_000),
+        {"ref": started["data"]["ref"], "projection": "log", "max_bytes": 64_000},
+    )
 
     assert started["result"]["outcome"] == "ok"
     assert started["data"]["job_id"] == job_id
@@ -282,11 +377,22 @@ def test_v2_run_and_wait_forward_the_same_daemon_job_identity(tmp_path: Path) ->
     assert waited["result"]["outcome"] == "ok"
     assert waited["data"]["job_id"] == job_id
     assert waited["data"]["ref"] == started["data"]["ref"]
+    assert output["data"] == {
+        "ref": started["data"]["ref"],
+        "kind": "job",
+        "projection": "log",
+        "job": {"job_id": job_id, "content": "fixture output"},
+    }
     assert [request.operation for request in daemon.calls] == [
         "job.shell.start",
         "job.wait",
+        "job.logs",
     ]
-    assert [request.principal for request in daemon.calls] == ["operator", "operator"]
+    assert [request.principal for request in daemon.calls] == [
+        "operator",
+        "operator",
+        "operator",
+    ]
     assert daemon.calls[0].arguments == {
         "project_id": "fixture",
         "checkout_id": "default",
@@ -296,9 +402,83 @@ def test_v2_run_and_wait_forward_the_same_daemon_job_identity(tmp_path: Path) ->
         "result": "exit-status",
     }
     assert daemon.calls[1].arguments == {"job_id": job_id, "timeout_seconds": 30}
+    assert daemon.calls[2].arguments == {"job_id": job_id, "offset": 0, "max_bytes": 64_000}
     assert set(daemon.calls[0].arguments).isdisjoint(
         {"environment", "as_root", "command", "unit"}
     )
+
+
+def test_v2_agent_run_and_job_cancel_preserve_typed_owner_truth(tmp_path: Path) -> None:
+    runtime, daemon = runtime_with_daemon(tmp_path, "agent-control")
+    job_id = "3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
+    daemon.responses = {
+        "job.agent.start": {"job_id": job_id, "state": {"phase": "running"}},
+        "job.get": {"job_id": job_id, "state": {"phase": "running"}},
+        "job.cancel": {"job_id": job_id, "cancel_requested": False, "state": {"phase": "running"}},
+    }
+    request = {
+        "project_id": "fixture",
+        "prompt": "inspect fixture",
+        "backend": "codex",
+        "model": "gpt-5.6-terra",
+        "reasoning_effort": "high",
+        "idempotency_key": "agent-fixture",
+    }
+
+    started = runtime.execute_v2(
+        REGISTRY.action("agents.run"),
+        lambda: runtime.v2_run_agent(
+            project_id="fixture",
+            checkout_id=None,
+            prompt="inspect fixture",
+            backend="codex",
+            model="gpt-5.6-terra",
+            reasoning_effort="high",
+            timeout_seconds=14_400,
+            credential_profile="subscription",
+        ),
+        request,
+    )
+    replayed = runtime.execute_v2(
+        REGISTRY.action("agents.run"),
+        lambda: pytest.fail("idempotent replay invoked the daemon agent callback"),
+        request,
+    )
+    cancel = runtime.execute_v2(
+        REGISTRY.action("jobs.cancel"),
+        lambda: runtime.v2_cancel_job(
+            reference=started["data"]["ref"],
+            preconditions={"expected_phase": "running"},
+        ),
+        {
+            "ref": started["data"]["ref"],
+            "preconditions": {"expected_phase": "running"},
+            "idempotency_key": "cancel-fixture",
+        },
+    )
+
+    assert replayed == started
+    assert started["data"]["ref"] == f"sinnix://jobs/{job_id}"
+    assert cancel["data"]["ref"] == f"sinnix://jobs/{job_id}"
+    assert cancel["data"]["previous_state"]["state"]["phase"] == "running"
+    assert cancel["data"]["cancel"]["cancel_requested"] is False
+    assert [call.operation for call in daemon.calls] == [
+        "job.agent.start",
+        "job.get",
+        "job.cancel",
+    ]
+    assert daemon.calls[0].arguments == {
+        "project_id": "fixture",
+        "checkout_id": "default",
+        "prompt": "inspect fixture",
+        "backend": "codex",
+        "model": "gpt-5.6-terra",
+        "effort": "high",
+        "credential_profile": "subscription",
+        "timeout_seconds": 14_400,
+        "result": "last-message",
+    }
+    assert daemon.calls[2].arguments == {"job_id": job_id}
 
 
 def test_v2_run_and_wait_preserve_typed_daemon_errors(tmp_path: Path) -> None:
