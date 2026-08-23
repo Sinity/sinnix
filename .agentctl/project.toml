@@ -26,6 +26,8 @@ pool = "bulk"
 result = "exit"
 cache = "tree+environment"
 exclusive_keys = ["sinnix:nix-store-pressure"]
+estimate_memory_bytes = 6442450944
+scratch = "nvme"
 
 [operations.lint]
 description = "Run maintained Nix and shell linters"
@@ -33,6 +35,8 @@ exec = ["lint"]
 pool = "normal"
 result = "exit"
 cache = "tree+environment"
+estimate_memory_bytes = 536870912
+scratch = "tmpfs"
 
 [operations.switch]
 description = "Build and activate the workstation configuration"
@@ -41,6 +45,8 @@ pool = "bulk"
 result = "json"
 cache = "none"
 exclusive_keys = ["host:nixos-switch", "sinnix:nix-store-pressure"]
+estimate_memory_bytes = 12884901888
+scratch = "nvme"
 
 [conflicts]
 exact_files = ["flake.lock", "flake.nix"]
