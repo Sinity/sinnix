@@ -13,8 +13,6 @@ in
       # builds are part of what these fixtures are testing, and a fixture that
       # rebuilds them itself passes while the real command is broken.
       scriptRegistry = import ../scripts.nix { inherit inputs pkgs; };
-      vacuitySampler = "${scriptRegistry.packageSet.sinnix-vacuity-sampler}/bin/sinnix-vacuity-sampler";
-      claudeJudge = "${scriptRegistry.packageSet.sinnix-claude-judge}/bin/sinnix-claude-judge";
       runtimeDefaults = import ../data/runtime-defaults.nix { inherit lib; };
       mcpRegistry = import ../data/mcp-registry.nix { inherit lib; };
       launch = import ../launch.nix { inherit lib pkgs runtimeDefaults; };
@@ -146,14 +144,6 @@ in
             {
               assertion = builtins.hasAttr "sinnix-settings-env-lint" config.systemd.user.timers;
               message = "The settings environment audit timer must be declared.";
-            }
-            {
-              assertion = builtins.hasAttr "sinnix-vacuity-judge" config.systemd.user.services;
-              message = "The bounded vacuity judge worker must be declared.";
-            }
-            {
-              assertion = builtins.hasAttr "sinnix-vacuity-judge" config.systemd.user.timers;
-              message = "The bounded vacuity judge timer must be declared.";
             }
             {
               assertion = builtins.all (path: builtins.hasAttr path hm.home.file) [
@@ -805,38 +795,6 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/desktop-capture.sh} "$ocr" "$dismiss"
             touch "$out"
           '';
-      claudeJudgeFixture =
-        pkgs.runCommand "claude-judge-fixture"
-          {
-            nativeBuildInputs = [
-              pkgs.bash
-              pkgs.coreutils
-              pkgs.gnugrep
-              pkgs.jq
-              pkgs.python3
-            ];
-          }
-          ''
-            review="$TMPDIR/run-review.sh"
-            cp ${../../dots/_ai/skills/adversarial-loop/scripts/run-review.sh} "$review"
-            chmod +x "$review"
-            patchShebangs "$review"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/claude-judge.sh} ${claudeJudge} "$review"
-            touch "$out"
-          '';
-      vacuitySamplerFixture =
-        pkgs.runCommand "vacuity-sampler-fixture"
-          {
-            nativeBuildInputs = [
-              pkgs.bash
-              pkgs.coreutils
-              pkgs.jq
-            ];
-          }
-          ''
-            ${pkgs.bash}/bin/bash ${../../flake/tests/vacuity-sampler.sh} ${vacuitySampler}
-            touch "$out"
-          '';
       recoverySkillsFixture =
         pkgs.runCommand "recovery-skills-fixture"
           {
@@ -865,9 +823,8 @@ in
               pkgs.coreutils
               pkgs.gnused
               pkgs.jq
-              # The hooks under test call python3 themselves; the sampler no
-              # longer needs it here, since it arrives as a built package with
-              # its own interpreter.
+              # The explicit-model policy hook parses its structured payload
+              # with python3.
               pkgs.python3
               pkgs.shellcheck
             ];
@@ -880,7 +837,7 @@ in
             cp ${../../dots/claude/managed-settings.json} "$settings"
             chmod +x "$hooks"/*.sh
             patchShebangs "$hooks"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/hooks-harness.sh} "$hooks" "$settings" ${vacuitySampler}
+            ${pkgs.bash}/bin/bash ${../../flake/tests/hooks-harness.sh} "$hooks" "$settings"
             touch "$out"
           '';
       agentDefinitionsFixture =
@@ -947,8 +904,6 @@ in
         context-handoff = contextHandoffFixture;
         skill-authoring = skillAuthoringFixture;
         desktop-capture = desktopCaptureFixture;
-        claude-judge = claudeJudgeFixture;
-        vacuity-sampler = vacuitySamplerFixture;
         recovery-skills = recoverySkillsFixture;
         hooks-harness = hooksHarnessFixture;
         agent-definitions = agentDefinitionsFixture;

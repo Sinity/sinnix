@@ -13,7 +13,7 @@ git -C "$test_root/repo" init -q
 
 payload() {
   local client="$1"
-  printf '%s\n' "{\"cwd\":\"$test_root/repo\",\"client\":\"$client\",\"handoff\":{\"mission\":\"same mission\",\"bead_ids\":[\"sinnix-ac1\"],\"active_jobs\":[\"job-1\"],\"completed_verification\":[\"fixture\"],\"evidence_paths\":[\"flake/tests\"],\"blockers\":[\"lease\"],\"next_action\":\"resume\"}}"
+  printf '%s\n' "{\"cwd\":\"$test_root/repo\",\"client\":\"$client\",\"handoff\":{\"mission\":\"same mission\",\"task_ids\":[\"sinnix-ac1\"],\"active_jobs\":[\"job-1\"],\"completed_verification\":[\"fixture\"],\"evidence_paths\":[\"flake/tests\"],\"blockers\":[\"lease\"],\"next_action\":\"resume\"}}"
 }
 
 claude_record="$(payload claude | "$writer")"
@@ -24,7 +24,7 @@ test "$(stat -c '%a' "$claude_record")" = 600
 test "$(stat -c '%a' "$(dirname "$claude_record")")" = 700
 diff -u <(sed -n '2,/^---$/p' "$claude_record" | cut -d: -f1 | sort) <(sed -n '2,/^---$/p' "$codex_record" | cut -d: -f1 | sort)
 grep -Fq 'mission: "same mission"' "$claude_record"
-grep -Fq 'bead_ids: ["sinnix-ac1"]' "$claude_record"
+grep -Fq 'task_ids: ["sinnix-ac1"]' "$claude_record"
 if grep -Fq 'transcript' "$claude_record"; then
   echo "handoff leaked transcript content" >&2
   exit 1

@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Provably fails when: a Claude hook stops emitting the ledger row it owns
-# (verified by renaming the SubagentStop dispatch_end row type), fails
-# shellcheck, or blocks on a malformed payload.
+# Provably fails when: a Claude policy hook stops enforcing explicit models or
+# destructive-command protection, fails shellcheck, or blocks on malformed
+# input.
 set -euo pipefail
 
 hooks_dir=$1
 settings=$2
-sampler=${3:-}
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT
 mkdir -p "$test_root/bin" "$test_root/home"
@@ -16,10 +15,6 @@ ln -s /run/current-system/sw/bin/bash "$test_root/bin/bash"
 for tool in cat date dirname mkdir sleep; do
   ln -s "/run/current-system/sw/bin/$tool" "$test_root/bin/$tool"
 done
-if [[ -n $sampler ]]; then
-  ln -s "$sampler" "$test_root/bin/sinnix-vacuity-sampler"
-  ln -s /run/current-system/sw/bin/python3 "$test_root/bin/python3"
-fi
 
 jq -e . "$settings" >/dev/null
 shellcheck "$hooks_dir"/*.sh
@@ -73,18 +68,6 @@ store_after_payload=$(jq -n --arg c "$store_after_heredoc" '{tool_input:{command
 store_after_deny=$(run_hook "$hooks_dir/pretooluse-bash.sh" "$store_after_payload")
 printf '%s' "$store_after_deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 
-# Empty-payload smoke call: must exit clean and silent. Runs against its
-# own scratch state so its ledger rows cannot pollute the dedup/report
-# counts below.
-test -z "$(printf '%s' '{}' | PATH="$test_root/bin:${PATH}" HOME="$test_root/home" XDG_STATE_HOME="$test_root/state-smoke" "$hooks_dir/subagentstop-dispatch-ledger.sh")"
-if [[ -n $sampler ]]; then
-  payload='{"session_id":"fixture-session","event_id":"fixture-stop","transcript_path":"/missing","duration_ms":1000,"status":"completed","last_assistant_message":"finished"}'
-  PATH="$test_root/bin:${PATH}" SINNIX_VACUITY_SAMPLE_RATE=1 run_hook "$hooks_dir/subagentstop-dispatch-ledger.sh" "$payload"
-  PATH="$test_root/bin:${PATH}" SINNIX_VACUITY_SAMPLE_RATE=1 run_hook "$hooks_dir/subagentstop-dispatch-ledger.sh" "$payload"
-  test "$(jq -s '[.[] | select(.type == "vacuity_candidate")] | length' "$test_root/state/claude-code/dispatch-ledger.jsonl")" = 1
-  test "$(jq -s '[.[] | select(.type == "dispatch_end")] | length' "$test_root/state/claude-code/dispatch-ledger.jsonl")" = 2
-  PATH="$test_root/bin:${PATH}" HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" sinnix-vacuity-sampler report | jq -e '.denominator == 1 and .sampled == 1 and .judged == 0' >/dev/null
-fi
 test -z "$(PATH="$test_root/bin" run_hook "$hooks_dir/sessionstart-polylogue-recall.sh" '{}')"
 test -z "$(PATH="$test_root/bin" run_hook "$hooks_dir/sessionstart-sinex-recall.sh" '{}')"
 
