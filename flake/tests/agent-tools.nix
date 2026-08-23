@@ -191,7 +191,6 @@ in
           ".local/bin/grok-sinnix"
           ".local/bin/agy-sinnix"
           ".local/bin/hermes"
-          ".local/bin/bd-prime-if-present"
           ".local/bin/mcp-firecrawl"
           ".local/bin/mcp-chrome-devtools"
           ".local/bin/mcp-polylogue"
@@ -487,8 +486,7 @@ in
               "$HOME/.local/bin/gemini" \
               "$HOME/.local/bin/grok-sinnix" \
               "$HOME/.local/bin/agy-sinnix" \
-              "$HOME/.local/bin/hermes" \
-              "$HOME/.local/bin/bd-prime-if-present"; do
+              "$HOME/.local/bin/hermes"; do
               test -x "$wrapper"
               bash -n "$wrapper"
             done
@@ -586,9 +584,6 @@ in
             jq -e '
               [.hooks.Stop[].hooks[].command]
               | any(contains("polylogue-hook Stop --provider codex"))
-            ' "$HOME/.codex/hooks.json" >/dev/null
-            jq -e '
-              [.hooks.SessionStart[].hooks[].command] | index("bd-prime-if-present")
             ' "$HOME/.codex/hooks.json" >/dev/null
             jq -e '
               [.hooks.SessionStart[].hooks[].command] | any(contains("sessionstart-sinex-recall.sh"))

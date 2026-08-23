@@ -1,6 +1,6 @@
 # Codex session-lifecycle hooks (SessionStart/UserPromptSubmit/Stop):
-# Beads/session-recall priming and Polylogue capture. Plain helper (not a NixOS
-# module) imported directly by mcp.nix's
+# Session recall and Polylogue capture. Plain helper (not a NixOS module)
+# imported directly by mcp.nix's
 # configFn; the generated file is exposed via the mcp-servers.codexHooksSource
 # option for tests.
 { pkgs, dotsRoot }:
@@ -15,10 +15,6 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "bd-prime-if-present";
-          }
-          {
-            type = "command";
             command = "${dotsRoot}/claude/hooks/sessionstart-sinex-recall.sh";
           }
           {
@@ -31,10 +27,6 @@ jsonFormat.generate "codex-hooks.json" {
     UserPromptSubmit = [
       {
         hooks = [
-          {
-            type = "command";
-            command = "bd-prime-if-present --memories-only";
-          }
           {
             type = "command";
             command = "polylogue-hook UserPromptSubmit --provider codex --sidecar-dir /home/sinity/.local/share/polylogue/hooks";

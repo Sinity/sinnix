@@ -85,7 +85,6 @@ if [[ -n $sampler ]]; then
   test "$(jq -s '[.[] | select(.type == "dispatch_end")] | length' "$test_root/state/claude-code/dispatch-ledger.jsonl")" = 2
   PATH="$test_root/bin:${PATH}" HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" sinnix-vacuity-sampler report | jq -e '.denominator == 1 and .sampled == 1 and .judged == 0' >/dev/null
 fi
-test -z "$(PATH="$test_root/bin" run_hook "$hooks_dir/sessionstart-beads-prime.sh" '{}')"
 test -z "$(PATH="$test_root/bin" run_hook "$hooks_dir/sessionstart-polylogue-recall.sh" '{}')"
 test -z "$(PATH="$test_root/bin" run_hook "$hooks_dir/sessionstart-sinex-recall.sh" '{}')"
 
