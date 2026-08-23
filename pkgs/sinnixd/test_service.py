@@ -21,6 +21,7 @@ from sinnix_mcp.execution import EnvironmentProfile, ExecutionResult
 
 from sinnixd.api import UnixSocketServer, call, receive_frame, send_frame
 from sinnixd.environment import build_environment
+from sinnixd.delivery import DeliveryError, GitHubDelivery
 from sinnixd.jobs import (
     MAX_LOG_ARTIFACT_BYTES,
     SYSTEMD_COMMAND_TIMEOUT_SECONDS,
@@ -60,9 +61,10 @@ unset = ["PYTHONPATH"]
 [workspace]
 provider = "git-worktree"
 root = "{root / 'worktrees'}"
-default_base = "HEAD"
+default_base = "origin/master"
 identity_check = ["git", "diff", "--quiet"]
 checkpoint_untracked = true
+verification_operations = ["check"]
 
 [conflicts]
 exact_files = ["fixture.lock"]
@@ -180,6 +182,9 @@ def initialize_git_checkout(root: Path) -> None:
         ("git", "-C", str(root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "fixture"),
     ):
         subprocess.run(arguments, check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "update-ref", "refs/remotes/origin/master", "HEAD"], check=True
+    )
 
 
 def test_worktree_porcelain_parser_accepts_flags_and_rejects_unknown_shapes() -> None:
@@ -854,6 +859,113 @@ def test_workspace_restack_reports_declared_collision_without_mutating_child(tmp
     assert subprocess.run(
         ["git", "-C", child["path"], "rev-parse", "HEAD"], check=True, capture_output=True, text=True
     ).stdout.strip() == child_head
+
+
+def test_declared_job_binds_workspace_and_exact_head(tmp_path: Path) -> None:
+    """Anti-vacuity: workspace verification launches in that checkout and persists its HEAD."""
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    jobs = generic_jobs(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    workspace = service.workspaces.create(
+        project_id="fixture", name="verify-lane", branch="feature/verify-lane", base="HEAD"
+    )
+
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "check", "workspace_id": workspace["workspace_id"]},
+        )
+    )
+
+    assert started.ok and started.payload is not None
+    record = jobs.store.load(started.payload.inline["job_id"])
+    assert record.spec.working_directory == workspace["path"]
+    assert record.spec.checkout is not None
+    assert record.spec.checkout["checkout_id"] == workspace["checkout_id"]
+    assert record.spec.checkout["head"] == workspace["head"]
+
+
+def test_exact_head_verified_workspace_publishes_lands_and_finishes_without_a_pr_ledger(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    workspace = service.workspaces.create(
+        project_id="fixture", name="delivery-lane", branch="feature/delivery", base="HEAD"
+    )
+    path = Path(workspace["path"])
+    (path / "delivery.txt").write_text("deliver\n")
+    subprocess.run(["git", "-C", str(path), "add", "delivery.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "delivery"],
+        check=True,
+    )
+    workspace = service.workspaces.get(workspace["workspace_id"])
+    started = service.dispatch(
+        request(
+            "job.start", "systemd-jobs",
+            {"project_id": "fixture", "operation": "check", "workspace_id": workspace["workspace_id"]},
+        )
+    )
+    assert started.ok and started.payload is not None
+    job_id = started.payload.inline["job_id"]
+    systemd.properties = {"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}
+    calls: list[list[str]] = []
+    merged = False
+
+    def fake_run(argv, **_kwargs):
+        nonlocal merged
+        command = list(argv)
+        calls.append(command)
+        if command[:3] == ["gh", "pr", "merge"]:
+            merged = True
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if command[:3] == ["gh", "pr", "view"]:
+            payload = {
+                "number": 17,
+                "url": "https://github.test/example/pull/17",
+                "state": "MERGED" if merged else "OPEN",
+                "isDraft": False,
+                "mergeStateStatus": "CLEAN",
+                "headRefOid": workspace["head"],
+                "baseRefName": "master",
+                "statusCheckRollup": [],
+            }
+            return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+        return subprocess.CompletedProcess(command, 0, "https://github.test/example/pull/17\n", "")
+
+    delivery = GitHubDelivery(service.projects, service.workspaces, jobs, run=fake_run)
+    (path / "late.txt").write_text("late change\n")
+    subprocess.run(["git", "-C", str(path), "add", "late.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "late"],
+        check=True,
+    )
+    workspace = service.workspaces.get(workspace["workspace_id"])
+    with pytest.raises(DeliveryError, match="exact HEAD"):
+        delivery.publish(workspace["workspace_id"], job_id, "Stale", "must not publish")
+    assert calls == []
+    replacement = service.dispatch(
+        request(
+            "job.start", "systemd-jobs",
+            {"project_id": "fixture", "operation": "check", "workspace_id": workspace["workspace_id"]},
+        )
+    )
+    assert replacement.ok and replacement.payload is not None
+    job_id = replacement.payload.inline["job_id"]
+    published = delivery.publish(workspace["workspace_id"], job_id, "Deliver fixture", "Verified body")
+    landed = delivery.land(workspace["workspace_id"], job_id)
+    finished = delivery.finish(workspace["workspace_id"])
+
+    assert published["published"] and landed["landed"] and finished["finished"]
+    assert any(command[:3] == ["git", "-C", str(path)] and "push" in command for command in calls)
+    assert any(command[:3] == ["gh", "pr", "create"] for command in calls)
+    assert any(command[:3] == ["gh", "pr", "merge"] for command in calls)
+    assert not path.exists()
+    assert service.workspaces.list("fixture") == {"workspaces": []}
 
 
 def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: Path) -> None:

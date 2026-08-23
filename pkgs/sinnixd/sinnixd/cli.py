@@ -73,11 +73,24 @@ def parser() -> argparse.ArgumentParser:
     workspace_stack.add_argument("--branch", required=True)
     workspace_restack = workspace_subcommands.add_parser("restack")
     workspace_restack.add_argument("workspace_id")
+    workspace_publish = workspace_subcommands.add_parser("publish")
+    workspace_publish.add_argument("workspace_id")
+    workspace_publish.add_argument("--job", required=True)
+    workspace_publish.add_argument("--title", required=True)
+    workspace_publish.add_argument("--body", default="")
+    workspace_review = workspace_subcommands.add_parser("review-status")
+    workspace_review.add_argument("workspace_id")
+    workspace_land = workspace_subcommands.add_parser("land")
+    workspace_land.add_argument("workspace_id")
+    workspace_land.add_argument("--job", required=True)
+    workspace_finish = workspace_subcommands.add_parser("finish")
+    workspace_finish.add_argument("workspace_id")
     job = subcommands.add_parser("job")
     job_subcommands = job.add_subparsers(dest="job_command", required=True)
     start = job_subcommands.add_parser("start")
     start.add_argument("project_id")
     start.add_argument("operation")
+    start.add_argument("--workspace")
     get = job_subcommands.add_parser("get")
     get.add_argument("job_id")
     job_subcommands.add_parser("list")
@@ -236,18 +249,39 @@ def main() -> None:
             },
             "agent-control",
         )
-    elif arguments.command == "workspace":
+    elif arguments.command == "workspace" and arguments.workspace_command == "restack":
         request = _request(
             "workspace.restack",
             "git-workspaces",
             {"workspace_id": arguments.workspace_id},
             "agent-control",
         )
+    elif arguments.command == "workspace" and arguments.workspace_command == "publish":
+        request = _request(
+            "workspace.publish", "git-workspaces",
+            {"workspace_id": arguments.workspace_id, "job_id": arguments.job, "title": arguments.title, "body": arguments.body},
+            "agent-control",
+        )
+    elif arguments.command == "workspace" and arguments.workspace_command == "review-status":
+        request = _request("workspace.review-status", "git-workspaces", {"workspace_id": arguments.workspace_id})
+    elif arguments.command == "workspace" and arguments.workspace_command == "land":
+        request = _request(
+            "workspace.land", "git-workspaces",
+            {"workspace_id": arguments.workspace_id, "job_id": arguments.job}, "agent-control",
+        )
+    elif arguments.command == "workspace":
+        request = _request(
+            "workspace.finish", "git-workspaces", {"workspace_id": arguments.workspace_id}, "agent-control"
+        )
     elif arguments.command == "job" and arguments.job_command == "start":
         request = _request(
             "job.start",
             "systemd-jobs",
-            {"project_id": arguments.project_id, "operation": arguments.operation},
+            {
+                "project_id": arguments.project_id,
+                "operation": arguments.operation,
+                "workspace_id": arguments.workspace,
+            },
         )
     elif arguments.command == "job" and arguments.job_command == "get":
         request = _request("job.get", "systemd-jobs", {"job_id": arguments.job_id})

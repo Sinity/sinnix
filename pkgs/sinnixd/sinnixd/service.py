@@ -19,6 +19,7 @@ from sinnix_mcp.execution import OwnerExecution
 
 from .jobs import GenericJobStore, GenericJobs, JobRecordError, SystemdJobError, UserSystemdJobs, default_state_dir
 from .contracts import TypedJobContracts
+from .delivery import DeliveryError, GitHubDelivery
 from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from .projects import ProjectCatalog
 from .workspaces import GitWorkspaces, WorkspaceError, WorkspaceStore
@@ -43,10 +44,14 @@ class SinnixdService:
     version: str = "0.2.0"
     native_runner: Path = Path("/home/sinity/.config/hermes/skills/agent-orchestration/scripts/run_agent_prompt.sh")
     workspaces: GitWorkspaces | None = None
+    delivery: GitHubDelivery | None = None
 
     def __post_init__(self) -> None:
         if self.workspaces is None:
             object.__setattr__(self, "workspaces", GitWorkspaces(self.projects, WorkspaceStore(self.jobs.store.root)))
+        if self.delivery is None:
+            assert self.workspaces is not None
+            object.__setattr__(self, "delivery", GitHubDelivery(self.projects, self.workspaces, self.jobs))
         _ = self.owners
 
     @property
@@ -114,7 +119,7 @@ class SinnixdService:
             )
         except (JobRecordError, SystemdJobError) as error:
             return self._error(request, owner_name, ErrorCode.OPERATION_FAILED, str(error))
-        except WorkspaceError as error:
+        except (WorkspaceError, DeliveryError) as error:
             return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
         except ValueError as error:
             return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
@@ -233,16 +238,49 @@ class SinnixdService:
                 raise ValueError("workspace restacking requires agent-control or operator principal")
             assert self.workspaces is not None
             return self.workspaces.restack(self._single_workspace_id(arguments, "workspace.restack"))
+        if operation == "workspace.publish":
+            if principal not in {"agent-control", "operator"}:
+                raise ValueError("workspace publication requires agent-control or operator principal")
+            if set(arguments) != {"workspace_id", "job_id", "title", "body"}:
+                raise ValueError("workspace.publish requires workspace_id, job_id, title, and body")
+            assert self.delivery is not None
+            return self.delivery.publish(
+                self._job_argument(arguments, "workspace_id"),
+                self._job_argument(arguments, "job_id"),
+                self._job_argument(arguments, "title"),
+                arguments.get("body") if isinstance(arguments.get("body"), str) else "",
+            )
+        if operation == "workspace.review-status":
+            assert self.delivery is not None
+            return self.delivery.review_status(self._single_workspace_id(arguments, "workspace.review-status"))
+        if operation == "workspace.land":
+            if principal not in {"agent-control", "operator"} or set(arguments) != {"workspace_id", "job_id"}:
+                raise ValueError("workspace.land requires agent-control or operator plus workspace_id and job_id")
+            assert self.delivery is not None
+            return self.delivery.land(
+                self._job_argument(arguments, "workspace_id"), self._job_argument(arguments, "job_id")
+            )
+        if operation == "workspace.finish":
+            if principal not in {"agent-control", "operator"}:
+                raise ValueError("workspace finish requires agent-control or operator principal")
+            assert self.delivery is not None
+            return self.delivery.finish(self._single_workspace_id(arguments, "workspace.finish"))
         if operation == "job.start":
             project_id = self._job_argument(arguments, "project_id")
             operation_name = self._job_argument(arguments, "operation")
-            if set(arguments) != {"project_id", "operation"}:
-                raise ValueError("job.start accepts only project_id and operation")
+            if set(arguments) - {"project_id", "operation", "workspace_id"}:
+                raise ValueError("job.start accepts project_id, operation, and optional workspace_id")
             project = self.projects.get(project_id)
+            workspace_id = arguments.get("workspace_id")
+            if workspace_id is not None and (not isinstance(workspace_id, str) or not workspace_id):
+                raise ValueError("job.start workspace_id must be null or non-empty")
+            assert self.workspaces is not None
+            checkout = self.workspaces.checkout(workspace_id) if workspace_id is not None else None
             return self._cleanup_terminal(self.jobs.start_declared(
                 project=project,
                 operation=project.operation(operation_name),
                 correlation_id=correlation_id,
+                checkout=checkout,
             ))
         if operation == "job.shell.start":
             required = {"project_id", "checkout_id", "argv", "cwd", "timeout_seconds", "result"}

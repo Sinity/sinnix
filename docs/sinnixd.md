@@ -19,8 +19,13 @@ agentctl workspace checkpoint <workspace-id>
 agentctl workspace restore <workspace-id> <checkpoint-id>
 agentctl workspace stack <parent-workspace-id> child-lane --branch feature/child
 agentctl workspace restack <child-workspace-id>
+agentctl workspace publish <workspace-id> --job <job-id> --title 'Review title' --body 'Review body'
+agentctl workspace review-status <workspace-id>
+agentctl workspace land <workspace-id> --job <job-id>
+agentctl workspace finish <workspace-id>
 agentctl workspace reap <workspace-id>
 agentctl job start sinnix lint
+agentctl job start polylogue verify_quick --workspace <workspace-id>
 agentctl job get <job-id>
 agentctl job list
 agentctl job wait <job-id>
@@ -33,7 +38,7 @@ agentctl agent --project sinnix --checkout default --prompt-file ./prompt.md --b
 
 The service passes a declarative, non-empty `sinnix.services.sinnixd.projectRoots` list as repeated `--project-root` arguments. It defaults to the Sinnix root and `/realm/project/polylogue`. Sinnixd loads only those `.agentctl/project.toml` adapters and does not scan arbitrary directories. Each descriptor is schema-versioned, identifies its repository root markers, declares the execution environment, and publishes named operation metadata.
 
-`job start` accepts a project ID and one declared operation name, never an arbitrary command. Declared operations and internal synthetic foreground commands construct the same durable generic-job spec, record, transient user `.service` launch, log artifact, reconciliation, wait, and cancellation route. The only additional public starts are the constrained typed contracts below.
+`job start` accepts a project ID and one declared operation name, never an arbitrary command. Its optional workspace binding launches in that registered checkout and durably records the checkout ID and exact starting HEAD, so later publication can reject stale verification. Declared operations and internal synthetic foreground commands construct the same durable generic-job spec, record, transient user `.service` launch, log artifact, reconciliation, wait, and cancellation route. The only additional public starts are the constrained typed contracts below.
 
 ## Typed shell and agent contracts
 
@@ -59,9 +64,11 @@ Create, adopt, checkpoint, restore, and reap require the `agent-control` or `ope
 
 Checkpoint stores separate binary patches for the index and working tree plus a bounded private archive of policy-allowed untracked regular files. Every artifact has a SHA-256 digest and is bound to the workspace, project, branch, and exact source HEAD. Restore requires a clean target at that same HEAD and branch, reruns the descriptor identity check, verifies every artifact digest and archive member, then reconstructs staged, unstaged, and untracked state. It never creates a stash or commit.
 
-A stacked workspace records only its stable parent relationship; Git remains the history authority. Restack requires a clean child, reports overlaps on declared exact-file and generated surfaces before mutation, then rebases the child onto the parent's current branch and aborts a failed Git rebase. A parent cannot be reaped while children still reference it. Publication and landing remain outside this slice.
+A stacked workspace records only its stable parent relationship; Git remains the history authority. Restack requires a clean child, reports overlaps on declared exact-file and generated surfaces before mutation, then rebases the child onto the parent's current branch and aborts a failed Git rebase. A parent cannot be reaped while children still reference it.
 
-The daemon still does not own job queues, retries, task mutation, service leases, arbitrary shells beyond the typed operator contract, admission policy, Git history, hosted review state, or merge state. Descriptor pool, cache, and exclusivity metadata remain descriptive until their existing authorities move behind an explicit shared contract. The gateway’s legacy controllers remain downstream and are unchanged here.
+Publication requires a successful operation listed by the project as a workspace verifier, bound to the same checkout ID and current exact HEAD. AgentCTL pushes that branch and creates a GitHub review, but stores no PR ledger: review status, mergeability, head identity, and merged state are queried fresh from GitHub. Land rechecks the verification and GitHub head before requesting a squash merge. Finish requires GitHub to report that exact head merged, deletes the remote branch when present, removes the clean managed worktree and local branch, then removes its relationship and checkpoints.
+
+The daemon still does not own job queues, retries, task mutation, service leases, arbitrary shells beyond the typed operator contract, admission policy, Git history, hosted review state, or merge state. GitHub remains authoritative for reviews and merges; AgentCTL only applies typed transitions after re-reading it. Descriptor pool, cache, and exclusivity metadata remain descriptive until their existing authorities move behind an explicit shared contract. The gateway’s legacy controllers remain downstream and are unchanged here.
 
 ## Shared protocol
 
