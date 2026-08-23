@@ -326,6 +326,7 @@ def test_catalog_search_scopes_contracts_to_project_resources() -> None:
         "beads.change",
         "beads.changeset",
         "beads.operate",
+        "operations.run",
         "agents.run",
         "shell.run",
         "projects.list",

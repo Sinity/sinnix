@@ -366,6 +366,20 @@ SHELL_RUN_SCHEMA: dict[str, Any] = _with_request_controls(
     }
 )
 
+DECLARED_OPERATION_RUN_SCHEMA: dict[str, Any] = _with_request_controls(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["project_id", "operation", "idempotency_key"],
+        "properties": {
+            "project_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "operation": {"type": "string", "minLength": 1, "maxLength": 128},
+            "workspace_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "parameters": {"type": "object", "maxProperties": 16, "default": {}},
+        },
+    }
+)
+
 AGENT_RUN_SCHEMA: dict[str, Any] = _with_request_controls(
     {
         "type": "object",
@@ -1111,6 +1125,31 @@ def build_registry() -> CatalogRegistry:
                 },
             ),
             documentation="Submit one revision-checked ops-reducer action against a canonical attested target reference.",
+        ),
+        ActionSpec(
+            name="operations.run",
+            verb=VerbFamily.RUN,
+            domain="operations",
+            owner="systemd-jobs",
+            route="job.start",
+            effect=EffectMode.RUN,
+            principals=frozenset({"agent-control", "operator"}),
+            input_schema=DECLARED_OPERATION_RUN_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("project", "checkout", "job"),
+            supports_idempotency=True,
+            receipt_policy="audit",
+            examples=(
+                {
+                    "input": {
+                        "project_id": "sinnix",
+                        "operation": "check",
+                        "parameters": {},
+                        "idempotency_key": "declared-check-example",
+                    }
+                },
+            ),
+            documentation="Start one project-declared operation through the daemon-owned generic job route.",
         ),
         ActionSpec(
             name="agents.run",
