@@ -871,6 +871,45 @@ def test_workspace_stack_restacks_child_onto_parent_and_survives_restart(tmp_pat
         restarted.workspaces.reap(parent["workspace_id"])
 
 
+def test_workspace_restack_detaches_child_after_squash_equivalent_parent_disappears(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Fixture"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "fixture@example.test"], check=True)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    parent = service.workspaces.create(
+        project_id="fixture", name="merged-parent", branch="feature/merged-parent", base="HEAD"
+    )
+    child = service.workspaces.stack(
+        parent_workspace_id=parent["workspace_id"], name="surviving-child", branch="feature/surviving-child"
+    )
+    child_path = Path(child["path"])
+    (child_path / "child.txt").write_text("child\n")
+    subprocess.run(["git", "-C", str(child_path), "add", "child.txt"], check=True)
+    subprocess.run(["git", "-C", str(child_path), "commit", "--quiet", "-m", "child"], check=True)
+    parent_path = Path(parent["path"])
+    (parent_path / "parent.txt").write_text("parent\n")
+    subprocess.run(["git", "-C", str(parent_path), "add", "parent.txt"], check=True)
+    subprocess.run(["git", "-C", str(parent_path), "commit", "--quiet", "-m", "parent"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "merge", "--squash", parent["branch"]], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "--quiet", "-m", "merged parent"], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "update-ref", "refs/remotes/origin/master", "HEAD"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "worktree", "remove", "--force", str(parent_path)], check=True
+    )
+    subprocess.run(["git", "-C", str(tmp_path), "branch", "-D", parent["branch"]], check=True)
+
+    restacked = service.workspaces.restack(child["workspace_id"])
+
+    assert restacked["restacked"] and restacked["detached_merged_parent"]
+    assert (child_path / "parent.txt").read_text() == "parent\n"
+    assert (child_path / "child.txt").read_text() == "child\n"
+    forgotten = service.workspaces.reap(parent["workspace_id"])
+    assert forgotten["relationship_only"]
+
+
 @pytest.mark.parametrize(
     ("conflict_path", "expected_class"),
     [("fixture.lock", "exact-file"), ("generated.json", "generated-surface"), ("ordinary.txt", "hard")],
