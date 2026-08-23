@@ -800,6 +800,33 @@ def test_workspace_restore_rejects_dirty_or_stale_head_targets(tmp_path: Path) -
         service.workspaces.restore(created["workspace_id"], checkpoint["checkpoint_id"])
 
 
+def test_workspace_recover_recreates_missing_exact_head_and_restores_checkpoint(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    created = service.workspaces.create(
+        project_id="fixture", name="recover-lane", branch="feature/recover-lane", base="HEAD"
+    )
+    path = Path(created["path"])
+    (path / "flake.nix").write_text('{"recovered": true}\n')
+    subprocess.run(["git", "-C", str(path), "add", "flake.nix"], check=True)
+    (path / "untracked.txt").write_text("preserved\n")
+    checkpoint = service.workspaces.checkpoint(created["workspace_id"])
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "worktree", "remove", "--force", str(path)],
+        check=True,
+    )
+
+    recovered = service.workspaces.recover(created["workspace_id"], checkpoint["checkpoint_id"])
+
+    assert recovered["recovered"] and recovered["path"] == str(path)
+    assert (path / "flake.nix").read_text() == '{"recovered": true}\n'
+    assert (path / "untracked.txt").read_text() == "preserved\n"
+    assert "recovered" in subprocess.run(
+        ["git", "-C", str(path), "diff", "--cached"], check=True, capture_output=True, text=True
+    ).stdout
+
+
 def test_workspace_stack_restacks_child_onto_parent_and_survives_restart(tmp_path: Path) -> None:
     """Anti-vacuity: the durable parent edge drives a real Git rebase after restart."""
     write_adapter(tmp_path)
