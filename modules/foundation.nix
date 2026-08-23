@@ -233,7 +233,7 @@ in
                   observerRead = true;
                   devtoolsEntrypoint = "nix develop";
                   taskAuthority = {
-                    workspace = "${config.sinnix}/.beads";
+                    workspace = "${cfg.paths.stateRoot}/tasks/sinnix/.beads";
                     database = "${cfg.paths.stateRoot}/tasks/sinnix/.beads/dolt";
                     publicationPolicy = "dolt-sync";
                   };
@@ -243,7 +243,7 @@ in
                   remote = "https://github.com/Sinity/sinex.git";
                   observerRead = true;
                   taskAuthority = {
-                    workspace = "${config.sinex}/.beads";
+                    workspace = "${cfg.paths.stateRoot}/tasks/sinex/.beads";
                     database = "${cfg.paths.stateRoot}/tasks/sinex/.beads/dolt";
                     publicationPolicy = "dolt-sync";
                   };
@@ -253,7 +253,7 @@ in
                   remote = "https://github.com/Sinity/polylogue.git";
                   observerRead = true;
                   taskAuthority = {
-                    workspace = "${config.polylogue}/.beads";
+                    workspace = "${cfg.paths.stateRoot}/tasks/polylogue/.beads";
                     database = "${cfg.paths.stateRoot}/tasks/polylogue/.beads/dolt";
                     publicationPolicy = "dolt-sync";
                   };
@@ -263,7 +263,7 @@ in
                   remote = "https://github.com/Sinity/sinity-lynchpin.git";
                   observerRead = true;
                   taskAuthority = {
-                    workspace = "${config.lynchpin}/.beads";
+                    workspace = "${cfg.paths.stateRoot}/tasks/lynchpin/.beads";
                     database = "${cfg.paths.stateRoot}/tasks/lynchpin/.beads/dolt";
                     publicationPolicy = "local";
                   };
