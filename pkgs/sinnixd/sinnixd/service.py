@@ -222,6 +222,16 @@ class SinnixdService:
                 self._job_argument(arguments, "workspace_id"),
                 self._job_argument(arguments, "checkpoint_id"),
             )
+        if operation == "workspace.recover":
+            if principal not in {"agent-control", "operator"}:
+                raise ValueError("workspace recovery requires agent-control or operator principal")
+            if set(arguments) != {"workspace_id", "checkpoint_id"}:
+                raise ValueError("workspace.recover requires workspace_id and checkpoint_id")
+            assert self.workspaces is not None
+            return self.workspaces.recover(
+                self._job_argument(arguments, "workspace_id"),
+                self._job_argument(arguments, "checkpoint_id"),
+            )
         if operation == "workspace.stack":
             if principal not in {"agent-control", "operator"}:
                 raise ValueError("workspace stacking requires agent-control or operator principal")

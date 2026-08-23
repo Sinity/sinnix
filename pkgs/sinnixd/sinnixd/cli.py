@@ -67,6 +67,9 @@ def parser() -> argparse.ArgumentParser:
     workspace_restore = workspace_subcommands.add_parser("restore")
     workspace_restore.add_argument("workspace_id")
     workspace_restore.add_argument("checkpoint_id")
+    workspace_recover = workspace_subcommands.add_parser("recover")
+    workspace_recover.add_argument("workspace_id")
+    workspace_recover.add_argument("checkpoint_id")
     workspace_stack = workspace_subcommands.add_parser("stack")
     workspace_stack.add_argument("parent_workspace_id")
     workspace_stack.add_argument("name")
@@ -235,6 +238,12 @@ def main() -> None:
         request = _request(
             "workspace.restore",
             "git-workspaces",
+            {"workspace_id": arguments.workspace_id, "checkpoint_id": arguments.checkpoint_id},
+            "agent-control",
+        )
+    elif arguments.command == "workspace" and arguments.workspace_command == "recover":
+        request = _request(
+            "workspace.recover", "git-workspaces",
             {"workspace_id": arguments.workspace_id, "checkpoint_id": arguments.checkpoint_id},
             "agent-control",
         )

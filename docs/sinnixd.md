@@ -17,6 +17,7 @@ agentctl workspace adopt sinnix worktree-0123456789abcdef adopted-lane
 agentctl workspace get <workspace-id>
 agentctl workspace checkpoint <workspace-id>
 agentctl workspace restore <workspace-id> <checkpoint-id>
+agentctl workspace recover <workspace-id> <checkpoint-id>
 agentctl workspace stack <parent-workspace-id> child-lane --branch feature/child
 agentctl workspace restack <child-workspace-id>
 agentctl workspace publish <workspace-id> --job <job-id> --title 'Review title' --body 'Review body'

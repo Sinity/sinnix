@@ -494,23 +494,52 @@ class GitWorkspaces:
 
     def restore(self, workspace_id: str, checkpoint_id: str) -> dict[str, Any]:
         with flock(self.mutation_lock):
+            return self._restore_locked(workspace_id, checkpoint_id)
+
+    def _restore_locked(self, workspace_id: str, checkpoint_id: str) -> dict[str, Any]:
+        record = self._record(workspace_id)
+        checkout, project = self._available(record)
+        checkpoint, root = self.store.checkpoint(workspace_id, checkpoint_id)
+        if checkpoint.workspace_id != record.workspace_id or checkpoint.project_id != record.project_id:
+            raise WorkspaceError("checkpoint authority does not match workspace")
+        if checkout.head != checkpoint.head or record.branch != checkpoint.branch:
+            raise WorkspaceError("checkpoint source HEAD or branch no longer matches workspace")
+        if self._git(checkout.path, "status", "--porcelain", "--untracked-files=all").stdout:
+            raise WorkspaceError("checkpoint restore requires a clean workspace")
+        self._identity_check(project, checkout.path)
+        staged = self._verified_artifact(root / "staged.patch", checkpoint.staged_sha256)
+        unstaged = self._verified_artifact(root / "unstaged.patch", checkpoint.unstaged_sha256)
+        untracked = self._verified_artifact(root / "untracked.tar", checkpoint.untracked_sha256)
+        self._apply_patch(checkout.path, staged, index=True)
+        self._apply_patch(checkout.path, unstaged, index=False)
+        self._extract_untracked(checkout.path, untracked, checkpoint.untracked_files)
+        return {"workspace_id": workspace_id, "checkpoint_id": checkpoint_id, "restored": True}
+
+    def recover(self, workspace_id: str, checkpoint_id: str) -> dict[str, Any]:
+        with flock(self.mutation_lock):
             record = self._record(workspace_id)
-            checkout, project = self._available(record)
-            checkpoint, root = self.store.checkpoint(workspace_id, checkpoint_id)
-            if checkpoint.workspace_id != record.workspace_id or checkpoint.project_id != record.project_id:
+            if not record.managed:
+                raise WorkspaceError("adopted workspaces cannot be recovered")
+            status = self._status(record)
+            if status["state"] != "missing":
+                raise WorkspaceError("recover requires a missing managed workspace")
+            checkpoint, _root = self.store.checkpoint(workspace_id, checkpoint_id)
+            if checkpoint.project_id != record.project_id or checkpoint.branch != record.branch:
                 raise WorkspaceError("checkpoint authority does not match workspace")
-            if checkout.head != checkpoint.head or record.branch != checkpoint.branch:
-                raise WorkspaceError("checkpoint source HEAD or branch no longer matches workspace")
-            if self._git(checkout.path, "status", "--porcelain", "--untracked-files=all").stdout:
-                raise WorkspaceError("checkpoint restore requires a clean workspace")
-            self._identity_check(project, checkout.path)
-            staged = self._verified_artifact(root / "staged.patch", checkpoint.staged_sha256)
-            unstaged = self._verified_artifact(root / "unstaged.patch", checkpoint.unstaged_sha256)
-            untracked = self._verified_artifact(root / "untracked.tar", checkpoint.untracked_sha256)
-            self._apply_patch(checkout.path, staged, index=True)
-            self._apply_patch(checkout.path, unstaged, index=False)
-            self._extract_untracked(checkout.path, untracked, checkpoint.untracked_files)
-            return {"workspace_id": workspace_id, "checkpoint_id": checkpoint_id, "restored": True}
+            project = self._project(record.project_id)
+            branch_head = self._git(project.root, "rev-parse", "--verify", f"{record.branch}^{{commit}}").stdout.strip()
+            if branch_head != checkpoint.head:
+                raise WorkspaceError("workspace branch no longer matches checkpoint HEAD")
+            self._validate_target(project.workspace.root, record.path)
+            result = self._git(project.root, "worktree", "add", str(record.path), record.branch, check=False)
+            if result.returncode != 0:
+                raise WorkspaceError(result.stderr.strip() or "Git workspace recovery failed")
+            try:
+                restored = self._restore_locked(workspace_id, checkpoint_id)
+            except BaseException:
+                self._git(project.root, "worktree", "remove", "--force", str(record.path), check=False)
+                raise
+            return {**restored, "recovered": True, "path": str(record.path)}
 
     def _status(self, record: WorkspaceRecord) -> dict[str, Any]:
         row = record.to_dict()
