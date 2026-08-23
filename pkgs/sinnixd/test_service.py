@@ -1976,23 +1976,13 @@ def test_job_store_fsyncs_parents_when_creating_state_directories(
     ("mode", "properties", "expected"),
     [
         ("missing", {"LoadState": "not-found", "ActiveState": "inactive"}, "missing"),
-        ("lost", None, "lost"),
     ],
 )
-def test_nonterminal_absence_and_launch_failure_are_distinct_terminal_outcomes(
+def test_confirmed_absence_and_launch_failure_are_distinct_terminal_outcomes(
     tmp_path: Path, mode: str, properties: dict[str, str] | None, expected: str
 ) -> None:
     """Anti-vacuity: post-launch loss, missing units, and launch failures have distinct terminal records."""
-    class FailingShow(FakeSystemdJobs):
-        def show(
-            self,
-            unit: str,
-            *,
-            timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
-        ) -> dict[str, str]:
-            raise SystemdJobError("manager unavailable")
-
-    systemd: FakeSystemdJobs = FailingShow() if mode == "lost" else FakeSystemdJobs(properties=properties or {})
+    systemd = FakeSystemdJobs(properties=properties or {})
     jobs = generic_jobs(tmp_path, systemd)
     status = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
     status = jobs.get(status["job_id"])
@@ -2044,8 +2034,8 @@ def test_start_persists_launch_failed_only_when_systemd_confirms_absence(tmp_pat
     assert secret not in persisted
 
 
-@pytest.mark.parametrize("mode", ("lost", "launch-failed"))
-def test_terminal_systemd_errors_persist_only_stable_codes(tmp_path: Path, mode: str) -> None:
+@pytest.mark.parametrize("mode", ("observation-unknown", "launch-failed"))
+def test_systemd_errors_persist_only_stable_codes(tmp_path: Path, mode: str) -> None:
     """Anti-vacuity: persisting a SystemdJobError message writes this fixture secret to disk."""
     secret = "systemd-error-secret-do-not-persist"
 
@@ -2064,7 +2054,9 @@ def test_terminal_systemd_errors_persist_only_stable_codes(tmp_path: Path, mode:
 
     jobs = generic_jobs(
         tmp_path,
-        FailingShow() if mode == "lost" else FailingStart(properties={"LoadState": "not-found", "ActiveState": "inactive"}),
+        FailingShow()
+        if mode == "observation-unknown"
+        else FailingStart(properties={"LoadState": "not-found", "ActiveState": "inactive"}),
     )
     if mode == "launch-failed":
         status = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
@@ -2076,6 +2068,7 @@ def test_terminal_systemd_errors_persist_only_stable_codes(tmp_path: Path, mode:
 
     assert status["state"]["phase"] == mode
     assert status["state"]["error"] == {"code": "systemd-job-error"}
+    assert status["state"]["terminal"] is (mode == "launch-failed")
     assert secret not in persisted
     assert '"message"' not in persisted
 
@@ -2228,7 +2221,7 @@ def test_job_wait_caps_manager_calls_at_its_remaining_deadline(
     timed_out = jobs.wait(uncertain["job_id"], timeout_seconds=1)
 
     assert timed_out["job_id"] == uncertain["job_id"]
-    assert timed_out["state"]["phase"] == "launch-unknown"
+    assert timed_out["state"]["phase"] == "observation-unknown"
     assert timed_out["wait_timed_out"]
     assert systemd.timeouts
     assert all(0 < timeout <= SYSTEMD_COMMAND_TIMEOUT_SECONDS for timeout in systemd.timeouts)
