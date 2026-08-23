@@ -689,6 +689,18 @@ def test_workspace_reap_forgets_missing_and_removes_only_clean_contained_managed
     assert service.workspaces.list("fixture") == {"workspaces": []}
 
 
+def test_delivery_rejects_pending_hosted_checks() -> None:
+    assert not GitHubDelivery._checks_pass(
+        [{"__typename": "StatusContext", "context": "ci", "state": "PENDING"}]
+    )
+    assert GitHubDelivery._checks_pass(
+        [
+            {"__typename": "StatusContext", "context": "ci", "state": "SUCCESS"},
+            {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "NEUTRAL"},
+        ]
+    )
+
+
 def test_workspace_reap_preserves_dirty_divergent_and_adopted_worktrees(tmp_path: Path) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
