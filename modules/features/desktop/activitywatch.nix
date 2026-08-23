@@ -74,7 +74,7 @@ mkFeatureModule {
       };
 
       home-manager.users.${user} =
-        { pkgs, lib, ... }:
+        { pkgs, lib, config, ... }:
         {
           # awatcher (Rust) handles both AFK and window tracking natively on
           # Wayland; aw-watcher-afk is X11-only.
@@ -84,10 +84,33 @@ mkFeatureModule {
             watchers = {
               awatcher = {
                 package = pkgs.awatcher;
+                # Without --config, awatcher reads ~/.config/awatcher/config.toml
+                # (a stale 2024 file), not the file home-manager generates here —
+                # pass the generated path explicitly so the declared settings are
+                # authoritative. Keys live under the [awatcher] section per the
+                # upstream FileConfig schema.
+                extraOptions = [
+                  "--config"
+                  "${config.xdg.configHome}/activitywatch/awatcher/awatcher.toml"
+                ];
                 settings = {
-                  idle-timeout-seconds = 60;
-                  poll-time-idle-seconds = 5;
-                  poll-time-window-seconds = 2;
+                  awatcher = {
+                    idle-timeout-seconds = 60;
+                    poll-time-idle-seconds = 5;
+                    poll-time-window-seconds = 2;
+                    # Strip CLI-agent spinner glyphs (Claude Code half-disks,
+                    # braille frames, ✳) from kitty titles: each animation tick
+                    # otherwise defeats heartbeat merging and one agent session
+                    # becomes thousands of near-zero-duration window events
+                    # (93% of the 2026-08 window bucket was this churn).
+                    filters = [
+                      {
+                        match-app-id = "kitty";
+                        match-title = "[◐◑⠂⠐⠏⠸⠦⠴⠇⠧⠋⠼⠹⠙✳] (.*)";
+                        replace-title = "$1";
+                      }
+                    ];
+                  };
                 };
               };
             };
