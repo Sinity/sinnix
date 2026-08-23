@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import BoundedSemaphore, Event
 from typing import Any, Callable
 
-from sinnix_mcp import RequestEnvelope, ResponseEnvelope, response_envelope_from_dict
+from sinnix_mcp import ErrorCode, ErrorEnvelope, RequestEnvelope, ResponseEnvelope, response_envelope_from_dict
 
 from .jobs import DEFAULT_WAIT_SECONDS, MAX_WAIT_SECONDS
 from .service import SinnixdService
@@ -19,6 +19,9 @@ CONNECTION_TIMEOUT_SECONDS = 5.0
 WAIT_TRANSPORT_MARGIN_SECONDS = 5.0
 ACCEPT_POLL_SECONDS = 0.1
 RESERVED_CONTROL_WORKERS = 2
+MAX_JSON_RPC_ERROR_MESSAGE_BYTES = 1_024
+JSON_RPC_INVALID_REQUEST = -32600
+WAIT_CAPACITY_EXHAUSTED_MESSAGE = "job.wait capacity is exhausted"
 
 
 class ProtocolError(ValueError):
@@ -27,6 +30,26 @@ class ProtocolError(ValueError):
 
 class SinnixdClientError(ValueError):
     """The canonical client could not obtain a valid daemon response."""
+
+
+@dataclass(frozen=True)
+class JsonRpcErrorEnvelope:
+    """A bounded JSON-RPC error frame accepted from the local daemon."""
+
+    code: int
+    message: str
+
+    def __post_init__(self) -> None:
+        if isinstance(self.code, bool) or not isinstance(self.code, int):
+            raise ProtocolError("response error code must be an integer")
+        if not isinstance(self.message, str):
+            raise ProtocolError("response error message must be a string")
+        try:
+            message_bytes = self.message.encode()
+        except UnicodeEncodeError as error:
+            raise ProtocolError("response error message must be valid UTF-8") from error
+        if not message_bytes or len(message_bytes) > MAX_JSON_RPC_ERROR_MESSAGE_BYTES:
+            raise ProtocolError("response error message exceeds its bound")
 
 
 def _read_exact(connection: socket.socket, length: int) -> bytes:
@@ -72,6 +95,41 @@ def _response_timeout_seconds(request: RequestEnvelope) -> float:
     ):
         return CONNECTION_TIMEOUT_SECONDS
     return timeout_seconds + WAIT_TRANSPORT_MARGIN_SECONDS
+
+
+def _json_rpc_error_from_dict(value: Any) -> JsonRpcErrorEnvelope:
+    if not isinstance(value, dict) or set(value) != {"code", "message"}:
+        raise ProtocolError("response error has invalid fields")
+    return JsonRpcErrorEnvelope(code=value["code"], message=value["message"])
+
+
+def _response_from_json_rpc_error(request: RequestEnvelope, error: JsonRpcErrorEnvelope) -> dict[str, Any]:
+    if error.code == JSON_RPC_INVALID_REQUEST and error.message == WAIT_CAPACITY_EXHAUSTED_MESSAGE:
+        return ResponseEnvelope(
+            request_id=request.request_id,
+            correlation_id=request.correlation_id,
+            owner=request.owner,
+            error=ErrorEnvelope(ErrorCode.RESOURCE_EXHAUSTED, error.message),
+        ).to_dict()
+    raise SinnixdClientError("sinnixd is unavailable")
+
+
+def _response_result_from_json_rpc_frame(request: RequestEnvelope, response: dict[str, Any]) -> dict[str, Any]:
+    if response.get("jsonrpc") != "2.0" or response.get("id") != request.request_id:
+        raise ProtocolError("response does not match the request")
+    has_result = "result" in response
+    has_error = "error" in response
+    if has_result == has_error:
+        raise ProtocolError("response requires exactly one of result or error")
+    expected_fields = {"jsonrpc", "id", "error"} if has_error else {"jsonrpc", "id", "result"}
+    if set(response) != expected_fields:
+        raise ProtocolError("response has invalid fields")
+    if has_error:
+        return _response_from_json_rpc_error(request, _json_rpc_error_from_dict(response["error"]))
+    result = response["result"]
+    if not isinstance(result, dict):
+        raise ProtocolError("response requires an object result")
+    return result
 
 
 @dataclass
@@ -242,12 +300,7 @@ def call(socket_path: Path, request: RequestEnvelope) -> dict[str, Any]:
         )
         connection.settimeout(_response_timeout_seconds(request))
         response = receive_frame(connection)
-    if response.get("jsonrpc") != "2.0" or response.get("id") != request.request_id:
-        raise ProtocolError("response does not match the request")
-    result = response.get("result")
-    if not isinstance(result, dict):
-        raise ProtocolError("response requires an object result")
-    return result
+    return _response_result_from_json_rpc_frame(request, response)
 
 
 @dataclass(frozen=True)

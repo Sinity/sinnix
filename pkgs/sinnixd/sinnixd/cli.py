@@ -6,9 +6,9 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
-from sinnix_mcp import RequestEnvelope
+from sinnix_mcp import ErrorCode, ErrorEnvelope, RequestEnvelope, ResponseEnvelope
 
-from .api import UnixSocketServer, call
+from .api import ProtocolError, SinnixdClientError, UnixSocketServer, call
 from .jobs import GenericJobStore, GenericJobs, UserSystemdJobs, default_state_dir
 from .projects import ProjectCatalog
 from .service import SinnixdService
@@ -187,6 +187,15 @@ def _request(
         arguments=arguments,
         idempotency_key=idempotency_key,
     )
+
+
+def _unavailable_response(request: RequestEnvelope) -> dict[str, object]:
+    return ResponseEnvelope(
+        request_id=request.request_id,
+        correlation_id=request.correlation_id,
+        owner=request.owner,
+        error=ErrorEnvelope(ErrorCode.OWNER_UNAVAILABLE, "sinnixd is unavailable"),
+    ).to_dict()
 
 
 def main() -> int:
@@ -426,7 +435,10 @@ def main() -> int:
         if not isinstance(owner_arguments, dict):
             parser().error("--arguments-json must be a JSON object")
         request = _request(arguments.operation, arguments.owner, owner_arguments)
-    response = call(arguments.socket, request)
+    try:
+        response = call(arguments.socket, request)
+    except (OSError, ProtocolError, SinnixdClientError):
+        response = _unavailable_response(request)
     print(json.dumps(response, indent=2, sort_keys=True))
     return 0 if response.get("ok") is True else 1
 

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +23,8 @@ from sinnix_mcp import ErrorCode, OpaquePayload, RequestEnvelope, ResponseEnvelo
 from sinnix_mcp.execution import EnvironmentProfile, ExecutionResult
 
 from sinnixd.api import (
+    MAX_JSON_RPC_ERROR_MESSAGE_BYTES,
+    ProtocolError,
     WAIT_TRANSPORT_MARGIN_SECONDS,
     SinnixdClient,
     SinnixdClientError,
@@ -108,6 +111,60 @@ def test_canonical_client_validates_typed_response_identity() -> None:
     )
     with pytest.raises(SinnixdClientError, match="does not match"):
         mismatched.dispatch(request)
+
+
+@pytest.mark.parametrize(
+    ("shape", "error"),
+    (
+        ("mismatched-id", "response does not match the request"),
+        ("unexpected-response-field", "response has invalid fields"),
+        ("unexpected-error-field", "response error has invalid fields"),
+        ("oversized-error-message", "response error message exceeds its bound"),
+    ),
+)
+def test_call_preserves_request_matching_and_rejects_malformed_json_rpc_errors(
+    tmp_path: Path, shape: str, error: str
+) -> None:
+    request_value = request("runtime.status", "sinnixd")
+    socket_path = tmp_path / "sinnixd.sock"
+
+    def reply(raw: dict[str, object]) -> dict[str, object]:
+        if shape == "mismatched-id":
+            return {"jsonrpc": "2.0", "id": "not-the-request-id", "result": {"ok": True}}
+        if shape == "unexpected-response-field":
+            return {"jsonrpc": "2.0", "id": raw["id"], "result": {"ok": True}, "extra": "rejected"}
+        message = "server-secret" if shape == "unexpected-error-field" else "x" * (MAX_JSON_RPC_ERROR_MESSAGE_BYTES + 1)
+        error_value: dict[str, object] = {"code": -32600, "message": message}
+        if shape == "unexpected-error-field":
+            error_value["data"] = "must-not-be-accepted"
+        return {"jsonrpc": "2.0", "id": raw["id"], "error": error_value}
+
+    thread = start_rpc_reply_server(socket_path, reply)
+
+    with pytest.raises(ProtocolError, match=error):
+        call(socket_path, request_value)
+
+    thread.join(timeout=1)
+    assert not thread.is_alive()
+
+
+def test_canonical_client_redacts_unrecognized_json_rpc_errors(tmp_path: Path) -> None:
+    request_value = request("runtime.status", "sinnixd")
+    socket_path = tmp_path / "sinnixd.sock"
+    thread = start_rpc_reply_server(
+        socket_path,
+        lambda raw: {
+            "jsonrpc": "2.0",
+            "id": raw["id"],
+            "error": {"code": -32600, "message": "server-secret-must-not-escape"},
+        },
+    )
+
+    with pytest.raises(SinnixdClientError, match="^sinnixd is unavailable$"):
+        SinnixdClient(socket_path).dispatch(request_value)
+
+    thread.join(timeout=1)
+    assert not thread.is_alive()
 
 
 @pytest.mark.parametrize(
@@ -1066,6 +1123,25 @@ def start_server(
     thread = threading.Thread(target=target, args=args, daemon=True)
     thread.start()
     assert ready.wait(1), "Unix socket server did not begin listening"
+    return thread
+
+
+def start_rpc_reply_server(
+    socket_path: Path, reply: Callable[[dict[str, object]], dict[str, object]]
+) -> threading.Thread:
+    ready = threading.Event()
+
+    def serve() -> None:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(str(socket_path))
+            listener.listen()
+            ready.set()
+            with listener.accept()[0] as connection:
+                send_frame(connection, reply(receive_frame(connection)))
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    assert ready.wait(1), "JSON-RPC reply server did not begin listening"
     return thread
 
 
@@ -3116,8 +3192,10 @@ def test_agentctl_wait_returns_a_timed_out_envelope_past_control_timeout(
     assert response["payload"]["value"]["wait_timed_out"]
 
 
-def test_unix_socket_wait_workers_outlive_control_timeout_and_reserve_control_capacity(tmp_path: Path) -> None:
-    """Anti-vacuity: every wait worker holds a bounded long socket while control RPCs and capacity errors remain responsive."""
+def test_agentctl_wait_reports_capacity_exhaustion_while_all_wait_workers_are_occupied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Anti-vacuity: raw framing cannot cover the agentctl capacity-error path."""
     write_adapter(tmp_path)
     systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"})
     jobs = generic_jobs(tmp_path, systemd)
@@ -3162,30 +3240,22 @@ def test_unix_socket_wait_workers_outlive_control_timeout_and_reserve_control_ca
     for waiter in waiters:
         waiter.start()
     assert wait_started.wait(timeout=1)
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-        connection.connect(str(socket_path))
-        capacity_request = request("job.wait", "systemd-jobs", {"job_id": job_id, "timeout_seconds": 1})
-        send_frame(
-            connection,
-            {
-                "jsonrpc": "2.0",
-                "id": capacity_request.request_id,
-                "method": "dispatch",
-                "params": capacity_request.to_dict(),
-            },
-        )
-        capacity = receive_frame(connection)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["agentctl", "--socket", str(socket_path), "job", "wait", job_id, "--timeout-seconds", "1"],
+    )
+    assert cli_module.main() == 1
+    capacity = json.loads(capsys.readouterr().out)
     status = call(socket_path, request("runtime.status", "sinnixd"))
     get = call(socket_path, request("job.get", "systemd-jobs", {"job_id": job_id}))
     for waiter in waiters:
         waiter.join(timeout=2)
     stop_event.set()
     thread.join(timeout=2)
-    assert capacity == {
-        "jsonrpc": "2.0",
-        "id": capacity_request.request_id,
-        "error": {"code": -32600, "message": "job.wait capacity is exhausted"},
-    }
+    assert not capacity["ok"]
+    assert capacity["error"]["code"] == "RESOURCE_EXHAUSTED"
+    assert capacity["error"]["message"] == "job.wait capacity is exhausted"
     assert status["ok"] and get["ok"]
     assert not wait_errors
     assert all(not waiter.is_alive() for waiter in waiters)
