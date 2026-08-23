@@ -18,18 +18,22 @@ from uuid import uuid4
 
 import pytest
 
-import sinnixd.jobs as jobs_module
+import sinnixd.api as api_module
 import sinnixd.cli as cli_module
+import sinnixd.jobs as jobs_module
 from sinnix_mcp import ErrorCode, OpaquePayload, RequestEnvelope, ResponseEnvelope, SinnixRef, SourceBinding
 from sinnix_mcp.execution import EnvironmentProfile, ExecutionResult
 
 from sinnixd.api import (
+    CONNECTION_TIMEOUT_SECONDS,
+    CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS,
     MAX_JSON_RPC_ERROR_MESSAGE_BYTES,
     ProtocolError,
     WAIT_TRANSPORT_MARGIN_SECONDS,
     SinnixdClient,
     SinnixdClientError,
     UnixSocketServer,
+    _response_timeout_seconds,
     call,
     receive_frame,
     send_frame,
@@ -4380,6 +4384,59 @@ def test_agentctl_wait_returns_a_timed_out_envelope_past_control_timeout(
     assert response["ok"]
     assert response["payload"]["value"]["state"]["phase"] == "running"
     assert response["payload"]["value"]["wait_timed_out"]
+
+
+def test_delivery_operations_have_truthful_bounded_response_timeouts() -> None:
+    """Remote effects must not outlive the client's success/failure response."""
+    expected = {
+        "workspace.publish": 790.0,
+        "workspace.review-status": 65.0,
+        "workspace.land": 185.0,
+        "workspace.finish": 185.0,
+    }
+    assert CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS == expected
+    for operation, timeout in expected.items():
+        assert _response_timeout_seconds(request(operation, "git-workspaces")) == timeout
+    assert _response_timeout_seconds(request("workspace.get", "git-workspaces")) == CONNECTION_TIMEOUT_SECONDS
+    assert _response_timeout_seconds(request("unknown.slow-effect", "git-workspaces")) == CONNECTION_TIMEOUT_SECONDS
+
+
+def test_slow_delivery_response_outlives_the_ordinary_control_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A remote effect that is still running must not be reported as daemon loss."""
+    write_adapter(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, FakeSystemdJobs()))
+    assert service.delivery is not None
+
+    def slow_publish(_workspace_id: str, _job_id: str, _title: str, _body: str) -> dict[str, object]:
+        time.sleep(0.1)
+        return {"published": True, "publication_output": "https://github.test/pull/17"}
+
+    monkeypatch.setattr(service.delivery, "publish", slow_publish)
+    monkeypatch.setattr(api_module, "CONNECTION_TIMEOUT_SECONDS", 0.05)
+    socket_path = tmp_path / "sinnixd.sock"
+    stop_event = threading.Event()
+    server = UnixSocketServer(socket_path, service, connection_timeout_seconds=0.05)
+    thread = start_server(server, stop_event=stop_event)
+    publication = request(
+        "workspace.publish",
+        "git-workspaces",
+        {"workspace_id": "fixture", "job_id": "verified", "title": "Fixture", "body": "body"},
+        "agent-control",
+    )
+    try:
+        response = call(socket_path, publication)
+    finally:
+        stop_event.set()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+    assert response["ok"] is True
+    assert response["payload"]["value"] == {
+        "published": True,
+        "publication_output": "https://github.test/pull/17",
+    }
 
 
 def test_agentctl_wait_reports_capacity_exhaustion_while_all_wait_workers_are_occupied(

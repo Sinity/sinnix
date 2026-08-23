@@ -17,6 +17,16 @@ from .service import SinnixdService
 MAX_FRAME_BYTES = 1_048_576
 CONNECTION_TIMEOUT_SECONDS = 5.0
 WAIT_TRANSPORT_MARGIN_SECONDS = 5.0
+# Delivery is deliberately synchronous today, but its implementation runs
+# bounded Git/GitHub commands before returning.  The client must not report the
+# daemon unavailable while those commands continue and create remote effects.
+# Values cover the command deadlines in delivery.py plus a transport margin.
+CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS = {
+    "workspace.publish": 790.0,
+    "workspace.review-status": 65.0,
+    "workspace.land": 185.0,
+    "workspace.finish": 185.0,
+}
 ACCEPT_POLL_SECONDS = 0.1
 RESERVED_CONTROL_WORKERS = 2
 MAX_JSON_RPC_ERROR_MESSAGE_BYTES = 1_024
@@ -86,7 +96,7 @@ def send_frame(connection: socket.socket, value: dict[str, Any]) -> None:
 
 def _response_timeout_seconds(request: RequestEnvelope) -> float:
     if request.operation != "job.wait":
-        return CONNECTION_TIMEOUT_SECONDS
+        return CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS.get(request.operation, CONNECTION_TIMEOUT_SECONDS)
     timeout_seconds = request.arguments.get("timeout_seconds", DEFAULT_WAIT_SECONDS)
     if (
         not isinstance(timeout_seconds, int)
