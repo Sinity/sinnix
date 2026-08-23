@@ -16,7 +16,7 @@ from threading import Lock, RLock
 from typing import Any, Iterator, Protocol
 from uuid import UUID, uuid4
 
-from .projects import ProjectAdapter, ProjectOperation
+from .projects import ProjectAdapter, ProjectOperation, RegisteredCheckout
 
 DEFAULT_TIMEOUT_SECONDS = 3_600
 DEFAULT_WAIT_SECONDS = 30
@@ -542,7 +542,10 @@ class GenericJobs:
         project: ProjectAdapter,
         operation: ProjectOperation,
         correlation_id: str,
+        checkout: RegisteredCheckout | None = None,
     ) -> dict[str, Any]:
+        if checkout is not None and checkout.project_id != project.project_id:
+            raise ValueError("declared job checkout belongs to another project")
         job_id = str(uuid4())
         environment = project.environment.values()
         environment.update(
@@ -553,14 +556,22 @@ class GenericJobs:
                 "SINNIXD_OPERATION": operation.name,
             }
         )
+        if checkout is not None:
+            environment.update(
+                {
+                    "SINNIXD_CHECKOUT_ID": checkout.checkout_id,
+                    "SINNIXD_CHECKOUT_HEAD": checkout.head,
+                }
+            )
         return self.start(
             GenericJobSpec(
                 kind="declared-operation",
                 command=(*project.environment.command, *operation.command),
-                working_directory=str(project.root),
+                working_directory=str(checkout.path if checkout is not None else project.root),
                 environment=environment,
                 project_id=project.project_id,
                 operation=operation.name,
+                checkout=checkout.to_dict() if checkout is not None else None,
             ),
             job_id,
         )

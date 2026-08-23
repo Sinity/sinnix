@@ -70,6 +70,7 @@ class WorkspacePolicy:
     default_base: str
     identity_check: tuple[str, ...]
     checkpoint_untracked: bool
+    verification_operations: tuple[str, ...]
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -78,6 +79,7 @@ class WorkspacePolicy:
             "default_base": self.default_base,
             "identity_check": list(self.identity_check),
             "checkpoint_untracked": self.checkpoint_untracked,
+            "verification_operations": list(self.verification_operations),
         }
 
 
@@ -307,7 +309,10 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
     if raw_workspace is not None:
         if not isinstance(raw_workspace, Mapping):
             raise ProjectConfigError(f"{descriptor} [workspace] must be a table")
-        allowed_workspace = {"provider", "root", "default_base", "identity_check", "checkpoint_untracked"}
+        allowed_workspace = {
+            "provider", "root", "default_base", "identity_check", "checkpoint_untracked",
+            "verification_operations",
+        }
         if set(raw_workspace) - allowed_workspace:
             raise ProjectConfigError(f"{descriptor} [workspace] contains unknown fields")
         provider = raw_workspace.get("provider")
@@ -328,6 +333,9 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             default_base=default_base,
             identity_check=_string_list(raw_workspace.get("identity_check"), "workspace.identity_check"),
             checkpoint_untracked=checkpoint_untracked,
+            verification_operations=_string_list(
+                raw_workspace.get("verification_operations"), "workspace.verification_operations"
+            ),
         )
 
     raw_conflicts = raw.get("conflicts", {})
@@ -377,6 +385,14 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 ),
             )
         )
+    if workspace is not None:
+        operation_names = {operation.name for operation in operations}
+        unknown_verifiers = set(workspace.verification_operations) - operation_names
+        if unknown_verifiers:
+            raise ProjectConfigError(
+                f"{descriptor} workspace verification operation(s) are undeclared: "
+                + ", ".join(sorted(unknown_verifiers))
+            )
     return ProjectAdapter(
         project_id=project_id,
         display_name=display_name,
