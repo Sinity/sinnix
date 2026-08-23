@@ -169,6 +169,9 @@ class ProjectOperation:
     result: str
     cache: str
     exclusive_keys: tuple[str, ...] = ()
+    dependencies: tuple[str, ...] = ()
+    estimate_memory_bytes: int | None = None
+    scratch: str = "none"
     parameters: tuple[OperationParameter, ...] = ()
 
     def derive_argv(self, raw_parameters: Mapping[str, Any]) -> tuple[tuple[str, ...], str]:
@@ -204,6 +207,9 @@ class ProjectOperation:
             "result": self.result,
             "cache": self.cache,
             "exclusive_keys": list(self.exclusive_keys),
+            "dependencies": list(self.dependencies),
+            "estimate_memory_bytes": self.estimate_memory_bytes,
+            "scratch": self.scratch,
             "parameters": [parameter.catalog_row() for parameter in self.parameters],
         }
 
@@ -486,7 +492,10 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
     for name, definition in sorted(raw_operations.items()):
         if not isinstance(name, str) or not name.isidentifier() or not isinstance(definition, Mapping):
             raise ProjectConfigError(f"{descriptor} contains an invalid operation declaration")
-        allowed_operation = {"description", "exec", "pool", "result", "cache", "exclusive_keys", "parameters"}
+        allowed_operation = {
+            "description", "exec", "pool", "result", "cache", "exclusive_keys",
+            "dependencies", "estimate_memory_bytes", "scratch", "parameters",
+        }
         if set(definition) - allowed_operation:
             raise ProjectConfigError(f"{descriptor} operation {name} contains unknown fields")
         description = definition.get("description")
@@ -496,12 +505,27 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         pool = definition.get("pool", "normal")
         result = definition.get("result", "exit")
         cache = definition.get("cache", "none")
-        if pool not in {"normal", "bulk", "attached"}:
+        if pool not in {"interactive", "normal", "bulk"}:
             raise ProjectConfigError(f"operations.{name}.pool is invalid")
         if result not in {"exit", "json", "pytest"}:
             raise ProjectConfigError(f"operations.{name}.result is invalid")
         if not isinstance(cache, str) or not cache:
             raise ProjectConfigError(f"operations.{name}.cache must be non-empty")
+        if cache not in {"none", "tree+environment"}:
+            raise ProjectConfigError(f"operations.{name}.cache is invalid")
+        dependencies = _optional_string_list(definition.get("dependencies"), f"operations.{name}.dependencies")
+        if name in dependencies or len(set(dependencies)) != len(dependencies):
+            raise ProjectConfigError(f"operations.{name}.dependencies is invalid")
+        estimate_memory_bytes = definition.get("estimate_memory_bytes")
+        if estimate_memory_bytes is not None and (
+            not isinstance(estimate_memory_bytes, int)
+            or isinstance(estimate_memory_bytes, bool)
+            or not 1 <= estimate_memory_bytes <= 128 * 1024 * 1024 * 1024
+        ):
+            raise ProjectConfigError(f"operations.{name}.estimate_memory_bytes is invalid")
+        scratch = definition.get("scratch", "none")
+        if scratch not in {"none", "tmpfs", "nvme"}:
+            raise ProjectConfigError(f"operations.{name}.scratch is invalid")
         operations.append(
             ProjectOperation(
                 name=name,
@@ -513,11 +537,24 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 exclusive_keys=_optional_string_list(
                     definition.get("exclusive_keys"), f"operations.{name}.exclusive_keys"
                 ),
+                dependencies=dependencies,
+                estimate_memory_bytes=estimate_memory_bytes,
+                scratch=scratch,
                 parameters=_operation_parameters(definition.get("parameters"), f"operations.{name}.parameters"),
             )
         )
+    operation_names = {operation.name for operation in operations}
+    unknown_dependencies = {
+        dependency
+        for operation in operations
+        for dependency in operation.dependencies
+        if dependency not in operation_names
+    }
+    if unknown_dependencies:
+        raise ProjectConfigError(
+            f"{descriptor} operation dependency/dependencies are undeclared: " + ", ".join(sorted(unknown_dependencies))
+        )
     if workspace is not None:
-        operation_names = {operation.name for operation in operations}
         unknown_verifiers = set(workspace.verification_operations) - operation_names
         if unknown_verifiers:
             raise ProjectConfigError(
