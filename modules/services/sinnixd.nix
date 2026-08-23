@@ -18,6 +18,7 @@ mkServiceModule {
     default = [
       config.sinnix.paths.projectRoot
       "${config.sinnix.paths.realmRoot}/project/polylogue"
+      "${config.sinnix.paths.realmRoot}/project/sinex"
     ];
     apply =
       roots:
