@@ -2641,8 +2641,8 @@ def test_cancel_persists_intent_and_preserves_systemd_exit_races(
     assert record.cancel_requested_invocation_id == "fixture-invocation"
 
 
-def test_cancelled_missing_unit_requires_durable_stop_acknowledgement(tmp_path: Path) -> None:
-    """Anti-vacuity: cancellation intent alone must leave an absent unit as missing."""
+def test_cancelled_missing_unit_distinguishes_acknowledged_and_ambiguous_stop(tmp_path: Path) -> None:
+    """Anti-vacuity: cancellation intent alone must leave an absent unit retryable."""
     class CollectedDuringStop(FakeSystemdJobs):
         def stop(self, unit: str) -> None:
             self.stopped.append(unit)
@@ -2665,7 +2665,9 @@ def test_cancelled_missing_unit_requires_durable_stop_acknowledgement(tmp_path: 
     record = missing_jobs.store.load(started["job_id"])
     missing_jobs.store.save(missing_jobs._with_cancel_intent(record, "fixture-invocation"))
     missing_systemd.properties = {"LoadState": "not-found", "ActiveState": "inactive"}
-    assert missing_jobs.get(started["job_id"])["state"]["phase"] == "missing"
+    intent_only = missing_jobs.get(started["job_id"])
+    assert intent_only["state"]["phase"] == "outcome-unknown"
+    assert not intent_only["state"]["terminal"]
 
     class CrashAfterStopStore(GenericJobStore):
         crash_on_acknowledgement: bool = False
@@ -2687,7 +2689,9 @@ def test_cancelled_missing_unit_requires_durable_stop_acknowledgement(tmp_path: 
     persisted = crashing_store.load(started["job_id"])
     assert persisted.cancel_requested_at is not None
     assert persisted.cancel_stop_acknowledged_at is None
-    assert crashing_jobs.get(started["job_id"])["state"]["phase"] == "missing"
+    crash_reconciled = crashing_jobs.get(started["job_id"])
+    assert crash_reconciled["state"]["phase"] == "outcome-unknown"
+    assert not crash_reconciled["state"]["terminal"]
 
 
 def test_unix_socket_wait_saturation_reserves_cancel_get_logs_and_start(tmp_path: Path) -> None:
