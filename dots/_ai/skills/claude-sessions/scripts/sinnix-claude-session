@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""Prose-oriented extraction from raw Claude Code session JSONL.
+
+Stopgap until Polylogue is back: turn a session transcript into readable
+prose (user + assistant text), optionally with thinking and one-line tool
+summaries, so a session's accumulated understanding survives context
+exhaustion and can be re-read or re-fed cheaply.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from datetime import datetime
+from pathlib import Path
+
+PROJECTS_ROOT = Path.home() / ".claude" / "projects"
+
+
+def iter_records(path: Path):
+    with path.open(encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+
+def resolve_session(token: str) -> Path:
+    p = Path(token)
+    if p.is_file():
+        return p
+    matches = sorted(PROJECTS_ROOT.glob(f"*/{token}*.jsonl"))
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        sys.exit(f"no session file matches {token!r} under {PROJECTS_ROOT}")
+    sys.exit(
+        f"{token!r} is ambiguous ({len(matches)} matches):\n"
+        + "\n".join(str(m) for m in matches[:10])
+    )
+
+
+def content_blocks(message):
+    content = (message or {}).get("content")
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    if isinstance(content, list):
+        return content
+    return []
+
+
+def first_user_snippet(path: Path, limit: int = 110) -> str:
+    for rec in iter_records(path):
+        if rec.get("type") != "user" or rec.get("isSidechain"):
+            continue
+        for block in content_blocks(rec.get("message")):
+            if block.get("type") == "text":
+                text = " ".join(block.get("text", "").split())
+                if text and not text.startswith("<"):
+                    return text[:limit]
+    return ""
+
+
+def cmd_list(args):
+    roots = (
+        [PROJECTS_ROOT / args.project] if args.project else sorted(PROJECTS_ROOT.iterdir())
+    )
+    rows = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in root.glob("*.jsonl"):
+            stat = path.stat()
+            rows.append((stat.st_mtime, path, stat.st_size))
+    rows.sort(reverse=True)
+    for mtime, path, size in rows[: args.limit]:
+        stamp = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+        print(
+            f"{stamp}  {size / 1e6:8.1f}MB  {path.parent.name}/{path.stem}"
+            f"  {first_user_snippet(path)}"
+        )
+
+
+def tool_one_liner(block) -> str:
+    name = block.get("name", "?")
+    inp = block.get("input") or {}
+    hint = (
+        inp.get("description")
+        or inp.get("command")
+        or inp.get("file_path")
+        or inp.get("prompt")
+        or inp.get("query")
+        or ""
+    )
+    hint = " ".join(str(hint).split())
+    if len(hint) > 100:
+        hint = hint[:100] + "…"
+    return f"> [tool] {name}: {hint}" if hint else f"> [tool] {name}"
+
+
+def cmd_prose(args):
+    path = resolve_session(args.session)
+    out = open(args.out, "w", encoding="utf-8") if args.out else sys.stdout
+    emitted_role = None
+    try:
+        print(f"# Session {path.stem} ({path.parent.name})\n", file=out)
+        for rec in iter_records(path):
+            rtype = rec.get("type")
+            if rtype not in ("user", "assistant"):
+                continue
+            if rec.get("isSidechain") and not args.sidechains:
+                continue
+            stamp = (rec.get("timestamp") or "")[:16].replace("T", " ")
+            parts = []
+            for block in content_blocks(rec.get("message")):
+                btype = block.get("type")
+                if btype == "text":
+                    text = block.get("text", "").strip()
+                    if text and not text.startswith(
+                        ("<local-command", "<command-name>", "<system-reminder>")
+                    ):
+                        parts.append(text)
+                elif btype == "thinking" and args.thinking:
+                    think = block.get("thinking", "").strip()
+                    if think:
+                        parts.append(
+                            "*[thinking]* " + think.replace("\n", "\n> ")
+                        )
+                elif btype == "tool_use" and args.tools:
+                    parts.append(tool_one_liner(block))
+                # tool_result blocks are always skipped: bulk, not prose
+            if not parts:
+                continue
+            if rtype != emitted_role:
+                header = "USER" if rtype == "user" else "ASSISTANT"
+                print(f"\n## {header}  ({stamp})\n", file=out)
+                emitted_role = rtype
+            print("\n\n".join(parts), file=out)
+            print("", file=out)
+    finally:
+        if args.out:
+            out.close()
+            print(f"wrote {args.out}", file=sys.stderr)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_list = sub.add_parser("list", help="list sessions, newest first")
+    p_list.add_argument("--project", help="munged project dir name (e.g. -realm-project-polylogue)")
+    p_list.add_argument("--limit", type=int, default=25)
+    p_list.set_defaults(func=cmd_list)
+
+    p_prose = sub.add_parser("prose", help="emit prose-only markdown for a session")
+    p_prose.add_argument("session", help="session file path or id (prefix ok)")
+    p_prose.add_argument("--thinking", action="store_true", help="include thinking blocks")
+    p_prose.add_argument("--tools", action="store_true", help="include one-line tool summaries")
+    p_prose.add_argument("--sidechains", action="store_true", help="include subagent sidechains")
+    p_prose.add_argument("--out", help="write to file instead of stdout")
+    p_prose.set_defaults(func=cmd_prose)
+
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
