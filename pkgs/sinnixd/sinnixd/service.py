@@ -17,7 +17,7 @@ from sinnix_mcp import (
 )
 from sinnix_mcp.execution import OwnerExecution
 
-from .jobs import GenericJobStore, GenericJobs, JobRecordError, SystemdJobError, UserSystemdJobs, default_state_dir
+from .jobs import GenericJobStore, GenericJobs, JobRecordError, JobResultError, JobResultLimitError, SystemdJobError, UserSystemdJobs, default_state_dir
 from .contracts import TypedJobContracts
 from .delivery import DeliveryError, GitHubDelivery
 from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
@@ -135,6 +135,10 @@ class SinnixdService:
                 ErrorCode(error.code.upper()),
                 str(error),
             )
+        except JobResultLimitError as error:
+            return self._error(request, owner_name, ErrorCode.RESOURCE_EXHAUSTED, str(error))
+        except JobResultError as error:
+            return self._error(request, owner_name, ErrorCode.RESULT_INVALID, str(error))
         except (JobRecordError, SystemdJobError) as error:
             return self._error(request, owner_name, ErrorCode.OPERATION_FAILED, str(error))
         except (WorkspaceError, DeliveryError) as error:
@@ -312,8 +316,11 @@ class SinnixdService:
         if operation == "job.start":
             project_id = self._job_argument(arguments, "project_id")
             operation_name = self._job_argument(arguments, "operation")
-            if set(arguments) - {"project_id", "operation", "workspace_id"}:
-                raise ValueError("job.start accepts project_id, operation, and optional workspace_id")
+            if set(arguments) - {"project_id", "operation", "workspace_id", "parameters"}:
+                raise ValueError("job.start accepts project_id, operation, optional workspace_id, and optional parameters")
+            parameters = arguments.get("parameters", {})
+            if not isinstance(parameters, Mapping):
+                raise ValueError("job.start parameters must be an object")
             project = self.projects.get(project_id)
             workspace_id = arguments.get("workspace_id")
             if workspace_id is not None and (not isinstance(workspace_id, str) or not workspace_id):
@@ -324,6 +331,7 @@ class SinnixdService:
                 project=project,
                 operation=project.operation(operation_name),
                 correlation_id=correlation_id,
+                parameters=parameters,
                 checkout=checkout,
             ))
         if operation == "job.shell.start":

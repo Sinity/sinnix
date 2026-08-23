@@ -96,6 +96,7 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("project_id")
     start.add_argument("operation")
     start.add_argument("--workspace")
+    start.add_argument("--parameters-json", default="{}")
     get = job_subcommands.add_parser("get")
     get.add_argument("job_id")
     job_subcommands.add_parser("list")
@@ -333,6 +334,12 @@ def main() -> int:
             "workspace.finish", "git-workspaces", {"workspace_id": arguments.workspace_id}, "agent-control"
         )
     elif arguments.command == "job" and arguments.job_command == "start":
+        try:
+            parameters = json.loads(arguments.parameters_json)
+        except json.JSONDecodeError as error:
+            parser().error(f"--parameters-json must be valid JSON: {error.msg}")
+        if not isinstance(parameters, dict):
+            parser().error("--parameters-json must be a JSON object")
         request = _request(
             "job.start",
             "systemd-jobs",
@@ -340,6 +347,7 @@ def main() -> int:
                 "project_id": arguments.project_id,
                 "operation": arguments.operation,
                 "workspace_id": arguments.workspace,
+                "parameters": parameters,
             },
         )
     elif arguments.command == "job" and arguments.job_command == "get":

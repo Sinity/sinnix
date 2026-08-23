@@ -4,6 +4,8 @@ import argparse
 import hashlib
 import json
 import os
+import selectors
+import stat
 import subprocess
 import sys
 import time
@@ -25,7 +27,7 @@ SYSTEMD_COMMAND_TIMEOUT_SECONDS = 0.25
 MAX_LOG_BYTES = 64_000
 MAX_LOG_ARTIFACT_BYTES = 1_048_576
 MAX_RESULT_BYTES = 64_000
-JOB_SCHEMA_VERSION = 3
+JOB_SCHEMA_VERSION = 4
 JOB_UNIT_PREFIX = "sinnixd-job-"
 SYSTEMD_ERROR_CODE = "systemd-job-error"
 
@@ -40,6 +42,78 @@ class SystemdJobError(RuntimeError):
 
 class JobRecordError(ValueError):
     """Raised when a persisted job record cannot be reconstructed safely."""
+
+
+class JobResultError(ValueError):
+    """Raised when a declared result artifact is unavailable or invalid."""
+
+
+class JobResultLimitError(JobResultError):
+    """Raised when a valid declared result exceeds the caller's response bound."""
+
+
+def _open_private_parent(path: Path) -> int:
+    """Open and validate the private directory holding one capture artifact."""
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    parent_descriptor = os.open(path.parent, directory_flags)
+    parent = os.fstat(parent_descriptor)
+    if parent.st_uid != os.getuid() or parent.st_mode & 0o077:
+        os.close(parent_descriptor)
+        raise PermissionError(f"artifact parent is not private: {path.parent}")
+    return parent_descriptor
+
+
+def _private_regular_artifact(descriptor: int, path: Path) -> None:
+    artifact = os.fstat(descriptor)
+    if (
+        artifact.st_uid != os.getuid()
+        or artifact.st_mode & 0o077
+        or not stat.S_ISREG(artifact.st_mode)
+        or artifact.st_nlink != 1
+    ):
+        raise PermissionError(f"capture artifact is not private: {path}")
+
+
+def _open_private_artifact(path: Path) -> Any:
+    """Create one capture artifact without following a same-user symlink."""
+    parent_descriptor = _open_private_parent(path)
+    try:
+        descriptor = os.open(
+            path.name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=parent_descriptor,
+        )
+    finally:
+        os.close(parent_descriptor)
+    try:
+        _private_regular_artifact(descriptor, path)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return os.fdopen(descriptor, "wb")
+
+
+def _open_preallocated_private_artifact(path: Path) -> Any:
+    """Open the store-reserved log artifact without accepting a replacement link."""
+    parent_descriptor = _open_private_parent(path)
+    try:
+        descriptor = os.open(path.name, os.O_WRONLY | os.O_NOFOLLOW, dir_fd=parent_descriptor)
+    finally:
+        os.close(parent_descriptor)
+    try:
+        _private_regular_artifact(descriptor, path)
+        os.ftruncate(descriptor, 0)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return os.fdopen(descriptor, "wb")
+
+
+def _write_private_marker(path: Path) -> None:
+    with _open_private_artifact(path) as handle:
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def _fsync_directory(path: Path) -> None:
@@ -78,6 +152,7 @@ class SystemdJobs(Protocol):
         environment: Mapping[str, str],
         timeout_seconds: int,
         log_path: Path,
+        json_result_path: Path | None = None,
     ) -> None: ...
 
     def show(
@@ -103,6 +178,7 @@ class UserSystemdJobs:
         environment: Mapping[str, str],
         timeout_seconds: int,
         log_path: Path,
+        json_result_path: Path | None = None,
     ) -> None:
         args = [
             "systemd-run",
@@ -122,10 +198,17 @@ class UserSystemdJobs:
             str(log_path.with_suffix(".overflow")),
             "--max-bytes",
             str(MAX_LOG_ARTIFACT_BYTES),
-            "--",
-            "/run/current-system/sw/bin/env",
-            "-i",
         ]
+        if json_result_path is not None:
+            args.extend(
+                [
+                    "--result-path",
+                    str(json_result_path),
+                    "--result-overflow-path",
+                    str(json_result_path.with_suffix(".overflow")),
+                ]
+            )
+        args.extend(["--", "/run/current-system/sw/bin/env", "-i"])
         args.extend(f"{key}={value}" for key, value in sorted(environment.items()))
         args.extend(command)
         self._run(args)
@@ -209,6 +292,7 @@ class GenericJobSpec:
     operation: str | None = None
     environment_keys: tuple[str, ...] = ()
     command_digest: str | None = None
+    parameter_digest: str | None = None
     principal: str | None = None
     checkout: Mapping[str, str] | None = None
     contract: Mapping[str, Any] = field(default_factory=dict)
@@ -225,6 +309,14 @@ class GenericJobSpec:
             len(self.command_digest) != 64 or any(value not in "0123456789abcdef" for value in self.command_digest)
         ):
             raise ValueError("job command digest is invalid")
+        if self.parameter_digest is not None and (
+            len(self.parameter_digest) != 64 or any(value not in "0123456789abcdef" for value in self.parameter_digest)
+        ):
+            raise ValueError("job parameter digest is invalid")
+        if self.kind == "declared-operation" and self.parameter_digest is None:
+            raise ValueError("declared operation jobs require a parameter digest")
+        if self.kind != "declared-operation" and self.parameter_digest is not None:
+            raise ValueError("only declared operation jobs may have a parameter digest")
         if not isinstance(self.working_directory, str) or not self.working_directory:
             raise ValueError("job working_directory must be non-empty")
         if not 1 <= self.timeout_seconds <= DEFAULT_TIMEOUT_SECONDS:
@@ -251,7 +343,7 @@ class GenericJobSpec:
             raise ValueError("job checkout identity is invalid")
         if not isinstance(self.contract, Mapping) or any(not isinstance(key, str) or not key for key in self.contract):
             raise ValueError("job contract is invalid")
-        if self.result_kind not in {"exit-status", "last-message"}:
+        if self.result_kind not in {"exit-status", "last-message", "json", "pytest"}:
             raise ValueError("job result kind is invalid")
         if self.kind == "operator-shell" and self.result_kind != "exit-status":
             raise ValueError("operator shell jobs only support exit-status results")
@@ -280,10 +372,11 @@ class GenericJobSpec:
             result["command"] = {
                 "display": "declared project operation",
             }
+            result["parameters"] = {"digest": self.parameter_digest}
         return result
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> GenericJobSpec:
+    def from_dict(cls, value: Mapping[str, Any], *, require_parameter_digest: bool = False) -> GenericJobSpec:
         command = value.get("command")
         environment_keys = value.get("environment_keys")
         if not isinstance(command, Mapping) or not isinstance(environment_keys, list) or any(
@@ -296,6 +389,17 @@ class GenericJobSpec:
             raise JobRecordError("non-declared job spec requires a command digest")
         if kind == "declared-operation":
             digest = "0" * 64
+        raw_parameters = value.get("parameters")
+        parameter_digest: str | None = None
+        if kind == "declared-operation":
+            if raw_parameters is None and not require_parameter_digest:
+                parameter_digest = _parameter_digest({})
+            elif not isinstance(raw_parameters, Mapping) or set(raw_parameters) != {"digest"}:
+                raise JobRecordError("declared job spec has invalid parameter metadata")
+            else:
+                parameter_digest = raw_parameters.get("digest")
+        elif raw_parameters is not None:
+            raise JobRecordError("non-declared job spec has parameter metadata")
         try:
             return cls(
                 kind=kind,
@@ -307,6 +411,7 @@ class GenericJobSpec:
                 operation=value.get("operation"),
                 environment_keys=tuple(environment_keys),
                 command_digest=digest,
+                parameter_digest=parameter_digest,
                 principal=value.get("principal"),
                 checkout=value.get("checkout"),
                 contract=value.get("contract", {}),
@@ -353,7 +458,8 @@ class GenericJobRecord:
         job_id = value.get("job_id")
         unit = value.get("unit")
         artifacts = value.get("artifacts")
-        if value.get("schema_version") not in {2, JOB_SCHEMA_VERSION} or not isinstance(job_id, str):
+        schema_version = value.get("schema_version")
+        if schema_version not in {2, 3, JOB_SCHEMA_VERSION} or not isinstance(job_id, str):
             raise JobRecordError("job record schema or ID is invalid")
         if unit != job_unit_name(job_id):
             raise JobRecordError("job record unit does not match its ID")
@@ -394,7 +500,7 @@ class GenericJobRecord:
         return cls(
             job_id=job_id,
             unit=unit,
-            spec=GenericJobSpec.from_dict(spec),
+            spec=GenericJobSpec.from_dict(spec, require_parameter_digest=schema_version >= 4),
             log_path=log_path,
             result_path=result_path,
             created_at=created_at,
@@ -429,7 +535,7 @@ class GenericJobStore:
     def create(self, spec: GenericJobSpec, job_id: str | None = None) -> GenericJobRecord:
         _ensure_durable_directory(self.records_root)
         _ensure_durable_directory(self.logs_root)
-        if spec.result_kind == "last-message":
+        if spec.result_kind in {"last-message", "json", "pytest"}:
             _ensure_durable_directory(self.results_root)
         candidates = (job_id,) if job_id is not None else tuple(str(uuid4()) for _ in range(8))
         for candidate in candidates:
@@ -439,11 +545,16 @@ class GenericJobStore:
                 continue
             log_path = self.logs_root / f"{candidate}.log"
             try:
-                log_path.touch(mode=0o600, exist_ok=False)
+                with _open_private_artifact(log_path):
+                    pass
             except FileExistsError:
                 continue
             _fsync_directory(self.logs_root)
-            result_path = self.results_root / f"{candidate}.result" if spec.result_kind == "last-message" else None
+            result_path = (
+                self.results_root / f"{candidate}.result"
+                if spec.result_kind in {"last-message", "json", "pytest"}
+                else None
+            )
             record = GenericJobRecord(
                 job_id=candidate,
                 unit=job_unit_name(candidate),
@@ -529,6 +640,7 @@ class GenericJobs:
                     environment=spec.environment,
                     timeout_seconds=spec.timeout_seconds,
                     log_path=record.log_path,
+                    json_result_path=record.result_path if spec.result_kind in {"json", "pytest"} else None,
                 )
             except SystemdJobError:
                 return self._reconcile_launch_error(record)
@@ -542,10 +654,12 @@ class GenericJobs:
         project: ProjectAdapter,
         operation: ProjectOperation,
         correlation_id: str,
+        parameters: Mapping[str, Any],
         checkout: RegisteredCheckout | None = None,
     ) -> dict[str, Any]:
         if checkout is not None and checkout.project_id != project.project_id:
             raise ValueError("declared job checkout belongs to another project")
+        operation_argv, parameter_digest = operation.derive_argv(parameters)
         job_id = str(uuid4())
         environment = project.environment.values()
         environment.update(
@@ -566,12 +680,14 @@ class GenericJobs:
         return self.start(
             GenericJobSpec(
                 kind="declared-operation",
-                command=(*project.environment.command, *operation.command),
+                command=(*project.environment.command, *operation_argv),
                 working_directory=str(checkout.path if checkout is not None else project.root),
                 environment=environment,
                 project_id=project.project_id,
                 operation=operation.name,
+                parameter_digest=parameter_digest,
                 checkout=checkout.to_dict() if checkout is not None else None,
+                result_kind={"exit": "exit-status", "json": "json", "pytest": "pytest"}[operation.result],
             ),
             job_id,
         )
@@ -673,15 +789,32 @@ class GenericJobs:
             raise ValueError("job has no result artifact")
         try:
             with record.result_path.open("rb") as handle:
-                content = handle.read(max_bytes + 1)
+                content = handle.read(MAX_RESULT_BYTES + 1)
         except FileNotFoundError:
             content = b""
+        artifact = {
+            "ref": f"sinnix://jobs/{job_id}/artifacts/result",
+            "max_bytes": MAX_RESULT_BYTES,
+            "kind": record.spec.result_kind,
+        }
+        if record.spec.result_kind in {"json", "pytest"}:
+            if len(content) > MAX_RESULT_BYTES or record.result_path.with_suffix(".overflow").exists():
+                raise JobResultError("job JSON result exceeds the artifact limit")
+            if len(content) > max_bytes:
+                raise JobResultLimitError("job JSON result exceeds the requested response limit")
+            try:
+                value = json.loads(content.decode())
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise JobResultError("job JSON result is malformed") from error
+            if not isinstance(value, dict):
+                raise JobResultError("job JSON result must be an object")
+            return {"job_id": job_id, "kind": record.spec.result_kind, "value": value, "artifact": artifact}
         return {
             "job_id": job_id,
             "kind": record.spec.result_kind,
             "content": content[:max_bytes].decode(errors="replace"),
             "truncated": len(content) > max_bytes,
-            "artifact": {"ref": f"sinnix://jobs/{job_id}/artifacts/result", "max_bytes": MAX_RESULT_BYTES},
+            "artifact": artifact,
         }
 
     def _get_locked(
@@ -877,6 +1010,11 @@ class GenericJobs:
             "kind": record.spec.kind,
             "project_id": record.spec.project_id,
             "operation": record.spec.operation,
+            "parameters": (
+                {"digest": record.spec.parameter_digest}
+                if record.spec.kind == "declared-operation"
+                else None
+            ),
             "principal": record.spec.principal,
             "checkout": dict(record.spec.checkout) if record.spec.checkout is not None else None,
             "contract": dict(record.spec.contract),
@@ -885,7 +1023,11 @@ class GenericJobs:
             "artifacts": {
                 "log": {"ref": f"sinnix://jobs/{record.job_id}/artifacts/log", "max_bytes": MAX_LOG_BYTES},
                 "result": (
-                    {"ref": f"sinnix://jobs/{record.job_id}/artifacts/result", "max_bytes": MAX_RESULT_BYTES}
+                    {
+                        "ref": f"sinnix://jobs/{record.job_id}/artifacts/result",
+                        "max_bytes": MAX_RESULT_BYTES,
+                        "kind": record.spec.result_kind,
+                    }
                     if record.result_path is not None
                     else None
                 ),
@@ -896,6 +1038,12 @@ class GenericJobs:
 
 def _command_digest(command: Sequence[str]) -> str:
     return hashlib.sha256("\0".join(command).encode()).hexdigest()
+
+
+def _parameter_digest(parameters: Mapping[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(parameters, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    ).hexdigest()
 
 
 def capture_executable() -> Path:
@@ -910,30 +1058,68 @@ def capture_main(arguments: Sequence[str] | None = None) -> int:
     parser.add_argument("--log-path", type=Path, required=True)
     parser.add_argument("--overflow-path", type=Path, required=True)
     parser.add_argument("--max-bytes", type=int, required=True)
+    parser.add_argument("--result-path", type=Path)
+    parser.add_argument("--result-overflow-path", type=Path)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     parsed = parser.parse_args(arguments)
-    if not parsed.command or parsed.command[0] != "--" or not 1 <= parsed.max_bytes <= MAX_LOG_ARTIFACT_BYTES:
+    if (
+        not parsed.command
+        or parsed.command[0] != "--"
+        or not 1 <= parsed.max_bytes <= MAX_LOG_ARTIFACT_BYTES
+        or (parsed.result_path is None) != (parsed.result_overflow_path is None)
+    ):
         parser.error("requires --max-bytes within the artifact cap and a command after --")
     command = parsed.command[1:]
-    parsed.log_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    parsed.overflow_path.unlink(missing_ok=True)
     remaining = parsed.max_bytes
     overflowed = False
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    assert process.stdout is not None
-    with parsed.log_path.open("wb") as handle:
-        while chunk := process.stdout.read1(65_536):
-            accepted = b""
-            if remaining:
-                accepted = chunk[:remaining]
-                handle.write(accepted)
-                remaining -= len(accepted)
-            if len(chunk) > len(accepted) and not overflowed:
-                parsed.overflow_path.touch(mode=0o600)
-                overflowed = True
-        handle.flush()
-        os.fsync(handle.fileno())
-    return process.wait()
+    log_handle = _open_preallocated_private_artifact(parsed.log_path)
+    result_handle = _open_private_artifact(parsed.result_path) if parsed.result_path is not None else None
+    result_remaining = MAX_RESULT_BYTES
+    result_overflowed = False
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE if parsed.result_path is not None else subprocess.STDOUT,
+        )
+        assert process.stdout is not None
+        streams = selectors.DefaultSelector()
+        streams.register(process.stdout, selectors.EVENT_READ, "stdout")
+        if process.stderr is not None:
+            streams.register(process.stderr, selectors.EVENT_READ, "stderr")
+        try:
+            while streams.get_map():
+                for key, _ in streams.select():
+                    chunk = key.fileobj.read1(65_536)
+                    if not chunk:
+                        streams.unregister(key.fileobj)
+                        continue
+                    accepted = chunk[:remaining]
+                    log_handle.write(accepted)
+                    remaining -= len(accepted)
+                    if len(chunk) > len(accepted) and not overflowed:
+                        _write_private_marker(parsed.overflow_path)
+                        overflowed = True
+                    if key.data == "stdout" and result_handle is not None:
+                        accepted_result = chunk[:result_remaining]
+                        result_handle.write(accepted_result)
+                        result_remaining -= len(accepted_result)
+                        if len(chunk) > len(accepted_result) and not result_overflowed:
+                            assert parsed.result_overflow_path is not None
+                            _write_private_marker(parsed.result_overflow_path)
+                            result_overflowed = True
+            log_handle.flush()
+            os.fsync(log_handle.fileno())
+        finally:
+            streams.close()
+        if result_handle is not None:
+            result_handle.flush()
+            os.fsync(result_handle.fileno())
+        return process.wait()
+    finally:
+        log_handle.close()
+        if result_handle is not None:
+            result_handle.close()
 
 
 def capture_cli() -> None:
