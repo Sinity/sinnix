@@ -50,44 +50,37 @@ Operation parameters are descriptor-owned. The server accepts only parameter nam
 The closed type set has no positional parameters. Every parameter owns one long flag, so omission always emits nothing and static or positional command arguments remain in the descriptor's `exec` vector. The descriptor's parameter-table order controls argv order, regardless of JSON object ordering. The server never invokes a shell.
 
 ```toml
-[operations.check_default.parameters.full]
-type = "bool"
-flag = "--full"
+[operations.sinex_all_sources]
+description = "Run Sinex's all-sources foreground operation"
+exec = ["xtask", "run", "all-sources"]
+pool = "normal"
+result = "exit"
+cache = "tree+environment"
 
-[operations.test_default.parameters.impact_mode]
-type = "enum"
-flag = "--impact-mode"
-values = ["balanced", "strict"]
-
-[operations.test_default.parameters.threads]
-type = "integer"
-flag = "--threads"
-min = 1
-max = 16
-
-[operations.test_default.parameters.timeout]
+[operations.sinex_all_sources.parameters.instance_id]
 type = "string"
-flag = "--timeout"
-max_length = 10
-grammar = "duration"
-
-[operations.test_default.parameters.features]
-type = "string-list"
-flag = "--features"
-max_items = 16
-max_length = 64
+flag = "--instance-id"
+max_length = 128
 grammar = "safe-token"
 
-[operations.test_default.parameters.package]
-type = "enum-list"
-flag = "--package"
-values = ["sinexd", "xtask"]
-max_items = 16
+[operations.sinex_all_sources.parameters.reconcile]
+type = "bool"
+flag = "--reconcile"
+
+[operations.sinex_all_sources.parameters.service_name]
+type = "string"
+flag = "--service-name"
+max_length = 128
+grammar = "safe-token"
+
+[operations.sinex_all_sources.parameters.include_default_excluded]
+type = "bool"
+flag = "--include-default-excluded"
 ```
 
 `bool` emits its flag only when true. `string`, `enum`, and `integer` emit one flag-value pair. `string-list` and `enum-list` require non-empty arrays, deduplicate and sort their values, then repeat the fixed flag once per canonical value. False booleans and absent parameters emit nothing. Scalar strings require `max_length`; the optional `grammar` selects one safe grammar, with `safe-token` as the default. The supported grammars are `safe-token` (`[A-Za-z0-9][A-Za-z0-9._:+@=-]*`), `identifier` (`[A-Za-z_][A-Za-z0-9_]*`), `package-name` (`[A-Za-z0-9][A-Za-z0-9_-]*`), and `duration` (`[1-9][0-9]{0,8}(ms|s|m|h)`). Arbitrary descriptor regexes are not accepted. Enum values must be a non-empty, unique safe-token set. Integers require inclusive `min` and `max` within signed 32-bit range. Lists require `max_items` from 1 through 32; strings and enum values are limited to 128 characters, and declared `max_length` must be from 1 through 128. An operation has at most 16 parameters and an enum has at most 64 values. Unknown descriptor fields, malformed definitions, duplicate flags or enum values, booleans supplied as integers, unsafe strings, empty lists, and out-of-range values are rejected before launch.
 
-For the example above, `{"package":["xtask","sinexd","xtask"],"features":["serde","tokio","serde"],"timeout":"15m","threads":4,"impact_mode":"strict"}` produces `xtask test --impact-mode strict --threads 4 --timeout 15m --features serde --features tokio --package sinexd --package xtask` before the declared environment prefix. The normalized non-default object is encoded as sorted compact JSON and SHA-256 hashed. Each declared job record and `job start`, `job get`, and `job list` response exposes only `parameters.digest`, a lowercase 64-hex digest. Raw parameter values are not persisted. Operations with no `[operations.<name>.parameters]` table remain fixed and reject every non-empty parameters object.
+For the example above, `{"instance_id":"operator-source-driver-browser.history-3","reconcile":true,"service_name":"source-driver-browser.history-3","include_default_excluded":true}` produces `xtask run all-sources --instance-id operator-source-driver-browser.history-3 --reconcile --service-name source-driver-browser.history-3 --include-default-excluded` before the declared environment prefix. These names match Sinex's source-binding identities, whose defaults are `source-driver-<source_id>-<instance_idx>`. The normalized non-default object is encoded as sorted compact JSON and SHA-256 hashed. Each declared job record and `job start`, `job get`, and `job list` response exposes only `parameters.digest`, a lowercase 64-hex digest. Raw parameter values are not persisted. Operations with no `[operations.<name>.parameters]` table remain fixed and reject every non-empty parameters object.
 
 Descriptor `result` is executable contract data. `exit` remains log-only. `json` and `pytest` allocate a bounded result artifact, capture stdout separately from the combined log, and require one UTF-8 JSON object. `agentctl job result` returns that object as typed `value`; malformed, injected trailing output, arrays, and overflowed artifacts are rejected. The record persists `result_kind`, and the result artifact metadata exposes its kind and bound. Polylogue currently declares `verify_affected` and `verify_all` as `pytest`, so their JSON receipts are consumable through this route. Its `verify_quick` still declares `exit`; its descriptor must change to `json` or `pytest` before its receipt is consumable, and this repository does not make that cross-repository declaration change.
 
