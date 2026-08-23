@@ -517,9 +517,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             credential_profile: str = "subscription",
             cwd: str = ".",
             timeout_seconds: int | None = None,
-            operation: str | None = None,
-            workspace_id: str | None = None,
-            parameters: dict[str, Any] | None = None,
             request_id: str | None = None,
             actor: str | None = None,
             reason: str | None = None,
@@ -539,9 +536,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 "credential_profile": credential_profile,
                 "cwd": cwd,
                 "timeout_seconds": timeout_seconds,
-                "operation": operation,
-                "workspace_id": workspace_id,
-                "parameters": parameters,
                 "request_id": request_id,
                 "actor": actor,
                 "reason": reason,
@@ -580,31 +574,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                         timeout_seconds=14_400 if timeout_seconds is None else timeout_seconds,
                         credential_profile=credential_profile,
                     )
-                elif action.name == "operations.run":
-                    if any(
-                        value is not None
-                        for value in (
-                            checkout_id,
-                            argv,
-                            prompt,
-                            backend,
-                            model,
-                            reasoning_effort,
-                            timeout_seconds,
-                        )
-                    ) or credential_profile != "subscription" or cwd != ".":
-                        def callback() -> dict[str, Any]:
-                            raise ProtocolError(
-                                "invalid_request",
-                                "declared operations do not accept command, agent, or timeout overlays",
-                            )
-                    else:
-                        callback = lambda: runtime.v2_run_declared_operation(
-                            project_id=project_id,
-                            operation=operation,
-                            workspace_id=workspace_id,
-                            parameters=parameters,
-                        )
                 else:
                     raise RegistryError(f"run action {action.name!r} is not implemented")
             response = runtime.execute_v2(action, callback, request)

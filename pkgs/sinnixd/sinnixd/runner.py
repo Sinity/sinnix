@@ -7,13 +7,23 @@ import subprocess
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from .jobs import GenericJobStore, JobRecordError, MAX_RESULT_BYTES
+from .jobs import MAX_RESULT_BYTES
 from .limits import maximum_timeout_seconds, valid_timeout_seconds
-from .projects import ProjectConfigError, revalidate_registered_checkout
+from .projects import ProjectConfigError, parse_worktree_records
 
 
 class RunnerError(ValueError):
     pass
+
+
+def _git(path: Path, *arguments: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), *arguments], check=True, capture_output=True, text=True, timeout=2
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RunnerError("could not revalidate registered checkout") from error
+    return result.stdout
 
 
 def _require_strings(value: Mapping[str, Any], fields: Sequence[str]) -> None:
@@ -45,10 +55,46 @@ def _load(path: Path, job_id: str) -> dict[str, Any]:
 
 
 def _revalidate_checkout(checkout: Mapping[str, Any]) -> Path:
+    recorded_path = Path(checkout["path"])
+    if not recorded_path.is_absolute():
+        raise RunnerError("registered checkout path is not absolute")
     try:
-        return revalidate_registered_checkout(checkout)
+        path = recorded_path.resolve(strict=True)
+    except OSError as error:
+        raise RunnerError("registered checkout is unavailable") from error
+    if str(path) != checkout["path"]:
+        raise RunnerError("registered checkout path is not canonical")
+    project_path = Path(checkout["project_path"])
+    try:
+        project_path = project_path.resolve(strict=True)
+    except OSError as error:
+        raise RunnerError("registered project is unavailable") from error
+    if not project_path.is_absolute() or str(project_path) != checkout["project_path"]:
+        raise RunnerError("registered project path is not canonical")
+    if not (project_path / ".agentctl" / "project.toml").is_file():
+        raise RunnerError("registered project is unavailable")
+    top_level = Path(_git(path, "rev-parse", "--show-toplevel").strip()).resolve(strict=True)
+    common_dir = Path(_git(path, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()).resolve(strict=True)
+    project_top_level = Path(_git(project_path, "rev-parse", "--show-toplevel").strip()).resolve(strict=True)
+    project_common_dir = Path(
+        _git(project_path, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+    ).resolve(strict=True)
+    if (
+        top_level != path
+        or project_top_level != project_path
+        or str(common_dir) != checkout["git_common_dir"]
+        or common_dir != project_common_dir
+    ):
+        raise RunnerError("registered checkout identity changed")
+    try:
+        records = parse_worktree_records(_git(path, "worktree", "list", "--porcelain"))
     except ProjectConfigError as error:
         raise RunnerError(str(error)) from error
+    if not any(
+        record.get("worktree") == str(path) and record.get("HEAD") == checkout["head"] for record in records
+    ):
+        raise RunnerError("checkout is no longer a registered Git worktree")
+    return path
 
 
 def _require_environment(job_id: str, unit: str, value: Mapping[str, Any]) -> None:
@@ -68,36 +114,6 @@ def _require_environment(job_id: str, unit: str, value: Mapping[str, Any]) -> No
         raise RunnerError("typed-job environment contains an untrusted SINNIX identity")
     if unit != f"sinnixd-job-{job_id}.service":
         raise RunnerError("typed-job unit identity is invalid")
-
-
-def _run_declared(state_root: Path, job_id: str, unit: str) -> None:
-    """Revalidate a bound checkout at the unit's check-to-exec boundary."""
-    try:
-        store = GenericJobStore(state_root.resolve(strict=True))
-        record = store.load(job_id)
-        command, environment = store.declared_launch(job_id)
-    except (OSError, JobRecordError) as error:
-        raise RunnerError("declared-job launch input is invalid") from error
-    checkout = record.spec.checkout
-    if (
-        record.unit != unit
-        or record.spec.kind != "declared-operation"
-        or not isinstance(checkout, Mapping)
-        or record.spec.working_directory != checkout.get("path")
-    ):
-        raise RunnerError("declared-job identity is invalid")
-    expected = {
-        "SINNIXD_JOB_ID": job_id,
-        "SINNIXD_PROJECT_ID": record.spec.project_id,
-        "SINNIXD_OPERATION": record.spec.operation,
-        "SINNIXD_CHECKOUT_ID": checkout.get("checkout_id"),
-        "SINNIXD_CHECKOUT_HEAD": checkout.get("head"),
-    }
-    if any(not isinstance(value, str) or os.environ.get(key) != value for key, value in expected.items()):
-        raise RunnerError("declared-job environment identity is invalid")
-    checkout_path = _revalidate_checkout(checkout)
-    os.chdir(checkout_path)
-    os.execvpe(command[0], command, {**os.environ, **environment})
 
 
 def _exec_shell(value: Mapping[str, Any], checkout: Path) -> None:
@@ -164,20 +180,13 @@ def _run_agent(
 
 def main(arguments: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sinnixd-contract-runner")
-    parser.add_argument("--input", type=Path)
-    parser.add_argument("--declared", action="store_true")
+    parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--unit", required=True)
-    parser.add_argument("--native-runner", type=Path)
+    parser.add_argument("--native-runner", type=Path, required=True)
     parser.add_argument("--state-root", type=Path, required=True)
     args = parser.parse_args(arguments)
     try:
-        if args.declared:
-            if args.input is not None or args.native_runner is not None:
-                raise RunnerError("declared-job runner arguments are invalid")
-            _run_declared(args.state_root, args.job_id, args.unit)
-        if args.input is None or args.native_runner is None:
-            raise RunnerError("typed-job runner arguments are invalid")
         value = _load(args.input, args.job_id)
         _require_environment(args.job_id, args.unit, value)
         checkout = _revalidate_checkout(value["checkout"])

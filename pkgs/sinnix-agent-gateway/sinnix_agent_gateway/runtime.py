@@ -549,40 +549,6 @@ class Runtime:
             "ref": REGISTRY.reference("job", {"job_id": job_id}),
         }
 
-    def v2_run_declared_operation(
-        self,
-        *,
-        project_id: str | None,
-        operation: str | None,
-        workspace_id: str | None,
-        parameters: Mapping[str, Any] | None,
-    ) -> dict[str, Any]:
-        self.principal.require(Capability.JOB_START)
-        if self.principal.name not in {"agent-control", "operator"}:
-            raise PolicyError("declared operations require agent-control or operator principal")
-        if not isinstance(project_id, str) or not 1 <= len(project_id) <= 128:
-            raise ProtocolError("invalid_request", "project_id is malformed")
-        if not isinstance(operation, str) or not 1 <= len(operation) <= 128:
-            raise ProtocolError("invalid_request", "operation is malformed")
-        if workspace_id is not None and (
-            not isinstance(workspace_id, str) or not 1 <= len(workspace_id) <= 128
-        ):
-            raise ProtocolError("invalid_request", "workspace_id is malformed")
-        if parameters is not None and not isinstance(parameters, Mapping):
-            raise ProtocolError("invalid_request", "parameters must be an object")
-        arguments: dict[str, Any] = {
-            "project_id": project_id,
-            "operation": operation,
-            "parameters": dict(parameters or {}),
-        }
-        if workspace_id is not None:
-            arguments["workspace_id"] = workspace_id
-        result = self._sinnixd_job("job.start", arguments)
-        job_id = result.get("job_id")
-        if not isinstance(job_id, str) or not job_id:
-            raise ProtocolError("owner_failed", "sinnixd declared-operation start response omitted the job ID")
-        return {**result, "ref": REGISTRY.reference("job", {"job_id": job_id})}
-
     def v2_run_agent(
         self,
         *,
