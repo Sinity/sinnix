@@ -4,7 +4,7 @@ The shape sinnix kept rebuilding: producers drop files into a directory;
 a consumer must process each exactly once, survive crashes mid-item, and
 tolerate the same item arriving twice (a drain can legitimately redeliver).
 Instances before this module: the phone outbox/intents (send_token ledger),
-elicit's feedback spool, hub-feedback, the vacuity-judge queue, the
+elicit's feedback spool and hub-feedback, the
 enrichment dump loop.
 
 Design:

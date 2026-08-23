@@ -267,29 +267,6 @@ mkFeatureModule {
         ;
     in
     lib.mkMerge [
-      # NixOS-level systemd.user (manager="user", preserving the unit's
-      # existing manager) rather than the previous home-manager.users.${user}
-      # block: no registered runtime surface existed for this unit either
-      # way, so this is render-only aside from the namespace move (same
-      # reasoning as sinnix-enrichment-loop's conversion).
-      (lib.sinnix.mkScheduledJob
-        {
-          inherit config;
-          unitName = "sinnix-vacuity-judge";
-          description = "Process queued bounded agent-vacuity samples";
-          surface = null;
-        }
-        {
-          manager = "user";
-          execStart = "${scriptPkgs.sinnix-vacuity-sampler}/bin/sinnix-vacuity-sampler judge-once";
-          timer = {
-            onBootSec = "10min";
-            onUnitActiveSec = "15min";
-            accuracySec = "1min";
-            description = "Timer for bounded agent-vacuity judgments";
-          };
-        }
-      )
       {
         sinnix.features.dev.agentTools.hermesConfigSource = hermesConfigFile;
         sinnix.features.dev.agentTools.hermesProfileConfigSources = hermesProfileConfigFiles;
@@ -352,8 +329,6 @@ mkFeatureModule {
               scriptPkgs.sinnix-agent-control-mcp
               scriptPkgs.sinnix-attention
               scriptPkgs.sinnix-context-handoff
-              scriptPkgs.sinnix-claude-judge
-              scriptPkgs.sinnix-vacuity-sampler
               scriptPkgs.sinnix-agent-profile-benchmark
             ];
 

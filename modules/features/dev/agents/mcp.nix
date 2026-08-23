@@ -150,9 +150,7 @@ mkFeatureModule {
       # existing manager) rather than the previous home-manager.users.${user}
       # block: neither unit had a registered runtime surface either way, so
       # this is render-only aside from the namespace move and the gained
-      # OnFailure path every generated job carries by default (same
-      # reasoning as sinnix-enrichment-loop's/sinnix-vacuity-judge's
-      # conversions).
+      # OnFailure path every generated job carries by default.
       (lib.sinnix.mkScheduledJob
         {
           inherit config;

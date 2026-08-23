@@ -55,13 +55,6 @@ STOP. Surface the remaining findings to the user with your
 classification. Do not silently abandon — the iteration cap
 exists to prevent infinite loops, not to mask unresolved gaps.
 
-For a structured verdict, use the bundled `scripts/run-review.sh` helper. It
-routes the schema, bounded context files, and review prompt through
-`sinnix-claude-judge`, which owns Claude invocation, independent validation,
-the single schema-only retry, and the private receipt. Review prompts must not
-reimplement those flags or receipt writes.
-```
-
 **Independence rule**: Iteration N+1's prompt must not reference
 iteration N's findings. Each reviewer must independently re-derive
 what to attack. Coherence gaps are easy to miss when you absorb prior
