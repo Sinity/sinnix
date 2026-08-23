@@ -137,19 +137,8 @@ let
       };
     })
   ];
-  layers = [
-    # Noctalia keeps this surface full-height so toast cards can stack. Its
-    # transparent area still receives the client's background-blur request,
-    # which produces a dark column while global blur is enabled. Explicitly
-    # disable blur for this namespace. `ignore_alpha` was accepted by the Lua
-    # provider but controlled captures showed that it does not stop this path.
-    (mkLayerRule "noctalia-notification-blur" {
-      namespace = "noctalia-notification";
-      blur = false;
-    })
-  ];
 in
 {
   windowRules = dialogs ++ [ pip ] ++ scratchpads ++ applications ++ idle;
-  layerRules = layers;
+  layerRules = [ ];
 }
