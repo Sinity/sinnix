@@ -45,7 +45,7 @@
         # opaque-artifact reads, V3 status, catalog, canonical get, checkout selection,
         # and route preflight.
         approvedManifestHash = "9bef2c34f7b80ed2f63a8060fdd82f5d8728492d3718f9c77712d256e574ef03";
-        approvedActionCatalogHash = "644fd9157cab370576994b519bace367c44ad5798b43f0cae17f86ec4140aa57";
+        approvedActionCatalogHash = "38f8403bde6518e1a0e8a481849ca3772844877f08672da124b666df9647704d";
         tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
       };
     };
