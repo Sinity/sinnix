@@ -333,7 +333,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             default_base=default_base,
             identity_check=_string_list(raw_workspace.get("identity_check"), "workspace.identity_check"),
             checkpoint_untracked=checkpoint_untracked,
-            verification_operations=_string_list(
+            verification_operations=_optional_string_list(
                 raw_workspace.get("verification_operations"), "workspace.verification_operations"
             ),
         )
