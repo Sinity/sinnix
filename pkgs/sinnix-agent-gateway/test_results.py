@@ -5,6 +5,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -282,6 +283,32 @@ def test_mutation_idempotency_replays_receipt_without_second_owner_write(tmp_pat
     assert writes == ["owner write"]
     assert replay == first
     assert conflict["error"]["code"] == "idempotency_conflict"
+
+
+def test_concurrent_matching_idempotency_returns_conflict_then_replays(tmp_path) -> None:
+    runtime = Runtime.create(config(tmp_path), "operator")
+    action = ActionSpec(
+        name="fixture.concurrent-change", verb=VerbFamily.CHANGE, domain="fixture",
+        owner="fixture", route="fixture.write", effect=EffectMode.CHANGE,
+        principals=frozenset({"operator"}), input_schema={"type": "object"}, output_schema={"type": "object"},
+        supports_idempotency=True, receipt_policy="audit",
+    )
+    started, release = threading.Event(), threading.Event()
+    writes: list[str] = []
+
+    def write() -> dict[str, str]:
+        writes.append("write"); started.set(); assert release.wait(5)
+        return {"ref": "sinnix://projects/fixture", "created": True}
+
+    first_result: dict[str, object] = {}
+    thread = threading.Thread(target=lambda: first_result.setdefault("value", runtime.execute_v2(action, write, {"idempotency_key": "same"})))
+    thread.start(); assert started.wait(5)
+    concurrent = runtime.execute_v2(action, write, {"idempotency_key": "same"})
+    assert concurrent["error"]["code"] == "conflict"
+    release.set(); thread.join(5)
+    replay = runtime.execute_v2(action, write, {"idempotency_key": "same"})
+    assert replay == first_result["value"]
+    assert writes == ["write"]
 
 
 def test_partial_completion_is_explicitly_non_atomic(tmp_path) -> None:
