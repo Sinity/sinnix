@@ -65,7 +65,12 @@ class GitHubDelivery:
         self._verified_workspace(workspace_id, job_id)
         status = self.review_status(workspace_id)
         review = status["review"]
-        if review["state"] != "OPEN" or review["isDraft"] or review["mergeStateStatus"] not in {"CLEAN", "HAS_HOOKS", "UNSTABLE"}:
+        if (
+            review["state"] != "OPEN"
+            or review["isDraft"]
+            or review["mergeStateStatus"] not in {"CLEAN", "HAS_HOOKS"}
+            or not self._checks_pass(review["statusCheckRollup"])
+        ):
             raise DeliveryError("review is not in a landable GitHub state")
         self._command(["gh", "pr", "merge", str(review["number"]), "--squash"], cwd=self.workspaces.get(workspace_id)["path"])
         merged = self.review_status(workspace_id)
@@ -126,3 +131,22 @@ class GitHubDelivery:
         if probe.returncode != 0:
             raise DeliveryError(probe.stderr.strip() or "could not inspect remote branch")
         self._command(["git", "-C", path, "push", "origin", "--delete", branch])
+
+    @staticmethod
+    def _checks_pass(checks: Any) -> bool:
+        if not isinstance(checks, list):
+            return False
+        for check in checks:
+            if not isinstance(check, Mapping):
+                return False
+            if check.get("__typename") == "StatusContext":
+                if check.get("state") != "SUCCESS":
+                    return False
+            elif check.get("__typename") == "CheckRun":
+                if check.get("status") != "COMPLETED" or check.get("conclusion") not in {
+                    "SUCCESS", "NEUTRAL", "SKIPPED",
+                }:
+                    return False
+            else:
+                return False
+        return True
