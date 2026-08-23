@@ -94,6 +94,10 @@ in
               };
               sinnix.services.sinnixd.enable = true;
               sinnix.services.sinnixd.agentRunner = "/realm/project/sinnix/native-runner";
+              sinnix.services.sinnixd.projectRoots = [
+                "/realm/project/sinnix"
+                "/realm/project/polylogue"
+              ];
               home-manager.users.sinity.systemd.user.services.sinnixd.Unit.ConditionPathExists =
                 "/realm/project/sinnix/.agentctl/project.toml";
             };
