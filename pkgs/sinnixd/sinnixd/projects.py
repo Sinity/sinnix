@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 import subprocess
 import tomllib
 from dataclasses import dataclass
@@ -14,6 +16,19 @@ from .environment import build_environment
 
 class ProjectConfigError(ValueError):
     """Raised when a project adapter is missing or violates the v1 contract."""
+
+
+MAX_OPERATION_PARAMETERS = 16
+MAX_PARAMETER_LIST_ITEMS = 32
+MAX_PARAMETER_STRING_LENGTH = 128
+_PARAMETER_FLAG = re.compile(r"--[a-z][a-z0-9-]*\Z")
+_PACKAGE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
+
+
+def _parameter_digest(parameters: Mapping[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(parameters, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    ).hexdigest()
 
 
 def parse_worktree_records(output: str) -> tuple[dict[str, str], ...]:
@@ -109,6 +124,43 @@ class ProjectEnvironment:
 
 
 @dataclass(frozen=True)
+class OperationParameter:
+    """A fixed descriptor-owned mapping from a typed value to argv entries."""
+
+    name: str
+    kind: str
+    flag: str
+    max_items: int | None = None
+    max_length: int | None = None
+
+    def catalog_row(self) -> dict[str, Any]:
+        row: dict[str, Any] = {"name": self.name, "type": self.kind, "flag": self.flag}
+        if self.kind == "string-list":
+            row.update({"max_items": self.max_items, "max_length": self.max_length})
+        return row
+
+    def canonicalize(self, value: Any) -> bool | tuple[str, ...]:
+        if self.kind == "bool":
+            if not isinstance(value, bool):
+                raise ValueError(f"parameter {self.name} must be boolean")
+            return value
+        if not isinstance(value, list) or not value:
+            raise ValueError(f"parameter {self.name} must be a non-empty list")
+        assert self.max_items is not None and self.max_length is not None
+        if len(value) > self.max_items:
+            raise ValueError(f"parameter {self.name} exceeds max_items")
+        if any(
+            not isinstance(item, str)
+            or not item
+            or len(item) > self.max_length
+            or _PACKAGE_NAME.fullmatch(item) is None
+            for item in value
+        ):
+            raise ValueError(f"parameter {self.name} must contain bounded package strings")
+        return tuple(sorted(set(value)))
+
+
+@dataclass(frozen=True)
 class ProjectOperation:
     name: str
     description: str
@@ -117,6 +169,31 @@ class ProjectOperation:
     result: str
     cache: str
     exclusive_keys: tuple[str, ...] = ()
+    parameters: tuple[OperationParameter, ...] = ()
+
+    def derive_argv(self, raw_parameters: Mapping[str, Any]) -> tuple[tuple[str, ...], str]:
+        if not isinstance(raw_parameters, Mapping):
+            raise ValueError("declared job parameters must be an object")
+        parameter_by_name = {parameter.name: parameter for parameter in self.parameters}
+        unknown = set(raw_parameters) - set(parameter_by_name)
+        if unknown:
+            raise ValueError("declared job parameters contain unknown field(s): " + ", ".join(sorted(unknown)))
+        canonical: dict[str, Any] = {}
+        argv = list(self.command)
+        for parameter in self.parameters:
+            if parameter.name not in raw_parameters:
+                continue
+            value = parameter.canonicalize(raw_parameters[parameter.name])
+            if parameter.kind == "bool":
+                if value:
+                    canonical[parameter.name] = True
+                    argv.append(parameter.flag)
+                continue
+            assert isinstance(value, tuple)
+            canonical[parameter.name] = list(value)
+            for item in value:
+                argv.extend((parameter.flag, item))
+        return tuple(argv), _parameter_digest(canonical)
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -127,6 +204,7 @@ class ProjectOperation:
             "result": self.result,
             "cache": self.cache,
             "exclusive_keys": list(self.exclusive_keys),
+            "parameters": [parameter.catalog_row() for parameter in self.parameters],
         }
 
 
@@ -192,6 +270,43 @@ def _optional_string_list(value: Any, field: str) -> tuple[str, ...]:
     if not isinstance(value, list) or any(not isinstance(item, str) or not item for item in value):
         raise ProjectConfigError(f"{field} must be a list of non-empty strings")
     return tuple(value)
+
+
+def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, Mapping) or len(value) > MAX_OPERATION_PARAMETERS:
+        raise ProjectConfigError(f"{field} must be a bounded table")
+    parameters: list[OperationParameter] = []
+    for name, definition in sorted(value.items()):
+        if not isinstance(name, str) or not name.isidentifier() or not isinstance(definition, Mapping):
+            raise ProjectConfigError(f"{field} contains an invalid parameter declaration")
+        kind = definition.get("type")
+        flag = definition.get("flag")
+        if kind not in {"bool", "string-list"} or not isinstance(flag, str) or _PARAMETER_FLAG.fullmatch(flag) is None:
+            raise ProjectConfigError(f"{field}.{name} has an invalid type or flag")
+        if kind == "bool":
+            if set(definition) != {"type", "flag"}:
+                raise ProjectConfigError(f"{field}.{name} bool parameters only accept type and flag")
+            parameters.append(OperationParameter(name=name, kind=kind, flag=flag))
+            continue
+        if set(definition) != {"type", "flag", "max_items", "max_length"}:
+            raise ProjectConfigError(f"{field}.{name} string-list parameters require explicit bounds")
+        max_items = definition.get("max_items")
+        max_length = definition.get("max_length")
+        if (
+            not isinstance(max_items, int)
+            or isinstance(max_items, bool)
+            or not 1 <= max_items <= MAX_PARAMETER_LIST_ITEMS
+            or not isinstance(max_length, int)
+            or isinstance(max_length, bool)
+            or not 1 <= max_length <= MAX_PARAMETER_STRING_LENGTH
+        ):
+            raise ProjectConfigError(f"{field}.{name} has invalid bounds")
+        parameters.append(OperationParameter(name=name, kind=kind, flag=flag, max_items=max_items, max_length=max_length))
+    if len({parameter.flag for parameter in parameters}) != len(parameters):
+        raise ProjectConfigError(f"{field} parameter flags must be unique")
+    return tuple(parameters)
 
 
 def _owner_adapters(raw: Mapping[str, Any], descriptor: Path) -> tuple[ProjectOwnerAdapter, ...]:
@@ -371,6 +486,9 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
     for name, definition in sorted(raw_operations.items()):
         if not isinstance(name, str) or not name.isidentifier() or not isinstance(definition, Mapping):
             raise ProjectConfigError(f"{descriptor} contains an invalid operation declaration")
+        allowed_operation = {"description", "exec", "pool", "result", "cache", "exclusive_keys", "parameters"}
+        if set(definition) - allowed_operation:
+            raise ProjectConfigError(f"{descriptor} operation {name} contains unknown fields")
         description = definition.get("description")
         if not isinstance(description, str) or not description:
             raise ProjectConfigError(f"{descriptor} operation {name} requires description")
@@ -380,7 +498,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         cache = definition.get("cache", "none")
         if pool not in {"normal", "bulk", "attached"}:
             raise ProjectConfigError(f"operations.{name}.pool is invalid")
-        if result not in {"exit", "json", "pytest", "agent", "service"}:
+        if result not in {"exit", "json", "pytest"}:
             raise ProjectConfigError(f"operations.{name}.result is invalid")
         if not isinstance(cache, str) or not cache:
             raise ProjectConfigError(f"operations.{name}.cache must be non-empty")
@@ -395,6 +513,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 exclusive_keys=_optional_string_list(
                     definition.get("exclusive_keys"), f"operations.{name}.exclusive_keys"
                 ),
+                parameters=_operation_parameters(definition.get("parameters"), f"operations.{name}.parameters"),
             )
         )
     if workspace is not None:

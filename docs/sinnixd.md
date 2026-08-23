@@ -27,6 +27,7 @@ agentctl workspace finish <workspace-id>
 agentctl workspace dispose <workspace-id>
 agentctl workspace reap <workspace-id>
 agentctl job start sinnix lint
+agentctl job start sinex check_default --parameters-json '{"full":true,"package":["sinexd","xtask"]}'
 agentctl job start polylogue verify_quick --workspace <workspace-id>
 agentctl job get <job-id>
 agentctl job list
@@ -40,7 +41,29 @@ agentctl agent --project sinnix --checkout default --prompt-file ./prompt.md --b
 
 The service passes a declarative, non-empty `sinnix.services.sinnixd.projectRoots` list as repeated `--project-root` arguments. It defaults to the Sinnix root and `/realm/project/polylogue`. Sinnixd loads only those `.agentctl/project.toml` adapters and does not scan arbitrary directories. Each descriptor is schema-versioned, identifies its repository root markers, declares the execution environment, and publishes named operation metadata.
 
-`job start` accepts a project ID and one declared operation name, never an arbitrary command. Its optional workspace binding launches in that registered checkout and durably records the checkout ID and exact starting HEAD, so later publication can reject stale verification. Declared operations and internal synthetic foreground commands construct the same durable generic-job spec, record, transient user `.service` launch, log artifact, reconciliation, wait, and cancellation route. The only additional public starts are the constrained typed contracts below.
+`job start` accepts a project ID, one declared operation name, an optional workspace binding, and an optional JSON parameters object. It never accepts an arbitrary command. Its optional workspace binding launches in that registered checkout and durably records the checkout ID and exact starting HEAD, so later publication can reject stale verification. Declared operations and internal synthetic foreground commands construct the same durable generic-job spec, record, transient user `.service` launch, log artifact, reconciliation, wait, and cancellation route. The only additional public starts are the constrained typed contracts below.
+
+## Declared-operation parameters and results
+
+Operation parameters are descriptor-owned. The server accepts only parameter names and types declared under that operation, converts them to a fixed argument vector without a shell, and rejects unknown fields, malformed values, missing bounds, and values beyond those bounds. There is no caller-controlled argv, environment, working directory, or timeout on this route.
+
+The initial closed type set is deliberately small:
+
+```toml
+[operations.check_default.parameters.full]
+type = "bool"
+flag = "--full"
+
+[operations.check_default.parameters.package]
+type = "string-list"
+flag = "--package"
+max_items = 16
+max_length = 64
+```
+
+`bool` emits its declared flag only when true. `string-list` accepts non-empty Cargo-style package names, deduplicates and sorts them, then emits its fixed flag once per value. For the example above, `{"package":["xtask","sinexd","xtask"],"full":true}` becomes `xtask check --full --package sinexd --package xtask` before the declared environment prefix is applied. False booleans and absent parameters do not emit argv entries. The normalized non-default object is encoded as sorted compact JSON and SHA-256 hashed. Each declared job record and `job start`, `job get`, and `job list` response exposes only `parameters.digest`, a lowercase 64-hex digest. Raw parameter values are not persisted. Operations with no `[operations.<name>.parameters]` table remain fixed and reject every non-empty parameters object.
+
+Descriptor `result` is executable contract data. `exit` remains log-only. `json` and `pytest` allocate a bounded result artifact, capture stdout separately from the combined log, and require one UTF-8 JSON object. `agentctl job result` returns that object as typed `value`; malformed, injected trailing output, arrays, and overflowed artifacts are rejected. The record persists `result_kind`, and the result artifact metadata exposes its kind and bound. Polylogue currently declares `verify_affected` and `verify_all` as `pytest`, so their JSON receipts are consumable through this route. Its `verify_quick` still declares `exit`; its descriptor must change to `json` or `pytest` before its receipt is consumable, and this repository does not make that cross-repository declaration change.
 
 ## Typed shell and agent contracts
 

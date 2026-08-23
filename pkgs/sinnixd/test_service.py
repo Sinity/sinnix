@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import socket
@@ -30,6 +31,8 @@ from sinnixd.jobs import (
     GenericJobSpec,
     GenericJobStore,
     GenericJobs,
+    JobResultError,
+    JobResultLimitError,
     SystemdJobError,
     UserSystemdJobs,
     capture_executable,
@@ -116,6 +119,31 @@ def test_agentctl_workspace_dispose_maps_to_a_typed_envelope(
     assert dict(outbound.arguments) == {"workspace_id": "workspace-1"}
 
 
+def test_agentctl_job_start_maps_parameters_json_to_the_typed_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, RequestEnvelope] = {}
+
+    def fake_call(socket_path, request_value):
+        captured["request"] = request_value
+        return {"schema": 1, "ok": True}
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["agentctl", "job", "start", "fixture", "parameterized", "--parameters-json", '{"package":["xtask","sinexd"],"full":true}'],
+    )
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    assert dict(captured["request"].arguments) == {
+        "project_id": "fixture",
+        "operation": "parameterized",
+        "workspace_id": None,
+        "parameters": {"package": ["xtask", "sinexd"], "full": True},
+    }
+
+
 def write_adapter(root: Path) -> None:
     (root / "modules").mkdir(parents=True)
     (root / "flake.nix").write_text("{}")
@@ -156,6 +184,30 @@ pool = "normal"
 result = "exit"
 cache = "tree+environment"
 exclusive_keys = ["fixture:check"]
+
+[operations.parameterized]
+description = "Run fixture checks with declared parameters"
+exec = ["fixture-check"]
+pool = "normal"
+result = "json"
+cache = "tree+environment"
+
+[operations.parameterized.parameters.full]
+type = "bool"
+flag = "--full"
+
+[operations.parameterized.parameters.package]
+type = "string-list"
+flag = "--package"
+max_items = 4
+max_length = 32
+
+[operations.pytest_receipt]
+description = "Run fixture pytest receipt"
+exec = ["fixture-pytest"]
+pool = "normal"
+result = "pytest"
+cache = "tree+environment"
 """
     )
 
@@ -178,6 +230,33 @@ exec = ["polylogue-agentctl-adapter"]
 documentation = "Bounded Polylogue archive status."
 """
     )
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    (
+        "unknown = true\n",
+        "[operations.parameterized.parameters.broken]\ntype = \"integer\"\nflag = \"--broken\"\n",
+        "[operations.parameterized.parameters.unbounded]\ntype = \"string-list\"\nflag = \"--unbounded\"\nmax_items = 4\n",
+    ),
+)
+def test_project_operation_parameter_schema_is_closed_and_bounded(tmp_path: Path, fragment: str) -> None:
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(descriptor.read_text() + fragment)
+
+    with pytest.raises(ProjectConfigError):
+        ProjectCatalog([tmp_path])
+
+
+def test_project_operation_result_must_have_an_executable_declared_contract(tmp_path: Path) -> None:
+    """Anti-vacuity: descriptor result metadata cannot be accepted and ignored."""
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(descriptor.read_text().replace('result = "json"', 'result = "agent"'))
+
+    with pytest.raises(ProjectConfigError, match="operations.parameterized.result is invalid"):
+        ProjectCatalog([tmp_path])
 
 
 def request(
@@ -222,6 +301,7 @@ class FakeSystemdJobs:
         environment: dict[str, str],
         timeout_seconds: int,
         log_path: Path,
+        json_result_path: Path | None = None,
     ) -> None:
         self.started.append(
             {
@@ -231,6 +311,7 @@ class FakeSystemdJobs:
                 "environment": environment,
                 "timeout_seconds": timeout_seconds,
                 "log_path": log_path,
+                "json_result_path": json_result_path,
             }
         )
 
@@ -684,23 +765,17 @@ def test_project_catalog_is_explicit_and_operation_catalog_is_bounded(tmp_path: 
 
     assert response.ok
     assert response.payload is not None
-    assert response.payload.to_dict() == {
-        "kind": "inline",
-        "value": {
-            "project_id": "fixture",
-            "operations": [
-                {
-                    "name": "check",
-                    "description": "Run fixture checks",
-                    "command": ["fixture-check"],
-                    "pool": "normal",
-                    "result": "exit",
-                    "cache": "tree+environment",
-                    "exclusive_keys": ["fixture:check"],
-                }
-            ],
-        },
-    }
+    catalog = response.payload.inline
+    assert catalog["project_id"] == "fixture"
+    operations = {operation["name"]: operation for operation in catalog["operations"]}
+    assert operations["check"]["parameters"] == []
+    assert operations["check"]["result"] == "exit"
+    assert operations["parameterized"]["parameters"] == [
+        {"name": "full", "type": "bool", "flag": "--full"},
+        {"name": "package", "type": "string-list", "flag": "--package", "max_items": 4, "max_length": 32},
+    ]
+    assert operations["parameterized"]["result"] == "json"
+    assert operations["pytest_receipt"]["result"] == "pytest"
 
 
 def test_owner_mismatch_is_a_typed_error(tmp_path: Path) -> None:
@@ -895,6 +970,204 @@ def test_declared_and_foreground_jobs_share_the_generic_route(tmp_path: Path) ->
     assert status.payload.inline["state"]["systemd"]["MainPID"] == "42"
     assert cancelled.ok
     assert systemd.stopped == [launch["unit"]]
+
+
+def test_declared_parameters_canonicalize_argv_and_persist_only_the_digest(tmp_path: Path) -> None:
+    """Anti-vacuity: parameter ordering must affect neither argv identity nor durable record contents."""
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "operation": "parameterized",
+                "parameters": {"package": ["xtask", "sinexd", "xtask"], "full": True},
+            },
+        )
+    )
+
+    assert started.ok and started.payload is not None
+    launch = started.payload.inline
+    digest = hashlib.sha256(b'{"full":true,"package":["sinexd","xtask"]}').hexdigest()
+    assert systemd.started[0]["command"] == (
+        "fixture-env", "--command", "fixture-check", "--full", "--package", "sinexd", "--package", "xtask"
+    )
+    assert launch["parameters"] == {"digest": digest}
+    persisted = (jobs.store.records_root / f"{launch['job_id']}.json").read_text()
+    assert '"parameters": {"digest": ' in persisted
+    assert "sinexd" not in persisted and "xtask" not in persisted
+    assert jobs.store.load(launch["job_id"]).spec.parameter_digest == digest
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    (
+        {"unknown": True},
+        {"full": "true"},
+        {"package": []},
+        {"package": ["--full"]},
+        {"package": ["one", "two", "three", "four", "five"]},
+    ),
+)
+def test_declared_parameters_reject_unknown_malformed_and_unbounded_input(
+    tmp_path: Path, parameters: dict[str, object]
+) -> None:
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs()
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+
+    response = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "parameterized", "parameters": parameters},
+        )
+    )
+
+    assert response.error is not None
+    assert response.error.code.value == "INVALID_ARGUMENT"
+    assert systemd.started == []
+
+
+def test_fixed_operation_rejects_parameters_and_retains_its_declared_argv(tmp_path: Path) -> None:
+    """Anti-vacuity: parameters must not create an argv authority for fixed operations."""
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs()
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+
+    fixed = service.dispatch(
+        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check", "parameters": {}})
+    )
+    rejected = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "check", "parameters": {"full": True}},
+        )
+    )
+
+    assert fixed.ok and fixed.payload is not None
+    assert systemd.started[0]["command"] == ("fixture-env", "--command", "fixture-check")
+    assert rejected.error is not None
+    assert rejected.error.code.value == "INVALID_ARGUMENT"
+    assert len(systemd.started) == 1
+
+
+@pytest.mark.parametrize(
+    ("operation", "content", "overflowed", "expected"),
+    (
+        ("parameterized", b'{"receipt":"ok"}', False, {"receipt": "ok"}),
+        ("pytest_receipt", b'{"receipt":"pytest"}', False, {"receipt": "pytest"}),
+        ("parameterized", b'{"receipt":"ok"}injected', False, None),
+        ("parameterized", b"not-json", False, None),
+        ("parameterized", b'{"receipt":"too-large"}', True, None),
+    ),
+)
+def test_declared_json_results_are_bounded_and_validated(
+    tmp_path: Path, operation: str, content: bytes, overflowed: bool, expected: dict[str, str] | None
+) -> None:
+    """Anti-vacuity: result artifacts must reject injected, malformed, and overflowed JSON."""
+    write_adapter(tmp_path)
+    jobs = generic_jobs(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": operation}))
+    assert started.ok and started.payload is not None
+    job_id = started.payload.inline["job_id"]
+    record = jobs.store.load(job_id)
+    assert record.result_path is not None
+    record.result_path.write_bytes(content)
+    if overflowed:
+        record.result_path.with_suffix(".overflow").touch()
+
+    if expected is not None:
+        kind = "json" if operation == "parameterized" else "pytest"
+        assert jobs.result(job_id) == {
+            "job_id": job_id,
+            "kind": kind,
+            "value": expected,
+            "artifact": {"ref": f"sinnix://jobs/{job_id}/artifacts/result", "max_bytes": 64_000, "kind": kind},
+        }
+    else:
+        with pytest.raises(JobResultError):
+            jobs.result(job_id)
+        response = service.dispatch(request("job.result", "systemd-jobs", {"job_id": job_id}))
+        assert response.error is not None
+        assert response.error.code.value == "RESULT_INVALID"
+
+
+def test_declared_json_result_respects_the_callers_response_budget(tmp_path: Path) -> None:
+    """Anti-vacuity: typed JSON must not bypass job.result's max_bytes contract."""
+    write_adapter(tmp_path)
+    jobs = generic_jobs(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "parameterized"}))
+    assert started.ok and started.payload is not None
+    job_id = started.payload.inline["job_id"]
+    record = jobs.store.load(job_id)
+    assert record.result_path is not None
+    record.result_path.write_bytes(b'{"receipt":"ok"}')
+
+    with pytest.raises(JobResultLimitError, match="requested response limit"):
+        jobs.result(job_id, max_bytes=8)
+    response = service.dispatch(request("job.result", "systemd-jobs", {"job_id": job_id, "max_bytes": 8}))
+    assert response.error is not None
+    assert response.error.code.value == "RESOURCE_EXHAUSTED"
+
+
+def test_capture_separates_json_stdout_from_logs(tmp_path: Path) -> None:
+    log_path = tmp_path / "job.log"
+    result_path = tmp_path / "job.result"
+    log_path.touch(mode=0o600)
+    assert capture_main(
+        (
+            "--log-path", str(log_path), "--overflow-path", str(tmp_path / "job.overflow"), "--max-bytes", "64",
+            "--result-path", str(result_path), "--result-overflow-path", str(tmp_path / "result.overflow"),
+            "--", "/bin/sh", "-c", "printf '{\"receipt\":true}'; printf diagnostic >&2",
+        )
+    ) == 0
+    assert json.loads(result_path.read_text()) == {"receipt": True}
+    assert "diagnostic" in log_path.read_text()
+
+
+def test_capture_writes_to_the_store_preallocated_log_artifact(tmp_path: Path) -> None:
+    """Anti-vacuity: the real GenericJobStore log reservation remains capturable."""
+    jobs = generic_jobs(tmp_path)
+    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    record = jobs.store.load(started["job_id"])
+    assert record.log_path.exists()
+
+    assert capture_main(
+        (
+            "--log-path", str(record.log_path), "--overflow-path", str(record.log_path.with_suffix(".overflow")),
+            "--max-bytes", "64", "--", "/bin/sh", "-c", "printf captured-log",
+        )
+    ) == 0
+    assert record.log_path.read_text() == "captured-log"
+
+
+def test_capture_refuses_hostile_artifact_symlinks(tmp_path: Path) -> None:
+    """Anti-vacuity: a job process cannot redirect capture artifacts through a same-user symlink."""
+    protected = tmp_path / "protected"
+    protected.write_text("keep")
+    log_path = tmp_path / "job.log"
+    result_path = tmp_path / "job.result"
+    log_path.touch(mode=0o600)
+    result_path.symlink_to(protected)
+
+    with pytest.raises(FileExistsError):
+        capture_main(
+            (
+                "--log-path", str(log_path), "--overflow-path", str(tmp_path / "job.overflow"), "--max-bytes", "64",
+                "--result-path", str(result_path), "--result-overflow-path", str(tmp_path / "result.overflow"),
+                "--", "/bin/true",
+            )
+        )
+    assert protected.read_text() == "keep"
 
 
 def test_job_reconciliation_marks_missing_units_without_daemon_owned_state(tmp_path: Path) -> None:
@@ -1906,6 +2179,7 @@ def test_capture_caps_persistent_artifacts_and_reports_producer_overflow(tmp_pat
     """Anti-vacuity: delayed marker writes fail while the producer is still running."""
     log_path = tmp_path / "overflow.log"
     overflow_path = tmp_path / "overflow.overflow"
+    log_path.touch(mode=0o600)
     result: dict[str, int] = {}
     producer = ("/bin/sh", "-c", "printf 012345; sleep 1")
 
