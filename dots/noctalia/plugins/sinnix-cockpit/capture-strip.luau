@@ -3,7 +3,7 @@
 -- click runs exactly what the matching F-key bind runs — dispatched through
 -- Hyprland so the spawn path (uwsm scope, env) is identical to the keybind —
 -- and the button lights up while the scratchpad holds a window, so the strip
--- doubles as presence state for the three live specials.
+-- doubles as presence state for all three live surfaces.
 
 local toggleScratch = noctalia.expandPath("~/.local/bin/toggle-scratch")
 
@@ -24,7 +24,7 @@ local VERBS = {
     name = "agentbrowser",
     glyph = "travel_explore",
     tooltip = "Agent browser (F7)",
-    command = "hyprctl dispatch togglespecialworkspace agentbrowser",
+    command = "sinnix-chrome-control toggle-agent-workspace",
   },
 }
 

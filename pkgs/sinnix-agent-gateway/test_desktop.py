@@ -89,10 +89,10 @@ def test_operator_dispatch_uses_exact_argument_vector(tmp_path: Path) -> None:
 
     desktop.action(
         "dispatch",
-        {"dispatcher": "workspace", "args": ["special:agentbrowser"]},
+        {"dispatcher": "workspace", "args": ["name:agentbrowser"]},
     )
 
-    assert commands(captured) == [["dispatch", "workspace", "special:agentbrowser"]]
+    assert commands(captured) == [["dispatch", "workspace", "name:agentbrowser"]]
 
 
 def test_observer_cannot_mutate_desktop(tmp_path: Path) -> None:

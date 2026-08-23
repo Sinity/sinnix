@@ -1,18 +1,17 @@
 --!nonstrict
 -- Cockpit probe. Owns the polling so the widgets stay render-only: every few
--- seconds it asks Hyprland which special workspaces hold windows, and it
+-- seconds it asks Hyprland which scratch or agent workspaces hold windows, and it
 -- rereads the capability index when the file's mtime moves. No daemon, no
 -- timer unit — this runs inside the shell the widgets already live in.
 
 local INDEX_PATH = noctalia.getConfig("index_path") or "/etc/sinnix/capability-index.json"
 
--- Scratchpad name -> the special workspace its verb toggles. These mirror the
--- F8/F6/F7 binds (toggle-scratch specs in hyprland/scratchpads.nix and the
--- direct togglespecialworkspace dispatch for the agent browser).
+-- Surface name -> the workspace its verb toggles. These mirror the F8/F6/F7
+-- binds: two special scratchpads and the ordinary named agent-browser workspace.
 local TARGETS = {
   rawlog = "special:scratch_rawlog",
   weechat = "special:scratch_weechat",
-  agentbrowser = "special:agentbrowser",
+  agentbrowser = "agentbrowser",
 }
 
 local polling = false
