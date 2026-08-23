@@ -23,7 +23,7 @@ from .projects import ProjectAdapter, ProjectCatalog, RegisteredCheckout
 
 WORKSPACE_SCHEMA_VERSION = 1
 CHECKPOINT_SCHEMA_VERSION = 1
-STACK_SCHEMA_VERSION = 1
+STACK_SCHEMA_VERSION = 2
 MAX_CHECKPOINT_BYTES = 64 * 1024 * 1024
 MAX_UNTRACKED_FILES = 4096
 _NAME = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?\Z")
@@ -113,6 +113,7 @@ class StackRecord:
     child_workspace_id: str
     parent_workspace_id: str
     created_at: str
+    parent_head: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -120,14 +121,15 @@ class StackRecord:
             "child_workspace_id": self.child_workspace_id,
             "parent_workspace_id": self.parent_workspace_id,
             "created_at": self.created_at,
+            "parent_head": self.parent_head,
         }
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> StackRecord:
-        required = {"schema_version", "child_workspace_id", "parent_workspace_id", "created_at"}
+        required = {"schema_version", "child_workspace_id", "parent_workspace_id", "created_at", "parent_head"}
         if set(value) != required or value.get("schema_version") != STACK_SCHEMA_VERSION:
             raise WorkspaceError("workspace stack record schema is invalid")
-        fields = tuple(value.get(key) for key in ("child_workspace_id", "parent_workspace_id", "created_at"))
+        fields = tuple(value.get(key) for key in ("child_workspace_id", "parent_workspace_id", "created_at", "parent_head"))
         if any(not isinstance(item, str) or not item for item in fields):
             raise WorkspaceError("workspace stack record fields are invalid")
         return cls(*fields)
@@ -187,11 +189,15 @@ class WorkspaceStore:
 
     def stack_records(self) -> tuple[StackRecord, ...]:
         payload = read_json(self.stacks, {"schema_version": STACK_SCHEMA_VERSION, "stacks": []})
-        if not isinstance(payload, Mapping) or payload.get("schema_version") != STACK_SCHEMA_VERSION:
+        if not isinstance(payload, Mapping):
             raise WorkspaceError("workspace stack index schema is invalid")
         rows = payload.get("stacks")
         if not isinstance(rows, list) or any(not isinstance(row, Mapping) for row in rows):
             raise WorkspaceError("workspace stack index rows are invalid")
+        if payload.get("schema_version") == 1 and not rows:
+            return ()
+        if payload.get("schema_version") != STACK_SCHEMA_VERSION:
+            raise WorkspaceError("workspace stack index schema is invalid")
         return tuple(StackRecord.from_dict(row) for row in rows)
 
     def put_stack(self, record: StackRecord) -> None:
@@ -200,6 +206,8 @@ class WorkspaceStore:
             rows = payload.get("stacks") if isinstance(payload, dict) else None
             if not isinstance(rows, list):
                 raise WorkspaceError("workspace stack index rows are invalid")
+            if payload.get("schema_version") == 1 and not rows:
+                payload["schema_version"] = STACK_SCHEMA_VERSION
             existing = [StackRecord.from_dict(row) for row in rows]
             if any(item.child_workspace_id == record.child_workspace_id for item in existing):
                 raise WorkspaceError("workspace already has a stack parent")
@@ -211,12 +219,45 @@ class WorkspaceStore:
             rows = payload.get("stacks") if isinstance(payload, dict) else None
             if not isinstance(rows, list):
                 raise WorkspaceError("workspace stack index rows are invalid")
+            if payload.get("schema_version") == 1 and not rows:
+                payload["schema_version"] = STACK_SCHEMA_VERSION
             payload["stacks"] = [
                 row for row in rows
                 if isinstance(row, Mapping)
                 and row.get("child_workspace_id") != workspace_id
                 and row.get("parent_workspace_id") != workspace_id
             ]
+
+    def update_stack_parent_head(self, child_workspace_id: str, parent_head: str) -> None:
+        default = {"schema_version": STACK_SCHEMA_VERSION, "stacks": []}
+        with modify_json(self.stacks, default, mode=0o600) as payload:
+            rows = payload.get("stacks") if isinstance(payload, dict) else None
+            if not isinstance(rows, list):
+                raise WorkspaceError("workspace stack index rows are invalid")
+            if payload.get("schema_version") == 1 and not rows:
+                payload["schema_version"] = STACK_SCHEMA_VERSION
+            records = [StackRecord.from_dict(row) for row in rows]
+            if not any(record.child_workspace_id == child_workspace_id for record in records):
+                raise WorkspaceError("workspace is not a stacked child")
+            payload["stacks"] = [
+                StackRecord(
+                    child_workspace_id=record.child_workspace_id,
+                    parent_workspace_id=record.parent_workspace_id,
+                    created_at=record.created_at,
+                    parent_head=parent_head if record.child_workspace_id == child_workspace_id else record.parent_head,
+                ).to_dict()
+                for record in records
+            ]
+
+    def remove_stack_child(self, child_workspace_id: str) -> None:
+        default = {"schema_version": STACK_SCHEMA_VERSION, "stacks": []}
+        with modify_json(self.stacks, default, mode=0o600) as payload:
+            rows = payload.get("stacks") if isinstance(payload, dict) else None
+            if not isinstance(rows, list):
+                raise WorkspaceError("workspace stack index rows are invalid")
+            if payload.get("schema_version") == 1 and not rows:
+                payload["schema_version"] = STACK_SCHEMA_VERSION
+            payload["stacks"] = [row for row in rows if row.get("child_workspace_id") != child_workspace_id]
 
     def put_checkpoint(self, record: CheckpointRecord, staged: bytes, unstaged: bytes, untracked: bytes) -> None:
         root = self.checkpoint_path(record.workspace_id, record.checkpoint_id)
@@ -353,14 +394,14 @@ class GitWorkspaces:
         with flock(self.mutation_lock):
             record = self._record(workspace_id)
             status = self._status(record)
+            if any(stack.parent_workspace_id == workspace_id for stack in self.store.stack_records()):
+                raise WorkspaceError("workspace cannot be reaped while stacked children exist")
             if status["state"] == "missing":
                 self.store.remove_stack_references(workspace_id)
                 self.store.remove(workspace_id)
                 return {"workspace_id": workspace_id, "reaped": True, "relationship_only": True}
             if not record.managed:
                 raise WorkspaceError("adopted workspaces cannot be reaped")
-            if any(stack.parent_workspace_id == workspace_id for stack in self.store.stack_records()):
-                raise WorkspaceError("workspace cannot be reaped while stacked children exist")
             if status["dirty"] or not status["identity_matches"]:
                 raise WorkspaceError("workspace is dirty or its branch identity changed")
             project = self._project(record.project_id)
@@ -390,7 +431,7 @@ class GitWorkspaces:
     def stack(self, *, parent_workspace_id: str, name: str, branch: str) -> dict[str, Any]:
         with flock(self.mutation_lock):
             parent = self._record(parent_workspace_id)
-            self._available(parent)
+            parent_checkout, _project = self._available(parent)
             created = self._create_locked(
                 project_id=parent.project_id,
                 name=name,
@@ -401,6 +442,7 @@ class GitWorkspaces:
                 child_workspace_id=created["workspace_id"],
                 parent_workspace_id=parent_workspace_id,
                 created_at=datetime.now(UTC).isoformat(),
+                parent_head=parent_checkout.head,
             )
             try:
                 self.store.put_stack(relationship)
@@ -425,10 +467,23 @@ class GitWorkspaces:
             if child.project_id != parent.project_id:
                 raise WorkspaceError("stack parent belongs to another project")
             child_checkout, project = self._available(child)
-            parent_checkout, _ = self._available(parent)
             if self._git(child_checkout.path, "status", "--porcelain", "--untracked-files=all").stdout:
                 raise WorkspaceError("restack requires a clean child workspace")
-            collisions = self._declared_collisions(project, child.branch, parent.branch)
+            parent_status = self._status(parent)
+            detached_parent = parent_status["state"] == "missing"
+            if detached_parent:
+                assert project.workspace is not None
+                target_ref = project.workspace.default_base
+                parent_head = stack.parent_head
+                if not self._tree_equivalent(project.root, target_ref, parent_head):
+                    raise WorkspaceError("missing stack parent is not represented in the declared base")
+            else:
+                parent_checkout, _ = self._available(parent)
+                target_ref = parent.branch
+                parent_head = parent_checkout.head
+            collisions = self._declared_collisions(
+                project, child.branch, target_ref, base_ref=stack.parent_head
+            )
             if collisions:
                 return {
                     "workspace_id": workspace_id,
@@ -437,23 +492,31 @@ class GitWorkspaces:
                     "collisions": collisions,
                 }
             before = child_checkout.head
-            result = self._git(child_checkout.path, "rebase", parent.branch, check=False)
+            arguments = ("rebase", "--onto", target_ref, stack.parent_head) if detached_parent else ("rebase", target_ref)
+            result = self._git(child_checkout.path, *arguments, check=False)
             if result.returncode != 0:
                 self._git(child_checkout.path, "rebase", "--abort", check=False)
                 raise WorkspaceError(result.stderr.strip() or "Git restack failed")
             after = self._git(child_checkout.path, "rev-parse", "HEAD").stdout.strip()
+            if detached_parent:
+                self.store.remove_stack_child(workspace_id)
+            else:
+                self.store.update_stack_parent_head(workspace_id, parent_head)
             return {
                 "workspace_id": workspace_id,
                 "parent_workspace_id": parent.workspace_id,
                 "restacked": True,
                 "before_head": before,
                 "head": after,
-                "parent_head": parent_checkout.head,
+                "parent_head": parent_head,
+                "detached_merged_parent": detached_parent,
                 "collisions": [],
             }
 
-    def _declared_collisions(self, project: ProjectAdapter, child_ref: str, parent_ref: str) -> list[dict[str, str]]:
-        base = self._git(project.root, "merge-base", child_ref, parent_ref).stdout.strip()
+    def _declared_collisions(
+        self, project: ProjectAdapter, child_ref: str, parent_ref: str, *, base_ref: str | None = None
+    ) -> list[dict[str, str]]:
+        base = base_ref or self._git(project.root, "merge-base", child_ref, parent_ref).stdout.strip()
         child_paths = set(self._git(project.root, "diff", "--name-only", base, child_ref, "--").stdout.splitlines())
         parent_paths = set(self._git(project.root, "diff", "--name-only", base, parent_ref, "--").stdout.splitlines())
         overlap = child_paths & parent_paths
@@ -481,6 +544,15 @@ class GitWorkspaces:
                     }
                 )
         return collisions
+
+    def _tree_equivalent(self, root: Path, target_ref: str, source_ref: str) -> bool:
+        target_tree = self._git(root, "rev-parse", f"{target_ref}^{{tree}}", check=False)
+        merged_tree = self._git(root, "merge-tree", "--write-tree", target_ref, source_ref, check=False)
+        return (
+            target_tree.returncode == 0
+            and merged_tree.returncode == 0
+            and target_tree.stdout.strip() == merged_tree.stdout.strip()
+        )
 
     def checkpoint(self, workspace_id: str) -> dict[str, Any]:
         with flock(self.mutation_lock):
