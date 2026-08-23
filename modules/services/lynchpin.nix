@@ -87,7 +87,6 @@ mkServiceModule {
       };
       localHotDirs = [
         "cache"
-        "duck"
         "enrich"
         "refresh"
       ];
