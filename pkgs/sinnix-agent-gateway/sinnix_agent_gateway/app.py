@@ -32,7 +32,7 @@ from .projects import ProjectService
 from .redaction import public_error
 from .results import ProtocolError, RequestContext, ResultError, ResultService
 from .route_preflight import GatewayRoutePreflight
-from .registry import CatalogSearch, REGISTRY, RegistryError
+from .registry import CatalogSearch, MACHINE_OPERATIONS, REGISTRY, RegistryError
 from .schemas import AgentLaunchRequest, V2ToolEnvelope
 from .sessions import SessionLogService
 from .terminals import TerminalService
@@ -57,6 +57,12 @@ IDEMPOTENT_RUN_TOOL = ToolAnnotations(
     destructiveHint=False,
     idempotentHint=True,
     openWorldHint=True,
+)
+IDEMPOTENT_MUTATION_TOOL = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=True,
+    idempotentHint=True,
+    openWorldHint=False,
 )
 DESTRUCTIVE_TOOL = ToolAnnotations(
     readOnlyHint=False,
@@ -200,7 +206,10 @@ class Runtime:
         def resolve_availability(kind: str, name: str) -> tuple[str, str | None]:
             if kind == "action":
                 return "available", None
-            if name in REGISTRY.action("resources.get").resource_kinds:
+            if any(
+                action.name != "gateway.catalog" and name in action.resource_kinds
+                for action in REGISTRY.actions
+            ):
                 return "available", None
             return "unavailable", "no migrated V2 action currently exposes this resource"
 
@@ -448,6 +457,192 @@ class Runtime:
             "ref": REGISTRY.reference("job", {"job_id": job_id}),
         }
 
+    @staticmethod
+    def _required_preconditions(
+        preconditions: Mapping[str, Any] | None,
+        allowed: set[str],
+    ) -> dict[str, Any]:
+        if not isinstance(preconditions, Mapping) or not preconditions:
+            raise ProtocolError("precondition_failed", "mutation requires preconditions")
+        values = dict(preconditions)
+        if set(values) - allowed:
+            raise ProtocolError("invalid_request", "mutation preconditions are not recognized")
+        return values
+
+    def _project_change_preconditions(
+        self,
+        project_id: str,
+        checkout_id: str | None,
+        preconditions: Mapping[str, Any] | None,
+    ) -> str:
+        values = self._required_preconditions(preconditions, {"head", "dirty_sha256"})
+        selected_checkout = checkout_id or "default"
+        checkout = self.projects.checkout(project_id, selected_checkout)["checkout"]
+        for name, expected in values.items():
+            if not isinstance(expected, str) or checkout.get(name) != expected:
+                raise ProtocolError(
+                    "precondition_failed", f"project checkout {name} no longer matches"
+                )
+        return selected_checkout
+
+    def v2_change(
+        self,
+        *,
+        reference: str,
+        operation: str,
+        path: str | None,
+        content: str | None,
+        patch: str | None,
+        preconditions: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        project_id, checkout_id, canonical_ref = self._project_reference(
+            reference, allow_checkout=True
+        )
+        selected_checkout = self._project_change_preconditions(
+            project_id, checkout_id, preconditions
+        )
+        if operation == "write":
+            if not isinstance(path, str) or not path or not isinstance(content, str):
+                raise ProtocolError("invalid_request", "write requires path and content")
+            if patch is not None:
+                raise ProtocolError("invalid_request", "write does not accept patch")
+            result = self.projects.write(project_id, path, content, checkout_id)
+        elif operation == "apply_patch":
+            if not isinstance(patch, str) or not patch:
+                raise ProtocolError("invalid_request", "apply_patch requires patch")
+            if path is not None or content is not None:
+                raise ProtocolError("invalid_request", "apply_patch does not accept path or content")
+            result = self.projects.apply_patch(project_id, patch, checkout_id)
+        else:
+            raise ProtocolError("invalid_request", "project change operation is not recognized")
+        return {
+            "ref": canonical_ref,
+            "project_ref": REGISTRY.reference("project", {"project_id": project_id}),
+            "checkout_ref": REGISTRY.reference(
+                "checkout", {"project_id": project_id, "checkout_id": selected_checkout}
+            ),
+            "operation": operation,
+            "owner_result": result,
+        }
+
+    def _machine_target(self, reference: str) -> tuple[str, dict[str, Any]]:
+        try:
+            resource, values = REGISTRY.resolve(reference)
+        except RegistryError as exc:
+            raise ProtocolError("not_found", "canonical machine target was not found") from exc
+        canonical_ref = str(resource.ref_template.format(values))
+        if resource.kind == "job":
+            return canonical_ref, {"job_id": values["job_id"]}
+        if resource.kind == "machine_unit":
+            if values["manager"] not in {"user", "system"}:
+                raise ProtocolError("invalid_request", "machine unit manager is not recognized")
+            return canonical_ref, {"unit": values["unit"]}
+        if resource.kind == "scope":
+            return canonical_ref, {"scope": values["scope_unit"]}
+        if resource.kind == "process":
+            try:
+                pid = int(values["pid"])
+                start_ticks = int(values["start_ticks"])
+            except ValueError as exc:
+                raise ProtocolError("invalid_request", "process reference is malformed") from exc
+            if pid <= 1 or start_ticks < 0:
+                raise ProtocolError("invalid_request", "process reference is malformed")
+            return canonical_ref, {"process": {"pid": pid, "start_ticks": start_ticks}}
+        raise ProtocolError("invalid_request", "reference does not identify an operable machine target")
+
+    @staticmethod
+    def _machine_receipt(
+        receipt: Mapping[str, Any],
+        *,
+        action: str,
+        target: Mapping[str, Any],
+        expected_revision: int,
+        idempotency_key: str,
+        operator_reason: str,
+    ) -> dict[str, Any]:
+        required = {
+            "schema": str,
+            "receipt_id": str,
+            "idempotency_key": str,
+            "action": str,
+            "target": dict,
+            "operator_reason": str,
+            "expected_revision": int,
+        }
+        if any(
+            not isinstance(receipt.get(key), value_type)
+            or (key == "expected_revision" and isinstance(receipt.get(key), bool))
+            for key, value_type in required.items()
+        ):
+            raise JobError("ops reducer returned a malformed action receipt", failure_class="owner_failed")
+        if receipt["schema"] != "sinnix-ops-action-v1" or (
+            receipt["idempotency_key"] != idempotency_key
+            or receipt["action"] != action
+            or receipt["target"] != target
+            or receipt["expected_revision"] != expected_revision
+            or receipt["operator_reason"] != operator_reason
+        ):
+            raise JobError("ops reducer receipt does not match the submitted action", failure_class="owner_failed")
+        return {
+            key: receipt[key]
+            for key in (
+                "schema",
+                "receipt_id",
+                "idempotency_key",
+                "action",
+                "target",
+                "operator_reason",
+                "expected_revision",
+                "status",
+                "preconditions",
+                "previous_state",
+                "resulting_state",
+                "adapter",
+                "created_at",
+            )
+            if key in receipt
+        }
+
+    def v2_operate(
+        self,
+        *,
+        reference: str,
+        action: str,
+        parameters: Mapping[str, Any] | None,
+        reason: str | None,
+        idempotency_key: str | None,
+        preconditions: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        canonical_ref, target = self._machine_target(reference)
+        values = self._required_preconditions(preconditions, {"expected_revision"})
+        expected_revision = values.get("expected_revision")
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision < 0:
+            raise ProtocolError("invalid_request", "expected_revision must be a non-negative integer")
+        if not isinstance(action, str) or action not in MACHINE_OPERATIONS:
+            raise ProtocolError("invalid_request", "machine action is not recognized")
+        if not isinstance(parameters, Mapping):
+            raise ProtocolError("invalid_request", "machine parameters must be an object")
+        if not isinstance(reason, str) or not reason:
+            raise ProtocolError("invalid_request", "machine operation requires reason")
+        if not isinstance(idempotency_key, str) or not idempotency_key:
+            raise ProtocolError("invalid_request", "machine operation requires idempotency_key")
+        owner_receipt = self._machine_receipt(
+            self.machine_actions.execute(
+                action,
+                target,
+                expected_revision,
+                idempotency_key,
+                reason,
+                dict(parameters),
+            ),
+            action=action,
+            target=target,
+            expected_revision=expected_revision,
+            idempotency_key=idempotency_key,
+            operator_reason=reason,
+        )
+        return {"ref": canonical_ref, "action": action, "owner_receipt": owner_receipt}
+
     def v2_wait(self, reference: str, timeout_seconds: int) -> dict[str, Any]:
         if not isinstance(reference, str) or not 1 <= len(reference) <= 2_048:
             raise ProtocolError("invalid_request", "wait ref is malformed")
@@ -585,6 +780,13 @@ class Runtime:
             "effects": [],
             "created_objects": created_objects,
             "artifact_refs": sorted(set(artifact_refs)),
+            "owner_receipt_id": (
+                result.get("owner_receipt", {}).get("receipt_id")
+                if isinstance(result, Mapping)
+                and isinstance(result.get("owner_receipt"), Mapping)
+                and isinstance(result["owner_receipt"].get("receipt_id"), str)
+                else None
+            ),
             "atomicity": (
                 "read_only"
                 if action.effect is EffectMode.READ
@@ -776,6 +978,8 @@ class Runtime:
         reserved = False
         try:
             context = self._request_context(request)
+            if context.preconditions and not action.supports_precondition:
+                raise ProtocolError("invalid_request", "action does not support preconditions")
             if context.deadline_at is not None and time.time() >= context.deadline_at:
                 raise ProtocolError("deadline", "request deadline elapsed before execution")
             replay = self._claim_v2_idempotency(action, context)
@@ -783,7 +987,7 @@ class Runtime:
                 return replay
             reserved = action.effect is not EffectMode.READ
             response = self._v2_success(action, callback(), context)
-        except (OwnerDiagnosticError, ProtocolError, ResultError, PolicyError, ValueError) as exc:
+        except (OwnerDiagnosticError, ProtocolError, ResultError, JobError, PolicyError, ValueError) as exc:
             response = self._v2_failure(action, exc, context)
         if reserved:
             self._complete_v2_idempotency(action, context, response)
@@ -799,6 +1003,8 @@ class Runtime:
         reserved = False
         try:
             context = self._request_context(request)
+            if context.preconditions and not action.supports_precondition:
+                raise ProtocolError("invalid_request", "action does not support preconditions")
             if context.deadline_at is not None and time.time() >= context.deadline_at:
                 raise ProtocolError("deadline", "request deadline elapsed before execution")
             replay = self._claim_v2_idempotency(action, context)
@@ -806,7 +1012,7 @@ class Runtime:
                 return replay
             reserved = action.effect is not EffectMode.READ
             response = self._v2_success(action, await callback(), context)
-        except (OwnerDiagnosticError, ProtocolError, ResultError, PolicyError, ValueError) as exc:
+        except (OwnerDiagnosticError, ProtocolError, ResultError, JobError, PolicyError, ValueError) as exc:
             response = self._v2_failure(action, exc, context)
         if reserved:
             self._complete_v2_idempotency(action, context, response)
@@ -1024,6 +1230,18 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 action_name="shell.run",
                 owner="systemd-jobs",
                 route="job.shell.start",
+            ),
+            TargetToolBinding(
+                tool_name="change",
+                action_name="projects.change",
+                owner="projects",
+                route="projects.change",
+            ),
+            TargetToolBinding(
+                tool_name="operate",
+                action_name="machine.operate",
+                owner="ops-reducer",
+                route="ops.actions.execute",
             ),
         ),
     )
@@ -1309,6 +1527,90 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             )
             return cast(V2ToolEnvelope, v2_tool_result(response))
 
+    if target_bindings.is_visible("change", principal_name):
+
+        @mcp.tool(title="Change canonical project", annotations=IDEMPOTENT_MUTATION_TOOL)
+        def change(
+            ref: str,
+            operation: str,
+            idempotency_key: str,
+            preconditions: dict[str, Any],
+            path: str | None = None,
+            content: str | None = None,
+            patch: str | None = None,
+            request_id: str | None = None,
+            actor: str | None = None,
+            reason: str | None = None,
+            deadline_at: float | None = None,
+        ) -> V2ToolEnvelope:
+            """Apply one bounded, precondition-checked project mutation by canonical ref."""
+            action = target_bindings.action_for_tool("change", principal_name)
+            response = runtime.execute_v2(
+                action,
+                lambda: runtime.v2_change(
+                    reference=ref,
+                    operation=operation,
+                    path=path,
+                    content=content,
+                    patch=patch,
+                    preconditions=preconditions,
+                ),
+                {
+                    "ref": ref,
+                    "operation": operation,
+                    "path": path,
+                    "content": content,
+                    "patch": patch,
+                    "request_id": request_id,
+                    "actor": actor,
+                    "reason": reason,
+                    "idempotency_key": idempotency_key,
+                    "deadline_at": deadline_at,
+                    "preconditions": preconditions,
+                },
+            )
+            return cast(V2ToolEnvelope, v2_tool_result(response))
+
+    if target_bindings.is_visible("operate", principal_name):
+
+        @mcp.tool(title="Operate canonical machine target", annotations=IDEMPOTENT_MUTATION_TOOL)
+        def operate(
+            ref: str,
+            action: str,
+            parameters: dict[str, Any],
+            reason: str,
+            idempotency_key: str,
+            preconditions: dict[str, Any],
+            request_id: str | None = None,
+            actor: str | None = None,
+            deadline_at: float | None = None,
+        ) -> V2ToolEnvelope:
+            """Run one revision-checked owner action against a canonical attested target."""
+            contract = target_bindings.action_for_tool("operate", principal_name)
+            response = runtime.execute_v2(
+                contract,
+                lambda: runtime.v2_operate(
+                    reference=ref,
+                    action=action,
+                    parameters=parameters,
+                    reason=reason,
+                    idempotency_key=idempotency_key,
+                    preconditions=preconditions,
+                ),
+                {
+                    "ref": ref,
+                    "action": action,
+                    "parameters": parameters,
+                    "request_id": request_id,
+                    "actor": actor,
+                    "reason": reason,
+                    "idempotency_key": idempotency_key,
+                    "deadline_at": deadline_at,
+                    "preconditions": preconditions,
+                },
+            )
+            return cast(V2ToolEnvelope, v2_tool_result(response))
+
     @mcp.tool(title="Machine report", annotations=READ_ONLY_TOOL)
     def machine_report() -> dict[str, Any]:
         """Return a bounded machine and runtime report through the canonical sinnix-observe contract."""
@@ -1405,30 +1707,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             """Perform one structured Beads mutation through the native owner CLI."""
             return runtime.execute(
                 "tasks_write", lambda: runtime.beads.write(project_id, operation, arguments)
-            )
-
-    if Capability.MACHINE_ACTION in runtime.principal.capabilities:
-
-        @mcp.tool(title="Run typed machine action", annotations=DESTRUCTIVE_TOOL)
-        def machine_action(
-            action: str,
-            target: dict[str, Any],
-            expected_revision: int,
-            idempotency_key: str,
-            operator_reason: str,
-            parameters: dict[str, Any] | None = None,
-        ) -> dict[str, Any]:
-            """Submit one revision-checked, idempotent action to the ops reducer."""
-            return runtime.execute(
-                "machine_action",
-                lambda: runtime.machine_actions.execute(
-                    action,
-                    target,
-                    expected_revision,
-                    idempotency_key,
-                    operator_reason,
-                    parameters,
-                ),
             )
 
     if Capability.DESKTOP_READ in runtime.principal.capabilities:
@@ -1804,30 +2082,5 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         def job_cancel(job_id: str) -> dict[str, Any]:
             """Stop a live job by attested job ID and systemd cgroup identity."""
             return runtime.execute("job_cancel", lambda: runtime.jobs.cancel(job_id))
-
-    if Capability.PROJECT_WRITE in runtime.principal.capabilities:
-
-        @mcp.tool(title="Write project file", annotations=DESTRUCTIVE_TOOL)
-        def project_write(
-            project_id: str,
-            path: str,
-            content: str,
-            checkout_id: str | None = None,
-        ) -> dict[str, Any]:
-            """Atomically write one project-relative file under operator policy."""
-            return runtime.execute(
-                "project_write",
-                lambda: runtime.projects.write(project_id, path, content, checkout_id),
-            )
-
-        @mcp.tool(title="Apply project patch", annotations=DESTRUCTIVE_TOOL)
-        def project_apply_patch(
-            project_id: str, patch: str, checkout_id: str | None = None
-        ) -> dict[str, Any]:
-            """Apply a bounded Git patch under operator policy."""
-            return runtime.execute(
-                "project_apply_patch",
-                lambda: runtime.projects.apply_patch(project_id, patch, checkout_id),
-            )
 
     return mcp

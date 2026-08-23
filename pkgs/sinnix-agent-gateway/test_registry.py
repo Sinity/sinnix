@@ -66,6 +66,8 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "audit.events",
         "jobs.wait",
         "shell.run",
+        "projects.change",
+        "machine.operate",
     }
     assert observer_catalog["action_catalog_hash"] != operator_catalog["action_catalog_hash"]
     assert {row["kind"] for row in observer_catalog["resources"]} >= {
@@ -77,6 +79,8 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "receipt",
         "result",
         "machine_unit",
+        "scope",
+        "process",
         "browser_page",
         "terminal",
         "capture_lane",
@@ -258,6 +262,7 @@ def test_catalog_search_scopes_contracts_to_project_resources() -> None:
         "resources.get",
         "projects.query",
         "projects.context",
+        "projects.change",
         "shell.run",
     }
 
@@ -299,6 +304,45 @@ def test_run_and_wait_contracts_are_closed_and_authority_scoped() -> None:
     assert wait["input_schema"]["properties"]["timeout_seconds"]["maximum"] == 300
     with pytest.raises(RegistryError, match="cannot read action"):
         REGISTRY.action_schema("shell.run", "observer")
+
+
+def test_change_and_operate_contracts_bind_closed_canonical_owner_targets() -> None:
+    change = REGISTRY.action_schema("projects.change", "operator")["action"]
+    operate = REGISTRY.action_schema("machine.operate", "operator")["action"]
+
+    assert change["verb"] == "change"
+    assert change["effect"] == "change"
+    assert change["owner"] == "projects"
+    assert change["route"] == "projects.change"
+    assert change["resource_kinds"] == ["project", "checkout"]
+    assert change["supports_idempotency"] is True
+    assert change["supports_precondition"] is True
+    assert change["input_schema"]["required"] == [
+        "ref",
+        "operation",
+        "idempotency_key",
+        "preconditions",
+    ]
+    assert change["input_schema"]["properties"]["operation"] == {
+        "enum": ["write", "apply_patch"]
+    }
+    assert change["input_schema"]["properties"]["preconditions"]["additionalProperties"] is False
+
+    assert operate["verb"] == "operate"
+    assert operate["effect"] == "operate"
+    assert operate["owner"] == "ops-reducer"
+    assert operate["route"] == "ops.actions.execute"
+    assert operate["resource_kinds"] == ["job", "machine_unit", "scope", "process"]
+    assert operate["supports_idempotency"] is True
+    assert operate["supports_precondition"] is True
+    assert operate["input_schema"]["properties"]["preconditions"] == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["expected_revision"],
+        "properties": {"expected_revision": {"type": "integer", "minimum": 0}},
+    }
+    with pytest.raises(RegistryError, match="cannot read action"):
+        REGISTRY.action_schema("machine.operate", "observer")
 
 
 def test_query_context_and_events_contracts_bind_existing_read_owners() -> None:

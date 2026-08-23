@@ -3,14 +3,16 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from sinnix_agent_gateway.app import Runtime
 from sinnix_agent_gateway.audit import AuditService
 from sinnix_agent_gateway.capabilities import Principal
-from sinnix_agent_gateway.config import GatewayConfig
+from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.contracts import ActionSpec, EffectMode, VerbFamily
 from sinnix_mcp.execution import ExecutionProfile, OwnerRoute
 from sinnix_agent_gateway.registry import REGISTRY
@@ -310,3 +312,234 @@ def test_partial_completion_is_explicitly_non_atomic(tmp_path) -> None:
     assert response["error"]["code"] == "partial_completion"
     assert receipt["payload"]["partial_completion"] is True
     assert receipt["payload"]["atomicity"] == "not_atomic"
+
+
+def test_v2_rejects_ignored_preconditions(tmp_path) -> None:
+    runtime = Runtime.create(config(tmp_path), "observer")
+
+    response = runtime.execute_v2(
+        REGISTRY.action("gateway.catalog"),
+        lambda: {"rows": []},
+        {"preconditions": {"unexpected": "state"}},
+    )
+
+    assert response["error"]["code"] == "invalid_request"
+    assert response["error"]["message"] == "action does not support preconditions"
+
+
+def _project_runtime(tmp_path: Path) -> Runtime:
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.run(["git", "init", "--quiet", project], check=True)
+    subprocess.run(["git", "config", "user.name", "Gateway Test"], cwd=project, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "gateway-test@example.invalid"],
+        cwd=project,
+        check=True,
+    )
+    (project / "tracked.txt").write_text("before\n")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=project, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=project, check=True)
+    return Runtime.create(
+        GatewayConfig(
+            state_dir=tmp_path / "state",
+            projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
+        ),
+        "operator",
+    )
+
+
+def _checkout_preconditions(runtime: Runtime) -> dict[str, str]:
+    checkout = runtime.projects.checkout("fixture", "default")["checkout"]
+    return {"head": checkout["head"], "dirty_sha256": checkout["dirty_sha256"]}
+
+
+def test_v2_change_uses_canonical_checkout_preconditions_and_idempotency(tmp_path) -> None:
+    runtime = _project_runtime(tmp_path)
+    action = REGISTRY.action("projects.change")
+    reference = "sinnix://projects/fixture/checkouts/default"
+    preconditions = _checkout_preconditions(runtime)
+    request = {
+        "ref": reference,
+        "operation": "write",
+        "path": "tracked.txt",
+        "content": "after\n",
+        "preconditions": preconditions,
+        "idempotency_key": "project-write",
+    }
+
+    first = runtime.execute_v2(
+        action,
+        lambda: runtime.v2_change(
+            reference=reference,
+            operation="write",
+            path="tracked.txt",
+            content="after\n",
+            patch=None,
+            preconditions=preconditions,
+        ),
+        request,
+    )
+    replay = runtime.execute_v2(
+        action,
+        lambda: (_ for _ in ()).throw(AssertionError("owner was called on replay")),
+        request,
+    )
+    stale = runtime.execute_v2(
+        action,
+        lambda: runtime.v2_change(
+            reference=reference,
+            operation="write",
+            path="tracked.txt",
+            content="stale\n",
+            patch=None,
+            preconditions=preconditions,
+        ),
+        {**request, "content": "stale\n", "idempotency_key": "project-stale"},
+    )
+
+    assert first["data"]["ref"] == reference
+    assert first["data"]["checkout_ref"] == reference
+    assert first["data"]["owner_result"] == {
+        "project_id": "fixture",
+        "path": "tracked.txt",
+        "bytes": len(b"after\n"),
+    }
+    assert replay == first
+    assert stale["error"]["code"] == "precondition_failed"
+    assert (tmp_path / "project" / "tracked.txt").read_text() == "after\n"
+
+
+def test_v2_change_preserves_project_patch_owner_contract(tmp_path) -> None:
+    runtime = _project_runtime(tmp_path)
+    preconditions = _checkout_preconditions(runtime)
+    patch = """diff --git a/tracked.txt b/tracked.txt
+--- a/tracked.txt
++++ b/tracked.txt
+@@ -1 +1 @@
+-before
++patched
+"""
+
+    response = runtime.execute_v2(
+        REGISTRY.action("projects.change"),
+        lambda: runtime.v2_change(
+            reference="sinnix://projects/fixture",
+            operation="apply_patch",
+            path=None,
+            content=None,
+            patch=patch,
+            preconditions=preconditions,
+        ),
+        {
+            "ref": "sinnix://projects/fixture",
+            "operation": "apply_patch",
+            "patch": patch,
+            "preconditions": preconditions,
+            "idempotency_key": "project-patch",
+        },
+    )
+
+    assert response["data"]["owner_result"] == {"project_id": "fixture", "applied": True}
+    assert (tmp_path / "project" / "tracked.txt").read_text() == "patched\n"
+
+
+@pytest.mark.parametrize(
+    ("reference", "target"),
+    [
+        ("sinnix://jobs/job-1", {"job_id": "job-1"}),
+        ("sinnix://machine/units/user/fixture.service", {"unit": "fixture.service"}),
+        ("sinnix://scopes/sinnix-agent-fixture.scope", {"scope": "sinnix-agent-fixture.scope"}),
+        ("sinnix://processes/42/123", {"process": {"pid": 42, "start_ticks": 123}}),
+    ],
+)
+def test_v2_operate_maps_canonical_targets_and_validates_owner_receipts(
+    tmp_path, reference, target
+) -> None:
+    runtime = Runtime.create(config(tmp_path), "operator")
+    calls: list[dict[str, object]] = []
+
+    def execute(
+        action: str,
+        received_target: dict[str, object],
+        expected_revision: int,
+        idempotency_key: str,
+        operator_reason: str,
+        parameters: dict[str, object],
+    ) -> dict[str, object]:
+        calls.append({"target": received_target})
+        return {
+            "schema": "sinnix-ops-action-v1",
+            "receipt_id": "owner-receipt",
+            "idempotency_key": idempotency_key,
+            "action": action,
+            "target": received_target,
+            "operator_reason": operator_reason,
+            "expected_revision": expected_revision,
+            "status": "accepted",
+            "adapter": {"status": "ok"},
+        }
+
+    runtime.machine_actions.execute = execute  # type: ignore[method-assign]
+    request = {
+        "ref": reference,
+        "action": "restart",
+        "parameters": {},
+        "reason": "exercise typed operation",
+        "idempotency_key": f"operate-{target}",
+        "preconditions": {"expected_revision": 7},
+    }
+    response = runtime.execute_v2(
+        REGISTRY.action("machine.operate"),
+        lambda: runtime.v2_operate(
+            reference=reference,
+            action="restart",
+            parameters={},
+            reason="exercise typed operation",
+            idempotency_key=request["idempotency_key"],
+            preconditions={"expected_revision": 7},
+        ),
+        request,
+    )
+
+    assert calls == [{"target": target}]
+    assert response["data"]["ref"] == reference
+    assert response["data"]["owner_receipt"]["target"] == target
+    assert response["data"]["owner_receipt"]["operator_reason"] == "exercise typed operation"
+    receipt = runtime.audit.receipt(response["receipt"]["receipt_id"])
+    assert receipt["payload"]["owner_receipt_id"] == "owner-receipt"
+
+
+def test_v2_operate_rejects_mismatched_owner_receipt(tmp_path) -> None:
+    runtime = Runtime.create(config(tmp_path), "operator")
+
+    runtime.machine_actions.execute = lambda *_args: {
+        "schema": "sinnix-ops-action-v1",
+        "receipt_id": "owner-receipt",
+        "idempotency_key": "wrong-key",
+        "action": "restart",
+        "target": {"unit": "fixture.service"},
+        "operator_reason": "exercise typed operation",
+        "expected_revision": 7,
+    }  # type: ignore[method-assign]
+    response = runtime.execute_v2(
+        REGISTRY.action("machine.operate"),
+        lambda: runtime.v2_operate(
+            reference="sinnix://machine/units/user/fixture.service",
+            action="restart",
+            parameters={},
+            reason="exercise typed operation",
+            idempotency_key="operate-key",
+            preconditions={"expected_revision": 7},
+        ),
+        {
+            "ref": "sinnix://machine/units/user/fixture.service",
+            "action": "restart",
+            "parameters": {},
+            "reason": "exercise typed operation",
+            "idempotency_key": "operate-key",
+            "preconditions": {"expected_revision": 7},
+        },
+    )
+
+    assert response["error"]["code"] == "owner_failed"
