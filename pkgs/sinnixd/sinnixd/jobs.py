@@ -1444,7 +1444,10 @@ class GenericJobs:
         return isinstance(value, dict)
 
     def _has_authoritative_result(self, record: GenericJobRecord) -> bool:
-        return _completion_marker_path(record.log_path).is_file() and self._has_valid_result_artifact(record)
+        completed = _completion_marker_path(record.log_path).is_file()
+        if record.spec.result_kind == "exit-status":
+            return completed
+        return completed and self._has_valid_result_artifact(record)
 
     def _has_schema_v3_native_success(self, record: GenericJobRecord, properties: Mapping[str, str]) -> bool:
         return (

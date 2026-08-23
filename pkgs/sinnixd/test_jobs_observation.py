@@ -382,6 +382,30 @@ def test_capture_completion_marker_requires_zero_exit(
     assert log_path.with_suffix(".complete").exists() is completed
 
 
+def test_collected_exit_status_job_uses_capture_completion_marker(tmp_path: Path) -> None:
+    """A successful short command remains succeeded after systemd collects its unit."""
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "not-found",
+            "ActiveState": "inactive",
+            "InvocationID": "",
+            "Result": "success",
+            "ExecMainCode": "0",
+            "ExecMainStatus": "0",
+        }
+    )
+    jobs = generic_jobs(tmp_path, systemd)
+    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    record = jobs.store.load(started["job_id"])
+    record.log_path.with_suffix(".complete").touch(mode=0o600)
+
+    terminal = jobs.get(started["job_id"])
+
+    assert terminal["state"]["phase"] == "succeeded"
+    assert terminal["state"]["terminal"]
+    assert terminal["state"]["result_evidence"] == "completed"
+
+
 def test_schema_v3_native_success_reconciles_after_restart_without_exec_main_status(tmp_path: Path) -> None:
     """Evidence harness: a retained inactive unit must retain schema-v3 native completion evidence."""
     job_id = "74e64cb4-282e-4b27-b4b1-af052b268161"
