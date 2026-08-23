@@ -104,7 +104,7 @@ def test_owner_execution_handles_child_that_closes_stdin() -> None:
 def test_owner_execution_decodes_json_or_preserves_text_output() -> None:
     execution = OwnerExecution()
     json_result = execution.run(
-        [sys.executable, "-c", "print('{\"route\": \"fixture\"}')"],
+        [sys.executable, "-c", 'print(\'{"route": "fixture"}\')'],
         ExecutionProfile(route=OwnerRoute("fixture")),
     )
     text_result = execution.run(
@@ -140,14 +140,19 @@ def test_owner_execution_profile_omits_ambient_credentials() -> None:
     assert environment["HOME"] == "/home/fixture"
     assert environment["LANG"] == "C.UTF-8"
     assert environment["PATH"] == "/fixture/bin"
-    assert not {
-        "OPENAI_API_KEY",
-        "OPENAI_TUNNEL_RUNTIME_KEY",
-        "CREDENTIALS_DIRECTORY",
-    } & environment.keys()
+    assert (
+        not {
+            "OPENAI_API_KEY",
+            "OPENAI_TUNNEL_RUNTIME_KEY",
+            "CREDENTIALS_DIRECTORY",
+        }
+        & environment.keys()
+    )
 
 
-def test_owner_execution_user_bus_profile_requires_complete_session_environment() -> None:
+def test_owner_execution_user_bus_profile_requires_complete_session_environment() -> (
+    None
+):
     source = {
         "HOME": "/home/fixture",
         "LANG": "C.UTF-8",
@@ -161,7 +166,11 @@ def test_owner_execution_user_bus_profile_requires_complete_session_environment(
         route, {"FIXTURE": "1"}
     )
     unavailable, missing_unavailable = OwnerExecution(
-        {key: value for key, value in source.items() if key != "DBUS_SESSION_BUS_ADDRESS"}
+        {
+            key: value
+            for key, value in source.items()
+            if key != "DBUS_SESSION_BUS_ADDRESS"
+        }
     ).environment_for(route)
 
     assert missing is None
@@ -170,7 +179,9 @@ def test_owner_execution_user_bus_profile_requires_complete_session_environment(
     assert missing_unavailable == "DBUS_SESSION_BUS_ADDRESS"
 
 
-def test_owner_execution_wayland_profile_requires_complete_session_environment() -> None:
+def test_owner_execution_wayland_profile_requires_complete_session_environment() -> (
+    None
+):
     route = OwnerRoute("desktop-fixture", EnvironmentProfile.WAYLAND)
     source = {
         "HOME": "/home/fixture",

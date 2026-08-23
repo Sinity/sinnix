@@ -95,6 +95,10 @@
         # ProjectError"; 1 failed, 23 passed); reverted after confirming red.
         sinnix-agent-gateway-suite = scriptRegistry.packageSet.sinnix-agent-gateway;
 
+        # Owner-execution has daemon and adapter consumers. This package check
+        # exercises its bounded subprocess contract at its package boundary.
+        sinnix-mcp-suite = scriptRegistry.packageSet.sinnix-mcp;
+
         # Provably fails when: a persisted job record stops reconciling its
         # lifecycle from the systemd status adapter. The package suite enters
         # the generic-job store plus systemd seam and asserts the missing-unit

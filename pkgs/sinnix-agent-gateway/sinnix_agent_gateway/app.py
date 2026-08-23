@@ -7,6 +7,7 @@ import json
 import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping, TypeVar, cast
+from uuid import uuid4
 
 from mcp.server import MCPServer
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
@@ -24,7 +25,6 @@ from .contracts import ActionSpec, EffectMode, VerbFamily
 from .desktop import DesktopService
 from sinnix_mcp.execution import ExecutionProfile, OwnerDiagnosticError, OwnerExecution
 from .files import HostFileService
-from .jobs import JobError, JobService
 from .machine_actions import MachineActionService
 from .mcp_broker import McpBrokerService
 from .memory import MemoryService
@@ -39,8 +39,21 @@ from .schemas import AgentLaunchRequest, V2ToolEnvelope
 from .sessions import SessionLogService
 from .terminals import TerminalService
 from .timeline import TimelineService
+from sinnix_mcp import ErrorCode, RequestEnvelope
+from sinnixd.api import SinnixdClient, SinnixdClientError
 
 T = TypeVar("T")
+
+DAEMON_ERROR_CLASSES = {
+    ErrorCode.INVALID_ARGUMENT: "invalid_request",
+    ErrorCode.POLICY_DENIED: "policy_denied",
+    ErrorCode.OWNER_UNAVAILABLE: "unavailable",
+    ErrorCode.AUTHORITY_MISMATCH: "policy_denied",
+    ErrorCode.RESOURCE_DEFERRED: "unavailable",
+    ErrorCode.RESOURCE_EXHAUSTED: "response_bound",
+    ErrorCode.OPERATION_FAILED: "owner_failed",
+    ErrorCode.RESULT_INVALID: "owner_failed",
+}
 
 READ_ONLY_TOOL = ToolAnnotations(
     readOnlyHint=True,
@@ -101,7 +114,7 @@ class Runtime:
     artifacts: ArtifactService
     audit: AuditService
     results: ResultService
-    jobs: JobService
+    sinnixd: SinnixdClient
     observe: ObserveService
     machine_actions: MachineActionService
     desktop: DesktopService
@@ -133,7 +146,7 @@ class Runtime:
             artifacts=artifacts,
             audit=AuditService(config, principal),
             results=ResultService(config, principal),
-            jobs=JobService(config, principal, projects=projects),
+            sinnixd=SinnixdClient(config.sinnixd_socket),
             observe=ObserveService(config, principal),
             machine_actions=MachineActionService(config, principal),
             desktop=DesktopService(config, principal, artifacts),
@@ -295,6 +308,42 @@ class Runtime:
             str(resource.ref_template.format(values)),
         )
 
+    def _sinnixd_job(
+        self,
+        operation: str,
+        arguments: Mapping[str, Any],
+        *,
+        principal: str | None = None,
+    ) -> dict[str, Any]:
+        request = RequestEnvelope(
+            request_id=str(uuid4()),
+            correlation_id=str(uuid4()),
+            operation=operation,
+            owner="systemd-jobs",
+            principal=principal or self.principal.name,
+            arguments=dict(arguments),
+        )
+        try:
+            response = self.sinnixd.dispatch(request)
+        except SinnixdClientError as exc:
+            raise ProtocolError("unavailable", str(exc)) from exc
+        if response.owner != "systemd-jobs":
+            raise ProtocolError(
+                "owner_failed", "sinnixd response violates the job-owner contract"
+            )
+        if response.error is not None:
+            details = response.error.details.inline
+            raise ProtocolError(
+                DAEMON_ERROR_CLASSES[response.error.code],
+                response.error.message,
+                details=details if isinstance(details, Mapping) else {},
+            )
+        if response.payload is None or not isinstance(response.payload.inline, Mapping):
+            raise ProtocolError(
+                "owner_failed", "sinnixd job response must contain an inline object"
+            )
+        return dict(response.payload.inline)
+
     def _bounded_project_context(self, project_id: str) -> dict[str, Any]:
         context = self.project_context.context(project_id)
         authority = self.project_authority(project_id)
@@ -419,18 +468,23 @@ class Runtime:
             }
         if resource.kind == "job":
             job_id = values["job_id"]
+            self.principal.require(Capability.JOB_READ)
             if projection == "summary":
-                result = self.jobs.status(job_id)
+                result = self._sinnixd_job("job.get", {"job_id": job_id})
             elif projection == "log":
-                result = self.jobs.logs(job_id, offset=offset, max_bytes=max_bytes)
+                result = self._sinnixd_job(
+                    "job.logs",
+                    {"job_id": job_id, "offset": offset, "max_bytes": max_bytes},
+                )
             else:
                 if offset:
                     raise ProtocolError("invalid_request", "job result does not support offsets")
-                result = self.jobs.result(job_id, max_bytes=max_bytes)
+                result = self._sinnixd_job(
+                    "job.result", {"job_id": job_id, "max_bytes": max_bytes}
+                )
             if result.get("job_id") != job_id:
-                raise JobError(
-                    "sinnixd get response does not match the requested job",
-                    failure_class="owner_failed",
+                raise ProtocolError(
+                    "owner_failed", "sinnixd get response does not match the requested job"
                 )
             return {
                 "ref": canonical_ref,
@@ -449,6 +503,9 @@ class Runtime:
         cwd: str,
         timeout_seconds: int,
     ) -> dict[str, Any]:
+        self.principal.require(Capability.SHELL_RUN)
+        if self.principal.name != "operator":
+            raise PolicyError("operator shell jobs require the operator principal")
         if not isinstance(project_id, str) or not 1 <= len(project_id) <= 128:
             raise ProtocolError("invalid_request", "project_id is malformed")
         if not isinstance(checkout_id, str) or not 1 <= len(checkout_id) <= 128:
@@ -472,19 +529,21 @@ class Runtime:
             raise ProtocolError(
                 "invalid_request", "run timeout_seconds must be between 1 and 3600"
             )
-        result = self.jobs.start_shell(
-            project_id=project_id,
-            checkout_id=checkout_id,
-            argv=argv,
-            cwd=cwd,
-            timeout_seconds=timeout_seconds,
+        result = self._sinnixd_job(
+            "job.shell.start",
+            {
+                "project_id": project_id,
+                "checkout_id": checkout_id,
+                "argv": argv,
+                "cwd": cwd,
+                "timeout_seconds": timeout_seconds,
+                "result": "exit-status",
+            },
+            principal="operator",
         )
         job_id = result.get("job_id")
         if not isinstance(job_id, str) or not job_id:
-            raise JobError(
-                "sinnixd start response omitted the job ID",
-                failure_class="owner_failed",
-            )
+            raise ProtocolError("owner_failed", "sinnixd start response omitted the job ID")
         return {
             **result,
             "ref": REGISTRY.reference("job", {"job_id": job_id}),
@@ -502,6 +561,9 @@ class Runtime:
         timeout_seconds: int,
         credential_profile: str,
     ) -> dict[str, Any]:
+        self.principal.require(Capability.JOB_START)
+        if self.principal.name != "agent-control":
+            raise PolicyError("agent jobs require the agent-control principal")
         request = AgentLaunchRequest(
             project_id=project_id,
             checkout_id=checkout_id,
@@ -512,12 +574,25 @@ class Runtime:
             timeout_seconds=timeout_seconds,
             credential_profile=credential_profile,
         )
-        result = self.jobs.launch_agent(request)
+        result = self._sinnixd_job(
+            "job.agent.start",
+            {
+                "project_id": request.project_id,
+                "checkout_id": request.checkout_id or "default",
+                "prompt": request.prompt,
+                "backend": request.backend,
+                "model": request.model,
+                "effort": request.reasoning_effort,
+                "credential_profile": request.credential_profile,
+                "timeout_seconds": request.timeout_seconds,
+                "result": "last-message",
+            },
+            principal="agent-control",
+        )
         job_id = result.get("job_id")
         if not isinstance(job_id, str) or not job_id:
-            raise JobError(
-                "sinnixd agent start response omitted the job ID",
-                failure_class="owner_failed",
+            raise ProtocolError(
+                "owner_failed", "sinnixd agent start response omitted the job ID"
             )
         return {
             **result,
@@ -827,7 +902,9 @@ class Runtime:
             or (key == "expected_revision" and isinstance(receipt.get(key), bool))
             for key, value_type in required.items()
         ):
-            raise JobError("ops reducer returned a malformed action receipt", failure_class="owner_failed")
+            raise ProtocolError(
+                "owner_failed", "ops reducer returned a malformed action receipt"
+            )
         if receipt["schema"] != "sinnix-ops-action-v1" or (
             receipt["idempotency_key"] != idempotency_key
             or receipt["action"] != action
@@ -835,7 +912,9 @@ class Runtime:
             or receipt["expected_revision"] != expected_revision
             or receipt["operator_reason"] != operator_reason
         ):
-            raise JobError("ops reducer receipt does not match the submitted action", failure_class="owner_failed")
+            raise ProtocolError(
+                "owner_failed", "ops reducer receipt does not match the submitted action"
+            )
         return {
             key: receipt[key]
             for key in (
@@ -914,23 +993,22 @@ class Runtime:
         if not isinstance(expected_phase, str) or not expected_phase:
             raise ProtocolError("invalid_request", "expected_phase is malformed")
         job_id = values["job_id"]
-        status = self.jobs.status(job_id)
+        self.principal.require(Capability.JOB_CANCEL)
+        status = self._sinnixd_job("job.get", {"job_id": job_id})
         if status.get("job_id") != job_id:
-            raise JobError(
-                "sinnixd status response does not match the requested job",
-                failure_class="owner_failed",
+            raise ProtocolError(
+                "owner_failed", "sinnixd status response does not match the requested job"
             )
         state = status.get("state")
         phase = state.get("phase") if isinstance(state, Mapping) else None
         if phase != expected_phase:
             raise ProtocolError("precondition_failed", "job phase no longer matches")
-        cancelled = self.jobs.cancel(job_id)
+        cancelled = self._sinnixd_job("job.cancel", {"job_id": job_id})
         if cancelled.get("job_id") != job_id or not isinstance(
             cancelled.get("cancel_requested"), bool
         ):
-            raise JobError(
-                "sinnixd cancel response does not prove cancellation truth",
-                failure_class="owner_failed",
+            raise ProtocolError(
+                "owner_failed", "sinnixd cancel response does not prove cancellation truth"
             )
         return {
             "ref": str(resource.ref_template.format(values)),
@@ -956,11 +1034,13 @@ class Runtime:
         if resource.kind != "job":
             raise ProtocolError("invalid_request", "wait requires a canonical job reference")
         job_id = values["job_id"]
-        result = self.jobs.wait(job_id, timeout_seconds=timeout_seconds)
+        self.principal.require(Capability.JOB_READ)
+        result = self._sinnixd_job(
+            "job.wait", {"job_id": job_id, "timeout_seconds": timeout_seconds}
+        )
         if result.get("job_id") != job_id:
-            raise JobError(
-                "sinnixd wait response does not match the requested job",
-                failure_class="owner_failed",
+            raise ProtocolError(
+                "owner_failed", "sinnixd wait response does not match the requested job"
             )
         return {**result, "ref": REGISTRY.reference("job", {"job_id": job_id})}
 
@@ -1189,13 +1269,6 @@ class Runtime:
                 "details": {},
                 "diagnostic_refs": [],
             }
-        elif isinstance(exc, JobError):
-            error = {
-                "code": exc.failure_class,
-                "message": public_error(exc),
-                "details": exc.details,
-                "diagnostic_refs": [],
-            }
         elif isinstance(exc, PolicyError):
             error = {
                 "code": "policy_denied",
@@ -1286,7 +1359,7 @@ class Runtime:
                 return replay
             reserved = action.effect is not EffectMode.READ
             response = self._v2_success(action, callback(), context)
-        except (OwnerDiagnosticError, ProtocolError, ResultError, JobError, PolicyError, ValueError) as exc:
+        except (OwnerDiagnosticError, ProtocolError, ResultError, PolicyError, ValueError) as exc:
             response = self._v2_failure(action, exc, context)
         if reserved:
             self._complete_v2_idempotency(action, context, response)
@@ -1315,7 +1388,7 @@ class Runtime:
                 return replay
             reserved = action.effect is not EffectMode.READ
             response = self._v2_success(action, await callback(), context)
-        except (OwnerDiagnosticError, ProtocolError, ResultError, JobError, PolicyError, ValueError) as exc:
+        except (OwnerDiagnosticError, ProtocolError, ResultError, PolicyError, ValueError) as exc:
             response = self._v2_failure(action, exc, context)
         if reserved:
             self._complete_v2_idempotency(action, context, response)
@@ -2333,29 +2406,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 "timeline_query",
                 lambda: runtime.timeline.query(start, end, query, providers, limit),
             )
-
-    @mcp.tool(title="List attested jobs", annotations=READ_ONLY_TOOL)
-    def job_list(limit: int = 100) -> dict[str, Any]:
-        """List recent attested jobs and report malformed records explicitly."""
-        return runtime.execute("job_list", lambda: runtime.jobs.list(limit))
-
-    @mcp.tool(title="Attested job status", annotations=READ_ONLY_TOOL)
-    def job_status(job_id: str) -> dict[str, Any]:
-        """Return the daemon-reconciled lifecycle for one typed job ID."""
-        return runtime.execute("job_status", lambda: runtime.jobs.status(job_id))
-
-    @mcp.tool(title="Read job output", annotations=READ_ONLY_TOOL)
-    def job_read_output(
-        job_id: str,
-        artifact: str = "log",
-        offset: int = 0,
-        max_bytes: int = 64_000,
-    ) -> dict[str, Any]:
-        """Read a bounded daemon-owned log or result artifact."""
-        return runtime.execute(
-            "job_read_output",
-            lambda: runtime.jobs.read_output(job_id, artifact, offset, max_bytes),
-        )
 
     @mcp.tool(title="List artifacts", annotations=READ_ONLY_TOOL)
     def artifact_list(limit: int = 100) -> dict[str, Any]:

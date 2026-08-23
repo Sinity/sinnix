@@ -77,7 +77,6 @@ The common read surface includes:
 - `browser_read` for Chrome state and bounded page content
 - `browser_capture` for screenshots of gateway-created hidden browser targets, returned as opaque artifacts
 - `tasks_read` for native Beads lists, ready work, records, comments, history, dependencies, and searches
-- `job_list`, `job_status`, and `job_read_output`
 - `artifact_list` and `artifact_read`
 - `audit_verify`
 
@@ -107,7 +106,7 @@ Project paths are always relative. Reads and writes reject absolute paths, paren
 
 ## Jobs and artifacts
 
-The gateway forwards only typed `job.agent.start`, `job.shell.start`, `job.get`, `job.list`, `job.wait`, `job.logs`, `job.result`, and `job.cancel` requests to the local `sinnixd` Unix socket. V2 `run` selects `shell.run` for the operator or `agents.run` for the agent-control principal. Both paths return the daemon's job ID as a canonical `sinnix://jobs/{job_id}` ref and claim idempotency at the gateway boundary before forwarding. Shell requests do not accept root escalation, environment overlays, commands encoded as strings, or caller-selected units. V2 `wait` is available to every job-reading principal, accepts only a canonical job ref and a 1-300 second bound, and rejects a daemon response carrying a different job ID. `get` reads a bounded canonical job summary, log range, or result. V2 `operate` selects `jobs.cancel` for agent-control and operator, first verifies the requested daemon phase, and returns the owner's `cancel_requested` truth. All responses pass through the common bounded V2 result envelope and retain typed daemon failures. The legacy `job_list`, `job_status`, and `job_read_output` read tools remain registered during parity migration.
+The gateway calls the canonical typed `sinnixd` client for `job.agent.start`, `job.shell.start`, `job.get`, `job.wait`, `job.logs`, `job.result`, and `job.cancel`. V2 `run` selects `shell.run` for the operator or `agents.run` for the agent-control principal. Both paths return the daemon's job ID as a canonical `sinnix://jobs/{job_id}` ref and claim idempotency at the gateway boundary before forwarding. Shell requests do not accept root escalation, environment overlays, commands encoded as strings, or caller-selected units. V2 `wait` is available to every job-reading principal, accepts only a canonical job ref and a 1-300 second bound, and rejects a daemon response carrying a different job ID. `get` reads a bounded canonical job summary, log range, or result. V2 `operate` selects `jobs.cancel` for agent-control and operator, first verifies the requested daemon phase, and returns the owner's `cancel_requested` truth. All responses pass through the common bounded V2 result envelope and retain typed daemon failures.
 
 The daemon derives the environment from the registered project without an overlay, revalidates the exact worktree, common Git directory, porcelain membership, and recorded HEAD immediately before execution, and fails closed on drift. It hands the native runner the canonical registered project path, expected Git common directory, and checkout reference, so the runner independently attests the same worktree before it starts an agent. The daemon's retained transient user service is the only process, cgroup, timeout, and cancellation authority.
 

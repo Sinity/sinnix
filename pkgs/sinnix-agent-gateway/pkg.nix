@@ -10,6 +10,7 @@
   gzip,
   coreutils,
   sinnix-mcp,
+  sinnixd,
   ...
 }:
 let
@@ -120,6 +121,7 @@ python3Packages.buildPythonApplication {
   dependencies = [
     mcp-sdk
     sinnix-mcp
+    sinnixd
   ];
 
   nativeCheckInputs = [
@@ -158,7 +160,6 @@ python3Packages.buildPythonApplication {
     "sinnix_agent_gateway.app"
     "sinnix_agent_gateway.audit"
     "sinnix_agent_gateway.beads"
-    "sinnix_agent_gateway.jobs"
     "sinnix_agent_gateway.memory"
     "sinnix_agent_gateway.mcp_broker"
     "sinnix_agent_gateway.project_context"

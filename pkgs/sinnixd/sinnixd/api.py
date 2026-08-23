@@ -7,9 +7,9 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from threading import BoundedSemaphore, Event
-from typing import Any
+from typing import Any, Callable
 
-from sinnix_mcp import RequestEnvelope
+from sinnix_mcp import RequestEnvelope, ResponseEnvelope, response_envelope_from_dict
 
 from .service import SinnixdService
 
@@ -21,6 +21,10 @@ RESERVED_CONTROL_WORKERS = 2
 
 class ProtocolError(ValueError):
     """Raised when a Unix-socket RPC frame is malformed or exceeds its bound."""
+
+
+class SinnixdClientError(ValueError):
+    """The canonical client could not obtain a valid daemon response."""
 
 
 def _read_exact(connection: socket.socket, length: int) -> bytes:
@@ -226,3 +230,27 @@ def call(socket_path: Path, request: RequestEnvelope) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise ProtocolError("response requires an object result")
     return result
+
+
+@dataclass(frozen=True)
+class SinnixdClient:
+    """Typed client for the daemon's bounded local request/response contract."""
+
+    socket_path: Path
+    transport: Callable[[Path, RequestEnvelope], dict[str, Any]] = call
+
+    def dispatch(self, request: RequestEnvelope) -> ResponseEnvelope:
+        try:
+            raw = self.transport(self.socket_path, request)
+        except (OSError, ProtocolError) as error:
+            raise SinnixdClientError("sinnixd is unavailable") from error
+        try:
+            response = response_envelope_from_dict(raw)
+        except ValueError as error:
+            raise SinnixdClientError("sinnixd returned an invalid response") from error
+        if (
+            response.request_id != request.request_id
+            or response.correlation_id != request.correlation_id
+        ):
+            raise SinnixdClientError("sinnixd response does not match the request")
+        return response

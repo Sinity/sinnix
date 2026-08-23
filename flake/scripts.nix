@@ -144,6 +144,7 @@ let
   };
   agentGatewayPackage = pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix {
     sinnix-mcp = sinnixMcpPackage;
+    sinnixd = sinnixdPackage;
   };
 
   mkSanitizedPythonWrapper =
