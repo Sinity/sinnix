@@ -226,12 +226,12 @@ status)
 # creation, not by matching a class or a title. Every window of one Chrome
 # process carries the same class, so a windowrule cannot tell this window from
 # the operator's; and a title match would race the page's own title changes.
-# The address that appears is unambiguous, and `movetoworkspacesilent` moves
-# it without pulling the operator's view along with it.
-#
-# A failure to park is reported but not fatal: a visible agent window is
-# untidy, whereas failing the command would lose a window that is already open
-# and already authenticated.
+# The whole create-to-park transaction is serialized because concurrent callers
+# would otherwise diff the same client set and both select one new address.
+# `movetoworkspacesilent` moves that unique address without pulling the
+# operator's view along with it. Chrome may still finish mapping its native
+# window after CDP returns, so success requires observing that exact address on
+# the hidden workspace after the move.
 agent-window)
   url="about:blank"
   while [[ $# -gt 0 ]]; do
@@ -252,9 +252,22 @@ agent-window)
     echo "browser websocket unavailable: ${CDP_BASE}" >&2
     exit 1
   }
+  command -v flock >/dev/null 2>&1 || {
+    echo "agent-window requires flock" >&2
+    exit 1
+  }
 
+  agent_window_runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  exec {agent_window_lock_fd}>"${agent_window_runtime_dir}/sinnix-chrome-agent-window.lock"
+  flock -w 15 "$agent_window_lock_fd" || {
+    echo "timed out waiting to create an agent browser window" >&2
+    exit 1
+  }
+
+  hyprland_available="false"
   before=""
   if command -v hyprctl >/dev/null 2>&1; then
+    hyprland_available="true"
     before=$(hyprctl clients -j 2>/dev/null | jq -r '.[].address' | sort)
   fi
 
@@ -267,24 +280,41 @@ agent-window)
   page_id=$(jq -r '.result.targetId' <<<"$response")
 
   parked="false"
-  if [[ -n $before ]]; then
+  addr=""
+  if [[ $hyprland_available == "true" ]]; then
     for _ in {1..40}; do
       sleep 0.1
       after=$(hyprctl clients -j 2>/dev/null | jq -r '.[].address' | sort)
-      addr=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | head -n 1)
-      [[ -n $addr ]] || continue
-      if hyprctl dispatch movetoworkspacesilent "${AGENT_WORKSPACE},address:${addr}" >/dev/null 2>&1; then
-        parked="true"
-      fi
-      break
+      addr=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | awk 'NR == 1 { print; exit }')
+      [[ -n $addr ]] && break
     done
+
+    if [[ -n $addr ]]; then
+      stable_checks=0
+      for _ in {1..20}; do
+        hyprctl dispatch movetoworkspacesilent "${AGENT_WORKSPACE},address:${addr}" >/dev/null 2>&1 || true
+        sleep 0.1
+        workspace=$(hyprctl clients -j 2>/dev/null | jq -r --arg address "$addr" \
+          '.[] | select(.address == $address) | .workspace.name // empty')
+        if [[ $workspace == "$AGENT_WORKSPACE" ]]; then
+          ((stable_checks += 1))
+          if [[ $stable_checks -ge 3 ]]; then
+            parked="true"
+            break
+          fi
+        else
+          stable_checks=0
+        fi
+      done
+    fi
   fi
 
   jq -nc --arg id "$page_id" --arg url "$url" --argjson parked "$parked" \
     --arg ws "$AGENT_WORKSPACE" --arg key "$SUMMON_BINDING" \
     '{id: $id, url: $url, parked: $parked, workspace: $ws, show_with: $key}'
   if [[ $parked != "true" ]]; then
-    echo "note: window opened but could not be parked on ${AGENT_WORKSPACE}; it is visible" >&2
+    echo "window ${page_id} opened but was not verified on ${AGENT_WORKSPACE}" >&2
+    exit 1
   fi
   ;;
 

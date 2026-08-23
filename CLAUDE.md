@@ -389,8 +389,10 @@ when a new script is added.
   to it via `~/.config/claude/CLAUDE.md`. There is no render pipeline.
 - Repo convention across the constellation: per-repo `CLAUDE.md` is canonical
   and flat; `AGENTS.md` is a committed symlink to it.
-- Shared skills live in `dots/_ai/skills/`; agent trees (`~/.config/claude/
-skills`, `~/.codex/skills`, `~/.gemini/skills`) are linkFarms over it.
+- Shared skills live in `dots/_ai/skills/`. `~/.config/claude/skills` is an
+  out-of-store root symlink, so its additions, removals, and edits are live
+  immediately. The other client trees are generated linkFarms over the shared
+  roster because Codex additionally merges its local-only `.system` subtree.
   Codex-only system skills: `dots/codex/skills/.system/`.
 - Agent CLI / MCP data lives in `flake/data/`: `mcp-registry.nix` (servers,
   tiers, lean/evidence/full/browser profiles, per-client render) and
@@ -414,8 +416,22 @@ skills`, `~/.codex/skills`, `~/.gemini/skills`) are linkFarms over it.
   `observer`, `agent-control`, and `operator` authority principals. Transport
   selects its principal explicitly. `sinnix-agent-control-mcp` is a thin local wrapper around that
   implementation. Remote ChatGPT access uses the pinned OpenAI
-  `tunnel-client` user service; the gateway has no custom HTTP/SSE transport
-  or separate PID job substrate.
+  `tunnel-client` user service; the gateway has no custom HTTP/SSE transport.
+  The gateway retains transport, principal/capability and project authorization,
+  envelopes, audit, and redaction, then forwards typed job requests to the
+  daemon. `pkgs/sinnix-mcp` owns canonical references and the shared
+  envelope/owner contract. `modules/services/sinnixd.nix` runs the local
+  `sinnixd` Unix-socket daemon and installs `agentctl`; it discovers explicit
+  project adapters and launches only their declared operations as transient
+  user services. Systemd owns process lifecycle, cgroups, results,
+  cancellation, and journal evidence; `sinnixd` has no job queue, task, Git,
+  or arbitrary-process authority. Its
+  only non-declared execution contracts are typed `operator-shell` and
+  `attested-agent` jobs: both bind an explicit principal and registered Git
+  checkout, use the durable generic-job record and transient user service,
+  and revalidate the worktree/common-dir identity immediately before exec.
+  Shell argv and agent prompts remain private launch inputs; durable public
+  metadata retains only redacted digests and bounded artifact references.
 
 ## Secrets
 

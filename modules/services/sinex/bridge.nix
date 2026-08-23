@@ -68,6 +68,16 @@ in
             automata = false;
             kitty = false;
           };
+          user-mile = {
+            filesystem = false;
+            terminal = true;
+            browser = false;
+            desktop = false;
+            system = false;
+            document = false;
+            automata = false;
+            kitty = false;
+          };
           capture = {
             filesystem = true;
             terminal = true;
@@ -514,6 +524,13 @@ in
         };
       })
 
+      # The first-user-mile trial is deliberately one source domain. Upstream
+      # enables static imports by default, which would otherwise add the Git
+      # and Raindrop importers even while every non-terminal domain is disabled.
+      (lib.mkIf (runtimeEnabled && cfg.activationProfile == "user-mile") {
+        services.sinex.sources.staticImports = lib.mkForce { };
+      })
+
       # Workstation policy that sinex itself does not own: resource class
       # placement for PostgreSQL/NATS, mount ordering for /var/lib/sinex,
       # maintenance-timer scheduling, and the post-activation ACL repair.
@@ -599,6 +616,13 @@ in
             nats.serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
               runtimeInventory = config.sinnix.runtime.inventory;
               unit = "nats.service";
+            };
+            # Bootstrap is a client of NATS, not the NATS daemon. It must use
+            # the same narrowly-owned client credentials as sinexd rather than
+            # requiring the listener account to read them.
+            sinex-nats-bootstrap.serviceConfig = {
+              User = lib.mkForce "sinex";
+              Group = lib.mkForce "sinex";
             };
             sinex-postgres-dump = {
               description = "Dump Sinex PostgreSQL database for disaster recovery";
@@ -715,6 +739,10 @@ in
                 # Nix module options.
                 "SINEX_EVENT_ENGINE_REJECT_INITIAL_REPLAY=false"
                 "SINEX_EVENT_ENGINE_STARTUP_CATCH_UP_MAX_CONCURRENT=1"
+                # The pinned Sinex Nix module emits `1` for this boolean, but
+                # the daemon's top-level Clap argument accepts only true/false.
+                # A later Environment= assignment wins in systemd.
+                "SINEX_NATS_REQUIRE_TLS=true"
               ];
               # Bounded drain window: forced kills replay cleanly via
               # JetStream, so bounding activation stalls beats waiting on a
@@ -744,6 +772,10 @@ in
           # warning at evaluation time.
           wants = [ "network-online.target" ] ++ lib.optionals databasePrepared [ "postgresql.target" ];
         };
+        # PostgreSQL owns its own aggregate target. It otherwise keeps its
+        # Wants= graph alive after sinex-runtime.target stops, leaving the
+        # manually parked runtime half-running.
+        systemd.targets.postgresql.unitConfig.PartOf = [ "sinex-runtime.target" ];
         # Maintenance timers follow the runtime TARGET, not the auto-start
         # POLICY: this host is manual-start by policy but runs 24/7, so gating
         # timers on auto-start masks them and silently kills the DR dump.

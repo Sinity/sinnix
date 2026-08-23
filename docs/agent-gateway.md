@@ -1,6 +1,6 @@
 # Agent gateway
 
-The Sinnix agent gateway is one official-SDK MCP implementation with three explicit authority principals. It exposes canonical project and runtime evidence, reuses the attested transient-systemd agent substrate, and keeps transport outside the MCP process.
+The Sinnix agent gateway is one official-SDK MCP implementation with three explicit authority principals. It exposes canonical project and runtime evidence, forwards typed job requests to `sinnixd`, and keeps transport outside the MCP process.
 
 ## Architecture
 
@@ -14,8 +14,8 @@ ChatGPT observer connector
 Local coordinators
     -> sinnix-agent-control-mcp
     -> stdio: sinnix-agent-gateway --principal agent-control
-    -> run_agent_prompt.sh and agent_job_control.sh
-    -> transient systemd scope, manifest, cgroup, and bounded artifacts
+    -> typed sinnixd Unix-socket job.agent.start request
+    -> daemon-owned transient service, lifecycle, and bounded artifacts
 
 ChatGPT operator connector
     -> separate OpenAI Secure MCP Tunnel
@@ -24,7 +24,7 @@ ChatGPT operator connector
     -> explicit operator-authorized tools and attested receipts
 ```
 
-The gateway owns no HTTP server and no listening port. The official OpenAI tunnel owns the remote connection and launches the MCP server over stdio. The gateway uses the official MCP Python SDK v2 for protocol parsing and typed tool schemas.
+The gateway owns no HTTP server and no listening port. The official OpenAI tunnel owns the remote connection and launches the MCP server over stdio. The gateway uses the official MCP Python SDK v2 for protocol parsing and typed tool schemas. It retains transport, principal and capability authorization, project authorization, envelopes, audit, and redaction. `sinnixd` owns typed validation, checkout attestation, process and systemd lifecycle, logs, results, cancellation, and reconciliation.
 
 ## Principals
 
@@ -51,19 +51,26 @@ sinnix-agent-gateway-schema observer
 sinnix-agent-gateway --config /etc/sinnix/agent-gateway.json --principal observer info
 ```
 
-`sinnix-agent-gateway-schema` emits a canonical, sorted tool manifest and SHA-256. The selected tunnel principal's manifest is compared with its Nix-approved hash before startup. A local server manifest, an approved Nix manifest, and an externally observed ChatGPT connector snapshot are distinct facts. The private state file `connector-snapshot.json` records an external snapshot with schema `sinnix.gateway-connector-snapshot.v1`, principal, and manifest SHA-256. The gateway reports every comparison as `match`, `mismatch`, or `unobserved`; it does not claim connector parity until an actual product-level observation has been recorded.
+`sinnix-agent-gateway-schema` emits a canonical, sorted tool manifest and SHA-256. The selected tunnel principal's manifest is compared with its Nix-approved hash before startup. A local server manifest, an approved Nix manifest, and an externally observed ChatGPT connector snapshot are distinct facts. The private state file `connector-snapshot.json` records an external snapshot with schema `sinnix.gateway-connector-snapshot.v1`, principal, and manifest SHA-256. The gateway reports every comparison as `match`, `mismatch`, or `unobserved`; it does not claim connector parity until an actual product-level observation has been recorded. `status` also exposes the principal contract hash and the principal-filtered action catalog hash separately, so a stable MCP tool manifest cannot conceal a widened action contract.
+
+### V2 contract foundation
+
+Gateway V2 converges on the stable verb families `status`, `catalog`, `query`, `get`, `context`, `events`, `wait`, `change`, `operate`, and `run`. `status` and `catalog` are the first live target-named tools. Their bindings are validated against the executable action registry at startup: a binding must cover every declared action and match its declared owner, route, and verb. `status` calls the gateway observation owner directly and includes non-mutating configured-route preflight evidence. Safe bounded direct routes are invoked and required to satisfy their declared output decoder, while machine observation and Beads remain prerequisite checks because their current owner calls build a whole report before selection or synchronize workspace state. Durable jobs, brokered MCP sessions, and operator shell execution have distinct lifecycle contracts and are excluded. `catalog` searches the V2 registry directly and is distinct from `mcp_catalog`, which remains the registry-derived inventory of upstream MCP brokers. `sinnix://gateway/v2/catalog` remains a principal-filtered MCP resource generated from the same declarations. It publishes canonical templates for project, checkout, bead, job, artifact, receipt, result, machine unit, browser page, terminal, capture lane, session, and context snapshot resources. Legacy tools remain active only until a replacement has owner-domain parity evidence.
+
+`pkgs/sinnix-mcp` is the shared protocol package for the gateway, future `sinnixd` runtime, project adapters, and MCP owners. It owns the canonical `sinnix://` parser and templates, versioned request and response envelopes, bounded inline-or-opaque payload representation, typed errors, source-generation bindings, and a non-overlapping owner registry. Owner declarations name their authority and lifecycle (`read_only`, `daemon_owned`, `window_gated`, or `operator_confirmed`), so an MCP frontend cannot silently widen a domain owner’s write boundary. Archive-backed owners additionally bind returned facts and receipts to their source reference, generation, and root digest.
+
+Fixed direct gateway owners use declared environment profiles rather than the tunnel process environment. Plain routes receive a minimal base environment. Kitty routes additionally require the runtime directory, while Hyprland and screenshot routes also require the Wayland display and Hyprland instance signature. Gateway credentials are never inherited by these child processes. A direct desktop or terminal failure returns its owner route, typed execution facts, and an opaque diagnostic artifact ID. The private artifact contains bounded, redacted stderr evidence but no command arguments or stdout.
 
 The common read surface includes:
 
-- `gateway_status`, `machine_report`, `machine_query`, `capability_search`, and `capability_describe`
+- `status`, `catalog`, `machine_report` (the bounded overview), `machine_query`, `capability_search`, and `capability_describe`
 - `project_list`, `project_context`, `project_tree`, `project_read`, `project_search`, and `project_diff`
 - `files_read` for bounded host-path stat, reads, and directory listings
-- `session_list`, `session_read`, and `session_search` over authoritative Claude Code and Codex JSONL files
+- `session_list`, `session_read`, and `session_search` over authoritative Claude Code and Codex session JSONL files
 - `memory_search` and `memory_get` for source-preserving semantic access to available raw coding-session memory
 - `timeline_query` for source-preserving coding-session timeline evidence
 - `mcp_catalog` and `mcp_read` for registry-derived upstream MCP discovery and explicitly read-only upstream tools
-- `shell_query` for exact-argument, output-bounded read-only host inspection
-- `shell_run` for exact-argument operator commands in an unrestricted transient user service, with explicit optional `sudo -n` root execution
+- `capture_lanes` and `capture_query` for runtime-inventory-declared `sinnix-capture` lanes with sidecar indexes
 - `desktop_read` for current Hyprland, workspace, client, binding, and color-management state
 - `desktop_capture` for output-only screenshots returned as opaque artifacts
 - `terminal_read` for Kitty terminal inventory and bounded capture reads
@@ -74,15 +81,15 @@ The common read surface includes:
 - `artifact_list` and `artifact_read`
 - `audit_tail` and `audit_verify`
 
-`machine_query` selects one bounded section from the canonical `sinnix-observe` report. Its operations are `overview`, `pressure`, `runtime_inventory`, `gateway`, `browser`, `storage`, `ingestion`, `units`, `workloads`, `slices`, and `blocked_tasks`; the array operations use cursor and limit pagination. Every response carries the collector schema, generation time, and observation window. This keeps a large full report from making a small requested section unavailable.
+`machine_query` requests one bounded section from the canonical `sinnix-observe` owner. Its operations are `overview`, `pressure`, `runtime_inventory`, `gateway`, `browser`, `storage`, `ingestion`, `units`, `workloads`, `slices`, and `blocked_tasks`; the array operations use cursor and limit pagination. The owner runs only the collectors required for a non-overview section. Every response carries the collector schema, generation time, and observation window. This keeps a large full report from making a small requested section unavailable.
 
 `capability_search` and `capability_describe` read the generated `/etc/sinnix/capability-index.json` rather than maintaining another catalog. Search supports query terms, kind, enabled state, and cursor pagination. Every result identifies the index schema, host, and generation revision. It reports the index as unavailable when the running generation has not rendered it.
 
-`memory_search` and `memory_get` retain the raw session provider and source-specific reference in every result. They report the current Polylogue and Sinex upstreams as unavailable and Lynchpin as not yet adapted. They do not fabricate a unified source or copy session JSONL into gateway state.
+`session_list`, `session_read`, and `session_search` read Claude Code sessions from `~/.claude/projects` and Codex sessions from `~/.codex/sessions`. They do not traverse Codex configuration, history, plugin fixtures, or other non-session state. `memory_search` and `memory_get` retain the raw session provider and source-specific reference in every result. They report the current Polylogue and Sinex upstreams as unavailable and Lynchpin as not yet adapted. They do not fabricate a unified source or copy session JSONL into gateway state.
 
 `timeline_query` provides chronological session-file evidence from the same authoritative raw providers. Its timestamps are explicitly identified as filesystem modification times, not inferred conversation-event times. It preserves provider coverage and reports unavailable upstreams instead of treating the available raw files as a complete personal timeline.
 
-`mcp_catalog` is generated from the existing MCP registry. The initial broker admits only local evidence servers. It excludes agent control to prevent a recursive job-control path and Chrome DevTools to preserve the browser ownership boundary. `mcp_read` launches a bounded stdio session inside a read-only, network-isolated transient user service for the observer principal, then checks the live upstream tool metadata for an explicit read-only declaration. Oversized normalized responses become opaque artifacts. `mcp_write` is operator-only and rejects tools declared read-only.
+`mcp_catalog` is generated from the existing MCP registry and performs a bounded five-second `initialize` plus `tools/list` probe for each admitted stdio upstream when called. It returns the observed availability, total tool count, and explicitly read-only tool count. An unavailable upstream retains its registry row with a typed failure class and, when stderr exists, an opaque diagnostic artifact. The initial broker admits only local evidence servers. It excludes agent control to prevent a recursive job-control path and Chrome DevTools to preserve the browser ownership boundary. `mcp_read` launches a bounded stdio session inside a read-only, network-isolated transient user service for the observer principal, then checks the live upstream tool metadata for an explicit read-only declaration. The child receives the session-bus address because owner-native evidence tools require it, while its filesystem, home, network, and privilege restrictions remain in force. Oversized normalized responses become opaque artifacts. `mcp_write` is operator-only and rejects tools declared read-only.
 
 `machine_action` is operator-only. It sends the complete typed request to the running ops reducer over its local Unix socket, including the owner-required revision, idempotency key, reason, target, and parameters. The reducer resolves runtime identities, enforces admission, performs the action, and returns its native receipt. The gateway does not substitute its own service-control path.
 
@@ -92,7 +99,7 @@ The common read surface includes:
 
 `browser_action` is operator-only. It first creates an agent window, which the existing wrapper parks on the hidden agent workspace. The gateway persists its returned page ID and allows later navigation, interaction, evaluation, waiting, and closing only against those registered agent targets. It cannot mutate an existing operator tab. `browser_capture` is read-only, but applies the same registered-target check before Chrome receives a screenshot request, so it cannot capture an existing operator tab. `desktop_capture` invokes only the output capture route and never an interactive area selector or a focus operation.
 
-`agent-control` adds `agent_launch` and `job_cancel`. `operator` also adds `files_write`, `project_write`, `project_apply_patch`, `tasks_write`, `shell_run`, and `shell_start`. `tasks_read` invokes Beads with its physical read-only flag. `tasks_write` performs only supported structured native operations and uses `--append-notes`, never the history-replacing `--notes` form. `agent_launch` accepts an optional `worktree`, but only the registered checkout or an exact linked Git worktree with the same resolved Git common directory is authorized; path-prefix and non-worktree paths are rejected. Arbitrary agent environment overlays are currently rejected until a service-private handoff exists; no overlay values are written to gateway state or passed on a supervisor command line. `shell_run` accepts exact argv, a working directory, bounded environment overlay, timeout, output limit, and an explicit root flag. It uses `env -i` and a bounded base environment, then invokes `sudo -n --` only when root was requested. The returned receipt identifies the transient service unit, selected identity, exit status, timeout, and output-truncation facts. `shell_start` uses the existing agent-slice scope policy to create a durable, attested shell job. It returns a stable job ID and scope unit; `job_status`, `job_read_output`, and `job_cancel` use that identity rather than a PID. `files_write` supports atomic replacement, append, mkdir, and explicit regular-file removal. A mutation can require the current SHA-256 so concurrent or stale requests fail rather than overwrite newer content.
+`agent-control` adds `agent_launch` and `job_cancel`. `operator` also adds `files_write`, `project_write`, `project_apply_patch`, `tasks_write`, `shell_run`, and `shell_start`. `tasks_read` invokes Beads with its physical read-only flag. `tasks_write` performs only supported structured native operations and uses `--append-notes`, never the history-replacing `--notes` form. `files_write` supports atomic replacement, append, mkdir, copy, move, and explicit regular-file removal. Copy and move refuse to replace a destination; moves create the destination before removing the source. A mutation can require the current SHA-256 so concurrent or stale requests fail rather than overwrite newer content. The typed job contract and owner boundary are described below.
 
 ## Project and path authority
 
@@ -104,11 +111,11 @@ Project paths are always relative. Reads and writes reject absolute paths, paren
 
 ## Jobs and artifacts
 
-The gateway does not implement another job runner. `agent_launch` calls the shared `run_agent_prompt.sh`, which creates a transient systemd scope and a versioned manifest containing the stable job ID, cgroup, unit, worktree, prompt digest, resource overrides, timeout, lifecycle, and artifact locations. `RuntimeMaxSec` enforces the declared timeout. Cancellation accepts only an attested job ID and verifies the unit, PID, cgroup, and working directory before stopping the scope.
+The gateway forwards only typed `job.agent.start`, `job.shell.start`, `job.get`, `job.list`, `job.wait`, `job.logs`, `job.result`, and `job.cancel` requests to the local `sinnixd` Unix socket. `agent_launch` is restricted to the `agent-control` principal. `shell_start` and `shell_run` are restricted to `operator`, require a registered project and checkout, and accept an argv plus a relative working directory. They do not accept root escalation or environment overlays. `shell_run` starts, waits for, and reads the bounded log of the same typed job.
 
-Only the runner's scrubbed base environment reaches launched agents. Unrelated exported secrets are not inherited. Arbitrary agent overlays remain deferred because the gateway has no service-private handoff that would keep values out of same-user observer file reads and supervisor arguments. Job state and generated prompt, manifest, log, and artifact metadata are private to the user.
+The daemon derives the environment from the registered project without an overlay, revalidates the exact worktree, common Git directory, porcelain membership, and recorded HEAD immediately before execution, and fails closed on drift. It hands the native runner the canonical registered project path, expected Git common directory, and checkout reference, so the runner independently attests the same worktree before it starts an agent. The daemon's retained transient user service is the only process, cgroup, timeout, and cancellation authority.
 
-Artifacts use random opaque UUIDs. The public metadata omits host paths, and reads use offset plus a bounded byte count. Malformed job and artifact records remain visible as malformed evidence instead of disappearing from listings.
+Gateway-owned opaque artifacts remain available for non-job owners. Job logs and results are daemon-owned, bounded reads; the gateway does not own their paths, manifests, reservations, PIDs, cgroups, or reconciliation state.
 
 ## Audit and observe
 
@@ -143,7 +150,7 @@ The runtime key is the agenix secret `openai-tunnel-runtime-key`. Tunnel-managem
 2. Compare `sinnix-agent-gateway-schema observer` with a direct stdio `tools/list` call.
 3. Enable a tunnel only after its ID and dedicated runtime credential exist.
 4. Verify `http://127.0.0.1:3088/healthz` and `/readyz`, then inspect the tunnel logs through systemd.
-5. Create or refresh the ChatGPT connector from the tunnel, approve its exact tool snapshot, and invoke `gateway_status` plus a bounded project read from ChatGPT.
+5. Create or refresh the ChatGPT connector from the tunnel, approve its exact tool snapshot, and invoke `status`, `catalog`, and a bounded project read from ChatGPT.
 6. Record the observed connector tool names and manifest hash separately from the Nix-approved manifest. The observation is required before claiming connector parity.
 
 The old prototype state may be retained under the canonical state root's `legacy/` directory for forensic inspection. It must not be loaded as active jobs, artifacts, repositories, tasks, or audit data.

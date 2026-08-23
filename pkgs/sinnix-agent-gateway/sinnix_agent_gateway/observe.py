@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import tempfile
 from typing import Any
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
+from sinnix_mcp.execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
 class ObserveService:
@@ -40,6 +38,7 @@ class ObserveService:
     def __init__(self, config: GatewayConfig, principal: Principal):
         self.config = config
         self.principal = principal
+        self.execution = OwnerExecution()
 
     def _connector_snapshot(self) -> dict[str, str] | None:
         path = self.config.connector_snapshot_path or (
@@ -57,9 +56,15 @@ class ObserveService:
             or not isinstance(snapshot.get("manifest_sha256"), str)
         ):
             return None
+        action_catalog_sha256 = snapshot.get("action_catalog_sha256")
+        if action_catalog_sha256 is not None and not isinstance(
+            action_catalog_sha256, str
+        ):
+            return None
         return {
             "principal": snapshot["principal"],
             "manifest_sha256": snapshot["manifest_sha256"],
+            "action_catalog_sha256": action_catalog_sha256,
         }
 
     @staticmethod
@@ -71,51 +76,58 @@ class ObserveService:
     def _collector_bound(self) -> int:
         return min(max(self.config.max_result_bytes * 8, 1_048_576), 8_388_608)
 
-    def _collect_report(self) -> dict[str, Any]:
-        environment = {
-            "HOME": os.environ.get("HOME", "/home/sinity"),
-            "LANG": os.environ.get("LANG", "C.UTF-8"),
-            "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
-            "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"),
-        }
-        try:
-            with tempfile.TemporaryFile() as output:
-                result = subprocess.run(
-                    [self.config.observe_command, "--format", "json", "--limit", "20"],
-                    stdin=subprocess.DEVNULL,
-                    stdout=output,
-                    stderr=subprocess.STDOUT,
-                    timeout=20,
-                    check=False,
-                    env=environment,
-                )
-                output.seek(0)
-                data = output.read(self._collector_bound() + 1)
-        except subprocess.TimeoutExpired:
+    def _collect_report(
+        self, operation: str, cursor: int = 0, page_limit: int = 100
+    ) -> dict[str, Any]:
+        result = self.execution.run(
+            [
+                self.config.observe_command,
+                "--format",
+                "json",
+                "--limit",
+                "20",
+                "--section",
+                operation,
+                "--cursor",
+                str(cursor),
+                "--page-limit",
+                str(page_limit),
+            ],
+            ExecutionProfile(
+                route=OwnerRoute("machine-observe"),
+                timeout_seconds=20,
+                max_stdout_bytes=self._collector_bound(),
+            ),
+        )
+        if result.failure_class == "command_timeout":
             return {
                 "available": False,
                 "failure_class": "collector_timeout",
                 "reason": "sinnix-observe timed out",
+                "command": list(result.command),
             }
-        if result.returncode != 0:
-            return {
-                "available": False,
-                "failure_class": "collector_failed",
-                "reason": "sinnix-observe failed",
-            }
-        if len(data) > self._collector_bound():
+        if result.failure_class == "command_output_bound":
             return {
                 "available": False,
                 "failure_class": "collector_response_bound",
                 "reason": "sinnix-observe exceeded collector bound",
+                "command": list(result.command),
+            }
+        if result.failure_class is not None:
+            return {
+                "available": False,
+                "failure_class": "collector_failed",
+                "reason": result.stderr_excerpt() or "sinnix-observe failed",
+                "command": list(result.command),
             }
         try:
-            return {"available": True, "report": json.loads(data)}
+            return {"available": True, "report": result.decode_json()}
         except json.JSONDecodeError:
             return {
                 "available": False,
                 "failure_class": "malformed_report",
                 "reason": "sinnix-observe returned malformed JSON",
+                "command": list(result.command),
             }
 
     def _within_response_bound(self, response: dict[str, Any]) -> dict[str, Any]:
@@ -129,11 +141,8 @@ class ObserveService:
         }
 
     def machine_report(self) -> dict[str, Any]:
-        self.principal.require(Capability.MACHINE_READ)
-        collected = self._collect_report()
-        if not collected["available"]:
-            return collected
-        return self._within_response_bound(collected)
+        """Return the bounded overview retained for callers of the old route."""
+        return self.machine_query("overview")
 
     def machine_query(
         self, operation: str, cursor: int = 0, limit: int = 100
@@ -143,7 +152,68 @@ class ObserveService:
             raise ValueError("cursor must be non-negative")
         if limit < 1 or limit > 500:
             raise ValueError("limit must be 1-500")
-        collected = self._collect_report()
+        available = self._ARRAY_OPERATIONS | self._SECTION_OPERATIONS
+        if operation not in available:
+            raise ValueError(
+                f"unknown machine operation {operation!r}; available: {sorted(available)}"
+            )
+        if operation not in self._ARRAY_OPERATIONS and cursor:
+            raise ValueError("cursor is only valid for array machine operations")
+        if operation in self._ARRAY_OPERATIONS:
+            key = self._ARRAY_OPERATIONS[operation]
+            page_limit = limit
+            while True:
+                collected = self._collect_report(operation, cursor, page_limit)
+                if not collected["available"]:
+                    return collected
+                report = collected["report"]
+                source = {
+                    "schema": report.get("schema"),
+                    "generated_at": report.get("generated_at"),
+                    "window": report.get("window"),
+                }
+                page = report.get(key)
+                if not isinstance(page, dict):
+                    return {
+                        "available": False,
+                        "failure_class": "malformed_report",
+                        "reason": f"sinnix-observe section {key} is not a page",
+                    }
+                rows = page.get("rows")
+                total = page.get("total")
+                next_cursor = page.get("next_cursor")
+                if (
+                    not isinstance(rows, list)
+                    or not isinstance(total, int)
+                    or not isinstance(page.get("cursor"), int)
+                    or page["cursor"] != cursor
+                    or (next_cursor is not None and not isinstance(next_cursor, int))
+                ):
+                    return {
+                        "available": False,
+                        "failure_class": "malformed_report",
+                        "reason": f"sinnix-observe section {key} has an invalid page",
+                    }
+                response = {
+                    "available": True,
+                    "operation": operation,
+                    "source": source,
+                    "total": total,
+                    "cursor": cursor,
+                    "next_cursor": next_cursor,
+                    "rows": rows,
+                }
+                bounded = self._within_response_bound(response)
+                if bounded["available"]:
+                    return bounded
+                if len(rows) <= 1:
+                    return {
+                        "available": False,
+                        "failure_class": "response_bound",
+                        "reason": "one machine row exceeded response bound",
+                    }
+                page_limit = len(rows) - 1
+        collected = self._collect_report(operation)
         if not collected["available"]:
             return collected
         report = collected["report"]
@@ -152,55 +222,7 @@ class ObserveService:
             "generated_at": report.get("generated_at"),
             "window": report.get("window"),
         }
-        if operation in self._ARRAY_OPERATIONS:
-            key = self._ARRAY_OPERATIONS[operation]
-            rows = report.get(key)
-            if not isinstance(rows, list):
-                return {
-                    "available": False,
-                    "failure_class": "malformed_report",
-                    "reason": f"sinnix-observe section {key} is not an array",
-                }
-            selected = rows[cursor : cursor + limit]
-            while selected:
-                next_cursor = cursor + len(selected)
-                response = {
-                    "available": True,
-                    "operation": operation,
-                    "source": source,
-                    "total": len(rows),
-                    "cursor": cursor,
-                    "next_cursor": next_cursor if next_cursor < len(rows) else None,
-                    "rows": selected,
-                }
-                bounded = self._within_response_bound(response)
-                if bounded["available"]:
-                    return bounded
-                selected.pop()
-            if cursor >= len(rows):
-                return {
-                    "available": True,
-                    "operation": operation,
-                    "source": source,
-                    "total": len(rows),
-                    "cursor": cursor,
-                    "next_cursor": None,
-                    "rows": [],
-                }
-            return {
-                "available": False,
-                "failure_class": "response_bound",
-                "reason": "one machine row exceeded response bound",
-            }
-        try:
-            keys = self._SECTION_OPERATIONS[operation]
-        except KeyError as exc:
-            available = sorted(self._ARRAY_OPERATIONS | self._SECTION_OPERATIONS)
-            raise ValueError(
-                f"unknown machine operation {operation!r}; available: {available}"
-            ) from exc
-        if cursor:
-            raise ValueError("cursor is only valid for array machine operations")
+        keys = self._SECTION_OPERATIONS[operation]
         response = {
             "available": True,
             "operation": operation,
@@ -214,11 +236,18 @@ class ObserveService:
         principal_name: str,
         capability_contract_hash: str,
         live_manifest_hash: str,
+        action_catalog_hash: str,
+        catalog_revision: str,
     ) -> dict[str, Any]:
         self.principal.require(Capability.MACHINE_READ)
         inventory_available = self.config.runtime_inventory.is_file()
         approved_hash = (
             self.config.approved_manifest_hash
+            if self.config.approved_manifest_principal == principal_name
+            else None
+        )
+        approved_catalog_hash = (
+            self.config.approved_action_catalog_hash
             if self.config.approved_manifest_principal == principal_name
             else None
         )
@@ -228,10 +257,51 @@ class ObserveService:
             if snapshot is not None and snapshot["principal"] == principal_name
             else None
         )
+        observed_catalog_hash = (
+            snapshot["action_catalog_sha256"]
+            if snapshot is not None and snapshot["principal"] == principal_name
+            else None
+        )
         return {
             "status": "ready",
             "principal": principal_name,
-            "capability_contract_hash": capability_contract_hash,
+            "principal_contract_hash": capability_contract_hash,
+            "tool_manifest_hash": live_manifest_hash,
+            "action_catalog_hash": action_catalog_hash,
+            "catalog": {
+                "revision": catalog_revision,
+                "live_action_catalog": {
+                    "principal": principal_name,
+                    "sha256": action_catalog_hash,
+                },
+                "nix_approved": (
+                    {
+                        "principal": self.config.approved_manifest_principal,
+                        "sha256": approved_catalog_hash,
+                    }
+                    if approved_catalog_hash is not None
+                    else None
+                ),
+                "chatgpt_observed": (
+                    {
+                        "principal": principal_name,
+                        "sha256": observed_catalog_hash,
+                    }
+                    if observed_catalog_hash is not None
+                    else None
+                ),
+                "comparisons": {
+                    "live_to_nix_approved": self._comparison(
+                        action_catalog_hash, approved_catalog_hash
+                    ),
+                    "live_to_chatgpt_observed": self._comparison(
+                        action_catalog_hash, observed_catalog_hash
+                    ),
+                    "nix_approved_to_chatgpt_observed": self._comparison(
+                        approved_catalog_hash, observed_catalog_hash
+                    ),
+                },
+            },
             "manifests": {
                 "live_server": {
                     "principal": principal_name,

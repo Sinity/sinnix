@@ -149,6 +149,7 @@ run_job() {
     --provider codex --account-hash sha256:test --vendor-session-id vendor-1 \
     --polylogue-session-id polylogue-1 --kitty-socket unix:/tmp/kitty \
     --kitty-window-id 42 --hyprland-address address-1 --quota-snapshot-id quota-1 \
+    --checkout-ref sinnix://projects/fixture/checkouts/default \
     --agent codex --model fake --reasoning-effort high \
     --workdir "${tmp}/worktree" --registered-project "${tmp}/repo" \
     --expected-git-common-dir "${repo_common_dir}" --prompt-file "${prompt}" \
@@ -183,8 +184,8 @@ grep -Fxq 'fake grok final' "${tmp}/output/job-grok.final"
 grep -Fxq 'fake antigravity final' "${tmp}/output/job-antigravity.final"
 
 # --registered-project and --expected-git-common-dir are the runner's own
-# authorization boundary (the gateway's JobService always supplies both,
-# unconditionally, for every launch it makes): a direct caller that omits
+# authorization boundary (the typed sinnixd runner supplies both for every
+# gateway launch): a direct caller that omits
 # either, supplies a stale common-dir, or points at an unrelated checkout
 # must be refused before anything runs, not silently trusted.
 run_job_variant() {
@@ -387,8 +388,8 @@ print("actual_agent pid/proc_start pairing held across an unreadable retry")
 PYEOF
 jq -e --arg repo "${tmp}/repo" --arg worktree "${tmp}/worktree" '
   (.schema_version == 2 or .schema_version == 3) and .job_id == "job-one" and .lifecycle == "succeeded" and .exit_status == 0 and
-  .repo == $repo and .worktree == $worktree and .backend == "codex" and .model == "fake" and
-  (.prompt.sha256 | length == 64) and .artifacts.final != "" and
+  .repo == $repo and .worktree == $worktree and .checkout_ref == "sinnix://projects/fixture/checkouts/default" and
+  .backend == "codex" and .model == "fake" and (.prompt.sha256 | length == 64) and .artifacts.final != "" and
   .launcher.scope_unit == "sinnix-agent-job-job-one.scope" and
   .launcher.cgroup == "/fake/sinnix-agent-job-job-one.scope" and
   .delegation.parent_job_id == "parent-1" and .delegation.coordinator_job_id == "coord-1" and

@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sinnix-mcp"
+version = "0.1.0"
+description = "Canonical Sinnix MCP references, envelopes, and owner registration"
+requires-python = ">=3.12"
+
+[tool.setuptools.packages.find]
+include = ["sinnix_mcp*"]

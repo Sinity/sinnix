@@ -60,6 +60,33 @@ def test_operator_write_uses_compare_and_swap_and_receipts(tmp_path: Path) -> No
     assert not target.exists()
 
 
+def test_operator_copies_and_moves_regular_files_without_replacing_destination(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.txt"
+    copy = tmp_path / "copy.txt"
+    moved = tmp_path / "moved.txt"
+    source.write_text("gateway fixture")
+    operator = service(tmp_path, "operator")
+    source_hash = operator.read("stat", str(source))["sha256"]
+
+    copied = operator.write(
+        "copy", str(source), destination=str(copy), expected_sha256=source_hash
+    )
+    moved_result = operator.write(
+        "move", str(copy), destination=str(moved), expected_sha256=source_hash
+    )
+
+    assert source.read_text() == "gateway fixture"
+    assert not copy.exists()
+    assert moved.read_text() == "gateway fixture"
+    assert copied["destination"] == str(copy)
+    assert moved_result["removed"] is True
+    with pytest.raises(FileError, match="destination already exists"):
+        operator.write("move", str(source), destination=str(moved))
+    assert source.exists()
+
+
 def test_operator_rejects_symlink_mutation(tmp_path: Path) -> None:
     target = tmp_path / "target.txt"
     target.write_text("before")

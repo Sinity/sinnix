@@ -20,6 +20,27 @@ def session_service(tmp_path: Path) -> tuple[SessionLogService, Path]:
     return service, root
 
 
+def test_default_codex_source_is_the_canonical_sessions_root(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    session_root = home / ".codex" / "sessions"
+    session_root.mkdir(parents=True)
+    (session_root / "session.jsonl").write_text('{"text":"session"}\n')
+    (home / ".codex" / "history.jsonl").write_text('{"text":"history"}\n')
+    sources = SessionLogService.default_sources(home)
+    service = SessionLogService(
+        GatewayConfig(state_dir=tmp_path / "state", projects={}),
+        Principal.for_name("observer"),
+        sources=sources,
+    )
+
+    listed = service.list("codex")
+
+    assert sources[1] == SessionSource("codex", session_root)
+    assert [entry["reference"] for entry in listed["sessions"]] == [
+        "codex:session.jsonl"
+    ]
+
+
 def test_session_list_read_and_search_preserve_provider_reference(tmp_path: Path) -> None:
     service, root = session_service(tmp_path)
     session = root / "project" / "session.jsonl"
@@ -36,6 +57,26 @@ def test_session_list_read_and_search_preserve_provider_reference(tmp_path: Path
     assert "gateway" in read["content"]
     assert search["matches"][0]["reference"] == reference
     assert search["truncated"] is False
+
+
+def test_session_references_survive_a_provider_root_symlink(tmp_path: Path) -> None:
+    canonical_root = tmp_path / "canonical-claude"
+    canonical_root.mkdir()
+    alias_root = tmp_path / "claude"
+    alias_root.symlink_to(canonical_root, target_is_directory=True)
+    session = canonical_root / "project" / "session.jsonl"
+    session.parent.mkdir()
+    session.write_text('{"text":"gateway demonstration"}\n')
+    service = SessionLogService(
+        GatewayConfig(state_dir=tmp_path / "state", projects={}),
+        Principal.for_name("observer"),
+        sources=(SessionSource("claude-code", alias_root),),
+    )
+
+    reference = service.list("claude-code")["sessions"][0]["reference"]
+
+    assert reference == "claude-code:project/session.jsonl"
+    assert service.read(reference, max_bytes=1)["reference"] == reference
 
 
 def test_session_reference_rejects_path_escape(tmp_path: Path) -> None:

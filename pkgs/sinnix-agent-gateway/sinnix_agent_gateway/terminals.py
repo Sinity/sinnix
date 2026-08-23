@@ -1,16 +1,26 @@
 from __future__ import annotations
 
-import json
-import subprocess
-import tempfile
 from typing import Any
 
+from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
+from sinnix_mcp.execution import (
+    EnvironmentProfile,
+    ExecutionProfile,
+    OwnerDiagnosticError,
+    OwnerExecution,
+    OwnerRoute,
+)
 
 
 class TerminalError(ValueError):
     pass
+
+
+class TerminalDiagnosticError(TerminalError, OwnerDiagnosticError):
+    def __init__(self, response: dict[str, object]):
+        OwnerDiagnosticError.__init__(self, response)
 
 
 class TerminalService:
@@ -22,35 +32,33 @@ class TerminalService:
         "last_non_empty_output",
     }
 
-    def __init__(self, config: GatewayConfig, principal: Principal):
+    def __init__(
+        self,
+        config: GatewayConfig,
+        principal: Principal,
+        artifacts: ArtifactService,
+        execution: OwnerExecution | None = None,
+    ):
         self.config = config
         self.principal = principal
+        self.artifacts = artifacts
+        self.execution = execution or OwnerExecution()
 
     def _run(self, arguments: list[str]) -> dict[str, Any]:
-        try:
-            with tempfile.TemporaryFile() as output:
-                result = subprocess.run(
-                    [self.config.kitty_control_command, *arguments],
-                    stdin=subprocess.DEVNULL,
-                    stdout=output,
-                    stderr=subprocess.STDOUT,
-                    timeout=30,
-                    check=False,
-                )
-                output.seek(0)
-                data = output.read(self.config.max_result_bytes + 1)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise TerminalError(f"Kitty control unavailable: {type(exc).__name__}") from exc
-        if len(data) > self.config.max_result_bytes:
-            raise TerminalError("Kitty control response exceeded response bound")
-        if result.returncode != 0:
-            raise TerminalError("Kitty control command failed")
-        text = data.decode("utf-8", errors="replace")
-        try:
-            value: Any = json.loads(text)
-        except json.JSONDecodeError:
-            value = text
-        return {"result": value}
+        route = OwnerRoute("terminal-kitty", EnvironmentProfile.TERMINAL)
+        result = self.execution.run(
+            [self.config.kitty_control_command, *arguments],
+            ExecutionProfile(
+                route=route,
+                timeout_seconds=30,
+                max_stdout_bytes=self.config.max_result_bytes,
+            ),
+        )
+        if result.failure_class is not None:
+            raise TerminalDiagnosticError(
+                self.artifacts.record_owner_diagnostic(route.name, result)
+            )
+        return {"result": result.decode_json_or_text()}
 
     @staticmethod
     def _string(value: Any, name: str, maximum: int = 64_000) -> str:

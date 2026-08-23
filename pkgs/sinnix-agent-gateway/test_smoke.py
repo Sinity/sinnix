@@ -11,17 +11,14 @@ from pathlib import Path
 import anyio
 import pytest
 from mcp import ClientSession
-from pydantic import ValidationError
 from mcp.client.stdio import StdioServerParameters, stdio_client
-from sinnix_agent_gateway import observe as observe_module
 from sinnix_agent_gateway.app import Runtime, create_server
+from sinnix_mcp.execution import ExecutionResult, OwnerDiagnosticError
 from sinnix_agent_gateway.capabilities import PolicyError
-from sinnix_agent_gateway.files import FileError
-from sinnix_agent_gateway.cli import build_manifest, parser
+from sinnix_agent_gateway.cli import build_manifest, parser, verify_approval
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
-from sinnix_agent_gateway.jobs import JobError
 from sinnix_agent_gateway.projects import ProjectError
-from sinnix_agent_gateway.schemas import AgentLaunchRequest
+from sinnix_agent_gateway.registry import REGISTRY
 
 
 def config(tmp_path: Path, *, observer_read: bool = True) -> GatewayConfig:
@@ -37,6 +34,7 @@ def config(tmp_path: Path, *, observer_read: bool = True) -> GatewayConfig:
             )
         },
         approved_manifest_hash="approved-fixture-hash",
+        approved_action_catalog_hash="catalog-hash",
     )
 
 
@@ -53,7 +51,6 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "project_read",
         "session_list",
         "session_read",
-        "shell_query",
         "machine_query",
         "desktop_read",
         "desktop_capture",
@@ -80,6 +77,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "shell_run",
         "shell_start",
     }.isdisjoint(readonly_names)
+    assert "shell_query" not in readonly_names
     assert {"agent_launch", "job_cancel", "capability_search", "capability_describe"} <= local_names
     assert {
         "desktop_action",
@@ -131,6 +129,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "mcp_read",
         "mcp_write",
     } <= operator_names
+    assert "agent_launch" not in operator_names
     assert "project_context" in readonly_names & local_names & operator_names
     assert readonly["sha256"] != local["sha256"] != operator["sha256"]
     assert all(
@@ -150,6 +149,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
 
 def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> None:
     cfg = config(tmp_path)
+    subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
     config_path = tmp_path / "gateway.json"
     config_path.write_text(
         json.dumps(
@@ -186,20 +186,162 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
             async with ClientSession(read_stream, write_stream) as session:
                 initialized = await session.initialize()
                 tools = await session.list_tools()
+                templates = await session.list_resource_templates()
                 names = {tool.name for tool in tools.tools}
                 assert initialized.server_info.name == "sinnix-agent-gateway"
-                assert "project_read" in names
+                assert {"status", "catalog", "get", "project_read"} <= names
                 assert "project_write" not in names
                 assert "agent_launch" not in names
-                result = await session.call_tool("gateway_status", {})
-                status = json.loads(result.content[0].text)
+                assert {
+                    "sinnix://gateway/v2/actions/{action_name}",
+                    "sinnix://gateway/v2/resources/{resource_kind}",
+                    "sinnix://receipts/{receipt_id}",
+                    "sinnix://results/{result_id}",
+                } <= {template.uri_template for template in templates.resource_templates}
+                action_resource = await session.read_resource(
+                    "sinnix://gateway/v2/actions/gateway.catalog"
+                )
+                action_contract = json.loads(action_resource.contents[0].text)
+                resource_resource = await session.read_resource(
+                    "sinnix://gateway/v2/resources/bead"
+                )
+                resource_contract = json.loads(resource_resource.contents[0].text)
+                documentation = await session.read_resource(
+                    "sinnix://gateway/v2/documentation"
+                )
+                documentation_rows = json.loads(documentation.contents[0].text)
+                assert action_contract["action"]["schema_ref"] == (
+                    "sinnix://gateway/v2/actions/gateway.catalog"
+                )
+                assert resource_contract["resource"] == {
+                    "availability": "declared",
+                    "contract_ref": "sinnix://gateway/v2/resources/bead",
+                    "kind": "bead",
+                    "owner": "beads",
+                    "principals": ["agent-control", "observer", "operator"],
+                    "readable_projections": ["summary", "history", "graph"],
+                    "ref_template": "sinnix://projects/{project_id}/beads/{bead_id}",
+                    "supports_query": True,
+                }
+                assert {row["name"] for row in documentation_rows["actions"]} == {
+                    "gateway.catalog",
+                    "gateway.status",
+                    "resources.get",
+                }
+                assert all(
+                    "observer" in row["principals"]
+                    for row in documentation_rows["resources"]
+                )
+                result = await session.call_tool("status", {})
+                status_envelope = json.loads(result.content[0].text)
+                status = status_envelope["data"]
+                assert status_envelope["schema"] == "sinnix.gateway-result.v3"
+                assert result.is_error is False
+                assert result.structured_content == status_envelope
+                status_tool = next(tool for tool in tools.tools if tool.name == "status")
+                assert status_tool.output_schema == REGISTRY.action(
+                    "gateway.status"
+                ).output_schema
+                assert status_envelope["result"]["action"] == "gateway.status"
+                assert status_envelope["result"]["outcome"] == "ok"
+                assert status_envelope["receipt"]["ref"].startswith("sinnix://receipts/")
                 assert status["principal"] == "observer"
+                assert status["route_preflight"]["routes"]
                 assert status["manifests"]["live_server"]["sha256"]
                 assert status["manifests"]["comparisons"] == {
                     "live_to_nix_approved": "unobserved",
                     "live_to_chatgpt_observed": "unobserved",
                     "nix_approved_to_chatgpt_observed": "unobserved",
                 }
+                result_resource = await session.read_resource(
+                    status_envelope["result"]["ref"]
+                )
+                receipt_resource = await session.read_resource(
+                    status_envelope["receipt"]["ref"]
+                )
+                assert json.loads(result_resource.contents[0].text) == status_envelope
+                assert json.loads(receipt_resource.contents[0].text)["outcome"] == "ok"
+                catalog_result = await session.call_tool("catalog", {"text": "gateway"})
+                catalog_envelope = json.loads(catalog_result.content[0].text)
+                catalog = catalog_envelope["data"]
+                assert catalog_envelope["result"]["action"] == "gateway.catalog"
+                assert [action["name"] for action in catalog["actions"]] == [
+                    "gateway.status",
+                    "gateway.catalog",
+                ]
+                project_catalog_result = await session.call_tool(
+                    "catalog", {"project": "fixture"}
+                )
+                project_catalog = json.loads(project_catalog_result.content[0].text)["data"]
+                assert project_catalog["project"] == {
+                    "project_id": "fixture",
+                    "available": True,
+                    "default_ref": "master",
+                    "observer_read": True,
+                    "writable": False,
+                    "ref": "sinnix://projects/fixture",
+                }
+                assert {resource["kind"] for resource in project_catalog["resources"]} == {
+                    "project",
+                    "checkout",
+                    "bead",
+                    "task_authority",
+                }
+                assert all(
+                    resource["availability"] == "available"
+                    for resource in project_catalog["resources"]
+                )
+                unavailable_catalog_result = await session.call_tool(
+                    "catalog", {"availability": "unavailable"}
+                )
+                unavailable_catalog = json.loads(
+                    unavailable_catalog_result.content[0].text
+                )["data"]
+                assert unavailable_catalog["actions"] == []
+                assert "terminal" in {
+                    resource["kind"] for resource in unavailable_catalog["resources"]
+                }
+                assert all(
+                    resource["availability_reason"]
+                    == "no migrated V2 action currently exposes this resource"
+                    for resource in unavailable_catalog["resources"]
+                )
+                get_result = await session.call_tool(
+                    "get", {"ref": "sinnix://projects/fixture"}
+                )
+                project_envelope = json.loads(get_result.content[0].text)
+                project_resource = project_envelope["data"]
+                assert project_envelope["result"]["action"] == "resources.get"
+                assert project_resource["kind"] == "project"
+                assert project_resource["project"]["project_id"] == "fixture"
+                checkout = project_resource["checkouts"][0]
+                assert checkout["ref"] == "sinnix://projects/fixture/checkouts/default"
+                assert checkout["checkout_id"] == "default"
+                assert project_resource["task_authority"]["availability"] == "unavailable"
+                checkout_result = await session.call_tool("get", {"ref": checkout["ref"]})
+                checkout_resource = json.loads(checkout_result.content[0].text)["data"]
+                assert checkout_resource["kind"] == "checkout"
+                assert checkout_resource["checkout"]["checkout"]["checkout_id"] == "default"
+                context_result = await session.call_tool(
+                    "project_context", {"project_id": "fixture"}
+                )
+                context = json.loads(context_result.content[0].text)
+                assert context["authority"]["canonical_checkout_ref"] == checkout["ref"]
+                assert len(context["authority"]["code_revision"]) == 64
+                assert context["authority"]["task_authority"]["availability"] == "unavailable"
+                invalid_catalog_result = await session.call_tool(
+                    "catalog", {"verb": "unrecognized"}
+                )
+                invalid_catalog = json.loads(invalid_catalog_result.content[0].text)
+                assert invalid_catalog_result.is_error is True
+                assert invalid_catalog_result.structured_content == invalid_catalog
+                assert invalid_catalog["result"]["outcome"] == "error"
+                assert invalid_catalog["error"]["code"] == "invalid_request"
+                assert invalid_catalog["receipt"]["ref"].startswith(
+                    "sinnix://receipts/"
+                )
+                mcp_catalog_result = await session.call_tool("mcp_catalog", {})
+                assert json.loads(mcp_catalog_result.content[0].text) == {"servers": []}
 
     anyio.run(probe)
 
@@ -218,6 +360,7 @@ def test_operator_project_writes_do_not_depend_on_observer_visibility(
     tmp_path: Path,
 ) -> None:
     cfg = config(tmp_path, observer_read=False)
+    subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
     runtime = Runtime.create(cfg, "operator")
     target = cfg.projects["fixture"].path / "operator.txt"
 
@@ -247,6 +390,42 @@ def test_project_subprocess_output_is_bounded_before_storage(tmp_path: Path) -> 
         cfg.projects["fixture"].path,
     )
     assert len(output.encode()) == 4096
+
+
+def test_project_subprocess_failure_surfaces_bounded_stderr(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "observer")
+
+    with pytest.raises(ProjectError, match="project diagnostic"):
+        runtime.projects._run_bounded(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stderr.write('project diagnostic'); raise SystemExit(2)",
+            ],
+            runtime.config.projects["fixture"].path,
+        )
+
+
+def test_project_apply_patch_streams_patch_to_git(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
+    target = cfg.projects["fixture"].path / "tracked.txt"
+    target.write_text("before\n")
+    runtime = Runtime.create(cfg, "operator")
+
+    result = runtime.projects.apply_patch(
+        "fixture",
+        """diff --git a/tracked.txt b/tracked.txt
+--- a/tracked.txt
++++ b/tracked.txt
+@@ -1 +1 @@
+-before
++after
+""",
+    )
+
+    assert result == {"project_id": "fixture", "applied": True}
+    assert target.read_text() == "after\n"
 
 
 def test_project_diff_rejects_option_injection_before_external_driver(
@@ -351,6 +530,37 @@ def test_audit_chain_survives_concurrent_writers(tmp_path: Path) -> None:
     }
 
 
+def test_runtime_returns_owner_diagnostic_and_audits_its_reference(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "observer")
+    response = {
+        "available": False,
+        "failure_class": "command_timeout",
+        "route": "terminal-kitty",
+        "exit_status": None,
+        "timed_out": True,
+        "output_exceeded": False,
+        "diagnostic_artifact_id": "fixture-artifact",
+    }
+
+    def fail() -> None:
+        raise OwnerDiagnosticError(response)
+
+    assert runtime.execute("terminal_read", fail) == {
+        "operation": "terminal_read",
+        **response,
+    }
+    event = runtime.audit.tail(1)["events"][0]
+    assert event["outcome"] == "error"
+    assert event["payload"] == {
+        "failure_class": "command_timeout",
+        "route": "terminal-kitty",
+        "exit_status": None,
+        "timed_out": True,
+        "output_exceeded": False,
+        "diagnostic_artifact_id": "fixture-artifact",
+    }
+
+
 def test_runtime_audit_carries_returned_job_correlation(tmp_path: Path) -> None:
     runtime = Runtime.create(config(tmp_path), "agent-control")
     runtime.execute(
@@ -358,6 +568,25 @@ def test_runtime_audit_carries_returned_job_correlation(tmp_path: Path) -> None:
     )
     payload = runtime.audit.tail(1)["events"][0]["payload"]
     assert payload == {"job_id": "job-correlation", "correlation_id": "job-correlation"}
+
+
+def test_runtime_audit_carries_upstream_mcp_target(tmp_path: Path) -> None:
+    runtime = Runtime.create(config(tmp_path), "observer")
+    runtime.execute(
+        "mcp_read",
+        lambda: {
+            "server": "fixture",
+            "tool": "fixture_read",
+            "mode": "read",
+            "secret": "hidden",
+        },
+    )
+
+    assert runtime.audit.tail(1)["events"][0]["payload"] == {
+        "server": "fixture",
+        "tool": "fixture_read",
+        "mode": "read",
+    }
 
 
 def test_runtime_audit_carries_returned_transient_unit(tmp_path: Path) -> None:
@@ -370,13 +599,13 @@ def test_runtime_audit_carries_returned_transient_unit(tmp_path: Path) -> None:
     assert payload == {"unit": "sinnix-gateway-run-fixture.service"}
 
 
-def test_runtime_audit_carries_execution_job_and_scope(tmp_path: Path) -> None:
+def test_runtime_audit_carries_daemon_job_identity(tmp_path: Path) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
     runtime.execute(
         "shell_start",
         lambda: {
             "job_id": "shell-fixture",
-            "unit": "sinnix-gateway-exec-shell-fixture.scope",
+            "unit": "sinnixd-job-shell-fixture.service",
             "secret": "hidden",
         },
     )
@@ -385,7 +614,7 @@ def test_runtime_audit_carries_execution_job_and_scope(tmp_path: Path) -> None:
 
     assert payload == {
         "job_id": "shell-fixture",
-        "unit": "sinnix-gateway-exec-shell-fixture.scope",
+        "unit": "sinnixd-job-shell-fixture.service",
         "correlation_id": "shell-fixture",
     }
 
@@ -405,8 +634,9 @@ def test_runtime_audit_carries_file_mutation_receipt(tmp_path: Path) -> None:
     runtime.execute(
         "files_write",
         lambda: {
-            "operation": "replace",
+            "operation": "move",
             "path": "/realm/tmp/work/gateway-demo/fixture.txt",
+            "destination": "/realm/tmp/work/gateway-demo/moved.txt",
             "bytes": 7,
             "previous_sha256": None,
             "sha256": "fixture-hash",
@@ -417,8 +647,9 @@ def test_runtime_audit_carries_file_mutation_receipt(tmp_path: Path) -> None:
     payload = runtime.audit.tail(1)["events"][0]["payload"]
 
     assert payload == {
-        "operation": "replace",
+        "operation": "move",
         "path": "/realm/tmp/work/gateway-demo/fixture.txt",
+        "destination": "/realm/tmp/work/gateway-demo/moved.txt",
         "bytes": 7,
         "sha256": "fixture-hash",
     }
@@ -428,9 +659,28 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
     cfg = config(tmp_path)
     runtime = Runtime.create(cfg, "observer")
     status = runtime.observe.gateway_status(
-        "observer", "capability-hash", "approved-fixture-hash"
+        "observer", "capability-hash", "approved-fixture-hash", "catalog-hash", "v2-test"
     )
-    assert status["capability_contract_hash"] == "capability-hash"
+    assert status["principal_contract_hash"] == "capability-hash"
+    assert status["tool_manifest_hash"] == "approved-fixture-hash"
+    assert status["action_catalog_hash"] == "catalog-hash"
+    assert status["catalog"] == {
+        "revision": "v2-test",
+        "live_action_catalog": {
+            "principal": "observer",
+            "sha256": "catalog-hash",
+        },
+        "nix_approved": {
+            "principal": "observer",
+            "sha256": "catalog-hash",
+        },
+        "chatgpt_observed": None,
+        "comparisons": {
+            "live_to_nix_approved": "match",
+            "live_to_chatgpt_observed": "unobserved",
+            "nix_approved_to_chatgpt_observed": "unobserved",
+        },
+    }
     assert status["manifests"]["comparisons"] == {
         "live_to_nix_approved": "match",
         "live_to_chatgpt_observed": "unobserved",
@@ -444,13 +694,19 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
                 "schema": "sinnix.gateway-connector-snapshot.v1",
                 "principal": "observer",
                 "manifest_sha256": "approved-fixture-hash",
+                "action_catalog_sha256": "catalog-hash",
             }
         )
     )
     status = runtime.observe.gateway_status(
-        "observer", "capability-hash", "approved-fixture-hash"
+        "observer", "capability-hash", "approved-fixture-hash", "catalog-hash", "v2-test"
     )
     assert set(status["manifests"]["comparisons"].values()) == {"match"}
+    assert status["catalog"]["chatgpt_observed"] == {
+        "principal": "observer",
+        "sha256": "catalog-hash",
+    }
+    assert set(status["catalog"]["comparisons"].values()) == {"match"}
 
     snapshot.write_text(
         json.dumps(
@@ -462,7 +718,7 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         )
     )
     status = runtime.observe.gateway_status(
-        "observer", "capability-hash", "approved-fixture-hash"
+        "observer", "capability-hash", "approved-fixture-hash", "catalog-hash", "v2-test"
     )
     assert status["manifests"]["comparisons"] == {
         "live_to_nix_approved": "match",
@@ -471,14 +727,99 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
     }
 
 
+def test_gateway_status_reports_catalog_approval_drift(tmp_path: Path) -> None:
+    cfg = dataclasses.replace(
+        config(tmp_path), approved_action_catalog_hash="approved-catalog-hash"
+    )
+    runtime = Runtime.create(cfg, "observer")
+
+    status = runtime.observe.gateway_status(
+        "observer", "capability-hash", "approved-fixture-hash", "live-catalog-hash", "v2-test"
+    )
+
+    assert status["catalog"]["nix_approved"] == {
+        "principal": "observer",
+        "sha256": "approved-catalog-hash",
+    }
+    assert status["catalog"]["comparisons"]["live_to_nix_approved"] == "mismatch"
+
+
+def test_gateway_status_reports_broker_route_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = dataclasses.replace(
+        config(tmp_path),
+        mcp_broker_servers={
+            "lynchpin": {"brokered": True},
+            "polylogue": {"brokered": True},
+        },
+    )
+    runtime = Runtime.create(cfg, "observer")
+    monkeypatch.setattr(
+        runtime.route_preflight,
+        "run",
+        lambda: {"status": "ready", "routes": []},
+    )
+
+    async def catalog() -> dict[str, object]:
+        return {
+            "servers": [
+                {
+                    "name": "lynchpin",
+                    "brokered": True,
+                    "availability": "available",
+                    "tool_count": 8,
+                    "read_only_tool_count": 3,
+                },
+                {
+                    "name": "polylogue",
+                    "brokered": True,
+                    "availability": "unavailable",
+                    "failure_class": "upstream_unavailable",
+                },
+            ]
+        }
+
+    monkeypatch.setattr(runtime.mcp_broker, "catalog", catalog)
+    status = anyio.run(
+        runtime.gateway_status,
+        "capability-hash",
+        "approved-fixture-hash",
+        "catalog-hash",
+        "v2-test",
+    )
+
+    assert status["route_preflight"] == {
+        "status": "degraded",
+        "routes": [
+            {
+                "route": "mcp.lynchpin",
+                "status": "pass",
+                "tool_count": 8,
+                "read_only_tool_count": 3,
+            },
+            {
+                "route": "mcp.polylogue",
+                "status": "unavailable",
+                "tool_count": None,
+                "read_only_tool_count": None,
+                "failure_class": "upstream_unavailable",
+            },
+        ],
+    }
+
+
 def test_gateway_status_keeps_unapproved_principal_unobserved(tmp_path: Path) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
 
     status = runtime.observe.gateway_status(
-        "operator", "capability-hash", "operator-live-hash"
+        "operator", "capability-hash", "operator-live-hash", "catalog-hash", "v2-test"
     )
 
     assert status["manifests"]["nix_approved"] is None
+    assert status["catalog"]["nix_approved"] is None
+    assert status["catalog"]["chatgpt_observed"] is None
+    assert set(status["catalog"]["comparisons"].values()) == {"unobserved"}
     assert status["manifests"]["comparisons"] == {
         "live_to_nix_approved": "unobserved",
         "live_to_chatgpt_observed": "unobserved",
@@ -489,9 +830,20 @@ def test_gateway_status_keeps_unapproved_principal_unobserved(tmp_path: Path) ->
 def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:
     cfg = config(tmp_path)
     runtime = Runtime.create(cfg, "agent-control")
-    source = cfg.state_dir / "jobs" / "job.log"
+    directory = cfg.state_dir / "diagnostics" / "fixture"
+    directory.mkdir(parents=True)
+    source = directory / "fixture.log"
     source.write_bytes(b"abcdef")
     source.chmod(0o600)
+    (directory / "receipt.json").write_text(
+        json.dumps(
+            {
+                "schema": "sinnix.gateway-diagnostic-receipt.v1",
+                "diagnostic_id": "fixture",
+                "files": [source.name],
+            }
+        )
+    )
     first = runtime.artifacts.register(source, kind="log", owner_id="job-a")
     second = runtime.artifacts.register(source, kind="log", owner_id="job-a")
     assert first != second
@@ -501,312 +853,37 @@ def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:
     assert "source" not in chunk
 
 
-def test_malformed_job_records_are_visible(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "agent-control")
-    (runtime.jobs.root / "broken.json").write_text("{not-json")
-    result = runtime.jobs.list()
-    assert result["jobs"] == []
-    assert result["malformed_records"][0]["record"] == "broken.json"
-
-
-def test_job_list_preserves_schema_three_manifests(tmp_path: Path) -> None:
-    controller = tmp_path / "agent-job-control"
-    controller.write_text(
-        f"#!{sys.executable}\n"
-        "import pathlib, sys\n"
-        "print((pathlib.Path(sys.argv[2]) / f'{sys.argv[5]}.json').read_text())\n"
-    )
-    controller.chmod(0o700)
-    cfg = dataclasses.replace(config(tmp_path), agent_controller=controller)
-    runtime = Runtime.create(cfg, "agent-control")
-    manifest = {
-        "schema_version": 3,
-        "job_id": "schema-three-job",
-        "lifecycle": "completed",
-        "launcher": {"scope_unit": "sinnix-agent-job-schema-three-job.scope"},
-    }
-    (runtime.jobs.root / "schema-three-job.json").write_text(json.dumps(manifest))
-
-    result = runtime.jobs.list()
-
-    assert [job["job_id"] for job in result["jobs"]] == ["schema-three-job"]
-    assert result["malformed_records"] == []
-
-
-def test_gateway_status_uses_shared_native_controller(tmp_path: Path) -> None:
-    controller = tmp_path / "agent-job-control"
-    controller.write_text(
-        f"#!{sys.executable}\n"
-        "import json, pathlib, sys\n"
-        "value=json.loads((pathlib.Path(sys.argv[2]) / f'{sys.argv[5]}.json').read_text())\n"
-        "value['lifecycle']='timed_out'\n"
-        "value['live']={'available':True,'Result':'timeout','MemoryHigh':'2G'}\n"
-        "print(json.dumps(value))\n"
-    )
-    controller.chmod(0o700)
-    cfg = dataclasses.replace(config(tmp_path), agent_controller=controller)
-    runtime = Runtime.create(cfg, "agent-control")
-    manifest = {
-        "schema_version": 2,
-        "job_id": "deadline-job",
-        "lifecycle": "running",
-        "launcher": {
-            "pid": 1,
-            "proc_start": "1",
-            "scope_unit": "sinnix-agent-job-deadline-job.scope",
-            "cgroup": "/fixture",
-        },
-        "worktree": str(cfg.projects["fixture"].path),
-    }
-    (runtime.jobs.root / "deadline-job.json").write_text(json.dumps(manifest))
-    status = runtime.jobs.status("deadline-job")
-    assert status["lifecycle"] == "timed_out"
-    assert status["live"]["Result"] == "timeout"
-    assert status["live"]["MemoryHigh"] == "2G"
-
-
-def test_gateway_rejects_runner_job_id_collision(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    job_id = "00000000-0000-4000-8000-000000000001"
-    runner = tmp_path / "runner"
-    runner.write_text("#!/bin/sh\nexit 2\n")
-    runner.chmod(0o700)
-    cfg = dataclasses.replace(config(tmp_path), agent_runner=runner)
-    runtime = Runtime.create(cfg, "agent-control")
-    old_prompt = runtime.jobs.root / f"{job_id}.prompt.md"
-    old_prompt.write_text("original")
-    (runtime.jobs.root / f"{job_id}.json").write_text(
-        json.dumps({"schema_version": 2, "job_id": job_id, "launch_id": "original"})
-    )
-    monkeypatch.setattr("sinnix_agent_gateway.jobs.uuid.uuid4", lambda: job_id)
-    with pytest.raises(JobError, match="collision"):
-        runtime.jobs.launch_agent(
-            AgentLaunchRequest(project_id="fixture", prompt="new", backend="codex")
-        )
-    assert old_prompt.read_text() == "original"
-
-
-def test_launch_agent_unlinks_prompt_when_subprocess_popen_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    job_id = "00000000-0000-4000-8000-000000000002"
-    launch_id = "deadbeefdeadbeefdeadbeefdeadbeef"
-    runner = tmp_path / "runner"
-    runner.write_text("#!/bin/sh\nexit 0\n")
-    # Deliberately not executable: agent_runner.is_file() still passes the
-    # pre-flight check, but subprocess.Popen raises a real PermissionError
-    # (a subclass of OSError) when it tries to exec this file -- no mocking
-    # of Popen itself, just an OS-enforced launch failure.
-    runner.chmod(0o600)
-    cfg = dataclasses.replace(config(tmp_path), agent_runner=runner)
-    runtime = Runtime.create(cfg, "agent-control")
-    monkeypatch.setattr("sinnix_agent_gateway.jobs.uuid.uuid4", lambda: job_id)
-    monkeypatch.setattr("sinnix_agent_gateway.jobs.secrets.token_hex", lambda _n: launch_id)
-
-    prompt_path = runtime.jobs.root / f"{job_id}.{launch_id}.prompt.md"
-    with pytest.raises(JobError, match="failed to launch attested agent job"):
-        runtime.jobs.launch_agent(
-            AgentLaunchRequest(
-                project_id="fixture", prompt="secret prompt body", backend="codex"
-            )
-        )
-
-    assert not prompt_path.exists()
-    leftover = list(runtime.jobs.root.glob(f"{job_id}.*.prompt.md"))
-    assert leftover == [], f"prompt file(s) survived a launch failure: {leftover}"
-    # An observer-scoped principal must not be able to read a prompt that a
-    # failed launch left behind -- verify no readable file remains, not just
-    # that the JobService's own handle is gone.
-    observer_files = Runtime.create(runtime.config, "observer").files
-    with pytest.raises(FileError, match="path does not exist"):
-        observer_files.read("read", str(prompt_path))
-
-
-def test_agent_worktree_authorization_reaches_runner_boundary(tmp_path: Path) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    subprocess.run(["git", "-C", str(project), "init", "-q"], check=True)
-    (project / "tracked.txt").write_text("tracked\n")
-    subprocess.run(["git", "-C", str(project), "add", "tracked.txt"], check=True)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(project),
-            "-c",
-            "user.email=test@example.invalid",
-            "-c",
-            "user.name=Test",
-            "commit",
-            "-qm",
-            "initial",
-        ],
-        check=True,
-    )
-    linked = tmp_path / "linked"
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(project),
-            "worktree",
-            "add",
-            "-q",
-            "-b",
-            "linked",
-            str(linked),
-        ],
-        check=True,
-    )
-    capture = tmp_path / "runner-argv.json"
-    runner = tmp_path / "runner"
-    runner.write_text(
-        f"#!{sys.executable}\n"
-        "import json, pathlib, sys\n"
-        "args = sys.argv[1:]\n"
-        f"pathlib.Path({str(capture)!r}).write_text(json.dumps(args))\n"
-        "values = dict(zip(args[::2], args[1::2]))\n"
-        "state = pathlib.Path(values['--job-state-dir'])\n"
-        "job = values['--job-id']\n"
-        "launch = values['--launch-id']\n"
-        "(state / f'{job}.json').write_text(json.dumps({'schema_version': 3, 'job_id': job, 'launch_id': launch}))\n"
-    )
-    runner.chmod(0o700)
-    cfg = GatewayConfig(
-        state_dir=tmp_path / "state",
-        projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
-        agent_runner=runner,
-    )
-    runtime = Runtime.create(cfg, "agent-control")
-
-    result = runtime.jobs.launch_agent(
-        AgentLaunchRequest(
-            project_id="fixture",
-            prompt="prompt",
-            backend="codex",
-            worktree=str(linked),
-        )
-    )
-    args = json.loads(capture.read_text())
-    values = dict(zip(args[::2], args[1::2]))
-    assert result["accepted"] is True
-    assert values["--workdir"] == str(linked)
-    assert values["--registered-project"] == str(project)
-    assert Path(values["--expected-git-common-dir"]).resolve() == (project / ".git").resolve()
-
-
-def test_launch_agent_uses_local_workdir_for_non_git_registered_project(
-    tmp_path: Path,
-) -> None:
-    # A registered project is not required to be a Git checkout (config.py
-    # never enforces that). Before this fix, launch_agent unconditionally
-    # passed --registered-project plus an *empty* --expected-git-common-dir
-    # for such a project -- and the runner's own `${2:?msg}` argument parser
-    # treats an empty value the same as a missing one, so every launch
-    # against a non-Git registered project crashed at argument-parsing time,
-    # before any of the runner's own validation logic ran (reproduced
-    # directly against the runner script; not exercised here since this test
-    # captures argv with a fixture runner rather than invoking the real one).
-    # _authorized_agent_worktree guarantees `worktree` cannot differ from
-    # the registered project in this case (any other requested worktree
-    # fails to validate without a Git common directory to link against), so
-    # --local-workdir is the exact non-attested opt-out for that guarantee,
-    # not a weakening of it.
-    project = tmp_path / "project"
-    project.mkdir()  # deliberately not a Git checkout
-    capture = tmp_path / "runner-argv.json"
-    runner = tmp_path / "runner"
-    runner.write_text(
-        f"#!{sys.executable}\n"
-        "import json, pathlib, sys\n"
-        "args = sys.argv[1:]\n"
-        f"pathlib.Path({str(capture)!r}).write_text(json.dumps(args))\n"
-        "values, i = {}, 0\n"
-        "while i < len(args):\n"
-        "    if args[i] == '--local-workdir':\n"
-        "        values['--local-workdir'] = True\n"
-        "        i += 1\n"
-        "    else:\n"
-        "        values[args[i]] = args[i + 1]\n"
-        "        i += 2\n"
-        "state = pathlib.Path(values['--job-state-dir'])\n"
-        "job = values['--job-id']\n"
-        "launch = values['--launch-id']\n"
-        "(state / f'{job}.json').write_text(json.dumps({'schema_version': 3, 'job_id': job, 'launch_id': launch}))\n"
-    )
-    runner.chmod(0o700)
-    cfg = GatewayConfig(
-        state_dir=tmp_path / "state",
-        projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
-        agent_runner=runner,
-    )
-    runtime = Runtime.create(cfg, "agent-control")
-
-    result = runtime.jobs.launch_agent(
-        AgentLaunchRequest(project_id="fixture", prompt="prompt", backend="codex")
-    )
-    args = json.loads(capture.read_text())
-    assert result["accepted"] is True
-    assert "--local-workdir" in args
-    assert "--registered-project" not in args
-    assert "--expected-git-common-dir" not in args
-    # The crash-inducing case: an empty string ever reaching argv as a flag
-    # value that the runner's `${var:?msg}` parser would reject.
-    assert "" not in args
-
-
-def test_agent_overlay_is_deferred_before_secret_state_is_created(
-    tmp_path: Path,
-) -> None:
-    runtime = Runtime.create(config(tmp_path), "agent-control")
-    with pytest.raises(ValidationError, match="deferred"):
-        AgentLaunchRequest.model_validate(
-            {
-                "project_id": "fixture",
-                "prompt": "secret prompt",
-                "backend": "codex",
-                "environment_overlay": {"API_TOKEN": "secret-value"},
-            }
-        )
-
-    overlay_paths = list(runtime.jobs.root.glob("*.environment.json"))
-    assert overlay_paths == []
-    observer_files = Runtime.create(runtime.config, "observer").files
-    with pytest.raises(FileError, match="path does not exist"):
-        observer_files.read("read", str(runtime.jobs.root / "not-created.environment.json"))
-
-
-def test_agent_overlay_rejects_reserved_identity_variables(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "agent-control")
-    with pytest.raises(ValidationError, match="reserved"):
-        AgentLaunchRequest.model_validate(
-            {
-                "project_id": "fixture",
-                "prompt": "prompt",
-                "backend": "codex",
-                "environment_overlay": {"SINNIX_CORRELATION_ID": "spoofed"},
-            }
-        )
-    assert list(runtime.jobs.root.glob("*.environment.json")) == []
-
-
-def test_agent_environment_is_explicitly_allowlisted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("SINNIX_GATEWAY_PROBE_SECRET", "must-not-propagate")
-    runtime = Runtime.create(config(tmp_path), "agent-control")
-    environment = runtime.jobs._environment()
-    assert "SINNIX_GATEWAY_PROBE_SECRET" not in environment
-    assert "PATH" in environment
-
-
 def test_unknown_principal_is_rejected_before_server_creation(tmp_path: Path) -> None:
     with pytest.raises(PolicyError):
         create_server(config(tmp_path), "unknown")
 
 
-def test_cli_rejects_retired_profile_flag() -> None:
+def test_approval_check_requires_the_current_paired_contract(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    approved = dataclasses.replace(
+        cfg,
+        approved_manifest_hash=anyio.run(build_manifest, cfg, "observer")["sha256"],
+        approved_action_catalog_hash=REGISTRY.action_catalog_hash("observer"),
+    )
+
+    assert verify_approval(approved, "observer") == {
+        "principal": "observer",
+        "tool_manifest_hash": approved.approved_manifest_hash,
+        "action_catalog_hash": approved.approved_action_catalog_hash,
+    }
+
+    with pytest.raises(ValueError, match="action catalog drift"):
+        verify_approval(
+            dataclasses.replace(
+                approved, approved_action_catalog_hash="unapproved-catalog"
+            ),
+            "observer",
+        )
+
+
+def test_cli_exposes_catalog_hash_without_retired_profiles() -> None:
+    assert parser().parse_args(["catalog-hash"]).command == "catalog-hash"
+    assert parser().parse_args(["approval-check"]).command == "approval-check"
     with pytest.raises(SystemExit):
         parser().parse_args(["--profile", "observer", "info"])
 
@@ -819,18 +896,30 @@ def test_config_load_uses_one_project_contract(tmp_path: Path) -> None:
         json.dumps(
             {
                 "stateDir": str(tmp_path / "state"),
+                "approvedActionCatalogHash": "fixture-catalog-hash",
                 "projects": {
                     "fixture": {
                         "path": str(project),
                         "observerRead": True,
+                        "devtoolsEntrypoint": "nix develop",
+                        "taskAuthority": {
+                            "owner": "beads",
+                            "workspace": str(project / ".beads"),
+                            "database": str(project / ".beads" / "dolt"),
+                            "publicationPolicy": "dolt-sync",
+                        },
                     }
                 },
             }
         )
     )
     loaded = GatewayConfig.load(path)
+    assert loaded.approved_action_catalog_hash == "fixture-catalog-hash"
     assert loaded.projects["fixture"].path == project
     assert loaded.projects["fixture"].observer_read is True
+    assert loaded.projects["fixture"].devtools_entrypoint == "nix develop"
+    assert loaded.projects["fixture"].task_authority is not None
+    assert loaded.projects["fixture"].task_authority.database == project / ".beads" / "dolt"
 
 
 def test_config_rejects_retired_project_visibility_fields(tmp_path: Path) -> None:
@@ -860,10 +949,18 @@ def test_machine_report_timeout_is_a_typed_failure(
 ) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
 
-    def timeout(*args, **kwargs):
-        raise subprocess.TimeoutExpired("sinnix-observe", 20)
-
-    monkeypatch.setattr(observe_module.subprocess, "run", timeout)
+    monkeypatch.setattr(
+        runtime.observe.execution,
+        "run",
+        lambda *_args, **_kwargs: ExecutionResult(
+            command=("sinnix-observe",),
+            exit_status=-15,
+            stdout=b"",
+            stderr=b"",
+            timed_out=True,
+            failure_class="command_timeout",
+        ),
+    )
     result = runtime.observe.machine_report()
     assert result["failure_class"] == "collector_timeout"
 
@@ -891,7 +988,25 @@ def test_machine_query_selects_and_pages_large_collector_report(tmp_path: Path) 
     }
     collector = tmp_path / "observe-fixture"
     collector.write_text(
-        f"#!{sys.executable}\nimport json\nprint(json.dumps({report!r}))\n"
+        f"""#!{sys.executable}
+import json
+import sys
+
+report = {report!r}
+section = sys.argv[sys.argv.index("--section") + 1]
+if section == "units":
+    cursor = int(sys.argv[sys.argv.index("--cursor") + 1])
+    page_limit = int(sys.argv[sys.argv.index("--page-limit") + 1])
+    rows = report["systemd_units"]
+    next_cursor = cursor + len(rows[cursor : cursor + page_limit])
+    report["systemd_units"] = {{
+        "total": len(rows),
+        "cursor": cursor,
+        "next_cursor": next_cursor if next_cursor < len(rows) else None,
+        "rows": rows[cursor : cursor + page_limit],
+    }}
+print(json.dumps(report))
+"""
     )
     collector.chmod(0o700)
     cfg = GatewayConfig(
@@ -902,10 +1017,13 @@ def test_machine_query_selects_and_pages_large_collector_report(tmp_path: Path) 
     )
     runtime = Runtime.create(cfg, "observer")
 
-    assert runtime.observe.machine_report()["failure_class"] == "response_bound"
+    machine_report = runtime.observe.machine_report()
     overview = runtime.observe.machine_query("overview")
     units = runtime.observe.machine_query("units", cursor=20, limit=3)
 
+    assert machine_report["available"] is True
+    assert machine_report["operation"] == "overview"
+    assert machine_report["sections"]["live_pressure"] == {"state": "quiet"}
     assert overview["available"] is True
     assert overview["source"]["schema"] == "sinnix.observe.v1"
     assert overview["sections"]["live_pressure"] == {"state": "quiet"}
@@ -916,6 +1034,49 @@ def test_machine_query_selects_and_pages_large_collector_report(tmp_path: Path) 
         "fixture-20.service",
         "fixture-21.service",
         "fixture-22.service",
+    ]
+
+
+def test_machine_query_requests_owner_selected_section(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = Runtime.create(config(tmp_path), "observer")
+    calls = []
+    report = {
+        "schema": "sinnix.observe.v1",
+        "generated_at": "2026-08-21T00:00:00Z",
+        "window": {},
+        "systemd_units": {"total": 0, "cursor": 0, "next_cursor": None, "rows": []},
+    }
+    monkeypatch.setattr(
+        runtime.observe.execution,
+        "run",
+        lambda command, _profile: calls.append(command)
+        or ExecutionResult(
+            command=tuple(command),
+            exit_status=0,
+            stdout=json.dumps(report).encode(),
+            stderr=b"",
+        ),
+    )
+
+    result = runtime.observe.machine_query("units")
+
+    assert result["available"] is True
+    assert calls == [
+        [
+            runtime.config.observe_command,
+            "--format",
+            "json",
+            "--limit",
+            "20",
+            "--section",
+            "units",
+            "--cursor",
+            "0",
+            "--page-limit",
+            "100",
+        ]
     ]
 
 
@@ -930,20 +1091,30 @@ def test_machine_query_reduces_page_to_response_bound(
         ),
         "observer",
     )
-    report = {
-        "schema": "sinnix.observe.v1",
-        "generated_at": "2026-08-21T00:00:00Z",
-        "window": {},
-        "systemd_units": [
-            {"unit": f"fixture-{index}.service", "detail": "x" * 700}
-            for index in range(3)
-        ],
-    }
-    monkeypatch.setattr(
-        runtime.observe,
-        "_collect_report",
-        lambda: {"available": True, "report": report},
-    )
+    rows = [
+        {"unit": f"fixture-{index}.service", "detail": "x" * 700}
+        for index in range(3)
+    ]
+
+    def collect(_operation: str, cursor: int, page_limit: int) -> dict[str, object]:
+        selected = rows[cursor : cursor + page_limit]
+        next_cursor = cursor + len(selected)
+        return {
+            "available": True,
+            "report": {
+                "schema": "sinnix.observe.v1",
+                "generated_at": "2026-08-21T00:00:00Z",
+                "window": {},
+                "systemd_units": {
+                    "total": len(rows),
+                    "cursor": cursor,
+                    "next_cursor": next_cursor if next_cursor < len(rows) else None,
+                    "rows": selected,
+                },
+            },
+        }
+
+    monkeypatch.setattr(runtime.observe, "_collect_report", collect)
 
     result = runtime.observe.machine_query("units", limit=3)
 

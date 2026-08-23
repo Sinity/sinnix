@@ -34,15 +34,18 @@
 
   sinnix.persistence.enable = true;
   sinnix.services = {
+    sinnixd.enable = true;
     agent-gateway = {
       enable = true;
       tunnel = {
         enable = true;
-        # Review checkpoint on what reaches remote ChatGPT. This is the reviewed
-        # observer manifest, regenerated from the packaged gateway on 2026-08-21.
-        # It contains only read-annotated tools, including bounded content and
-        # opaque-artifact reads authorized for the observer principal.
-        approvedManifestHash = "865604729fda6738291255ccf8c93a13bc98a93c71eece951d96ee69ff12f37c";
+        # Review checkpoint on what reaches remote ChatGPT. This V3 observer
+        # manifest was regenerated from the packaged gateway on 2026-08-22.
+        # It contains only read-annotated tools, including bounded content,
+        # opaque-artifact reads, V3 status, catalog, canonical get, checkout selection,
+        # and route preflight.
+        approvedManifestHash = "026ce1d679a5eeb6eb866937ba067e12f3b17a453734b37e460177c9f0e2bc8e";
+        approvedActionCatalogHash = "12749fedc7b71bc3fe096fafd8eab3953fdfe6d5e3e5c4111b8ee3aa254af4cd";
         tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
       };
     };
@@ -181,7 +184,11 @@
       # graphical boot transaction.
       autoStart = false;
       provisionDatabase = true;
-      activationProfile = "full";
+      # A bounded daily-use trial: Atuin terminal history reaches
+      # sinex_search_events without enabling the full workstation capture and
+      # automata graph. The delayed timer stays inert until this loop has
+      # survived its one-week observation window.
+      activationProfile = "user-mile";
       environment = "prod";
       filesystem.watchPaths = [
         "/realm/project"
