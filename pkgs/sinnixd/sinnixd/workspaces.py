@@ -4,6 +4,7 @@ import hashlib
 import io
 import os
 import re
+import stat
 from fnmatch import fnmatch
 import shutil
 import subprocess
@@ -354,7 +355,7 @@ class GitWorkspaces:
                 raise WorkspaceError("merged review head no longer matches workspace HEAD")
             if self._git(checkout.path, "status", "--porcelain", "--untracked-files=all").stdout:
                 raise WorkspaceError("merged workspace must be clean before finish")
-            removed = self._git(project.root, "worktree", "remove", str(record.path), check=False)
+            removed = self._remove_worktree(project, record, checkout)
             if removed.returncode != 0:
                 raise WorkspaceError(removed.stderr.strip() or "git worktree remove failed")
             self._git(project.root, "branch", "-D", record.branch, check=False)
@@ -386,7 +387,7 @@ class GitWorkspaces:
                 raise WorkspaceError("integration target is not contained in the declared default base")
             if not self._tree_equivalent(project.root, target_ref, checkout.head):
                 raise WorkspaceError("workspace changes are not fully represented by the integration target")
-            removed = self._git(project.root, "worktree", "remove", str(record.path), check=False)
+            removed = self._remove_worktree(project, record, checkout)
             if removed.returncode != 0:
                 raise WorkspaceError(removed.stderr.strip() or "git worktree remove failed")
             self._git(project.root, "branch", "-D", record.branch, check=False)
@@ -429,7 +430,7 @@ class GitWorkspaces:
         try:
             self.store.put(record)
         except BaseException:
-            self._git(project.root, "worktree", "remove", str(path), check=False)
+            self._remove_worktree(project, record, checkout)
             if not branch_exists:
                 self._git(project.root, "branch", "-D", branch, check=False)
             raise
@@ -466,7 +467,7 @@ class GitWorkspaces:
             head = status["head"]
             if not isinstance(head, str) or not self._head_is_contained_in_declared_base(project, head):
                 raise WorkspaceError("workspace HEAD is not contained in the declared base")
-            removed = self._git(project.root, "worktree", "remove", str(record.path), check=False)
+            removed = self._remove_worktree(project, record)
             if removed.returncode != 0:
                 raise WorkspaceError(removed.stderr.strip() or "git worktree remove failed")
             self.store.remove_stack_references(workspace_id)
@@ -495,7 +496,7 @@ class GitWorkspaces:
             if not self._head_is_contained_in_declared_base(project, checkout.head):
                 raise WorkspaceError("workspace has unpublished committed content")
             self._verify_disposable_checkpoints(workspace_id)
-            removed = self._git(project.root, "worktree", "remove", str(record.path), check=False)
+            removed = self._remove_worktree(project, record, checkout)
             if removed.returncode != 0:
                 raise WorkspaceError(removed.stderr.strip() or "git worktree remove failed")
             branch = self._git(project.root, "branch", "-D", record.branch, check=False)
@@ -531,7 +532,7 @@ class GitWorkspaces:
             except BaseException:
                 child = self._record(created["workspace_id"])
                 project = self._project(parent.project_id)
-                self._git(project.root, "worktree", "remove", str(child.path), check=False)
+                self._remove_worktree(project, child)
                 self.store.remove(child.workspace_id)
                 raise
         return {**created, "parent_workspace_id": parent_workspace_id}
@@ -733,7 +734,7 @@ class GitWorkspaces:
             try:
                 restored = self._restore_locked(workspace_id, checkpoint_id)
             except BaseException:
-                self._git(project.root, "worktree", "remove", "--force", str(record.path), check=False)
+                self._remove_worktree(project, record, "--force")
                 raise
             return {**restored, "recovered": True, "path": str(record.path)}
 
@@ -775,6 +776,93 @@ class GitWorkspaces:
         if self._branch(checkout.path) != record.branch:
             raise WorkspaceError("workspace branch identity changed")
         return checkout, project
+
+    def _remove_worktree(
+        self, project: ProjectAdapter, record: WorkspaceRecord, *arguments: str | RegisteredCheckout
+    ) -> subprocess.CompletedProcess[str]:
+        checkout = next((item for item in arguments if isinstance(item, RegisteredCheckout)), None)
+        flags = tuple(item for item in arguments if isinstance(item, str))
+        if checkout is None:
+            checkout = self._checkout_by_path(record.project_id, record.path)
+        if checkout.path != record.path:
+            raise WorkspaceError("registered checkout does not match workspace record")
+        self._canonicalize_gitfile_symlink(checkout)
+        return self._git(project.root, "worktree", "remove", *flags, str(record.path), check=False)
+
+    @staticmethod
+    def _canonicalize_gitfile_symlink(checkout: RegisteredCheckout) -> None:
+        """Replace only the exact registered-worktree gitdir symlink with a Git gitfile."""
+        gitfile = checkout.path / ".git"
+        try:
+            metadata = gitfile.lstat()
+        except FileNotFoundError as error:
+            raise WorkspaceError("workspace .git file is missing") from error
+        except OSError as error:
+            raise WorkspaceError("workspace .git file is unavailable") from error
+        if stat.S_ISDIR(metadata.st_mode):
+            raise WorkspaceError("workspace .git path is a directory, not a gitfile")
+        if not stat.S_ISLNK(metadata.st_mode):
+            if not stat.S_ISREG(metadata.st_mode):
+                raise WorkspaceError("workspace .git path is not a regular gitfile")
+            return
+
+        try:
+            target = gitfile.resolve(strict=True)
+            worktrees_root = (checkout.git_common_dir / "worktrees").resolve(strict=True)
+        except FileNotFoundError as error:
+            raise WorkspaceError("workspace .git symlink is broken") from error
+        except OSError as error:
+            raise WorkspaceError("workspace .git symlink is unavailable") from error
+        try:
+            target.relative_to(worktrees_root)
+        except ValueError as error:
+            raise WorkspaceError("workspace .git symlink target is outside the repository worktrees area") from error
+        expected = GitWorkspaces._registered_worktree_gitdir(checkout, worktrees_root)
+        if target != expected:
+            raise WorkspaceError("workspace .git symlink target does not match its registered worktree gitdir")
+
+        descriptor, temporary = tempfile.mkstemp(prefix=".git.", dir=gitfile.parent)
+        try:
+            with os.fdopen(descriptor, "w") as handle:
+                handle.write(f"gitdir: {expected}\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temporary, 0o644)
+            os.replace(temporary, gitfile)
+        except OSError as error:
+            raise WorkspaceError("could not canonicalize workspace .git symlink") from error
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+
+    @staticmethod
+    def _registered_worktree_gitdir(checkout: RegisteredCheckout, worktrees_root: Path) -> Path:
+        expected_gitfile = checkout.path / ".git"
+        try:
+            entries = tuple(worktrees_root.iterdir())
+        except OSError as error:
+            raise WorkspaceError("repository worktrees area is unavailable") from error
+        matches: list[Path] = []
+        for candidate in entries:
+            reference = candidate / "gitdir"
+            try:
+                raw_gitfile = reference.read_text().strip()
+            except OSError:
+                continue
+            if not raw_gitfile:
+                continue
+            registered_gitfile = Path(os.path.normpath(os.path.abspath(raw_gitfile)))
+            if registered_gitfile != expected_gitfile:
+                continue
+            try:
+                candidate_target = candidate.resolve(strict=True)
+            except OSError as error:
+                raise WorkspaceError("registered worktree gitdir is unavailable") from error
+            if candidate_target.parent != worktrees_root or not candidate_target.is_dir():
+                raise WorkspaceError("registered worktree gitdir is outside the repository worktrees area")
+            matches.append(candidate_target)
+        if len(matches) != 1:
+            raise WorkspaceError("registered worktree gitdir is unavailable or ambiguous")
+        return matches[0]
 
     def _identity_check(self, project: ProjectAdapter, path: Path) -> None:
         assert project.workspace is not None
