@@ -135,16 +135,10 @@ check_flake() {
 
 check_work() {
   local jobs leases
-  jobs=0
-  for manifest in "${SINNIX_AGENT_JOB_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/agent-jobs}"/*.json; do
-    [ -r "$manifest" ] || continue
-    case "$(jq -r '.lifecycle // empty' "$manifest" 2>/dev/null || true)" in
-      starting|running|cancel_requested) jobs=$((jobs + 1)) ;;
-    esac
-  done
-  leases="$(systemctl --user list-units --state=active --no-legend 2>/dev/null | awk '$1 ~ /sinnix-(build|agent|borg)/ {n++} END {print n+0}' || true)"
+  jobs="$(systemctl --user list-units --state=active --no-legend 2>/dev/null | awk '$1 ~ /^sinnixd-job-.*\.service$/ {n++} END {print n+0}' || true)"
+  leases="$(systemctl --user list-units --state=active --no-legend 2>/dev/null | awk '$1 ~ /sinnix-(build|agent|borg)/ && $1 !~ /^sinnixd-job-/ {n++} END {print n+0}' || true)"
   if [ "$jobs" -gt 0 ] || [ "$leases" -gt 0 ]; then
-    report 1 live-work "agent_manifests=${jobs}, active_work_units=${leases}"
+    report 1 live-work "agentctl_jobs=${jobs}, active_work_units=${leases}"
   else
     report 0 live-work "no active agent or build units observed"
   fi

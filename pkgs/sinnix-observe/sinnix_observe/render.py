@@ -98,14 +98,14 @@ def render_human(report: dict[str, Any]) -> str:
             f"max={policy.get('memory_max')} io_weight={policy.get('io_weight')}"
         )
 
-    section("agent gateway")
+    section("AgentCTL jobs")
     gateway = report.get("agent_gateway", {})
     lines.append(
-        f"available={gateway.get('available')} audit_error={gateway.get('audit_error')} quota={gateway.get('quota', {}).get('provenance')}"
+        f"available={gateway.get('available')} malformed_records={len(gateway.get('malformed_records', []))}"
     )
     for row in gateway.get("correlations", [])[:10]:
         lines.append(
-            f"  {row.get('job_id')} scope={row.get('scope_unit')} cgroup={row.get('cgroup')} correlated={row.get('complete')}"
+            f"  {row.get('job_id')} unit={row.get('unit')} cgroup={row.get('cgroup')} terminal={row.get('terminal')}"
         )
 
     section("resource slices")

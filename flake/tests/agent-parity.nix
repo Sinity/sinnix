@@ -6,7 +6,7 @@
 # Provably fails when: a `polylogue-hook <Event>` lane present in Claude's
 # settings is dropped from the generated Codex hooks (verified by removing
 # the PostToolUse entry from modules/features/dev/agents/hooks.nix), or when
-# either client loses the pre-compaction handoff or the orphan sweep.
+# either client loses the pre-compaction handoff or the shared hook coverage.
 { inputs, ... }:
 {
   perSystem =
@@ -52,11 +52,9 @@
               exit 1
             fi
 
-            # The two cross-client commands the parity matrix records as
-            # enforced on both sides. Each lives in its own source file, so
-            # this is an agreement between two files rather than an echo of
-            # one.
-            for command in sinnix-context-handoff "sinnix-mcp-sweep --orphans-only"; do
+            # The shared context handoff is configured independently for both
+            # clients, so this verifies the intended cross-client agreement.
+            for command in sinnix-context-handoff; do
               for file in "$claudeHooks" "$codexHooks"; do
                 jq -e --arg needle "$command" '
                   [.hooks[][].hooks[]?.command] | any(contains($needle))

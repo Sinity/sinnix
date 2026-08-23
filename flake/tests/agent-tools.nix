@@ -196,7 +196,6 @@ in
           ".local/bin/mcp-chrome-devtools"
           ".local/bin/mcp-polylogue"
           ".local/bin/mcp-sinex"
-          ".local/bin/sinnix-mcp-sweep"
           ".config/hermes/skills"
           ".config/claude/agents"
         ];
@@ -499,7 +498,7 @@ in
               ([.hooks.SessionStart[].hooks[].command]
                 | any(contains("sessionstart-sinex-recall.sh"))) and
               ([.hooks.Stop[].hooks[].command]
-                | any(contains("sinnix-mcp-sweep --orphans-only --quiet")))
+                | any(contains("polylogue-hook Stop --provider claude-code")))
             ' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
 
             # Rendered profile configs must match the registry's own computed
@@ -586,7 +585,7 @@ in
 
             jq -e '
               [.hooks.Stop[].hooks[].command]
-              | any(contains("sinnix-mcp-sweep --orphans-only --quiet"))
+              | any(contains("polylogue-hook Stop --provider codex"))
             ' "$HOME/.codex/hooks.json" >/dev/null
             jq -e '
               [.hooks.SessionStart[].hooks[].command] | index("bd-prime-if-present")
@@ -674,26 +673,6 @@ in
           }
           ''
             ${pkgs.bash}/bin/bash ${../../flake/tests/scope-wrapper.sh} ${pkgs.writeText "sinnix-direnvrc-rendered" (runtimeDefaults.renderDirenvrc (builtins.readFile ../../scripts/sinnix-direnvrc))}
-            touch "$out"
-          '';
-      mcpSweepFixture =
-        pkgs.runCommand "mcp-sweep-fixture"
-          {
-            nativeBuildInputs = [
-              pkgs.bash
-              pkgs.coreutils
-              pkgs.findutils
-              pkgs.gawk
-              pkgs.jq
-              pkgs.procps
-            ];
-          }
-          ''
-            sweep="$TMPDIR/sinnix-mcp-sweep"
-            cp ${../../scripts/sinnix-mcp-sweep} "$sweep"
-            chmod +x "$sweep"
-            patchShebangs "$sweep"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/mcp-sweep.sh} "$sweep"
             touch "$out"
           '';
       preflightFixture =
@@ -966,7 +945,6 @@ in
         agent-resource-policy = agentResourcePolicy;
         agent-npm-bootstrap-recovery = agentNpmBootstrapRecovery;
         scope-wrapper = scopeWrapperFixture;
-        mcp-sweep = mcpSweepFixture;
         preflight = preflightFixture;
         kitty-agent-here = kittyAgentHereFixture;
         bd-safety-hook = bdSafetyHookFixture;

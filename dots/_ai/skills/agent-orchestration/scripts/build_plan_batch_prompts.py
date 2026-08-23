@@ -119,16 +119,13 @@ def main():
         path.write_text(prompt, encoding="utf-8")
         generated.append(str(path))
 
-    manifest = {
+    result = {
         "plan_json": str(Path(args.plan_json).resolve()),
         "out_dir": str(out_dir.resolve()),
         "generated_count": len(generated),
         "generated": generated,
     }
-    (out_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    print(json.dumps(manifest, indent=2, sort_keys=True))
+    print(json.dumps(result, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

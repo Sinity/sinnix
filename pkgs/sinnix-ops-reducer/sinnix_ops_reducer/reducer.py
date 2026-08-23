@@ -12,7 +12,6 @@ from sinnix_lib.atomic_json import write_json_atomic
 
 from . import SCHEMA
 from .anchor import expire_anchor, reduce_anchor_event
-from .attention import normalize_attention
 from .hyprland import HyprlandState, Socket2Adapter, reduce_socket_event
 
 
@@ -36,7 +35,7 @@ class Reducer:
         self.state_path = state_path
         self.source = source
         self.events: deque[dict[str, Any]] = deque(maxlen=max_events)
-        self.sequence, self.orphan_observations = self._load_state()
+        self.sequence = self._load_state()
         self.previous_health: dict[str, str] = {}
         self._snapshot: dict[str, Any] = {}
         self.ambient_source = ambient_source
@@ -47,69 +46,23 @@ class Reducer:
         self.hyprland_event_path: Path | None = None
         self.hyprland_socket = Socket2Adapter()
 
-    def _load_state(self) -> tuple[int, dict[str, dict[str, Any]]]:
+    def _load_state(self) -> int:
         if self.state_path is None:
-            return 0, {}
+            return 0
         try:
             value = json.loads(self.state_path.read_text(encoding="utf-8"))
-            observations = value.get("orphan_observations", {})
-            return int(value.get("sequence", 0)), observations if isinstance(
-                observations, dict
-            ) else {}
+            return int(value.get("sequence", 0))
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            return 0, {}
+            return 0
 
     def _save_sequence(self) -> None:
         if self.state_path is not None:
             write_json_atomic(
                 self.state_path,
-                {
-                    "sequence": self.sequence,
-                    "orphan_observations": self.orphan_observations,
-                },
+                {"sequence": self.sequence},
                 mode=0o600,
                 fsync=True,
             )
-
-    def _reduce_orphan_policy(self, report: dict[str, Any]) -> None:
-        gateway = report.get("agent_gateway")
-        if not isinstance(gateway, dict):
-            return
-        observations = gateway.get("orphaned_jobs", [])
-        if not isinstance(observations, list):
-            return
-        reduced = []
-        active_keys: set[str] = set()
-        for row in observations:
-            if not isinstance(row, dict) or not row.get("job_id"):
-                continue
-            key = f"{row['job_id']}:{row.get('identity_revision', '')}"
-            active_keys.add(key)
-            previous = self.orphan_observations.get(key, {})
-            count = int(previous.get("count", 0)) + 1 if row.get("orphaned") else 0
-            self.orphan_observations[key] = {
-                "count": count,
-                "identity_revision": row.get("identity_revision"),
-            }
-            expendable = (row.get("workload") or {}).get("class") == "sacrificial"
-            cold = bool((row.get("coldness") or {}).get("candidate"))
-            proposed = (
-                "reap"
-                if row.get("orphaned") and cold and expendable and count >= 2
-                else "notify"
-            )
-            reduced.append(
-                {
-                    **row,
-                    "policy": {"observation_count": count, "proposed_action": proposed},
-                }
-            )
-        self.orphan_observations = {
-            key: value
-            for key, value in self.orphan_observations.items()
-            if key in active_keys
-        }
-        gateway["orphaned_jobs"] = reduced
 
     def refresh(self) -> dict[str, Any]:
         observed_at = now_iso()
@@ -119,8 +72,6 @@ class Reducer:
             if not isinstance(report, dict):
                 raise ValueError("collector returned a non-object")
             report = dict(report)
-            self._reduce_orphan_policy(report)
-            report["attention"] = normalize_attention(report)
             report["agentctl"] = agent_jobs
             source_health = {
                 "status": "healthy",

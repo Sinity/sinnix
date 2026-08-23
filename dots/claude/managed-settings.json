@@ -93,11 +93,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.local/bin/sinnix-mcp-sweep --orphans-only --quiet",
-            "timeout": 10
-          },
-          {
-            "type": "command",
             "command": "polylogue-hook Stop --provider claude-code",
             "timeout": 5
           }
@@ -118,11 +113,6 @@
     "SessionStart": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "~/.local/bin/sinnix-mcp-sweep --orphans-only --quiet",
-            "timeout": 10
-          },
           {
             "type": "command",
             "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-acknowledged-outages.sh",

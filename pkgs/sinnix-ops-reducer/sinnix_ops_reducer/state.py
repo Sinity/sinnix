@@ -6,7 +6,7 @@ Five accreted shapes reduce to three writer contracts:
     ``sinnix_lib.atomic_json``: no history, the latest write is the whole
     truth. The status snapshot (overwritten every ``refresh()``, decided to
     stay that way -- see ``reducer.Reducer.refresh``), the reducer's own
-    sequence/orphan-observation state, the auth token, and health.py's
+    sequence state, the auth token, and health.py's
     per-key confirm-2 state document all take this shape.
   * "ledger" -- append-only JSONL via ``sinnix_lib.ledger``, read back into an
     in-memory index folded once at start: the action receipts store (one line

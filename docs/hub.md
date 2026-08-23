@@ -51,10 +51,9 @@ process list. It can, because sinnix already names its own work:
   8G/12G cap; a build scope does not, so the figure shown is against
   `build.slice`'s. Slice budgets get their own card, because "how much of the
   sacrificial budget is spent" is the question that predicts a stall.
-- **Agent-gateway jobs** are matched to their `sinnix-agent-job-*.scope` by job
-  id, so a live job shows its backend, model, work item and elapsed time, and
-  the ones whose launcher has exited are listed separately, with the reducer's
-  orphan policy on the ones that need a decision.
+- **AgentCTL jobs** are matched to their `sinnixd-job-*.service` unit by job
+  id, so a live job shows its backend, model, registered checkout, and elapsed
+  time from the canonical Sinnixd record.
 
 Long-lived scopes are labelled as such rather than filtered out. A devshell
 Postgres or a Dolt server that has sat in `build.slice` for a week is not

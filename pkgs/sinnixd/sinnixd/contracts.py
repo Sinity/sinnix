@@ -44,10 +44,6 @@ class TypedJobContracts:
     def inputs_root(self) -> Path:
         return self.jobs.store.root / "inputs"
 
-    @property
-    def native_root(self) -> Path:
-        return self.jobs.store.root / "native"
-
     def start_shell(
         self,
         *,
@@ -196,8 +192,6 @@ class TypedJobContracts:
             f"sinnixd-job-{job_id}.service",
             "--native-runner",
             str(self.native_runner),
-            "--native-state-dir",
-            str(self.native_root),
             "--state-root",
             str(self.jobs.store.root),
         )
