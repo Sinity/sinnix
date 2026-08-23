@@ -24,9 +24,9 @@ the territory; its snapshot date is 2026-08-11.
   cheaper lever: Sonnet at high effort beats Opus at low effort on many tasks.
 - **Context and compaction**: long sessions get summarized ("compacted");
   in-flight state that lives only in conversation memory is what compaction
-  loses. Durable state belongs in files, ledgers, beads — the conversation is
-  a steering console, not RAM. After compaction, re-orient from evidence
-  (Polylogue archive, `bd prime`, git) rather than trusting the summary.
+  loses. Durable state belongs in files, AgentCTL records, and Beads — the
+  conversation is a steering console, not RAM. After compaction, re-orient
+  from Polylogue, AgentCTL, and Git evidence rather than trusting the summary.
 - **Thinking vs output**: extended thinking is usually invisible to the
   operator; anything decision-relevant discovered while thinking must be
   restated in the visible reply. Never rely on the operator having seen it.
@@ -100,8 +100,9 @@ Grounded in measured fanout ops (2026-08-02) + capability research
 - **Never poll background agents** — completion notifications are automatic;
   Monitor only with an until-condition; ScheduleWakeup only for genuine
   wall-clock deadlines (CI grace windows, external state).
-- A **fanout dispatch ledger** records every dispatch via PreToolUse +
-  SubagentStop hooks.
+- AgentCTL records registered job state, including launch contract, checkout,
+  result, cancellation, and recovery evidence. Polylogue retains session
+  history; neither role is recreated from hook-derived transcript ledgers.
 - For coordination, Beads owns work and dependencies; Polylogue blackboard
   assertions are durable asynchronous notes, not a delivered group chat.
 - Wrappers: `claude` → `claude-full` (full MCP profile); `claude-lean`,

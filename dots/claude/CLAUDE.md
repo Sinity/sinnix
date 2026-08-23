@@ -83,7 +83,7 @@
   durable task state: ready work, claims, blockers, dependencies, discovered
   follow-ups, and persistent project memory. Use local plans only for the
   current turn's execution checklist; do not make markdown TODOs the shared
-  source of truth. Run `bd prime` for the current Beads workflow context.
+  source of truth.
 
 ### Safety And Git
 
@@ -209,52 +209,11 @@ runtime and control surfaces.
 
 ### Agent Runtime Control
 
-The current Claude Code and Codex hook boundary is recorded in
-`docs/agent-hook-parity.md`. Generated Codex lifecycle hooks are enforced
-where its schema provides the event; Claude-only model, Bash-policy, and
-SubagentStop guards remain manual or unsupported for Codex rather than being
-recreated through terminal scraping.
-
-Prefer native non-interactive runtimes for unattended work; use Kitty only
-when a human needs a visible, interruptible process. Launch commands, auth
-rules, and mode constraints live in the `agent-orchestration` skill
-(`references/runtime-modes.md`). Standing rules: set model/effort per run,
-never inherit stale defaults; the browser is shared by every concurrent agent
-AND by the operator — own explicit page target ids, never activate another
-agent's target, never touch a page you did not open; Kitty workers keep focus and route to other workspaces
-silently; never inject model/effort changes into a live agent TUI while it is
-sampling.
+AgentCTL and its `agent-control` MCP routes are the lifecycle authority for registered workspaces and unattended jobs. Use their typed launch, status, wait, result, cancel, workspace, and task operations. Set backend, model, and effort explicitly. Polylogue preserves session orientation; do not recreate state from transcripts or terminal scraping. The Claude/Codex hook boundary is in `docs/agent-hook-parity.md`. Kitty is visible UI only and never changes job lifecycle state.
 
 ### Claude Code Dispatch Doctrine
 
-Mechanics, caveats, and history live in the `claude-self-knowledge` skill.
-The standing rules:
-
-- **Explicit model on every fresh Agent dispatch** — Sonnet default, Haiku
-  for triage-grade read-only lanes, Fable/Opus for judgment lanes as an
-  explicit choice. Hard-enforced: a global PreToolUse hook DENIES model-less
-  dispatches of every type and emits a visible confirmation on allowed ones.
-- **Forks are exempt**: they inherit context and model by design. Using a
-  fork as a de-facto implementation lane violates the rule in disguise.
-- **Agent teams: narrowly adopted** (env-gated) for read-only
-  research/synthesis tasks — own blinded pilot verdict 2026-08-12
-  (adopt-qualified; see claude-self-knowledge skill). Implementation and
-  write-capable work keeps the subagent doctrine; teammates do not inherit
-  the lead's model.
-- **Never poll background agents** — completion notifications are automatic.
-  Monitor only with an until-condition; ScheduleWakeup only for genuine
-  wall-clock deadlines.
-- **Bake standing contracts into agent definitions** (`.claude/agents/*.md`);
-  dispatch prompts carry only task content.
-- **Scripted judgment calls**: `claude -p --output-format json
---json-schema` for validated verdicts; `--resume` for continuity;
-  `--bare` for deterministic scripted invocations.
-
-For coordination, Beads owns work and dependencies. Polylogue blackboard
-assertions are durable asynchronous notes, not a delivered group chat: until
-`polylogue-1hj` / `polylogue-s7ae.3` provide watch, unread, addressing, ack, and
-wakeup semantics, use explicit runtime task ids plus an append-only shared
-dialogue for active cross-agent design.
+Load `claude-self-knowledge` for harness details. Every fresh Claude Agent dispatch names its model; only forks inherit. The PreToolUse guard enforces that policy and confirms allowed launches. Use AgentCTL for durable work, including its returned job IDs for observation and cancellation. Agent teams remain read-only research/synthesis only; write-capable work follows the AgentCTL workspace contract.
 
 ### Evidence and Telemetry
 
@@ -529,43 +488,7 @@ substrate materialization; `...cli.current_state --start/--end` for windows.
 
 ### Agent Orchestration (Multi-Agent Work)
 
-Full procedure (worktree discipline, write-scope separation, pre-flight and
-post-merge checklists, batching shapes, Codex model contract) lives in the
-`agent-orchestration` skill — read it before any multi-agent dispatch. The
-non-negotiables:
-
-- State the isolation model explicitly (worktree-isolated vs shared checkout;
-  in shared checkouts the coordinator owns branching/committing/merging).
-- Worktree agents MUST `git commit` every logical chunk — isolation
-  auto-cleanup discards uncommitted work. Never `cd` to the main checkout
-  from inside a worktree.
-- After spawn, verify the worktree exists, is a linked worktree, and is on
-  the expected branch before trusting output — `isolation: "worktree"` can
-  silently fail and land the agent in the live tree.
-- Foreground-only execution: workers run every command synchronously in
-  their own turn; never background-and-wait.
-- Workers verify their own changes with real-route tests plus an
-  anti-vacuity statement; the coordinator still reviews independently.
-- Codex contract: `gpt-5.6-luna` (coordinator) / `gpt-5.6-terra` (workers),
-  high reasoning, always explicit, verified in the launch receipt.
-
-### Cross-item batch execution (content-aware)
-
-The unit of work is a cluster of related items, not one tracker item at a
-time; full shapes in the `agent-orchestration` skill
-(`references/batch-and-worktree-execution.md`). The rules:
-
-- Overlapping footprints: one branch, rewrite the area once against every
-  item's AC, per-item commits, one sweep PR with an AC matrix.
-- Disjoint footprints: separate PRs, pipelined — never idle-wait on CI.
-- Parallel worktree lanes only for ≥3 disjoint, execution-grade lanes with
-  no shared hotspot files; otherwise one agent pipelining wins.
-- Run one full, non-affected-only suite on merged master per heavy
-  multi-merge session — per-PR CI cannot catch cross-PR drift latches.
-- Beads under branch churn: every `bd` call reimports the invoking
-  checkout's jsonl (stale branches/worktrees time-machine live state); lane
-  agents make no `bd` writes; batch jsonl commits per unit of work, not per
-  operation. Hazard recipes in the `beads` skill.
+Read `agent-orchestration` before dispatch. State the isolation model and file ownership, use an AgentCTL workspace for each worker, and commit every verified chunk in that workspace. Workers run foreground checks and report an anti-vacuity statement. Coordinators use AgentCTL IDs and own Beads changes; do not create batch manifests, terminal ledgers, or checkout-local task state.
 
 ### Daily oracle digest
 

@@ -21,7 +21,7 @@ agentctl job wait <job-id>
 agentctl job result <job-id>
 ```
 
-Use the returned `job_id` for `get`, `logs`, `result`, `wait`, and `cancel`. For a batch, submit one job per prepared prompt and retain only those AgentCTL IDs in the coordinator's report. AgentCTL reuses the same IDs across listing, reconciliation, logs, results, and cancellation. Resume work by starting a new attested job against the registered workspace with a follow-up prompt.
+Use the returned `job_id` for `get`, `logs`, `result`, `wait`, and `cancel`. For multiple prepared prompts, submit one AgentCTL job per workspace and retain only those IDs in the coordinator report. AgentCTL reuses each ID across listing, reconciliation, logs, results, and cancellation. Use its workspace and task commands for workspace state and task work. Resume work by starting a new attested job against the registered workspace with a follow-up prompt.
 
 Use `workspace checkpoint` before recovery, `stack`/`restack` for dependent work, `publish`/`land`/`finish` for reviewed work, and `dispose` for a clean no-PR verification workspace. Worktree agents commit every verified logical chunk.
 
@@ -31,7 +31,7 @@ Use `workspace checkpoint` before recovery, `stack`/`restack` for dependent work
 - Set backend, model, and effort explicitly. Codex coordinators use `gpt-5.6-luna` at high reasoning; unattended workers use `gpt-5.6-terra` at high reasoning unless the operator chooses otherwise.
 - Require focused real-route verification and an anti-vacuity statement from every worker. Independently review meaningful diffs.
 - Keep commands foreground in each worker turn. Do not launch a background command and wait across turns.
-- `scripts/build_plan_batch_prompts.py` remains a prompt-construction helper. `scripts/probe_agent_runtime.sh` remains a direct vendor availability probe for paid or quota-sensitive dispatches. The private `scripts/run_agent_prompt.sh` is Sinnixd's backend adapter, not a user API.
+- `scripts/build_plan_batch_prompts.py` only constructs prompt files. `scripts/probe_agent_runtime.sh` only checks vendor availability. The private `scripts/run_agent_prompt.sh` is Sinnixd's backend argv adapter, not a user API or process controller.
 
 ## Visible terminal work
 
