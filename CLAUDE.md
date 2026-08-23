@@ -421,8 +421,9 @@ when a new script is added.
   envelopes, audit, and redaction, then forwards typed job requests to the
   daemon. `pkgs/sinnix-mcp` owns canonical references and the shared
   envelope/owner contract. `modules/services/sinnixd.nix` runs the local
-  `sinnixd` Unix-socket daemon and installs `agentctl`; it discovers explicit
-  project adapters and launches only their declared operations as transient
+  `sinnixd` Unix-socket daemon and installs `agentctl`; it loads only the
+  declaratively listed project roots (Sinnix and Polylogue by default), then
+  discovers their explicit adapters and launches only their declared operations as transient
   user services. Systemd owns process lifecycle, cgroups, results,
   cancellation, and journal evidence; `sinnixd` has no job queue, task, Git,
   or arbitrary-process authority. Its
