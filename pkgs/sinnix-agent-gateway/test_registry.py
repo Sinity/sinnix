@@ -68,6 +68,7 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "shell.run",
         "projects.change",
         "machine.operate",
+        "jobs.cancel",
     }
     assert observer_catalog["action_catalog_hash"] != operator_catalog["action_catalog_hash"]
     assert {row["kind"] for row in observer_catalog["resources"]} >= {
@@ -218,8 +219,14 @@ def test_resource_get_contract_formats_canonical_project_relationships() -> None
         "checkout",
         "bead",
         "task_authority",
+        "job",
     ]
     assert action["input_schema"]["required"] == ["ref"]
+    assert action["input_schema"]["properties"]["projection"]["enum"] == [
+        "summary",
+        "log",
+        "result",
+    ]
     assert REGISTRY.reference(
         "checkout", {"project_id": "sinnix main", "checkout_id": "default"}
     ) == "sinnix://projects/sinnix%20main/checkouts/default"
@@ -263,6 +270,7 @@ def test_catalog_search_scopes_contracts_to_project_resources() -> None:
         "projects.query",
         "projects.context",
         "projects.change",
+        "agents.run",
         "shell.run",
     }
 
@@ -275,6 +283,7 @@ def test_catalog_search_applies_text_to_resource_contracts() -> None:
 
 
 def test_run_and_wait_contracts_are_closed_and_authority_scoped() -> None:
+    agent = REGISTRY.action_schema("agents.run", "agent-control")["action"]
     run = REGISTRY.action_schema("shell.run", "operator")["action"]
     wait = REGISTRY.action_schema("jobs.wait", "observer")["action"]
 
@@ -294,6 +303,19 @@ def test_run_and_wait_contracts_are_closed_and_authority_scoped() -> None:
     assert set(run["input_schema"]["properties"]).isdisjoint(
         {"environment", "as_root", "command", "unit"}
     )
+    assert agent["verb"] == "run"
+    assert agent["owner"] == "systemd-jobs"
+    assert agent["route"] == "job.agent.start"
+    assert agent["principals"] == ["agent-control"]
+    assert agent["input_schema"]["additionalProperties"] is False
+    assert agent["input_schema"]["required"] == [
+        "project_id",
+        "prompt",
+        "backend",
+        "model",
+        "reasoning_effort",
+        "idempotency_key",
+    ]
     assert wait["verb"] == "wait"
     assert wait["effect"] == "read"
     assert wait["owner"] == "systemd-jobs"
@@ -309,6 +331,7 @@ def test_run_and_wait_contracts_are_closed_and_authority_scoped() -> None:
 def test_change_and_operate_contracts_bind_closed_canonical_owner_targets() -> None:
     change = REGISTRY.action_schema("projects.change", "operator")["action"]
     operate = REGISTRY.action_schema("machine.operate", "operator")["action"]
+    cancel = REGISTRY.action_schema("jobs.cancel", "agent-control")["action"]
 
     assert change["verb"] == "change"
     assert change["effect"] == "change"
@@ -343,6 +366,23 @@ def test_change_and_operate_contracts_bind_closed_canonical_owner_targets() -> N
     }
     with pytest.raises(RegistryError, match="cannot read action"):
         REGISTRY.action_schema("machine.operate", "observer")
+    assert cancel["verb"] == "operate"
+    assert cancel["owner"] == "systemd-jobs"
+    assert cancel["route"] == "job.cancel"
+    assert cancel["principals"] == ["agent-control", "operator"]
+    assert cancel["resource_kinds"] == ["job"]
+    assert cancel["input_schema"]["properties"]["preconditions"] == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["expected_phase"],
+        "properties": {
+            "expected_phase": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+            }
+        },
+    }
 
 
 def test_query_context_and_events_contracts_bind_existing_read_owners() -> None:

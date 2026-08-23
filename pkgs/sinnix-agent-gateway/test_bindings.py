@@ -19,8 +19,10 @@ VALID_BINDINGS = (
     TargetToolBinding("events", "audit.events", "audit", "audit.tail"),
     TargetToolBinding("wait", "jobs.wait", "systemd-jobs", "job.wait"),
     TargetToolBinding("run", "shell.run", "systemd-jobs", "job.shell.start"),
+    TargetToolBinding("run", "agents.run", "systemd-jobs", "job.agent.start"),
     TargetToolBinding("change", "projects.change", "projects", "projects.change"),
     TargetToolBinding("operate", "machine.operate", "ops-reducer", "ops.actions.execute"),
+    TargetToolBinding("operate", "jobs.cancel", "systemd-jobs", "job.cancel"),
 )
 
 
@@ -34,9 +36,11 @@ def test_target_tool_bindings_cover_every_declared_action() -> None:
     assert bindings.action_for_tool("context") is REGISTRY.action("projects.context")
     assert bindings.action_for_tool("events") is REGISTRY.action("audit.events")
     assert bindings.action_for_tool("wait") is REGISTRY.action("jobs.wait")
-    assert bindings.action_for_tool("run") is REGISTRY.action("shell.run")
+    assert bindings.action_for_tool("run", "shell.run") is REGISTRY.action("shell.run")
+    assert bindings.action_for_tool("run", "agents.run") is REGISTRY.action("agents.run")
     assert bindings.action_for_tool("change") is REGISTRY.action("projects.change")
-    assert bindings.action_for_tool("operate") is REGISTRY.action("machine.operate")
+    assert bindings.action_for_tool("operate", "machine.operate") is REGISTRY.action("machine.operate")
+    assert bindings.action_for_tool("operate", "jobs.cancel") is REGISTRY.action("jobs.cancel")
 
 
 def test_target_tool_bindings_enforce_declared_principal() -> None:
@@ -52,16 +56,18 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
 
     assert bindings.is_visible("status", "observer")
     with pytest.raises(RegistryError, match="cannot invoke"):
-        bindings.action_for_tool("status", "operator")
+        bindings.action_for_tool("status", principal="operator")
     assert bindings.is_visible("wait", "observer")
     assert bindings.is_visible("run", "operator")
+    assert bindings.is_visible("run", "agent-control")
     assert bindings.is_visible("run", "observer") is False
     assert bindings.is_visible("change", "operator")
     assert bindings.is_visible("operate", "operator")
+    assert bindings.is_visible("operate", "agent-control")
     assert bindings.is_visible("change", "observer") is False
     assert bindings.is_visible("operate", "observer") is False
     with pytest.raises(RegistryError, match="cannot invoke"):
-        bindings.action_for_tool("run", "observer")
+        bindings.action_for_tool("run", "agents.run", "observer")
 
 
 @pytest.mark.parametrize(
@@ -97,12 +103,11 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
         ),
         (
             (
-                VALID_BINDINGS[0],
-                TargetToolBinding("status", "gateway.catalog", "registry", "registry.search"),
-                VALID_BINDINGS[2],
-                *VALID_BINDINGS[3:],
+                *VALID_BINDINGS[:8],
+                TargetToolBinding("operate", "agents.run", "systemd-jobs", "job.agent.start"),
+                *VALID_BINDINGS[9:],
             ),
-            "unique tool names",
+            "must use action 'agents.run' verb 'run'",
         ),
     ],
 )

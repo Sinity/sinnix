@@ -297,6 +297,17 @@ RESOURCE_GET_SCHEMA: dict[str, Any] = _with_request_controls(
         "required": ["ref"],
         "properties": {
             "ref": {"type": "string", "minLength": 1, "maxLength": 2_048},
+            "projection": {
+                "enum": ["summary", "log", "result"],
+                "default": "summary",
+            },
+            "offset": {"type": "integer", "minimum": 0, "default": 0},
+            "max_bytes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 262_144,
+                "default": 64_000,
+            },
         },
     }
 )
@@ -348,6 +359,67 @@ SHELL_RUN_SCHEMA: dict[str, Any] = _with_request_controls(
                 "minimum": 1,
                 "maximum": 3_600,
                 "default": 3_600,
+            },
+        },
+    }
+)
+
+AGENT_RUN_SCHEMA: dict[str, Any] = _with_request_controls(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "project_id",
+            "prompt",
+            "backend",
+            "model",
+            "reasoning_effort",
+            "idempotency_key",
+        ],
+        "properties": {
+            "project_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "checkout_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "prompt": {"type": "string", "minLength": 1, "maxLength": 200_000},
+            "backend": {"enum": ["claude", "codex", "gemini", "grok", "antigravity"]},
+            "model": {"type": "string", "minLength": 1, "maxLength": 256},
+            "reasoning_effort": {"type": "string", "minLength": 1, "maxLength": 32},
+            "timeout_seconds": {
+                "type": "integer",
+                "minimum": 30,
+                "maximum": 86_400,
+                "default": 14_400,
+            },
+            "credential_profile": {
+                "enum": ["subscription", "api"],
+                "default": "subscription",
+            },
+        },
+    }
+)
+
+JOB_CANCEL_SCHEMA: dict[str, Any] = _with_request_controls(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["ref", "idempotency_key", "preconditions"],
+        "properties": {
+            "ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2_048,
+                "pattern": "^sinnix://jobs/[^/]+$",
+            },
+            "preconditions": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["expected_phase"],
+                "properties": {
+                    "expected_phase": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                    },
+                },
             },
         },
     }
@@ -552,7 +624,7 @@ def build_registry() -> CatalogRegistry:
             principals=frozenset({"observer", "agent-control", "operator"}),
             input_schema=RESOURCE_GET_SCHEMA,
             output_schema=V2_ENVELOPE_SCHEMA,
-            resource_kinds=("project", "checkout", "bead", "task_authority"),
+            resource_kinds=("project", "checkout", "bead", "task_authority", "job"),
             examples=({"input": {"ref": "sinnix://projects/sinnix"}},),
             documentation="Resolve one canonical project, checkout, Beads task, or task-authority reference.",
         ),
@@ -685,6 +757,58 @@ def build_registry() -> CatalogRegistry:
                 },
             ),
             documentation="Submit one revision-checked ops-reducer action against a canonical attested target reference.",
+        ),
+        ActionSpec(
+            name="agents.run",
+            verb=VerbFamily.RUN,
+            domain="agents",
+            owner="systemd-jobs",
+            route="job.agent.start",
+            effect=EffectMode.RUN,
+            principals=frozenset({"agent-control"}),
+            input_schema=AGENT_RUN_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("project", "checkout", "job"),
+            supports_idempotency=True,
+            receipt_policy="audit",
+            examples=(
+                {
+                    "input": {
+                        "project_id": "sinnix",
+                        "prompt": "Inspect the declared task and report evidence.",
+                        "backend": "codex",
+                        "model": "gpt-5.6-terra",
+                        "reasoning_effort": "high",
+                        "idempotency_key": "agent-inspect-example",
+                    }
+                },
+            ),
+            documentation="Launch one typed attested coding-agent job and return its daemon-owned handle.",
+        ),
+        ActionSpec(
+            name="jobs.cancel",
+            verb=VerbFamily.OPERATE,
+            domain="jobs",
+            owner="systemd-jobs",
+            route="job.cancel",
+            effect=EffectMode.OPERATE,
+            principals=frozenset({"agent-control", "operator"}),
+            input_schema=JOB_CANCEL_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("job",),
+            supports_idempotency=True,
+            supports_precondition=True,
+            receipt_policy="audit",
+            examples=(
+                {
+                    "input": {
+                        "ref": "sinnix://jobs/3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c",
+                        "preconditions": {"expected_phase": "running"},
+                        "idempotency_key": "cancel-example",
+                    }
+                },
+            ),
+            documentation="Request cancellation for one phase-checked daemon job and return the owner truth without asserting terminal completion.",
         ),
         ActionSpec(
             name="shell.run",

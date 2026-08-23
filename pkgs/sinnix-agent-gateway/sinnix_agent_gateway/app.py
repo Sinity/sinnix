@@ -46,12 +46,6 @@ READ_ONLY_TOOL = ToolAnnotations(
     idempotentHint=True,
     openWorldHint=False,
 )
-AGENT_LAUNCH_TOOL = ToolAnnotations(
-    readOnlyHint=False,
-    destructiveHint=False,
-    idempotentHint=False,
-    openWorldHint=True,
-)
 IDEMPOTENT_RUN_TOOL = ToolAnnotations(
     readOnlyHint=False,
     destructiveHint=False,
@@ -369,12 +363,32 @@ class Runtime:
             ]
         }
 
-    def v2_get(self, reference: str) -> dict[str, Any]:
+    def v2_get(
+        self,
+        reference: str,
+        projection: str = "summary",
+        offset: int = 0,
+        max_bytes: int = 64_000,
+    ) -> dict[str, Any]:
         try:
             resource, values = REGISTRY.resolve(reference)
         except RegistryError as exc:
             raise ProtocolError("not_found", "canonical resource was not found") from exc
         canonical_ref = str(resource.ref_template.format(values))
+        if projection not in {"summary", "log", "result"}:
+            raise ProtocolError("invalid_request", "resource projection is not recognized")
+        if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+            raise ProtocolError("invalid_request", "resource offset is malformed")
+        if (
+            not isinstance(max_bytes, int)
+            or isinstance(max_bytes, bool)
+            or not 1 <= max_bytes <= 262_144
+        ):
+            raise ProtocolError("invalid_request", "resource max_bytes must be 1-262144")
+        if resource.kind != "job" and projection != "summary":
+            raise ProtocolError(
+                "invalid_request", "resource projection requires a canonical job reference"
+            )
         if resource.kind == "project":
             return {
                 "ref": canonical_ref,
@@ -404,6 +418,27 @@ class Runtime:
                 "task_authority": self.beads.task_authority_status(
                     values["project_id"]
                 ),
+            }
+        if resource.kind == "job":
+            job_id = values["job_id"]
+            if projection == "summary":
+                result = self.jobs.status(job_id)
+            elif projection == "log":
+                result = self.jobs.logs(job_id, offset=offset, max_bytes=max_bytes)
+            else:
+                if offset:
+                    raise ProtocolError("invalid_request", "job result does not support offsets")
+                result = self.jobs.result(job_id, max_bytes=max_bytes)
+            if result.get("job_id") != job_id:
+                raise JobError(
+                    "sinnixd get response does not match the requested job",
+                    failure_class="owner_failed",
+                )
+            return {
+                "ref": canonical_ref,
+                "kind": resource.kind,
+                "projection": projection,
+                "job": result,
             }
         raise ValueError(f"V2 get does not support resource kind {resource.kind!r}")
 
@@ -450,6 +485,40 @@ class Runtime:
         if not isinstance(job_id, str) or not job_id:
             raise JobError(
                 "sinnixd start response omitted the job ID",
+                failure_class="owner_failed",
+            )
+        return {
+            **result,
+            "ref": REGISTRY.reference("job", {"job_id": job_id}),
+        }
+
+    def v2_run_agent(
+        self,
+        *,
+        project_id: str | None,
+        checkout_id: str | None,
+        prompt: str | None,
+        backend: str | None,
+        model: str | None,
+        reasoning_effort: str | None,
+        timeout_seconds: int,
+        credential_profile: str,
+    ) -> dict[str, Any]:
+        request = AgentLaunchRequest(
+            project_id=project_id,
+            checkout_id=checkout_id,
+            prompt=prompt,
+            backend=backend,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout_seconds=timeout_seconds,
+            credential_profile=credential_profile,
+        )
+        result = self.jobs.launch_agent(request)
+        job_id = result.get("job_id")
+        if not isinstance(job_id, str) or not job_id:
+            raise JobError(
+                "sinnixd agent start response omitted the job ID",
                 failure_class="owner_failed",
             )
         return {
@@ -642,6 +711,48 @@ class Runtime:
             operator_reason=reason,
         )
         return {"ref": canonical_ref, "action": action, "owner_receipt": owner_receipt}
+
+    def v2_cancel_job(
+        self,
+        *,
+        reference: str,
+        preconditions: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        try:
+            resource, values = REGISTRY.resolve(reference)
+        except RegistryError as exc:
+            raise ProtocolError("not_found", "canonical job resource was not found") from exc
+        if resource.kind != "job":
+            raise ProtocolError("invalid_request", "cancel requires a canonical job reference")
+        expected_phase = self._required_preconditions(
+            preconditions, {"expected_phase"}
+        ).get("expected_phase")
+        if not isinstance(expected_phase, str) or not expected_phase:
+            raise ProtocolError("invalid_request", "expected_phase is malformed")
+        job_id = values["job_id"]
+        status = self.jobs.status(job_id)
+        if status.get("job_id") != job_id:
+            raise JobError(
+                "sinnixd status response does not match the requested job",
+                failure_class="owner_failed",
+            )
+        state = status.get("state")
+        phase = state.get("phase") if isinstance(state, Mapping) else None
+        if phase != expected_phase:
+            raise ProtocolError("precondition_failed", "job phase no longer matches")
+        cancelled = self.jobs.cancel(job_id)
+        if cancelled.get("job_id") != job_id or not isinstance(
+            cancelled.get("cancel_requested"), bool
+        ):
+            raise JobError(
+                "sinnixd cancel response does not prove cancellation truth",
+                failure_class="owner_failed",
+            )
+        return {
+            "ref": str(resource.ref_template.format(values)),
+            "previous_state": status,
+            "cancel": cancelled,
+        }
 
     def v2_wait(self, reference: str, timeout_seconds: int) -> dict[str, Any]:
         if not isinstance(reference, str) or not 1 <= len(reference) <= 2_048:
@@ -978,6 +1089,10 @@ class Runtime:
         reserved = False
         try:
             context = self._request_context(request)
+            if self.principal_name not in action.principals:
+                raise PolicyError(
+                    f"principal {self.principal_name!r} cannot invoke action {action.name!r}"
+                )
             if context.preconditions and not action.supports_precondition:
                 raise ProtocolError("invalid_request", "action does not support preconditions")
             if context.deadline_at is not None and time.time() >= context.deadline_at:
@@ -1003,6 +1118,10 @@ class Runtime:
         reserved = False
         try:
             context = self._request_context(request)
+            if self.principal_name not in action.principals:
+                raise PolicyError(
+                    f"principal {self.principal_name!r} cannot invoke action {action.name!r}"
+                )
             if context.preconditions and not action.supports_precondition:
                 raise ProtocolError("invalid_request", "action does not support preconditions")
             if context.deadline_at is not None and time.time() >= context.deadline_at:
@@ -1232,6 +1351,12 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 route="job.shell.start",
             ),
             TargetToolBinding(
+                tool_name="run",
+                action_name="agents.run",
+                owner="systemd-jobs",
+                route="job.agent.start",
+            ),
+            TargetToolBinding(
                 tool_name="change",
                 action_name="projects.change",
                 owner="projects",
@@ -1242,6 +1367,12 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 action_name="machine.operate",
                 owner="ops-reducer",
                 route="ops.actions.execute",
+            ),
+            TargetToolBinding(
+                tool_name="operate",
+                action_name="jobs.cancel",
+                owner="systemd-jobs",
+                route="job.cancel",
             ),
         ),
     )
@@ -1258,7 +1389,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             preconditions: dict[str, Any] | None = None,
         ) -> V2ToolEnvelope:
             """Return the current principal's gateway contract and availability observations."""
-            action = target_bindings.action_for_tool("status", principal_name)
+            action = target_bindings.action_for_tool("status", principal=principal_name)
             manifest = canonical_manifest(await mcp.list_tools())
             response = await runtime.execute_v2_async(
                 action,
@@ -1298,7 +1429,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             preconditions: dict[str, Any] | None = None,
         ) -> V2ToolEnvelope:
             """Search the principal-filtered V2 resource and executable action catalog."""
-            action = target_bindings.action_for_tool("catalog", principal_name)
+            action = target_bindings.action_for_tool("catalog", principal=principal_name)
             response = runtime.execute_v2(
                 action,
                 lambda: runtime.catalog(
@@ -1336,6 +1467,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         @mcp.tool(title="Get V2 resource", annotations=READ_ONLY_TOOL)
         def get(
             ref: str,
+            projection: str = "summary",
+            offset: int = 0,
+            max_bytes: int = 64_000,
             request_id: str | None = None,
             actor: str | None = None,
             reason: str | None = None,
@@ -1343,13 +1477,16 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
         ) -> V2ToolEnvelope:
-            """Resolve one canonical project, checkout, or Beads task reference."""
-            action = target_bindings.action_for_tool("get", principal_name)
+            """Resolve a canonical resource, including bounded daemon job status or output."""
+            action = target_bindings.action_for_tool("get", principal=principal_name)
             response = runtime.execute_v2(
                 action,
-                lambda: runtime.v2_get(ref),
+                lambda: runtime.v2_get(ref, projection, offset, max_bytes),
                 {
                     "ref": ref,
+                    "projection": projection,
+                    "offset": offset,
+                    "max_bytes": max_bytes,
                     "request_id": request_id,
                     "actor": actor,
                     "reason": reason,
@@ -1375,7 +1512,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             preconditions: dict[str, Any] | None = None,
         ) -> V2ToolEnvelope:
             """Search one canonical project or checkout through the bounded project owner."""
-            action = target_bindings.action_for_tool("query", principal_name)
+            action = target_bindings.action_for_tool("query", principal=principal_name)
             response = runtime.execute_v2(
                 action,
                 lambda: runtime.v2_query(ref, query, max_matches),
@@ -1406,7 +1543,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             preconditions: dict[str, Any] | None = None,
         ) -> V2ToolEnvelope:
             """Compose Git and bounded task orientation for one canonical project."""
-            action = target_bindings.action_for_tool("context", principal_name)
+            action = target_bindings.action_for_tool("context", principal=principal_name)
             response = runtime.execute_v2(
                 action,
                 lambda: runtime.v2_context(ref),
@@ -1435,7 +1572,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             preconditions: dict[str, Any] | None = None,
         ) -> V2ToolEnvelope:
             """Read bounded audit events visible to the active principal."""
-            action = target_bindings.action_for_tool("events", principal_name)
+            action = target_bindings.action_for_tool("events", principal=principal_name)
             response = runtime.execute_v2(
                 action,
                 lambda: runtime.v2_events(limit),
@@ -1465,7 +1602,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             preconditions: dict[str, Any] | None = None,
         ) -> V2ToolEnvelope:
             """Wait for a bounded interval on one daemon-owned job reference."""
-            action = target_bindings.action_for_tool("wait", principal_name)
+            action = target_bindings.action_for_tool("wait", principal=principal_name)
             response = runtime.execute_v2(
                 action,
                 lambda: runtime.v2_wait(ref, timeout_seconds),
@@ -1484,37 +1621,62 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
 
     if target_bindings.is_visible("run", principal_name):
 
-        @mcp.tool(
-            title="Run typed operator shell job", annotations=IDEMPOTENT_RUN_TOOL
-        )
+        @mcp.tool(title="Run typed V2 job", annotations=IDEMPOTENT_RUN_TOOL)
         def run(
-            project_id: str,
-            checkout_id: str,
-            argv: list[str],
+            action_name: str,
             idempotency_key: str,
+            project_id: str | None = None,
+            checkout_id: str | None = None,
+            argv: list[str] | None = None,
+            prompt: str | None = None,
+            backend: str | None = None,
+            model: str | None = None,
+            reasoning_effort: str | None = None,
+            credential_profile: str = "subscription",
             cwd: str = ".",
-            timeout_seconds: int = 3_600,
+            timeout_seconds: int | None = None,
             request_id: str | None = None,
             actor: str | None = None,
             reason: str | None = None,
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
         ) -> V2ToolEnvelope:
-            """Start one typed operator-shell job and return its daemon-owned handle."""
-            action = target_bindings.action_for_tool("run", principal_name)
-            response = runtime.execute_v2(
-                action,
-                lambda: runtime.v2_run_shell(
+            """Start one catalog-declared shell or attested-agent job by action name."""
+            action = target_bindings.action_for_tool("run", action_name)
+            if action.name == "shell.run":
+                callback = lambda: runtime.v2_run_shell(
                     project_id=project_id,
                     checkout_id=checkout_id,
                     argv=argv,
                     cwd=cwd,
-                    timeout_seconds=timeout_seconds,
-                ),
+                    timeout_seconds=3_600 if timeout_seconds is None else timeout_seconds,
+                )
+            elif action.name == "agents.run":
+                callback = lambda: runtime.v2_run_agent(
+                    project_id=project_id,
+                    checkout_id=checkout_id,
+                    prompt=prompt,
+                    backend=backend,
+                    model=model,
+                    reasoning_effort=reasoning_effort,
+                    timeout_seconds=14_400 if timeout_seconds is None else timeout_seconds,
+                    credential_profile=credential_profile,
+                )
+            else:
+                raise RegistryError(f"run action {action.name!r} is not implemented")
+            response = runtime.execute_v2(
+                action,
+                callback,
                 {
+                    "action_name": action_name,
                     "project_id": project_id,
                     "checkout_id": checkout_id,
                     "argv": argv,
+                    "prompt": prompt,
+                    "backend": backend,
+                    "model": model,
+                    "reasoning_effort": reasoning_effort,
+                    "credential_profile": credential_profile,
                     "cwd": cwd,
                     "timeout_seconds": timeout_seconds,
                     "request_id": request_id,
@@ -1544,7 +1706,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             deadline_at: float | None = None,
         ) -> V2ToolEnvelope:
             """Apply one bounded, precondition-checked project mutation by canonical ref."""
-            action = target_bindings.action_for_tool("change", principal_name)
+            action = target_bindings.action_for_tool("change", principal=principal_name)
             response = runtime.execute_v2(
                 action,
                 lambda: runtime.v2_change(
@@ -1575,31 +1737,42 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
 
         @mcp.tool(title="Operate canonical machine target", annotations=IDEMPOTENT_MUTATION_TOOL)
         def operate(
+            action_name: str,
             ref: str,
-            action: str,
-            parameters: dict[str, Any],
-            reason: str,
             idempotency_key: str,
-            preconditions: dict[str, Any],
+            operation: str | None = None,
+            parameters: dict[str, Any] | None = None,
+            reason: str | None = None,
+            preconditions: dict[str, Any] | None = None,
             request_id: str | None = None,
             actor: str | None = None,
             deadline_at: float | None = None,
         ) -> V2ToolEnvelope:
-            """Run one revision-checked owner action against a canonical attested target."""
-            contract = target_bindings.action_for_tool("operate", principal_name)
-            response = runtime.execute_v2(
-                contract,
-                lambda: runtime.v2_operate(
+            """Run one catalog-declared machine or job operation against a canonical target."""
+            contract = target_bindings.action_for_tool("operate", action_name)
+            if contract.name == "machine.operate":
+                callback = lambda: runtime.v2_operate(
                     reference=ref,
-                    action=action,
+                    action=operation,
                     parameters=parameters,
                     reason=reason,
                     idempotency_key=idempotency_key,
                     preconditions=preconditions,
-                ),
+                )
+            elif contract.name == "jobs.cancel":
+                callback = lambda: runtime.v2_cancel_job(
+                    reference=ref,
+                    preconditions=preconditions,
+                )
+            else:
+                raise RegistryError(f"operate action {contract.name!r} is not implemented")
+            response = runtime.execute_v2(
+                contract,
+                callback,
                 {
+                    "action_name": action_name,
                     "ref": ref,
-                    "action": action,
+                    "operation": operation,
                     "parameters": parameters,
                     "request_id": request_id,
                     "actor": actor,
@@ -1945,50 +2118,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 lambda: runtime.timeline.query(start, end, query, providers, limit),
             )
 
-    if Capability.SHELL_RUN in runtime.principal.capabilities:
-
-        @mcp.tool(title="Run operator shell command", annotations=DESTRUCTIVE_TOOL)
-        def shell_run(
-            project_id: str,
-            checkout_id: str,
-            argv: list[str],
-            cwd: str = ".",
-            timeout_seconds: int = 300,
-            max_bytes: int = 64_000,
-        ) -> dict[str, Any]:
-            """Run exact argv through the typed operator-shell job contract."""
-            return runtime.execute(
-                "shell_run",
-                lambda: runtime.jobs.run_shell(
-                    project_id=project_id,
-                    checkout_id=checkout_id,
-                    argv=argv,
-                    cwd=cwd,
-                    timeout_seconds=timeout_seconds,
-                    max_bytes=max_bytes,
-                ),
-            )
-
-        @mcp.tool(title="Start operator shell job", annotations=DESTRUCTIVE_TOOL)
-        def shell_start(
-            project_id: str,
-            checkout_id: str,
-            argv: list[str],
-            cwd: str = ".",
-            timeout_seconds: int = 3_600,
-        ) -> dict[str, Any]:
-            """Start exact argv through the typed, cancellable operator-shell contract."""
-            return runtime.execute(
-                "shell_start",
-                lambda: runtime.jobs.start_shell(
-                    project_id=project_id,
-                    checkout_id=checkout_id,
-                    argv=argv,
-                    cwd=cwd,
-                    timeout_seconds=timeout_seconds,
-                ),
-            )
-
     @mcp.tool(title="List attested jobs", annotations=READ_ONLY_TOOL)
     def job_list(limit: int = 100) -> dict[str, Any]:
         """List recent attested jobs and report malformed records explicitly."""
@@ -2047,40 +2176,5 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             return runtime.execute(
                 "capture_query", lambda: runtime.captures.query(lanes, since, limit)
             )
-
-    if runtime.principal.name == "agent-control":
-
-        @mcp.tool(title="Launch agent job", annotations=AGENT_LAUNCH_TOOL)
-        def agent_launch(
-            project_id: str,
-            prompt: str,
-            backend: str,
-            model: str,
-            reasoning_effort: str,
-            checkout_id: str | None = None,
-            timeout_seconds: int = 14_400,
-            credential_profile: str = "subscription",
-        ) -> dict[str, Any]:
-            """Launch an attested native coding-agent job in an allowlisted project."""
-            request = AgentLaunchRequest(
-                project_id=project_id,
-                checkout_id=checkout_id,
-                prompt=prompt,
-                backend=backend,
-                model=model,
-                reasoning_effort=reasoning_effort,
-                timeout_seconds=timeout_seconds,
-                credential_profile=credential_profile,
-            )
-            return runtime.execute(
-                "agent_launch", lambda: runtime.jobs.launch_agent(request)
-            )
-
-    if Capability.JOB_CANCEL in runtime.principal.capabilities:
-
-        @mcp.tool(title="Cancel attested job", annotations=DESTRUCTIVE_TOOL)
-        def job_cancel(job_id: str) -> dict[str, Any]:
-            """Stop a live job by attested job ID and systemd cgroup identity."""
-            return runtime.execute("job_cancel", lambda: runtime.jobs.cancel(job_id))
 
     return mcp
