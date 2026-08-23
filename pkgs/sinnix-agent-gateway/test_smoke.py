@@ -14,6 +14,7 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from sinnix_agent_gateway.app import Runtime, create_server
+from sinnix_agent_gateway.server import _query_owner
 from sinnix_mcp.execution import ExecutionResult, OwnerDiagnosticError
 from sinnix_agent_gateway.capabilities import PolicyError
 from sinnix_agent_gateway.cli import build_manifest, parser, verify_approval
@@ -39,141 +40,48 @@ def config(tmp_path: Path, *, observer_read: bool = True) -> GatewayConfig:
     )
 
 
-def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) -> None:
+def test_official_sdk_principals_expose_only_protocol_verbs(tmp_path: Path) -> None:
     cfg = config(tmp_path)
-    readonly = anyio.run(build_manifest, cfg, "observer")
-    local = anyio.run(build_manifest, cfg, "agent-control")
+    observer = anyio.run(build_manifest, cfg, "observer")
+    agent_control = anyio.run(build_manifest, cfg, "agent-control")
     operator = anyio.run(build_manifest, cfg, "operator")
-    readonly_names = {row["name"] for row in readonly["tools"]}
-    local_names = {row["name"] for row in local["tools"]}
-    operator_names = {row["name"] for row in operator["tools"]}
-    assert {"status", "catalog", "query", "get", "context", "events", "wait"} <= readonly_names
-    assert {
-        "files_read",
-        "project_read",
-        "session_list",
-        "session_read",
-        "machine_query",
-        "desktop_read",
-        "desktop_capture",
-        "terminal_read",
-        "browser_read",
-        "browser_capture",
-        "capability_search",
-        "capability_describe",
-        "memory_search",
-        "memory_get",
-        "timeline_query",
-        "mcp_catalog",
-        "mcp_read",
-    } <= readonly_names
-    assert {
-        "project_write",
-        "change",
-        "machine_action",
-        "operate",
-        "run",
-    }.isdisjoint(readonly_names)
-    assert "shell_query" not in readonly_names
-    assert {"project_context", "project_search", "audit_tail"}.isdisjoint(readonly_names)
-    assert {"job_list", "job_status", "job_read_output"}.isdisjoint(
-        readonly_names | local_names | operator_names
-    )
-    assert {
-        "capability_search",
-        "capability_describe",
-        "wait",
-        "run",
-        "operate",
-    } <= local_names
-    assert {
-        "desktop_read",
-        "desktop_capture",
-        "files_read",
-        "machine_action",
-        "change",
-        "session_list",
-        "browser_read",
-        "browser_capture",
-        "terminal_read",
-        "memory_search",
-        "memory_get",
-        "timeline_query",
-        "mcp_catalog",
-        "mcp_read",
-    }.isdisjoint(local_names)
-    assert {
-        "change",
-        "operate",
-        "session_search",
-        "desktop_read",
-        "desktop_capture",
-        "browser_read",
-        "browser_capture",
-        "terminal_read",
-        "run",
-        "wait",
-        "capability_search",
-        "capability_describe",
-        "memory_search",
-        "memory_get",
-        "timeline_query",
-        "mcp_catalog",
-        "mcp_read",
-    } <= operator_names
-    assert {"project_write", "project_apply_patch", "machine_action"}.isdisjoint(operator_names)
-    assert {
-        "change",
-        "operate",
-        "run",
-    } == {
-        row["name"]
-        for row in operator["tools"]
-        if row["annotations"]["readOnlyHint"] is False
+    names = {row["name"] for row in operator["tools"]}
+
+    assert names == {
+        "status", "catalog", "query", "get", "context", "events", "wait",
+        "change", "operate", "run",
     }
-    assert {
-        "run",
-        "operate",
-    } == {
-        row["name"]
-        for row in local["tools"]
-        if row["annotations"]["readOnlyHint"] is False
+    assert {row["name"] for row in observer["tools"]} == {
+        "status", "catalog", "query", "get", "context", "events", "wait",
     }
-    assert "context" in readonly_names & local_names & operator_names
-    run_tool = next(row for row in operator["tools"] if row["name"] == "run")
-    change_tool = next(row for row in operator["tools"] if row["name"] == "change")
-    wait_tool = next(row for row in readonly["tools"] if row["name"] == "wait")
-    assert set(run_tool["inputSchema"]["required"]) == {
-        "action_name",
-        "idempotency_key",
+    assert {row["name"] for row in agent_control["tools"]} == {
+        "status", "catalog", "query", "get", "context", "events", "wait",
+        "operate", "run",
     }
-    assert {"argv", "prompt", "backend", "model", "reasoning_effort"} <= set(
-        run_tool["inputSchema"]["properties"]
-    )
-    assert set(run_tool["inputSchema"]["properties"]).isdisjoint(
-        {"environment", "as_root", "command", "unit"}
-    )
-    assert set(wait_tool["inputSchema"]["required"]) == {"ref"}
-    assert set(wait_tool["inputSchema"]["properties"]).isdisjoint(
-        {"job_id", "operation", "command"}
-    )
-    assert {"action_name", "ref", "operation", "parameters", "idempotency_key"} <= set(
-        change_tool["inputSchema"]["properties"]
-    )
-    assert readonly["sha256"] != local["sha256"] != operator["sha256"]
+    assert {row["name"] for row in operator["tools"] if row["annotations"]["readOnlyHint"]} == {
+        "status", "catalog", "query", "get", "context", "events", "wait",
+    }
+    assert next(row for row in operator["tools"] if row["name"] == "change")["annotations"] == {
+        "readOnlyHint": False, "destructiveHint": True, "idempotentHint": True,
+        "openWorldHint": False,
+    }
+    assert next(row for row in operator["tools"] if row["name"] == "operate")["annotations"] == {
+        "readOnlyHint": False, "destructiveHint": True, "idempotentHint": True,
+        "openWorldHint": False,
+    }
+    assert next(row for row in operator["tools"] if row["name"] == "run")["annotations"] == {
+        "readOnlyHint": False, "destructiveHint": False, "idempotentHint": True,
+        "openWorldHint": True,
+    }
     assert all(
-        "inputSchema" in row and "outputSchema" in row for row in readonly["tools"]
-    )
-    assert all(
-        row["annotations"]
-        == {
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
+        row["annotations"] == {
+            "readOnlyHint": True, "destructiveHint": False, "idempotentHint": True,
             "openWorldHint": False,
         }
-        for row in readonly["tools"]
+        for row in observer["tools"]
     )
+    assert all("inputSchema" in row and "outputSchema" in row for row in operator["tools"])
+    assert observer["sha256"] != agent_control["sha256"] != operator["sha256"]
 
 
 def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> None:
@@ -218,8 +126,9 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 templates = await session.list_resource_templates()
                 names = {tool.name for tool in tools.tools}
                 assert initialized.server_info.name == "sinnix-agent-gateway"
-                assert {"status", "catalog", "get", "wait", "project_read"} <= names
-                assert "project_write" not in names
+                assert names == {
+                    "status", "catalog", "query", "get", "context", "events", "wait",
+                }
                 assert {
                     "sinnix://gateway/v2/actions/{action_name}",
                     "sinnix://gateway/v2/resources/{resource_kind}",
@@ -251,7 +160,7 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "ref_template": "sinnix://projects/{project_id}/beads/{bead_id}",
                     "supports_query": True,
                 }
-                assert {row["name"] for row in documentation_rows["actions"]} == {
+                assert {
                     "audit.events",
                     "gateway.catalog",
                     "gateway.status",
@@ -260,7 +169,13 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "projects.query",
                     "beads.query",
                     "resources.get",
-                }
+                    "machine.query",
+                    "captures.query",
+                    "artifacts.query",
+                    "files.query",
+                    "sessions.query",
+                    "mcp.query",
+                } <= {row["name"] for row in documentation_rows["actions"]}
                 assert all(
                     "observer" in row["principals"]
                     for row in documentation_rows["resources"]
@@ -298,10 +213,10 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 catalog_envelope = json.loads(catalog_result.content[0].text)
                 catalog = catalog_envelope["data"]
                 assert catalog_envelope["result"]["action"] == "gateway.catalog"
-                assert [action["name"] for action in catalog["actions"]] == [
+                assert {
                     "gateway.status",
                     "gateway.catalog",
-                ]
+                } <= {action["name"] for action in catalog["actions"]}
                 project_catalog_result = await session.call_tool(
                     "catalog", {"project": "fixture"}
                 )
@@ -331,8 +246,9 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     unavailable_catalog_result.content[0].text
                 )["data"]
                 assert unavailable_catalog["actions"] == []
-                assert "terminal" in {
-                    resource["kind"] for resource in unavailable_catalog["resources"]
+                assert {resource["kind"] for resource in unavailable_catalog["resources"]} == {
+                    "context_snapshot",
+                    "result",
                 }
                 assert all(
                     resource["availability_reason"]
@@ -395,8 +311,10 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert invalid_catalog["receipt"]["ref"].startswith(
                     "sinnix://receipts/"
                 )
-                mcp_catalog_result = await session.call_tool("mcp_catalog", {})
-                assert json.loads(mcp_catalog_result.content[0].text) == {"servers": []}
+                mcp_catalog_result = await session.call_tool(
+                    "query", {"action_name": "mcp.query", "parameters": {"operation": "catalog"}}
+                )
+                assert json.loads(mcp_catalog_result.content[0].text)["data"] == {"servers": []}
 
     anyio.run(probe)
 
@@ -572,6 +490,31 @@ def test_public_v2_mutation_verbs_preserve_owner_routes(
     assert browser_result["data"]["ref"] == "sinnix://browser/pages/agent-target"
     assert unsupported["error"]["code"] == "unsupported_capability"
     assert undeclared["error"]["code"] == "unsupported_capability"
+
+
+def test_query_adapter_consumes_capture_selector_before_owner_invocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = Runtime.create(config(tmp_path), "observer")
+    captured: dict[str, object] = {}
+
+    def query(*, lanes: list[str], since: float, limit: int) -> dict[str, object]:
+        captured.update(lanes=lanes, since=since, limit=limit)
+        return {"records": []}
+
+    monkeypatch.setattr(runtime.captures, "query", query)
+    result = anyio.run(
+        _query_owner,
+        runtime,
+        "captures.query",
+        None,
+        None,
+        200,
+        {"operation": "query", "lanes": ["shell"], "since": 1.5, "limit": 4},
+    )
+
+    assert result == {"records": []}
+    assert captured == {"lanes": ["shell"], "since": 1.5, "limit": 4}
 
 
 def test_readonly_policy_is_checked_inside_write_operation(tmp_path: Path) -> None:

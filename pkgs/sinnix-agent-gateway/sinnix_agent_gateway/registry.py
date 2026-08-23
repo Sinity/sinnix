@@ -48,7 +48,7 @@ def _templates_overlap(left: RefTemplate, right: RefTemplate) -> bool:
 class CatalogRegistry:
     """One declaration registry for V2 resource and action contracts."""
 
-    revision = "v2-initial"
+    revision = "v2-operator-verbs"
 
     def __init__(
         self,
@@ -749,6 +749,69 @@ AUDIT_EVENTS_SCHEMA: dict[str, Any] = _with_request_controls(
     }
 )
 
+# The public ``query`` verb deliberately stays compact.  The exact owner
+# contract is selected by ``action_name`` and retrieved lazily from the
+# generated action-schema resource, so expanding an owner does not bloat the
+# top-level MCP manifest.
+OWNER_QUERY_SCHEMA: dict[str, Any] = _with_request_controls(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "ref": {"type": "string", "minLength": 1, "maxLength": 2_048},
+            "parameters": {"type": "object", "additionalProperties": True},
+        },
+    }
+)
+
+
+def _owner_query_action(
+    name: str,
+    domain: str,
+    owner: str,
+    route: str,
+    principals: frozenset[str],
+    resource_kinds: tuple[str, ...],
+    documentation: str,
+) -> ActionSpec:
+    return ActionSpec(
+        name=name,
+        verb=VerbFamily.QUERY,
+        domain=domain,
+        owner=owner,
+        route=route,
+        effect=EffectMode.READ,
+        principals=principals,
+        input_schema=OWNER_QUERY_SCHEMA,
+        output_schema=V2_ENVELOPE_SCHEMA,
+        resource_kinds=resource_kinds,
+        documentation=documentation,
+    )
+
+
+def _owner_query_actions() -> tuple[ActionSpec, ...]:
+    all_principals = frozenset({"observer", "agent-control", "operator"})
+    observer_operator = frozenset({"observer", "operator"})
+    return (
+        _owner_query_action("projects.list", "projects", "projects", "projects.list", all_principals, ("project",), "List principal-visible projects without host paths."),
+        _owner_query_action("projects.tree", "projects", "projects", "projects.tree", all_principals, ("project", "checkout"), "List a bounded canonical project tree without following symlinks."),
+        _owner_query_action("projects.read", "projects", "projects", "projects.read", all_principals, ("project", "checkout"), "Read a bounded project file through a canonical project or checkout ref."),
+        _owner_query_action("projects.diff", "projects", "projects", "projects.diff", all_principals, ("project", "checkout"), "Read a bounded Git diff through a canonical project or checkout ref."),
+        _owner_query_action("machine.query", "machine", "machine", "observe.machine_query", all_principals, ("machine_unit", "scope", "process"), "Read one bounded, provenance-carrying machine section; overview replaces the retired whole-machine report."),
+        _owner_query_action("capabilities.query", "capabilities", "capability-index", "capability_index.query", all_principals, ("capability",), "Search or exactly describe generated machine capabilities."),
+        _owner_query_action("mcp.query", "mcp", "mcp-broker", "mcp.call.read", observer_operator, ("mcp_tool",), "Discover brokered MCP servers or invoke a declared read-only upstream tool."),
+        _owner_query_action("desktop.query", "desktop", "desktop", "desktop.read", observer_operator, ("desktop",), "Read desktop state or capture output without changing focus."),
+        _owner_query_action("terminals.query", "terminals", "terminals", "terminals.read", observer_operator, ("terminal",), "List terminals or read bounded terminal evidence."),
+        _owner_query_action("browser.query", "browser", "browser", "browser.read", observer_operator, ("browser_page",), "Read browser state or capture only a registered gateway-owned browser target."),
+        _owner_query_action("files.query", "files", "files", "files.read", observer_operator, ("host_file",), "Stat, list, or read a bounded principal-authorized host path."),
+        _owner_query_action("sessions.query", "sessions", "sessions", "sessions.query", observer_operator, ("session",), "List, read, or search bounded provider-scoped coding sessions."),
+        _owner_query_action("memory.query", "memory", "memory", "memory.query", observer_operator, ("session",), "Search or retrieve semantic memory while retaining source provenance."),
+        _owner_query_action("timeline.query", "timeline", "timeline", "timeline.query", observer_operator, ("session",), "Query available session evidence without claiming unavailable upstream coverage."),
+        _owner_query_action("artifacts.query", "artifacts", "artifacts", "artifacts.query", all_principals, ("artifact",), "List opaque artifact metadata or read a bounded artifact range."),
+        _owner_query_action("audit.verify", "audit", "audit", "audit.verify", all_principals, ("receipt",), "Verify the tamper-evident audit hash chain."),
+        _owner_query_action("captures.query", "captures", "captures", "captures.query", all_principals, ("capture_lane",), "List visible capture lanes or query their declared native owner roots."),
+    )
+
 
 def build_registry() -> CatalogRegistry:
     resources = (
@@ -770,6 +833,7 @@ def build_registry() -> CatalogRegistry:
         ResourceSpec("host_file", RefTemplate("host_file", "sinnix://files/{file_token}"), "files", ("summary",), False, principals=frozenset({"operator"})),
         ResourceSpec("mcp_tool", RefTemplate("mcp_tool", "sinnix://mcp/{server}/tools/{tool}"), "mcp-broker", ("summary",), False, principals=frozenset({"operator"})),
         ResourceSpec("capture_lane", RefTemplate("capture_lane", "sinnix://captures/{lane}"), "captures", ("summary", "query"), True),
+        ResourceSpec("capability", RefTemplate("capability", "sinnix://capabilities/{name}"), "capability-index", ("summary",), True),
         ResourceSpec("session", RefTemplate("session", "sinnix://sessions/{provider}/{session_id}"), "sessions", ("summary", "messages"), True),
         ResourceSpec("context_snapshot", RefTemplate("context_snapshot", "sinnix://contexts/{snapshot_id}"), "context", ("summary", "sources"), True),
     )
@@ -1177,7 +1241,7 @@ def build_registry() -> CatalogRegistry:
             documentation="Start one typed operator-shell job and return its daemon-owned handle.",
         ),
     )
-    return CatalogRegistry(resources, actions)
+    return CatalogRegistry(resources, (*actions, *_owner_query_actions()))
 
 
 REGISTRY = build_registry()

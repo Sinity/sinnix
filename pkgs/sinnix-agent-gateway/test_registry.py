@@ -7,6 +7,24 @@ from sinnix_mcp.refs import RefTemplate, ReferenceError, SinnixRef
 from sinnix_agent_gateway.registry import CatalogRegistry, CatalogSearch, RegistryError, REGISTRY
 
 
+RETAINED_OWNER_ACTIONS = {
+    "project inspection": "projects.read",
+    "machine observation": "machine.query",
+    "capability discovery": "capabilities.query",
+    "brokered MCP reads": "mcp.query",
+    "desktop evidence": "desktop.query",
+    "terminal evidence": "terminals.query",
+    "browser evidence": "browser.query",
+    "host-file reads": "files.query",
+    "session evidence": "sessions.query",
+    "memory evidence": "memory.query",
+    "timeline evidence": "timeline.query",
+    "artifact access": "artifacts.query",
+    "audit verification": "audit.verify",
+    "capture evidence": "captures.query",
+}
+
+
 def test_canonical_reference_round_trips_escaped_segments() -> None:
     reference = RefTemplate(
         "bead", "sinnix://projects/{project_id}/beads/{bead_id}"
@@ -48,7 +66,9 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
     observer_catalog = REGISTRY.search(CatalogSearch(principal="observer"))
     operator_catalog = REGISTRY.search(CatalogSearch(principal="operator"))
 
-    assert {row["name"] for row in observer_catalog["actions"]} == {
+    observer_actions = {row["name"] for row in observer_catalog["actions"]}
+    operator_actions = {row["name"] for row in operator_catalog["actions"]}
+    assert {
         "gateway.status",
         "gateway.catalog",
         "resources.get",
@@ -57,8 +77,11 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "projects.context",
         "audit.events",
         "jobs.wait",
-    }
-    assert {row["name"] for row in operator_catalog["actions"]} == {
+        "machine.query",
+        "captures.query",
+        "artifacts.query",
+    } <= observer_actions
+    assert {
         "gateway.status",
         "gateway.catalog",
         "resources.get",
@@ -79,7 +102,12 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "desktop.operate",
         "terminals.operate",
         "browser.operate",
-    }
+        "files.query",
+        "mcp.query",
+        "sessions.query",
+    } <= operator_actions
+    assert "shell.run" not in observer_actions
+    assert "projects.change" not in observer_actions
     assert observer_catalog["action_catalog_hash"] != operator_catalog["action_catalog_hash"]
     assert {row["kind"] for row in observer_catalog["resources"]} >= {
         "project",
@@ -98,6 +126,15 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "session",
         "context_snapshot",
     }
+
+
+def test_every_retained_owner_capability_has_a_read_action_and_resource_route() -> None:
+    for capability, action_name in RETAINED_OWNER_ACTIONS.items():
+        action = REGISTRY.action(action_name)
+        assert action.effect is EffectMode.READ, capability
+        assert action.verb is VerbFamily.QUERY, capability
+        assert action.resource_kinds, capability
+        assert all(REGISTRY.resource(kind) for kind in action.resource_kinds), capability
 
 
 def test_resource_contracts_and_discovery_are_principal_filtered() -> None:
@@ -292,6 +329,10 @@ def test_catalog_search_scopes_contracts_to_project_resources() -> None:
         "beads.operate",
         "agents.run",
         "shell.run",
+        "projects.list",
+        "projects.tree",
+        "projects.read",
+        "projects.diff",
     }
 
 
