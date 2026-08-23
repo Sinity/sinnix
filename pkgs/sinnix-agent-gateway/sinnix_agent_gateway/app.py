@@ -800,6 +800,45 @@ class Runtime:
         )
         return {"ref": canonical_ref, **result}
 
+    def v2_beads_changeset(
+        self,
+        *,
+        reference: str,
+        operation: str,
+        parameters: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        _resource, values, canonical_ref = self._resource_reference(
+            reference, {"project"}, "ref does not identify a canonical project"
+        )
+        mutation = self._parameters(parameters)
+        actions = mutation.pop("actions", None)
+        if not isinstance(actions, list) or not actions:
+            raise ProtocolError("invalid_request", "Beads changeset requires ordered actions")
+        first = actions[0]
+        if not isinstance(first, Mapping) or first.get("ref") != canonical_ref:
+            raise ProtocolError("invalid_request", "changeset ref must anchor its first action")
+        result = self.beads.changeset(
+            actions,
+            mode=operation,
+            on_error=mutation.pop("on_error", None),
+            preview_digest=mutation.pop("preview_digest", None),
+        )
+        if mutation:
+            raise ProtocolError("invalid_request", "Beads changeset received unsupported parameters")
+        return {"ref": canonical_ref, **result}
+
+    def v2_beads_operate(
+        self,
+        *,
+        reference: str,
+        operation: str,
+        parameters: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        _resource, values, canonical_ref = self._resource_reference(
+            reference, {"project"}, "ref does not identify a canonical project"
+        )
+        return {"ref": canonical_ref, **self.beads.operate(values["project_id"], operation, self._parameters(parameters))}
+
     async def v2_mcp_change(
         self,
         *,
@@ -1200,14 +1239,17 @@ class Runtime:
             "atomicity": (
                 "read_only"
                 if action.effect is EffectMode.READ
+                else result.get("atomicity", "owner_declared")
+                if isinstance(result, Mapping)
                 else "not_atomic"
                 if error and error.get("code") == "partial_completion"
                 else "owner_declared"
             ),
             "partial_completion": bool(
-                error and error.get("code") == "partial_completion"
+                (isinstance(result, Mapping) and result.get("partial_completion"))
+                or (error and error.get("code") == "partial_completion")
             ),
-            "compensation": None,
+            "compensation": result.get("compensation") if isinstance(result, Mapping) else None,
             "error": dict(error or {}),
         }
         return self.audit.append(action.name, outcome, payload)
@@ -1674,6 +1716,12 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             ),
             TargetToolBinding(
                 tool_name="change",
+                action_name="beads.changeset",
+                owner="beads",
+                route="beads.changeset",
+            ),
+            TargetToolBinding(
+                tool_name="change",
                 action_name="mcp.change",
                 owner="mcp-broker",
                 route="mcp.call.write",
@@ -1683,6 +1731,12 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 action_name="machine.operate",
                 owner="ops-reducer",
                 route="ops.actions.execute",
+            ),
+            TargetToolBinding(
+                tool_name="operate",
+                action_name="beads.operate",
+                owner="beads",
+                route="beads.maintenance",
             ),
             TargetToolBinding(
                 tool_name="operate",
@@ -2132,6 +2186,14 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                             parameters=parameters,
                             preconditions=preconditions,
                         )
+                    if action.name == "beads.changeset":
+                        if preconditions is not None:
+                            raise ProtocolError("invalid_request", "Beads changeset preconditions belong to individual actions")
+                        return runtime.v2_beads_changeset(
+                            reference=ref,
+                            operation=operation,
+                            parameters=parameters,
+                        )
                     if action.name == "mcp.change":
                         return await runtime.v2_mcp_change(
                             reference=ref, operation=operation, parameters=parameters
@@ -2205,6 +2267,10 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     )
                 elif contract.name == "browser.operate":
                     callback = lambda: runtime.v2_browser_operate(
+                        reference=ref, operation=operation, parameters=parameters
+                    )
+                elif contract.name == "beads.operate":
+                    callback = lambda: runtime.v2_beads_operate(
                         reference=ref, operation=operation, parameters=parameters
                     )
                 else:

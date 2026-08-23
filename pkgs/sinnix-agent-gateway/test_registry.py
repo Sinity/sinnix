@@ -71,8 +71,10 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "projects.change",
         "files.change",
         "beads.change",
+        "beads.changeset",
         "mcp.change",
         "machine.operate",
+        "beads.operate",
         "jobs.cancel",
         "desktop.operate",
         "terminals.operate",
@@ -252,6 +254,7 @@ def test_catalog_search_filters_resource_kind_and_text() -> None:
         "beads.query",
         "projects.context",
         "beads.change",
+        "beads.changeset",
     ]
     assert result["resources"] == [
         {
@@ -285,6 +288,8 @@ def test_catalog_search_scopes_contracts_to_project_resources() -> None:
         "projects.context",
         "projects.change",
         "beads.change",
+        "beads.changeset",
+        "beads.operate",
         "agents.run",
         "shell.run",
     }
@@ -404,7 +409,9 @@ def test_collapsed_mutation_contracts_are_operator_only_and_canonical() -> None:
     expected = {
         "files.change": ("change", "files", "files.change", ["host_file"]),
         "beads.change": ("change", "beads", "beads.write", ["project", "bead", "task_authority"]),
+        "beads.changeset": ("change", "beads", "beads.changeset", ["project", "bead", "task_authority"]),
         "mcp.change": ("change", "mcp-broker", "mcp.call.write", ["mcp_tool"]),
+        "beads.operate": ("operate", "beads", "beads.maintenance", ["project", "task_authority"]),
         "desktop.operate": ("operate", "desktop", "desktop.action", ["desktop"]),
         "terminals.operate": ("operate", "terminals", "terminals.action", ["terminal"]),
         "browser.operate": ("operate", "browser", "browser.action", ["browser_workspace", "browser_page"]),
@@ -444,6 +451,14 @@ def test_query_context_and_events_contracts_bind_existing_read_owners() -> None:
     assert beads["route"] == "beads.query"
     assert beads["input_schema"]["properties"]["parameters"]["properties"]["cursor"]["maxLength"] == 256
     assert "preview_digest" in REGISTRY.action_schema("beads.change", "operator")["action"]["input_schema"]["properties"]["parameters"]["properties"]
+    changeset = REGISTRY.action_schema("beads.changeset", "operator")["action"]
+    assert changeset["route"] == "beads.changeset"
+    assert changeset["input_schema"]["properties"]["operation"]["enum"] == ["apply", "preview"]
+    assert changeset["input_schema"]["properties"]["parameters"]["properties"]["actions"]["maxItems"] == 128
+    assert changeset["input_schema"]["properties"]["parameters"]["properties"]["on_error"]["enum"] == ["stop", "continue"]
+    maintenance = REGISTRY.action_schema("beads.operate", "operator")["action"]
+    assert maintenance["route"] == "beads.maintenance"
+    assert maintenance["input_schema"]["properties"]["operation"]["enum"] == ["backup.create", "backup.list", "backup.restore", "snapshot.publish", "sync.pull", "sync.push"]
     assert context["verb"] == "context"
     assert context["owner"] == "project-context"
     assert context["route"] == "project_context.context"
