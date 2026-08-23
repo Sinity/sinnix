@@ -50,6 +50,16 @@ When an MCP-capable client is available, prefer `agent-control` over direct
 shell invocation. It exposes only `start_agent_job`, `list_agent_jobs`,
 `agent_job_status`, `read_agent_job_output`, and `interrupt_agent_job`.
 
+For a local operator CLI, use the same lifecycle through AgentCTL:
+
+```bash
+agentctl agent --project <project-id> --checkout <checkout-id> \
+  --prompt-file <prompt-file> --backend <backend> --model <model> --effort high
+agentctl job wait <job-id>
+agentctl job result <job-id>
+agentctl job cancel <job-id>
+```
+
 - Start work with an explicit backend, absolute workdir, bounded prompt, model,
   and reasoning effort where applicable.
 - Persist and use only the returned `job_id`; do not control jobs by PID,
@@ -62,27 +72,21 @@ shell invocation. It exposes only `start_agent_job`, `list_agent_jobs`,
 
 ## Helpers
 
-- `scripts/run_agent_prompt.sh` runs one prompt through Claude, Codex, Gemini,
-  Grok, or Antigravity, records its output, and emits an attested manifest for
-  each headless job. Use `--job-id`, `--job-role`, `--work-item`, and the narrow
-  resource options when an operator needs a stable control handle. `--workdir`
-  identity is mandatory in exactly one form: `--registered-project` +
-  `--expected-git-common-dir` together attest `--workdir` as that project's own
-  checkout or a linked Git worktree of it (this is what typed Sinnixd agent
-  jobs use); `--local-workdir` is the explicit opt-out for a directory the caller
-  already trusts directly -- a non-Git target, or a subdirectory of a Git
-  checkout (the attested form can only authorize a whole worktree root, never
-  a subdirectory of one). `launch_agent_tabs.sh` picks the right form for you.
-- `scripts/agent_job_control.sh` lists or refreshes a manifest and interrupts
-  only by an attested job ID; it deliberately rejects PID, title, and window
-  targeting.
-- `scripts/launch_agent_tabs.sh` runs prompt batches directly or in Kitty,
-  including bounded batch concurrency and optional workspace routing.
-- `scripts/agent_instance_control.sh` discovers, captures, interrupts, or sends
-  commands to existing Kitty terminals.
-- `scripts/build_plan_batch_prompts.py` renders prompt files from plan JSON.
-- `scripts/probe_agent_runtime.sh` and `scripts/probe_host_control_plane.sh`
-  check runtime and terminal-control availability.
+- AgentCTL owns job lifecycle. Use its CLI or the MCP control plane for start,
+  status, output, wait, and cancellation.
+- `scripts/run_agent_prompt.sh` and `run_agent_prompt_job.py` are the private
+  native backend translation layer for Sinnixd's typed attested-agent job. Do
+  not use them as a second lifecycle surface.
+- `scripts/agent_job_control.sh` remains a private compatibility bridge for
+  the ops reducer until that caller consumes AgentCTL's job protocol.
+- `scripts/launch_agent_tabs.sh`, `launch_agent_tabs_status.py`, and
+  `build_plan_batch_prompts.py` retain direct batch and Kitty launch support
+  while AgentCTL has no batch scheduling contract.
+- Use `desktop-control-plane` and `sinnix-kitty-control` for optional visible
+  terminal UI control. That skill owns terminal discovery, input, capture, and
+  waits.
+- `scripts/probe_agent_runtime.sh` checks backend availability when a paid or
+  quota-sensitive launch needs direct vendor evidence.
 
 ## Backend capabilities
 
