@@ -53,6 +53,7 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "gateway.catalog",
         "resources.get",
         "projects.query",
+        "beads.query",
         "projects.context",
         "audit.events",
         "jobs.wait",
@@ -62,6 +63,7 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "gateway.catalog",
         "resources.get",
         "projects.query",
+        "beads.query",
         "projects.context",
         "audit.events",
         "jobs.wait",
@@ -219,6 +221,9 @@ def test_action_contract_rejects_missing_schema_and_unknown_principal() -> None:
 def test_resource_get_contract_formats_canonical_project_relationships() -> None:
     action = REGISTRY.action_schema("resources.get", "observer")["action"]
 
+    assert action["input_schema"]["properties"]["includes"]["maxItems"] == 8
+    assert action["input_schema"]["properties"]["as_of"]["maxLength"] == 128
+
     assert action["verb"] == "get"
     assert action["resource_kinds"] == [
         "project",
@@ -244,6 +249,7 @@ def test_catalog_search_filters_resource_kind_and_text() -> None:
     assert [action["name"] for action in result["actions"]] == [
         "gateway.catalog",
         "resources.get",
+        "beads.query",
         "projects.context",
         "beads.change",
     ]
@@ -275,6 +281,7 @@ def test_catalog_search_scopes_contracts_to_project_resources() -> None:
         "gateway.catalog",
         "resources.get",
         "projects.query",
+        "beads.query",
         "projects.context",
         "projects.change",
         "beads.change",
@@ -432,6 +439,11 @@ def test_query_context_and_events_contracts_bind_existing_read_owners() -> None:
         "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$"
     )
     assert query["input_schema"]["properties"]["max_matches"]["maximum"] == 1_000
+    beads = REGISTRY.action_schema("beads.query", "observer")["action"]
+    assert beads["owner"] == "beads"
+    assert beads["route"] == "beads.query"
+    assert beads["input_schema"]["properties"]["parameters"]["properties"]["cursor"]["maxLength"] == 256
+    assert "preview_digest" in REGISTRY.action_schema("beads.change", "operator")["action"]["input_schema"]["properties"]["parameters"]["properties"]
     assert context["verb"] == "context"
     assert context["owner"] == "project-context"
     assert context["route"] == "project_context.context"

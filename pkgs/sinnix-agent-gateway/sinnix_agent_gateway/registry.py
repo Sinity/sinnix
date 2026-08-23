@@ -308,6 +308,8 @@ RESOURCE_GET_SCHEMA: dict[str, Any] = _with_request_controls(
                 "maximum": 262_144,
                 "default": 64_000,
             },
+            "includes": {"type": "array", "maxItems": 8, "items": {"enum": ["comments", "history", "events", "dependencies", "dependents", "children", "refs"]}},
+            "as_of": {"type": "string", "minLength": 1, "maxLength": 128},
         },
     }
 )
@@ -564,22 +566,60 @@ FILES_CHANGE_SCHEMA = _owner_change_schema(
 )
 
 BEADS_CHANGE_SCHEMA = _owner_change_schema(
-    ref_pattern=r"^sinnix://projects/[^/]+$",
+    ref_pattern=r"^sinnix://projects/[^/]+(?:/beads/[^/]+)?$",
     operations=(
         "claim",
         "close",
         "comment",
         "create",
-        "dependency_add",
+        "dependency.add",
+        "dependency.remove",
+        "memory.forget",
+        "memory.remember",
         "relate",
         "reopen",
         "unclaim",
+        "unrelate",
         "update",
+        "reparent",
     ),
     precondition_properties={
         "expected_task_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     },
 )
+
+BEADS_QUERY_SCHEMA: dict[str, Any] = _with_request_controls(
+    {"type": "object", "additionalProperties": False, "required": ["action_name", "parameters"], "properties": {
+        "action_name": {"const": "beads.query"},
+        "parameters": {"type": "object", "additionalProperties": False, "properties": {
+            "project_ids": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 128}},
+            "view": {"enum": ["query", "ready", "blocked", "open", "all", "recent", "overdue", "deferred", "unassigned", "stale_claims", "epic_progress", "changed_since"]},
+            "filters": {"type": "object", "maxProperties": 32}, "expression": {"type": "string", "minLength": 1, "maxLength": 4000},
+            "order": {"type": "object", "additionalProperties": False, "properties": {"field": {"enum": ["priority", "created", "updated", "closed", "status", "id", "title", "type", "assignee"]}, "reverse": {"type": "boolean"}}},
+            "includes": {"type": "array", "maxItems": 8, "items": {"enum": ["comments", "history", "events", "dependencies", "dependents", "children", "refs"]}},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 200}, "cursor": {"type": "string", "minLength": 1, "maxLength": 256},
+            "graph": {"type": "object", "additionalProperties": False, "properties": {"bead_id": {"type": "string"}, "direction": {"enum": ["down", "up", "both"]}, "edge_type": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 20}, "max_rows": {"type": "integer", "minimum": 1, "maximum": 1000}, "mermaid": {"type": "boolean"}}},
+            "memory": {"type": "object", "additionalProperties": False, "properties": {"key": {"type": "string"}, "query": {"type": "string"}}},
+        }},
+    }}
+)
+
+BEADS_CHANGE_SCHEMA["properties"]["parameters"] = {
+    "type": "object", "additionalProperties": False,
+    "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 128}, "mode": {"enum": ["preview", "apply"]},
+        "preview_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "title": {"type": "string", "maxLength": 512},
+        "text": {"type": "string", "maxLength": 32000}, "depends_on": {"type": "string", "maxLength": 128},
+        "other_id": {"type": "string", "maxLength": 128}, "parent_id": {"type": "string", "maxLength": 128},
+        "type": {"type": "string", "maxLength": 64}, "reason": {"type": "string", "maxLength": 32000}, "key": {"type": "string", "maxLength": 256},
+        "patch": {"type": "object", "additionalProperties": False, "properties": {
+            "set": {"type": "object"},
+            "labels": {"type": "object", "additionalProperties": False, "properties": {"add": {"type": "array", "items": {"type": "string"}}, "remove": {"type": "array", "items": {"type": "string"}}, "replace": {"type": "array", "items": {"type": "string"}}}},
+            "metadata": {"type": "object", "additionalProperties": False, "properties": {"set": {"type": "object"}, "unset": {"type": "array", "items": {"type": "string"}}}},
+            "notes": {"type": "object", "additionalProperties": False, "required": ["text"], "properties": {"text": {"type": "string", "maxLength": 32000}, "mode": {"enum": ["append", "replace"]}}},
+        }},
+    },
+}
 
 MCP_CHANGE_SCHEMA = _owner_change_schema(
     ref_pattern=r"^sinnix://mcp/[^/]+/tools/[^/]+$",
@@ -745,6 +785,20 @@ def build_registry() -> CatalogRegistry:
                 },
             ),
             documentation="Search one canonical project or checkout through the bounded project owner.",
+        ),
+        ActionSpec(
+            name="beads.query",
+            verb=VerbFamily.QUERY,
+            domain="beads",
+            owner="beads",
+            route="beads.query",
+            effect=EffectMode.READ,
+            principals=frozenset({"observer", "agent-control", "operator"}),
+            input_schema=BEADS_QUERY_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("project", "bead", "task_authority"),
+            examples=({"input": {"action_name": "beads.query", "parameters": {"project_ids": ["polylogue"], "view": "query", "filters": {"status": "open", "priority": {"op": "<=", "value": 1}}, "includes": ["dependencies"], "limit": 50}}},),
+            documentation="Query canonical project-qualified Beads resources with bounded snapshot paging and explicit coverage.",
         ),
         ActionSpec(
             name="projects.context",

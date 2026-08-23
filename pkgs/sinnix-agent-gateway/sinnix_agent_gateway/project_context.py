@@ -32,13 +32,13 @@ class ProjectContextService:
             try:
                 tasks = {
                     "availability": "available",
-                    **self.beads.read(project_id, "ready", {"limit": 20}),
+                    **self.beads.query(project_ids=[project_id], view="ready", limit=20),
                 }
             except BeadsError as exc:
                 tasks = {
                     "availability": "unavailable",
                     "reason": public_error(exc),
-                    "next_route": "tasks_read",
+                    "next_route": "query:beads.query",
                 }
         response = {
             "project": summary,
@@ -48,7 +48,7 @@ class ProjectContextService:
                 "project_read",
                 "query",
                 "project_diff",
-                "tasks_read",
+                "query:beads.query",
             ],
         }
         encoded = json.dumps(response, sort_keys=True, separators=(",", ":")).encode()
@@ -59,7 +59,7 @@ class ProjectContextService:
             "tasks": {
                 "availability": "unavailable",
                 "reason": "ready task result exceeded project context response bound",
-                "next_route": "tasks_read",
+                "next_route": "query:beads.query",
             },
             "next_routes": response["next_routes"],
         }
