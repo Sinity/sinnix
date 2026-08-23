@@ -322,7 +322,7 @@ class McpBrokerService:
             read_only = getattr(getattr(tool, "annotations", None), "read_only_hint", None)
             if not write and read_only is not True:
                 raise McpBrokerError(
-                    "MCP tool is not explicitly declared read-only; use mcp_write"
+                    "MCP tool is not explicitly declared read-only; select mcp.change through change"
                 )
             if write and read_only is True:
                 raise McpBrokerError("MCP tool is declared read-only; use mcp_read")

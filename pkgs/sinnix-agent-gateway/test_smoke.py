@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import concurrent.futures
 import dataclasses
 import json
@@ -68,14 +69,10 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "mcp_read",
     } <= readonly_names
     assert {
-        "files_write",
         "project_write",
         "change",
         "machine_action",
         "operate",
-        "desktop_action",
-        "terminal_action",
-        "browser_action",
         "run",
     }.isdisjoint(readonly_names)
     assert "shell_query" not in readonly_names
@@ -88,64 +85,47 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "operate",
     } <= local_names
     assert {
-        "desktop_action",
         "desktop_read",
         "desktop_capture",
         "files_read",
         "machine_action",
         "change",
         "session_list",
-        "browser_action",
         "browser_read",
         "browser_capture",
-        "terminal_action",
         "terminal_read",
         "tasks_read",
-        "tasks_write",
         "memory_search",
         "memory_get",
         "timeline_query",
         "mcp_catalog",
         "mcp_read",
-        "mcp_write",
     }.isdisjoint(local_names)
     assert {
-        "files_write",
         "change",
         "operate",
         "session_search",
-        "desktop_action",
         "desktop_read",
         "desktop_capture",
-        "browser_action",
         "browser_read",
         "browser_capture",
-        "terminal_action",
         "terminal_read",
         "run",
         "wait",
         "capability_search",
         "capability_describe",
         "tasks_read",
-        "tasks_write",
         "memory_search",
         "memory_get",
         "timeline_query",
         "mcp_catalog",
         "mcp_read",
-        "mcp_write",
     } <= operator_names
     assert {"project_write", "project_apply_patch", "machine_action"}.isdisjoint(operator_names)
     assert {
         "change",
         "operate",
         "run",
-        "files_write",
-        "tasks_write",
-        "mcp_write",
-        "desktop_action",
-        "terminal_action",
-        "browser_action",
     } == {
         row["name"]
         for row in operator["tools"]
@@ -161,6 +141,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
     }
     assert "context" in readonly_names & local_names & operator_names
     run_tool = next(row for row in operator["tools"] if row["name"] == "run")
+    change_tool = next(row for row in operator["tools"] if row["name"] == "change")
     wait_tool = next(row for row in readonly["tools"] if row["name"] == "wait")
     assert set(run_tool["inputSchema"]["required"]) == {
         "action_name",
@@ -175,6 +156,9 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
     assert set(wait_tool["inputSchema"]["required"]) == {"ref"}
     assert set(wait_tool["inputSchema"]["properties"]).isdisjoint(
         {"job_id", "operation", "command"}
+    )
+    assert {"action_name", "ref", "operation", "parameters", "idempotency_key"} <= set(
+        change_tool["inputSchema"]["properties"]
     )
     assert readonly["sha256"] != local["sha256"] != operator["sha256"]
     assert all(
@@ -414,6 +398,179 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert json.loads(mcp_catalog_result.content[0].text) == {"servers": []}
 
     anyio.run(probe)
+
+
+def test_public_v2_mutation_verbs_preserve_owner_routes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = config(tmp_path)
+    runtime = Runtime.create(cfg, "operator")
+    calls: dict[str, object] = {}
+
+    def beads_write(project_id: str, operation: str, arguments: dict[str, object]) -> dict[str, object]:
+        calls["beads"] = (project_id, operation, arguments)
+        return {"project_id": project_id, "operation": operation, "result": {"ok": True}}
+
+    async def mcp_call(
+        server: str, tool: str, arguments: dict[str, object], *, write: bool
+    ) -> dict[str, object]:
+        calls["mcp"] = (server, tool, arguments, write)
+        return {"server": server, "tool": tool, "mode": "write", "response": {"ok": True}}
+
+    def desktop_owner(operation: str, arguments: dict[str, object]) -> dict[str, object]:
+        calls["desktop"] = (operation, arguments)
+        return {"operation": operation, "result": {"ok": True}}
+
+    def terminal_owner(operation: str, arguments: dict[str, object]) -> dict[str, object]:
+        calls["terminal"] = (operation, arguments)
+        return {"operation": operation, "result": {"ok": True}}
+
+    def browser_owner(operation: str, arguments: dict[str, object]) -> dict[str, object]:
+        calls.setdefault("browser", []).append((operation, arguments))
+        if operation == "agent_window":
+            return {"operation": operation, "target": {"id": "agent-target", "parked": True}}
+        return {"operation": operation, "page_id": arguments["page_id"], "result": {"ok": True}}
+
+    monkeypatch.setattr(runtime.beads, "write", beads_write)
+    monkeypatch.setattr(runtime.mcp_broker, "call", mcp_call)
+    monkeypatch.setattr(runtime.desktop, "action", desktop_owner)
+    monkeypatch.setattr(runtime.terminals, "action", terminal_owner)
+    monkeypatch.setattr(runtime.browser, "action", browser_owner)
+    monkeypatch.setattr(Runtime, "create", classmethod(lambda _cls, _cfg, _principal: runtime))
+    server = create_server(cfg, "operator")
+    target = tmp_path / "public-route.txt"
+    file_token = base64.urlsafe_b64encode(str(target).encode()).decode().rstrip("=")
+
+    async def invoke(name: str, arguments: dict[str, object]) -> dict[str, object]:
+        response = await server.call_tool(name, arguments)
+        assert response.structured_content is not None
+        return response.structured_content
+
+    file_result = anyio.run(
+        invoke,
+        "change",
+        {
+            "action_name": "files.change",
+            "ref": f"sinnix://files/{file_token}",
+            "operation": "replace",
+            "parameters": {"content": "public route\n"},
+            "idempotency_key": "public-file-change",
+        },
+    )
+    beads_result = anyio.run(
+        invoke,
+        "change",
+        {
+            "action_name": "beads.change",
+            "ref": "sinnix://projects/fixture",
+            "operation": "comment",
+            "parameters": {"id": "fixture-1", "text": "public route"},
+            "idempotency_key": "public-beads-change",
+        },
+    )
+    mcp_result = anyio.run(
+        invoke,
+        "change",
+        {
+            "action_name": "mcp.change",
+            "ref": "sinnix://mcp/fixture/tools/mutate",
+            "operation": "call",
+            "parameters": {"value": "public route"},
+            "idempotency_key": "public-mcp-change",
+        },
+    )
+    desktop_result = anyio.run(
+        invoke,
+        "operate",
+        {
+            "action_name": "desktop.operate",
+            "ref": "sinnix://desktop/current",
+            "operation": "focus_window",
+            "parameters": {"window": "address:0xfixture"},
+            "idempotency_key": "public-desktop-operate",
+        },
+    )
+    terminal_result = anyio.run(
+        invoke,
+        "operate",
+        {
+            "action_name": "terminals.operate",
+            "ref": "sinnix://terminals/7",
+            "operation": "send",
+            "parameters": {"text": "printf fixture", "enter": True},
+            "idempotency_key": "public-terminal-operate",
+        },
+    )
+    window_result = anyio.run(
+        invoke,
+        "operate",
+        {
+            "action_name": "browser.operate",
+            "ref": "sinnix://browser/agent-workspace",
+            "operation": "agent_window",
+            "parameters": {"url": "https://example.test"},
+            "idempotency_key": "public-browser-window",
+        },
+    )
+    browser_result = anyio.run(
+        invoke,
+        "operate",
+        {
+            "action_name": "browser.operate",
+            "ref": "sinnix://browser/pages/agent-target",
+            "operation": "navigate",
+            "parameters": {"url": "https://example.test/next"},
+            "idempotency_key": "public-browser-operate",
+        },
+    )
+    unsupported = anyio.run(
+        invoke,
+        "change",
+        {
+            "action_name": "mcp.change",
+            "ref": "sinnix://mcp/fixture/tools/mutate",
+            "operation": "unsupported",
+            "parameters": {},
+            "idempotency_key": "public-mcp-unsupported",
+        },
+    )
+    undeclared = anyio.run(
+        invoke,
+        "change",
+        {
+            "action_name": "undeclared.change",
+            "ref": "sinnix://projects/fixture",
+            "operation": "replace",
+            "parameters": {},
+            "idempotency_key": "public-undeclared-change",
+        },
+    )
+
+    assert target.read_text() == "public route\n"
+    assert calls["beads"] == ("fixture", "comment", {"id": "fixture-1", "text": "public route"})
+    assert calls["mcp"] == ("fixture", "mutate", {"value": "public route"}, True)
+    assert calls["desktop"] == ("focus_window", {"window": "address:0xfixture"})
+    assert calls["terminal"] == ("send", {"match": "id:7", "text": "printf fixture", "enter": True})
+    assert calls["browser"] == [
+        ("agent_window", {"url": "https://example.test"}),
+        ("navigate", {"page_id": "agent-target", "url": "https://example.test/next"}),
+    ]
+    assert [
+        result["result"]["action"]
+        for result in (file_result, beads_result, mcp_result, desktop_result, terminal_result, window_result, browser_result)
+    ] == [
+        "files.change",
+        "beads.change",
+        "mcp.change",
+        "desktop.operate",
+        "terminals.operate",
+        "browser.operate",
+        "browser.operate",
+    ]
+    assert window_result["data"]["target_ref"] == "sinnix://browser/pages/agent-target"
+    assert browser_result["data"]["ref"] == "sinnix://browser/pages/agent-target"
+    assert unsupported["error"]["code"] == "unsupported_capability"
+    assert undeclared["error"]["code"] == "unsupported_capability"
 
 
 def test_readonly_policy_is_checked_inside_write_operation(tmp_path: Path) -> None:
@@ -724,7 +881,7 @@ def test_runtime_audit_carries_returned_owner_receipt(tmp_path: Path) -> None:
 def test_runtime_audit_carries_file_mutation_receipt(tmp_path: Path) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
     runtime.execute(
-        "files_write",
+        "files.change",
         lambda: {
             "operation": "move",
             "path": "/realm/tmp/work/gateway-demo/fixture.txt",

@@ -67,8 +67,14 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "jobs.wait",
         "shell.run",
         "projects.change",
+        "files.change",
+        "beads.change",
+        "mcp.change",
         "machine.operate",
         "jobs.cancel",
+        "desktop.operate",
+        "terminals.operate",
+        "browser.operate",
     }
     assert observer_catalog["action_catalog_hash"] != operator_catalog["action_catalog_hash"]
     assert {row["kind"] for row in observer_catalog["resources"]} >= {
@@ -239,6 +245,7 @@ def test_catalog_search_filters_resource_kind_and_text() -> None:
         "gateway.catalog",
         "resources.get",
         "projects.context",
+        "beads.change",
     ]
     assert result["resources"] == [
         {
@@ -270,6 +277,7 @@ def test_catalog_search_scopes_contracts_to_project_resources() -> None:
         "projects.query",
         "projects.context",
         "projects.change",
+        "beads.change",
         "agents.run",
         "shell.run",
     }
@@ -343,11 +351,11 @@ def test_change_and_operate_contracts_bind_closed_canonical_owner_targets() -> N
     assert change["input_schema"]["required"] == [
         "ref",
         "operation",
+        "parameters",
         "idempotency_key",
-        "preconditions",
     ]
     assert change["input_schema"]["properties"]["operation"] == {
-        "enum": ["write", "apply_patch"]
+        "enum": ["apply_patch", "write"]
     }
     assert change["input_schema"]["properties"]["preconditions"]["additionalProperties"] is False
 
@@ -383,6 +391,31 @@ def test_change_and_operate_contracts_bind_closed_canonical_owner_targets() -> N
             }
         },
     }
+
+
+def test_collapsed_mutation_contracts_are_operator_only_and_canonical() -> None:
+    expected = {
+        "files.change": ("change", "files", "files.change", ["host_file"]),
+        "beads.change": ("change", "beads", "beads.write", ["project", "bead", "task_authority"]),
+        "mcp.change": ("change", "mcp-broker", "mcp.call.write", ["mcp_tool"]),
+        "desktop.operate": ("operate", "desktop", "desktop.action", ["desktop"]),
+        "terminals.operate": ("operate", "terminals", "terminals.action", ["terminal"]),
+        "browser.operate": ("operate", "browser", "browser.action", ["browser_workspace", "browser_page"]),
+    }
+
+    for action_name, (verb, owner, route, resources) in expected.items():
+        action = REGISTRY.action_schema(action_name, "operator")["action"]
+        assert (action["verb"], action["owner"], action["route"]) == (verb, owner, route)
+        assert action["resource_kinds"] == resources
+        assert action["supports_idempotency"] is True
+        assert action["input_schema"]["required"] == [
+            "ref",
+            "operation",
+            "parameters",
+            "idempotency_key",
+        ]
+        with pytest.raises(RegistryError, match="cannot read action"):
+            REGISTRY.action_schema(action_name, "observer")
 
 
 def test_query_context_and_events_contracts_bind_existing_read_owners() -> None:

@@ -110,6 +110,20 @@ class TargetToolBindings:
             )
         return action
 
+    def fallback_for_tool(self, tool_name: str, principal: str):
+        """Return a visible action for recording a rejected selector request."""
+        try:
+            bindings = self._bindings_by_tool[tool_name]
+        except KeyError as error:
+            raise RegistryError(f"no target tool binding for {tool_name!r}") from error
+        for binding in bindings:
+            action = self.registry.action(binding.action_name)
+            if principal in action.principals:
+                return action
+        raise RegistryError(
+            f"principal {principal!r} has no visible action for target tool {tool_name!r}"
+        )
+
     def is_visible(self, tool_name: str, principal: str) -> bool:
         try:
             return any(

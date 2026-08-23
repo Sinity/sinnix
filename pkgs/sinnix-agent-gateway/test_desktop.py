@@ -95,7 +95,7 @@ def test_operator_dispatch_uses_exact_argument_vector(tmp_path: Path) -> None:
     assert commands(captured) == [["dispatch", "workspace", "special:agentbrowser"]]
 
 
-def test_observer_cannot_take_desktop_action(tmp_path: Path) -> None:
+def test_observer_cannot_mutate_desktop(tmp_path: Path) -> None:
     desktop, _ = desktop_service(tmp_path, "observer")
 
     with pytest.raises(PolicyError, match="desktop.action"):

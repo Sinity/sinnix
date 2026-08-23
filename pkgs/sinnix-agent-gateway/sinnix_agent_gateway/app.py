@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import time
@@ -56,12 +58,6 @@ IDEMPOTENT_MUTATION_TOOL = ToolAnnotations(
     readOnlyHint=False,
     destructiveHint=True,
     idempotentHint=True,
-    openWorldHint=False,
-)
-DESTRUCTIVE_TOOL = ToolAnnotations(
-    readOnlyHint=False,
-    destructiveHint=True,
-    idempotentHint=False,
     openWorldHint=False,
 )
 
@@ -201,7 +197,9 @@ class Runtime:
             if kind == "action":
                 return "available", None
             if any(
-                action.name != "gateway.catalog" and name in action.resource_kinds
+                action.name != "gateway.catalog"
+                and name in action.resource_kinds
+                and (search.principal is None or search.principal in action.principals)
                 for action in REGISTRY.actions
             ):
                 return "available", None
@@ -593,6 +591,192 @@ class Runtime:
             "operation": operation,
             "owner_result": result,
         }
+
+    @staticmethod
+    def _parameters(value: Mapping[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(value, Mapping):
+            raise ProtocolError("invalid_request", "parameters must be an object")
+        return dict(value)
+
+    @staticmethod
+    def _resource_reference(
+        reference: str, allowed: set[str], message: str
+    ) -> tuple[Any, dict[str, str], str]:
+        try:
+            resource, values = REGISTRY.resolve(reference)
+        except RegistryError as exc:
+            raise ProtocolError("not_found", message) from exc
+        if resource.kind not in allowed:
+            raise ProtocolError("invalid_request", message)
+        return resource, values, str(resource.ref_template.format(values))
+
+    @staticmethod
+    def _decode_file_token(token: str) -> str:
+        try:
+            padded = token + "=" * (-len(token) % 4)
+            path = base64.b64decode(
+                padded.encode(), altchars=b"-_", validate=True
+            ).decode("utf-8")
+        except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
+            raise ProtocolError("invalid_request", "file reference is malformed") from exc
+        if not path or len(path) > 4_096 or not path.startswith("/"):
+            raise ProtocolError("invalid_request", "file reference is malformed")
+        return path
+
+    def v2_file_change(
+        self,
+        *,
+        reference: str,
+        operation: str,
+        parameters: Mapping[str, Any] | None,
+        preconditions: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        _resource, values, canonical_ref = self._resource_reference(
+            reference, {"host_file"}, "ref does not identify a canonical host file"
+        )
+        arguments = self._parameters(parameters)
+        allowed = {
+            "append": {"content"},
+            "copy": {"destination_ref"},
+            "mkdir": set(),
+            "move": {"destination_ref"},
+            "remove": set(),
+            "replace": {"content"},
+        }
+        if operation not in allowed:
+            raise ProtocolError("unsupported_capability", "file operation is not declared")
+        if set(arguments) - allowed[operation]:
+            raise ProtocolError("invalid_request", "file parameters are not valid for this operation")
+        if operation in {"append", "replace"} and not isinstance(
+            arguments.get("content"), str
+        ):
+            raise ProtocolError("invalid_request", "file operation requires content")
+        destination: str | None = None
+        if operation in {"copy", "move"}:
+            destination_ref = arguments.get("destination_ref")
+            if not isinstance(destination_ref, str):
+                raise ProtocolError("invalid_request", "file operation requires destination_ref")
+            _destination, destination_values, _ = self._resource_reference(
+                destination_ref,
+                {"host_file"},
+                "destination_ref does not identify a canonical host file",
+            )
+            destination = self._decode_file_token(destination_values["file_token"])
+        expected_sha256: str | None = None
+        if preconditions is not None:
+            if not isinstance(preconditions, Mapping) or set(preconditions) - {"expected_sha256"}:
+                raise ProtocolError("invalid_request", "file preconditions are not recognized")
+            value = preconditions.get("expected_sha256")
+            if value is not None and (
+                not isinstance(value, str) or len(value) != 64
+            ):
+                raise ProtocolError("invalid_request", "expected_sha256 is malformed")
+            expected_sha256 = value
+        result = self.files.write(
+            operation,
+            self._decode_file_token(values["file_token"]),
+            content=arguments.get("content"),
+            destination=destination,
+            expected_sha256=expected_sha256,
+        )
+        response = {"ref": canonical_ref, **result}
+        if destination is not None:
+            destination_token = base64.urlsafe_b64encode(destination.encode()).decode().rstrip("=")
+            response["destination_ref"] = REGISTRY.reference(
+                "host_file", {"file_token": destination_token}
+            )
+        return response
+
+    def v2_beads_change(
+        self,
+        *,
+        reference: str,
+        operation: str,
+        parameters: Mapping[str, Any] | None,
+        preconditions: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        _resource, values, canonical_ref = self._resource_reference(
+            reference, {"project"}, "ref does not identify a canonical project"
+        )
+        if preconditions is not None:
+            if not isinstance(preconditions, Mapping) or set(preconditions) != {"expected_task_revision"}:
+                raise ProtocolError("invalid_request", "Beads change requires expected_task_revision when preconditions are supplied")
+            expected = preconditions["expected_task_revision"]
+            actual = self.beads.task_authority_status(values["project_id"])["revision"]
+            if not isinstance(expected, str) or expected != actual:
+                raise ProtocolError("precondition_failed", "Beads task revision no longer matches")
+        result = self.beads.write(
+            values["project_id"], operation, self._parameters(parameters)
+        )
+        return {"ref": canonical_ref, **result}
+
+    async def v2_mcp_change(
+        self,
+        *,
+        reference: str,
+        operation: str,
+        parameters: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        _resource, values, canonical_ref = self._resource_reference(
+            reference, {"mcp_tool"}, "ref does not identify a canonical MCP tool"
+        )
+        if operation != "call":
+            raise ProtocolError("unsupported_capability", "MCP operation is not declared")
+        result = await self.mcp_broker.call(
+            values["server"], values["tool"], self._parameters(parameters), write=True
+        )
+        return {"ref": canonical_ref, **result}
+
+    def v2_desktop_operate(
+        self, *, reference: str, operation: str, parameters: Mapping[str, Any] | None
+    ) -> dict[str, Any]:
+        _resource, _values, canonical_ref = self._resource_reference(
+            reference, {"desktop"}, "ref does not identify the canonical desktop"
+        )
+        return {"ref": canonical_ref, **self.desktop.action(operation, self._parameters(parameters))}
+
+    def v2_terminal_operate(
+        self, *, reference: str, operation: str, parameters: Mapping[str, Any] | None
+    ) -> dict[str, Any]:
+        _resource, values, canonical_ref = self._resource_reference(
+            reference, {"terminal"}, "ref does not identify a canonical terminal"
+        )
+        arguments = self._parameters(parameters)
+        if "match" in arguments:
+            raise ProtocolError("invalid_request", "terminal match is derived from the canonical ref")
+        return {
+            "ref": canonical_ref,
+            **self.terminals.action(
+                operation, {"match": f"id:{values['terminal_id']}", **arguments}
+            ),
+        }
+
+    def v2_browser_operate(
+        self, *, reference: str, operation: str, parameters: Mapping[str, Any] | None
+    ) -> dict[str, Any]:
+        resource, values, canonical_ref = self._resource_reference(
+            reference,
+            {"browser_workspace", "browser_page"},
+            "ref does not identify a canonical browser target",
+        )
+        arguments = self._parameters(parameters)
+        if operation == "agent_window":
+            if resource.kind != "browser_workspace":
+                raise ProtocolError("invalid_request", "agent_window requires the browser workspace ref")
+        else:
+            if resource.kind != "browser_page":
+                raise ProtocolError("invalid_request", "browser operation requires a gateway-owned page ref")
+            if "page_id" in arguments:
+                raise ProtocolError("invalid_request", "browser page_id is derived from the canonical ref")
+            arguments = {"page_id": values["page_id"], **arguments}
+        result = self.browser.action(operation, arguments)
+        response = {"ref": canonical_ref, **result}
+        target = result.get("target")
+        if isinstance(target, Mapping) and isinstance(target.get("id"), str):
+            response["target_ref"] = REGISTRY.reference(
+                "browser_page", {"page_id": target["id"]}
+            )
+        return response
 
     def _machine_target(self, reference: str) -> tuple[str, dict[str, Any]]:
         try:
@@ -1363,6 +1547,24 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 route="projects.change",
             ),
             TargetToolBinding(
+                tool_name="change",
+                action_name="files.change",
+                owner="files",
+                route="files.change",
+            ),
+            TargetToolBinding(
+                tool_name="change",
+                action_name="beads.change",
+                owner="beads",
+                route="beads.write",
+            ),
+            TargetToolBinding(
+                tool_name="change",
+                action_name="mcp.change",
+                owner="mcp-broker",
+                route="mcp.call.write",
+            ),
+            TargetToolBinding(
                 tool_name="operate",
                 action_name="machine.operate",
                 owner="ops-reducer",
@@ -1374,8 +1576,37 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 owner="systemd-jobs",
                 route="job.cancel",
             ),
+            TargetToolBinding(
+                tool_name="operate",
+                action_name="desktop.operate",
+                owner="desktop",
+                route="desktop.action",
+            ),
+            TargetToolBinding(
+                tool_name="operate",
+                action_name="terminals.operate",
+                owner="terminals",
+                route="terminals.action",
+            ),
+            TargetToolBinding(
+                tool_name="operate",
+                action_name="browser.operate",
+                owner="browser",
+                route="browser.action",
+            ),
         ),
     )
+
+    def selector_failure(tool_name: str, error: RegistryError) -> ProtocolError:
+        if "cannot invoke action" in str(error):
+            return ProtocolError(
+                "policy_denied",
+                f"this principal cannot invoke the selected {tool_name} action",
+            )
+        return ProtocolError(
+            "unsupported_capability",
+            f"the selected {tool_name} action is not declared for this principal",
+        )
 
     if target_bindings.is_visible("status", principal_name):
 
@@ -1642,95 +1873,132 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             preconditions: dict[str, Any] | None = None,
         ) -> V2ToolEnvelope:
             """Start one catalog-declared shell or attested-agent job by action name."""
-            action = target_bindings.action_for_tool("run", action_name)
-            if action.name == "shell.run":
-                callback = lambda: runtime.v2_run_shell(
-                    project_id=project_id,
-                    checkout_id=checkout_id,
-                    argv=argv,
-                    cwd=cwd,
-                    timeout_seconds=3_600 if timeout_seconds is None else timeout_seconds,
+            request = {
+                "action_name": action_name,
+                "project_id": project_id,
+                "checkout_id": checkout_id,
+                "argv": argv,
+                "prompt": prompt,
+                "backend": backend,
+                "model": model,
+                "reasoning_effort": reasoning_effort,
+                "credential_profile": credential_profile,
+                "cwd": cwd,
+                "timeout_seconds": timeout_seconds,
+                "request_id": request_id,
+                "actor": actor,
+                "reason": reason,
+                "idempotency_key": idempotency_key,
+                "deadline_at": deadline_at,
+                "preconditions": preconditions,
+            }
+            try:
+                action = target_bindings.action_for_tool(
+                    "run", action_name, principal=principal_name
                 )
-            elif action.name == "agents.run":
-                callback = lambda: runtime.v2_run_agent(
-                    project_id=project_id,
-                    checkout_id=checkout_id,
-                    prompt=prompt,
-                    backend=backend,
-                    model=model,
-                    reasoning_effort=reasoning_effort,
-                    timeout_seconds=14_400 if timeout_seconds is None else timeout_seconds,
-                    credential_profile=credential_profile,
-                )
+            except RegistryError as error:
+                action = target_bindings.fallback_for_tool("run", principal_name)
+                failure = selector_failure("run", error)
+
+                def callback() -> dict[str, Any]:
+                    raise failure
+
             else:
-                raise RegistryError(f"run action {action.name!r} is not implemented")
-            response = runtime.execute_v2(
-                action,
-                callback,
-                {
-                    "action_name": action_name,
-                    "project_id": project_id,
-                    "checkout_id": checkout_id,
-                    "argv": argv,
-                    "prompt": prompt,
-                    "backend": backend,
-                    "model": model,
-                    "reasoning_effort": reasoning_effort,
-                    "credential_profile": credential_profile,
-                    "cwd": cwd,
-                    "timeout_seconds": timeout_seconds,
-                    "request_id": request_id,
-                    "actor": actor,
-                    "reason": reason,
-                    "idempotency_key": idempotency_key,
-                    "deadline_at": deadline_at,
-                    "preconditions": preconditions,
-                },
-            )
+                if action.name == "shell.run":
+                    callback = lambda: runtime.v2_run_shell(
+                        project_id=project_id,
+                        checkout_id=checkout_id,
+                        argv=argv,
+                        cwd=cwd,
+                        timeout_seconds=3_600 if timeout_seconds is None else timeout_seconds,
+                    )
+                elif action.name == "agents.run":
+                    callback = lambda: runtime.v2_run_agent(
+                        project_id=project_id,
+                        checkout_id=checkout_id,
+                        prompt=prompt,
+                        backend=backend,
+                        model=model,
+                        reasoning_effort=reasoning_effort,
+                        timeout_seconds=14_400 if timeout_seconds is None else timeout_seconds,
+                        credential_profile=credential_profile,
+                    )
+                else:
+                    raise RegistryError(f"run action {action.name!r} is not implemented")
+            response = runtime.execute_v2(action, callback, request)
             return cast(V2ToolEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("change", principal_name):
 
-        @mcp.tool(title="Change canonical project", annotations=IDEMPOTENT_MUTATION_TOOL)
-        def change(
+        @mcp.tool(title="Change canonical target", annotations=IDEMPOTENT_MUTATION_TOOL)
+        async def change(
+            action_name: str,
             ref: str,
             operation: str,
             idempotency_key: str,
-            preconditions: dict[str, Any],
-            path: str | None = None,
-            content: str | None = None,
-            patch: str | None = None,
+            parameters: dict[str, Any] | None = None,
+            preconditions: dict[str, Any] | None = None,
             request_id: str | None = None,
             actor: str | None = None,
             reason: str | None = None,
             deadline_at: float | None = None,
         ) -> V2ToolEnvelope:
-            """Apply one bounded, precondition-checked project mutation by canonical ref."""
-            action = target_bindings.action_for_tool("change", principal=principal_name)
-            response = runtime.execute_v2(
-                action,
-                lambda: runtime.v2_change(
-                    reference=ref,
-                    operation=operation,
-                    path=path,
-                    content=content,
-                    patch=patch,
-                    preconditions=preconditions,
-                ),
-                {
-                    "ref": ref,
-                    "operation": operation,
-                    "path": path,
-                    "content": content,
-                    "patch": patch,
-                    "request_id": request_id,
-                    "actor": actor,
-                    "reason": reason,
-                    "idempotency_key": idempotency_key,
-                    "deadline_at": deadline_at,
-                    "preconditions": preconditions,
-                },
-            )
+            """Apply one catalog-declared mutation through its canonical owner route."""
+            request = {
+                "action_name": action_name,
+                "ref": ref,
+                "operation": operation,
+                "parameters": parameters,
+                "request_id": request_id,
+                "actor": actor,
+                "reason": reason,
+                "idempotency_key": idempotency_key,
+                "deadline_at": deadline_at,
+                "preconditions": preconditions,
+            }
+            try:
+                action = target_bindings.action_for_tool(
+                    "change", action_name, principal=principal_name
+                )
+            except RegistryError as error:
+                action = target_bindings.fallback_for_tool("change", principal_name)
+                failure = selector_failure("change", error)
+
+                async def callback() -> dict[str, Any]:
+                    raise failure
+
+            else:
+                async def callback() -> dict[str, Any]:
+                    if action.name == "projects.change":
+                        return runtime.v2_change(
+                            reference=ref,
+                            operation=operation,
+                            path=parameters.get("path") if parameters else None,
+                            content=parameters.get("content") if parameters else None,
+                            patch=parameters.get("patch") if parameters else None,
+                            preconditions=preconditions,
+                        )
+                    if action.name == "files.change":
+                        return runtime.v2_file_change(
+                            reference=ref,
+                            operation=operation,
+                            parameters=parameters,
+                            preconditions=preconditions,
+                        )
+                    if action.name == "beads.change":
+                        return runtime.v2_beads_change(
+                            reference=ref,
+                            operation=operation,
+                            parameters=parameters,
+                            preconditions=preconditions,
+                        )
+                    if action.name == "mcp.change":
+                        return await runtime.v2_mcp_change(
+                            reference=ref, operation=operation, parameters=parameters
+                        )
+                    raise RegistryError(f"change action {action.name!r} is not implemented")
+
+            response = await runtime.execute_v2_async(action, callback, request)
             return cast(V2ToolEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("operate", principal_name):
@@ -1749,39 +2017,59 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             deadline_at: float | None = None,
         ) -> V2ToolEnvelope:
             """Run one catalog-declared machine or job operation against a canonical target."""
-            contract = target_bindings.action_for_tool("operate", action_name)
-            if contract.name == "machine.operate":
-                callback = lambda: runtime.v2_operate(
-                    reference=ref,
-                    action=operation,
-                    parameters=parameters,
-                    reason=reason,
-                    idempotency_key=idempotency_key,
-                    preconditions=preconditions,
+            request = {
+                "action_name": action_name,
+                "ref": ref,
+                "operation": operation,
+                "parameters": parameters,
+                "request_id": request_id,
+                "actor": actor,
+                "reason": reason,
+                "idempotency_key": idempotency_key,
+                "deadline_at": deadline_at,
+                "preconditions": preconditions,
+            }
+            try:
+                contract = target_bindings.action_for_tool(
+                    "operate", action_name, principal=principal_name
                 )
-            elif contract.name == "jobs.cancel":
-                callback = lambda: runtime.v2_cancel_job(
-                    reference=ref,
-                    preconditions=preconditions,
-                )
+            except RegistryError as error:
+                contract = target_bindings.fallback_for_tool("operate", principal_name)
+                failure = selector_failure("operate", error)
+
+                def callback() -> dict[str, Any]:
+                    raise failure
+
             else:
-                raise RegistryError(f"operate action {contract.name!r} is not implemented")
-            response = runtime.execute_v2(
-                contract,
-                callback,
-                {
-                    "action_name": action_name,
-                    "ref": ref,
-                    "operation": operation,
-                    "parameters": parameters,
-                    "request_id": request_id,
-                    "actor": actor,
-                    "reason": reason,
-                    "idempotency_key": idempotency_key,
-                    "deadline_at": deadline_at,
-                    "preconditions": preconditions,
-                },
-            )
+                if contract.name == "machine.operate":
+                    callback = lambda: runtime.v2_operate(
+                        reference=ref,
+                        action=operation,
+                        parameters=parameters,
+                        reason=reason,
+                        idempotency_key=idempotency_key,
+                        preconditions=preconditions,
+                    )
+                elif contract.name == "jobs.cancel":
+                    callback = lambda: runtime.v2_cancel_job(
+                        reference=ref,
+                        preconditions=preconditions,
+                    )
+                elif contract.name == "desktop.operate":
+                    callback = lambda: runtime.v2_desktop_operate(
+                        reference=ref, operation=operation, parameters=parameters
+                    )
+                elif contract.name == "terminals.operate":
+                    callback = lambda: runtime.v2_terminal_operate(
+                        reference=ref, operation=operation, parameters=parameters
+                    )
+                elif contract.name == "browser.operate":
+                    callback = lambda: runtime.v2_browser_operate(
+                        reference=ref, operation=operation, parameters=parameters
+                    )
+                else:
+                    raise RegistryError(f"operate action {contract.name!r} is not implemented")
+            response = runtime.execute_v2(contract, callback, request)
             return cast(V2ToolEnvelope, v2_tool_result(response))
 
     @mcp.tool(title="Machine report", annotations=READ_ONLY_TOOL)
@@ -1848,18 +2136,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 lambda: runtime.mcp_broker.call(server, tool, arguments, write=False),
             )
 
-    if Capability.MCP_WRITE in runtime.principal.capabilities:
-
-        @mcp.tool(title="Call writable upstream MCP tool", annotations=DESTRUCTIVE_TOOL)
-        async def mcp_write(
-            server: str, tool: str, arguments: dict[str, Any]
-        ) -> dict[str, Any]:
-            """Call one non-read-only upstream tool through the configured broker."""
-            return await runtime.execute_async(
-                "mcp_write",
-                lambda: runtime.mcp_broker.call(server, tool, arguments, write=True),
-            )
-
     if Capability.TASK_READ in runtime.principal.capabilities:
 
         @mcp.tool(title="Read Beads tasks", annotations=READ_ONLY_TOOL)
@@ -1869,17 +2145,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             """Read bounded Beads records through the native owner CLI."""
             return runtime.execute(
                 "tasks_read", lambda: runtime.beads.read(project_id, operation, arguments)
-            )
-
-    if Capability.TASK_WRITE in runtime.principal.capabilities:
-
-        @mcp.tool(title="Write Beads tasks", annotations=DESTRUCTIVE_TOOL)
-        def tasks_write(
-            project_id: str, operation: str, arguments: dict[str, Any]
-        ) -> dict[str, Any]:
-            """Perform one structured Beads mutation through the native owner CLI."""
-            return runtime.execute(
-                "tasks_write", lambda: runtime.beads.write(project_id, operation, arguments)
             )
 
     if Capability.DESKTOP_READ in runtime.principal.capabilities:
@@ -1900,15 +2165,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 "desktop_capture", lambda: runtime.desktop.capture_output(fix_hdr)
             )
 
-    if Capability.DESKTOP_ACTION in runtime.principal.capabilities:
-
-        @mcp.tool(title="Run desktop action", annotations=DESTRUCTIVE_TOOL)
-        def desktop_action(operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
-            """Run one exact operator desktop action through the Hyprland wrapper."""
-            return runtime.execute(
-                "desktop_action", lambda: runtime.desktop.action(operation, arguments)
-            )
-
     if Capability.TERMINAL_READ in runtime.principal.capabilities:
 
         @mcp.tool(title="Read terminal state", annotations=READ_ONLY_TOOL)
@@ -1918,15 +2174,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             """List Kitty terminals or read a bounded capture through its owner wrapper."""
             return runtime.execute(
                 "terminal_read", lambda: runtime.terminals.read(operation, arguments)
-            )
-
-    if Capability.TERMINAL_ACTION in runtime.principal.capabilities:
-
-        @mcp.tool(title="Run terminal action", annotations=DESTRUCTIVE_TOOL)
-        def terminal_action(operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
-            """Send one exact operator action to a selected Kitty terminal."""
-            return runtime.execute(
-                "terminal_action", lambda: runtime.terminals.action(operation, arguments)
             )
 
     if Capability.BROWSER_READ in runtime.principal.capabilities:
@@ -1958,15 +2205,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 lambda: runtime.browser.capture(
                     page_id, image_format, full_page, quality
                 ),
-            )
-
-    if Capability.BROWSER_ACTION in runtime.principal.capabilities:
-
-        @mcp.tool(title="Run browser action", annotations=DESTRUCTIVE_TOOL)
-        def browser_action(operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
-            """Operate only a gateway-created hidden Chrome agent window."""
-            return runtime.execute(
-                "browser_action", lambda: runtime.browser.action(operation, arguments)
             )
 
     @mcp.tool(title="List projects", annotations=READ_ONLY_TOOL)
@@ -2032,28 +2270,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     offset=offset,
                     max_bytes=max_bytes,
                     max_entries=max_entries,
-                ),
-            )
-
-    if Capability.FILE_WRITE in runtime.principal.capabilities:
-
-        @mcp.tool(title="Write host files", annotations=DESTRUCTIVE_TOOL)
-        def files_write(
-            operation: str,
-            path: str,
-            content: str | None = None,
-            destination: str | None = None,
-            expected_sha256: str | None = None,
-        ) -> dict[str, Any]:
-            """Replace, append, create, remove, copy, or move a host path with a receipt."""
-            return runtime.execute(
-                "files_write",
-                lambda: runtime.files.write(
-                    operation,
-                    path,
-                    content=content,
-                    destination=destination,
-                    expected_sha256=expected_sha256,
                 ),
             )
 

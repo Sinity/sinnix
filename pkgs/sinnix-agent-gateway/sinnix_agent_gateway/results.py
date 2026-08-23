@@ -32,6 +32,7 @@ EXPECTED_ERROR_CODES = frozenset(
         "owner_failed",
         "policy_denied",
         "idempotency_conflict",
+        "unsupported_capability",
     }
 )
 
