@@ -376,6 +376,18 @@ def initialize_git_checkout(root: Path) -> None:
     )
 
 
+def replace_worktree_gitfile_with_symlink(worktree: Path, target: Path | None = None) -> Path:
+    """Model the managed-worktree layout that Git refuses to remove directly."""
+    gitfile = worktree / ".git"
+    if target is None:
+        content = gitfile.read_text().strip()
+        assert content.startswith("gitdir: ")
+        target = Path(content.removeprefix("gitdir: "))
+    gitfile.unlink()
+    gitfile.symlink_to(target)
+    return target
+
+
 def test_worktree_porcelain_parser_accepts_flags_and_rejects_unknown_shapes() -> None:
     parsed = parse_worktree_records(
         "worktree /repo\nHEAD " + "a" * 40 + "\ndetached\nlocked operator reason\nprunable stale\n\n"
@@ -1677,6 +1689,8 @@ def test_workspace_dispose_deletes_a_clean_no_pr_branch_without_checkpoint_conte
         project_id="fixture", name="verification-lane", branch="feature/verification-lane", base="HEAD"
     )
     checkpoint = service.workspaces.checkpoint(workspace["workspace_id"])
+    gitdir = replace_worktree_gitfile_with_symlink(Path(workspace["path"]))
+    assert gitdir.is_dir()
 
     disposed = service.dispatch(
         request(
@@ -1722,6 +1736,8 @@ def test_workspace_finish_integrated_accepts_cherry_picked_tree_and_rejects_miss
     subprocess.run(
         ["git", "-C", str(tmp_path), "update-ref", "refs/remotes/origin/master", target_head], check=True
     )
+    gitdir = replace_worktree_gitfile_with_symlink(workspace_path)
+    assert gitdir.is_dir()
 
     finished = service.workspaces.finish_integrated(workspace["workspace_id"], target_head)
 
@@ -1736,6 +1752,42 @@ def test_workspace_finish_integrated_accepts_cherry_picked_tree_and_rejects_miss
     assert subprocess.run(
         ["git", "-C", str(tmp_path), "show-ref", "--verify", "--quiet", f"refs/heads/{workspace['branch']}"]
     ).returncode == 1
+
+
+def test_workspace_gitfile_symlink_rejects_mismatched_and_outside_targets_without_mutation(tmp_path: Path) -> None:
+    """Anti-vacuity: only the exact registered administrative gitdir may be canonicalized."""
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    first = service.workspaces.create(
+        project_id="fixture", name="symlink-first", branch="feature/symlink-first", base="HEAD"
+    )
+    second = service.workspaces.create(
+        project_id="fixture", name="symlink-second", branch="feature/symlink-second", base="HEAD"
+    )
+    first_path = Path(first["path"])
+    first_checkout = next(item for item in service.projects.checkouts("fixture") if item.path == first_path)
+    second_gitdir = Path((Path(second["path"]) / ".git").read_text().strip().removeprefix("gitdir: "))
+    first_gitfile = first_path / ".git"
+    first_gitfile.unlink()
+    first_gitfile.symlink_to(second_gitdir)
+
+    with pytest.raises(WorkspaceError, match="does not match its registered worktree gitdir"):
+        service.workspaces._canonicalize_gitfile_symlink(first_checkout)
+    assert first_gitfile.is_symlink()
+    assert first_gitfile.resolve(strict=True) == second_gitdir
+
+    outside = tmp_path / "outside-gitdir"
+    outside.mkdir()
+    first_gitfile.unlink()
+    first_gitfile.symlink_to(outside)
+
+    with pytest.raises(WorkspaceError, match="outside the repository worktrees area"):
+        service.workspaces._canonicalize_gitfile_symlink(first_checkout)
+    assert first_gitfile.is_symlink()
+    assert first_gitfile.resolve(strict=True) == outside
+    assert first_path.is_dir()
+    assert Path(second["path"]).is_dir()
 
 
 def test_workspace_dispose_refuses_dirty_divergent_unpublished_and_checkpoint_only_content(tmp_path: Path) -> None:
