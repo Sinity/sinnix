@@ -33,9 +33,12 @@ CDP_HOST="${CDP_HOST:-127.0.0.1}"
 CDP_PORT="${CDP_PORT:-9222}"
 CDP_BASE="http://${CDP_HOST}:${CDP_PORT}"
 
-# The hidden workspace agent windows are parked on, and the key that shows it.
+# The inactive named workspace agent windows are parked on, and the key that
+# switches to it. A special workspace is an overlay and therefore cannot be
+# the isolation boundary: if shown, it obscures every ordinary workspace.
 # Must match modules/features/desktop/hyprland/{rules,bindings}.nix.
-AGENT_WORKSPACE="${SINNIX_AGENT_BROWSER_WORKSPACE:-special:agentbrowser}"
+AGENT_WORKSPACE="${SINNIX_AGENT_BROWSER_WORKSPACE:-agentbrowser}"
+AGENT_WORKSPACE_TARGET="name:${AGENT_WORKSPACE}"
 SUMMON_BINDING="F7"
 
 usage() {
@@ -50,6 +53,8 @@ Commands:
   status                          Probe the browser
   agent-window [--url <url>]      Open a new window and park it on the hidden
                                   agent workspace; prints its page id
+  toggle-agent-workspace          Switch to the agent workspace, or back to the
+                                  previous workspace when already there
   list                            List all open pages (id, title, url, type)
   list-tabs                       List only page-type targets
   info <page_id>                  Get detailed info for a page
@@ -297,17 +302,12 @@ agent-window)
     if [[ -n $addr ]]; then
       stable_checks=0
       for _ in {1..20}; do
-        hyprctl dispatch movetoworkspacesilent "${AGENT_WORKSPACE},address:${addr}" >/dev/null 2>&1 || true
-        visible=$(hyprctl monitors -j 2>/dev/null | jq -r --arg workspace "$AGENT_WORKSPACE" \
-          'any(.[]; .specialWorkspace.name == $workspace)')
-        if [[ $visible == "true" ]]; then
-          hyprctl dispatch togglespecialworkspace "${AGENT_WORKSPACE#special:}" >/dev/null 2>&1 || true
-        fi
+        hyprctl dispatch movetoworkspacesilent "${AGENT_WORKSPACE_TARGET},address:${addr}" >/dev/null 2>&1 || true
         sleep 0.1
         workspace=$(hyprctl clients -j 2>/dev/null | jq -r --arg address "$addr" \
           '.[] | select(.address == $address) | .workspace.name // empty')
         visible=$(hyprctl monitors -j 2>/dev/null | jq -r --arg workspace "$AGENT_WORKSPACE" \
-          'any(.[]; .specialWorkspace.name == $workspace)')
+          'any(.[]; .activeWorkspace.name == $workspace)')
         if [[ $workspace == "$AGENT_WORKSPACE" && $visible == "false" ]]; then
           ((stable_checks += 1))
           if [[ $stable_checks -ge 3 ]]; then
@@ -328,6 +328,15 @@ agent-window)
     close_created_target
     echo "window ${page_id} opened but was not verified on ${AGENT_WORKSPACE}" >&2
     exit 1
+  fi
+  ;;
+
+toggle-agent-workspace)
+  active_workspace=$(hyprctl activeworkspace -j | jq -r '.name')
+  if [[ $active_workspace == "$AGENT_WORKSPACE" ]]; then
+    hyprctl dispatch workspace previous
+  else
+    hyprctl dispatch workspace "$AGENT_WORKSPACE_TARGET"
   fi
   ;;
 

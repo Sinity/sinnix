@@ -119,7 +119,7 @@ Examples:
 # Probe the browser (the operator's own Chrome; there is no second one)
 sinnix-chrome-control status
 
-# Open an agent window, hidden on special:agentbrowser. Prints its page id.
+# Open an agent window on the inactive named agentbrowser workspace. Prints its page id.
 # Authenticated exactly where the operator is, because it IS his profile.
 sinnix-chrome-control agent-window --url https://example.com
 

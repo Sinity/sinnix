@@ -183,7 +183,7 @@ machine. Interpret user language directly:
   real window passes).
 - **"your browser" / "an agent browser"** → `sinnix-chrome-control agent-window
 [--url ...]`. Opens a NEW WINDOW and parks it on the hidden
-  `special:agentbrowser` workspace, so it takes no focus and touches none of
+  inactive named `agentbrowser` workspace, so it takes no focus and touches none of
   his tabs. Isolation is per-window now, not per-profile. Hidden windows still
   run JS and still screenshot — verified — because CDP goes through the
   renderer, not the compositor. **F7** shows or hides it; do not activate it
