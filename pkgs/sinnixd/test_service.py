@@ -783,6 +783,79 @@ def test_workspace_restore_rejects_dirty_or_stale_head_targets(tmp_path: Path) -
         service.workspaces.restore(created["workspace_id"], checkpoint["checkpoint_id"])
 
 
+def test_workspace_stack_restacks_child_onto_parent_and_survives_restart(tmp_path: Path) -> None:
+    """Anti-vacuity: the durable parent edge drives a real Git rebase after restart."""
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Fixture"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "fixture@example.test"], check=True)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    parent = service.workspaces.create(
+        project_id="fixture", name="parent-lane", branch="feature/parent", base="HEAD"
+    )
+    child = service.workspaces.stack(
+        parent_workspace_id=parent["workspace_id"], name="child-lane", branch="feature/child"
+    )
+    parent_path = Path(parent["path"])
+    child_path = Path(child["path"])
+    (child_path / "child.txt").write_text("child\n")
+    subprocess.run(["git", "-C", str(child_path), "add", "child.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(child_path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "child"],
+        check=True,
+    )
+    child_before = subprocess.run(
+        ["git", "-C", str(child_path), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (parent_path / "parent.txt").write_text("parent\n")
+    subprocess.run(["git", "-C", str(parent_path), "add", "parent.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(parent_path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "parent"],
+        check=True,
+    )
+
+    restarted = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    result = restarted.workspaces.restack(child["workspace_id"])
+
+    assert result["restacked"] and result["before_head"] == child_before
+    assert result["parent_workspace_id"] == parent["workspace_id"]
+    assert result["head"] != child_before
+    assert (child_path / "parent.txt").read_text() == "parent\n"
+    with pytest.raises(ValueError, match="stacked children"):
+        restarted.workspaces.reap(parent["workspace_id"])
+
+
+def test_workspace_restack_reports_declared_collision_without_mutating_child(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    parent = service.workspaces.create(
+        project_id="fixture", name="collision-parent", branch="feature/collision-parent", base="HEAD"
+    )
+    child = service.workspaces.stack(
+        parent_workspace_id=parent["workspace_id"], name="collision-child", branch="feature/collision-child"
+    )
+    for workspace, content, message in ((parent, "parent\n", "parent lock"), (child, "child\n", "child lock")):
+        path = Path(workspace["path"])
+        (path / "fixture.lock").write_text(content)
+        subprocess.run(["git", "-C", str(path), "add", "fixture.lock"], check=True)
+        subprocess.run(
+            ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", message],
+            check=True,
+        )
+    child_head = subprocess.run(
+        ["git", "-C", child["path"], "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    result = service.workspaces.restack(child["workspace_id"])
+
+    assert not result["restacked"]
+    assert result["collisions"] == [{"path": "fixture.lock", "class": "exact-file"}]
+    assert subprocess.run(
+        ["git", "-C", child["path"], "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip() == child_head
+
+
 def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: Path) -> None:
     """Anti-vacuity: typed contracts must reach GenericJobs, not a second controller."""
     write_adapter(tmp_path)

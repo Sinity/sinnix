@@ -217,6 +217,22 @@ class SinnixdService:
                 self._job_argument(arguments, "workspace_id"),
                 self._job_argument(arguments, "checkpoint_id"),
             )
+        if operation == "workspace.stack":
+            if principal not in {"agent-control", "operator"}:
+                raise ValueError("workspace stacking requires agent-control or operator principal")
+            if set(arguments) != {"parent_workspace_id", "name", "branch"}:
+                raise ValueError("workspace.stack requires parent_workspace_id, name, and branch")
+            assert self.workspaces is not None
+            return self.workspaces.stack(
+                parent_workspace_id=self._job_argument(arguments, "parent_workspace_id"),
+                name=self._job_argument(arguments, "name"),
+                branch=self._job_argument(arguments, "branch"),
+            )
+        if operation == "workspace.restack":
+            if principal not in {"agent-control", "operator"}:
+                raise ValueError("workspace restacking requires agent-control or operator principal")
+            assert self.workspaces is not None
+            return self.workspaces.restack(self._single_workspace_id(arguments, "workspace.restack"))
         if operation == "job.start":
             project_id = self._job_argument(arguments, "project_id")
             operation_name = self._job_argument(arguments, "operation")

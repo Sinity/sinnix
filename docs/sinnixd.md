@@ -17,6 +17,8 @@ agentctl workspace adopt sinnix worktree-0123456789abcdef adopted-lane
 agentctl workspace get <workspace-id>
 agentctl workspace checkpoint <workspace-id>
 agentctl workspace restore <workspace-id> <checkpoint-id>
+agentctl workspace stack <parent-workspace-id> child-lane --branch feature/child
+agentctl workspace restack <child-workspace-id>
 agentctl workspace reap <workspace-id>
 agentctl job start sinnix lint
 agentctl job get <job-id>
@@ -55,7 +57,9 @@ Projects may declare a `git-worktree` policy with one absolute workspace root, a
 
 Create, adopt, checkpoint, restore, and reap require the `agent-control` or `operator` principal. Names are bounded path-safe identifiers, branches pass `git check-ref-format`, bases must resolve to commits, the configured root cannot be adopted, and duplicate names or paths fail closed under a shared mutation lock. A daemon restart reloads the relationship index and derives current state from Git. Reap forgets an already-missing relationship, or removes only an AgentCTL-created worktree that is clean, still on its recorded branch, and whose HEAD is contained in the declared base. It retains the branch for explicit review. Adopted, dirty, divergent, and identity-changed worktrees are preserved.
 
-Checkpoint stores separate binary patches for the index and working tree plus a bounded private archive of policy-allowed untracked regular files. Every artifact has a SHA-256 digest and is bound to the workspace, project, branch, and exact source HEAD. Restore requires a clean target at that same HEAD and branch, reruns the descriptor identity check, verifies every artifact digest and archive member, then reconstructs staged, unstaged, and untracked state. It never creates a stash or commit. Stacking, publication, and landing remain outside this slice.
+Checkpoint stores separate binary patches for the index and working tree plus a bounded private archive of policy-allowed untracked regular files. Every artifact has a SHA-256 digest and is bound to the workspace, project, branch, and exact source HEAD. Restore requires a clean target at that same HEAD and branch, reruns the descriptor identity check, verifies every artifact digest and archive member, then reconstructs staged, unstaged, and untracked state. It never creates a stash or commit.
+
+A stacked workspace records only its stable parent relationship; Git remains the history authority. Restack requires a clean child, reports overlaps on declared exact-file and generated surfaces before mutation, then rebases the child onto the parent's current branch and aborts a failed Git rebase. A parent cannot be reaped while children still reference it. Publication and landing remain outside this slice.
 
 The daemon still does not own job queues, retries, task mutation, service leases, arbitrary shells beyond the typed operator contract, admission policy, Git history, hosted review state, or merge state. Descriptor pool, cache, and exclusivity metadata remain descriptive until their existing authorities move behind an explicit shared contract. The gateway’s legacy controllers remain downstream and are unchanged here.
 
