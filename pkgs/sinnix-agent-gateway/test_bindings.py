@@ -19,6 +19,8 @@ VALID_BINDINGS = (
     TargetToolBinding("events", "audit.events", "audit", "audit.tail"),
     TargetToolBinding("wait", "jobs.wait", "systemd-jobs", "job.wait"),
     TargetToolBinding("run", "shell.run", "systemd-jobs", "job.shell.start"),
+    TargetToolBinding("change", "projects.change", "projects", "projects.change"),
+    TargetToolBinding("operate", "machine.operate", "ops-reducer", "ops.actions.execute"),
 )
 
 
@@ -33,6 +35,8 @@ def test_target_tool_bindings_cover_every_declared_action() -> None:
     assert bindings.action_for_tool("events") is REGISTRY.action("audit.events")
     assert bindings.action_for_tool("wait") is REGISTRY.action("jobs.wait")
     assert bindings.action_for_tool("run") is REGISTRY.action("shell.run")
+    assert bindings.action_for_tool("change") is REGISTRY.action("projects.change")
+    assert bindings.action_for_tool("operate") is REGISTRY.action("machine.operate")
 
 
 def test_target_tool_bindings_enforce_declared_principal() -> None:
@@ -52,6 +56,10 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
     assert bindings.is_visible("wait", "observer")
     assert bindings.is_visible("run", "operator")
     assert bindings.is_visible("run", "observer") is False
+    assert bindings.is_visible("change", "operator")
+    assert bindings.is_visible("operate", "operator")
+    assert bindings.is_visible("change", "observer") is False
+    assert bindings.is_visible("operate", "observer") is False
     with pytest.raises(RegistryError, match="cannot invoke"):
         bindings.action_for_tool("run", "observer")
 

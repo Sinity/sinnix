@@ -267,8 +267,8 @@ def _with_request_controls(schema: Mapping[str, Any]) -> dict[str, Any]:
     return {
         **dict(schema),
         "properties": {
-            **dict(schema.get("properties", {})),
             **REQUEST_CONTROL_PROPERTIES,
+            **dict(schema.get("properties", {})),
         },
     }
 
@@ -277,6 +277,19 @@ EMPTY_OBJECT_SCHEMA: dict[str, Any] = _with_request_controls(
     {"type": "object", "additionalProperties": False}
 )
 V2_ENVELOPE_SCHEMA: dict[str, Any] = V2ToolEnvelope.model_json_schema()
+MACHINE_OPERATIONS = (
+    "focus",
+    "interrupt",
+    "freeze",
+    "thaw",
+    "reset_policy",
+    "set_policy",
+    "park",
+    "rebuild_override",
+    "restart",
+    "start",
+    "stop",
+)
 RESOURCE_GET_SCHEMA: dict[str, Any] = _with_request_controls(
     {
         "type": "object",
@@ -395,6 +408,70 @@ PROJECT_CONTEXT_SCHEMA: dict[str, Any] = _with_request_controls(
     }
 )
 
+PROJECT_CHANGE_SCHEMA: dict[str, Any] = _with_request_controls(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["ref", "operation", "idempotency_key", "preconditions"],
+        "properties": {
+            "ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2_048,
+                "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+            },
+            "operation": {"enum": ["write", "apply_patch"]},
+            "path": {"type": "string", "minLength": 1, "maxLength": 4_096},
+            "content": {"type": "string", "maxLength": 262_144},
+            "patch": {"type": "string", "minLength": 1, "maxLength": 262_144},
+            "preconditions": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": False,
+                "properties": {
+                    "head": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+                    "dirty_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                },
+            },
+        },
+    }
+)
+
+MACHINE_OPERATE_SCHEMA: dict[str, Any] = _with_request_controls(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "ref",
+            "action",
+            "parameters",
+            "reason",
+            "idempotency_key",
+            "preconditions",
+        ],
+        "properties": {
+            "ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2_048,
+                "pattern": "^sinnix://(?:jobs|machine|scopes|processes)/",
+            },
+            "action": {
+                "enum": list(MACHINE_OPERATIONS)
+            },
+            "parameters": {"type": "object"},
+            "preconditions": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["expected_revision"],
+                "properties": {
+                    "expected_revision": {"type": "integer", "minimum": 0},
+                },
+            },
+        },
+    }
+)
+
 AUDIT_EVENTS_SCHEMA: dict[str, Any] = _with_request_controls(
     {
         "type": "object",
@@ -422,6 +499,8 @@ def build_registry() -> CatalogRegistry:
         ResourceSpec("receipt", RefTemplate("receipt", "sinnix://receipts/{receipt_id}"), "audit", ("summary",), True),
         ResourceSpec("result", RefTemplate("result", "sinnix://results/{result_id}"), "results", ("metadata", "page"), True),
         ResourceSpec("machine_unit", RefTemplate("machine_unit", "sinnix://machine/units/{manager}/{unit}"), "machine", ("status", "health"), True),
+        ResourceSpec("scope", RefTemplate("scope", "sinnix://scopes/{scope_unit}"), "machine", ("status",), True),
+        ResourceSpec("process", RefTemplate("process", "sinnix://processes/{pid}/{start_ticks}"), "machine", ("status",), True),
         ResourceSpec("browser_page", RefTemplate("browser_page", "sinnix://browser/pages/{page_id}"), "browser", ("summary", "content"), True),
         ResourceSpec("terminal", RefTemplate("terminal", "sinnix://terminals/{terminal_id}"), "terminals", ("summary", "scrollback"), True),
         ResourceSpec("capture_lane", RefTemplate("capture_lane", "sinnix://captures/{lane}"), "captures", ("summary", "query"), True),
@@ -550,6 +629,62 @@ def build_registry() -> CatalogRegistry:
                 },
             ),
             documentation="Wait for a bounded interval on one daemon-owned job reference.",
+        ),
+        ActionSpec(
+            name="projects.change",
+            verb=VerbFamily.CHANGE,
+            domain="projects",
+            owner="projects",
+            route="projects.change",
+            effect=EffectMode.CHANGE,
+            principals=frozenset({"operator"}),
+            input_schema=PROJECT_CHANGE_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("project", "checkout"),
+            supports_idempotency=True,
+            supports_precondition=True,
+            receipt_policy="audit",
+            examples=(
+                {
+                    "input": {
+                        "ref": "sinnix://projects/sinnix/checkouts/default",
+                        "operation": "write",
+                        "path": "README.md",
+                        "content": "updated content\\n",
+                        "preconditions": {"head": "a" * 40},
+                        "idempotency_key": "project-write-example",
+                    }
+                },
+            ),
+            documentation="Apply one bounded, precondition-checked project write or patch through a canonical project or checkout reference.",
+        ),
+        ActionSpec(
+            name="machine.operate",
+            verb=VerbFamily.OPERATE,
+            domain="machine",
+            owner="ops-reducer",
+            route="ops.actions.execute",
+            effect=EffectMode.OPERATE,
+            principals=frozenset({"operator"}),
+            input_schema=MACHINE_OPERATE_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("job", "machine_unit", "scope", "process"),
+            supports_idempotency=True,
+            supports_precondition=True,
+            receipt_policy="owner",
+            examples=(
+                {
+                    "input": {
+                        "ref": "sinnix://machine/units/user/example.service",
+                        "action": "restart",
+                        "parameters": {},
+                        "reason": "apply the approved restart",
+                        "preconditions": {"expected_revision": 42},
+                        "idempotency_key": "restart-example",
+                    }
+                },
+            ),
+            documentation="Submit one revision-checked ops-reducer action against a canonical attested target reference.",
         ),
         ActionSpec(
             name="shell.run",

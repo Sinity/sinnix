@@ -70,8 +70,10 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
     assert {
         "files_write",
         "project_write",
+        "change",
         "agent_launch",
         "machine_action",
+        "operate",
         "desktop_action",
         "terminal_action",
         "browser_action",
@@ -82,7 +84,6 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
     assert "shell_query" not in readonly_names
     assert {"project_context", "project_search", "audit_tail"}.isdisjoint(readonly_names)
     assert {
-        "agent_launch",
         "job_cancel",
         "capability_search",
         "capability_describe",
@@ -95,6 +96,8 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "desktop_capture",
         "files_read",
         "machine_action",
+        "change",
+        "operate",
         "session_list",
         "browser_action",
         "browser_read",
@@ -115,10 +118,9 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
     }.isdisjoint(local_names)
     assert {
         "files_write",
-        "project_write",
-        "project_apply_patch",
+        "change",
+        "operate",
         "session_search",
-        "machine_action",
         "desktop_action",
         "desktop_read",
         "desktop_capture",
@@ -143,6 +145,33 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "mcp_write",
     } <= operator_names
     assert "agent_launch" not in operator_names
+    assert {"project_write", "project_apply_patch", "machine_action"}.isdisjoint(operator_names)
+    assert {
+        "change",
+        "operate",
+        "run",
+        "job_cancel",
+        "shell_run",
+        "shell_start",
+        "files_write",
+        "tasks_write",
+        "mcp_write",
+        "desktop_action",
+        "terminal_action",
+        "browser_action",
+    } == {
+        row["name"]
+        for row in operator["tools"]
+        if row["annotations"]["readOnlyHint"] is False
+    }
+    assert {
+        "agent_launch",
+        "job_cancel",
+    } == {
+        row["name"]
+        for row in local["tools"]
+        if row["annotations"]["readOnlyHint"] is False
+    }
     assert "context" in readonly_names & local_names & operator_names
     run_tool = next(row for row in operator["tools"] if row["name"] == "run")
     wait_tool = next(row for row in readonly["tools"] if row["name"] == "wait")
