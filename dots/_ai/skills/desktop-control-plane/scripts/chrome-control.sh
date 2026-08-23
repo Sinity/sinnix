@@ -379,7 +379,7 @@ agent-window)
     --arg ws "$AGENT_WORKSPACE" --arg key "$SUMMON_BINDING" \
     '{id: $id, url: $url, parked: $parked, workspace: $ws, show_with: $key}'
   if [[ $parked != "true" ]]; then
-    echo "window ${page_id} opened but was not verified on ${AGENT_WORKSPACE}; last compositor state: ${client_state:-unavailable}; visible=${visible:-unknown}; stable_checks=${stable_checks:-0}" >&2
+    echo "window ${page_id} opened but was not verified on ${AGENT_WORKSPACE}; last compositor state: ${client_state:-unavailable}; visible=${visible:-unknown}; stable_checks=${stable_checks:-0}; hyprctl=${hyprctl_bin:-unavailable}; instances=${hyprland_instance_count:-unknown}; signature=$([[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && printf set || printf missing)" >&2
     exit 1
   fi
   retain_created_target="true"
