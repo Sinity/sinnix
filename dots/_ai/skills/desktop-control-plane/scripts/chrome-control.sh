@@ -197,6 +197,18 @@ get_browser_ws_url() {
   curl -fsS --max-time 2 "${CDP_BASE}/json/version" | jq -r '.webSocketDebuggerUrl // empty'
 }
 
+get_hyprctl_bin() {
+  local candidate
+  candidate=$(command -v hyprctl 2>/dev/null || true)
+  for candidate in "$candidate" "/etc/profiles/per-user/$(id -un)/bin/hyprctl" /run/current-system/sw/bin/hyprctl; do
+    if [[ -n $candidate && -x $candidate ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 resolve_page_id() {
   local maybe_id="$1"
   # If it looks like a full UUID, use it directly
@@ -272,14 +284,15 @@ agent-window)
   }
 
   hyprland_available="false"
-  if command -v hyprctl >/dev/null 2>&1; then
-    hyprland_instances=$(hyprctl instances -j 2>/dev/null || printf '[]')
+  hyprctl_bin=$(get_hyprctl_bin || true)
+  if [[ -n $hyprctl_bin ]]; then
+    hyprland_instances=$("$hyprctl_bin" instances -j 2>/dev/null || printf '[]')
     hyprland_instance_count=$(jq 'length' <<<"$hyprland_instances")
     if [[ $hyprland_instance_count -eq 1 ]]; then
       HYPRLAND_INSTANCE_SIGNATURE=$(jq -r '.[0].instance' <<<"$hyprland_instances")
       export HYPRLAND_INSTANCE_SIGNATURE
     fi
-    if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && hyprctl clients -j >/dev/null 2>&1; then
+    if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && "$hyprctl_bin" clients -j >/dev/null 2>&1; then
       hyprland_available="true"
     fi
   fi
@@ -312,7 +325,7 @@ agent-window)
   if [[ $hyprland_available == "true" ]]; then
     for _ in {1..40}; do
       sleep 0.1
-      matches=$(hyprctl clients -j 2>/dev/null | jq -r --arg marker "$marker" \
+      matches=$("$hyprctl_bin" clients -j 2>/dev/null | jq -r --arg marker "$marker" \
         '[.[] | select(.class == "google-chrome" and (.title | contains($marker))) | .address] | unique | .[]')
       match_count=$(wc -l <<<"$matches")
       if [[ $match_count -eq 1 && -n $matches ]]; then
@@ -324,15 +337,15 @@ agent-window)
     if [[ -n $addr ]]; then
       stable_checks=0
       for _ in {1..20}; do
-        hyprctl dispatch movetoworkspacesilent "${AGENT_WORKSPACE_TARGET},address:${addr}" >/dev/null 2>&1 || true
+        "$hyprctl_bin" dispatch movetoworkspacesilent "${AGENT_WORKSPACE_TARGET},address:${addr}" >/dev/null 2>&1 || true
         sleep 0.1
-        client_state=$(hyprctl clients -j 2>/dev/null | jq -c --arg address "$addr" \
+        client_state=$("$hyprctl_bin" clients -j 2>/dev/null | jq -c --arg address "$addr" \
           '.[] | select(.address == $address) | {workspace: .workspace.name, floating, pinned, fullscreen}')
         workspace=$(jq -r '.workspace // empty' <<<"$client_state")
         floating=$(jq -r '.floating' <<<"$client_state")
         pinned=$(jq -r '.pinned' <<<"$client_state")
         fullscreen=$(jq -r '.fullscreen' <<<"$client_state")
-        visible=$(hyprctl monitors -j 2>/dev/null | jq -r --arg workspace "$AGENT_WORKSPACE" \
+        visible=$("$hyprctl_bin" monitors -j 2>/dev/null | jq -r --arg workspace "$AGENT_WORKSPACE" \
           'any(.[]; .activeWorkspace.name == $workspace)')
         if [[ $workspace == "$AGENT_WORKSPACE" && $visible == "false" && $floating == "false" && \
           $pinned == "false" && $fullscreen == "0" ]]; then
@@ -374,11 +387,15 @@ agent-window)
   ;;
 
 toggle-agent-workspace)
-  active_workspace=$(hyprctl activeworkspace -j | jq -r '.name')
+  hyprctl_bin=$(get_hyprctl_bin) || {
+    echo "hyprctl unavailable" >&2
+    exit 1
+  }
+  active_workspace=$("$hyprctl_bin" activeworkspace -j | jq -r '.name')
   if [[ $active_workspace == "$AGENT_WORKSPACE" ]]; then
-    hyprctl dispatch workspace previous
+    "$hyprctl_bin" dispatch workspace previous
   else
-    hyprctl dispatch workspace "$AGENT_WORKSPACE_TARGET"
+    "$hyprctl_bin" dispatch workspace "$AGENT_WORKSPACE_TARGET"
   fi
   ;;
 
