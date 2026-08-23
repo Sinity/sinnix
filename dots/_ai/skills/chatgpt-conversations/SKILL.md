@@ -65,7 +65,17 @@ An attachment reference proves that the tab visibly rendered it and gives the
 agent stable page, message, and attachment context for a requested action. It
 does not itself provide a local file path. Downloading, opening, uploading,
 navigating, submitting, and other browser mutations require an explicit
-operator request and a verified result.
+operator request and a verified result. Sandbox-file links in old assistant
+turns are frequently expired on ChatGPT's side; a null `href` plus a button
+control is the normal rendering, and absence of a working link is not a
+capture defect.
+
+Canvas documents ("writing blocks") are captured completely: a canvas body is
+part of the containing turn's `text` exactly as rendered, and each turn also
+carries a `canvases` array identifying every canvas — `block_id`, `title`
+(its leading heading), `text_characters`, and `text_offset` locating the body
+inside the turn text. Slice the turn text at `text_offset` for that many
+characters to recover the canvas document alone.
 
 ## Boundaries
 
