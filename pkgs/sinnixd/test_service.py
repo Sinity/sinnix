@@ -337,42 +337,63 @@ flag = "--package"
 max_items = 4
 max_length = 32
 
-[operations.sinex_test]
-description = "Run the residual Sinex foreground test shape"
-exec = ["xtask", "test"]
+[operations.generic_extended_parameters]
+description = "Exercise generic bounded operation parameter kinds"
+exec = ["fixture-check"]
 pool = "normal"
 result = "exit"
 cache = "tree+environment"
 
-[operations.sinex_test.parameters.profile]
+[operations.generic_extended_parameters.parameters.profile]
 type = "enum"
-flag = "--impact-mode"
+flag = "--profile"
 values = ["balanced", "strict"]
 
-[operations.sinex_test.parameters.threads]
+[operations.generic_extended_parameters.parameters.attempts]
 type = "integer"
-flag = "--threads"
+flag = "--attempts"
 min = 1
 max = 16
 
-[operations.sinex_test.parameters.timeout]
-type = "string"
-flag = "--timeout"
-max_length = 10
-grammar = "duration"
-
-[operations.sinex_test.parameters.feature]
+[operations.generic_extended_parameters.parameters.feature]
 type = "string-list"
 flag = "--features"
 max_items = 4
 max_length = 32
 grammar = "safe-token"
 
-[operations.sinex_test.parameters.package]
+[operations.generic_extended_parameters.parameters.package]
 type = "enum-list"
 flag = "--package"
 values = ["sinexd", "xtask"]
 max_items = 4
+
+[operations.sinex_all_sources]
+description = "Run Sinex's all-sources foreground operation"
+exec = ["xtask", "run", "all-sources"]
+pool = "normal"
+result = "exit"
+cache = "tree+environment"
+
+[operations.sinex_all_sources.parameters.instance_id]
+type = "string"
+flag = "--instance-id"
+max_length = 128
+grammar = "safe-token"
+
+[operations.sinex_all_sources.parameters.reconcile]
+type = "bool"
+flag = "--reconcile"
+
+[operations.sinex_all_sources.parameters.service_name]
+type = "string"
+flag = "--service-name"
+max_length = 128
+grammar = "safe-token"
+
+[operations.sinex_all_sources.parameters.include_default_excluded]
+type = "bool"
+flag = "--include-default-excluded"
 
 [operations.pytest_receipt]
 description = "Run fixture pytest receipt"
@@ -1211,17 +1232,16 @@ def test_project_catalog_is_explicit_and_operation_catalog_is_bounded(tmp_path: 
             "grammar": "safe-token",
         },
     ]
-    assert operations["sinex_test"]["parameters"] == [
+    assert operations["generic_extended_parameters"]["parameters"] == [
         {
             "name": "profile",
             "type": "enum",
-            "flag": "--impact-mode",
+            "flag": "--profile",
             "values": ["balanced", "strict"],
             "max_length": 128,
             "grammar": "safe-token",
         },
-        {"name": "threads", "type": "integer", "flag": "--threads", "min": 1, "max": 16},
-        {"name": "timeout", "type": "string", "flag": "--timeout", "max_length": 10, "grammar": "duration"},
+        {"name": "attempts", "type": "integer", "flag": "--attempts", "min": 1, "max": 16},
         {
             "name": "feature",
             "type": "string-list",
@@ -1238,6 +1258,28 @@ def test_project_catalog_is_explicit_and_operation_catalog_is_bounded(tmp_path: 
             "values": ["sinexd", "xtask"],
             "max_length": 128,
             "grammar": "safe-token",
+        },
+    ]
+    assert operations["sinex_all_sources"]["parameters"] == [
+        {
+            "name": "instance_id",
+            "type": "string",
+            "flag": "--instance-id",
+            "max_length": 128,
+            "grammar": "safe-token",
+        },
+        {"name": "reconcile", "type": "bool", "flag": "--reconcile"},
+        {
+            "name": "service_name",
+            "type": "string",
+            "flag": "--service-name",
+            "max_length": 128,
+            "grammar": "safe-token",
+        },
+        {
+            "name": "include_default_excluded",
+            "type": "bool",
+            "flag": "--include-default-excluded",
         },
     ]
     assert operations["parameterized"]["result"] == "json"
@@ -1511,17 +1553,15 @@ def test_declared_parameters_reject_unknown_malformed_and_unbounded_input(
     "parameters",
     (
         {"profile": "unknown"},
-        {"threads": True},
-        {"threads": 0},
-        {"threads": 17},
-        {"timeout": "0m"},
-        {"timeout": "10 minutes"},
+        {"attempts": True},
+        {"attempts": 0},
+        {"attempts": 17},
         {"feature": ["--release"]},
         {"package": ["sinexd", "unknown"]},
         {"package": []},
     ),
 )
-def test_extended_declared_parameters_reject_invalid_values_before_launch(
+def test_generic_extended_parameters_reject_invalid_values_before_launch(
     tmp_path: Path, parameters: dict[str, object]
 ) -> None:
     write_adapter(tmp_path)
@@ -1529,7 +1569,11 @@ def test_extended_declared_parameters_reject_invalid_values_before_launch(
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
 
     response = service.dispatch(
-        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "sinex_test", "parameters": parameters})
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "generic_extended_parameters", "parameters": parameters},
+        )
     )
 
     assert response.error is not None
@@ -1537,8 +1581,7 @@ def test_extended_declared_parameters_reject_invalid_values_before_launch(
     assert systemd.started == []
 
 
-def test_sinex_foreground_fixture_derives_descriptor_ordered_argv_and_digest(tmp_path: Path) -> None:
-    """Audit-backed residual fixture: xtask test accepts all bounded parameter forms without a shell."""
+def test_generic_extended_parameters_derive_canonical_argv_and_digest(tmp_path: Path) -> None:
     write_adapter(tmp_path)
     systemd = FakeSystemdJobs()
     jobs = generic_jobs(tmp_path, systemd)
@@ -1550,12 +1593,11 @@ def test_sinex_foreground_fixture_derives_descriptor_ordered_argv_and_digest(tmp
             "systemd-jobs",
             {
                 "project_id": "fixture",
-                "operation": "sinex_test",
+                "operation": "generic_extended_parameters",
                 "parameters": {
                     "package": ["xtask", "sinexd", "xtask"],
                     "feature": ["serde", "tokio", "serde"],
-                    "timeout": "15m",
-                    "threads": 4,
+                    "attempts": 4,
                     "profile": "strict",
                 },
             },
@@ -1564,17 +1606,91 @@ def test_sinex_foreground_fixture_derives_descriptor_ordered_argv_and_digest(tmp
 
     assert started.ok and started.payload is not None
     expected_canonical = {
+        "attempts": 4,
         "feature": ["serde", "tokio"],
         "package": ["sinexd", "xtask"],
         "profile": "strict",
-        "threads": 4,
-        "timeout": "15m",
     }
     assert systemd.started[0]["command"] == (
-        "fixture-env", "--command", "xtask", "test",
-        "--impact-mode", "strict", "--threads", "4", "--timeout", "15m",
+        "fixture-env", "--command", "fixture-check",
+        "--profile", "strict", "--attempts", "4",
         "--features", "serde", "--features", "tokio",
         "--package", "sinexd", "--package", "xtask",
+    )
+    assert started.payload.inline["parameters"] == {
+        "digest": hashlib.sha256(
+            json.dumps(expected_canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+        ).hexdigest()
+    }
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    (
+        {"instance_id": "../escape"},
+        {"instance_id": "x" * 129},
+        {"reconcile": "true"},
+        {"service_name": "/tmp/source"},
+        {"include_default_excluded": 1},
+    ),
+)
+def test_sinex_all_sources_fixture_rejects_invalid_values_before_launch(
+    tmp_path: Path, parameters: dict[str, object]
+) -> None:
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs()
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+
+    response = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "sinex_all_sources", "parameters": parameters},
+        )
+    )
+
+    assert response.error is not None
+    assert response.error.code.value == "INVALID_ARGUMENT"
+    assert systemd.started == []
+
+
+def test_sinex_all_sources_fixture_derives_exact_argv_and_digest(tmp_path: Path) -> None:
+    """The fixture follows xtask run all-sources' current foreground flags."""
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "operation": "sinex_all_sources",
+                "parameters": {
+                    "instance_id": "operator-source-driver-browser.history-3",
+                    "reconcile": True,
+                    "service_name": "source-driver-browser.history-3",
+                    "include_default_excluded": True,
+                },
+            },
+        )
+    )
+
+    assert started.ok and started.payload is not None
+    expected_canonical = {
+        "include_default_excluded": True,
+        "instance_id": "operator-source-driver-browser.history-3",
+        "reconcile": True,
+        "service_name": "source-driver-browser.history-3",
+    }
+    assert systemd.started[0]["command"] == (
+        "fixture-env", "--command", "xtask", "run", "all-sources",
+        "--instance-id", "operator-source-driver-browser.history-3",
+        "--reconcile",
+        "--service-name", "source-driver-browser.history-3",
+        "--include-default-excluded",
     )
     assert started.payload.inline["parameters"] == {
         "digest": hashlib.sha256(
