@@ -1164,13 +1164,21 @@ class Runtime:
 
     def v2_jobs_query(self, parameters: Mapping[str, Any] | None) -> dict[str, Any]:
         values = self._parameters(parameters)
-        if set(values) - {"limit"}:
+        if set(values) - {"limit", "cursor"}:
             raise ProtocolError("invalid_request", "jobs.query parameters are not recognized")
         limit = values.get("limit", 100)
+        cursor = values.get("cursor")
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1_000:
             raise ProtocolError("invalid_request", "jobs.query limit must be 1-1000")
+        if cursor is not None and (
+            not isinstance(cursor, str) or not 1 <= len(cursor.encode()) <= 512
+        ):
+            raise ProtocolError("invalid_request", "jobs.query cursor is malformed")
         self.principal.require(Capability.JOB_READ)
-        response = self._sinnixd_job("job.list", {"limit": limit})
+        arguments: dict[str, Any] = {"limit": limit}
+        if cursor is not None:
+            arguments["cursor"] = cursor
+        response = self._sinnixd_job("job.list", arguments)
         jobs = response.get("jobs")
         if not isinstance(jobs, list) or any(not isinstance(job, Mapping) for job in jobs):
             raise ProtocolError("owner_failed", "sinnixd job list response is malformed")
@@ -1178,9 +1186,27 @@ class Runtime:
             raise ProtocolError("owner_failed", "sinnixd job list response exceeds its bound")
         total = response.get("total")
         truncated = response.get("truncated")
-        if not isinstance(total, int) or total < len(jobs) or not isinstance(truncated, bool):
+        next_cursor = response.get("next_cursor")
+        snapshot = response.get("snapshot")
+        if (
+            (total is not None and (not isinstance(total, int) or total < len(jobs)))
+            or not isinstance(truncated, bool)
+            or (
+                next_cursor is not None
+                and (
+                    not isinstance(next_cursor, str)
+                    or not 1 <= len(next_cursor.encode()) <= 512
+                )
+            )
+            or not isinstance(snapshot, Mapping)
+            or set(snapshot) != {"ordering", "ceiling"}
+            or snapshot.get("ordering") != "created_at_desc_job_id_desc"
+            or not isinstance(snapshot.get("ceiling"), list)
+            or len(snapshot["ceiling"]) != 2
+            or any(not isinstance(value, str) for value in snapshot["ceiling"])
+        ):
             raise ProtocolError("owner_failed", "sinnixd job list response omits paging metadata")
-        if truncated != (total > len(jobs)):
+        if truncated != (next_cursor is not None):
             raise ProtocolError("owner_failed", "sinnixd job list paging metadata is inconsistent")
         rows: list[dict[str, Any]] = []
         for job in jobs:
@@ -1193,6 +1219,8 @@ class Runtime:
             "limit": limit,
             "total": total,
             "truncated": truncated,
+            "next_cursor": next_cursor,
+            "snapshot": dict(snapshot),
         }
 
     def _record_result(
@@ -1458,11 +1486,19 @@ class Runtime:
                 "diagnostic_refs": [],
             }
         else:
-            raise exc
+            error = {
+                "code": "owner_failed",
+                "message": "gateway owner route failed",
+                "details": {},
+                "diagnostic_refs": [],
+            }
         if action.failure_codes is not None and error["code"] not in action.typed_failures:
-            raise RuntimeError(
-                f"action {action.name!r} emitted undeclared typed failure {error['code']!r}"
-            )
+            error = {
+                "code": "owner_failed",
+                "message": "gateway owner route failed",
+                "details": {},
+                "diagnostic_refs": [],
+            }
         receipt = self._record_v2_receipt(action, "error", context, error=error)
         return self.results.record(
             action=action.name,
@@ -1537,7 +1573,7 @@ class Runtime:
                 return replay
             reserved = action.effect is not EffectMode.READ
             response = self._v2_success(action, callback(), context)
-        except (OwnerDiagnosticError, ProtocolError, ResultError, PolicyError, ValueError) as exc:
+        except Exception as exc:
             response = self._v2_failure(action, exc, context)
         if reserved:
             self._complete_v2_idempotency(action, context, response)
@@ -1566,7 +1602,7 @@ class Runtime:
                 return replay
             reserved = action.effect is not EffectMode.READ
             response = self._v2_success(action, await callback(), context)
-        except (OwnerDiagnosticError, ProtocolError, ResultError, PolicyError, ValueError) as exc:
+        except Exception as exc:
             response = self._v2_failure(action, exc, context)
         if reserved:
             self._complete_v2_idempotency(action, context, response)

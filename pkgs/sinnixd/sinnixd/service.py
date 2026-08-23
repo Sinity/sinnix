@@ -17,13 +17,17 @@ from sinnix_mcp import (
 )
 from sinnix_mcp.execution import OwnerExecution
 
-from .jobs import GenericJobStore, GenericJobs, JobRecordError, JobResultError, JobResultLimitError, SystemdJobError, UserSystemdJobs, default_state_dir
+from .jobs import GenericJobStore, GenericJobs, JobPageCursorError, JobRecordError, JobResultError, JobResultLimitError, SystemdJobError, UserSystemdJobs, default_state_dir
 from .contracts import TypedJobContracts
 from .delivery import DeliveryError, GitHubDelivery
 from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from .projects import ProjectCatalog
 from .tasks import TaskError, TaskService
 from .workspaces import GitWorkspaces, WorkspaceError, WorkspaceStore
+
+
+class JobAuthorizationError(PermissionError):
+    """The caller does not own this job and is not the operator."""
 
 
 @dataclass(frozen=True)
@@ -139,6 +143,10 @@ class SinnixdService:
             return self._error(request, owner_name, ErrorCode.RESOURCE_EXHAUSTED, str(error))
         except JobResultError as error:
             return self._error(request, owner_name, ErrorCode.RESULT_INVALID, str(error))
+        except JobAuthorizationError as error:
+            return self._error(request, owner_name, ErrorCode.POLICY_DENIED, str(error))
+        except JobPageCursorError as error:
+            return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
         except (JobRecordError, SystemdJobError) as error:
             return self._error(request, owner_name, ErrorCode.OPERATION_FAILED, str(error))
         except (WorkspaceError, DeliveryError) as error:
@@ -322,6 +330,10 @@ class SinnixdService:
                 self._job_argument(arguments, "target_ref"),
             )
         if operation == "job.start":
+            if principal not in {"agent-control", "operator"}:
+                raise JobAuthorizationError(
+                    "declared operations require agent-control or operator principal"
+                )
             project_id = self._job_argument(arguments, "project_id")
             operation_name = self._job_argument(arguments, "operation")
             if set(arguments) - {"project_id", "operation", "workspace_id", "parameters"}:
@@ -339,6 +351,7 @@ class SinnixdService:
                 project=project,
                 operation=project.operation(operation_name),
                 correlation_id=correlation_id,
+                principal=principal,
                 parameters=parameters,
                 checkout=checkout,
             ))
@@ -377,16 +390,27 @@ class SinnixdService:
                 result=self._job_argument(arguments, "result"),
             ))
         if operation == "job.get":
-            return self._cleanup_terminal(self.jobs.get(self._single_job_id(arguments, "job.get")))
+            return self._cleanup_terminal(
+                self.jobs.get(
+                    self._authorize_job(
+                        principal, self._single_job_id(arguments, "job.get")
+                    )
+                )
+            )
         if operation == "job.list":
-            if set(arguments) - {"limit"}:
-                raise ValueError("job.list accepts an optional limit")
+            if set(arguments) - {"limit", "cursor"}:
+                raise ValueError("job.list accepts optional limit and cursor")
             limit = arguments.get("limit", 100)
             if not isinstance(limit, int) or isinstance(limit, bool):
                 raise ValueError("job.list limit must be an integer")
-            return self._cleanup_terminal(self.jobs.list(limit=limit))
+            cursor = arguments.get("cursor")
+            if cursor is not None and not isinstance(cursor, str):
+                raise ValueError("job.list cursor must be a string")
+            return self._cleanup_terminal(
+                self.jobs.list(principal=principal, limit=limit, cursor=cursor)
+            )
         if operation == "job.wait":
-            job_id = self._job_argument(arguments, "job_id")
+            job_id = self._authorize_job(principal, self._job_argument(arguments, "job_id"))
             timeout_seconds = arguments.get("timeout_seconds", 30)
             if set(arguments) - {"job_id", "timeout_seconds"}:
                 raise ValueError("job.wait accepts job_id and optional timeout_seconds")
@@ -394,7 +418,7 @@ class SinnixdService:
                 raise ValueError("job.wait timeout_seconds must be an integer")
             return self._cleanup_terminal(self.jobs.wait(job_id, timeout_seconds))
         if operation == "job.logs":
-            job_id = self._job_argument(arguments, "job_id")
+            job_id = self._authorize_job(principal, self._job_argument(arguments, "job_id"))
             offset = arguments.get("offset", 0)
             max_bytes = arguments.get("max_bytes", 64_000)
             if set(arguments) - {"job_id", "offset", "max_bytes"}:
@@ -403,7 +427,7 @@ class SinnixdService:
                 raise ValueError("job.logs offset and max_bytes must be integers")
             return self.jobs.logs(job_id, offset=offset, max_bytes=max_bytes)
         if operation == "job.result":
-            job_id = self._job_argument(arguments, "job_id")
+            job_id = self._authorize_job(principal, self._job_argument(arguments, "job_id"))
             max_bytes = arguments.get("max_bytes", 64_000)
             if set(arguments) - {"job_id", "max_bytes"}:
                 raise ValueError("job.result accepts job_id and optional max_bytes")
@@ -411,7 +435,13 @@ class SinnixdService:
                 raise ValueError("job.result max_bytes must be an integer")
             return self.jobs.result(job_id, max_bytes=max_bytes)
         if operation == "job.cancel":
-            return self._cleanup_terminal(self.jobs.cancel(self._single_job_id(arguments, "job.cancel")))
+            return self._cleanup_terminal(
+                self.jobs.cancel(
+                    self._authorize_job(
+                        principal, self._single_job_id(arguments, "job.cancel")
+                    )
+                )
+            )
         raise ValueError(f"unsupported operation: {operation}")
 
     def start_foreground(
@@ -465,6 +495,14 @@ class SinnixdService:
         if set(arguments) != {"job_id"}:
             raise ValueError(f"{operation} accepts only job_id")
         return self._job_argument(arguments, "job_id")
+
+    def _authorize_job(self, principal: str, job_id: str) -> str:
+        record = self.jobs.store.load(job_id)
+        if principal == "operator" or record.spec.principal == principal:
+            return job_id
+        raise JobAuthorizationError(
+            "job access requires its creator or the operator principal"
+        )
 
     def _error(
         self,

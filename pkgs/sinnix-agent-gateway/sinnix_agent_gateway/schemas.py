@@ -126,7 +126,7 @@ class AgentLaunchRequest(GatewayModel):
     backend: str = Field(pattern="^(claude|codex|gemini|grok|antigravity)$")
     model: str = Field(min_length=1, max_length=256)
     reasoning_effort: str = Field(min_length=1, max_length=32)
-    timeout_seconds: int = Field(default=14_400, ge=30, le=86_400)
+    timeout_seconds: int = Field(default=3_600, ge=1, le=3_600)
     credential_profile: str = Field(
         default="subscription", pattern="^(subscription|api)$"
     )

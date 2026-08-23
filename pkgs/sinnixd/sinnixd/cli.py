@@ -175,7 +175,7 @@ def _request(
     operation: str,
     owner: str,
     arguments: dict[str, object],
-    principal: str = "local-cli",
+    principal: str = "operator",
     *,
     idempotency_key: str | None = None,
 ) -> RequestEnvelope:
