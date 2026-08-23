@@ -4,7 +4,7 @@ import hashlib
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from .contracts import ActionSpec, EffectMode, ResourceSpec, VerbFamily
 from .schemas import V2ToolEnvelope
@@ -288,6 +288,58 @@ RESOURCE_GET_SCHEMA: dict[str, Any] = _with_request_controls(
     }
 )
 
+JOB_WAIT_SCHEMA: dict[str, Any] = _with_request_controls(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["ref"],
+        "properties": {
+            "ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2_048,
+                "pattern": "^sinnix://jobs/[^/]+$",
+            },
+            "timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 300,
+                "default": 30,
+            },
+        },
+    }
+)
+
+SHELL_RUN_SCHEMA: dict[str, Any] = _with_request_controls(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["project_id", "checkout_id", "argv", "idempotency_key"],
+        "properties": {
+            "project_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "checkout_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "argv": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 128,
+                "items": {"type": "string", "minLength": 1, "maxLength": 32_768},
+            },
+            "cwd": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4_096,
+                "default": ".",
+            },
+            "timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3_600,
+                "default": 3_600,
+            },
+        },
+    }
+)
+
 CATALOG_QUERY_SCHEMA: dict[str, Any] = _with_request_controls(
     {
         "type": "object",
@@ -370,6 +422,54 @@ def build_registry() -> CatalogRegistry:
             resource_kinds=("project", "checkout", "bead", "task_authority"),
             examples=({"input": {"ref": "sinnix://projects/sinnix"}},),
             documentation="Resolve one canonical project, checkout, Beads task, or task-authority reference.",
+        ),
+        ActionSpec(
+            name="jobs.wait",
+            verb=VerbFamily.WAIT,
+            domain="jobs",
+            owner="systemd-jobs",
+            route="job.wait",
+            effect=EffectMode.READ,
+            principals=frozenset({"observer", "agent-control", "operator"}),
+            input_schema=JOB_WAIT_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("job",),
+            examples=(
+                {
+                    "input": {
+                        "ref": "sinnix://jobs/3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c",
+                        "timeout_seconds": 30,
+                    }
+                },
+            ),
+            documentation="Wait for a bounded interval on one daemon-owned job reference.",
+        ),
+        ActionSpec(
+            name="shell.run",
+            verb=VerbFamily.RUN,
+            domain="shell",
+            owner="systemd-jobs",
+            route="job.shell.start",
+            effect=EffectMode.RUN,
+            principals=frozenset({"operator"}),
+            input_schema=SHELL_RUN_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("project", "checkout", "job"),
+            supports_idempotency=True,
+            receipt_policy="audit",
+            examples=(
+                {
+                    "input": {
+                        "project_id": "sinnix",
+                        "checkout_id": "default",
+                        "argv": ["git", "status", "--short"],
+                        "cwd": ".",
+                        "timeout_seconds": 300,
+                        "idempotency_key": "shell-status-example",
+                    }
+                },
+            ),
+            documentation="Start one typed operator-shell job and return its daemon-owned handle.",
         ),
     )
     return CatalogRegistry(resources, actions)
