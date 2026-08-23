@@ -279,6 +279,11 @@ agent-window)
   fi
   page_id=$(jq -r '.result.targetId' <<<"$response")
 
+  close_created_target() {
+    close_params=$(jq -nc --arg target_id "$page_id" '{targetId: $target_id}')
+    cdp_send "$ws_url" "Target.closeTarget" "$close_params" >/dev/null 2>&1 || true
+  }
+
   parked="false"
   addr=""
   if [[ $hyprland_available == "true" ]]; then
@@ -293,10 +298,17 @@ agent-window)
       stable_checks=0
       for _ in {1..20}; do
         hyprctl dispatch movetoworkspacesilent "${AGENT_WORKSPACE},address:${addr}" >/dev/null 2>&1 || true
+        visible=$(hyprctl monitors -j 2>/dev/null | jq -r --arg workspace "$AGENT_WORKSPACE" \
+          'any(.[]; .specialWorkspace.name == $workspace)')
+        if [[ $visible == "true" ]]; then
+          hyprctl dispatch togglespecialworkspace "${AGENT_WORKSPACE#special:}" >/dev/null 2>&1 || true
+        fi
         sleep 0.1
         workspace=$(hyprctl clients -j 2>/dev/null | jq -r --arg address "$addr" \
           '.[] | select(.address == $address) | .workspace.name // empty')
-        if [[ $workspace == "$AGENT_WORKSPACE" ]]; then
+        visible=$(hyprctl monitors -j 2>/dev/null | jq -r --arg workspace "$AGENT_WORKSPACE" \
+          'any(.[]; .specialWorkspace.name == $workspace)')
+        if [[ $workspace == "$AGENT_WORKSPACE" && $visible == "false" ]]; then
           ((stable_checks += 1))
           if [[ $stable_checks -ge 3 ]]; then
             parked="true"
@@ -313,6 +325,7 @@ agent-window)
     --arg ws "$AGENT_WORKSPACE" --arg key "$SUMMON_BINDING" \
     '{id: $id, url: $url, parked: $parked, workspace: $ws, show_with: $key}'
   if [[ $parked != "true" ]]; then
+    close_created_target
     echo "window ${page_id} opened but was not verified on ${AGENT_WORKSPACE}" >&2
     exit 1
   fi
