@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import json
 import signal
 import subprocess
@@ -14,6 +13,7 @@ from sinnix_ops_reducer.actions import (
     process_admitted_slices,
     validate_request,
 )
+from sinnix_ops_reducer.agent_jobs import AgentCtlError
 from sinnix_ops_reducer.reducer import Reducer
 
 
@@ -59,26 +59,46 @@ def fake_unit_state_prober(unit: str, manager: str) -> dict[str, str]:
     return {"LoadState": "loaded", "ActiveState": "active", "SubState": "running"}
 
 
+class FakeAgentJobs:
+    def __init__(self, jobs: list[dict]) -> None:
+        self.jobs = {str(job["job_id"]): job for job in jobs}
+        self.cancelled: list[str] = []
+
+    def get(self, job_id: str) -> dict:
+        try:
+            return self.jobs[job_id]
+        except KeyError as error:
+            raise AgentCtlError("unknown job") from error
+
+    def cancel(self, job_id: str) -> dict:
+        job = self.get(job_id)
+        self.cancelled.append(job_id)
+        return job | {
+            "state": {
+                "phase": "cancelled",
+                "terminal": True,
+                "observed_at": "2026-08-23T10:00:00Z",
+                "cancellation": {"stop_acknowledged_at": "2026-08-23T10:00:00Z"},
+            },
+            "cancel_requested": True,
+            "already_terminal": False,
+        }
+
+
 def test_action_fixtures_are_attested_and_idempotent_across_restart(
     tmp_path: Path,
 ) -> None:
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
-    state = {
-        "jobs": [
-            {
-                "job_id": "job-1",
-                "schema_version": 3,
-                "worktree": "/realm/worktrees/job-1",
-                "launcher": {
-                    "pid": 123,
-                    "proc_start": "1",
-                    "scope_unit": "job.scope",
-                    "cgroup": "/job",
-                },
-            }
-        ]
+    job = {
+        "job_id": "job-1",
+        "kind": "attested-agent",
+        "project_id": "sinnix",
+        "checkout": {"checkout_id": "default", "path": "/realm/project/sinnix"},
+        "contract": {"backend": "codex", "model": "fixture", "effort": "high"},
+        "state": {"phase": "running", "terminal": False},
     }
+    state = {"jobs": [job]}
     reducer = Reducer(
         tmp_path / "status.json",
         tmp_path / "token",
@@ -98,6 +118,7 @@ def test_action_fixtures_are_attested_and_idempotent_across_restart(
         inventory_path,
         receipts,
         adapter=adapter,
+        agent_jobs=FakeAgentJobs([job]),
         unit_state_prober=fake_unit_state_prober,
     )
     first = actions.execute(request("focus", {"job_id": "job-1"}))
@@ -270,59 +291,42 @@ def test_valid_rejected_action_leaves_a_receipt(tmp_path: Path) -> None:
     assert receipt["status"] == "rejected"
 
 
-def test_orphan_reap_requires_two_identical_cold_observations(tmp_path: Path) -> None:
+def test_interrupt_uses_agentctl_and_records_its_cancellation_truth(tmp_path: Path) -> None:
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
     job = {
-        "job_id": "orphan-1",
-        "schema_version": 3,
-        "worktree": "/realm/worktrees/orphan-1",
-        "launcher": {
-            "pid": 123,
-            "proc_start": "1",
-            "scope_unit": "orphan.scope",
-            "cgroup": "/orphan",
-        },
+        "job_id": "job-1",
+        "kind": "attested-agent",
+        "project_id": "sinnix",
+        "checkout": {"checkout_id": "default", "path": "/realm/project/sinnix"},
+        "contract": {"backend": "codex", "model": "fixture", "effort": "high"},
+        "state": {"phase": "running", "terminal": False},
     }
-    observation = {
-        "job_id": "orphan-1",
-        "identity_revision": "rev-1",
-        "orphaned": True,
-        "workload": {"class": "sacrificial"},
-        "coldness": {"candidate": True},
-    }
-    source_report = {"agent_gateway": {"jobs": [job], "orphaned_jobs": [observation]}}
     reducer = Reducer(
-        tmp_path / "status.json",
-        tmp_path / "token",
-        lambda: copy.deepcopy(source_report),
-        tmp_path / "reducer.json",
+        tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
     )
     reducer.refresh()
+    agent_jobs = FakeAgentJobs([job])
     actions = ActionService(
         reducer.snapshot,
         inventory_path,
         tmp_path / "receipts.json",
-        adapter=lambda *_: {"status": "fixture-reaped"},
+        agent_jobs=agent_jobs,
         unit_state_prober=fake_unit_state_prober,
     )
-    reap_request = request(
-        "interrupt", {"job_id": "orphan-1"}, key="reap-before-second"
-    ) | {"parameters": {"orphan_reap": True}}
-    with pytest.raises(ActionError, match="two identical"):
-        actions.execute(reap_request)
-    reducer.refresh()
-    accepted = actions.execute(
-        request(
-            "interrupt", {"job_id": "orphan-1"}, revision=2, key="reap-after-second"
-        )
-        | {"parameters": {"orphan_reap": True}}
-    )
-    assert accepted["adapter"]["status"] == "fixture-reaped"
-    assert (
-        accepted["preconditions"]["resolved"]["orphan"]["policy"]["observation_count"]
-        == 2
-    )
+    receipt = actions.execute(request("interrupt", {"job_id": "job-1"}))
+    assert agent_jobs.cancelled == ["job-1"]
+    assert receipt["adapter"]["job"]["cancel_requested"] is True
+    assert receipt["resulting_state"]["job"]["state"]["phase"] == "cancelled"
+
+    with pytest.raises(ActionError, match="attested agent"):
+        ActionService(
+            reducer.snapshot,
+            inventory_path,
+            tmp_path / "other-receipts.json",
+            agent_jobs=FakeAgentJobs([job | {"kind": "declared-operation"}]),
+            unit_state_prober=fake_unit_state_prober,
+        ).execute(request("interrupt", {"job_id": "job-1"}, key="declared"))
 
 
 def test_scope_targets_admit_only_name_shaped_live_units_and_only_stop(

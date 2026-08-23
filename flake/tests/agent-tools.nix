@@ -676,67 +676,6 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/scope-wrapper.sh} ${pkgs.writeText "sinnix-direnvrc-rendered" (runtimeDefaults.renderDirenvrc (builtins.readFile ../../scripts/sinnix-direnvrc))}
             touch "$out"
           '';
-      # Provably fails when: the job control plane misclassifies a terminal
-      # event (verified by classifying a timeout as a plain failure), or the
-      # launcher stops passing scope options and attestation environment
-      # through to the child.
-      #
-      # Note: the unattested-interrupt case is guarded in depth (manifest
-      # attestation, PID liveness, start-time, cgroup and worktree identity),
-      # so removing any single guard leaves it refused by the next one.
-      agentJobHandleFixture =
-        pkgs.runCommand "agent-job-handle-fixture"
-          {
-            nativeBuildInputs = [
-              pkgs.bash
-              pkgs.coreutils
-              pkgs.findutils
-              pkgs.git
-              pkgs.gawk
-              pkgs.gnugrep
-              pkgs.gnused
-              pkgs.jq
-              pkgs.python3
-              pkgs.util-linux
-            ];
-          }
-          ''
-            export HOME="$TMPDIR/home"
-            mkdir -p "$HOME"
-            export PATH=${
-              lib.makeBinPath [
-                pkgs.bash
-                pkgs.coreutils
-                pkgs.findutils
-                pkgs.git
-                pkgs.gawk
-                pkgs.gnugrep
-                pkgs.gnused
-                pkgs.jq
-                pkgs.python3
-                pkgs.util-linux
-              ]
-            }
-            fixture_source="$TMPDIR/source"
-            fixture_skill="$fixture_source/dots/_ai/skills/agent-orchestration"
-            mkdir -p "$fixture_skill/scripts" "$fixture_source/scripts"
-            cp ${../../dots/_ai/skills/agent-orchestration/scripts/run_agent_prompt.sh} "$fixture_skill/scripts/run_agent_prompt.sh"
-            cp ${../../dots/_ai/skills/agent-orchestration/scripts/run_agent_prompt_job.py} "$fixture_skill/scripts/run_agent_prompt_job.py"
-            cp ${../../dots/_ai/skills/agent-orchestration/scripts/agent_job_control.sh} "$fixture_skill/scripts/agent_job_control.sh"
-            cp ${../../scripts/sinnix-agent-scope-exec} "$fixture_source/scripts/sinnix-agent-scope-exec"
-            chmod +x "$fixture_skill/scripts/"* "$fixture_source/scripts/"*
-            patchShebangs "$fixture_skill/scripts" "$fixture_source/scripts"
-            export SINNIX_AGENT_TEST_REPO_ROOT="$fixture_source"
-            export SINNIX_AGENT_TEST_SKILL_DIR="$fixture_skill"
-            # The launcher is generated (flake/launch.nix), so there is no
-            # scripts/sinnix-scope to copy. Point the test at the harness
-            # rather than the wrapped package: the wrapper prepends systemd to
-            # PATH, and this test's whole technique is shadowing systemd-run
-            # with a recorder. Same rendered text either way.
-            export SINNIX_AGENT_TEST_SCOPE_BIN=${launch.dispatcher.passthru.harness}
-            ${pkgs.bash}/bin/bash ${../../dots/_ai/skills/agent-orchestration/tests/test_agent_job_handles.sh}
-            touch "$out"
-          '';
       mcpSweepFixture =
         pkgs.runCommand "mcp-sweep-fixture"
           {
@@ -1027,7 +966,6 @@ in
         agent-resource-policy = agentResourcePolicy;
         agent-npm-bootstrap-recovery = agentNpmBootstrapRecovery;
         scope-wrapper = scopeWrapperFixture;
-        agent-job-handles = agentJobHandleFixture;
         mcp-sweep = mcpSweepFixture;
         preflight = preflightFixture;
         kitty-agent-here = kittyAgentHereFixture;

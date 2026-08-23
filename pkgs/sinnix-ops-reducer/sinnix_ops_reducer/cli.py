@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from . import capabilities, feedback, health, pages
+from .agent_jobs import AgentCtlClient
 from .actions import ActionService
 from .ambient import product_source
 from .feedback import CoalescingTrigger, FeedbackSpool
@@ -241,10 +242,10 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--agent-controller",
+        "--agentctl",
         default=os.environ.get(
-            "SINNIX_AGENT_CONTROLLER",
-            "/home/sinity/.config/hermes/skills/agent-orchestration/scripts/agent_job_control.sh",
+            "SINNIX_AGENTCTL",
+            "agentctl",
         ),
     )
     args = parser.parse_args()
@@ -263,6 +264,7 @@ def main() -> None:
         observe_source(observe_command),
         layer.reducer_state_path,
         ambient_source=product_source(args.ambient_product),
+        agent_jobs_source=AgentCtlClient(args.agentctl).list,
     )
     reducer.anchor_event_path = args.anchor_events or (root / "afk-resume.json")
     reducer.hyprland_event_path = args.hyprland_events or (root / "hyprland-events")
@@ -270,7 +272,7 @@ def main() -> None:
         reducer.snapshot,
         args.inventory,
         layer.receipts_path,
-        controller=args.agent_controller,
+        agent_jobs=AgentCtlClient(args.agentctl),
     )
     elicit = (
         CoalescingTrigger(args.elicit_command.split()) if args.elicit_command else None

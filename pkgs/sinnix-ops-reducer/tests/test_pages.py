@@ -214,13 +214,35 @@ def test_scope_controls_distinguish_plain_scopes_from_attested_jobs() -> None:
         },
         {
             "abc": {
-                "backend": "claude",
-                "model": "sonnet",
-                "worktree": "/realm/worktrees/abc",
-                "declared": {},
+                "contract": {"backend": "claude", "model": "sonnet"},
+                "checkout": {"path": "/realm/worktrees/abc"},
             }
         },
         {},
     )
     assert "act('interrupt','job_id','abc'" in job
     assert "act('stop','scope'" not in job
+
+
+def test_work_page_uses_agentctl_lifecycle_and_keeps_live_job_interrupts() -> None:
+    snapshot = {
+        "state": {
+            "agentctl": {
+                "jobs": [
+                    {
+                        "job_id": "agent-1",
+                        "kind": "attested-agent",
+                        "project_id": "sinnix",
+                        "created_at": "2026-08-23T10:00:00Z",
+                        "checkout": {"path": "/realm/project/sinnix"},
+                        "contract": {"backend": "codex", "model": "fixture", "effort": "high"},
+                        "state": {"phase": "running", "terminal": False},
+                    }
+                ],
+                "truncated": False,
+            }
+        }
+    }
+    html = pages.render("/work/", MANIFEST, snapshot, INVENTORY, "fixture")
+    assert "AgentCTL attested jobs" in html
+    assert "act('interrupt','job_id','agent-1'" in html

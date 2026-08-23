@@ -29,6 +29,7 @@ class Reducer:
         state_path: Path | None = None,
         max_events: int = 256,
         ambient_source: Callable[[], dict[str, Any]] | None = None,
+        agent_jobs_source: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self.snapshot_path = snapshot_path
         self.token_path = token_path
@@ -39,6 +40,7 @@ class Reducer:
         self.previous_health: dict[str, str] = {}
         self._snapshot: dict[str, Any] = {}
         self.ambient_source = ambient_source
+        self.agent_jobs_source = agent_jobs_source
         self.anchor_event_path: Path | None = None
         self.anchor: dict[str, Any] | None = None
         self.hyprland_state = HyprlandState()
@@ -111,6 +113,7 @@ class Reducer:
 
     def refresh(self) -> dict[str, Any]:
         observed_at = now_iso()
+        agent_jobs, agent_jobs_health = self._agent_jobs_snapshot(observed_at)
         try:
             report = self.source()
             if not isinstance(report, dict):
@@ -118,6 +121,7 @@ class Reducer:
             report = dict(report)
             self._reduce_orphan_policy(report)
             report["attention"] = normalize_attention(report)
+            report["agentctl"] = agent_jobs
             source_health = {
                 "status": "healthy",
                 "source": "sinnix-observe",
@@ -144,6 +148,7 @@ class Reducer:
             "observed_at": observed_at,
             "sources": {
                 "sinnix-observe": source_health,
+                "agentctl": agent_jobs_health,
                 "ambient-intelligence": ambient_health,
             },
             "state": {
@@ -173,6 +178,46 @@ class Reducer:
             self.events.append(event)
             self.previous_health["sinnix-observe"] = status
         return snapshot
+
+    def _agent_jobs_snapshot(
+        self, observed_at: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if self.agent_jobs_source is None:
+            return (
+                {"jobs": [], "truncated": False},
+                {
+                    "status": "disabled",
+                    "source": "agentctl",
+                    "observed_at": observed_at,
+                    "freshness": "unknown",
+                    "degradation": "no AgentCTL client configured",
+                },
+            )
+        try:
+            value = self.agent_jobs_source()
+            if not isinstance(value, dict) or not isinstance(value.get("jobs"), list):
+                raise ValueError("AgentCTL collector returned an invalid jobs payload")
+            return (
+                value,
+                {
+                    "status": "healthy",
+                    "source": "agentctl",
+                    "observed_at": observed_at,
+                    "freshness": "current",
+                    "degradation": None,
+                },
+            )
+        except Exception as error:
+            return (
+                {"jobs": [], "truncated": False},
+                {
+                    "status": "unavailable",
+                    "source": "agentctl",
+                    "observed_at": observed_at,
+                    "freshness": "unknown",
+                    "degradation": str(error)[:240],
+                },
+            )
 
     def _hyprland_snapshot(self) -> dict[str, Any]:
         self.hyprland_socket.poll(self.hyprland_state)

@@ -15,8 +15,7 @@ everything that touches the job's attestation record:
   * the supervised run itself: one attempt per launcher-race retry, each with
     its own stdin snapshot, output truncation, and artifact finalization.
 
-The manifest is read directly by agent_job_control.sh and attested by
-`sinnix-observe orphans`, so the shape here is a hard contract, not an
+The manifest is attested by `sinnix-observe orphans`, so the shape here is a hard contract, not an
 implementation detail.
 
 The shell entrypoint keeps what shells are good at: option parsing and

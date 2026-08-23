@@ -104,20 +104,18 @@ def ledger_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
     return ledger
 
 
-def gateway_jobs(state: dict[str, Any]) -> list[dict[str, Any]]:
-    gateway = state.get("agent_gateway")
-    jobs = gateway.get("jobs") if isinstance(gateway, dict) else None
+def agentctl_jobs(state: dict[str, Any]) -> list[dict[str, Any]]:
+    agentctl = state.get("agentctl")
+    jobs = agentctl.get("jobs") if isinstance(agentctl, dict) else None
     return (
-        [job for job in jobs if isinstance(job, dict)] if isinstance(jobs, list) else []
+        [
+            job
+            for job in jobs
+            if isinstance(job, dict) and job.get("kind") == "attested-agent"
+        ]
+        if isinstance(jobs, list)
+        else []
     )
-
-
-def orphan_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
-    gateway = state.get("agent_gateway")
-    rows = gateway.get("orphaned_jobs") if isinstance(gateway, dict) else None
-    if not isinstance(rows, list):
-        return []
-    return [row for row in rows if isinstance(row, dict) and row.get("orphaned")]
 
 
 # --------------------------------------------------------------------------
@@ -136,26 +134,25 @@ def scope_block(
     job = jobs_by_id.get(entry["job_id"]) if entry.get("job_id") else None
     controls = ""
     if job is not None:
-        declared = job.get("declared") if isinstance(job.get("declared"), dict) else {}
+        contract = job.get("contract") if isinstance(job.get("contract"), dict) else {}
+        checkout = job.get("checkout") if isinstance(job.get("checkout"), dict) else {}
         headline = (
-            f"<strong>{esc(job.get('backend') or 'agent')} {esc(job.get('model') or '')}</strong>"
-            f" in <code>{esc(project_of(job.get('worktree')) or job.get('worktree') or '?')}</code>"
+            f"<strong>{esc(contract.get('backend') or 'agent')} {esc(contract.get('model') or '')}</strong>"
+            f" in <code>{esc(project_of(checkout.get('path')) or checkout.get('path') or '?')}</code>"
         )
-        meta = [badge("gateway job", "info"), esc(duration_human(entry.get("elapsed")))]
-        if declared.get("work_item"):
-            meta.append(f"work item <code>{esc(declared['work_item'])}</code>")
-        if job.get("effort"):
-            meta.append(f"effort {esc(job['effort'])}")
+        meta = [badge("AgentCTL job", "info"), esc(duration_human(entry.get("elapsed")))]
+        if contract.get("effort"):
+            meta.append(f"effort {esc(contract['effort'])}")
         controls = (
             f"<button class=\"act danger\" onclick=\"act('interrupt','job_id',"
             f"'{esc(entry['job_id'])}',this)\">interrupt</button>"
         )
     elif entry.get("job_id"):
-        headline = f"<strong>gateway job</strong> <code>{esc(entry['job_id'])}</code>"
+        headline = f"<strong>AgentCTL job</strong> <code>{esc(entry['job_id'])}</code>"
         meta = [
-            badge("gateway job", "info"),
+            badge("AgentCTL job", "info"),
             esc(duration_human(entry.get("elapsed"))),
-            "no manifest in the current snapshot",
+            "no typed job record in the current snapshot",
         ]
     else:
         klass = entry.get("class")
@@ -222,7 +219,7 @@ def scope_groups(
         bucket.sort(key=lambda item: item.get("elapsed") or 0)
     return [
         ("build, nix-build and heavy scopes", heavy),
-        ("agent-gateway jobs", jobs),
+        ("AgentCTL jobs", jobs),
         ("agent sessions", sessions),
         ("other scopes", other),
     ]
@@ -237,7 +234,7 @@ def live_work_card(
 ) -> str:
     jobs_by_id = {
         job["job_id"]: job
-        for job in gateway_jobs(state)
+        for job in agentctl_jobs(state)
         if isinstance(job.get("job_id"), str)
     }
     slice_limits = {
@@ -276,7 +273,7 @@ def live_work_card(
                 "Nothing is placed in a sinnix scope and no project command is in "
                 "flight — no agent session, build, or scoped command is running."
             ),
-            "project commands, agent sessions, gateway jobs and sinnix-scope placements",
+            "project commands, agent sessions, AgentCTL jobs and sinnix-scope placements",
             wide=True,
             anchor="running",
         )
@@ -360,53 +357,40 @@ def ledger_card(state: dict[str, Any], now: dt.datetime) -> str:
 def agent_jobs_card(
     state: dict[str, Any], live_job_ids: set[str], now: dt.datetime
 ) -> str:
-    jobs = [job for job in gateway_jobs(state) if job.get("job_id") not in live_job_ids]
-    jobs.sort(key=lambda job: str(job.get("updated_at") or ""), reverse=True)
-    orphans = {
-        row["job_id"]: row
-        for row in orphan_rows(state)
-        if isinstance(row.get("job_id"), str)
-    }
-    if not jobs and not orphans:
-        return card("Agent jobs", empty("the gateway has no recorded jobs"))
+    jobs = [job for job in agentctl_jobs(state) if job.get("job_id") not in live_job_ids]
+    jobs.sort(key=lambda job: str(job.get("created_at") or ""), reverse=True)
+    if not jobs:
+        return card("Agent jobs", empty("AgentCTL has no recorded agent jobs"))
     blocks = ""
     for job in jobs[:10]:
         job_id = str(job.get("job_id") or "")
-        lifecycle = str(job.get("lifecycle") or "unknown")
-        orphan = orphans.get(job_id)
-        tone = {"completed": "ok", "failed": "bad", "cancelled": "muted"}.get(
+        state = job.get("state") if isinstance(job.get("state"), dict) else {}
+        contract = job.get("contract") if isinstance(job.get("contract"), dict) else {}
+        checkout = job.get("checkout") if isinstance(job.get("checkout"), dict) else {}
+        lifecycle = str(state.get("phase") or "unknown")
+        tone = {"succeeded": "ok", "failed": "bad", "cancelled": "muted"}.get(
             lifecycle, "info"
         )
-        declared = job.get("declared") if isinstance(job.get("declared"), dict) else {}
         headline = (
-            f"<strong>{esc(job.get('backend') or 'agent')}</strong> "
-            f"{esc(job.get('model') or '')} · "
-            f"<code>{esc(project_of(job.get('worktree')) or '?')}</code>"
+            f"<strong>{esc(contract.get('backend') or 'agent')}</strong> "
+            f"{esc(contract.get('model') or '')} · "
+            f"<code>{esc(project_of(checkout.get('path')) or job.get('project_id') or '?')}</code>"
         )
-        meta = [badge(lifecycle, tone), esc(age_since(job.get("updated_at"), now))]
-        if declared.get("work_item"):
-            meta.append(f"work item <code>{esc(declared['work_item'])}</code>")
-        if isinstance(job.get("exit_status"), int):
-            meta.append(f"exit {job['exit_status']}")
+        meta = [badge(lifecycle, tone), esc(age_since(state.get("observed_at") or job.get("created_at"), now))]
+        if contract.get("effort"):
+            meta.append(f"effort {esc(contract['effort'])}")
         controls = ""
-        row_tone = ""
-        if orphan is not None:
-            policy = (
-                orphan.get("policy") if isinstance(orphan.get("policy"), dict) else {}
-            )
-            proposed = str(policy.get("proposed_action") or "notify")
-            meta.append(badge(f"orphaned, {proposed}", "warn"))
-            row_tone = "warn"
+        if state.get("terminal") is not True:
             controls = (
                 f"<button class=\"act danger\" onclick=\"act('interrupt','job_id',"
                 f"'{esc(job_id)}',this)\">interrupt</button>"
             )
-        blocks += row(headline, meta, controls, row_tone)
+        blocks += row(headline, meta, controls)
     return (
         '<section class="card wide"><h2>Agent jobs, recently</h2>'
-        '<p class="sub">Attested gateway jobs whose launcher has exited. An '
-        "orphan is one whose scope outlived its launcher; the reducer will only "
-        "accept a reap after two identical cold expendable observations.</p>"
+        '<p class="sub">AgentCTL attested jobs with their typed lifecycle state. '
+        "An interrupt is delegated to Sinnixd, whose systemd record supplies the "
+        "cancellation outcome.</p>"
         f"{blocks}</section>"
     )
 
