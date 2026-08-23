@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import subprocess
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,28 @@ from .environment import build_environment
 
 class ProjectConfigError(ValueError):
     """Raised when a project adapter is missing or violates the v1 contract."""
+
+
+@dataclass(frozen=True)
+class RegisteredCheckout:
+    """A Git-worktree identity revalidated at the execution boundary."""
+
+    project_id: str
+    project_path: Path
+    checkout_id: str
+    path: Path
+    git_common_dir: Path
+    head: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "project_id": self.project_id,
+            "project_path": str(self.project_path),
+            "checkout_id": self.checkout_id,
+            "path": str(self.path),
+            "git_common_dir": str(self.git_common_dir),
+            "head": self.head,
+        }
 
 
 @dataclass(frozen=True)
@@ -282,6 +305,83 @@ class ProjectCatalog:
             return self._adapters[project_id]
         except KeyError as error:
             raise KeyError(f"unknown project: {project_id}") from error
+
+    @staticmethod
+    def _git(path: Path, *arguments: str) -> str:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(path), *arguments],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            raise ProjectConfigError(f"could not verify registered checkout {path}") from error
+        return result.stdout
+
+    @staticmethod
+    def _worktree_records(output: str) -> tuple[dict[str, str], ...]:
+        records: list[dict[str, str]] = []
+        record: dict[str, str] = {}
+        for line in output.splitlines():
+            if not line:
+                if record:
+                    records.append(record)
+                    record = {}
+                continue
+            key, separator, value = line.partition(" ")
+            if not separator or key in record:
+                raise ProjectConfigError("git worktree returned malformed porcelain")
+            record[key] = value
+        if record:
+            records.append(record)
+        return tuple(records)
+
+    @staticmethod
+    def _checkout_id(path: Path, configured_root: Path) -> str:
+        if path == configured_root:
+            return "default"
+        return "worktree-" + hashlib.sha256(str(path).encode()).hexdigest()[:16]
+
+    def checkouts(self, project_id: str) -> tuple[RegisteredCheckout, ...]:
+        project = self.get(project_id)
+        root = project.root.resolve(strict=True)
+        records = self._worktree_records(self._git(root, "worktree", "list", "--porcelain"))
+        checkouts: list[RegisteredCheckout] = []
+        for record in records:
+            raw_path = record.get("worktree")
+            head = record.get("HEAD")
+            if raw_path is None or head is None:
+                raise ProjectConfigError("git worktree record is missing worktree or HEAD")
+            path = Path(raw_path).resolve(strict=True)
+            top_level = Path(self._git(path, "rev-parse", "--show-toplevel").strip()).resolve(strict=True)
+            common_dir = Path(
+                self._git(path, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+            ).resolve(strict=True)
+            if top_level != path:
+                raise ProjectConfigError("registered checkout has a non-canonical worktree root")
+            checkouts.append(
+                RegisteredCheckout(
+                    project_id=project.project_id,
+                    project_path=root,
+                    checkout_id=self._checkout_id(path, root),
+                    path=path,
+                    git_common_dir=common_dir,
+                    head=head,
+                )
+            )
+        if not any(checkout.checkout_id == "default" and checkout.path == root for checkout in checkouts):
+            raise ProjectConfigError("configured project root is not a registered Git worktree")
+        return tuple(sorted(checkouts, key=lambda checkout: (checkout.checkout_id != "default", checkout.checkout_id)))
+
+    def checkout(self, project_id: str, checkout_id: str) -> RegisteredCheckout:
+        if not isinstance(checkout_id, str) or not checkout_id:
+            raise KeyError("checkout_id must be a non-empty string")
+        for checkout in self.checkouts(project_id):
+            if checkout.checkout_id == checkout_id:
+                return checkout
+        raise KeyError(f"unknown registered checkout: {project_id}.{checkout_id}")
 
     def owner_adapters(self) -> tuple[ProjectOwnerAdapter, ...]:
         adapters = tuple(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Mapping
 
 from sinnix_mcp import (
@@ -17,6 +18,7 @@ from sinnix_mcp import (
 from sinnix_mcp.execution import OwnerExecution
 
 from .jobs import GenericJobStore, GenericJobs, JobRecordError, SystemdJobError, UserSystemdJobs, default_state_dir
+from .contracts import TypedJobContracts
 from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from .projects import ProjectCatalog
 
@@ -38,6 +40,7 @@ class SinnixdService:
         default_factory=lambda: DeclaredOwnerAdapters(OwnerExecution())
     )
     version: str = "0.2.0"
+    native_runner: Path = Path("/home/sinity/.config/hermes/skills/agent-orchestration/scripts/run_agent_prompt.sh")
 
     def __post_init__(self) -> None:
         _ = self.owners
@@ -87,7 +90,7 @@ class SinnixdService:
             if owner.source_scoped:
                 project, adapter = self.projects.owner_adapter(request.operation)
                 return self.owner_adapters.call(project=project, adapter=adapter, request=request)
-            payload = self._dispatch(request.operation, request.arguments, request.correlation_id)
+            payload = self._dispatch(request.operation, request.arguments, request.correlation_id, request.principal)
         except KeyError as error:
             return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
         except OwnerAdapterError as error:
@@ -117,6 +120,7 @@ class SinnixdService:
         operation: str,
         arguments: Mapping[str, Any],
         correlation_id: str,
+        principal: str,
     ) -> dict[str, Any]:
         if operation == "runtime.status":
             return {
@@ -146,17 +150,51 @@ class SinnixdService:
             if set(arguments) != {"project_id", "operation"}:
                 raise ValueError("job.start accepts only project_id and operation")
             project = self.projects.get(project_id)
-            return self.jobs.start_declared(
+            return self._cleanup_terminal(self.jobs.start_declared(
                 project=project,
                 operation=project.operation(operation_name),
                 correlation_id=correlation_id,
-            )
+            ))
+        if operation == "job.shell.start":
+            required = {"project_id", "checkout_id", "argv", "cwd", "timeout_seconds", "result"}
+            if set(arguments) != required:
+                raise ValueError("job.shell.start requires project_id, checkout_id, argv, cwd, timeout_seconds, and result")
+            argv = arguments["argv"]
+            if not isinstance(argv, list):
+                raise ValueError("job.shell.start argv must be a list")
+            return self._cleanup_terminal(self.job_contracts.start_shell(
+                principal=principal,
+                project_id=self._job_argument(arguments, "project_id"),
+                checkout_id=self._job_argument(arguments, "checkout_id"),
+                argv=argv,
+                cwd=self._job_argument(arguments, "cwd"),
+                timeout_seconds=self._integer_argument(arguments, "timeout_seconds"),
+                result=self._job_argument(arguments, "result"),
+            ))
+        if operation == "job.agent.start":
+            required = {
+                "project_id", "checkout_id", "prompt", "backend", "model", "effort", "credential_profile", "timeout_seconds", "result"
+            }
+            if set(arguments) != required:
+                raise ValueError("job.agent.start requires the complete typed agent contract")
+            return self._cleanup_terminal(self.job_contracts.start_agent(
+                principal=principal,
+                project_id=self._job_argument(arguments, "project_id"),
+                checkout_id=self._job_argument(arguments, "checkout_id"),
+                prompt=self._job_argument(arguments, "prompt"),
+                backend=self._job_argument(arguments, "backend"),
+                model=self._job_argument(arguments, "model"),
+                effort=self._job_argument(arguments, "effort"),
+                credential_profile=self._job_argument(arguments, "credential_profile"),
+                timeout_seconds=self._integer_argument(arguments, "timeout_seconds"),
+                result=self._job_argument(arguments, "result"),
+            ))
         if operation == "job.get":
-            return self.jobs.get(self._single_job_id(arguments, "job.get"))
+            return self._cleanup_terminal(self.jobs.get(self._single_job_id(arguments, "job.get")))
         if operation == "job.list":
             if arguments:
                 raise ValueError("job.list accepts no arguments")
-            return self.jobs.list()
+            return {"jobs": [self._cleanup_terminal(job) for job in self.jobs.list()["jobs"]]}
         if operation == "job.wait":
             job_id = self._job_argument(arguments, "job_id")
             timeout_seconds = arguments.get("timeout_seconds", 30)
@@ -164,7 +202,7 @@ class SinnixdService:
                 raise ValueError("job.wait accepts job_id and optional timeout_seconds")
             if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool):
                 raise ValueError("job.wait timeout_seconds must be an integer")
-            return self.jobs.wait(job_id, timeout_seconds)
+            return self._cleanup_terminal(self.jobs.wait(job_id, timeout_seconds))
         if operation == "job.logs":
             job_id = self._job_argument(arguments, "job_id")
             offset = arguments.get("offset", 0)
@@ -174,8 +212,16 @@ class SinnixdService:
             if any(not isinstance(value, int) or isinstance(value, bool) for value in (offset, max_bytes)):
                 raise ValueError("job.logs offset and max_bytes must be integers")
             return self.jobs.logs(job_id, offset=offset, max_bytes=max_bytes)
+        if operation == "job.result":
+            job_id = self._job_argument(arguments, "job_id")
+            max_bytes = arguments.get("max_bytes", 64_000)
+            if set(arguments) - {"job_id", "max_bytes"}:
+                raise ValueError("job.result accepts job_id and optional max_bytes")
+            if not isinstance(max_bytes, int) or isinstance(max_bytes, bool):
+                raise ValueError("job.result max_bytes must be an integer")
+            return self.jobs.result(job_id, max_bytes=max_bytes)
         if operation == "job.cancel":
-            return self.jobs.cancel(self._single_job_id(arguments, "job.cancel"))
+            return self._cleanup_terminal(self.jobs.cancel(self._single_job_id(arguments, "job.cancel")))
         raise ValueError(f"unsupported operation: {operation}")
 
     def start_foreground(
@@ -195,12 +241,26 @@ class SinnixdService:
             timeout_seconds=timeout_seconds,
         )
 
+    def _cleanup_terminal(self, response: Mapping[str, Any]) -> dict[str, Any]:
+        return self.job_contracts.cleanup_terminal(response)
+
     @staticmethod
     def _job_argument(arguments: Mapping[str, Any], name: str) -> str:
         value = arguments.get(name)
         if not isinstance(value, str) or not value:
             raise ValueError(f"job operation requires {name}")
         return value
+
+    @staticmethod
+    def _integer_argument(arguments: Mapping[str, Any], name: str) -> int:
+        value = arguments.get(name)
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ValueError(f"job operation requires integer {name}")
+        return value
+
+    @property
+    def job_contracts(self) -> TypedJobContracts:
+        return TypedJobContracts(self.projects, self.jobs, self.native_runner)
 
     def _single_job_id(self, arguments: Mapping[str, Any], operation: str) -> str:
         if set(arguments) != {"job_id"}:
