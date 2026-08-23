@@ -158,8 +158,13 @@ class BeadsService:
     def _includes(self, project: ProjectConfig, project_id: str, bead_id: str, includes: set[str]) -> dict[str, Any]:
         commands = {"comments": ["comments", bead_id], "history": ["history", bead_id, "--limit", "20"], "events": ["history", bead_id, "--events", "--limit", "20"], "dependencies": ["dep", "list", bead_id, "--direction", "down"], "dependents": ["dep", "list", bead_id, "--direction", "up"], "children": ["list", "--parent", bead_id, "--flat", "--limit", str(_MAX_PAGE), "--max-rows", str(_MAX_PAGE)], "refs": ["show", bead_id, "--refs"]}
         unsupported = includes - set(commands)
+        unsupported -= {"blockers"}
         if unsupported: raise BeadsError(f"unsupported_capability: unsupported Beads includes: {sorted(unsupported)}")
-        return {name: self._run(project, commands[name], False) for name in sorted(includes)}
+        result = {name: self._run(project, commands[name], False) for name in sorted(includes - {"blockers"})}
+        if "blockers" in includes:
+            rows = self._issues(self._run(project, ["dep", "list", bead_id, "--direction", "down", "--type", "blocks"], False))
+            result["blockers"] = {"count": len(rows), "items": [{key: row.get(key) for key in ("id", "title", "status", "priority", "dependency_type")} for row in rows]}
+        return result
 
     def get(self, project_id: str, bead_id: str, *, includes: list[str] | None = None, as_of: str | None = None) -> dict[str, Any]:
         if as_of is not None:
