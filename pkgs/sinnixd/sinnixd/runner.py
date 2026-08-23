@@ -4,11 +4,10 @@ import argparse
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from .jobs import MAX_LOG_ARTIFACT_BYTES, MAX_RESULT_BYTES, _read_private_artifact
+from .jobs import MAX_RESULT_BYTES
 from .projects import ProjectConfigError, parse_worktree_records
 
 
@@ -132,37 +131,12 @@ def _exec_shell(value: Mapping[str, Any], checkout: Path) -> None:
     os.execvpe(argv[0], argv, dict(os.environ))
 
 
-def _current_cgroup() -> str:
-    try:
-        for line in Path("/proc/self/cgroup").read_text().splitlines():
-            hierarchy, _, cgroup = line.partition("::")
-            if hierarchy == "0":
-                return cgroup
-    except OSError:
-        pass
-    return ""
-
-
-def _emit_native_log(log_path: Path) -> None:
-    """Relay a private native log through the shared bounded capture helper."""
-    try:
-        os.chmod(log_path, 0o600, follow_symlinks=False)
-    except OSError:
-        return
-    content = _read_private_artifact(log_path, MAX_LOG_ARTIFACT_BYTES)
-    if content:
-        sys.stdout.buffer.write(content)
-        sys.stdout.buffer.flush()
-
-
 def _run_agent(
     value: Mapping[str, Any],
     checkout: Path,
     *,
     native_runner: Path,
-    native_state_dir: Path,
     state_root: Path,
-    unit: str,
 ) -> int:
     _require_strings(value, ("backend", "model", "effort", "credential_profile", "prompt_path", "result_path"))
     if value.get("principal") != "agent-control" or value["backend"] not in {"claude", "codex", "gemini", "grok", "antigravity"}:
@@ -177,52 +151,30 @@ def _run_agent(
         raise RunnerError("attested agent result artifact is invalid")
     if not native_runner.is_file() or not os.access(native_runner, os.X_OK):
         raise RunnerError("native agent runner is unavailable")
-    native_state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    log_path = native_state_dir / f"{value['job_id']}.agent.log"
     command = [
         str(native_runner),
         "--agent",
         value["backend"],
-        "--registered-project",
-        value["checkout"]["project_path"],
-        "--expected-git-common-dir",
-        value["checkout"]["git_common_dir"],
         "--workdir",
         str(checkout),
         "--prompt-file",
         str(prompt_path),
-        "--log-file",
-        str(log_path),
         "--last-file",
         str(result_path),
-        "--job-id",
-        value["job_id"],
-        "--launch-id",
-        value["job_id"].replace("-", ""),
-        "--job-state-dir",
-        str(native_state_dir),
-        "--timeout-seconds",
-        os.environ.get("SINNIXD_TIMEOUT_SECONDS", "3600"),
         "--credential-profile",
         value["credential_profile"],
         "--model",
         value["model"],
         "--reasoning-effort",
         value["effort"],
-        "--checkout-ref",
-        f"sinnix://projects/{value['checkout']['project_id']}/checkouts/{value['checkout']['checkout_id']}",
     ]
-    environment = dict(os.environ)
-    environment.update({"SINNIX_AGENT_SCOPED": "1", "SINNIX_AGENT_SCOPE_UNIT": unit, "SINNIX_AGENT_SCOPE_CGROUP": _current_cgroup(), "SINNIX_AGENT_JOB_STATE_DIR": str(native_state_dir), "SINNIX_CORRELATION_ID": value["job_id"]})
     try:
-        completed = subprocess.run(command, cwd=checkout, env=environment, check=False)
-        _emit_native_log(log_path)
+        completed = subprocess.run(command, cwd=checkout, check=False)
         if result_path.exists() and result_path.stat().st_size > MAX_RESULT_BYTES:
             result_path.write_bytes(result_path.read_bytes()[:MAX_RESULT_BYTES])
         return completed.returncode
     finally:
         prompt_path.unlink(missing_ok=True)
-        log_path.unlink(missing_ok=True)
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
@@ -231,7 +183,6 @@ def main(arguments: Sequence[str] | None = None) -> int:
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--unit", required=True)
     parser.add_argument("--native-runner", type=Path, required=True)
-    parser.add_argument("--native-state-dir", type=Path, required=True)
     parser.add_argument("--state-root", type=Path, required=True)
     args = parser.parse_args(arguments)
     try:
@@ -246,9 +197,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             value,
             checkout,
             native_runner=args.native_runner.resolve(),
-            native_state_dir=args.native_state_dir.resolve(),
             state_root=args.state_root.resolve(),
-            unit=args.unit,
         )
     except RunnerError as error:
         parser.error(str(error))

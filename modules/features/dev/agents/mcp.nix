@@ -175,28 +175,6 @@ mkFeatureModule {
           };
         }
       )
-      # Session-boundary hooks only reap orphans at session start/end; a
-      # daemon orphaned mid-session survives unbounded until the next
-      # boundary. This periodic sweep closes that gap structurally,
-      # independent of any agent behaving correctly.
-      (lib.sinnix.mkScheduledJob
-        {
-          inherit config;
-          unitName = "sinnix-mcp-sweep-periodic";
-          description = "Periodically reap orphaned MCP/language-server/dev-daemon processes";
-          surface = null;
-        }
-        {
-          manager = "user";
-          execStart = "${scriptPkgs.sinnix-mcp-sweep}/bin/sinnix-mcp-sweep --orphans-only --quiet";
-          timer = {
-            onBootSec = "10min";
-            onUnitActiveSec = "15min";
-            accuracySec = "1min";
-            description = "Timer for periodic orphaned dev-daemon reaping";
-          };
-        }
-      )
       {
         sinnix.features.dev.mcp-servers.codexConfigSource = codexConfigFile;
         sinnix.features.dev.mcp-servers.codexFullConfigSource = codexFullConfigFile;
@@ -304,10 +282,6 @@ mkFeatureModule {
                 force = true;
               };
               ".gemini/config/AGENTS.md".source = mkDotsFile "/claude/CLAUDE.md";
-              ".local/bin/sinnix-mcp-sweep" = {
-                source = "${scriptPkgs.sinnix-mcp-sweep}/bin/sinnix-mcp-sweep";
-                force = true;
-              };
               ".local/bin/bd-prime-if-present" = {
                 source = "${scriptPkgs.bd-prime-if-present}/bin/bd-prime-if-present";
                 force = true;

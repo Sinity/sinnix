@@ -325,7 +325,6 @@ mkFeatureModule {
             ".local/state/codex"
             ".local/state/gemini"
             ".local/state/sinnix/clodex-credentials"
-            ".local/state/sinnix/agent-jobs"
             {
               directory = ".grok";
               mode = "0700";

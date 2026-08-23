@@ -6,7 +6,6 @@ import argparse
 import json
 import os
 import sqlite3
-from datetime import datetime, timezone
 
 import pytest
 from sinnix_observe import cli, joins, render, runtime_inventory, util
@@ -386,55 +385,37 @@ def test_cli_collect_report_offline() -> None:
         offline=True, limit=2, since="10 min ago", duration="10 min", format="json"
     )
     report = cli.collect_report(args)
-    assert report["agent_gateway"]["schema"] == "sinnix-observe-agent-gateway-v1"
+    assert report["agent_gateway"]["schema"] == "sinnix-observe-agentctl-v1"
     assert report["schema"] == "sinnix-observe-v1"
     assert report["live_pressure"] == {"offline": True}
     assert isinstance(report["workload_rows"], list)
     assert "gaps_summary" in report
 
 
-def test_agent_gateway_correlates_manifest_audit_history_and_quota(
+def test_agent_gateway_reads_canonical_agentctl_records(
     tmp_path, monkeypatch
 ) -> None:
-    root = tmp_path / "gateway"
+    root = tmp_path / "sinnixd"
     jobs = root / "jobs"
-    audit_dir = root / "audit"
     jobs.mkdir(parents=True)
-    audit_dir.mkdir()
     job_id = "00000000-0000-4000-8000-000000000001"
     (jobs / f"{job_id}.json").write_text(
         json.dumps(
             {
                 "job_id": job_id,
-                "launcher": {
-                    "scope_unit": "sinnix-agent-job-x.scope",
-                    "cgroup": "/agent.slice/x",
+                "unit": f"sinnixd-job-{job_id}.service",
+                "schema_version": 4,
+                "created_at": "2026-08-23T10:00:00Z",
+                "spec": {
+                    "kind": "attested-agent",
+                    "project_id": "sinnix",
+                    "timeout_seconds": 60,
+                    "checkout": {"path": "/realm/worktrees/fixture"},
+                    "contract": {"backend": "codex", "model": "fixture", "effort": "high"},
                 },
-                "schema_version": 3,
-                "identity": {"provider": "codex", "account_hash": "sha256:test"},
-                "delegation": {"parent_job_id": "parent-1"},
-                "actual_agent": {"pid": 22, "proc_start": "44"},
-                "completion": {"duration_seconds": 12},
+                "state": {"phase": "succeeded", "terminal": True, "systemd": {"ControlGroup": "/agent.slice/x"}},
             }
         )
-    )
-    (jobs / f"{job_id}.events.jsonl").write_text(
-        json.dumps({"schema_version": 2, "job_id": job_id, "event": "completion"})
-        + "\n"
-    )
-    db = sqlite3.connect(audit_dir / "events.sqlite3")
-    db.execute(
-        "create table events(sequence integer,event_id text,occurred_at real,profile text,operation text,outcome text,payload_json text)"
-    )
-    db.execute(
-        "insert into events values(1,'event-1',1.0,'local-agent-control','agent_launch','ok',?)",
-        (json.dumps({"correlation_id": job_id}),),
-    )
-    db.commit()
-    db.close()
-    journal = root / "journal.jsonl"
-    journal.write_text(
-        json.dumps({"SINNIX_JOB_ID": job_id, "SINNIX_JOB_LIFECYCLE": "running"}) + "\n"
     )
     polylogue = root / "index.db"
     history_db = sqlite3.connect(polylogue)
@@ -447,79 +428,61 @@ def test_agent_gateway_correlates_manifest_audit_history_and_quota(
     )
     history_db.commit()
     history_db.close()
-    quota = root / "quota.json"
-    quota.write_text(
-        json.dumps(
-            {"observed_at": datetime.now(timezone.utc).isoformat(), "remaining": 42}
-        )
-    )
-    monkeypatch.setenv("SINNIX_AGENT_GATEWAY_STATE_DIR", str(root))
-    monkeypatch.setenv("SINNIX_AGENT_JOURNAL_FILE", str(journal))
+    monkeypatch.setenv("SINNIXD_STATE_DIR", str(root))
     monkeypatch.setenv("SINNIX_POLYLOGUE_INDEX_DB", str(polylogue))
-    monkeypatch.setenv("SINNIX_AGENT_QUOTA_FILE", str(quota))
     out = agent_gateway.collect_agent_gateway()
-    assert out["correlations"][0]["complete"] is True
+    assert out["schema"] == "sinnix-observe-agentctl-v1"
+    assert out["correlations"][0]["terminal"] is True
+    assert out["correlations"][0]["unit"] == f"sinnixd-job-{job_id}.service"
     assert out["correlations"][0]["cgroup"] == "/agent.slice/x"
-    assert out["correlations"][0]["identity"]["provider"] == "codex"
-    assert out["correlations"][0]["delegation"]["parent_job_id"] == "parent-1"
-    assert out["correlations"][0]["lifecycle_events"][0]["event"] == "completion"
+    assert out["jobs"][0]["backend"] == "codex"
     assert (
         out["correlations"][0]["polylogue"]["session_id"] == "codex-session:session-1"
     )
-    assert out["quota"]["provenance"] == "observed"
 
 
 def test_agent_gateway_bounds_malformed_sources(tmp_path, monkeypatch) -> None:
-    root = tmp_path / "gateway"
+    root = tmp_path / "sinnixd"
     (root / "jobs").mkdir(parents=True)
     (root / "jobs/broken.json").write_text("{")
-    monkeypatch.setenv("SINNIX_AGENT_GATEWAY_STATE_DIR", str(root))
-    monkeypatch.setenv("SINNIX_AGENT_QUOTA_FILE", str(root / "missing"))
+    (root / "jobs/declared.json").write_text(
+        json.dumps(
+            {
+                "job_id": "declared",
+                "unit": "sinnixd-job-declared.service",
+                "schema_version": 4,
+                "spec": {"kind": "declared-operation"},
+                "state": {"phase": "succeeded"},
+            }
+        )
+    )
+    monkeypatch.setenv("SINNIXD_STATE_DIR", str(root))
     out = agent_gateway.collect_agent_gateway()
     assert out["malformed_records"] == ["broken.json"]
-    assert out["quota"]["provenance"] == "inferred"
+    assert out["jobs"] == []
 
 
-def test_agent_gateway_rejects_stale_quota_as_observation(
-    tmp_path, monkeypatch
-) -> None:
-    root = tmp_path / "gateway"
-    (root / "jobs").mkdir(parents=True)
-    quota = root / "quota.json"
-    quota.write_text(
-        json.dumps({"observed_at": "2020-01-01T00:00:00Z", "remaining": 42})
-    )
-    monkeypatch.setenv("SINNIX_AGENT_GATEWAY_STATE_DIR", str(root))
-    monkeypatch.setenv("SINNIX_AGENT_QUOTA_FILE", str(quota))
-    monkeypatch.setenv("SINNIX_POLYLOGUE_INDEX_DB", str(root / "missing.db"))
-    out = agent_gateway.collect_agent_gateway()
-    assert out["quota"]["provenance"] == "inferred"
-    assert out["quota"]["reason"] == "provider observation is stale"
-
-
-def test_gateway_rows_use_attested_nested_manifest_fields() -> None:
+def test_gateway_rows_use_agentctl_record_fields() -> None:
     rows = joins.build_gateway_rows(
         {
             "jobs": [
                 {
                     "job_id": "j",
-                    "lifecycle": "running",
-                    "launcher": {
-                        "scope_unit": "sinnix-agent-job-j.scope",
-                        "cgroup": "/agent.slice/j",
-                    },
-                    "declared": {"work_item": "sinnix-056.6"},
-                    "resource_overrides": {"MemoryHigh": "2G"},
+                    "unit": "sinnixd-job-j.service",
+                    "backend": "codex",
+                    "model": "fixture",
+                    "effort": "high",
+                    "checkout": {"path": "/realm/worktrees/j"},
+                    "contract": {"backend": "codex"},
+                    "state": {"phase": "running", "systemd": {"ControlGroup": "/agent.slice/j"}},
                 }
             ],
-            "quota": {},
         },
         {},
     )
-    assert rows[0]["unit"] == "sinnix-agent-job-j.scope"
+    assert rows[0]["unit"] == "sinnixd-job-j.service"
     assert rows[0]["cgroup"] == "/agent.slice/j"
-    assert rows[0]["metrics"]["work_item"] == "sinnix-056.6"
-    assert rows[0]["metrics"]["resource_overrides"]["MemoryHigh"] == "2G"
+    assert rows[0]["metrics"]["backend"] == "codex"
 
 
 def test_sqlite_failure_is_recorded_not_swallowed(tmp_path):
@@ -564,92 +527,12 @@ def test_successful_read_records_no_error(tmp_path):
     assert sqlite_util.sqlite_errors() == []
 
 
-def test_gateway_probe_failures_surface_as_gap_categories() -> None:
-    """A failed gateway probe is a gap CATEGORY, never a raw reason string.
-
-    gaps_summary counts gap entries as taxonomy keys, so a probe that put
-    its exception class name (e.g. sqlite3 OperationalError) into the gap
-    list minted a fake gap category per exception type. The reason detail
-    belongs on the agent_gateway state; the workload row carries the stable
-    identifier.
-    """
+def test_gateway_polylogue_probe_failure_surfaces_as_a_gap_category() -> None:
     rows = joins.build_gateway_rows(
         {
-            "jobs": [{"job_id": "j", "lifecycle": "running"}],
-            "audit_error": "audit_log_unreadable",
-            "journal_error": None,
+            "jobs": [{"job_id": "j", "state": {"phase": "running"}}],
             "polylogue_error": "polylogue_index_unreadable",
-            "quota": {},
         },
         {},
     )
-    assert rows[0]["gaps"] == [
-        "agent_gateway.audit.unavailable",
-        "agent_gateway.polylogue.unavailable",
-    ]
-
-
-def test_gateway_audit_probe_reports_stable_unavailable_identifier(
-    tmp_path, monkeypatch
-) -> None:
-    """An unreadable audit database yields the explicit unavailable state.
-
-    The audit sqlite is absent here, so the read-only connect fails; the
-    probe must report its stable identifier rather than whichever exception
-    class sqlite3 raised (which is what leaked into gaps_summary live).
-    """
-    root = tmp_path / "gateway"
-    (root / "jobs").mkdir(parents=True)
-    monkeypatch.setenv("SINNIX_AGENT_GATEWAY_STATE_DIR", str(root))
-    monkeypatch.setenv("SINNIX_AGENT_QUOTA_FILE", str(root / "missing"))
-    monkeypatch.setenv("SINNIX_POLYLOGUE_INDEX_DB", str(root / "missing.db"))
-    out = agent_gateway.collect_agent_gateway()
-    assert out["audit_error"] == "audit_log_unreadable"
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses the permission bits")
-def test_gateway_audit_probe_survives_readonly_mount(tmp_path, monkeypatch) -> None:
-    """A WAL-mode audit db must stay readable when its directory is read-only.
-
-    sinnix-ops-reducer runs sinnix-observe under ProtectHome=read-only /
-    ProtectSystem=strict, so the audit sqlite's own directory is mounted
-    read-only in the live path. A plain ``mode=ro`` connect still needs a
-    read-write open of the WAL sidecar (-shm) for locking, which fails there
-    with "unable to open database file" (audit_log_unreadable on every job
-    row) even though the data itself is perfectly readable. This reproduces
-    that failure with chmod instead of a mount namespace: once the WAL file
-    has been checkpointed away, a read-only directory triggers the same
-    write-open attempt and the same class of sqlite3.OperationalError.
-    """
-    root = tmp_path / "gateway"
-    audit_dir = root / "audit"
-    audit_dir.mkdir(parents=True)
-    (root / "jobs").mkdir()
-    db_path = audit_dir / "events.sqlite3"
-    connection = sqlite3.connect(db_path)
-    connection.execute("pragma journal_mode=wal")
-    connection.execute(
-        "create table events (sequence integer primary key, event_id text,"
-        " occurred_at real, profile text, operation text, outcome text,"
-        " payload_json text)"
-    )
-    connection.execute(
-        "insert into events values (1, 'e1', 0.0, 'p', 'op', 'ok', '{}')"
-    )
-    connection.commit()
-    connection.close()
-
-    monkeypatch.setenv("SINNIX_AGENT_GATEWAY_STATE_DIR", str(root))
-    monkeypatch.setenv("SINNIX_AGENT_QUOTA_FILE", str(root / "missing"))
-    monkeypatch.setenv("SINNIX_POLYLOGUE_INDEX_DB", str(root / "missing.db"))
-
-    audit_dir.chmod(0o555)
-    db_path.chmod(0o444)
-    try:
-        out = agent_gateway.collect_agent_gateway()
-    finally:
-        audit_dir.chmod(0o755)
-        db_path.chmod(0o644)
-
-    assert out["audit_error"] is None
-    assert [row["event_id"] for row in out["audit"]] == ["e1"]
+    assert rows[0]["gaps"] == ["agent_gateway.polylogue.unavailable"]

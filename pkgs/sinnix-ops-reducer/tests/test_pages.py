@@ -199,7 +199,7 @@ def test_scope_controls_distinguish_plain_scopes_from_attested_jobs() -> None:
     assert "act('stop','scope','sinnix-build-123-456.scope'" in plain
     job = scope_block(
         {
-            "unit": "sinnix-agent-job-abc.scope",
+            "unit": "sinnixd-job-abc.service",
             "manager": "user",
             "job_id": "abc",
             "class": None,

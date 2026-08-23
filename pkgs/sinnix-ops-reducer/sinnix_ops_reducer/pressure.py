@@ -771,7 +771,7 @@ SCOPE_IDENTITY = re.compile(
     r"^sinnix-(?P<klass>agent|build|background|gpu-runtime|nix-build|system)"
     r"-(?P<identity>[A-Za-z0-9_.-]{1,40})-\d+-\d+\.scope$"
 )
-AGENT_JOB_SCOPE = re.compile(r"^sinnix-agent-job-(?P<job>.+)\.scope$")
+AGENT_JOB_SERVICE = re.compile(r"^sinnixd-job-(?P<job>.+)\.service$")
 
 
 def lane_of(
@@ -789,22 +789,24 @@ def lane_of(
     """
     if not unit:
         return ""
-    job_match = AGENT_JOB_SCOPE.match(unit)
+    job_match = AGENT_JOB_SERVICE.match(unit)
     if job_match:
         job = (jobs_by_id or {}).get(job_match.group("job"))
         if isinstance(job, dict):
-            worktree = str(job.get("worktree") or "")
+            checkout = job.get("checkout") if isinstance(job.get("checkout"), dict) else {}
+            contract = job.get("contract") if isinstance(job.get("contract"), dict) else {}
+            worktree = str(checkout.get("path") or job.get("worktree") or "")
             where = Path(worktree).name if worktree else ""
             named = " ".join(
                 part
                 for part in (
-                    str(job.get("backend") or "agent"),
-                    str(job.get("model") or ""),
+                    str(contract.get("backend") or job.get("backend") or "agent"),
+                    str(contract.get("model") or job.get("model") or ""),
                 )
                 if part
             )
             return f"{named} in {where}" if where else named
-        return f"gateway job {job_match.group('job')}"
+        return f"AgentCTL job {job_match.group('job')}"
     scope_match = SCOPE_IDENTITY.match(unit)
     if scope_match:
         klass = scope_match.group("klass")

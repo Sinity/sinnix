@@ -28,12 +28,7 @@ def test_healthy_stale_missing_and_malformed_sources_are_distinct(
     missing = reducer.refresh()
     malformed = reducer.refresh()
     assert healthy["sources"]["sinnix-observe"]["status"] == "healthy"
-    assert healthy["state"]["attention"] == {
-        "schema": "sinnix-attention-v1",
-        "pending": [],
-        "pending_count": 0,
-        "oldest_event_id": None,
-    }
+    assert healthy["state"]["agentctl"] == {"jobs": [], "truncated": False}
     assert stale["sources"]["sinnix-observe"]["status"] == "unavailable"
     assert missing["sources"]["sinnix-observe"]["degradation"] == "missing"
     assert (

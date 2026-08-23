@@ -445,7 +445,7 @@ def test_scopes_resolve_to_lanes_a_person_can_choose_between() -> None:
     )
     assert (
         pressure.lane_of(
-            "sinnix-agent-job-abc.scope",
+            "sinnixd-job-abc.service",
             jobs_by_id={
                 "abc": {
                     "backend": "claude",

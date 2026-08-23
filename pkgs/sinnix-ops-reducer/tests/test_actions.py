@@ -448,7 +448,7 @@ def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_system(
     ]
     state = {
         "jobs": bloat_jobs,
-        "agent_gateway": {"jobs": bloat_jobs, "orphaned_jobs": []},
+        "agent_gateway": {"jobs": bloat_jobs},
         "chrome": {"processes": [{"pid": i, "io": "y" * 500} for i in range(50)]},
     }
     reducer = Reducer(

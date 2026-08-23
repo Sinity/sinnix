@@ -398,14 +398,14 @@ def native_runner(path: Path) -> None:
     path.write_text(
         "#!/bin/sh\n"
         "set -eu\n"
-        "last= prompt= log=\n"
+        "last= prompt=\n"
         "if [ -n \"${RUNNER_ARGS:-}\" ]; then printf '%s\\n' \"$@\" > \"$RUNNER_ARGS\"; fi\n"
         "while [ $# -gt 0 ]; do\n"
-        "  case $1 in --last-file) last=$2; shift 2 ;; --prompt-file) prompt=$2; shift 2 ;; --log-file) log=$2; shift 2 ;; *) shift ;; esac\n"
+        "  case $1 in --last-file) last=$2; shift 2 ;; --prompt-file) prompt=$2; shift 2 ;; *) shift ;; esac\n"
         "done\n"
         "test -f \"$prompt\"\n"
         "printf native-fixture-result > \"$last\"\n"
-        "printf native-fixture-log > \"$log\"\n"
+        "printf native-fixture-log\n"
     )
     path.chmod(0o700)
 
@@ -2280,7 +2280,6 @@ def test_agent_runner_revalidates_checkout_and_writes_a_bounded_result_fixture(t
     state = tmp_path / "state"
     inputs = state / "inputs"
     results = state / "results"
-    native_state = state / "native"
     runner_arguments = state / "native-runner.args"
     inputs.mkdir(parents=True)
     results.mkdir()
@@ -2311,7 +2310,7 @@ def test_agent_runner_revalidates_checkout_and_writes_a_bounded_result_fixture(t
         "RUNNER_ARGS": str(runner_arguments),
     }
     result = subprocess.run(
-        [sys.executable, "-m", "sinnixd.runner", "--input", str(input_path), "--job-id", payload["job_id"], "--unit", f"sinnixd-job-{payload['job_id']}.service", "--native-runner", str(runner), "--native-state-dir", str(native_state), "--state-root", str(state)],
+        [sys.executable, "-m", "sinnixd.runner", "--input", str(input_path), "--job-id", payload["job_id"], "--unit", f"sinnixd-job-{payload['job_id']}.service", "--native-runner", str(runner), "--state-root", str(state)],
         env=environment,
         capture_output=True,
         text=True,
@@ -2324,11 +2323,10 @@ def test_agent_runner_revalidates_checkout_and_writes_a_bounded_result_fixture(t
     assert not prompt.exists()
     assert not input_path.exists()
     handoff = runner_arguments.read_text().splitlines()
-    assert handoff[handoff.index("--registered-project") + 1] == str(
-        checkout.project_path
-    )
-    assert handoff[handoff.index("--expected-git-common-dir") + 1] == str(checkout.git_common_dir)
     assert handoff[handoff.index("--workdir") + 1] == str(checkout.path)
+    assert "--job-state-dir" not in handoff
+    assert "--registered-project" not in handoff
+    assert "--expected-git-common-dir" not in handoff
 
 
 def test_runner_rejects_forged_sinnix_environment(tmp_path: Path) -> None:
@@ -2372,7 +2370,7 @@ def test_runner_rejects_forged_sinnix_environment(tmp_path: Path) -> None:
     }
 
     result = subprocess.run(
-        [sys.executable, "-m", "sinnixd.runner", "--input", str(input_path), "--job-id", job_id, "--unit", f"sinnixd-job-{job_id}.service", "--native-runner", str(runner), "--native-state-dir", str(state / "native"), "--state-root", str(state)],
+        [sys.executable, "-m", "sinnixd.runner", "--input", str(input_path), "--job-id", job_id, "--unit", f"sinnixd-job-{job_id}.service", "--native-runner", str(runner), "--state-root", str(state)],
         env=environment,
         capture_output=True,
         text=True,

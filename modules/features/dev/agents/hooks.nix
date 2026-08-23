@@ -1,5 +1,5 @@
-# Codex session-lifecycle hooks (SessionStart/UserPromptSubmit/Stop): orphan
-# process reaping and Beads/session-recall priming. Plain helper (not a NixOS
+# Codex session-lifecycle hooks (SessionStart/UserPromptSubmit/Stop):
+# Beads/session-recall priming and Polylogue capture. Plain helper (not a NixOS
 # module) imported directly by mcp.nix's
 # configFn; the generated file is exposed via the mcp-servers.codexHooksSource
 # option for tests.
@@ -13,10 +13,6 @@ jsonFormat.generate "codex-hooks.json" {
       {
         matcher = "startup|resume";
         hooks = [
-          {
-            type = "command";
-            command = "sinnix-mcp-sweep --orphans-only --quiet";
-          }
           {
             type = "command";
             command = "bd-prime-if-present";
@@ -79,10 +75,6 @@ jsonFormat.generate "codex-hooks.json" {
     Stop = [
       {
         hooks = [
-          {
-            type = "command";
-            command = "sinnix-mcp-sweep --orphans-only --quiet";
-          }
           {
             type = "command";
             command = "polylogue-hook Stop --provider codex --sidecar-dir /home/sinity/.local/share/polylogue/hooks";

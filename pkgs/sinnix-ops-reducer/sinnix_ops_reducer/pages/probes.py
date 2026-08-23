@@ -18,11 +18,11 @@ from typing import Any, Iterable
 
 from .shell import as_int
 
-# Transient scopes sinnix creates on purpose. Agent-gateway jobs carry a
-# job id and are drivable through the reducer via the job_id target; plain
+# Transient scopes sinnix creates on purpose. AgentCTL jobs carry a job id
+# and are drivable through the reducer via the job_id target; plain
 # sinnix-scope placements are drivable too (sinnix-pl37), via the reducer's
 # scope target -- name-shape plus live-state admission, stop only.
-AGENT_JOB_PREFIX = "sinnix-agent-job-"
+AGENT_JOB_PREFIX = "sinnixd-job-"
 SCOPE_PREFIX = "sinnix-"
 
 # Command classes that mean "heavy work is happening", as opposed to an agent
@@ -311,8 +311,8 @@ def collect_scopes(inventory: dict[str, Any] | None) -> list[dict[str, Any]]:
                 else None
             )
             job_id = (
-                unit[len(AGENT_JOB_PREFIX) : -len(".scope")]
-                if unit.startswith(AGENT_JOB_PREFIX) and unit.endswith(".scope")
+                unit[len(AGENT_JOB_PREFIX) : -len(".service")]
+                if unit.startswith(AGENT_JOB_PREFIX) and unit.endswith(".service")
                 else None
             )
             command, cwd = cgroup_leader(info.get("ControlGroup", ""))

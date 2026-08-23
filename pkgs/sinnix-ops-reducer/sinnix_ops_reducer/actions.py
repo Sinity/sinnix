@@ -31,8 +31,8 @@ UNIT_STATE_PROPERTIES = ("LoadState", "ActiveState", "SubState")
 
 # Ad-hoc `sinnix-scope` transient scopes (build.slice/agent.slice/etc placements
 # created by the generated sinnix-scope launcher (flake/launch.nix), distinct
-# from attested agent-gateway jobs
-# which use the `sinnix-agent-job-<id>.scope` namespace and the job_id target
+# from attested AgentCTL jobs
+# which use the `sinnixd-job-<id>.service` namespace and the job_id target
 # instead). Admission for these is structural, not inventory-registered: the
 # name must match the launcher's own naming convention
 # (`sinnix-<commandClass>-<timestamp>-<pid>.scope`) AND the unit must resolve

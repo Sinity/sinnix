@@ -217,15 +217,10 @@ def build_gateway_rows(
     gateway: dict[str, Any], below: dict[str, Any]
 ) -> list[dict[str, Any]]:
     rows = []
-    orphan_by_job = {
-        str(row.get("job_id")): row
-        for row in gateway.get("orphaned_jobs", [])
-        if isinstance(row, dict) and row.get("job_id")
-    }
     for job in gateway.get("jobs", []):
-        launcher = job.get("launcher") or {}
-        declared = job.get("declared") or {}
-        cgroup = launcher.get("cgroup")
+        state = job.get("state") if isinstance(job.get("state"), dict) else {}
+        systemd = state.get("systemd") if isinstance(state.get("systemd"), dict) else {}
+        cgroup = systemd.get("ControlGroup")
         rows.append(
             {
                 "workload_id": f"agent-gateway:{job.get('job_id')}",
@@ -234,21 +229,17 @@ def build_gateway_rows(
                 "kind": "attested-job",
                 "name": job.get("job_id"),
                 "run_id": job.get("job_id"),
-                "status": job.get("lifecycle"),
-                "unit": launcher.get("scope_unit"),
+                "status": state.get("phase"),
+                "unit": job.get("unit"),
                 "cgroup": cgroup,
                 "resource_class": infer_resource_class_from_cgroup(cgroup or ""),
                 "below": match_below(str(job.get("job_id")), cgroup, below),
                 "metrics": {
-                    "work_item": declared.get("work_item"),
-                    "delegation": job.get("delegation", {}),
-                    "identity": job.get("identity", {}),
-                    "correlation": job.get("correlation", {}),
-                    "actual_agent": job.get("actual_agent"),
-                    "completion": job.get("completion"),
-                    "resource_overrides": job.get("resource_overrides", {}),
-                    "quota_provenance": gateway.get("quota"),
-                    "orphan": orphan_by_job.get(str(job.get("job_id"))),
+                    "backend": job.get("backend"),
+                    "model": job.get("model"),
+                    "effort": job.get("effort"),
+                    "checkout": job.get("checkout", {}),
+                    "contract": job.get("contract", {}),
                 },
                 # Gap entries are stable category identifiers (gaps_summary
                 # counts them); the probes' reason strings stay on the
@@ -256,11 +247,6 @@ def build_gateway_rows(
                 "gaps": [
                     gap
                     for gap, reason in (
-                        ("agent_gateway.audit.unavailable", gateway.get("audit_error")),
-                        (
-                            "agent_gateway.journal.unavailable",
-                            gateway.get("journal_error"),
-                        ),
                         (
                             "agent_gateway.polylogue.unavailable",
                             gateway.get("polylogue_error"),
