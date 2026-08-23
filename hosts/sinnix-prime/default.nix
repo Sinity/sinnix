@@ -39,13 +39,12 @@
       enable = true;
       tunnel = {
         enable = true;
-        # Review checkpoint on what reaches remote ChatGPT. This V3 observer
+        # Review checkpoint on what reaches remote ChatGPT. This V2 observer
         # manifest was regenerated from the packaged gateway on 2026-08-23.
-        # It contains only read-annotated tools, including bounded content,
-        # opaque-artifact reads, V3 status, catalog, canonical get, checkout selection,
-        # and route preflight.
-        approvedManifestHash = "9bef2c34f7b80ed2f63a8060fdd82f5d8728492d3718f9c77712d256e574ef03";
-        approvedActionCatalogHash = "38f8403bde6518e1a0e8a481849ca3772844877f08672da124b666df9647704d";
+        # It exposes seven principal-filtered read tools: status, catalog,
+        # context, canonical get, query, events, and bounded job wait.
+        approvedManifestHash = "9bd5a0abff7f5f06afe88bf05b67d800bd2c88d0bfe93e111bf1da48aeca36fe";
+        approvedActionCatalogHash = "16af8f71f4328e66aecb00c876b64e51bbcbad1b5b3718a86139a276e882165e";
         tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
       };
     };
