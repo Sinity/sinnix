@@ -200,6 +200,17 @@ def test_owned_scratch_is_injected_cleaned_on_terminal_and_recovered(tmp_path: P
     GenericJobs(systemd, subject.store)
     assert not recovered.scratch_path.exists()
 
+    protected = subject.store.create(GenericJobSpec(kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={}, scratch=scratch))
+    assert protected.scratch_path is not None
+    nested = protected.scratch_path / "pytest-fixture" / "cache"
+    nested.mkdir(parents=True)
+    (nested / "payload").write_text("fixture")
+    nested.chmod(0o500)
+    nested.parent.chmod(0o500)
+    subject.store.save(subject._with_state(protected, {"phase": "timed_out", "terminal": True}))
+    GenericJobs(systemd, subject.store)
+    assert not protected.scratch_path.exists()
+
 
 def test_exit_json_pytest_and_agent_result_parsers_are_contract_specific(tmp_path: Path) -> None:
     systemd = FakeSystemd(properties={"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"})
