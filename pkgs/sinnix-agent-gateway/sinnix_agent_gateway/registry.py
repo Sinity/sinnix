@@ -356,6 +356,60 @@ CATALOG_QUERY_SCHEMA: dict[str, Any] = _with_request_controls(
     }
 )
 
+PROJECT_QUERY_SCHEMA: dict[str, Any] = _with_request_controls(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["ref", "query"],
+        "properties": {
+            "ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2_048,
+                "pattern": "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+            },
+            "query": {"type": "string", "minLength": 1, "maxLength": 1_000},
+            "max_matches": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1_000,
+                "default": 200,
+            },
+        },
+    }
+)
+
+PROJECT_CONTEXT_SCHEMA: dict[str, Any] = _with_request_controls(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["ref"],
+        "properties": {
+            "ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2_048,
+                "pattern": "^sinnix://projects/[^/]+$",
+            },
+        },
+    }
+)
+
+AUDIT_EVENTS_SCHEMA: dict[str, Any] = _with_request_controls(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1_000,
+                "default": 100,
+            },
+        },
+    }
+)
+
 
 def build_registry() -> CatalogRegistry:
     resources = (
@@ -422,6 +476,59 @@ def build_registry() -> CatalogRegistry:
             resource_kinds=("project", "checkout", "bead", "task_authority"),
             examples=({"input": {"ref": "sinnix://projects/sinnix"}},),
             documentation="Resolve one canonical project, checkout, Beads task, or task-authority reference.",
+        ),
+        ActionSpec(
+            name="projects.query",
+            verb=VerbFamily.QUERY,
+            domain="projects",
+            owner="projects",
+            route="projects.search",
+            effect=EffectMode.READ,
+            principals=frozenset({"observer", "agent-control", "operator"}),
+            input_schema=PROJECT_QUERY_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("project", "checkout"),
+            examples=(
+                {
+                    "input": {
+                        "ref": "sinnix://projects/sinnix",
+                        "query": "mkServiceModule",
+                        "max_matches": 20,
+                    }
+                },
+            ),
+            documentation="Search one canonical project or checkout through the bounded project owner.",
+        ),
+        ActionSpec(
+            name="projects.context",
+            verb=VerbFamily.CONTEXT,
+            domain="projects",
+            owner="project-context",
+            route="project_context.context",
+            effect=EffectMode.READ,
+            principals=frozenset({"observer", "agent-control", "operator"}),
+            input_schema=PROJECT_CONTEXT_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("project", "checkout", "bead", "task_authority"),
+            examples=(
+                {"input": {"ref": "sinnix://projects/sinnix"}},
+            ),
+            documentation="Compose Git and bounded task orientation for one canonical project.",
+        ),
+        ActionSpec(
+            name="audit.events",
+            verb=VerbFamily.EVENTS,
+            domain="audit",
+            owner="audit",
+            route="audit.tail",
+            effect=EffectMode.READ,
+            principals=frozenset({"observer", "agent-control", "operator"}),
+            input_schema=AUDIT_EVENTS_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("receipt",),
+            receipt_policy="audit",
+            examples=({"input": {"limit": 100}},),
+            documentation="Read bounded audit events visible to the active principal.",
         ),
         ActionSpec(
             name="jobs.wait",
