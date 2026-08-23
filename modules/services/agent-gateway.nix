@@ -65,7 +65,7 @@ mkServiceModule {
     stateDir = lib.mkOption {
       type = lib.types.str;
       default = "/home/${userName}/.local/state/sinnix/agent-gateway";
-      description = "Private persisted gateway audit, artifact, and job state.";
+      description = "Private persisted gateway audit and non-job artifact state.";
     };
     maxResultBytes = lib.mkOption {
       type = lib.types.int;
@@ -117,11 +117,6 @@ mkServiceModule {
   configFn =
     { cfg, ... }:
     let
-      # dotsRoot-direct, not via the ~/.config/hermes/skills linkFarm hop.
-      # Safe against the tunnel's approvedManifestHash: that hashes only the
-      # exposed MCP tool schemas (canonical_manifest() in cli.py), and these
-      # script paths never appear in a tool's name/description/inputSchema.
-      agentController = "${config.sinnix.paths.dotsRoot}/_ai/skills/agent-orchestration/scripts/agent_job_control.sh";
       configFile = jsonFormat.generate "sinnix-agent-gateway.json" {
         inherit (cfg) stateDir maxResultBytes;
         approvedManifestHash = cfg.tunnel.approvedManifestHash;
@@ -129,10 +124,6 @@ mkServiceModule {
         approvedManifestPrincipal = cfg.tunnel.principal;
         runtimeInventory = "/etc/sinnix/runtime-inventory.json";
         capabilityIndex = "/etc/sinnix/capability-index.json";
-        agentRunner = "${config.sinnix.paths.dotsRoot}/_ai/skills/agent-orchestration/scripts/run_agent_prompt.sh";
-        inherit agentController;
-        agentScopeExecCommand = "${scriptPkgs.sinnix-agent-scope-exec}/bin/sinnix-agent-scope-exec";
-        executionJobCommand = "${scriptPkgs.sinnix-agent-gateway}/bin/sinnix-agent-gateway-execution-job";
         systemdRunCommand = "${pkgs.systemd}/bin/systemd-run";
         systemctlCommand = "${pkgs.systemd}/bin/systemctl";
         observeCommand = "${scriptPkgs.sinnix-observe}/bin/sinnix-observe";
@@ -162,10 +153,6 @@ mkServiceModule {
       approvalGate = pkgs.writeShellScript "sinnix-agent-gateway-approval-gate" ''
         set -euo pipefail
         exec ${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg cfg.tunnel.principal} approval-check
-      '';
-      stateReconcile = pkgs.writeShellScript "sinnix-agent-gateway-state-reconcile" ''
-        set -euo pipefail
-        ${agentController} --state-dir ${lib.escapeShellArg "${cfg.stateDir}/jobs"} list >/dev/null
       '';
     in
     {
@@ -197,70 +184,7 @@ mkServiceModule {
         }
       ];
 
-      sinnix.runtime.surfaces = {
-        agent-gateway-jobs = {
-          unit = "sinnix-agent-job-.scope";
-          manager = "user";
-          # A scope, not a "capture". This carried kind = "capture" only to
-          # dodge the unit-suffix assertion, and it never needed to: these are
-          # real transient systemd scopes and the name ends in .scope. The
-          # surface owns its lane in the ordinary way.
-          kind = "scope";
-          dynamic = true;
-          resourceClass = "interactive-agent";
-          observe.enable = true;
-          workload = {
-            class = "protected";
-            rationale = "Attested gateway and local agent child scopes.";
-            processMatchers = [ "sinnix-agent-job-" ];
-          };
-          captures = [
-            (
-              {
-                name = "agent-job-manifests";
-                path = "${cfg.stateDir}/jobs";
-                eventDriven = true;
-                # Deliberately NO staleness budget: silence here measures how
-                # recently the operator asked for something, not health, so an
-                # unused gateway and a broken one look identical. No duration
-                # of silence is genuinely suspicious, so make no claim -- the
-                # sentinel skips lanes declaring neither cadence nor budget.
-                # What silence cannot tell us, the probe below can (sinnix-oig5).
-              }
-              // lib.optionalAttrs cfg.tunnel.enable {
-                # Reachability, asked directly instead of inferred from silence.
-                #
-                # /readyz rather than /healthz: the tunnel client answers "live"
-                # as soon as its process is up, but "ready" only once it holds a
-                # working control-plane connection -- and a gateway that is
-                # running but disconnected is exactly the state this lane could
-                # not previously distinguish from an unused one.
-                #
-                # Exit codes are chosen for how the sentinel reads them: 0 is
-                # healthy, 1 means the source is absent (the honest verdict when
-                # the endpoint answers wrong or not at all), and anything else
-                # means the probe itself could not answer. curl is addressed by
-                # store path because the probe runs under `bash -c` in the user
-                # session, where the sentinel's own runtimeInputs are not on
-                # PATH; the explicit exit 9 keeps a missing binary from
-                # masquerading as a missing gateway.
-                #
-                # Only declared when the tunnel is enabled. Without it there is
-                # no remote gateway to be unreachable, so there would be nothing
-                # for a probe to answer.
-                livenessProbe = {
-                  command =
-                    "command -v ${pkgs.curl}/bin/curl >/dev/null || exit 9; "
-                    + "${pkgs.curl}/bin/curl -sf -m 5 -o /dev/null "
-                    + "http://127.0.0.1:${toString cfg.tunnel.healthPort}/readyz || exit 1";
-                  timeoutSeconds = 10;
-                };
-              }
-            )
-          ];
-        };
-      }
-      // lib.optionalAttrs cfg.tunnel.enable {
+      sinnix.runtime.surfaces = lib.optionalAttrs cfg.tunnel.enable {
         agent-gateway-tunnel = {
           unit = "sinnix-agent-gateway-tunnel.service";
           manager = "user";
@@ -278,34 +202,22 @@ mkServiceModule {
       };
 
       home-manager.users.${userName} = {
-        systemd.user.services.sinnix-agent-gateway-reconcile = {
-          Unit.Description = "Reconcile Sinnix agent gateway job state";
-          Service = {
-            Type = "oneshot";
-            ExecStart = stateReconcile;
-            UMask = "0077";
-          };
-          Install.WantedBy = [ "default.target" ];
-        };
         systemd.user.services.sinnix-agent-gateway-tunnel = lib.mkIf cfg.tunnel.enable {
           Unit = {
             Description = "OpenAI Secure MCP Tunnel to Sinnix ${cfg.tunnel.principal} gateway";
             After = [
               "network-online.target"
-              "sinnix-agent-gateway-reconcile.service"
+              "sinnixd.service"
             ];
             Wants = [ "network-online.target" ];
-            Requires = [ "sinnix-agent-gateway-reconcile.service" ];
+            Requires = [ "sinnixd.service" ];
             ConditionPathExists = cfg.tunnel.runtimeKeyFile;
             StartLimitIntervalSec = 300;
             StartLimitBurst = 8;
           };
           Service = {
             Type = "simple";
-            ExecStartPre = [
-              stateReconcile
-            ]
-            ++ lib.optionals (cfg.tunnel.approvedManifestHash != null) [
+            ExecStartPre = lib.optionals (cfg.tunnel.approvedManifestHash != null) [
               approvalGate
             ];
             ExecStart = ''
@@ -319,14 +231,10 @@ mkServiceModule {
             LoadCredential = "runtime-key:${cfg.tunnel.runtimeKeyFile}";
             Restart = "on-failure";
             RestartSec = "5s";
-            # launch_agent() fork/execs claude/codex inside this namespace, so
-            # the child inherits this write surface. The observer does not have
-            # JOB_START, while operator authority is selected explicitly.
             ProtectHome = false;
             ReadWritePaths = [
               cfg.stateDir
-            ]
-            ++ lib.sinnix.systemd.agentRuntimeWritePaths { home = "/home/${userName}"; };
+            ];
             UMask = "0077";
           }
           // lib.optionalAttrs (cfg.tunnel.principal == "observer") {

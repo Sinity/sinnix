@@ -1,6 +1,6 @@
 # Agent gateway
 
-The Sinnix agent gateway is one official-SDK MCP implementation with three explicit authority principals. It exposes canonical project and runtime evidence, reuses the attested transient-systemd agent substrate, and keeps transport outside the MCP process.
+The Sinnix agent gateway is one official-SDK MCP implementation with three explicit authority principals. It exposes canonical project and runtime evidence, forwards typed job requests to `sinnixd`, and keeps transport outside the MCP process.
 
 ## Architecture
 
@@ -14,8 +14,8 @@ ChatGPT observer connector
 Local coordinators
     -> sinnix-agent-control-mcp
     -> stdio: sinnix-agent-gateway --principal agent-control
-    -> run_agent_prompt.sh and agent_job_control.sh
-    -> transient systemd scope, manifest, cgroup, and bounded artifacts
+    -> typed sinnixd Unix-socket job.agent.start request
+    -> daemon-owned transient service, lifecycle, and bounded artifacts
 
 ChatGPT operator connector
     -> separate OpenAI Secure MCP Tunnel
@@ -24,7 +24,7 @@ ChatGPT operator connector
     -> explicit operator-authorized tools and attested receipts
 ```
 
-The gateway owns no HTTP server and no listening port. The official OpenAI tunnel owns the remote connection and launches the MCP server over stdio. The gateway uses the official MCP Python SDK v2 for protocol parsing and typed tool schemas.
+The gateway owns no HTTP server and no listening port. The official OpenAI tunnel owns the remote connection and launches the MCP server over stdio. The gateway uses the official MCP Python SDK v2 for protocol parsing and typed tool schemas. It retains transport, principal and capability authorization, project authorization, envelopes, audit, and redaction. `sinnixd` owns typed validation, checkout attestation, process and systemd lifecycle, logs, results, cancellation, and reconciliation.
 
 ## Principals
 
@@ -111,11 +111,11 @@ Project paths are always relative. Reads and writes reject absolute paths, paren
 
 ## Jobs and artifacts
 
-The gateway does not implement another job runner. `agent_launch` calls the shared `run_agent_prompt.sh`, which creates a transient systemd scope and a versioned manifest containing the stable job ID, cgroup, unit, worktree, prompt digest, resource overrides, timeout, lifecycle, and artifact locations. `RuntimeMaxSec` enforces the declared timeout. Cancellation accepts only an attested job ID and verifies the unit, PID, cgroup, and working directory before stopping the scope.
+The gateway forwards only typed `job.agent.start`, `job.shell.start`, `job.get`, `job.list`, `job.wait`, `job.logs`, `job.result`, and `job.cancel` requests to the local `sinnixd` Unix socket. `agent_launch` is restricted to the `agent-control` principal. `shell_start` and `shell_run` are restricted to `operator`, require a registered project and checkout, and accept an argv plus a relative working directory. They do not accept root escalation or environment overlays. `shell_run` starts, waits for, and reads the bounded log of the same typed job.
 
-Only an explicit environment allowlist reaches launched agents. Unrelated exported secrets are not inherited. Job state and generated prompt, manifest, log, and artifact metadata are private to the user.
+The daemon derives the environment from the registered project without an overlay, revalidates the exact worktree, common Git directory, porcelain membership, and recorded HEAD immediately before execution, and fails closed on drift. `run_agent_prompt.sh` remains the native backend for typed agent jobs, but the daemon's retained transient user service is the only process, cgroup, timeout, and cancellation authority.
 
-Artifacts use random opaque UUIDs. The public metadata omits host paths, and reads use offset plus a bounded byte count. Malformed job and artifact records remain visible as malformed evidence instead of disappearing from listings.
+Gateway-owned opaque artifacts remain available for non-job owners. Job logs and results are daemon-owned, bounded reads; the gateway does not own their paths, manifests, reservations, PIDs, cgroups, or reconciliation state.
 
 ## Audit and observe
 

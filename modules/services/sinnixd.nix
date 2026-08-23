@@ -33,6 +33,26 @@ mkServiceModule {
     {
       environment.systemPackages = [ scriptPkgs.sinnixd ];
       sinnix.persistence.home.directories = [ ".local/state/sinnixd" ];
+      sinnix.runtime.surfaces.sinnixd-jobs = {
+        unit = "sinnixd-job-.service";
+        manager = "user";
+        kind = "service";
+        dynamic = true;
+        resourceClass = "interactive-agent";
+        observe.enable = true;
+        workload = {
+          class = "protected";
+          rationale = "Typed daemon jobs with daemon-owned systemd lifecycle.";
+          processMatchers = [ "sinnixd-job-" ];
+        };
+        captures = [
+          {
+            name = "sinnixd-job-records";
+            path = "/home/${userName}/.local/state/sinnixd/jobs";
+            eventDriven = true;
+          }
+        ];
+      };
 
       home-manager.users.${userName}.systemd.user.services.sinnixd = {
         Unit = {
