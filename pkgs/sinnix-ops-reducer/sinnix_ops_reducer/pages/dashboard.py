@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .probes import HEAVY_CLASSES, collect_scopes
 from .shell import (
     ACTION_SCRIPT,
     badge,
@@ -23,7 +22,7 @@ from .shell import (
     row,
     tile,
 )
-from .work import live_work_card, running_ledger
+from .work import agentctl_jobs, live_work_card, running_ledger
 
 
 def psi_avg10(pressure: dict[str, Any], key: str) -> float | None:
@@ -114,7 +113,6 @@ def worst_mount(state: dict[str, Any]) -> tuple[str, float] | None:
 
 def verdict(
     state: dict[str, Any],
-    scopes: list[dict[str, Any]],
     memory: tuple[float, float] | None,
     failed: list[dict[str, Any]],
     mount: tuple[str, float] | None,
@@ -146,13 +144,8 @@ def verdict(
         tone = "bad" if tone == "bad" else "warn"
         problems.append("memory is nearly exhausted")
 
-    heavy = [entry for entry in scopes if entry.get("class") in HEAVY_CLASSES]
-    agents = [
-        entry
-        for entry in scopes
-        if entry.get("job_id") or entry.get("class") == "agent"
-    ]
     in_flight = running_ledger(state)
+    jobs = agentctl_jobs(state)
     activity: list[str] = []
     if in_flight:
         named = ", ".join(
@@ -164,17 +157,10 @@ def verdict(
             )
         )
         activity.append(f"running {named}")
-    if heavy:
-        names = ", ".join(
-            sorted({str(entry.get("project") or entry.get("class")) for entry in heavy})
-        )
-        activity.append(
-            f"{len(heavy)} scope{'s' if len(heavy) != 1 else ''} in the build slices ({names})"
-        )
-    if agents:
-        activity.append(f"{len(agents)} agent session{'s' if len(agents) != 1 else ''}")
+    if jobs:
+        activity.append(f"{len(jobs)} AgentCTL job{'s' if len(jobs) != 1 else ''}")
     if not activity:
-        activity.append("nothing heavy is running")
+        activity.append("no named work is running")
 
     if problems:
         sentence = "Needs attention: " + "; ".join(problems) + "."
@@ -405,15 +391,13 @@ def render_dashboard(
     host = str(manifest.get("host", "sinnix"))
     now = dt.datetime.now(dt.timezone.utc)
     reports = Path(manifest.get("reportsDir", "/nonexistent"))
-    scopes = collect_scopes(inventory)
-
     if snapshot is None:
         body = (
             '<div class="verdict bad"><p>The system snapshot is unavailable, so '
             "this page cannot say whether anything is wrong.</p>"
             f'<p class="sub">{esc(snapshot_error)}</p></div>'
         )
-        body += live_work_card(scopes, {}, now)
+        body += live_work_card({}, now)
         body += links_card(manifest)
         body += reports_card(reports, now)
         return page("hub", host, ["degraded"], "/", body, tail=ACTION_SCRIPT)
@@ -432,11 +416,11 @@ def render_dashboard(
     failed = failed_units(state)
     mount = worst_mount(state)
 
-    tone, sentence, detail = verdict(state, scopes, memory, failed, mount, sources)
+    tone, sentence, detail = verdict(state, memory, failed, mount, sources)
     body = f'<div class="verdict {tone}"><p>{esc(sentence)}</p><p class="sub">{esc(detail)}</p></div>'
 
-    heavy = [entry for entry in scopes if entry.get("class") in HEAVY_CLASSES]
     in_flight = running_ledger(state)
+    jobs = agentctl_jobs(state)
     cpu = psi_avg10(pressure, "cpu")
     tiles = [
         tile(str(len(failed)), "failed units", "bad" if failed else "ok", "/services/"),
@@ -446,7 +430,7 @@ def render_dashboard(
             "info" if in_flight else "",
             "/work/#running",
         ),
-        tile(str(len(heavy)), "heavy scopes", "warn" if heavy else "", "/work/"),
+        tile(str(len(jobs)), "AgentCTL jobs", "info" if jobs else "", "/work/"),
     ]
     if memory:
         share = memory[0] / memory[1]

@@ -42,28 +42,6 @@ DEFAULT_RUNTIME_INVENTORY_JSON = r"""{
       "serviceConfig": {}
     }
   },
-  "commandClasses": {
-    "agent": {
-      "resourceClass": "interactive-agent",
-      "slice": "agent.slice",
-      "lease": {"required": false}
-    },
-    "build": {
-      "resourceClass": "developer-build",
-      "slice": "build.slice",
-      "lease": {"required": true}
-    },
-    "background": {
-      "resourceClass": "background-maintenance",
-      "slice": "background.slice",
-      "lease": {"required": false}
-    },
-    "nix-build": {
-      "resourceClass": "developer-build",
-      "slice": "nix-build.slice",
-      "lease": {"required": true}
-    }
-  },
   "environmentAllowList": [],
   "slices": {
     "system": {

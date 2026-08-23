@@ -1,7 +1,7 @@
 # Runtime inventory registry
 #
 # One source of truth for Sinnix runtime surfaces, resource classes, systemd
-# slices, command wrappers, static slice budgets, and capture inventory.
+# slices, static slice budgets, and capture inventory.
 {
   lib,
   config,
@@ -79,14 +79,6 @@ let
       )
     ) surfaces
   );
-  commandRows = lib.mapAttrsToList (name: command: {
-    inherit name;
-    inherit (command) resourceClass;
-  }) runtimeDefaults.commandClasses;
-  unknownCommandClasses = builtins.filter (
-    command: !(builtins.elem command.resourceClass resourceClassNames)
-  ) commandRows;
-
   mountMonitoring = [
     {
       path = cfg.paths.realmRoot;
@@ -545,14 +537,6 @@ in
           message =
             "sinnix.runtime.surfaces acknowledged outages must carry reason, since and ref: "
             + lib.concatStringsSep ", " unreferencedAcknowledgements;
-        }
-        {
-          assertion = unknownCommandClasses == [ ];
-          message =
-            "sinnix.runtime.inventory.commandClasses use unknown resource classes: "
-            + lib.concatMapStringsSep ", " (
-              command: "${command.name}:${command.resourceClass}"
-            ) unknownCommandClasses;
         }
       ];
 

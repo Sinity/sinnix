@@ -103,15 +103,6 @@ def cgroup_segments(cgroup: str) -> set[str]:
 
 def resource_class_from_cgroup(cgroup: str) -> str | None:
     segments = cgroup_segments(cgroup)
-    command_classes = load_inventory().get("commandClasses", {})
-    if isinstance(command_classes, dict):
-        for command in command_classes.values():
-            if not isinstance(command, dict):
-                continue
-            slice_name = command.get("slice")
-            resource_class = command.get("resourceClass")
-            if slice_name and resource_class and str(slice_name) in segments:
-                return str(resource_class)
     if "system.slice" in segments:
         return "system"
     return None

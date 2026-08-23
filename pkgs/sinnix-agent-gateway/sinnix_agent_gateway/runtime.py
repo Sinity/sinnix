@@ -919,8 +919,6 @@ class Runtime:
             if values["manager"] not in {"user", "system"}:
                 raise ProtocolError("invalid_request", "machine unit manager is not recognized")
             return canonical_ref, {"unit": values["unit"]}
-        if resource.kind == "scope":
-            return canonical_ref, {"scope": values["scope_unit"]}
         if resource.kind == "process":
             try:
                 pid = int(values["pid"])

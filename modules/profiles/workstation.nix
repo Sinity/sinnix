@@ -2,10 +2,9 @@
 #
 # Coarse aggregate for a desktop/interactive host (sinnix-prime). Sets
 # `sinnix.machine.isDesktop = true` and owns the resource-governance stack
-# that keeps desktop-critical processes protected while build/background
-# workloads are explicitly placed into lower-weight slices by
-# `sinnix-scope` (generated from the command-class table by flake/launch.nix):
-# systemd slices, earlyoom policy, io.cost init, RAPL power
+# that keeps desktop-critical processes protected while declared services and
+# AgentCTL jobs receive their own resource policy: systemd slices, earlyoom
+# policy, io.cost init, RAPL power
 # caps, the interactive memory sysctls, and the bounded stop timeout that
 # keeps one wedged session unit from owning the whole reboot.
 {
@@ -348,8 +347,8 @@ in
     # specific to it — 44 of the 47 user services running on this host carry
     # the 90s default, so any one of them can reproduce the stall.
     #
-    # 15s is Sinnix's established shutdown-debris cap (build/background/
-    # nix-build command classes, the Borg jobs, the Sinex maintenance timers).
+    # 15s is Sinnix's established shutdown-debris cap for ordinary services,
+    # Borg jobs, and Sinex maintenance timers.
     # A session helper still alive 15s after SIGTERM is wedged; the choice is
     # not between a clean exit and a kill, it is between killing it now and
     # killing it 75s later. This is only the *default*, so per-unit

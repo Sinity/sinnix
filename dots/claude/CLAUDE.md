@@ -452,26 +452,15 @@ status` loops: `python3 dots/_ai/tools/workspace_recon_scan.py --root
 
 ### Heavy Agent Work
 
-Recognized project dev environments install transparent wrappers for common
-heavy commands. In Sinex and Polylogue devshells, ordinary commands such as
-`xtask`, `cargo`, `pytest`, `uv`, `polylogue`, and `nix` are routed into the
-Sinnix build/background slices automatically, so agents should run the normal
-project command first.
-
-Invoke heavy test runners by their wrapper names (`pytest`, `cargo`,
-`xtask`), never as `python -m pytest` or absolute `.venv/bin/` paths —
-routing is by command name, and bypassing it bypasses slice containment,
-stop-timeout caps, and oomd policy (2026-07-11: an unwrapped xdist swarm sat
-resident in a protected scope for 35 hours).
+Project dev environments provide setup only. Ordinary commands such as
+`xtask`, `cargo`, `pytest`, `uv`, `polylogue`, and `nix` execute directly.
+Use a project's declared AgentCTL operation for scheduled or heavy work so
+Sinnixd owns its transient service, cgroup, lifecycle, and result.
 
 Resource containment is not a verification contract: in Sinex use `xtask`,
-which owns the schema/SQLx/feature/formatting assumptions — don't bypass it
-with direct `cargo` for a narrower-looking signal. Resource pressure during
-heavy work is a scheduling problem, not a project-semantics problem: one-shot
-overrides or the wrapper/slice layer, never durable project defaults.
-
-Outside a recognized devshell, scope long/heavy one-offs explicitly:
-`sinnix-scope {background|build|nix-build} -- <cmd>`.
+which owns the schema/SQLx/feature/formatting assumptions. Resource pressure
+during heavy work is a scheduling problem handled by the named operation's
+admission contract, never a transparent wrapper or a durable project default.
 
 **Worktree placement (wear policy):** heavy-compile worktrees go under
 `/realm/worktrees/` (NVMe), never `/tmp` — a Rust `CARGO_TARGET_DIR` writes

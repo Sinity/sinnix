@@ -329,100 +329,14 @@ def test_interrupt_uses_agentctl_and_records_its_cancellation_truth(tmp_path: Pa
         ).execute(request("interrupt", {"job_id": "job-1"}, key="declared"))
 
 
-def test_scope_targets_admit_only_name_shaped_live_units_and_only_stop(
-    tmp_path: Path,
-) -> None:
-    inventory_path = tmp_path / "inventory.json"
-    inventory(inventory_path)
-    reducer = Reducer(
-        tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
-    )
-    reducer.refresh()
-    live_units = {"sinnix-build-cargo-test-1786566375240889502-2296063.scope": "user"}
-    commands: list[list[str]] = []
-
-    def adapter(value, resolved):
-        commands.append(value["action"])
-        return {"status": "fixture", "manager": resolved.get("manager")}
-
-    actions = ActionService(
-        reducer.snapshot,
-        inventory_path,
-        tmp_path / "receipts.json",
-        adapter=adapter,
-        scope_prober=lambda unit: live_units.get(unit),
-        unit_state_prober=fake_unit_state_prober,
-    )
-    # A name that does not match the sinnix-scope launcher convention at all.
-    with pytest.raises(ActionError, match="does not match"):
-        actions.execute(
-            request("stop", {"scope": "some-other-unit.service"}, key="bad-shape")
-        )
-    # Name-shaped but not actually live (probe returns None) -- name alone is
-    # not trust.
-    with pytest.raises(ActionError, match="not a live"):
-        actions.execute(
-            request(
-                "stop",
-                {"scope": "sinnix-build-cargo-1-2.scope"},
-                key="not-live",
-            )
-        )
-    # Only "stop" is permitted on a scope target.
-    with pytest.raises(ActionError, match="only support stop"):
-        validate_request(
-            request(
-                "restart",
-                {"scope": "sinnix-build-cargo-test-1786566375240889502-2296063.scope"},
-                key="wrong-verb",
-            )
-        )
-    # A genuinely live, name-shaped scope is admitted and stopped.
-    accepted = actions.execute(
-        request(
-            "stop",
-            {"scope": "sinnix-build-cargo-test-1786566375240889502-2296063.scope"},
-            key="stop-scope",
-        )
-    )
-    assert accepted["adapter"]["manager"] == "user"
-    # previous_state/resulting_state carry the scope's own {kind, unit,
-    # manager, systemd} shape, not the resolved orphan/job dict from
-    # unrelated targets.
-    assert accepted["previous_state"] == {
-        "kind": "scope",
-        "unit": "sinnix-build-cargo-test-1786566375240889502-2296063.scope",
-        "manager": "user",
-        "systemd": {
-            "LoadState": "loaded",
-            "ActiveState": "active",
-            "SubState": "running",
-        },
-    }
-    assert accepted["resulting_state"] == accepted["previous_state"]
-    assert commands == ["stop"]
-    # Targeting both a unit and a scope at once is rejected at validation.
-    with pytest.raises(ActionError, match="exactly one"):
-        validate_request(
-            {
-                "action": "stop",
-                "target": {"unit": "safe", "scope": "sinnix-build-cargo-1-2.scope"},
-                "expected_revision": 1,
-                "idempotency_key": "both",
-                "operator_reason": "x",
-                "parameters": {},
-            }
-        )
-
-
 def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_system(
     tmp_path: Path,
 ) -> None:
-    """sinnix-rd69: a stop-scope receipt used to embed the ENTIRE reducer
+    """sinnix-rd69: a unit-action receipt used to embed the ENTIRE reducer
     snapshot (every agent-gateway job's full lifecycle history, per-process
     chrome IO, blocked tasks) twice over, in previous_state and
     resulting_state, because both copied `snapshot["state"]` wholesale. A
-    live receipt measured 25KB+ for a single-scope action. previous_state
+    live receipt measured 25KB+ for a single action. previous_state
     and resulting_state must be trimmed to the resolved target's own state;
     reverting `_target_state` to `lambda resolved: snapshot.get("state")`
     (the pre-fix behavior) blows the bound below."""
@@ -436,10 +350,10 @@ def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_system(
             "job_id": f"unrelated-{i}",
             "schema_version": 3,
             "worktree": f"/realm/worktrees/unrelated-{i}",
-            "launcher": {
+            "execution": {
                 "pid": 1000 + i,
                 "proc_start": "1",
-                "scope_unit": f"unrelated-{i}.scope",
+                "service_unit": f"sinnixd-job-unrelated-{i}.service",
                 "cgroup": f"/unrelated-{i}",
             },
             "history": ["x" * 200] * 20,
@@ -604,22 +518,6 @@ def test_receipts_replay_after_restart_reads_the_ledger(tmp_path: Path) -> None:
     assert calls == []
 
 
-def test_scope_pattern_matches_live_identity_shape():
-    """Live scopes carry the command-identity segment since 2026-08-13; the
-    pattern without it admitted nothing for five days. Mutation: dropping the
-    identity group from SCOPE_UNIT_PATTERN fails the first assert."""
-    from sinnix_ops_reducer.actions import SCOPE_UNIT_PATTERN
-
-    assert SCOPE_UNIT_PATTERN.match(
-        "sinnix-build-cargo-test-1786566375240889502-2296063.scope"
-    )
-    assert SCOPE_UNIT_PATTERN.match("sinnix-nix-build-nix-1-2.scope")
-    assert not SCOPE_UNIT_PATTERN.match(
-        "sinnix-build-1786566375240889502-2296063.scope"
-    )
-    assert not SCOPE_UNIT_PATTERN.match("sinnix-evil-x-1-2.scope")
-
-
 # --------------------------------------------------------------------------
 # process targets (sinnix-mble): {"process": {"pid": N, "start_ticks": M}},
 # accepting only stop, admitted by live cgroup membership.
@@ -770,7 +668,7 @@ def test_process_stop_refuses_a_start_ticks_mismatch_or_a_dead_pid(
         if pid == 200:
             # Live, but a DIFFERENT start_ticks than the caller observed --
             # the pid was reused by an unrelated process.
-            return (999999, "sinnix-agent-x-1-2.scope", "agent.slice")
+            return (999999, "sinnixd-job-other.service", "agent.slice")
         return None  # pid 300: no such process at all
 
     actions = make_process_actions(tmp_path, prober)

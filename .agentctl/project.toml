@@ -48,6 +48,17 @@ exclusive_keys = ["host:nixos-switch", "sinnix:nix-store-pressure"]
 estimate_memory_bytes = 12884901888
 scratch = "nvme"
 
+[operations.sinex_cache_prebuild]
+description = "Build and cache the pinned Sinex revision after an input move"
+exec = ["sinnix-sinex-cache-prebuild", "--flake-dir", "/realm/project/sinnix", "--system", "x86_64-linux"]
+pool = "bulk"
+result = "exit"
+cache = "none"
+exclusive_keys = ["sinnix:nix-store-pressure", "sinex:cache-prebuild"]
+estimate_memory_bytes = 12884901888
+scratch = "nvme"
+timeout_seconds = 7200
+
 [conflicts]
 exact_files = ["flake.lock", "flake.nix"]
 generated_surfaces = ["docs/agent-environment.md", "docs/config-default-audit-features.md"]

@@ -195,9 +195,10 @@ _QUIET_BLOCKING_UNITS = [
     "btrfs-scrub-realm.service",
     "btrfs-scrub-outer\\x2drealm.service",
 ]
-# Heavy user-manager scope prefixes (agents, builds) that mean the box is
-# not actually idle no matter what instantaneous PSI says.
-_QUIET_BLOCKING_SCOPE_PREFIXES = ("sinnix-agent-", "sinnix-build-", "sinnix-nix-build-")
+# AgentCTL owns named project operations as transient user services. A
+# running operation means the machine is not a clean benchmark baseline even
+# when instantaneous PSI happens to be quiet.
+_QUIET_BLOCKING_AGENTCTL_PREFIX = "sinnixd-job-"
 
 
 def _psi_avg10(path: str, line_kind: str) -> float | None:
@@ -212,28 +213,19 @@ def _psi_avg10(path: str, line_kind: str) -> float | None:
     return None
 
 
-def _own_scope() -> str | None:
-    text = read_text("/proc/self/cgroup")
-    if text is None:
-        return None
-    leaf = text.strip().rsplit("/", 1)[-1]
-    return leaf or None
-
-
-def _active_heavy_scopes() -> list[str]:
+def _active_agentctl_jobs() -> list[str]:
     out = run_stdout(
-        ["systemctl", "--user", "list-units", "--type=scope", "--state=active", "--plain", "--no-legend"],
+        ["systemctl", "--user", "list-units", "--type=service", "--state=active", "--plain", "--no-legend"],
         timeout=5.0,
     )
     if out is None:
         return []
-    own = _own_scope()
-    scopes = []
+    jobs = []
     for line in out.splitlines():
         name = line.split()[0] if line.split() else ""
-        if name.startswith(_QUIET_BLOCKING_SCOPE_PREFIXES) and name != own:
-            scopes.append(name)
-    return scopes
+        if name.startswith(_QUIET_BLOCKING_AGENTCTL_PREFIX):
+            jobs.append(name)
+    return jobs
 
 
 def quiet_state() -> dict[str, Any]:
@@ -264,7 +256,7 @@ def quiet_state() -> dict[str, Any]:
         for unit in _QUIET_BLOCKING_UNITS
         if run_stdout(["systemctl", "is-active", unit], timeout=5.0) == "active"
     ]
-    heavy_scopes = _active_heavy_scopes()
+    active_agentctl_jobs = _active_agentctl_jobs()
 
     violations: list[str] = []
     if io_full is None or io_full >= _QUIET_IO_FULL_AVG10_MAX:
@@ -276,7 +268,7 @@ def quiet_state() -> dict[str, Any]:
     if swap_used is not None and swap_used > _QUIET_SWAP_USED_BYTES_MAX:
         violations.append(f"swap_used_bytes={swap_used} (max {_QUIET_SWAP_USED_BYTES_MAX})")
     violations.extend(f"active_maintenance_unit={unit}" for unit in active_blocking)
-    violations.extend(f"active_heavy_scope={scope}" for scope in heavy_scopes)
+    violations.extend(f"active_agentctl_job={job}" for job in active_agentctl_jobs)
 
     return {
         "io_psi_full_avg10": io_full,
@@ -285,7 +277,7 @@ def quiet_state() -> dict[str, Any]:
         "swap_total_bytes": swap_total,
         "swap_used_bytes": swap_used,
         "active_maintenance_units": active_blocking,
-        "active_heavy_scopes": heavy_scopes,
+        "active_agentctl_jobs": active_agentctl_jobs,
         "violations": violations,
         "quiet": not violations,
     }
@@ -355,7 +347,7 @@ def main() -> int:
     parser.add_argument(
         "--require-quiet",
         action="store_true",
-        help="refuse to run unless the box is quiesced (PSI, backups, agent/build scopes); records the proven-quiet conditions in the manifest",
+        help="refuse to run unless the box is quiesced (PSI, backups, AgentCTL jobs); records the proven-quiet conditions in the manifest",
     )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()

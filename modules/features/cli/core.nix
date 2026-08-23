@@ -140,9 +140,7 @@ mkFeatureModule {
             config.global.warn_timeout = "30s";
           };
 
-          xdg.configFile."direnv/direnvrc".text = helpers.data.runtimeDefaults.renderDirenvrc (
-            builtins.readFile ../../../scripts/sinnix-direnvrc
-          );
+          xdg.configFile."direnv/direnvrc".text = builtins.readFile ../../../scripts/sinnix-direnvrc;
 
           programs.ssh = {
             enable = true;

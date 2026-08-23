@@ -8,11 +8,11 @@
 # This timer decouples that: it periodically diffs the sinex input's locked
 # revision in flake.lock against the last revision this host prebuilt (see
 # scripts/sinnix-sinex-cache-prebuild), and on a move builds that exact
-# revision under sinnix-scope's `nix-build` class and pushes it via
+# revision through its declared AgentCTL operation and pushes it via
 # scripts/sinnix-sinex-cache-push.
 #
-# Runs as the operator's systemd --user manager: `nix build` needs no root,
-# and the cachix push needs the operator's ~/.config/cachix auth token.
+# The timer submits the operation through the operator's user manager;
+# Sinnixd runs the build and cache push under the declared project contract.
 {
   mkServiceModule,
   lib,
@@ -22,7 +22,6 @@
 }@args:
 let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-  prebuild = scriptPkgs."sinnix-sinex-cache-prebuild";
 in
 mkServiceModule {
   name = "sinex-cache-prebuild";
@@ -51,18 +50,17 @@ mkServiceModule {
     };
   };
   job =
-    { cfg, config, ... }:
+    { cfg, ... }:
     {
       # Unit predates the sinnix- prefix; keep its name.
       unitName = "sinex-cache-prebuild";
       manager = "user";
-      description = "Detect a sinex input bump and pre-build + cache-push it";
-      execStart = "${prebuild}/bin/sinnix-sinex-cache-prebuild --flake-dir ${config.sinnix.paths.projectRoot} --system ${pkgs.stdenv.hostPlatform.system}";
+      description = "Submit the named Sinex cache-prebuild operation";
+      execStart = "${scriptPkgs.sinnixd}/bin/agentctl job start sinnix sinex_cache_prebuild";
       serviceConfig = {
-        # On a detected move this unit's runtime becomes the sinex build
-        # time, so bound generously: a wedged build still gets reaped
-        # without killing a legitimate multi-GB Rust workspace compile.
-        TimeoutStartSec = "2h";
+        # This unit only performs the local AgentCTL submission. The declared
+        # operation owns the actual build's lifecycle and timeout.
+        TimeoutStartSec = "1min";
       };
       timer = {
         description = "Periodic sinex input-bump check for pre-building + cache-push";

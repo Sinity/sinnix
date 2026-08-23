@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Nix wrapper that only applies explicit job/core overrides when requested
-# runtimeInputs: bash coreutils @sinnix-scope
+# runtimeInputs: bash coreutils
 set -euo pipefail
 
 if (( $# == 0 )); then
@@ -89,11 +89,6 @@ if [[ "$safe_eval_cache" != "true" && "$safe_eval_cache" != "1" && "$safe_eval_c
   else
     export NIX_CONFIG="eval-cache = false"
   fi
-fi
-
-if [[ -z "${NIX_SAFE_SCOPED:-}" ]] && command -v sinnix-scope >/dev/null 2>&1; then
-  export NIX_SAFE_SCOPED=1
-  exec sinnix-scope nix-build -- nix "$command_name" "${args[@]}"
 fi
 
 exec nix "$command_name" "${args[@]}"

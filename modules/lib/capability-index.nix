@@ -323,8 +323,8 @@ let
           inherit name;
           inherit (entry) description;
           invoke = "sinnix ${removePrefix "sinnix-" name}";
-          # Registry entries not discovered under scripts/ (sinnix-scope,
-          # sinnix-steer) carry their own owner in flake/scripts.nix.
+          # Registry entries not discovered under scripts/ (sinnix-steer)
+          # carry their own owner in flake/scripts.nix.
           owner = entry.owner or "scripts/${name}";
           docs = if entry.docs or null != null then entry.docs else docsFor (removePrefix "sinnix-" name);
           extra = {

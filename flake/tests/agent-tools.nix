@@ -15,7 +15,6 @@ in
       scriptRegistry = import ../scripts.nix { inherit inputs pkgs; };
       runtimeDefaults = import ../data/runtime-defaults.nix { inherit lib; };
       mcpRegistry = import ../data/mcp-registry.nix { inherit lib; };
-      launch = import ../launch.nix { inherit lib pkgs runtimeDefaults; };
       agentLanes = import ../data/agent-lanes.nix;
       # Derived from the lane registry rather than hand-listed: every declared
       # lane must produce an installed wrapper, and adding or retiring a lane
@@ -376,8 +375,7 @@ in
       # registry (verified by hardcoding MCP_CONFIG to mcp.json in
       # backends.nix, which breaks every non-full lane), a rendered MCP
       # profile's server set diverges from the registry's own selection, a
-      # Hermes profile gains a toolset its capability boundary forbids, or a
-      # wrapper stops launching through sinnix-agent-scope-exec.
+      # Hermes profile gains a toolset its capability boundary forbids.
       #
       # Note: changing flake/data/agent-lanes.nix alone does NOT fail this
       # check, and should not -- both the renderer and these expectations
@@ -587,12 +585,10 @@ in
             grep -Fq 'claude-code/bin/claude.exe' "$HOME/.local/bin/claude-clodex"
             grep -Fq 'MCP_CONFIG="$HOME/.config/claude/mcp.json"' "$HOME/.local/bin/claude-clodex"
             grep -Fq 'export SINNIX_CLAUDE_PROFILE=full' "$HOME/.local/bin/claude-clodex"
-            grep -Fq 'sinnix-agent-scope-exec' "$HOME/.local/bin/claude-clodex"
             grep -Fq '@bman654/clodex' "$HOME/.local/bin/clodex"
             grep -Fq 'CLODEX_CLAUDE_PATH="$claude_binary"' "$HOME/.local/bin/clodex"
             grep -Fq 'TWEAKCC_CC_INSTALLATION_PATH="$claude_binary"' "$HOME/.local/bin/clodex"
             grep -Fq 'claude-code/bin/claude.exe' "$HOME/.local/bin/clodex"
-            grep -Fq 'sinnix-agent-scope-exec "$CLODEX_STATE/launch.sh"' "$HOME/.local/bin/clodex"
             grep -Fq 'claude-wrapper.js' "$HOME/.local/bin/clodex-claude"
             grep -Fq 'CLODEX_CREDENTIAL_HELPER=' "$HOME/.local/bin/clodex-claude"
             grep -Fq 'server --proxy' "$HOME/.local/bin/sinnix-clodex-server"
@@ -600,19 +596,15 @@ in
             jq -e '.env.CLAUDE_CODE_PROCESS_WRAPPER == "/home/sinity/.local/bin/clodex-claude"' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
 
             # Every agent wrapper launches its npm-bootstrapped entry point
-            # through the scope wrapper, so the process lands in the agent
-            # slice rather than in the caller's cgroup.
+            # directly, preserving the caller's normal process context.
             for wrapper in \
               "$HOME/.local/bin/claude-full" \
               "$HOME/.local/bin/codex" \
               "$HOME/.local/bin/gemini"; do
               grep -Fq 'launch.sh' "$wrapper"
-              grep -Fq 'sinnix-agent-scope-exec "$STATE/launch.sh"' "$wrapper"
             done
-            grep -Fq 'sinnix-agent-scope-exec "$HOME/.local/bin/agy"' "$HOME/.local/bin/agy-sinnix"
-            grep -Fq 'sinnix-agent-scope-exec "$HOME/.grok/bin/grok"' "$HOME/.local/bin/grok-sinnix"
             if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude-full" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini"; then
-              echo "agent wrappers must not hardcode resource limits; runtime inventory owns per-scope defaults" >&2
+              echo "agent wrappers must not hardcode resource limits" >&2
               exit 1
             fi
             for wrapper in "$HOME/.local/bin/claude-full" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini"; do
@@ -646,18 +638,202 @@ in
           '';
         }
       );
-      scopeWrapperFixture =
-        pkgs.runCommand "scope-wrapper-fixture"
+      direnvDirectCommandsFixture =
+        pkgs.runCommand "direnv-direct-commands-fixture"
           {
-            # No jq: the wrapper resolves a command's class from the case body
-            # rendered into the rc below, not from the serialized inventory.
             nativeBuildInputs = [
               pkgs.bash
               pkgs.coreutils
+              pkgs.git
             ];
           }
           ''
-            ${pkgs.bash}/bin/bash ${../../flake/tests/scope-wrapper.sh} ${pkgs.writeText "sinnix-direnvrc-rendered" (runtimeDefaults.renderDirenvrc (builtins.readFile ../../scripts/sinnix-direnvrc))}
+            fixture_bin="$TMPDIR/bin"
+            mkdir -p "$fixture_bin"
+            printf '#!${pkgs.bash}/bin/bash\nprintf "%s\\n" direct\n' direct > "$fixture_bin/direct-command"
+            chmod +x "$fixture_bin/direct-command"
+            export PATH="$fixture_bin:$PATH"
+            before_path="$PATH"
+            use_flake() { return 0; }
+            source ${../../scripts/sinnix-direnvrc}
+            use_flake
+            test "$PATH" = "$before_path"
+            test "$(command -v direct-command)" = "$fixture_bin/direct-command"
+            test "$(direct-command)" = direct
+            touch "$out"
+          '';
+      agentctlOperationFixture =
+        pkgs.runCommand "agentctl-operation-contract-fixture"
+          {
+            nativeBuildInputs = [ pkgs.python3 ];
+          }
+          ''
+            ${pkgs.python3}/bin/python - <<'PY'
+            import tomllib
+            from pathlib import Path
+
+            descriptor = Path("${inputs.self}/.agentctl/project.toml")
+            operation = tomllib.loads(descriptor.read_text())["operations"]["sinex_cache_prebuild"]
+            assert operation["exec"] == [
+                "sinnix-sinex-cache-prebuild",
+                "--flake-dir",
+                "/realm/project/sinnix",
+                "--system",
+                "x86_64-linux",
+            ]
+            assert operation["pool"] == "bulk"
+            assert operation["result"] == "exit"
+            assert operation["cache"] == "none"
+            assert operation["exclusive_keys"] == ["sinnix:nix-store-pressure", "sinex:cache-prebuild"]
+            assert operation["estimate_memory_bytes"] == 12 * 1024 * 1024 * 1024
+            assert operation["scratch"] == "nvme"
+            assert operation["timeout_seconds"] == 7200
+            PY
+            touch "$out"
+          '';
+      agentctlOperationLaunchFixture =
+        pkgs.runCommand "agentctl-operation-launch-fixture"
+          {
+            nativeBuildInputs = [ pkgs.python3 ];
+          }
+          ''
+            export PYTHONPATH="${
+              lib.concatStringsSep ":" (
+                map (package: "${package}/${pkgs.python3.sitePackages}") [
+                  scriptRegistry.packageSet.sinnixd
+                  scriptRegistry.packageSet.sinnix-mcp
+                  scriptRegistry.packageSet.sinnix-lib
+                ]
+              )
+            }"
+            ${pkgs.python3}/bin/python - <<'PY'
+            import os
+            from pathlib import Path
+            from tempfile import TemporaryDirectory
+
+            from sinnixd.jobs import GenericJobStore, GenericJobs
+            from sinnixd.projects import ProjectCatalog
+
+
+            class FakeSystemd:
+                def __init__(self):
+                    self.started = []
+
+                def start(self, **kwargs):
+                    self.started.append(kwargs)
+
+                def show(self, _unit, *, timeout_seconds=0.25):
+                    return {
+                        "LoadState": "loaded",
+                        "ActiveState": "active",
+                        "SubState": "running",
+                        "MainPID": "42",
+                        "Result": "success",
+                    }
+
+                def stop(self, _unit):
+                    pass
+
+
+            root = Path("${inputs.self}")
+            project = ProjectCatalog([root]).get("sinnix")
+            operation = project.operation("sinex_cache_prebuild")
+            assert operation.timeout_seconds == 7200
+            assert operation.command == (
+                "sinnix-sinex-cache-prebuild",
+                "--flake-dir",
+                "/realm/project/sinnix",
+                "--system",
+                "x86_64-linux",
+            )
+            with TemporaryDirectory() as state:
+                os.environ["SINNIXD_NVME_SCRATCH_ROOT"] = str(Path(state) / "nvme-scratch")
+                systemd = FakeSystemd()
+                jobs = GenericJobs(
+                    systemd,
+                    GenericJobStore(Path(state)),
+                    pressure_probe=lambda: {"memory_full_avg10": 0.0},
+                )
+                started = jobs.start_declared(
+                    project=project,
+                    operation=operation,
+                    correlation_id="fixture",
+                    parameters={},
+                )
+                record = jobs.store.load(started["job_id"])
+                expected = (*project.environment.command, *operation.command)
+                assert started["kind"] == "declared-operation"
+                assert record.spec.timeout_seconds == 7200
+                assert systemd.started[0]["command"] == expected
+                assert systemd.started[0]["timeout_seconds"] == 7200
+            PY
+            touch "$out"
+          '';
+      cachePushForegroundFixture =
+        pkgs.runCommand "sinex-cache-push-foreground-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.gnugrep
+            ];
+          }
+          ''
+            fixture_bin="$TMPDIR/bin"
+            mkdir -p "$fixture_bin"
+            printf '#!%s\nprintf "%%s\\n" /nix/store/fixture-sinex-1\n' \
+              ${pkgs.bash}/bin/bash > "$fixture_bin/nix"
+            printf '#!%s\nprintf "%%s\\n" "$@" > "$CACHE_PUSH_ARGS"\nexit "''${CACHIX_EXIT:-0}"\n' \
+              ${pkgs.bash}/bin/bash > "$fixture_bin/cachix"
+            printf '#!%s\nexit 99\n' ${pkgs.bash}/bin/bash > "$fixture_bin/systemd-run"
+            chmod +x "$fixture_bin/nix" "$fixture_bin/cachix" "$fixture_bin/systemd-run"
+            export PATH="$fixture_bin:$PATH"
+            export CACHE_PUSH_ARGS="$TMPDIR/cachix-args"
+            ${pkgs.bash}/bin/bash ${../../scripts/sinnix-sinex-cache-push} --foreground /nix/store/fixture
+            test "$(tr '\n' ' ' < "$CACHE_PUSH_ARGS")" = "push sinity /nix/store/fixture-sinex-1 "
+            if CACHIX_EXIT=17 ${pkgs.bash}/bin/bash ${../../scripts/sinnix-sinex-cache-push} --foreground /nix/store/fixture; then
+              echo "foreground cache-push failure was swallowed" >&2
+              exit 1
+            else
+              test "$?" -eq 17
+            fi
+            touch "$out"
+          '';
+      cachePrebuildLifecycleFixture =
+        pkgs.runCommand "sinex-cache-prebuild-lifecycle-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.gnugrep
+              pkgs.jq
+            ];
+          }
+          ''
+            fixture_bin="$TMPDIR/bin"
+            flake_dir="$TMPDIR/flake"
+            state_dir="$TMPDIR/state"
+            mkdir -p "$fixture_bin" "$flake_dir"
+            printf '%s\n' '{"nodes":{"sinex":{"locked":{"rev":"fixture-rev","url":"https://example.test/sinex"}}}}' \
+              > "$flake_dir/flake.lock"
+            printf '#!%s\nprintf "%%s\\n" /nix/store/fixture-sinex-1\n' \
+              ${pkgs.bash}/bin/bash > "$fixture_bin/nix"
+            printf '#!%s\nprintf "%%s\\n" "$@" > "$PREBUILD_PUSH_ARGS"\nexit "''${PUSH_EXIT:-0}"\n' \
+              ${pkgs.bash}/bin/bash > "$fixture_bin/sinnix-sinex-cache-push"
+            chmod +x "$fixture_bin/nix" "$fixture_bin/sinnix-sinex-cache-push"
+            export PATH="$fixture_bin:$PATH"
+            export PREBUILD_PUSH_ARGS="$TMPDIR/prebuild-push-args"
+            ${pkgs.bash}/bin/bash ${../../scripts/sinnix-sinex-cache-prebuild} --flake-dir "$flake_dir" --state-dir "$state_dir"
+            test "$(tr '\n' ' ' < "$PREBUILD_PUSH_ARGS")" = "--foreground /nix/store/fixture-sinex-1 "
+            test "$(cat "$state_dir/last-built-rev")" = "fixture-rev"
+            rm "$state_dir/last-built-rev"
+            if PUSH_EXIT=19 ${pkgs.bash}/bin/bash ${../../scripts/sinnix-sinex-cache-prebuild} --flake-dir "$flake_dir" --state-dir "$state_dir"; then
+              echo "prebuild reported success after a failed cache upload" >&2
+              exit 1
+            else
+              test "$?" -eq 19
+            fi
+            test ! -e "$state_dir/last-built-rev"
             touch "$out"
           '';
       preflightFixture =
@@ -896,7 +1072,11 @@ in
       checks = {
         agent-resource-policy = agentResourcePolicy;
         agent-npm-bootstrap-recovery = agentNpmBootstrapRecovery;
-        scope-wrapper = scopeWrapperFixture;
+        direnv-direct-commands = direnvDirectCommandsFixture;
+        agentctl-operation-contract = agentctlOperationFixture;
+        agentctl-operation-launch = agentctlOperationLaunchFixture;
+        sinex-cache-push-foreground = cachePushForegroundFixture;
+        sinex-cache-prebuild-lifecycle = cachePrebuildLifecycleFixture;
         preflight = preflightFixture;
         kitty-agent-here = kittyAgentHereFixture;
         bd-safety-hook = bdSafetyHookFixture;

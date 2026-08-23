@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Detect a sinex flake input revision bump and pre-build + cache-push it asynchronously
-# runtimeInputs: bash coreutils jq @sinnix-scope @sinnix-sinex-cache-push
+# description: Detect a sinex flake input revision bump and pre-build + cache-push it through AgentCTL
+# runtimeInputs: bash coreutils jq @sinnix-sinex-cache-push
 #
 # The desktop is sinex's builder of record: `switch` publishes the sinex
 # closure to sinity.cachix.org after every successful activation
@@ -10,20 +10,20 @@
 # master bump would otherwise pay the full compile synchronously, on the
 # interactive critical path.
 #
-# This script is the oneshot body of a periodic timer (see
-# modules/services/sinex-cache-prebuild.nix). It diffs the sinex node's
-# locked revision in the live flake.lock against the last revision this host
-# has already prebuilt (a state file, not a live upstream poll -- what
-# matters for `switch` is sinnix's OWN pinned input, which only moves via a
-# committed flake.lock change, e.g. the routine `update` devshell command).
+# This script is the fixed body of Sinnix's named AgentCTL cache-prebuild
+# operation. The periodic timer submits that operation (see
+# modules/services/sinex-cache-prebuild.nix). It diffs the sinex node's locked
+# revision in the live flake.lock against the last revision this host has
+# already prebuilt (a state file, not a live upstream poll -- what matters for
+# `switch` is Sinnix's own pinned input, which only moves via a committed
+# flake.lock change, such as the routine `update` devshell command).
 # When it has moved:
 #   1. build sinex directly at that locked git revision -- bypassing
 #      sinnix's own flake entirely (sinex intentionally does not follow
 #      sinnix's nixpkgs, see CLAUDE.md's Input Pinning notes, so this
-#      produces the exact same closure an eventual `switch` would build) --
-#      under sinnix-scope's `nix-build` command class, i.e. the same
-#      nix-build.slice-contained path every other heavy build on this
-#      host uses;
+#      produces the exact same closure an eventual `switch` would build).
+#      AgentCTL owns the operation's cgroup, lifecycle, cancellation, and
+#      resource admission;
 #   2. on success, push the result to sinity.cachix.org via the same push
 #      logic `switch` uses (sinnix-sinex-cache-push);
 #   3. only then record the new revision as built. A failed run leaves the
@@ -75,7 +75,7 @@ if [[ "$locked_rev" == "$last_rev" ]]; then
   exit 0
 fi
 
-echo "sinnix-sinex-cache-prebuild: sinex input moved ${last_rev:-<none>} -> ${locked_rev}; prebuilding in the background"
+echo "sinnix-sinex-cache-prebuild: sinex input moved ${last_rev:-<none>} -> ${locked_rev}; prebuilding through AgentCTL"
 
 # Build the exact locked commit directly from sinex's own repo, not through
 # sinnix's flake -- sinnix has no flake output that re-exposes an input's
@@ -84,10 +84,7 @@ echo "sinnix-sinex-cache-prebuild: sinex input moved ${last_rev:-<none>} -> ${lo
 sinex_flake_ref="git+${locked_url}?rev=${locked_rev}"
 
 mapfile -t built_paths < <(
-  sinnix-scope nix-build \
-    --project sinnix \
-    --work-item sinex-cache-prebuild \
-    -- nix build "${sinex_flake_ref}#packages.${system}.sinex" --no-link --print-out-paths
+  nix build "${sinex_flake_ref}#packages.${system}.sinex" --no-link --print-out-paths
 )
 
 if [[ "${#built_paths[@]}" -eq 0 ]]; then
@@ -95,7 +92,9 @@ if [[ "${#built_paths[@]}" -eq 0 ]]; then
   exit 1
 fi
 
-sinnix-sinex-cache-push "${built_paths[@]}"
+# Keep publication inside the AgentCTL operation: its durable result must not
+# claim success until Cachix has accepted the closure.
+sinnix-sinex-cache-push --foreground "${built_paths[@]}"
 
 printf '%s' "$locked_rev" > "$last_rev_file.tmp"
 mv -f "$last_rev_file.tmp" "$last_rev_file"

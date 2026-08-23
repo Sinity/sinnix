@@ -234,10 +234,6 @@ mkFeatureModule {
         })
         sharedSkillFarm
         ;
-      # Runs the given launcher under sinnix-scope's agent slice unless already
-      # scoped (see scripts/sinnix-agent-scope-exec).
-      agentScopeExec = "${scriptPkgs.sinnix-agent-scope-exec}/bin/sinnix-agent-scope-exec";
-
       backends = import ./backends.nix {
         inherit
           lib
@@ -245,7 +241,6 @@ mkFeatureModule {
           scriptPkgs
           agentRuntimePath
           hermesRuntimePath
-          agentScopeExec
           sinnixCfg
           user
           ;
@@ -324,8 +319,6 @@ mkFeatureModule {
           {
             home.packages = [
               scriptPkgs.beads
-              scriptPkgs.sinnix-scope
-              scriptPkgs.sinnix-agent-scope-exec
               scriptPkgs.sinnix-agent-control-mcp
               scriptPkgs.sinnix-attention
               scriptPkgs.sinnix-context-handoff
@@ -521,7 +514,7 @@ mkFeatureModule {
                     export CLODEX_CLAUDE_PATH="$claude_binary"
                     export TWEAKCC_CC_INSTALLATION_PATH="$claude_binary"
 
-                    exec ${agentScopeExec} "$CLODEX_STATE/launch.sh" "$@"
+                    exec "$CLODEX_STATE/launch.sh" "$@"
                   '';
                   executable = true;
                   force = true;
@@ -537,7 +530,7 @@ mkFeatureModule {
                       binaryName = "gemini";
                     }}
 
-                    exec ${agentScopeExec} "$STATE/launch.sh" "$@"
+                    exec "$STATE/launch.sh" "$@"
                   '';
                   executable = true;
                   force = true;

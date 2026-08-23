@@ -767,26 +767,14 @@ def unit_run_facts(
     return found
 
 
-SCOPE_IDENTITY = re.compile(
-    r"^sinnix-(?P<klass>agent|build|background|gpu-runtime|nix-build|system)"
-    r"-(?P<identity>[A-Za-z0-9_.-]{1,40})-\d+-\d+\.scope$"
-)
 AGENT_JOB_SERVICE = re.compile(r"^sinnixd-job-(?P<job>.+)\.service$")
 
 
 def lane_of(
     unit: str,
     jobs_by_id: dict[str, dict[str, Any]] | None = None,
-    scopes_by_unit: dict[str, dict[str, Any]] | None = None,
 ) -> str:
-    """A scope unit resolved to the lane a human recognises.
-
-    The launcher encodes the command's own name in the unit
-    (`sinnix-<class>-<identity>-<epoch_ns>-<pid>.scope`) and the gateway
-    carries a full job manifest, so the digits never have to be shown: an
-    operator being asked which lane is expendable cannot answer about
-    `sinnix-agent-1785530197414290568-596681.scope`.
-    """
+    """An AgentCTL service unit resolved to a human-recognisable job lane."""
     if not unit:
         return ""
     job_match = AGENT_JOB_SERVICE.match(unit)
@@ -807,18 +795,4 @@ def lane_of(
             )
             return f"{named} in {where}" if where else named
         return f"AgentCTL job {job_match.group('job')}"
-    scope_match = SCOPE_IDENTITY.match(unit)
-    if scope_match:
-        klass = scope_match.group("klass")
-        placed = (scopes_by_unit or {}).get(unit)
-        if isinstance(placed, dict):
-            # The checkout the scope was launched in is what distinguishes two
-            # agent lanes from each other; the command is already the row's own
-            # headline, so repeating it here would cost a column and say
-            # nothing.
-            if placed.get("project"):
-                return f"{klass} · {placed['project']}"
-            if placed.get("command"):
-                return f"{klass} · {placed['command']}"
-        return f"{klass} · {scope_match.group('identity')}"
     return unit
