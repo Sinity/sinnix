@@ -277,8 +277,8 @@ drawbacks:
   `<dir>/<prompt-name>` — one git worktree per lane; makes `--workdir`
   optional.
 - `--job-prefix <p>` passes attested job identity (`--job-id <p><name>`,
-  `--work-item <name>`) to the runner so `agent_job_control.sh` can
-  list/interrupt lanes by ID.
+  `--work-item <name>`) to the runner so its logs and completion artifacts
+  retain stable lane identity.
 
 Aggregate completion afterwards with
 `launch_agent_tabs.sh --status --output-dir <output-dir>`. The table shows one

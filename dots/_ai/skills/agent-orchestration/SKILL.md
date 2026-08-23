@@ -77,8 +77,6 @@ agentctl job cancel <job-id>
 - `scripts/run_agent_prompt.sh` and `run_agent_prompt_job.py` are the private
   native backend translation layer for Sinnixd's typed attested-agent job. Do
   not use them as a second lifecycle surface.
-- `scripts/agent_job_control.sh` remains a private compatibility bridge for
-  the ops reducer until that caller consumes AgentCTL's job protocol.
 - `scripts/launch_agent_tabs.sh`, `launch_agent_tabs_status.py`, and
   `build_plan_batch_prompts.py` retain direct batch and Kitty launch support
   while AgentCTL has no batch scheduling contract.

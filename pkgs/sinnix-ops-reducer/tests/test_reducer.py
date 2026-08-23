@@ -64,3 +64,22 @@ def test_sequence_persists_and_events_are_bounded(tmp_path: Path) -> None:
     resumed.refresh()
     assert resumed.sequence == 2
     assert resumed.events_since(0)[0]["sequence"] == 2
+
+
+def test_agentctl_failure_degrades_only_the_job_source(tmp_path: Path) -> None:
+    reducer = Reducer(
+        tmp_path / "status.json",
+        tmp_path / "token",
+        lambda: {"report": 1},
+        agent_jobs_source=lambda: (_ for _ in ()).throw(RuntimeError("socket unavailable")),
+    )
+    snapshot = reducer.refresh()
+    assert snapshot["sources"]["sinnix-observe"]["status"] == "healthy"
+    assert snapshot["sources"]["agentctl"] == {
+        "status": "unavailable",
+        "source": "agentctl",
+        "observed_at": snapshot["observed_at"],
+        "freshness": "unknown",
+        "degradation": "socket unavailable",
+    }
+    assert snapshot["state"]["agentctl"] == {"jobs": [], "truncated": False}

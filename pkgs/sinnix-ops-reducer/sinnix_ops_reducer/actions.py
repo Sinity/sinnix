@@ -15,6 +15,7 @@ from typing import Any, Callable
 from sinnix_lib.ledger import append_jsonl, iter_jsonl
 from sinnix_lib.systemd import show_units
 
+from .agent_jobs import AgentCtlClient, AgentCtlError
 from . import pressure as pressure_model
 from .reducer import now_iso
 
@@ -311,13 +312,8 @@ def validate_request(value: Any) -> dict[str, Any]:
         _string(parameters["value"], "value", 64)
         if parameters["property"] not in POLICY_PROPERTIES:
             raise ActionError("unsupported runtime policy property")
-    if action == "interrupt":
-        if set(parameters) - {"orphan_reap"}:
-            raise ActionError("interrupt accepts only orphan_reap")
-        if "orphan_reap" in parameters and not isinstance(
-            parameters["orphan_reap"], bool
-        ):
-            raise ActionError("orphan_reap must be boolean")
+    if action == "interrupt" and parameters:
+        raise ActionError("interrupt accepts no parameters")
     if action == "park":
         if set(parameters) != {"deadline_seconds"}:
             raise ActionError("park requires deadline_seconds")
@@ -355,7 +351,7 @@ class ActionService:
         adapter: (
             Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None
         ) = None,
-        controller: str = "agent_job_control.sh",
+        agent_jobs: AgentCtlClient | None = None,
         scope_prober: Callable[[str], str | None] | None = None,
         unit_state_prober: Callable[[str, str], dict[str, str]] | None = None,
         process_prober: (Callable[[int], tuple[int, str, str] | None] | None) = None,
@@ -380,7 +376,7 @@ class ActionService:
             receipts_path.stem + ".jsonl"
         )
         self.adapter = adapter or self._live_adapter
-        self.controller = controller
+        self.agent_jobs = agent_jobs or AgentCtlClient()
         self.scope_prober = scope_prober or self._live_scope_prober
         self.unit_state_prober = unit_state_prober or self._live_unit_state_prober
         self.process_prober = process_prober or self._live_process_prober
@@ -458,54 +454,13 @@ class ActionService:
     ) -> dict[str, Any]:
         target = request["target"]
         if "job_id" in target:
-            state = snapshot.get("state") or {}
-            gateway = state.get("agent_gateway") if isinstance(state, dict) else None
-            jobs = (
-                gateway.get("jobs", [])
-                if isinstance(gateway, dict)
-                else state.get("jobs", [])
-            )
-            job = next(
-                (item for item in jobs if item.get("job_id") == target["job_id"]), None
-            )
-            attested = (
-                isinstance(job, dict)
-                and all(
-                    isinstance(job.get(field), value_type) and bool(job.get(field))
-                    for field, value_type in (
-                        ("job_id", str),
-                        ("schema_version", int),
-                        ("launcher", dict),
-                        ("worktree", str),
-                    )
-                )
-                and job.get("schema_version") in {2, 3}
-                and all(
-                    isinstance(job["launcher"].get(field), value_type)
-                    and bool(job["launcher"].get(field))
-                    for field, value_type in (
-                        ("pid", int),
-                        ("proc_start", str),
-                        ("scope_unit", str),
-                        ("cgroup", str),
-                    )
-                )
-            )
-            if not attested:
-                raise ActionError("job target is unknown or unattested", 403)
-            orphan = next(
-                (
-                    row
-                    for row in (
-                        state.get("agent_gateway", {}).get("orphaned_jobs", [])
-                        if isinstance(state.get("agent_gateway"), dict)
-                        else []
-                    )
-                    if isinstance(row, dict) and row.get("job_id") == target["job_id"]
-                ),
-                None,
-            )
-            return {"kind": "job", "job": job, "orphan": orphan}
+            try:
+                job = self.agent_jobs.get(target["job_id"])
+            except AgentCtlError as error:
+                raise ActionError(f"AgentCTL job lookup failed: {error}", 503) from error
+            if job.get("kind") != "attested-agent":
+                raise ActionError("job target is not an attested agent job", 403)
+            return {"kind": "job", "job": job}
         if "scope" in target:
             return self._resolve_scope(target["scope"])
         if "process" in target:
@@ -722,7 +677,7 @@ class ActionService:
         number, recorded separately in `preconditions.revision`."""
         kind = resolved.get("kind")
         if kind == "job":
-            return {"kind": "job", "job": resolved.get("job")}
+            return {"kind": "job", "job": self._job_state(resolved.get("job"))}
         if kind == "scope":
             unit = resolved.get("unit")
             manager = resolved.get("manager", "system")
@@ -755,6 +710,34 @@ class ActionService:
             }
         return {"kind": kind}
 
+    @staticmethod
+    def _job_state(job: Any) -> dict[str, Any]:
+        if not isinstance(job, dict):
+            return {}
+        contract = job.get("contract") if isinstance(job.get("contract"), dict) else {}
+        state = job.get("state") if isinstance(job.get("state"), dict) else {}
+        checkout = job.get("checkout") if isinstance(job.get("checkout"), dict) else {}
+        return {
+            "job_id": job.get("job_id"),
+            "kind": job.get("kind"),
+            "project_id": job.get("project_id"),
+            "checkout": {
+                key: checkout.get(key)
+                for key in ("checkout_id", "path", "head")
+                if key in checkout
+            },
+            "contract": {
+                key: contract.get(key)
+                for key in ("backend", "model", "effort", "result")
+                if key in contract
+            },
+            "state": {
+                key: state.get(key)
+                for key in ("phase", "terminal", "observed_at", "cancellation")
+                if key in state
+            },
+        }
+
     def execute(self, raw: Any) -> dict[str, Any]:
         request = validate_request(raw)
         digest = hashlib.sha256(
@@ -772,19 +755,6 @@ class ActionService:
             if request["expected_revision"] != snapshot.get("sequence"):
                 raise ActionError("expected_revision is stale", 409)
             resolved = self._resolve(request, snapshot)
-            if request["action"] == "interrupt" and request["parameters"].get(
-                "orphan_reap"
-            ):
-                orphan = resolved.get("orphan")
-                policy = orphan.get("policy") if isinstance(orphan, dict) else None
-                if (
-                    not isinstance(policy, dict)
-                    or policy.get("proposed_action") != "reap"
-                ):
-                    raise ActionError(
-                        "orphan reap requires two identical cold expendable observations",
-                        409,
-                    )
             previous_target_state = self._target_state(resolved)
             adapter_receipt = self.adapter(request, resolved)
         except ActionError as error:
@@ -820,10 +790,14 @@ class ActionService:
             "previous_state": previous_target_state,
             # Re-probed after the adapter ran, not the same pre-action copy:
             # for unit/scope targets this reflects the systemctl state the
-            # action actually produced. Job targets have no post-action
-            # re-snapshot source, so this stays identical to previous_state
-            # for those (unchanged from prior behavior).
-            "resulting_state": self._target_state(resolved),
+            # action actually produced. Job interrupts carry the typed
+            # AgentCTL cancellation response, so record that authoritative
+            # state instead of a stale pre-action snapshot.
+            "resulting_state": (
+                {"kind": "job", "job": self._job_state(adapter_receipt.get("job"))}
+                if resolved.get("kind") == "job" and isinstance(adapter_receipt, dict)
+                else self._target_state(resolved)
+            ),
             "adapter": adapter_receipt,
             "created_at": now_iso(),
         }
@@ -842,7 +816,10 @@ class ActionService:
             return {"name": action, **focus_registered_session(resolved["job"])}
         if action == "interrupt":
             job_id = resolved["job"]["job_id"]
-            command = [self.controller, "interrupt", "--job", job_id]
+            try:
+                return {"name": action, "job": self.agent_jobs.cancel(job_id)}
+            except AgentCtlError as error:
+                raise ActionError(f"AgentCTL cancellation failed: {error}", 503) from error
         elif resolved.get("kind") == "scope":
             # stop, not kill: systemctl stop on a scope sends SIGTERM to every
             # process in it and escalates to SIGKILL on its own timeout, which

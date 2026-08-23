@@ -454,8 +454,8 @@ fi
 # The manifest, the event log, the actual-agent attestation, the cgroup
 # completion accounting and the supervised run (including the launcher-race
 # retry ladder) live in the sibling run_agent_prompt_job.py (sinnix-gdlu): the
-# manifest is a hard contract, read directly by agent_job_control.sh and
-# attested by `sinnix-observe orphans`, so one implementation owns its bytes.
+# manifest is attested by `sinnix-observe orphans`, so one implementation owns
+# its bytes.
 # This script keeps option parsing, the reservation lock, the self-reexec,
 # per-backend argv, and the scrubbed child environment.
 job_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/run_agent_prompt_job.py"

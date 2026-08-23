@@ -65,7 +65,7 @@ Postgres or a Dolt server that has sat in `build.slice` for a week is not
 Lifecycle control goes through the reducer's action API and nowhere else, so
 the page can only offer what that API accepts: `start`/`stop`/`restart` on an
 attested inventory unit that declares `observe.restartable`, `interrupt` on an
-attested agent job, `stop` on an admitted `sinnix-scope` placement, and `stop`
+AgentCTL attested agent job, `stop` on an admitted `sinnix-scope` placement, and `stop`
 on an admitted `{pid, start_ticks}` process (sinnix-pl37, sinnix-mble — see
 "Unshackling the hub" below). An ad-hoc scope is admitted by name-shape
 (`sinnix-<class>-<identity>-<epoch_ns>-<pid>.scope`) plus live systemd state,
