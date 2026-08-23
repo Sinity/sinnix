@@ -626,6 +626,59 @@ BEADS_CHANGE_SCHEMA["properties"]["parameters"] = {
     },
 }
 
+BEADS_CHANGESET_SCHEMA = _owner_change_schema(
+    ref_pattern=r"^sinnix://projects/[^/]+$",
+    operations=("apply", "preview"),
+)
+BEADS_CHANGESET_SCHEMA["properties"]["parameters"] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["actions"],
+    "properties": {
+        "actions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 128,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["ref", "operation", "parameters"],
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 8_192,
+                        "pattern": r"^sinnix://projects/[^/]+(?:/beads/[^/]+)?$",
+                    },
+                    "operation": {"enum": list(BEADS_CHANGE_SCHEMA["properties"]["operation"]["enum"])},
+                    "parameters": {"type": "object", "maxProperties": 32},
+                    "preconditions": BEADS_CHANGE_SCHEMA["properties"]["preconditions"],
+                    "bind": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": r"^[A-Za-z][A-Za-z0-9_]{0,63}$",
+                    },
+                },
+            },
+        },
+        "on_error": {"enum": ["stop", "continue"]},
+        "preview_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    },
+}
+
+BEADS_OPERATE_SCHEMA = _owner_change_schema(
+    ref_pattern=r"^sinnix://projects/[^/]+$",
+    operations=("backup.create", "backup.list", "backup.restore", "snapshot.publish", "sync.pull", "sync.push"),
+)
+BEADS_OPERATE_SCHEMA["properties"]["parameters"] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "backup_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    },
+}
+
 MCP_CHANGE_SCHEMA = _owner_change_schema(
     ref_pattern=r"^sinnix://mcp/[^/]+/tools/[^/]+$",
     operations=("call",),
@@ -918,6 +971,39 @@ def build_registry() -> CatalogRegistry:
             receipt_policy="audit",
             examples=({"input": {"ref": "sinnix://projects/sinnix", "operation": "comment", "parameters": {"id": "sinnix-example", "text": "recorded by the operator"}, "idempotency_key": "bead-comment-example"}},),
             documentation="Perform one structured, attested Beads mutation for a canonical project.",
+        ),
+        ActionSpec(
+            name="beads.changeset",
+            verb=VerbFamily.CHANGE,
+            domain="beads",
+            owner="beads",
+            route="beads.changeset",
+            effect=EffectMode.CHANGE,
+            principals=frozenset({"operator"}),
+            input_schema=BEADS_CHANGESET_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("project", "bead", "task_authority"),
+            supports_idempotency=True,
+            supports_precondition=True,
+            receipt_policy="audit",
+            examples=({"input": {"ref": "sinnix://projects/sinnix", "operation": "preview", "parameters": {"actions": [{"ref": "sinnix://projects/sinnix", "operation": "create", "parameters": {"title": "parent"}, "bind": "parent"}, {"ref": "sinnix://projects/sinnix", "operation": "create", "parameters": {"title": "child", "parent": "$parent"}}]}, "idempotency_key": "beads-changeset-example"}},),
+            documentation="Preview or apply an ordered, project-partitioned Beads changeset with explicit step outcomes and no global rollback claim.",
+        ),
+        ActionSpec(
+            name="beads.operate",
+            verb=VerbFamily.OPERATE,
+            domain="beads",
+            owner="beads",
+            route="beads.maintenance",
+            effect=EffectMode.OPERATE,
+            principals=frozenset({"operator"}),
+            input_schema=BEADS_OPERATE_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("project", "task_authority"),
+            supports_idempotency=True,
+            receipt_policy="audit",
+            examples=({"input": {"ref": "sinnix://projects/sinnix", "operation": "snapshot.publish", "parameters": {}, "idempotency_key": "beads-publish-example"}},),
+            documentation="Run one explicit Beads publication, Dolt sync, or supported backup operation. Ordinary mutations do not publish JSONL or create Git commits.",
         ),
         ActionSpec(
             name="mcp.change",

@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 import time
+from difflib import unified_diff
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -43,6 +44,9 @@ _LIST_REPEAT_FLAGS = {"label": "--label", "label_any": "--label-any", "exclude_l
 _LIST_BOOLEAN_FLAGS = {"all": "--all", "deferred": "--deferred", "empty_description": "--empty-description", "include_gates": "--include-gates", "include_infra": "--include-infra", "include_templates": "--include-templates", "no_assignee": "--no-assignee", "no_labels": "--no-labels", "no_parent": "--no-parent", "no_pinned": "--no-pinned", "overdue": "--overdue", "pinned": "--pinned", "ready": "--ready"}
 _READY_BOOLEAN_FLAGS = {"gated": "--gated", "include_deferred": "--include-deferred", "include_ephemeral": "--include-ephemeral", "unassigned": "--unassigned"}
 _MAX_PAGE = 200
+_MAX_CHANGESET_ACTIONS = 128
+_SYMBOL_RE = re.compile(r"^\$([A-Za-z][A-Za-z0-9_]{0,63})$")
+_PROJECT_REF_RE = re.compile(r"^sinnix://projects/([^/]+)(?:/beads/([^/]+))?$")
 
 
 class BeadsService:
@@ -443,6 +447,10 @@ class BeadsService:
     def _public_command(command: list[str]) -> list[str]:
         return ["<bounded-native-graph-plan>" if item.startswith("@gateway-json:") else item for item in command]
 
+    @staticmethod
+    def _atomicity(operation: str, native_validation: str) -> str:
+        return "owner_atomic" if operation == "graph.create" and native_validation == "dry_run" else "per_step_commits"
+
     def change(self, project_id: str, operation: str, parameters: Mapping[str, Any], *, mode: str = "apply", preconditions: Mapping[str, Any] | None = None, preview_digest: str | None = None) -> dict[str, Any]:
         if mode not in {"preview", "apply"}: raise BeadsError("mode must be preview or apply")
         project, before_status = self._attest(project_id, mode == "apply"); target, command = self._compile(operation, parameters)
@@ -465,17 +473,21 @@ class BeadsService:
                 elif operation == "unclaim" and isinstance(preconditions.get("expected_assignee"), str):
                     command += ["--if-assignee", preconditions["expected_assignee"]]
         digest = hashlib.sha256(json.dumps({"project": project_id, "operation": operation, "command": self._public_command(command), "revision": before_status["revision"]}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        preview = {"mode": "preview", "preview_digest": digest, "project_ref": self.project_ref(project_id), "target_ref": self.bead_ref(project_id, target) if target else None, "owner_route": "beads.cli", "owner_version": before_status.get("schema_version"), "command": self._public_command(command), "preconditions": dict(preconditions or {}), "before": before, "before_revision": before_status["revision"], "precondition_semantics": {"expected_status": "native" if operation == "update" else "gateway_best_effort", "expected_assignee": "native" if operation in {"update", "unclaim"} else "gateway_best_effort", "expected_etag": "gateway_best_effort"}, "atomicity": "owner_native"}
+        preview = {"mode": "preview", "preview_digest": digest, "project_ref": self.project_ref(project_id), "target_ref": self.bead_ref(project_id, target) if target else None, "owner_route": "beads.cli", "owner_version": before_status.get("schema_version"), "command": self._public_command(command), "preconditions": dict(preconditions or {}), "before": before, "before_revision": before_status["revision"], "precondition_semantics": {"expected_status": "native" if operation == "update" else "gateway_best_effort", "expected_assignee": "native" if operation in {"update", "unclaim"} else "gateway_best_effort", "expected_etag": "gateway_best_effort"}, "atomicity": "per_step_commits"}
         native_command, graph_path = self._with_graph_file(command)
+        native_validation = "unavailable"
         try:
             if mode == "preview":
                 if operation in {"create", "graph.create"}:
                     self._run(project, native_command + ["--dry-run"], True)
-                    preview["native_validation"] = "dry_run"
-                else:
-                    preview["native_validation"] = "unavailable"
+                    native_validation = "dry_run"
+                preview["native_validation"] = native_validation
+                preview["atomicity"] = self._atomicity(operation, native_validation)
                 return preview
             if preview_digest is not None and preview_digest != digest: raise BeadsError("preview digest or source revision is stale", "precondition_failed")
+            if operation == "graph.create":
+                self._run(project, native_command + ["--dry-run"], True)
+                native_validation = "dry_run"
             native = self._run(project, native_command, True); after_status = self.task_authority_status(project_id)
         finally:
             if graph_path is not None: graph_path.unlink(missing_ok=True)
@@ -485,4 +497,222 @@ class BeadsService:
             created = self._normalize(project_id, created_rows[0], after_status["revision"])
         after = self.get(project_id, target) if target else created
         history = self._includes(project, project_id, target, {"history"}).get("history") if target else None
-        return {**preview, "mode": "apply", "before": before, "after": after, "before_revision": before_status["revision"], "after_revision": after_status["revision"], "owner_result": native, "owner_history_ref": f"{self.bead_ref(project_id, target)}/history" if target else (created or {}).get("links", {}).get("history"), "owner_history": history, "atomicity": "owner_native"}
+        return {**preview, "mode": "apply", "before": before, "after": after, "before_revision": before_status["revision"], "after_revision": after_status["revision"], "owner_result": native, "owner_history_ref": f"{self.bead_ref(project_id, target)}/history" if target else (created or {}).get("links", {}).get("history"), "owner_history": history, "native_validation": native_validation, "atomicity": self._atomicity(operation, native_validation)}
+
+    @staticmethod
+    def _symbolic_references(value: Any) -> set[str]:
+        if isinstance(value, str):
+            match = _SYMBOL_RE.fullmatch(value)
+            return {match.group(1)} if match else set()
+        if isinstance(value, Mapping):
+            return set().union(*(BeadsService._symbolic_references(item) for item in value.values())) if value else set()
+        if isinstance(value, list):
+            return set().union(*(BeadsService._symbolic_references(item) for item in value)) if value else set()
+        return set()
+
+    @staticmethod
+    def _canonical_references(value: Any) -> set[str]:
+        if isinstance(value, str):
+            return {value} if value.startswith("sinnix://") else set()
+        if isinstance(value, Mapping):
+            return set().union(*(BeadsService._canonical_references(item) for item in value.values())) if value else set()
+        if isinstance(value, list):
+            return set().union(*(BeadsService._canonical_references(item) for item in value)) if value else set()
+        return set()
+
+    @staticmethod
+    def _replace_symbols(value: Any, symbols: Mapping[str, str], *, placeholders: bool = False) -> Any:
+        if isinstance(value, str):
+            match = _SYMBOL_RE.fullmatch(value)
+            if match is None:
+                return value
+            name = match.group(1)
+            if placeholders:
+                return f"symbol-{name}"
+            try:
+                return symbols[name]
+            except KeyError as exc:
+                raise BeadsError(f"unresolved symbolic reference: ${name}", "precondition_failed") from exc
+        if isinstance(value, Mapping):
+            return {key: BeadsService._replace_symbols(item, symbols, placeholders=placeholders) for key, item in value.items()}
+        if isinstance(value, list):
+            return [BeadsService._replace_symbols(item, symbols, placeholders=placeholders) for item in value]
+        return value
+
+    @staticmethod
+    def _compensation_hint(operation: str, parameters: Mapping[str, Any], result: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+        inverse = {
+            "claim": "unclaim",
+            "close": "reopen",
+            "dependency.add": "dependency.remove",
+            "relate": "unrelate",
+        }.get(operation)
+        if operation == "create" and result and isinstance(result.get("after"), Mapping):
+            created = result["after"].get("id")
+            if isinstance(created, str):
+                return {"kind": "suggested_action", "operation": "close", "parameters": {"id": created}, "automatic": False}
+        if inverse is not None:
+            fields = {key: parameters[key] for key in ("id", "depends_on", "other_id") if key in parameters}
+            return {"kind": "suggested_action", "operation": inverse, "parameters": fields, "automatic": False}
+        if operation == "graph.create":
+            return {"kind": "manual", "reason": "native graph creation is atomic, but its created nodes require explicit follow-up actions to compensate", "automatic": False}
+        return None
+
+    @staticmethod
+    def _validate_changeset_preconditions(value: Any, index: int) -> Mapping[str, Any] | None:
+        if value is None:
+            return None
+        if not isinstance(value, Mapping) or set(value) - {"expected_task_revision", "expected_status", "expected_assignee", "expected_etag"}:
+            raise BeadsError(f"changeset action {index} preconditions are not recognized")
+        revision = value.get("expected_task_revision")
+        etag = value.get("expected_etag")
+        status = value.get("expected_status")
+        assignee = value.get("expected_assignee")
+        if revision is not None and (not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{64}", revision)):
+            raise BeadsError(f"changeset action {index} expected_task_revision is malformed")
+        if etag is not None and (not isinstance(etag, str) or not re.fullmatch(r"[0-9a-f]{64}", etag)):
+            raise BeadsError(f"changeset action {index} expected_etag is malformed")
+        if status is not None and (not isinstance(status, str) or len(status) > 64):
+            raise BeadsError(f"changeset action {index} expected_status is malformed")
+        if assignee is not None and (not isinstance(assignee, str) or len(assignee) > 256):
+            raise BeadsError(f"changeset action {index} expected_assignee is malformed")
+        return dict(value)
+
+    def _changeset_plan(self, actions: Any, on_error: Any) -> dict[str, Any]:
+        if on_error is None:
+            on_error = "stop"
+        if on_error not in {"stop", "continue"}:
+            raise BeadsError("on_error must be stop or continue")
+        if not isinstance(actions, list) or not actions or len(actions) > _MAX_CHANGESET_ACTIONS:
+            raise BeadsError(f"actions must contain 1-{_MAX_CHANGESET_ACTIONS} ordered items")
+        plan: list[dict[str, Any]] = []
+        bindings: dict[str, str] = {}
+        source_revisions: dict[str, str] = {}
+        for index, raw in enumerate(actions):
+            if not isinstance(raw, Mapping) or set(raw) - {"ref", "operation", "parameters", "preconditions", "bind"}:
+                raise BeadsError(f"changeset action {index} has unsupported fields")
+            if not {"ref", "operation", "parameters"} <= set(raw):
+                raise BeadsError(f"changeset action {index} requires ref, operation, and parameters")
+            match = _PROJECT_REF_RE.fullmatch(str(raw["ref"]))
+            if match is None:
+                raise BeadsError(f"changeset action {index} ref is not a canonical project or bead reference")
+            project_id, bead_id = match.groups()
+            operation = self._string(raw["operation"], f"actions[{index}].operation", 64)
+            parameters = raw["parameters"]
+            if not isinstance(parameters, Mapping):
+                raise BeadsError(f"changeset action {index} parameters must be an object")
+            parameters = dict(parameters)
+            preconditions = self._validate_changeset_preconditions(raw.get("preconditions"), index)
+            if bead_id is not None:
+                parameters.setdefault("id", bead_id)
+            bind = raw.get("bind")
+            if bind is not None:
+                bind = self._string(bind, f"actions[{index}].bind", 64)
+                if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", bind) or operation != "create":
+                    raise BeadsError(f"changeset action {index} bind is valid only for create")
+                if bind in bindings:
+                    raise BeadsError(f"changeset bind is duplicated: {bind}")
+                bindings[bind] = project_id
+            for reference in self._canonical_references(parameters):
+                foreign = _PROJECT_REF_RE.fullmatch(reference)
+                if foreign is not None and foreign.group(1) != project_id:
+                    raise BeadsError("cross-project Beads graph edges are unsupported", "unsupported_capability")
+            plan.append({"index": index, "project_id": project_id, "ref": str(raw["ref"]), "operation": operation, "parameters": parameters, "preconditions": preconditions, "bind": bind})
+            if project_id not in source_revisions:
+                source_revisions[project_id] = self.task_authority_status(project_id)["revision"]
+        for item in plan:
+            for symbol in self._symbolic_references(item["parameters"]):
+                if symbol not in bindings:
+                    raise BeadsError(f"changeset references unknown symbol: ${symbol}")
+                if bindings[symbol] != item["project_id"]:
+                    raise BeadsError("cross-project Beads graph edges are unsupported", "unsupported_capability")
+            self._compile(item["operation"], self._replace_symbols(item["parameters"], {}, placeholders=True))
+        payload = {"on_error": on_error, "actions": [{key: item[key] for key in ("ref", "operation", "parameters", "preconditions", "bind")} for item in plan], "source_revisions": source_revisions}
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        projects = list(source_revisions)
+        owner_atomic = len(plan) == 1 and plan[0]["operation"] == "graph.create"
+        atomicity = "owner_atomic" if owner_atomic else "cross_project_partitioned" if len(projects) > 1 else "per_step_commits"
+        return {"plan": plan, "on_error": on_error, "source_revisions": source_revisions, "preview_digest": digest, "atomicity": atomicity}
+
+    def changeset(self, actions: Any, *, mode: str, on_error: Any = None, preview_digest: str | None = None) -> dict[str, Any]:
+        if mode not in {"preview", "apply"}:
+            raise BeadsError("changeset mode must be preview or apply")
+        prepared = self._changeset_plan(actions, on_error)
+        native_validations: dict[int, str] = {}
+        if mode == "preview":
+            for item in prepared["plan"]:
+                if item["operation"] == "graph.create":
+                    validation = self.change(item["project_id"], item["operation"], item["parameters"], mode="preview")
+                    native_validations[item["index"]] = validation["native_validation"]
+        owner_atomic = prepared["atomicity"] == "owner_atomic" and (mode == "apply" or native_validations.get(0) == "dry_run")
+        atomicity = "owner_atomic" if owner_atomic else "per_step_commits" if prepared["atomicity"] == "owner_atomic" else prepared["atomicity"]
+        public_plan = [{"index": item["index"], "ref": item["ref"], "operation": item["operation"], "bind": item["bind"], "native_validation": native_validations.get(item["index"], "not_required"), "compensation": self._compensation_hint(item["operation"], item["parameters"])} for item in prepared["plan"]]
+        response = {"mode": mode, "owner_route": "beads.changeset", "source_revisions": prepared["source_revisions"], "preview_digest": prepared["preview_digest"], "on_error": prepared["on_error"], "atomicity": atomicity, "partitions": [{"project_ref": self.project_ref(project_id), "source_revision": revision, "action_indexes": [item["index"] for item in prepared["plan"] if item["project_id"] == project_id]} for project_id, revision in prepared["source_revisions"].items()], "actions": public_plan, "compensation": {"automatic": False, "claim": "No global rollback is attempted. Each applied step includes only a suggested compensation hint."}}
+        if mode == "preview":
+            return response
+        if preview_digest is not None and preview_digest != prepared["preview_digest"]:
+            raise BeadsError("changeset preview digest or per-project source revision is stale", "precondition_failed")
+        symbols: dict[str, str] = {}
+        outcomes: list[dict[str, Any]] = []
+        halted = False
+        for item in prepared["plan"]:
+            outcome = {"index": item["index"], "ref": item["ref"], "operation": item["operation"]}
+            if halted:
+                outcomes.append({**outcome, "outcome": "skipped", "reason": "on_error=stop after an earlier failed step"})
+                continue
+            try:
+                parameters = self._replace_symbols(item["parameters"], symbols)
+                applied = self.change(item["project_id"], item["operation"], parameters, mode="apply", preconditions=item["preconditions"])
+                if item["bind"] is not None:
+                    after = applied.get("after")
+                    if not isinstance(after, Mapping) or not isinstance(after.get("id"), str):
+                        raise BeadsError("owner create response omitted the bead id required by changeset bind", "owner_failed")
+                    symbols[item["bind"]] = after["id"]
+                outcomes.append({**outcome, "outcome": "applied", "before_revision": applied["before_revision"], "after_revision": applied["after_revision"], "result_ref": applied.get("after", {}).get("ref") if isinstance(applied.get("after"), Mapping) else None, "bound_ref": self.bead_ref(item["project_id"], symbols[item["bind"]]) if item["bind"] is not None else None, "compensation": self._compensation_hint(item["operation"], parameters, applied)})
+            except BeadsError as exc:
+                outcomes.append({**outcome, "outcome": "failed", "error": {"code": exc.code, "message": str(exc)}, "compensation": self._compensation_hint(item["operation"], item["parameters"])})
+                halted = prepared["on_error"] == "stop"
+        after_revisions = {project_id: self.task_authority_status(project_id)["revision"] for project_id in prepared["source_revisions"]}
+        return {**response, "outcomes": outcomes, "after_source_revisions": after_revisions, "partial_completion": any(item["outcome"] == "failed" for item in outcomes)}
+
+    def operate(self, project_id: str, operation: str, parameters: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        project, before = self._attest(project_id, True)
+        parameters = dict(parameters or {})
+        if operation == "snapshot.publish":
+            if parameters:
+                raise BeadsError("snapshot.publish accepts no parameters")
+            directory = self.config.state_dir / "beads-publications" / project_id
+            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            destination = directory / "issues.jsonl"
+            before_text = destination.read_text() if destination.exists() else ""
+            owner_result = self._run(project, ["export", "-o", str(destination)], True, text=True)
+            after_text = destination.read_text() if destination.exists() else ""
+            diff = "".join(unified_diff(before_text.splitlines(keepends=True), after_text.splitlines(keepends=True), fromfile="previous", tofile="published", n=3))
+            if len(diff.encode()) > self.config.max_result_bytes:
+                diff = diff[: self.config.max_result_bytes] + "\n[diff truncated]\n"
+            publication = {"destination": str(destination), "before_sha256": hashlib.sha256(before_text.encode()).hexdigest(), "after_sha256": hashlib.sha256(after_text.encode()).hexdigest(), "changed": before_text != after_text, "diff": diff}
+        elif operation == "sync.push":
+            if parameters:
+                raise BeadsError("sync.push accepts no parameters")
+            owner_result, publication = self._run(project, ["dolt", "push"], True), None
+        elif operation == "sync.pull":
+            if parameters:
+                raise BeadsError("sync.pull accepts no parameters")
+            owner_result, publication = self._run(project, ["dolt", "pull"], True), None
+        elif operation == "backup.create":
+            if parameters:
+                raise BeadsError("backup.create accepts no parameters")
+            owner_result, publication = self._run(project, ["backup", "create"], True), None
+        elif operation == "backup.list":
+            if parameters:
+                raise BeadsError("backup.list accepts no parameters")
+            owner_result, publication = self._run(project, ["backup", "list"], False), None
+        elif operation == "backup.restore":
+            backup_id = self._string(parameters.pop("backup_id", None), "backup_id", 256)
+            if parameters:
+                raise BeadsError("backup.restore accepts only backup_id")
+            owner_result, publication = self._run(project, ["backup", "restore", backup_id], True), None
+        else:
+            raise BeadsError(f"unsupported_capability: Beads maintenance operation {operation!r} is not declared")
+        after = self.task_authority_status(project_id)
+        return {"project_ref": self.project_ref(project_id), "owner_route": "beads.maintenance", "operation": operation, "before_revision": before["revision"], "after_revision": after["revision"], "owner_result": owner_result, "publication": publication, "atomicity": "per_step_commits", "git_bookkeeping": "none"}

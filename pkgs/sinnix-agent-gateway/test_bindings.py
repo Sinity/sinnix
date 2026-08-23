@@ -24,8 +24,10 @@ VALID_BINDINGS = (
     TargetToolBinding("change", "projects.change", "projects", "projects.change"),
     TargetToolBinding("change", "files.change", "files", "files.change"),
     TargetToolBinding("change", "beads.change", "beads", "beads.write"),
+    TargetToolBinding("change", "beads.changeset", "beads", "beads.changeset"),
     TargetToolBinding("change", "mcp.change", "mcp-broker", "mcp.call.write"),
     TargetToolBinding("operate", "machine.operate", "ops-reducer", "ops.actions.execute"),
+    TargetToolBinding("operate", "beads.operate", "beads", "beads.maintenance"),
     TargetToolBinding("operate", "jobs.cancel", "systemd-jobs", "job.cancel"),
     TargetToolBinding("operate", "desktop.operate", "desktop", "desktop.action"),
     TargetToolBinding("operate", "terminals.operate", "terminals", "terminals.action"),
@@ -51,8 +53,10 @@ def test_target_tool_bindings_cover_every_declared_action() -> None:
     assert bindings.action_for_tool("change", "projects.change") is REGISTRY.action("projects.change")
     assert bindings.action_for_tool("change", "files.change") is REGISTRY.action("files.change")
     assert bindings.action_for_tool("change", "beads.change") is REGISTRY.action("beads.change")
+    assert bindings.action_for_tool("change", "beads.changeset") is REGISTRY.action("beads.changeset")
     assert bindings.action_for_tool("change", "mcp.change") is REGISTRY.action("mcp.change")
     assert bindings.action_for_tool("operate", "machine.operate") is REGISTRY.action("machine.operate")
+    assert bindings.action_for_tool("operate", "beads.operate") is REGISTRY.action("beads.operate")
     assert bindings.action_for_tool("operate", "jobs.cancel") is REGISTRY.action("jobs.cancel")
     assert bindings.action_for_tool("operate", "desktop.operate") is REGISTRY.action("desktop.operate")
     assert bindings.action_for_tool("operate", "terminals.operate") is REGISTRY.action("terminals.operate")

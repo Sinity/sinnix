@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -14,21 +15,42 @@ from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig, TaskAuthor
 def beads_service(tmp_path: Path, principal: str = "operator") -> tuple[BeadsService, Path]:
     tmp_path.mkdir(parents=True, exist_ok=True)
     project = tmp_path / "project"; project.mkdir()
+    other_project = tmp_path / "other-project"; other_project.mkdir()
     log = tmp_path / "commands.jsonl"; runner = tmp_path / "bd"
     runner.write_text(
         f"#!{sys.executable}\nimport json, pathlib, sys\n"
         f"log=pathlib.Path({str(log)!r}); log.open('a').write(json.dumps(sys.argv[1:])+'\\n')\n"
         f"project={str(project)!r}\n"
+        f"other_project={str(other_project)!r}\n"
+        f"state_path={str(tmp_path / 'owner-state.json')!r}\n"
+        "state=json.loads(pathlib.Path(state_path).read_text()) if pathlib.Path(state_path).exists() else {'writes': 0, 'created': 0}\n"
         "args=sys.argv[1:]\n"
-        "if args[-1]=='where': print(json.dumps({'path': project+'/.beads','database_path':project+'/.beads/dolt','schema_version':1}))\n"
-        "elif args[-1]=='status': print(json.dumps({'summary':{'total_issues':2}}))\n"
+        "root=next((args[index + 1] for index, value in enumerate(args) if value == '--directory'), project)\n"
+        "if args[-1]=='where': print(json.dumps({'path': root+'/.beads','database_path':root+'/.beads/dolt','schema_version':1}))\n"
+        "elif args[-1]=='status': print(json.dumps({'summary':{'total_issues':2 + state['writes']}}))\n"
+        "elif 'unrelated-write' in args: state['writes'] += 1; pathlib.Path(state_path).write_text(json.dumps(state)); print(json.dumps({'unrelated': True}))\n"
+        "elif 'force-fail' in args: print('forced owner failure', file=sys.stderr); raise SystemExit(7)\n"
+        "elif 'export' in args:\n"
+        "    destination=pathlib.Path(args[args.index('-o')+1])\n"
+        "    destination.parent.mkdir(parents=True, exist_ok=True)\n"
+        "    destination.write_text(json.dumps({'writes':state['writes']}, sort_keys=True)+'\\n')\n"
+        "    print(json.dumps({'exported':str(destination)}))\n"
+        "elif 'create' in args and '--dry-run' not in args:\n"
+        "    state['writes'] += 1; state['created'] += 1; pathlib.Path(state_path).write_text(json.dumps(state)); print(json.dumps({'id':f'fixture-created-{state[\"created\"]}','title':'created','status':'open'}))\n"
+        "elif '--dry-run' in args: print(json.dumps({'dry_run':True}))\n"
         "elif '--format' in args: print('flowchart TD\\n  fixture-1 --> fixture-2')\n"
         "elif '--refs' in args: print(json.dumps({'schema_version':1, 'fixture-1':[]}))\n"
         "elif 'show' in args: print(json.dumps({'id':next((x for x in args if x.startswith('fixture-')), 'fixture-1'),'title':'fixture','status':'open','notes':'long existing notes','labels':['lane:gateway']}))\n"
         "elif 'dep' in args: print(json.dumps({'issues':[{'id':'fixture-2','dependency_type':'blocks'}]}))\n"
-        "else: print(json.dumps({'issues':[{'id':'fixture-1','title':'first','status':'open'},{'id':'fixture-2','title':'second','status':'open'}]}))\n"
+        "else:\n"
+        "    if '--readonly' not in args and any(item in args for item in ('update','unclaim','close','reopen','comments','remember','forget','dolt','backup')):\n"
+        "        state['writes'] += 1; pathlib.Path(state_path).write_text(json.dumps(state))\n"
+        "    print(json.dumps({'issues':[{'id':'fixture-1','title':'first','status':'open'},{'id':'fixture-2','title':'second','status':'open'}]}))\n"
     ); runner.chmod(0o700)
-    cfg = GatewayConfig(state_dir=tmp_path / "state", projects={"fixture": ProjectConfig(project_id="fixture", path=project, observer_read=True, task_authority=TaskAuthorityConfig(owner="beads", workspace=project / ".beads", database=project / ".beads" / "dolt"))}, beads_command=str(runner))
+    cfg = GatewayConfig(state_dir=tmp_path / "state", projects={
+        "fixture": ProjectConfig(project_id="fixture", path=project, observer_read=True, task_authority=TaskAuthorityConfig(owner="beads", workspace=project / ".beads", database=project / ".beads" / "dolt")),
+        "other": ProjectConfig(project_id="other", path=other_project, observer_read=True, task_authority=TaskAuthorityConfig(owner="beads", workspace=other_project / ".beads", database=other_project / ".beads" / "dolt")),
+    }, beads_command=str(runner))
     return BeadsService(cfg, Principal.for_name(principal)), log
 
 
@@ -146,3 +168,104 @@ def test_query_partial_sources_do_not_erase_healthy_projects(tmp_path: Path) -> 
     result = beads.query(project_ids=["fixture", "missing"], filters={"status":"open"})
     assert result["items"] and result["coverage"]["fixture"]["state"] == "complete"
     assert result["coverage"]["missing"]["state"] == "partial"
+
+
+def test_changeset_preview_is_non_mutating_and_binds_created_beads(tmp_path: Path) -> None:
+    beads, log = beads_service(tmp_path)
+    actions = [
+        {"ref": "sinnix://projects/fixture", "operation": "create", "parameters": {"title": "parent"}, "bind": "parent"},
+        {"ref": "sinnix://projects/fixture", "operation": "create", "parameters": {"title": "child", "parent": "$parent"}, "bind": "child"},
+        {"ref": "sinnix://projects/fixture", "operation": "dependency.add", "parameters": {"id": "$child", "depends_on": "$parent"}},
+    ]
+    preview = beads.changeset(actions, mode="preview")
+    assert preview["atomicity"] == "per_step_commits"
+    assert all("outcome" not in item for item in preview["actions"])
+    assert all("create" not in command or "--dry-run" in command for command in commands(log))
+    applied = beads.changeset(actions, mode="apply", preview_digest=preview["preview_digest"])
+    assert [item["outcome"] for item in applied["outcomes"]] == ["applied", "applied", "applied"]
+    assert applied["outcomes"][1]["bound_ref"].endswith("fixture-created-2")
+    dependency = next(command for command in commands(log) if "dep" in command and "add" in command)
+    assert "fixture-created-2" in dependency and "fixture-created-1" in dependency
+
+
+def test_changeset_reports_failure_skips_and_never_sweeps_an_unrelated_writer(tmp_path: Path) -> None:
+    beads, log = beads_service(tmp_path)
+    actions = [
+        {"ref": "sinnix://projects/fixture", "operation": "create", "parameters": {"title": "first"}},
+        {"ref": "sinnix://projects/fixture", "operation": "create", "parameters": {"title": "force-fail"}},
+        {"ref": "sinnix://projects/fixture", "operation": "create", "parameters": {"title": "skipped"}},
+    ]
+    result = beads.changeset(actions, mode="apply")
+    assert [item["outcome"] for item in result["outcomes"]] == ["applied", "failed", "skipped"]
+    continued = beads.changeset([
+        {"ref": "sinnix://projects/fixture", "operation": "create", "parameters": {"title": "force-fail"}},
+        {"ref": "sinnix://projects/fixture", "operation": "create", "parameters": {"title": "continues"}},
+    ], mode="apply", on_error="continue")
+    assert [item["outcome"] for item in continued["outcomes"]] == ["failed", "applied"]
+    runner = tmp_path / "bd"
+    subprocess.run([str(runner), "unrelated-write"], check=True, capture_output=True, text=True)
+    preview = beads.changeset(actions[:1], mode="preview")
+    subprocess.run([str(runner), "unrelated-write"], check=True, capture_output=True, text=True)
+    with pytest.raises(BeadsError, match="stale"):
+        beads.changeset(actions[:1], mode="apply", preview_digest=preview["preview_digest"])
+    assert all(item["operation"] == "create" for item in result["outcomes"])
+    assert any("unrelated-write" in command for command in commands(log))
+
+
+def test_changeset_rejects_cross_project_graph_edges_before_mutation(tmp_path: Path) -> None:
+    beads, log = beads_service(tmp_path)
+    with pytest.raises(BeadsError, match="cross-project"):
+        beads.changeset([
+            {"ref": "sinnix://projects/fixture", "operation": "create", "parameters": {"title": "first"}, "bind": "first"},
+            {"ref": "sinnix://projects/other", "operation": "create", "parameters": {"title": "second", "parent": "$first"}},
+        ], mode="preview")
+    assert all("create" not in command for command in commands(log))
+
+
+def test_changeset_partitions_independent_projects_and_validates_every_precondition(tmp_path: Path) -> None:
+    beads, _ = beads_service(tmp_path)
+    actions = [
+        {"ref": "sinnix://projects/fixture", "operation": "create", "parameters": {"title": "one"}},
+        {"ref": "sinnix://projects/other", "operation": "create", "parameters": {"title": "two"}},
+    ]
+    applied = beads.changeset(actions, mode="apply")
+    assert applied["atomicity"] == "cross_project_partitioned"
+    assert set(applied["source_revisions"]) == {"fixture", "other"}
+    assert [item["outcome"] for item in applied["outcomes"]] == ["applied", "applied"]
+    with pytest.raises(BeadsError, match="expected_task_revision"):
+        beads.changeset([
+            {"ref": "sinnix://projects/fixture", "operation": "create", "parameters": {"title": "blocked"}},
+            {"ref": "sinnix://projects/fixture", "operation": "create", "parameters": {"title": "bad"}, "preconditions": {"expected_task_revision": "not-a-revision"}},
+        ], mode="apply")
+
+
+def test_graph_changeset_is_owner_atomic_only_after_native_validation(tmp_path: Path) -> None:
+    beads, log = beads_service(tmp_path)
+    actions = [
+        {"ref": "sinnix://projects/fixture", "operation": "graph.create", "parameters": {"graph": {"issues": [{"title": "parent"}, {"title": "child"}]}}},
+    ]
+    preview = beads.changeset(actions, mode="preview")
+    assert preview["atomicity"] == "owner_atomic"
+    assert preview["actions"][0]["native_validation"] == "dry_run"
+    result = beads.changeset(actions, mode="apply", preview_digest=preview["preview_digest"])
+    assert result["atomicity"] == "owner_atomic"
+    assert result["outcomes"][0]["outcome"] == "applied"
+    assert any("--graph" in command and "--dry-run" in command for command in commands(log))
+
+
+def test_explicit_maintenance_operations_publish_a_deterministic_snapshot_receipt(tmp_path: Path) -> None:
+    beads, log = beads_service(tmp_path)
+    first = beads.operate("fixture", "snapshot.publish")
+    second = beads.operate("fixture", "snapshot.publish")
+    assert first["publication"]["after_sha256"] == second["publication"]["after_sha256"]
+    assert second["publication"]["changed"] is False and second["publication"]["diff"] == ""
+    assert first["git_bookkeeping"] == "none"
+    beads.operate("fixture", "sync.push")
+    beads.operate("fixture", "sync.pull")
+    beads.operate("fixture", "backup.create")
+    beads.operate("fixture", "backup.list")
+    beads.operate("fixture", "backup.restore", {"backup_id": "fixture-backup"})
+    assert any("dolt" in command and "push" in command for command in commands(log))
+    assert any("dolt" in command and "pull" in command for command in commands(log))
+    assert any("backup" in command and "create" in command for command in commands(log))
+    assert any("backup" in command and "restore" in command and "fixture-backup" in command for command in commands(log))
