@@ -308,7 +308,7 @@ RESOURCE_GET_SCHEMA: dict[str, Any] = _with_request_controls(
                 "maximum": 262_144,
                 "default": 64_000,
             },
-            "includes": {"type": "array", "maxItems": 8, "items": {"enum": ["comments", "history", "events", "dependencies", "dependents", "children", "refs"]}},
+            "includes": {"type": "array", "maxItems": 8, "items": {"enum": ["blockers", "comments", "history", "events", "dependencies", "dependents", "children", "refs"]}},
             "as_of": {"type": "string", "minLength": 1, "maxLength": 128},
         },
     }

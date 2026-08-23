@@ -68,12 +68,13 @@ def test_query_compiles_native_list_filters_and_records_parse_parity(tmp_path: P
 
 def test_get_graph_and_memory_keep_owner_features_explicit(tmp_path: Path) -> None:
     beads, log = beads_service(tmp_path)
-    item = beads.get("fixture", "fixture-1", includes=["comments", "history", "dependencies", "dependents", "children", "refs"], as_of="HEAD")
+    item = beads.get("fixture", "fixture-1", includes=["blockers", "comments", "history", "dependencies", "dependents", "children", "refs"], as_of="HEAD")
     graph = beads.graph("fixture", "fixture-1", direction="both", edge_type="blocks", status="open", max_rows=10, mermaid=True)
     assert item["task_revision"] and item["includes"]["history"]
     assert graph["nodes"][0]["ref"].startswith("sinnix://projects/fixture/beads/")
     assert "flowchart TD" in graph["mermaid"]
     assert item["as_of"] == "HEAD" and item["links"]["jobs"].endswith("/jobs")
+    assert item["includes"]["blockers"]["items"][0]["id"] == "fixture-2"
     assert graph["owner_capabilities"]["native_cycle_detection"] is True
     assert any(command[-2:] == ["--limit", "20"] for command in commands(log))
 
