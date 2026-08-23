@@ -21,7 +21,7 @@ import sinnixd.cli as cli_module
 from sinnix_mcp import ErrorCode, OpaquePayload, RequestEnvelope, ResponseEnvelope, SinnixRef, SourceBinding
 from sinnix_mcp.execution import EnvironmentProfile, ExecutionResult
 
-from sinnixd.api import UnixSocketServer, call, receive_frame, send_frame
+from sinnixd.api import SinnixdClient, SinnixdClientError, UnixSocketServer, call, receive_frame, send_frame
 from sinnixd.environment import build_environment
 from sinnixd.delivery import DeliveryError, GitHubDelivery
 from sinnixd.jobs import (
@@ -56,6 +56,40 @@ def test_agentctl_exit_status_matches_response_envelope(
 
     assert cli_module.main() == expected
     assert json.loads(capsys.readouterr().out) == response
+
+
+def test_canonical_client_validates_typed_response_identity() -> None:
+    request = RequestEnvelope(
+        request_id=str(uuid4()),
+        correlation_id=str(uuid4()),
+        operation="runtime.status",
+        owner="sinnixd",
+        principal="observer",
+    )
+    response = ResponseEnvelope(
+        request_id=request.request_id,
+        correlation_id=request.correlation_id,
+        owner="sinnixd",
+        payload=OpaquePayload.bounded({"status": "ready"}),
+    )
+    client = SinnixdClient(
+        Path("/run/user/fixture/sinnixd.sock"),
+        lambda _path, _request: response.to_dict(),
+    )
+
+    assert client.dispatch(request) == response
+
+    mismatched = SinnixdClient(
+        Path("/run/user/fixture/sinnixd.sock"),
+        lambda _path, _request: ResponseEnvelope(
+            request_id=str(uuid4()),
+            correlation_id=request.correlation_id,
+            owner="sinnixd",
+            payload=OpaquePayload.bounded({}),
+        ).to_dict(),
+    )
+    with pytest.raises(SinnixdClientError, match="does not match"):
+        mismatched.dispatch(request)
 
 
 @pytest.mark.parametrize(

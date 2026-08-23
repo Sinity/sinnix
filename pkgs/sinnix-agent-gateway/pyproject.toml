@@ -7,7 +7,7 @@ name = "sinnix-agent-gateway"
 version = "0.2.0"
 description = "Trusted local MCP gateway for repo, command, artifact, and Sinnix operations"
 requires-python = ">=3.12"
-dependencies = ["mcp==2.0.0"]
+dependencies = ["mcp==2.0.0", "sinnixd==0.1.0"]
 
 [project.scripts]
 sinnix-agent-gateway = "sinnix_agent_gateway.cli:main"

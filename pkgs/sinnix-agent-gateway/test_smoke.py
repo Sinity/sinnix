@@ -77,6 +77,9 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
     }.isdisjoint(readonly_names)
     assert "shell_query" not in readonly_names
     assert {"project_context", "project_search", "audit_tail"}.isdisjoint(readonly_names)
+    assert {"job_list", "job_status", "job_read_output"}.isdisjoint(
+        readonly_names | local_names | operator_names
+    )
     assert {
         "capability_search",
         "capability_describe",
