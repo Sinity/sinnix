@@ -23,6 +23,21 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--socket", type=Path, default=default_socket_path())
     subcommands = result.add_subparsers(dest="command", required=True)
     subcommands.add_parser("status")
+    shell = subcommands.add_parser("shell")
+    shell.add_argument("--project", required=True)
+    shell.add_argument("--checkout", required=True)
+    shell.add_argument("--cwd", default=".")
+    shell.add_argument("--timeout-seconds", type=int, default=3_600)
+    shell.add_argument("argv", nargs=argparse.REMAINDER)
+    agent = subcommands.add_parser("agent")
+    agent.add_argument("--project", required=True)
+    agent.add_argument("--checkout", required=True)
+    agent.add_argument("--prompt-file", type=Path, required=True)
+    agent.add_argument("--backend", required=True)
+    agent.add_argument("--model", required=True)
+    agent.add_argument("--effort", required=True)
+    agent.add_argument("--credential-profile", default="subscription")
+    agent.add_argument("--timeout-seconds", type=int, default=3_600)
     project = subcommands.add_parser("project")
     project_subcommands = project.add_subparsers(dest="project_command", required=True)
     project_subcommands.add_parser("list")
@@ -45,6 +60,9 @@ def parser() -> argparse.ArgumentParser:
     logs.add_argument("job_id")
     logs.add_argument("--offset", type=int, default=0)
     logs.add_argument("--max-bytes", type=int, default=64_000)
+    job_result = job_subcommands.add_parser("result")
+    job_result.add_argument("job_id")
+    job_result.add_argument("--max-bytes", type=int, default=64_000)
     cancel = job_subcommands.add_parser("cancel")
     cancel.add_argument("job_id")
     owner = subcommands.add_parser("owner")
@@ -61,16 +79,19 @@ def daemon_parser() -> argparse.ArgumentParser:
     result.add_argument("--socket", type=Path, default=default_socket_path())
     result.add_argument("--state-dir", type=Path, default=default_state_dir())
     result.add_argument("--project-root", type=Path, action="append", required=True)
+    result.add_argument("--native-runner", type=Path, required=True)
     return result
 
 
-def _request(operation: str, owner: str, arguments: dict[str, object]) -> RequestEnvelope:
+def _request(
+    operation: str, owner: str, arguments: dict[str, object], principal: str = "local-cli"
+) -> RequestEnvelope:
     return RequestEnvelope(
         request_id=str(uuid4()),
         correlation_id=str(uuid4()),
         operation=operation,
         owner=owner,
-        principal="local-cli",
+        principal=principal,
         arguments=arguments,
     )
 
@@ -79,6 +100,46 @@ def main() -> None:
     arguments = parser().parse_args()
     if arguments.command == "status":
         request = _request("runtime.status", "sinnixd", {})
+    elif arguments.command == "shell":
+        shell_argv = arguments.argv[1:] if arguments.argv and arguments.argv[0] == "--" else arguments.argv
+        if not shell_argv:
+            parser().error("shell requires a command after --")
+        request = _request(
+            "job.shell.start",
+            "systemd-jobs",
+            {
+                "project_id": arguments.project,
+                "checkout_id": arguments.checkout,
+                "argv": shell_argv,
+                "cwd": arguments.cwd,
+                "timeout_seconds": arguments.timeout_seconds,
+                "result": "exit-status",
+            },
+            "operator",
+        )
+    elif arguments.command == "agent":
+        try:
+            prompt = arguments.prompt_file.read_text()
+        except OSError as error:
+            parser().error(f"could not read --prompt-file: {error}")
+        if not prompt or len(prompt.encode()) > 200_000:
+            parser().error("--prompt-file must contain at most 200000 non-empty bytes")
+        request = _request(
+            "job.agent.start",
+            "systemd-jobs",
+            {
+                "project_id": arguments.project,
+                "checkout_id": arguments.checkout,
+                "prompt": prompt,
+                "backend": arguments.backend,
+                "model": arguments.model,
+                "effort": arguments.effort,
+                "credential_profile": arguments.credential_profile,
+                "timeout_seconds": arguments.timeout_seconds,
+                "result": "last-message",
+            },
+            "agent-control",
+        )
     elif arguments.command == "project" and arguments.project_command == "list":
         request = _request("project.list", "project-adapters", {})
     elif arguments.command == "project" and arguments.project_command == "get":
@@ -109,6 +170,12 @@ def main() -> None:
             "systemd-jobs",
             {"job_id": arguments.job_id, "offset": arguments.offset, "max_bytes": arguments.max_bytes},
         )
+    elif arguments.command == "job" and arguments.job_command == "result":
+        request = _request(
+            "job.result",
+            "systemd-jobs",
+            {"job_id": arguments.job_id, "max_bytes": arguments.max_bytes},
+        )
     elif arguments.command == "job":
         request = _request("job.cancel", "systemd-jobs", {"job_id": arguments.job_id})
     else:
@@ -127,5 +194,6 @@ def daemon_main() -> None:
     service = SinnixdService(
         ProjectCatalog(arguments.project_root),
         jobs=GenericJobs(UserSystemdJobs(), GenericJobStore(arguments.state_dir)),
+        native_runner=arguments.native_runner,
     )
     UnixSocketServer(arguments.socket, service).serve_forever()

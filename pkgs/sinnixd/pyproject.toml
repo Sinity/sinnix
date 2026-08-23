@@ -13,6 +13,7 @@ dependencies = ["sinnix-mcp==0.1.0"]
 agentctl = "sinnixd.cli:main"
 sinnixd = "sinnixd.cli:daemon_main"
 sinnixd-capture = "sinnixd.jobs:capture_cli"
+sinnixd-contract-runner = "sinnixd.runner:main"
 
 [tool.setuptools.packages.find]
 include = ["sinnixd*"]

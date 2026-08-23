@@ -5,6 +5,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -33,6 +34,7 @@ from sinnixd.jobs import (
 )
 from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from sinnixd.projects import ProjectCatalog, ProjectConfigError
+from sinnixd.runner import RunnerError, _revalidate_checkout
 from sinnixd.service import SinnixdService
 
 
@@ -85,13 +87,15 @@ documentation = "Bounded Polylogue archive status."
     )
 
 
-def request(operation: str, owner: str, arguments: dict[str, object] | None = None) -> RequestEnvelope:
+def request(
+    operation: str, owner: str, arguments: dict[str, object] | None = None, principal: str = "test"
+) -> RequestEnvelope:
     return RequestEnvelope(
         request_id=str(uuid4()),
         correlation_id=str(uuid4()),
         operation=operation,
         owner=owner,
-        principal="test",
+        principal=principal,
         arguments=arguments or {},
     )
 
@@ -154,6 +158,31 @@ class FakeSystemdJobs:
 
 def generic_jobs(tmp_path: Path, systemd: FakeSystemdJobs | None = None) -> GenericJobs:
     return GenericJobs(systemd or FakeSystemdJobs(), GenericJobStore(tmp_path / "state"), wait_poll_seconds=0.001)
+
+
+def initialize_git_checkout(root: Path) -> None:
+    for arguments in (
+        ("git", "init", "--quiet", str(root)),
+        ("git", "-C", str(root), "add", "."),
+        ("git", "-C", str(root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "fixture"),
+    ):
+        subprocess.run(arguments, check=True)
+
+
+def native_runner(path: Path) -> None:
+    path.write_text(
+        "#!/bin/sh\n"
+        "set -eu\n"
+        "last= prompt=\n"
+        "if [ -n \"${RUNNER_ARGS:-}\" ]; then printf '%s\\n' \"$@\" > \"$RUNNER_ARGS\"; fi\n"
+        "while [ $# -gt 0 ]; do\n"
+        "  case $1 in --last-file) last=$2; shift 2 ;; --prompt-file) prompt=$2; shift 2 ;; *) shift ;; esac\n"
+        "done\n"
+        "test -f \"$prompt\"\n"
+        "printf native-fixture-result > \"$last\"\n"
+        "printf native-fixture-log\n"
+    )
+    path.chmod(0o700)
 
 
 @dataclass
@@ -463,6 +492,245 @@ def test_declared_project_job_rejects_arbitrary_execution(tmp_path: Path) -> Non
     assert unknown_operation.error.code.value == "INVALID_ARGUMENT"
     assert direct_argv.error is not None
     assert direct_argv.error.code.value == "INVALID_ARGUMENT"
+
+
+def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: Path) -> None:
+    """Anti-vacuity: typed contracts must reach GenericJobs, not a second controller."""
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    runner = tmp_path / "native-runner"
+    native_runner(runner)
+    systemd = FakeSystemdJobs(
+        properties={"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}
+    )
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd), native_runner=runner)
+
+    shell = service.dispatch(
+        request(
+            "job.shell.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "checkout_id": "default", "argv": ["printf", "shell-secret"], "cwd": ".", "timeout_seconds": 60, "result": "exit-status"},
+            "operator",
+        )
+    )
+    agent = service.dispatch(
+        request(
+            "job.agent.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "checkout_id": "default", "prompt": "private prompt", "backend": "codex", "model": "fixture", "effort": "high", "credential_profile": "subscription", "timeout_seconds": 60, "result": "last-message"},
+            "agent-control",
+        )
+    )
+
+    assert shell.ok and agent.ok
+    assert shell.payload is not None and agent.payload is not None
+    shell_job = shell.payload.inline
+    agent_job = agent.payload.inline
+    assert shell_job["kind"] == "operator-shell"
+    assert shell_job["principal"] == "operator"
+    assert shell_job["contract"]["argv"]["executable"] == "printf"
+    assert agent_job["kind"] == "attested-agent"
+    assert agent_job["principal"] == "agent-control"
+    assert agent_job["contract"]["backend"] == "codex"
+    assert agent_job["artifacts"]["result"]["max_bytes"] == 64_000
+    persisted = (tmp_path / "state" / "jobs" / f"{agent_job['job_id']}.json").read_text()
+    assert "private prompt" not in persisted
+    assert "shell-secret" not in persisted
+    assert len(systemd.started) == 2
+    assert all(start["unit"].startswith("sinnixd-job-") for start in systemd.started)
+    restarted = GenericJobs(systemd, service.jobs.store, wait_poll_seconds=0.001)
+    assert {job["job_id"] for job in restarted.list()["jobs"]} == {shell_job["job_id"], agent_job["job_id"]}
+
+
+def test_typed_contracts_refuse_spoofed_principals_checkout_backend_environment_and_results(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    runner = tmp_path / "native-runner"
+    native_runner(runner)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path), native_runner=runner)
+    shell_arguments = {
+        "project_id": "fixture", "checkout_id": "default", "argv": ["true"], "cwd": ".", "timeout_seconds": 60, "result": "exit-status"
+    }
+    agent_arguments = {
+        "project_id": "fixture", "checkout_id": "default", "prompt": "prompt", "backend": "codex", "model": "fixture", "effort": "high", "credential_profile": "subscription", "timeout_seconds": 60, "result": "last-message"
+    }
+    invalid_principal = service.dispatch(request("job.shell.start", "systemd-jobs", shell_arguments, "observer"))
+    invalid_checkout = service.dispatch(request("job.shell.start", "systemd-jobs", {**shell_arguments, "checkout_id": "absent"}, "operator"))
+    invalid_backend = service.dispatch(request("job.agent.start", "systemd-jobs", {**agent_arguments, "backend": "unknown"}, "agent-control"))
+    invalid_environment = service.dispatch(request("job.shell.start", "systemd-jobs", {**shell_arguments, "environment": {"SINNIXD_JOB_ID": "spoof"}}, "operator"))
+    invalid_result = service.dispatch(request("job.agent.start", "systemd-jobs", {**agent_arguments, "result": "exit-status"}, "agent-control"))
+
+    for response in (invalid_principal, invalid_checkout, invalid_backend, invalid_environment, invalid_result):
+        assert response.error is not None
+        assert response.error.code.value == "INVALID_ARGUMENT"
+
+
+def test_failed_agent_launch_removes_private_prompt_and_contract_input(tmp_path: Path) -> None:
+    """Anti-vacuity: a rejected launch cannot leave prompt material in durable state."""
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    runner = tmp_path / "native-runner"
+    native_runner(runner)
+    class ConfirmedAbsent(FakeSystemdJobs):
+        def start(self, **kwargs) -> None:
+            raise SystemdJobError("fixture launch rejected")
+
+    systemd = ConfirmedAbsent(properties={"LoadState": "not-found", "ActiveState": "inactive"})
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd), native_runner=runner)
+
+    response = service.dispatch(
+        request(
+            "job.agent.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "checkout_id": "default",
+                "prompt": "private prompt removed after launch failure",
+                "backend": "codex",
+                "model": "fixture",
+                "effort": "high",
+                "credential_profile": "subscription",
+                "timeout_seconds": 60,
+                "result": "last-message",
+            },
+            "agent-control",
+        )
+    )
+
+    assert response.ok
+    assert response.payload is not None
+    assert response.payload.inline["state"]["phase"] == "launch-failed"
+    assert not list((tmp_path / "state" / "inputs").iterdir())
+
+
+def test_runner_rejects_changed_or_unregistered_checkout_identities(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    checkout = ProjectCatalog([tmp_path]).checkout("fixture", "default").to_dict()
+
+    for changed in (
+        {**checkout, "git_common_dir": str(tmp_path / "other-common-dir")},
+        {**checkout, "head": "0" * 40},
+        {**checkout, "project_path": str(tmp_path / "unregistered-project")},
+    ):
+        with pytest.raises(RunnerError):
+            _revalidate_checkout(changed)
+
+    symlink = tmp_path.parent / f"{tmp_path.name}-symlink"
+    symlink.symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(RunnerError):
+        _revalidate_checkout({**checkout, "path": str(symlink)})
+
+
+def test_agent_runner_revalidates_checkout_and_writes_a_bounded_result_fixture(tmp_path: Path) -> None:
+    """Anti-vacuity: the native runner only executes after Git identity and env checks pass."""
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    runner = tmp_path / "native-runner"
+    native_runner(runner)
+    catalog = ProjectCatalog([tmp_path])
+    checkout = catalog.checkout("fixture", "default")
+    state = tmp_path / "state"
+    inputs = state / "inputs"
+    results = state / "results"
+    native_state = state / "native"
+    runner_arguments = state / "native-runner.args"
+    inputs.mkdir(parents=True)
+    results.mkdir()
+    prompt = inputs / "fixture.prompt"
+    prompt.write_text("private fixture prompt")
+    payload = {
+        "schema_version": 1,
+        "job_id": "11111111-1111-1111-1111-111111111111",
+        "kind": "attested-agent",
+        "principal": "agent-control",
+        "checkout": checkout.to_dict(),
+        "backend": "codex",
+        "model": "fixture",
+        "effort": "high",
+        "credential_profile": "subscription",
+        "prompt_path": str(prompt),
+        "result_path": str(results / "fixture.result"),
+    }
+    input_path = inputs / "fixture.json"
+    input_path.write_text(json.dumps(payload))
+    environment = {
+        **os.environ,
+        "SINNIXD_JOB_ID": payload["job_id"],
+        "SINNIXD_PROJECT_ID": "fixture",
+        "SINNIXD_CHECKOUT_ID": "default",
+        "SINNIXD_PRINCIPAL": "agent-control",
+        "SINNIXD_TIMEOUT_SECONDS": "60",
+        "RUNNER_ARGS": str(runner_arguments),
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "sinnixd.runner", "--input", str(input_path), "--job-id", payload["job_id"], "--unit", f"sinnixd-job-{payload['job_id']}.service", "--native-runner", str(runner), "--native-state-dir", str(native_state), "--state-root", str(state)],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (results / "fixture.result").read_text() == "native-fixture-result"
+    assert not prompt.exists()
+    assert not input_path.exists()
+    handoff = runner_arguments.read_text().splitlines()
+    assert handoff[handoff.index("--registered-project") + 1] == "fixture"
+    assert handoff[handoff.index("--expected-git-common-dir") + 1] == str(checkout.git_common_dir)
+    assert handoff[handoff.index("--workdir") + 1] == str(checkout.path)
+
+
+def test_runner_rejects_forged_sinnix_environment(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    runner = tmp_path / "native-runner"
+    native_runner(runner)
+    checkout = ProjectCatalog([tmp_path]).checkout("fixture", "default")
+    state = tmp_path / "state"
+    inputs = state / "inputs"
+    inputs.mkdir(parents=True)
+    prompt = inputs / "fixture.prompt"
+    prompt.write_text("private fixture prompt")
+    job_id = "11111111-1111-1111-1111-111111111111"
+    input_path = inputs / "fixture.json"
+    input_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "job_id": job_id,
+                "kind": "attested-agent",
+                "principal": "agent-control",
+                "checkout": checkout.to_dict(),
+                "backend": "codex",
+                "model": "fixture",
+                "effort": "high",
+                "credential_profile": "subscription",
+                "prompt_path": str(prompt),
+                "result_path": str(state / "results" / "fixture.result"),
+            }
+        )
+    )
+    environment = {
+        **os.environ,
+        "SINNIXD_JOB_ID": job_id,
+        "SINNIXD_PROJECT_ID": "fixture",
+        "SINNIXD_CHECKOUT_ID": "default",
+        "SINNIXD_PRINCIPAL": "agent-control",
+        "SINNIXD_TIMEOUT_SECONDS": "60",
+        "SINNIXD_FORGED": "identity-overlay",
+    }
+
+    result = subprocess.run(
+        [sys.executable, "-m", "sinnixd.runner", "--input", str(input_path), "--job-id", job_id, "--unit", f"sinnixd-job-{job_id}.service", "--native-runner", str(runner), "--native-state-dir", str(state / "native"), "--state-root", str(state)],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "untrusted SINNIX identity" in result.stderr
 
 
 def test_environment_builder_keeps_empty_values_distinct_from_unset() -> None:

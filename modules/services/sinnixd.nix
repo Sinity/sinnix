@@ -14,6 +14,11 @@ in
 mkServiceModule {
   name = "sinnixd";
   description = "Local Sinnix runtime daemon for agentctl and MCP frontends";
+  extraOptions.agentRunner = lib.mkOption {
+    type = lib.types.str;
+    default = "${config.sinnix.paths.dotsRoot}/_ai/skills/agent-orchestration/scripts/run_agent_prompt.sh";
+    description = "Native attested-agent execution backend; Sinnixd retains systemd lifecycle authority.";
+  };
   surface = {
     unit = "sinnixd.service";
     manager = "user";
@@ -24,7 +29,7 @@ mkServiceModule {
     };
   };
   configFn =
-    { ... }:
+    { cfg, ... }:
     {
       environment.systemPackages = [ scriptPkgs.sinnixd ];
       sinnix.persistence.home.directories = [ ".local/state/sinnixd" ];
@@ -41,7 +46,7 @@ mkServiceModule {
           })
           // {
             Type = "simple";
-            ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd --socket %t/sinnixd.sock --state-dir %S/sinnixd --project-root ${projectRoot}";
+            ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd --socket %t/sinnixd.sock --state-dir %S/sinnixd --project-root ${projectRoot} --native-runner ${lib.escapeShellArg cfg.agentRunner}";
             Restart = "on-failure";
             RestartSec = "2s";
             UMask = "0077";
