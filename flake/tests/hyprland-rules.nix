@@ -29,28 +29,11 @@ in
           config:
           let
             settings = (hmFor config).wayland.windowManager.hyprland.settings;
-            notificationRules = lib.filter (
-              rule: lib.attrByPath [ "match" "namespace" ] null rule == "noctalia-notification"
-            ) settings.layer_rule;
-            notificationRule =
-              if builtins.length notificationRules == 1 then builtins.head notificationRules else { };
           in
           [
             {
-              assertion = settings.config.decoration.blur.enabled;
-              message = "Global Hyprland blur must remain enabled outside the notification layer.";
-            }
-            {
-              assertion = builtins.length notificationRules == 1;
-              message = "Exactly one layer rule must target the Noctalia notification namespace.";
-            }
-            {
-              assertion = notificationRule.blur or null == false;
-              message = "The Noctalia notification layer must explicitly disable blur.";
-            }
-            {
-              assertion = !(notificationRule ? ignore_alpha);
-              message = "The notification policy must not retain ignore_alpha as a claimed blur fix.";
+              assertion = !settings.config.decoration.blur.enabled;
+              message = "Global Hyprland blur must remain disabled while Noctalia uses a full-height notification surface.";
             }
           ];
       };
@@ -63,9 +46,6 @@ in
         cat > "$out" <<'EOF_CONTRACT'
         ${builtins.toJSON {
           globalBlur = settings.config.decoration.blur.enabled;
-          notificationLayerRules = lib.filter (
-            rule: lib.attrByPath [ "match" "namespace" ] null rule == "noctalia-notification"
-          ) settings.layer_rule;
         }}
         EOF_CONTRACT
       '';

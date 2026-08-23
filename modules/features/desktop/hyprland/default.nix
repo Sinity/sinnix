@@ -257,7 +257,15 @@ in
                   dim_inactive = false;
                   dim_strength = 0.0;
                   blur = {
-                    enabled = true;
+                    # Noctalia's notification surface is a full-height column
+                    # and requests client-side background blur for that whole
+                    # rectangle. Hyprland's scoped layer-rule blur=false and
+                    # ignore_alpha controls are accepted by the Lua parser but
+                    # do not override this request: matched live captures still
+                    # show the column after an explicit compositor reload.
+                    # Global blur=false is the directly measured boundary: with
+                    # it disabled, the transparent area remains unchanged.
+                    enabled = false;
                   };
                   shadow = {
                     enabled = true;
