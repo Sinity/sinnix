@@ -927,15 +927,23 @@ def test_exact_head_verified_workspace_publishes_lands_and_finishes_without_a_pr
     systemd.properties = {"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}
     calls: list[list[str]] = []
     merged = False
+    created = False
 
     def fake_run(argv, **_kwargs):
-        nonlocal merged
+        nonlocal created, merged
         command = list(argv)
         calls.append(command)
         if command[:3] == ["gh", "pr", "merge"]:
             merged = True
             return subprocess.CompletedProcess(command, 0, "", "")
+        if command[:3] == ["gh", "pr", "create"]:
+            created = True
+            return subprocess.CompletedProcess(command, 0, "https://github.test/example/pull/17\n", "")
         if command[:3] == ["gh", "pr", "view"]:
+            if command[-1] == "url":
+                return subprocess.CompletedProcess(
+                    command, 0 if created else 1, json.dumps({"url": "https://github.test/example/pull/17"}), "missing"
+                )
             payload = {
                 "number": 17,
                 "url": "https://github.test/example/pull/17",
@@ -969,14 +977,18 @@ def test_exact_head_verified_workspace_publishes_lands_and_finishes_without_a_pr
     assert replacement.ok and replacement.payload is not None
     job_id = replacement.payload.inline["job_id"]
     published = delivery.publish(workspace["workspace_id"], job_id, "Deliver fixture", "Verified body")
+    reconciled = delivery.publish(workspace["workspace_id"], job_id, "Deliver fixture", "Verified body")
     landed = delivery.land(workspace["workspace_id"], job_id)
     finished = delivery.finish(workspace["workspace_id"])
 
-    assert published["published"] and landed["landed"] and finished["finished"]
+    assert published["published"] and published["created"]
+    assert reconciled["published"] and not reconciled["created"]
+    assert landed["landed"] and finished["finished"]
     assert any(command[-7:-4] == ["git", "-C", str(path)] and "push" in command for command in calls)
     assert any(command[:3] == ["gh", "pr", "create"] for command in calls)
     assert any(command[:3] == ["gh", "pr", "merge"] for command in calls)
     assert not path.exists()
+    assert sum(command[:3] == ["gh", "pr", "create"] for command in calls) == 1
     assert service.workspaces.list("fixture") == {"workspaces": []}
 
 
