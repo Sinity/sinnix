@@ -15,11 +15,7 @@ mkServiceModule {
   description = "Local Sinnix runtime daemon for agentctl and MCP frontends";
   extraOptions.projectRoots = lib.mkOption {
     type = lib.types.nonEmptyListOf lib.types.str;
-    default = [
-      config.sinnix.paths.projectRoot
-      "${config.sinnix.paths.realmRoot}/project/polylogue"
-      "${config.sinnix.paths.realmRoot}/project/sinex"
-    ];
+    default = map (project: project.path) (lib.attrValues config.sinnix.projects.entries);
     apply =
       roots:
       if
