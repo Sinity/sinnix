@@ -427,9 +427,10 @@ when a new script is added.
   user services. Systemd owns process lifecycle, cgroups, results,
   cancellation, and journal evidence; `sinnixd` has no job queue, Git history,
   or arbitrary-process authority. Its task facade binds every registered project
-  to one Beads database under `/realm/state/tasks/<project>`, selected with an
-  explicit database path rather than checkout discovery. A verified cutover
-  receipt and a legacy-path symlink are both required, so a stale checkout JSONL,
+  to one standalone Beads workspace under `/realm/state/tasks/<project>`, whose
+  physical database is `.beads/dolt`; task commands select it through a fixed
+  `BEADS_DIR`, while each checkout's `.beads/redirect` preserves native Beads
+  behavior. A verified cutover receipt and that redirect are both required, so a stale checkout JSONL,
   incomplete bootstrap, or separate legacy database cannot become live authority.
   Snapshot export remains a read-only operation over that database. Its
   only non-declared execution contracts are typed `operator-shell` and

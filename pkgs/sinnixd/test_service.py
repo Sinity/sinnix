@@ -417,7 +417,7 @@ class FakeTaskBoundary:
     max_active: int = 0
     _guard: threading.Lock = field(default_factory=threading.Lock)
 
-    def run(self, *, argv: tuple[str, ...], cwd: Path, lock_path: Path | None = None) -> ExecutionResult:
+    def run(self, *, argv: tuple[str, ...], cwd: Path, environment: dict[str, str], lock_path: Path | None = None) -> ExecutionResult:
         self.calls.append((argv, cwd))
         self.lock_paths.append(lock_path)
         with self._guard:
@@ -438,9 +438,9 @@ class CanonicalTaskBoundary:
     calls: list[tuple[tuple[str, ...], Path]] = field(default_factory=list)
     databases: list[Path] = field(default_factory=list)
 
-    def run(self, *, argv: tuple[str, ...], cwd: Path, lock_path: Path | None = None) -> ExecutionResult:
+    def run(self, *, argv: tuple[str, ...], cwd: Path, environment: dict[str, str], lock_path: Path | None = None) -> ExecutionResult:
         self.calls.append((argv, cwd))
-        database = Path(argv[argv.index("--db") + 1])
+        database = Path(environment["BEADS_DIR"]) / "dolt"
         self.databases.append(database)
         command_offset = argv.index("--json") + 1
         if argv[command_offset : command_offset + 1] == ("--readonly",):
@@ -473,11 +473,11 @@ def activate_task_authority(
     digest: str = "sha256:" + "a" * 64,
 ) -> Path:
     authority_root = state_root / "fixture"
-    database = authority_root / "dolt"
+    database = authority_root / ".beads" / "dolt"
     database.mkdir(mode=0o700, parents=True)
     source_database = source_database or project_root / ".beads" / "dolt"
     source_database.parent.mkdir(parents=True, exist_ok=True)
-    source_database.symlink_to(database, target_is_directory=True)
+    (source_database.parent / "redirect").write_text(str(database.parent) + "\n")
     (authority_root / "authority.json").write_text(
         json.dumps(
             {
@@ -532,8 +532,9 @@ def test_task_reads_resolve_catalog_projects_and_use_readonly_fixed_argv(tmp_pat
 
     assert listed["result"] == {"issues": [{"id": "fixture-1"}]}
     assert fetched["result"] == {"id": "fixture-1"}
-    database = tmp_path / "task-state" / "fixture" / "dolt"
-    prefix = ("--directory", str(tmp_path), "--db", str(database), "--json", "--readonly")
+    authority_root = tmp_path / "task-state" / "fixture"
+    database = authority_root / ".beads" / "dolt"
+    prefix = ("--json", "--readonly")
     assert boundary.calls == [
         ((*prefix, "list", "--flat", "--status", "open", "--limit", "20"), tmp_path),
         ((*prefix, "show", "fixture-1"), tmp_path),
@@ -563,9 +564,10 @@ def test_task_mutations_map_to_fixed_beads_argv(
     )
 
     assert result == {"project_id": "fixture", "operation": operation, "result": {"ok": True}}
-    database = tmp_path / "task-state" / "fixture" / "dolt"
+    authority_root = tmp_path / "task-state" / "fixture"
+    database = authority_root / ".beads" / "dolt"
     assert boundary.calls == [
-        (("--directory", str(tmp_path), "--db", str(database), "--json", *expected), tmp_path)
+        (("--json", *expected), tmp_path)
     ]
 
 
@@ -677,20 +679,17 @@ def test_task_reconcile_returns_a_durable_fixed_command_receipt(tmp_path: Path) 
     assert isinstance(job_id, str)
     lock_path = jobs.store.root / "task-fixture.lock"
     assert boundary.lock_paths == [lock_path]
-    database = task_state_root / "fixture" / "dolt"
+    authority_root = task_state_root / "fixture"
+    database = authority_root / ".beads" / "dolt"
     assert boundary.calls == [
         (
             (
-                "--directory",
-                str(tmp_path),
-                "--db",
-                str(database),
-                "--json",
+                    "--json",
                 "update",
                 "fixture-1",
                 "--claim",
             ),
-            tmp_path,
+                tmp_path,
         )
     ]
     assert len(systemd.started) == 1
@@ -701,10 +700,6 @@ def test_task_reconcile_returns_a_durable_fixed_command_receipt(tmp_path: Path) 
         "--exclusive",
         str(lock_path),
         "bd",
-        "--directory",
-        str(tmp_path),
-        "--db",
-        str(database),
         "--json",
         "sync",
         "--no-adopt",
@@ -713,6 +708,7 @@ def test_task_reconcile_returns_a_durable_fixed_command_receipt(tmp_path: Path) 
     assert launched["timeout_seconds"] == DEFAULT_TIMEOUT_SECONDS
     environment = launched["environment"]
     assert isinstance(environment, dict)
+    assert environment["BEADS_DIR"] == str(authority_root / ".beads")
     assert environment["SINNIXD_JOB_ID"] == job_id
     assert environment["SINNIXD_PROJECT_ID"] == "fixture"
     assert environment["SINNIXD_OPERATION"] == "task.reconcile"
@@ -740,11 +736,12 @@ def test_task_snapshot_parses_jsonl_without_writing_a_store(tmp_path: Path) -> N
         "operation": "task.snapshot",
         "result": [{"id": "fixture-1"}, {"id": "fixture-2"}],
     }
-    database = tmp_path / "task-state" / "fixture" / "dolt"
+    authority_root = tmp_path / "task-state" / "fixture"
+    database = authority_root / ".beads" / "dolt"
     assert boundary.calls == [
         (
-            ("--directory", str(tmp_path), "--db", str(database), "--json", "--readonly", "export"),
-            tmp_path,
+                ("--json", "--readonly", "export"),
+                tmp_path,
         )
     ]
 
@@ -883,7 +880,6 @@ def test_task_authority_refuses_unverified_or_dual_authority(tmp_path: Path) -> 
     receipt["verification"]["destination_rows"] = 1
     receipt_path.write_text(json.dumps(receipt))
     source_database = tmp_path / ".beads" / "dolt"
-    source_database.unlink()
     source_database.mkdir()
     with pytest.raises(TaskError, match="ambiguous") as dual:
         tasks.execute(**request)

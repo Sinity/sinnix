@@ -76,7 +76,7 @@ class TaskAuthority:
     @classmethod
     def load(cls, state_root: Path, project: ProjectAdapter) -> TaskAuthority:
         root = state_root / project.project_id
-        database = root / "dolt"
+        database = root / ".beads" / "dolt"
         receipt_path = root / TASK_AUTHORITY_RECEIPT
         try:
             receipt = json.loads(receipt_path.read_text())
@@ -126,13 +126,14 @@ class TaskAuthority:
             canonical_database = database.resolve(strict=True)
         except OSError as error:
             raise TaskError(ErrorCode.OWNER_UNAVAILABLE, "canonical task database is unavailable") from error
-        if not source_database.is_symlink():
+        redirect = source_database.parent / "redirect"
+        if source_database.exists() or source_database.is_symlink() or not redirect.is_file():
             raise TaskError(ErrorCode.OPERATION_FAILED, "task authority cutover is ambiguous")
         try:
-            active_source = source_database.resolve(strict=True)
-        except OSError as error:
+            redirect_target = Path(redirect.read_text().strip()).resolve(strict=True)
+        except (OSError, ValueError) as error:
             raise TaskError(ErrorCode.OPERATION_FAILED, "task authority cutover is ambiguous") from error
-        if active_source != canonical_database:
+        if redirect_target != canonical_database.parent:
             raise TaskError(ErrorCode.OPERATION_FAILED, "task authority cutover is ambiguous")
         return cls(
             project_id=project.project_id,
@@ -256,6 +257,7 @@ class TaskCommandBoundary(Protocol):
         *,
         argv: tuple[str, ...],
         cwd: Path,
+        environment: dict[str, str],
         lock_path: Path | None = None,
     ) -> ExecutionResult: ...
 
@@ -272,6 +274,7 @@ class BeadsCommandBoundary:
         *,
         argv: tuple[str, ...],
         cwd: Path,
+        environment: dict[str, str],
         lock_path: Path | None = None,
     ) -> ExecutionResult:
         command = (self.executable, *argv)
@@ -286,6 +289,7 @@ class BeadsCommandBoundary:
                 max_stderr_bytes=MAX_TASK_STDERR_BYTES,
                 max_combined_output_bytes=MAX_TASK_OUTPUT_BYTES + MAX_TASK_STDERR_BYTES,
                 cwd=cwd,
+                environment=environment,
             ),
         )
 
@@ -443,10 +447,6 @@ class TaskService:
     ) -> Any:
         authority = self._authority(project)
         argv = (
-            "--directory",
-            str(project.root),
-            "--db",
-            str(authority.database),
             "--json",
             *(("--readonly",) if readonly else ()),
             *command,
@@ -454,6 +454,7 @@ class TaskService:
         result = self.boundary.run(
             argv=argv,
             cwd=project.root,
+            environment={"BEADS_DIR": str(authority.root / ".beads")},
             lock_path=None if readonly else self._lock_path(project),
         )
         if result.timed_out or result.failure_class == "command_timeout":
@@ -492,6 +493,7 @@ class TaskService:
                 "SINNIXD_JOB_ID": job_id,
                 "SINNIXD_PROJECT_ID": project.project_id,
                 "SINNIXD_OPERATION": "task.reconcile",
+                "BEADS_DIR": str(authority.root / ".beads"),
             }
         )
         return self.jobs.start(
@@ -502,10 +504,6 @@ class TaskService:
                     "--exclusive",
                     str(lock_path),
                     BEADS_EXECUTABLE,
-                    "--directory",
-                    str(project.root),
-                    "--db",
-                    str(authority.database),
                     "--json",
                     "sync",
                     "--no-adopt",
