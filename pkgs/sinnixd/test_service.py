@@ -4575,6 +4575,78 @@ def test_job_owner_boundary_filters_before_pagination_and_denies_cross_principal
     ).ok
 
 
+def test_declared_cache_identities_remain_controllable_by_their_principal(
+    tmp_path: Path,
+) -> None:
+    """A coalesced or reused declared ID must remain usable by its owning principal."""
+    project_root = tmp_path / "project"
+    write_adapter(project_root)
+    descriptor = project_root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace('exclusive_keys = ["fixture:check"]\n', "")
+    )
+    initialize_git_checkout(project_root)
+    systemd = FakeSystemdJobs()
+    service = SinnixdService(
+        ProjectCatalog([project_root]), jobs=generic_jobs(tmp_path, systemd)
+    )
+
+    def start(principal: str) -> dict[str, object]:
+        response = service.dispatch(
+            request(
+                "job.start",
+                "systemd-jobs",
+                {"project_id": "fixture", "operation": "check"},
+                principal=principal,
+            )
+        )
+        assert response.ok and response.payload is not None
+        return response.payload.inline
+
+    operator_first = start("operator")
+    operator_coalesced = start("operator")
+    agent_first = start("agent-control")
+    agent_coalesced = start("agent-control")
+
+    assert operator_coalesced["job_id"] == operator_first["job_id"]
+    assert operator_coalesced["coalesced"]
+    assert agent_coalesced["job_id"] == agent_first["job_id"]
+    assert agent_coalesced["coalesced"]
+    assert agent_first["job_id"] != operator_first["job_id"]
+    assert len(systemd.started) == 2
+
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+    }
+    for principal, launch in (
+        ("operator", operator_first),
+        ("agent-control", agent_first),
+    ):
+        job_id = launch["job_id"]
+        assert isinstance(job_id, str)
+        for operation, arguments in (
+            ("job.get", {"job_id": job_id}),
+            ("job.wait", {"job_id": job_id, "timeout_seconds": 1}),
+            ("job.logs", {"job_id": job_id}),
+            ("job.result", {"job_id": job_id}),
+            ("job.cancel", {"job_id": job_id}),
+        ):
+            response = service.dispatch(
+                request(operation, "systemd-jobs", arguments, principal=principal)
+            )
+            assert response.ok
+
+    operator_reused = start("operator")
+    agent_reused = start("agent-control")
+    assert operator_reused["job_id"] == operator_first["job_id"]
+    assert operator_reused["reused"]
+    assert agent_reused["job_id"] == agent_first["job_id"]
+    assert agent_reused["reused"]
+
+
 def test_real_user_systemd_service_cgroup_cancels_descendants(tmp_path: Path) -> None:
     """Anti-vacuity: this enters systemd-run/systemctl; replacing the launcher with a subprocess leaves the child alive."""
     if shutil.which("systemd-run") is None or shutil.which("systemctl") is None:

@@ -1698,7 +1698,9 @@ class GenericJobs:
         workdir = checkout.path if checkout is not None else project.root
         environment = project.environment.values()
         tree = self._cache_tree(workdir)
-        cache_key = self._cache_key(project, operation, parameter_digest, environment, tree)
+        cache_key = self._cache_key(
+            project, operation, parameter_digest, principal, environment, tree
+        )
         state = self._admission_state()
         if cache_key is not None:
             cached = state["cache"].get(cache_key)
@@ -1798,10 +1800,24 @@ class GenericJobs:
             return None
 
     @staticmethod
-    def _cache_key(project: ProjectAdapter, operation: ProjectOperation, parameter_digest: str, environment: Mapping[str, str], tree: str | None) -> str | None:
+    def _cache_key(
+        project: ProjectAdapter,
+        operation: ProjectOperation,
+        parameter_digest: str,
+        principal: str,
+        environment: Mapping[str, str],
+        tree: str | None,
+    ) -> str | None:
         if operation.cache != "tree+environment" or tree is None:
             return None
-        payload = {"project": project.project_id, "operation": operation.name, "parameters": parameter_digest, "tree": tree, "environment": dict(sorted(environment.items()))}
+        payload = {
+            "project": project.project_id,
+            "operation": operation.name,
+            "parameters": parameter_digest,
+            "principal": principal,
+            "tree": tree,
+            "environment": dict(sorted(environment.items())),
+        }
         return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
     @staticmethod
