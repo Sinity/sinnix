@@ -582,13 +582,14 @@ def test_live_service_leases_never_share_a_port(tmp_path: Path, monkeypatch: pyt
     assert second.payload.inline["lease"]["ports"][0]["port"] == 41001
 
 
-def test_terminal_service_jobs_release_port_leases_for_success_timeout_and_cancellation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_terminal_service_jobs_release_port_leases_for_success_failure_timeout_and_cancellation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Anti-vacuity: every terminal systemd outcome must make the port available to the next declared service."""
     monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
 
     for name, properties in (
-        ("success", {"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}),
-        ("timeout", {"LoadState": "loaded", "ActiveState": "inactive", "Result": "timeout", "ExecMainStatus": "1"}),
+        ("success", {"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0", "InvocationID": "fixture-invocation"}),
+        ("failure", {"LoadState": "loaded", "ActiveState": "failed", "Result": "exit-code", "ExecMainStatus": "1", "InvocationID": "fixture-invocation"}),
+        ("timeout", {"LoadState": "loaded", "ActiveState": "failed", "Result": "timeout", "ExecMainStatus": "1", "InvocationID": "fixture-invocation"}),
     ):
         case = tmp_path / name
         write_adapter(case)
@@ -601,27 +602,20 @@ def test_terminal_service_jobs_release_port_leases_for_success_timeout_and_cance
         systemd.properties = properties
         terminal = service.dispatch(request("job.get", "systemd-jobs", {"job_id": job_id}))
         assert terminal.ok and terminal.payload is not None
-        assert terminal.payload.inline["lease"]["state"] == "active"
-        systemd.properties = {"LoadState": "not-found", "ActiveState": "inactive"}
-        released = service.dispatch(request("job.get", "systemd-jobs", {"job_id": job_id}))
-        assert released.ok and released.payload is not None
-        assert released.payload.inline["lease"]["state"] == "released"
+        assert terminal.payload.inline["lease"]["state"] == "released"
         assert not (case / "state" / "leases" / f"{job_id}.json").exists()
 
     case = tmp_path / "cancelled"
     write_adapter(case)
-    systemd = FakeSystemdJobs()
+    systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"})
     jobs = generic_jobs(case, systemd)
     service = SinnixdService(ProjectCatalog([case]), jobs=jobs)
     started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
     assert started.ok and started.payload is not None
     cancelled = service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": started.payload.inline["job_id"]}))
     assert cancelled.ok and cancelled.payload is not None
-    assert cancelled.payload.inline["lease"]["state"] == "active"
-    systemd.properties = {"LoadState": "not-found", "ActiveState": "inactive"}
-    released = service.dispatch(request("job.get", "systemd-jobs", {"job_id": started.payload.inline["job_id"]}))
-    assert released.ok and released.payload is not None
-    assert released.payload.inline["lease"]["state"] == "released"
+    assert cancelled.payload.inline["state"]["phase"] == "cancelled"
+    assert cancelled.payload.inline["lease"]["state"] == "released"
     replacement = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
     assert replacement.ok and replacement.payload is not None
     assert replacement.payload.inline["lease"]["ports"][0]["port"] == 41000
@@ -654,6 +648,206 @@ def test_service_lease_recovery_reconstructs_live_ownership_and_expires_missing_
     assert (orphan_store.leases_root / f"{orphan.lease_id}.json").exists()
     _ = GenericJobs(systemd, orphan_store, wait_poll_seconds=0.001)
     assert not (orphan_store.leases_root / f"{orphan.lease_id}.json").exists()
+
+
+def test_restart_finalizes_admission_for_a_newly_terminal_active_record(tmp_path: Path) -> None:
+    """A restart must retire only the active cache entry it observes terminal, not rescan historical jobs."""
+    systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"})
+    store = GenericJobStore(tmp_path / "state")
+    original = GenericJobs(systemd, store, wait_poll_seconds=0.001)
+    record = store.create(
+        GenericJobSpec(
+            kind="declared-operation",
+            command=("fixture",),
+            working_directory=str(tmp_path),
+            environment={},
+            project_id="fixture",
+            operation="check",
+            parameter_digest="0" * 64,
+            cache_key="a" * 64,
+        )
+    )
+    store.save(original._with_state(record, {"phase": "submitted", "terminal": False, "observed_at": "fixture"}))
+    original._save_admission_state({"schema_version": 1, "active": {record.spec.cache_key: record.job_id}, "cache": {}, "estimates": {}})
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "InvocationID": "fixture-invocation",
+    }
+
+    restarted = GenericJobs(systemd, original.store, wait_poll_seconds=0.001)
+
+    admission = restarted._admission_state()
+    assert record.spec.cache_key not in admission["active"]
+    assert admission["cache"][record.spec.cache_key]["job_id"] == record.job_id
+
+
+def test_recovery_and_get_skip_historical_terminal_jobs_but_release_failed_loaded_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Live failure harness: one active request cannot serialize a terminal corpus through systemd or per-job locks."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+
+    class CountingSystemd(FakeSystemdJobs):
+        def __init__(self) -> None:
+            super().__init__(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "active-invocation"})
+            self.observed: list[str] = []
+
+        def show(self, unit: str, *, timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS) -> dict[str, str]:
+            self.observed.append(unit)
+            return super().show(unit, timeout_seconds=timeout_seconds)
+
+    store = GenericJobStore(tmp_path / "state")
+    terminal_ids: set[str] = set()
+    for _ in range(128):
+        record = store.create(
+            GenericJobSpec(kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={})
+        )
+        terminal_ids.add(record.job_id)
+        store.save(GenericJobs._with_state(record, {"phase": "succeeded", "terminal": True, "observed_at": "fixture"}))
+    active = store.create(
+        GenericJobSpec(kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={})
+    )
+    operation = ProjectCatalog([tmp_path]).get("fixture").operation("service")
+    assert operation.service is not None
+    stale_id = str(uuid4())
+    stale_lease = store.allocate_service_lease(stale_id, operation.service)
+    stale = store.create(
+        GenericJobSpec(
+            kind="declared-operation",
+            command=("fixture-service",),
+            working_directory=str(tmp_path),
+            environment={"FIXTURE_HTTP_PORT": str(stale_lease.ports[0].port)},
+            project_id="fixture",
+            operation="service",
+            parameter_digest="0" * 64,
+            lease=stale_lease,
+        ),
+        stale_id,
+    )
+    store.save(
+        GenericJobs._with_state(
+            stale,
+            {
+                "phase": "failed",
+                "terminal": True,
+                "lease_invocation_id": "failed-invocation",
+                "systemd": {
+                    "LoadState": "loaded",
+                    "ActiveState": "failed",
+                    "Result": "exit-code",
+                    "ExecMainStatus": "1",
+                    "InvocationID": "failed-invocation",
+                },
+                "observed_at": "fixture",
+            },
+        )
+    )
+    locks_before = {path.name for path in store.locks_root.glob("*.lock")} if store.locks_root.exists() else set()
+    systemd = CountingSystemd()
+    monkeypatch.setattr(
+        store,
+        "list",
+        lambda: (_ for _ in ()).throw(AssertionError("startup must not scan the terminal corpus")),
+    )
+
+    recovered = GenericJobs(systemd, store, wait_poll_seconds=0.001)
+
+    assert systemd.observed == [active.unit]
+    assert not (store.leases_root / f"{stale_id}.json").exists()
+    assert recovered.get(stale_id)["lease"]["state"] == "released"
+    assert systemd.observed == [active.unit]
+    recovered.get(active.job_id)
+    assert systemd.observed == [active.unit, active.unit]
+    locks_after = {path.name for path in store.locks_root.glob("*.lock")}
+    assert locks_after - locks_before == {f"{active.job_id}.lock"}
+    assert not {f"{job_id}.lock" for job_id in terminal_ids}.intersection(locks_after)
+
+
+def test_service_lease_invocation_mismatch_keeps_the_reservation_active(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anti-vacuity: a later unit invocation cannot inherit an earlier observation's release authority."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "first-invocation"})
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    assert started.ok and started.payload is not None
+    job_id = started.payload.inline["job_id"]
+    assert service.dispatch(request("job.get", "systemd-jobs", {"job_id": job_id})).ok
+
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "failed",
+        "Result": "exit-code",
+        "ExecMainStatus": "1",
+        "InvocationID": "newer-invocation",
+    }
+    mismatched = service.dispatch(request("job.get", "systemd-jobs", {"job_id": job_id}))
+
+    assert mismatched.ok and mismatched.payload is not None
+    assert mismatched.payload.inline["state"]["phase"] == "observation-unknown"
+    assert mismatched.payload.inline["lease"]["state"] == "active"
+    assert (tmp_path / "state" / "leases" / f"{job_id}.json").exists()
+
+
+def test_concurrent_start_and_get_do_not_take_historical_terminal_locks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Live failure harness: concurrent client routes finish without waiting on terminal-record lock files."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+    store = GenericJobStore(tmp_path / "state")
+    terminal_ids: set[str] = set()
+    for _ in range(64):
+        record = store.create(
+            GenericJobSpec(kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={})
+        )
+        terminal_ids.add(record.job_id)
+        store.save(GenericJobs._with_state(record, {"phase": "failed", "terminal": True, "observed_at": "fixture"}))
+    active = store.create(
+        GenericJobSpec(kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={})
+    )
+    systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"})
+    jobs = GenericJobs(systemd, store, wait_poll_seconds=0.001)
+    project = ProjectCatalog([tmp_path]).get("fixture")
+    original_locked = store.locked
+    original_list = store.list
+    acquired: list[str] = []
+
+    @contextmanager
+    def counted_locked(job_id: str):
+        acquired.append(job_id)
+        with original_locked(job_id):
+            yield
+
+    monkeypatch.setattr(store, "locked", counted_locked)
+    monkeypatch.setattr(
+        store,
+        "list",
+        lambda: (_ for _ in ()).throw(AssertionError("start/get must not scan the terminal corpus")),
+    )
+    started: list[dict[str, object]] = []
+    failures: list[BaseException] = []
+
+    def start_service() -> None:
+        try:
+            started.append(jobs.start_declared(project=project, operation=project.operation("service"), correlation_id="concurrent", parameters={}))
+        except BaseException as error:
+            failures.append(error)
+
+    start_thread = threading.Thread(target=start_service)
+    get_thread = threading.Thread(target=lambda: jobs.get(active.job_id))
+    start_thread.start()
+    get_thread.start()
+    start_thread.join(1)
+    get_thread.join(1)
+
+    assert not failures
+    assert not start_thread.is_alive() and not get_thread.is_alive()
+    assert started and started[0]["state"]["terminal"] is False
+    assert not terminal_ids.intersection(acquired)
+    monkeypatch.setattr(store, "list", original_list)
 
 
 def test_service_lease_creation_is_atomic_against_concurrent_recovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3745,8 +3939,12 @@ def test_job_store_fsyncs_parent_after_replacing_record(monkeypatch: pytest.Monk
     store.save(record)
 
     replace_index = events.index(("replace", store.records_root / f"{record.job_id}.json"))
-    file_fsync_index = next(index for index, event in enumerate(events) if event[0] == "fsync-file")
-    directory_fsync_index = events.index(("fsync-directory", directory_fd))
+    file_fsync_index = max(index for index, event in enumerate(events[:replace_index]) if event[0] == "fsync-file")
+    directory_fsync_index = next(
+        index
+        for index, event in enumerate(events[replace_index + 1 :], start=replace_index + 1)
+        if event == ("fsync-directory", directory_fd) and events[index - 1] == ("open-directory", store.records_root)
+    )
     assert file_fsync_index < replace_index < directory_fsync_index
     assert events[directory_fsync_index - 1] == ("open-directory", store.records_root)
 
@@ -3770,7 +3968,7 @@ def test_job_store_fsyncs_parents_when_creating_state_directories(
         "00000000-0000-0000-0000-000000000002",
     )
 
-    assert synchronized == [tmp_path, store.root, store.root, store.logs_root, store.records_root]
+    assert synchronized == [tmp_path, store.root, store.root, store.logs_root, store.root, store.root, store.records_root]
 
 
 @pytest.mark.parametrize(
