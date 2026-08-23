@@ -228,7 +228,9 @@ resourceClass, observe, captures }`. Eval-time assertions reject duplicate
   services and never places an arbitrary command. Scheduled or heavy work is
   submitted as a named operation from the registered project's
   `.agentctl/project.toml`; Sinnixd owns the resulting transient service,
-  cgroup, lifecycle, cancellation, result, and bounded timeout contract.
+  cgroup, lifecycle, cancellation, result, bounded timeout, and any closed
+  descriptor-declared development-service lease. Lease metadata is bounded and
+  public, while port allocation and release remain in the generic-job runtime.
 - Concurrency is governed by slice memory caps and weights, not
   serialization; the only build-path lock is `/tmp/sinnix-switch.lock`, a
   correctness guard against two activations racing on the system profile.
@@ -434,6 +436,11 @@ when a new script is added.
   and revalidate the worktree/common-dir identity immediately before exec.
   Shell argv and agent prompts remain private launch inputs; durable public
   metadata retains only redacted digests and bounded artifact references.
+  Declared development services use the same generic-job route: their static
+  descriptor supplies named loopback-port slots, and the durable record retains
+  only lease ID, loopback host, slot and environment names, allocated ports,
+  readiness and lifetime metadata. Systemd remains authoritative for their
+  process tree, timeout, cancellation, logs, and terminal state.
   Sinnixd also owns durable workspace relationships over Git-owned linked
   worktrees. Project descriptors constrain one workspace root and base policy;
   AgentCTL creates or adopts a canonical linked worktree and derives current
