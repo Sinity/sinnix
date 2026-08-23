@@ -44,6 +44,31 @@ The service passes a declarative, non-empty `sinnix.services.sinnixd.projectRoot
 
 `job start` accepts a project ID, one declared operation name, an optional workspace binding, and an optional JSON parameters object. It never accepts an arbitrary command. Its optional workspace binding launches in that registered checkout and durably records the checkout ID and exact starting HEAD, so later publication can reject stale verification. Declared operations and internal synthetic foreground commands construct the same durable generic-job spec, record, transient user `.service` launch, log artifact, reconciliation, wait, and cancellation route. A descriptor may set a bounded `timeout_seconds`; that becomes the transient service limit, rather than a caller-controlled duration. The only additional public starts are the constrained typed contracts below.
 
+## Declared development-service leases
+
+A declared operation may add one closed `[operations.<name>.service]` contract for a bounded development service. It carries readiness metadata (`none` or `project-command`), `lifetime = "job"`, and one through eight named loopback port slots. Each slot declares one `PORT` or `*_PORT` environment-variable name and an inclusive 1024 through 65535 range of at most 256 ports. The descriptor is static. `job start` accepts no port, environment, readiness, lifetime, or service-command arguments.
+
+```toml
+[operations.dev_server]
+description = "Run the project development server"
+exec = ["just", "dev"]
+pool = "interactive"
+result = "exit"
+cache = "none"
+
+[operations.dev_server.service]
+readiness = "project-command"
+lifetime = "job"
+
+[operations.dev_server.service.ports.http]
+environment = "DEV_SERVER_PORT"
+range = [41000, 41031]
+```
+
+Sinnixd allocates distinct available ports under the durable generic-job ID, injects only the declared slot variables, and launches through the existing transient user-service path. The job record and its `job start`, `job get`, `job list`, and Gateway projections expose only bounded public lease metadata: lease ID, `127.0.0.1`, readiness and lifetime labels, slot names, environment names, allocated ports, and active or released state. Raw argv, environment values outside the allocated ports, prompts, and secrets remain absent from durable public state.
+
+The generic job record, private launch input, and lease reservation are published before systemd launch. A failed input publication terminalizes the record before launch. Startup treats an incomplete private input as failed only after systemd proves the unit absent, otherwise it preserves the record for safe reconciliation. Allocation derives occupied ports from valid nonterminal records and unreleased terminal records as well as lease files. A terminal record retains its reservation until systemd proves the unit absent, then recovery records its release and reclaims it. An unavailable systemd observation retains the lease. The project command owns readiness and convergence. Sinnixd does not add probes, PID tracking, archive semantics, or a second scheduler.
+
 ## Declared-operation timeout contract
 
 An operation may declare `timeout_seconds` as a positive integer. Omission keeps the 3,600-second default. Declared operations may use at most 14,400 seconds (four hours), which is enough for finite full suites while still providing a fixed systemd deadline. Descriptor parsing rejects booleans, non-integers, zero, negative values, and values above that maximum. The catalog, job response, durable job spec, recovery path, and `RuntimeMaxSec` all carry this one descriptor-owned value. Gateway and MCP clients receive the same catalog and job metadata; they do not accept a second timeout override.
@@ -207,7 +232,7 @@ Scratch is allocated only under the daemon's owned tmpfs or NVMe roots and is pa
 
 Result parsing is pure and bounded. `exit` reads the observed systemd exit result, `json` and `pytest` require a JSON object result artifact, and an attested agent returns its bounded final-message artifact. Systemd still owns the process, cgroup, timeout, cancellation, and journal evidence.
 
-The daemon does not own service leases, arbitrary shells beyond the typed operator contract, Git history, hosted review state, or merge state. It owns durable submission and admission evidence for typed job requests, while Beads remains the task-state authority and GitHub remains authoritative for reviews and merges. The gateway’s legacy controllers remain downstream and are unchanged here.
+The daemon owns bounded descriptor-declared development-service leases and typed shells only through their stated contracts. It does not own arbitrary shells, product readiness, Git history, hosted review state, or merge state. Beads remains the task-state authority and GitHub remains authoritative for reviews and merges. The gateway’s legacy controllers remain downstream and are unchanged here.
 
 ## Shared protocol
 

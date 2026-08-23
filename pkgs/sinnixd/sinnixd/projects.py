@@ -25,7 +25,11 @@ MAX_PARAMETER_STRING_LENGTH = 128
 MAX_PARAMETER_ENUM_VALUES = 64
 MIN_PARAMETER_INTEGER = -(2**31)
 MAX_PARAMETER_INTEGER = 2**31 - 1
+MAX_SERVICE_PORT_SLOTS = 8
+MAX_SERVICE_PORT_RANGE = 256
 _PARAMETER_FLAG = re.compile(r"--[a-z][a-z0-9-]*\Z")
+_SERVICE_PORT_SLOT = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
+_SERVICE_ENVIRONMENT = re.compile(r"(?:[A-Z][A-Z0-9_]*_)?PORT\Z")
 _PARAMETER_GRAMMARS = {
     "identifier": re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z"),
     "package-name": re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z"),
@@ -64,6 +68,69 @@ def parse_worktree_records(output: str) -> tuple[dict[str, str], ...]:
     if record:
         records.append(record)
     return tuple(records)
+
+
+def _registered_checkout_id(path: Path, project_path: Path) -> str:
+    if path == project_path:
+        return "default"
+    return "worktree-" + hashlib.sha256(str(path).encode()).hexdigest()[:16]
+
+
+def _checkout_git(path: Path, *arguments: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ProjectConfigError(f"could not verify registered checkout {path}") from error
+    return result.stdout
+
+
+def revalidate_registered_checkout(checkout: Mapping[str, Any]) -> Path:
+    """Prove a durable checkout binding still names the same registered Git worktree."""
+    expected = {"project_id", "project_path", "checkout_id", "path", "git_common_dir", "head"}
+    if set(checkout) != expected or any(not isinstance(checkout.get(field), str) or not checkout[field] for field in expected):
+        raise ProjectConfigError("registered checkout identity is invalid")
+    recorded_path = Path(checkout["path"])
+    project_path = Path(checkout["project_path"])
+    if not recorded_path.is_absolute() or not project_path.is_absolute():
+        raise ProjectConfigError("registered checkout path is not absolute")
+    try:
+        path = recorded_path.resolve(strict=True)
+        project_root = project_path.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise ProjectConfigError("registered checkout is unavailable") from error
+    if str(path) != checkout["path"] or str(project_root) != checkout["project_path"]:
+        raise ProjectConfigError("registered checkout path is not canonical")
+    if not (project_root / ".agentctl" / "project.toml").is_file():
+        raise ProjectConfigError("registered project is unavailable")
+    try:
+        top_level = Path(_checkout_git(path, "rev-parse", "--show-toplevel").strip()).resolve(strict=True)
+        common_dir = Path(
+            _checkout_git(path, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+        ).resolve(strict=True)
+        project_top_level = Path(_checkout_git(project_root, "rev-parse", "--show-toplevel").strip()).resolve(strict=True)
+        project_common_dir = Path(
+            _checkout_git(project_root, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+        ).resolve(strict=True)
+    except OSError as error:
+        raise ProjectConfigError("registered checkout is unavailable") from error
+    if (
+        top_level != path
+        or project_top_level != project_root
+        or str(common_dir) != checkout["git_common_dir"]
+        or common_dir != project_common_dir
+        or _registered_checkout_id(path, project_root) != checkout["checkout_id"]
+    ):
+        raise ProjectConfigError("registered checkout identity changed")
+    records = parse_worktree_records(_checkout_git(project_root, "worktree", "list", "--porcelain"))
+    if not any(record.get("worktree") == str(path) and record.get("HEAD") == checkout["head"] for record in records):
+        raise ProjectConfigError("checkout is no longer a registered Git worktree")
+    return path
 
 
 @dataclass(frozen=True)
@@ -131,6 +198,39 @@ class ProjectEnvironment:
 
     def values(self) -> dict[str, str]:
         return build_environment(inherit=self.inherit, unset=self.unset)
+
+
+@dataclass(frozen=True)
+class ServicePortSlot:
+    """One descriptor-owned loopback port and the sole environment name it injects."""
+
+    name: str
+    environment: str
+    minimum: int
+    maximum: int
+
+    def catalog_row(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "environment": self.environment,
+            "range": [self.minimum, self.maximum],
+        }
+
+
+@dataclass(frozen=True)
+class OperationService:
+    """Closed metadata for a development service owned by one declared operation."""
+
+    readiness: str
+    lifetime: str
+    ports: tuple[ServicePortSlot, ...]
+
+    def catalog_row(self) -> dict[str, Any]:
+        return {
+            "readiness": self.readiness,
+            "lifetime": self.lifetime,
+            "ports": [port.catalog_row() for port in self.ports],
+        }
 
 
 @dataclass(frozen=True)
@@ -215,6 +315,7 @@ class ProjectOperation:
     estimate_memory_bytes: int | None = None
     scratch: str = "none"
     parameters: tuple[OperationParameter, ...] = ()
+    service: OperationService | None = None
 
     def derive_argv(self, raw_parameters: Mapping[str, Any]) -> tuple[tuple[str, ...], str]:
         if not isinstance(raw_parameters, Mapping):
@@ -259,6 +360,7 @@ class ProjectOperation:
             "estimate_memory_bytes": self.estimate_memory_bytes,
             "scratch": self.scratch,
             "parameters": [parameter.catalog_row() for parameter in self.parameters],
+            "service": self.service.catalog_row() if self.service is not None else None,
         }
 
 
@@ -426,6 +528,53 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
     if len({parameter.flag for parameter in parameters}) != len(parameters):
         raise ProjectConfigError(f"{field} parameter flags must be unique")
     return tuple(parameters)
+
+
+def _operation_service(value: Any, field: str) -> OperationService | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping) or set(value) != {"readiness", "lifetime", "ports"}:
+        raise ProjectConfigError(f"{field} must contain only readiness, lifetime, and ports")
+    readiness = value.get("readiness")
+    lifetime = value.get("lifetime")
+    ports = value.get("ports")
+    if readiness not in {"none", "project-command"}:
+        raise ProjectConfigError(f"{field}.readiness is invalid")
+    if lifetime != "job":
+        raise ProjectConfigError(f"{field}.lifetime is invalid")
+    if not isinstance(ports, Mapping) or not 1 <= len(ports) <= MAX_SERVICE_PORT_SLOTS:
+        raise ProjectConfigError(f"{field}.ports must be a bounded table")
+    slots: list[ServicePortSlot] = []
+    environments: set[str] = set()
+    for name, definition in sorted(ports.items()):
+        if (
+            not isinstance(name, str)
+            or _SERVICE_PORT_SLOT.fullmatch(name) is None
+            or not isinstance(definition, Mapping)
+            or set(definition) != {"environment", "range"}
+        ):
+            raise ProjectConfigError(f"{field}.ports contains an invalid slot")
+        environment = definition.get("environment")
+        port_range = definition.get("range")
+        if (
+            not isinstance(environment, str)
+            or _SERVICE_ENVIRONMENT.fullmatch(environment) is None
+            or environment.startswith("SINNIXD_")
+            or environment in environments
+        ):
+            raise ProjectConfigError(f"{field}.ports.{name}.environment is invalid")
+        if (
+            not isinstance(port_range, list)
+            or len(port_range) != 2
+            or any(not isinstance(port, int) or isinstance(port, bool) for port in port_range)
+        ):
+            raise ProjectConfigError(f"{field}.ports.{name}.range is invalid")
+        minimum, maximum = port_range
+        if not 1024 <= minimum <= maximum <= 65535 or maximum - minimum + 1 > MAX_SERVICE_PORT_RANGE:
+            raise ProjectConfigError(f"{field}.ports.{name}.range is invalid")
+        environments.add(environment)
+        slots.append(ServicePortSlot(name=name, environment=environment, minimum=minimum, maximum=maximum))
+    return OperationService(readiness=readiness, lifetime=lifetime, ports=tuple(slots))
 
 
 def _bounded_parameter_count(value: Any, maximum: int) -> bool:
@@ -611,7 +760,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             raise ProjectConfigError(f"{descriptor} contains an invalid operation declaration")
         allowed_operation = {
             "description", "exec", "pool", "result", "cache", "exclusive_keys",
-            "dependencies", "estimate_memory_bytes", "scratch", "parameters", "timeout_seconds",
+            "dependencies", "estimate_memory_bytes", "scratch", "parameters", "timeout_seconds", "service",
         }
         if set(definition) - allowed_operation:
             raise ProjectConfigError(f"{descriptor} operation {name} contains unknown fields")
@@ -649,6 +798,9 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         scratch = definition.get("scratch", "none")
         if scratch not in {"none", "tmpfs", "nvme"}:
             raise ProjectConfigError(f"operations.{name}.scratch is invalid")
+        service = _operation_service(definition.get("service"), f"operations.{name}.service")
+        if service is not None and cache != "none":
+            raise ProjectConfigError(f"operations.{name}.service requires cache = \"none\"")
         operations.append(
             ProjectOperation(
                 name=name,
@@ -665,6 +817,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 estimate_memory_bytes=estimate_memory_bytes,
                 scratch=scratch,
                 parameters=_operation_parameters(definition.get("parameters"), f"operations.{name}.parameters"),
+                service=service,
             )
         )
     operation_names = {operation.name for operation in operations}
@@ -720,23 +873,11 @@ class ProjectCatalog:
 
     @staticmethod
     def _git(path: Path, *arguments: str) -> str:
-        try:
-            result = subprocess.run(
-                ["git", "-C", str(path), *arguments],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=2,
-            )
-        except (OSError, subprocess.SubprocessError) as error:
-            raise ProjectConfigError(f"could not verify registered checkout {path}") from error
-        return result.stdout
+        return _checkout_git(path, *arguments)
 
     @staticmethod
     def _checkout_id(path: Path, configured_root: Path) -> str:
-        if path == configured_root:
-            return "default"
-        return "worktree-" + hashlib.sha256(str(path).encode()).hexdigest()[:16]
+        return _registered_checkout_id(path, configured_root)
 
     def checkouts(self, project_id: str) -> tuple[RegisteredCheckout, ...]:
         project = self.get(project_id)

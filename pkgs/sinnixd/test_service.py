@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -42,6 +43,7 @@ from sinnixd.jobs import (
     GenericJobSpec,
     GenericJobStore,
     GenericJobs,
+    JobRecordError,
     JobResultError,
     JobResultLimitError,
     SystemdJobError,
@@ -53,7 +55,7 @@ from sinnixd.jobs import (
 from sinnixd.limits import MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
 from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from sinnixd.projects import ProjectCatalog, ProjectConfigError, parse_worktree_records
-from sinnixd.runner import RunnerError, _require_environment, _revalidate_checkout
+from sinnixd.runner import RunnerError, _require_environment, _revalidate_checkout, _run_declared
 from sinnixd.service import SinnixdService
 from sinnixd.tasks import (
     FLOCK_EXECUTABLE,
@@ -321,6 +323,21 @@ result = "exit"
 cache = "tree+environment"
 exclusive_keys = ["fixture:check"]
 
+[operations.service]
+description = "Run a fixture development service"
+exec = ["fixture-service"]
+pool = "normal"
+result = "exit"
+cache = "none"
+
+[operations.service.service]
+readiness = "project-command"
+lifetime = "job"
+
+[operations.service.service.ports.http]
+environment = "FIXTURE_HTTP_PORT"
+range = [41000, 41001]
+
 [operations.parameterized]
 description = "Run fixture checks with declared parameters"
 exec = ["fixture-check"]
@@ -494,6 +511,511 @@ def test_declared_operation_timeout_defaults_and_survives_launch_recovery(tmp_pa
     assert GenericJobSpec(
         kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={}
     ).timeout_seconds == DEFAULT_TIMEOUT_SECONDS
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    (
+        'readiness = "product-probe"',
+        'lifetime = "daemon"',
+        'environment = "SINNIXD_JOB_ID"',
+        'environment = "HOME"',
+        'range = [1023, 1024]',
+        'range = [41000, 41256]',
+    ),
+)
+def test_service_declaration_is_closed_and_bounded(tmp_path: Path, replacement: str) -> None:
+    """Anti-vacuity: a service descriptor cannot become a caller-controlled launch overlay."""
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    if replacement.startswith("readiness"):
+        descriptor.write_text(descriptor.read_text().replace('readiness = "project-command"', replacement))
+    elif replacement.startswith("lifetime"):
+        descriptor.write_text(descriptor.read_text().replace('lifetime = "job"', replacement))
+    elif replacement.startswith("environment"):
+        descriptor.write_text(descriptor.read_text().replace('environment = "FIXTURE_HTTP_PORT"', replacement))
+    else:
+        descriptor.write_text(descriptor.read_text().replace('range = [41000, 41001]', replacement))
+
+    with pytest.raises(ProjectConfigError, match="operations.service.service"):
+        ProjectCatalog([tmp_path])
+
+
+def test_service_lease_is_bounded_public_metadata_and_injects_only_declared_port(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anti-vacuity: a service lease must reach the generic launch without persisting arbitrary environment input."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+
+    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+
+    assert started.ok and started.payload is not None
+    lease = started.payload.inline["lease"]
+    assert lease is not None
+    assert lease["id"] == started.payload.inline["job_id"]
+    assert lease["host"] == "127.0.0.1"
+    assert lease["ports"] == [{"name": "http", "environment": "FIXTURE_HTTP_PORT", "port": 41000}]
+    assert systemd.started[0]["environment"]["FIXTURE_HTTP_PORT"] == "41000"
+    persisted = (tmp_path / "state" / "jobs" / f"{lease['id']}.json").read_text()
+    assert "fixture-service" not in persisted
+    assert "FIXTURE_HTTP_PORT" in persisted
+    rejected = service.dispatch(
+        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service", "environment": {"SECRET": "value"}})
+    )
+    assert rejected.error is not None
+    assert rejected.error.code.value == "INVALID_ARGUMENT"
+
+
+def test_live_service_leases_never_share_a_port(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anti-vacuity: two live declared jobs must allocate different port slots from one range."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+
+    first = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    second = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+
+    assert first.ok and second.ok and first.payload is not None and second.payload is not None
+    assert first.payload.inline["lease"]["ports"][0]["port"] == 41000
+    assert second.payload.inline["lease"]["ports"][0]["port"] == 41001
+
+
+def test_terminal_service_jobs_release_port_leases_for_success_timeout_and_cancellation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anti-vacuity: every terminal systemd outcome must make the port available to the next declared service."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+
+    for name, properties in (
+        ("success", {"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}),
+        ("timeout", {"LoadState": "loaded", "ActiveState": "inactive", "Result": "timeout", "ExecMainStatus": "1"}),
+    ):
+        case = tmp_path / name
+        write_adapter(case)
+        systemd = FakeSystemdJobs()
+        jobs = generic_jobs(case, systemd)
+        service = SinnixdService(ProjectCatalog([case]), jobs=jobs)
+        started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+        assert started.ok and started.payload is not None
+        job_id = started.payload.inline["job_id"]
+        systemd.properties = properties
+        terminal = service.dispatch(request("job.get", "systemd-jobs", {"job_id": job_id}))
+        assert terminal.ok and terminal.payload is not None
+        assert terminal.payload.inline["lease"]["state"] == "active"
+        systemd.properties = {"LoadState": "not-found", "ActiveState": "inactive"}
+        released = service.dispatch(request("job.get", "systemd-jobs", {"job_id": job_id}))
+        assert released.ok and released.payload is not None
+        assert released.payload.inline["lease"]["state"] == "released"
+        assert not (case / "state" / "leases" / f"{job_id}.json").exists()
+
+    case = tmp_path / "cancelled"
+    write_adapter(case)
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(case, systemd)
+    service = SinnixdService(ProjectCatalog([case]), jobs=jobs)
+    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    assert started.ok and started.payload is not None
+    cancelled = service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": started.payload.inline["job_id"]}))
+    assert cancelled.ok and cancelled.payload is not None
+    assert cancelled.payload.inline["lease"]["state"] == "active"
+    systemd.properties = {"LoadState": "not-found", "ActiveState": "inactive"}
+    released = service.dispatch(request("job.get", "systemd-jobs", {"job_id": started.payload.inline["job_id"]}))
+    assert released.ok and released.payload is not None
+    assert released.payload.inline["lease"]["state"] == "released"
+    replacement = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    assert replacement.ok and replacement.payload is not None
+    assert replacement.payload.inline["lease"]["ports"][0]["port"] == 41000
+
+
+def test_service_lease_recovery_reconstructs_live_ownership_and_expires_missing_units(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anti-vacuity: restart must rebuild a valid active lease and discard one systemd proves stale."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    assert started.ok and started.payload is not None
+    job_id = started.payload.inline["job_id"]
+    lease_path = tmp_path / "state" / "leases" / f"{job_id}.json"
+    lease_path.unlink()
+
+    recovered = GenericJobs(systemd, jobs.store, wait_poll_seconds=0.001)
+    assert lease_path.exists()
+    systemd.properties = {"LoadState": "not-found", "ActiveState": "inactive"}
+    _ = GenericJobs(systemd, jobs.store, wait_poll_seconds=0.001)
+    assert not lease_path.exists()
+    assert recovered.get(job_id)["state"]["terminal"]
+
+    orphan_store = GenericJobStore(tmp_path / "orphan-state")
+    operation = ProjectCatalog([tmp_path]).get("fixture").operation("service")
+    assert operation.service is not None
+    orphan = orphan_store.allocate_service_lease(str(uuid4()), operation.service)
+    assert (orphan_store.leases_root / f"{orphan.lease_id}.json").exists()
+    _ = GenericJobs(systemd, orphan_store, wait_poll_seconds=0.001)
+    assert not (orphan_store.leases_root / f"{orphan.lease_id}.json").exists()
+
+
+def test_service_lease_creation_is_atomic_against_concurrent_recovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second daemon cannot collect an in-flight reservation and reallocate its port."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+    store = GenericJobStore(tmp_path / "state")
+    first = GenericJobs(FakeSystemdJobs(), store, wait_poll_seconds=0.001)
+    entered, release, recovered = threading.Event(), threading.Event(), threading.Event()
+    original_create = store.create
+    adapter = ProjectCatalog([tmp_path]).get("fixture")
+
+    def blocked_create(spec: GenericJobSpec, job_id: str | None = None):
+        entered.set()
+        assert release.wait(5)
+        return original_create(spec, job_id)
+
+    monkeypatch.setattr(store, "create", blocked_create)
+    first_result: list[dict[str, object]] = []
+    first_thread = threading.Thread(
+        target=lambda: first_result.append(
+            first.start_declared(project=adapter, operation=adapter.operation("service"), correlation_id="first", parameters={})
+        )
+    )
+    first_thread.start()
+    assert entered.wait(1)
+
+    def recover() -> None:
+        GenericJobStore(store.root).recover_service_leases(FakeSystemdJobs().show)
+        recovered.set()
+
+    second_thread = threading.Thread(target=recover)
+    second_thread.start()
+    assert not recovered.wait(0.05)
+    release.set()
+    first_thread.join(5)
+    second_thread.join(5)
+    assert not first_thread.is_alive() and not second_thread.is_alive()
+    assert recovered.is_set()
+    first_lease = first_result[0]["lease"]
+    assert isinstance(first_lease, dict)
+    assert first_lease["ports"][0]["port"] == 41000
+    second = GenericJobs(FakeSystemdJobs(), GenericJobStore(store.root), wait_poll_seconds=0.001)
+    replacement = second.start_declared(project=adapter, operation=adapter.operation("service"), correlation_id="second", parameters={})
+    assert replacement["lease"]["ports"][0]["port"] == 41001
+
+
+@pytest.mark.parametrize(
+    ("record_state", "systemd_state", "preserved"),
+    (
+        ("malformed", {"LoadState": "loaded", "ActiveState": "active"}, True),
+        ("missing", {"LoadState": "not-found", "ActiveState": "inactive"}, False),
+        ("malformed", None, True),
+    ),
+)
+def test_orphaned_valid_service_lease_recovery_requires_authoritative_absence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    record_state: str,
+    systemd_state: dict[str, str] | None,
+    preserved: bool,
+) -> None:
+    """Malformed records are never executable, but valid leases need absence proof before release."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+
+    class UnavailableSystemd(FakeSystemdJobs):
+        def show(self, unit: str, *, timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS) -> dict[str, str]:
+            raise SystemdJobError("systemd unavailable")
+
+    store = GenericJobStore(tmp_path / "state")
+    operation = ProjectCatalog([tmp_path]).get("fixture").operation("service")
+    assert operation.service is not None
+    lease = store.allocate_service_lease(str(uuid4()), operation.service)
+    record_path = store.records_root / f"{lease.lease_id}.json"
+    if record_state == "malformed":
+        record_path.parent.mkdir(parents=True)
+        record_path.write_text("{")
+    systemd = UnavailableSystemd() if systemd_state is None else FakeSystemdJobs(properties=systemd_state)
+    _ = GenericJobs(systemd, store, wait_poll_seconds=0.001)
+
+    lease_path = store.leases_root / f"{lease.lease_id}.json"
+    assert lease_path.exists() is preserved
+    with pytest.raises(JobRecordError):
+        store.load(lease.lease_id)
+    replacement = store.allocate_service_lease(str(uuid4()), operation.service)
+    assert replacement.ports[0].port == (41001 if preserved else 41000)
+
+
+def test_failed_service_launch_releases_its_lease(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anti-vacuity: a rejected transient service must not strand its reserved loopback port."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+
+    class FailedStart(FakeSystemdJobs):
+        def start(self, **_kwargs) -> None:
+            raise SystemdJobError("fixture launch failure")
+
+    write_adapter(tmp_path)
+    systemd = FailedStart(properties={"LoadState": "not-found", "ActiveState": "inactive"})
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+    failed = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+
+    assert failed.ok and failed.payload is not None
+    assert failed.payload.inline["state"]["phase"] == "launch-failed"
+    assert failed.payload.inline["lease"]["state"] == "released"
+    assert not list((tmp_path / "state" / "leases").glob("*.json"))
+
+
+def test_service_lease_claimed_between_allocation_and_launch_releases_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anti-vacuity: a port claimed after allocation cannot produce an active lease."""
+    availability = iter((True, False))
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: next(availability))
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"})
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+
+    failed = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+
+    assert failed.ok and failed.payload is not None
+    assert failed.payload.inline["state"]["phase"] == "launch-failed"
+    assert failed.payload.inline["lease"]["state"] == "released"
+    assert not list((tmp_path / "state" / "leases").glob("*.json"))
+
+
+def test_queued_service_cancellation_wins_the_admission_start_interleaving(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Admission re-reads the locked record, so cancellation cannot be overwritten by submitted."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'cache = "none"\n\n[operations.service.service]',
+            'cache = "none"\nestimate_memory_bytes = 4294967296\n\n[operations.service.service]',
+        )
+    )
+    systemd = FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"})
+    store = GenericJobStore(tmp_path / "state")
+    jobs = GenericJobs(
+        systemd,
+        store,
+        wait_poll_seconds=0.001,
+        pressure_probe=lambda: {"memory_full_avg10": 0.2},
+    )
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    assert started.ok and started.payload is not None
+    job_id = started.payload.inline["job_id"]
+    assert started.payload.inline["state"]["phase"] == "queued"
+
+    before_start, resume_admission, cancellation_saved = threading.Event(), threading.Event(), threading.Event()
+    original_save = store.save
+
+    def save_and_signal(record):
+        original_save(record)
+        if record.job_id == job_id and record.state.get("phase") == "cancelled":
+            cancellation_saved.set()
+
+    def pause_before_start(candidate: str) -> None:
+        assert candidate == job_id
+        before_start.set()
+        assert resume_admission.wait(5)
+
+    monkeypatch.setattr(store, "save", save_and_signal)
+    jobs.before_admission_start = pause_before_start
+    jobs.pressure_probe = lambda: {"memory_full_avg10": 0.0}
+    def admit() -> None:
+        with jobs._admission_lock:
+            jobs._admit_locked()
+
+    admission_thread = threading.Thread(target=admit)
+    admission_thread.start()
+    assert before_start.wait(1)
+    cancellation_thread = threading.Thread(target=lambda: jobs.cancel(job_id))
+    cancellation_thread.start()
+    assert cancellation_saved.wait(1)
+    resume_admission.set()
+    admission_thread.join(5)
+    cancellation_thread.join(5)
+
+    record = store.load(job_id)
+    assert not admission_thread.is_alive() and not cancellation_thread.is_alive()
+    assert systemd.started == []
+    assert record.state["phase"] == "cancelled" and record.state["terminal"]
+    assert not (store.leases_root / f"{job_id}.json").exists()
+
+
+def test_dependency_admission_never_nests_candidate_and_dependency_job_locks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Malformed durable dependency cycles cannot create a cross-process job-lock cycle during admission."""
+    store = GenericJobStore(tmp_path / "state")
+    jobs = GenericJobs(FakeSystemdJobs(), store, wait_poll_seconds=0.001)
+    first_id, second_id = str(uuid4()), str(uuid4())
+
+    def queued_record(job_id: str, dependency_id: str):
+        record = store.create(
+            GenericJobSpec(
+                kind="declared-operation",
+                command=("fixture-service",),
+                working_directory=str(tmp_path),
+                environment={},
+                project_id="fixture",
+                operation="service",
+                parameter_digest="0" * 64,
+                result_kind="exit-status",
+                dependency_job_ids=(dependency_id,),
+            ),
+            job_id,
+        )
+        store.write_declared_launch(job_id, record.spec.command, record.spec.environment)
+        store.save(jobs._with_state(record, {"phase": "queued", "terminal": False, "observed_at": "fixture"}))
+
+    queued_record(first_id, second_id)
+    queued_record(second_id, first_id)
+    original_locked = store.locked
+    held: list[str] = []
+
+    @contextmanager
+    def reject_nested_job_locks(job_id: str):
+        assert not held, f"nested job locks: {held!r} then {job_id}"
+        held.append(job_id)
+        try:
+            with original_locked(job_id):
+                yield
+        finally:
+            held.pop()
+
+    monkeypatch.setattr(store, "locked", reject_nested_job_locks)
+    with jobs._admission_lock:
+        jobs._admit_locked()
+
+    assert store.load(first_id).state["phase"] == "waiting-dependencies"
+    assert store.load(second_id).state["phase"] == "waiting-dependencies"
+
+
+def test_service_input_write_failure_terminalizes_the_record_and_removes_partial_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed private launch-input write cannot leave an unlaunchable record or a held port."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+    store = GenericJobStore(tmp_path / "state")
+    jobs = GenericJobs(FakeSystemdJobs(), store, wait_poll_seconds=0.001)
+    project = ProjectCatalog([tmp_path]).get("fixture")
+    original_write = store.write_declared_launch
+
+    def partial_then_fail(job_id: str, command: tuple[str, ...], environment: dict[str, str]) -> None:
+        _ = command, environment
+        store.inputs_root.mkdir(parents=True, exist_ok=True)
+        (store.inputs_root / f"{job_id}.launch").write_text("{")
+        raise OSError("fixture input persistence failure")
+
+    monkeypatch.setattr(store, "write_declared_launch", partial_then_fail)
+    with pytest.raises(OSError, match="fixture input persistence failure"):
+        jobs.start_declared(project=project, operation=project.operation("service"), correlation_id="write-failure", parameters={})
+    monkeypatch.setattr(store, "write_declared_launch", original_write)
+
+    [record] = store.list()
+    assert record.state["phase"] == "launch-failed" and record.state["terminal"]
+    assert not (store.inputs_root / f"{record.job_id}.launch").exists()
+    assert not (store.leases_root / f"{record.job_id}.json").exists()
+    service = project.operation("service").service
+    assert service is not None
+    replacement = store.allocate_service_lease(str(uuid4()), service)
+    assert replacement.ports[0].port == 41000
+
+
+def test_restart_terminalizes_truncated_unpublished_service_input_after_unit_absence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A crash between durable record and launch publication is recovered without retaining its lease."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+    store = GenericJobStore(tmp_path / "state")
+    operation = ProjectCatalog([tmp_path]).get("fixture").operation("service")
+    assert operation.service is not None
+    job_id = str(uuid4())
+    lease = store.allocate_service_lease(job_id, operation.service)
+    record = store.create(
+        GenericJobSpec(
+            kind="declared-operation",
+            command=("fixture-service",),
+            working_directory=str(tmp_path),
+            environment={"FIXTURE_HTTP_PORT": str(lease.ports[0].port)},
+            project_id="fixture",
+            operation="service",
+            parameter_digest="0" * 64,
+            result_kind="exit-status",
+            pool=operation.pool,
+            lease=lease,
+        ),
+        job_id,
+    )
+    (store.inputs_root).mkdir(parents=True, exist_ok=True)
+    (store.inputs_root / f"{job_id}.launch").write_text("{")
+    _ = GenericJobs(
+        FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"}),
+        store,
+        wait_poll_seconds=0.001,
+    )
+
+    recovered = store.load(record.job_id)
+    assert recovered.state["phase"] == "launch-failed" and recovered.state["terminal"]
+    assert not (store.inputs_root / f"{job_id}.launch").exists()
+    assert not (store.leases_root / f"{job_id}.json").exists()
+    replacement = store.allocate_service_lease(str(uuid4()), operation.service)
+    assert replacement.ports[0].port == 41000
+
+
+@pytest.mark.parametrize("artifact", ("missing", "truncated"))
+@pytest.mark.parametrize("phase", ("queued", "active", "terminal"))
+def test_record_owns_ports_when_its_lease_artifact_is_missing_or_truncated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, artifact: str, phase: str
+) -> None:
+    """Allocation derives occupancy from queued, active, and unreleased terminal records, never only lease files."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    if phase == "queued":
+        descriptor.write_text(
+            descriptor.read_text().replace(
+                'cache = "none"\n\n[operations.service.service]',
+                'cache = "none"\nestimate_memory_bytes = 4294967296\n\n[operations.service.service]',
+            )
+        )
+    systemd = (
+        FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"})
+        if phase == "queued"
+        else FakeSystemdJobs()
+    )
+    jobs = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        pressure_probe=lambda: {"memory_full_avg10": 0.2 if phase == "queued" else 0.0},
+    )
+    project = ProjectCatalog([tmp_path]).get("fixture")
+    started = jobs.start_declared(project=project, operation=project.operation("service"), correlation_id=f"{phase}-{artifact}", parameters={})
+    assert started["state"]["phase"] == ("queued" if phase == "queued" else "submitted")
+    job_id = started["job_id"]
+    if phase == "terminal":
+        record = jobs.store.load(job_id)
+        jobs.store.save(
+            jobs._with_state(record, {"phase": "launch-failed", "terminal": True, "observed_at": "fixture"})
+        )
+    lease_path = jobs.store.leases_root / f"{job_id}.json"
+    if artifact == "missing":
+        lease_path.unlink()
+    else:
+        lease_path.write_text("{")
+
+    operation = project.operation("service")
+    assert operation.service is not None
+    second = GenericJobStore(jobs.store.root).allocate_service_lease(str(uuid4()), operation.service)
+    assert second.ports[0].port == 41001
+
+    if phase != "terminal":
+        jobs.cancel(job_id)
+    systemd.properties = {"LoadState": "not-found", "ActiveState": "inactive"}
+    jobs.get(job_id)
+    reclaimed = GenericJobStore(jobs.store.root).allocate_service_lease(str(uuid4()), operation.service)
+    assert reclaimed.ports[0].port == 41000
 
 
 def test_typed_runner_keeps_the_one_hour_timeout_identity_bound(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2609,6 +3131,93 @@ def test_declared_job_binds_workspace_and_exact_head(tmp_path: Path) -> None:
     assert record.spec.checkout["head"] == workspace["head"]
 
 
+def test_admission_revalidates_queued_declared_workspace_before_systemd_launch(tmp_path: Path) -> None:
+    """A queued declared service whose checkout HEAD moved must terminalize before it reaches systemd."""
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'cache = "none"\n\n[operations.service.service]',
+            'cache = "none"\nestimate_memory_bytes = 4294967296\n\n[operations.service.service]',
+        )
+    )
+    initialize_git_checkout(tmp_path)
+    systemd = FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"})
+    jobs = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        pressure_probe=lambda: {"memory_full_avg10": 0.2},
+    )
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    workspace = service.workspaces.create(
+        project_id="fixture", name="queued-drift", branch="feature/queued-drift", base="HEAD"
+    )
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service", "workspace_id": workspace["workspace_id"]},
+        )
+    )
+    assert started.ok and started.payload is not None
+    assert started.payload.inline["state"]["phase"] == "queued"
+    path = Path(workspace["path"])
+    (path / "drift.txt").write_text("changed HEAD before admission\n")
+    subprocess.run(["git", "-C", str(path), "add", "drift.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "drift"],
+        check=True,
+    )
+    jobs.pressure_probe = lambda: {"memory_full_avg10": 0.0}
+    jobs._admit_locked()
+
+    record = jobs.store.load(started.payload.inline["job_id"])
+    assert record.state["phase"] == "launch-failed"
+    assert record.state["terminal"]
+    assert systemd.started == []
+    assert not (jobs.store.leases_root / f"{record.job_id}.json").exists()
+
+
+def test_declared_runner_revalidates_bound_checkout_at_payload_exec_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A checkout mutation after systemd admission cannot reach the project payload."""
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active"})
+    jobs = generic_jobs(tmp_path, systemd)
+    catalog = ProjectCatalog([tmp_path])
+    project = catalog.get("fixture")
+    checkout = catalog.checkout("fixture", "default")
+    started = jobs.start_declared(
+        project=project,
+        operation=project.operation("service"),
+        correlation_id="declared-runner-fixture",
+        parameters={},
+        checkout=checkout,
+    )
+    record = jobs.store.load(started["job_id"])
+    _, launch_environment = jobs.store.declared_launch(record.job_id)
+    assert systemd.started[0]["command"][1] == "--declared"
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--allow-empty", "-m", "moved"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    for key in (
+        "SINNIXD_JOB_ID",
+        "SINNIXD_PROJECT_ID",
+        "SINNIXD_OPERATION",
+        "SINNIXD_CHECKOUT_ID",
+        "SINNIXD_CHECKOUT_HEAD",
+    ):
+        monkeypatch.setenv(key, launch_environment[key])
+    with pytest.raises(RunnerError, match="registered Git worktree"):
+        _run_declared(jobs.store.root, record.job_id, record.unit)
+
+
 def test_exact_head_verified_workspace_publishes_lands_and_finishes_without_a_pr_ledger(tmp_path: Path) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
@@ -2830,6 +3439,10 @@ def test_runner_rejects_changed_or_unregistered_checkout_identities(tmp_path: Pa
     symlink.symlink_to(tmp_path, target_is_directory=True)
     with pytest.raises(RunnerError):
         _revalidate_checkout({**checkout, "path": str(symlink)})
+    loop = tmp_path.parent / f"{tmp_path.name}-loop"
+    loop.symlink_to(loop.name)
+    with pytest.raises(RunnerError):
+        _revalidate_checkout({**checkout, "path": str(loop)})
 
 
 def test_agent_runner_revalidates_checkout_and_writes_a_bounded_result_fixture(tmp_path: Path) -> None:
