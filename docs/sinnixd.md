@@ -24,6 +24,7 @@ agentctl workspace publish <workspace-id> --job <job-id> --title 'Review title' 
 agentctl workspace review-status <workspace-id>
 agentctl workspace land <workspace-id> --job <job-id>
 agentctl workspace finish <workspace-id>
+agentctl workspace dispose <workspace-id>
 agentctl workspace reap <workspace-id>
 agentctl job start sinnix lint
 agentctl job start polylogue verify_quick --workspace <workspace-id>
@@ -67,7 +68,7 @@ Checkpoint stores separate binary patches for the index and working tree plus a 
 
 A stacked workspace records only its stable parent relationship; Git remains the history authority. Restack requires a clean child, reports overlaps on declared exact-file and generated surfaces before mutation, then rebases the child onto the parent's current branch and aborts a failed Git rebase. A parent cannot be reaped while children still reference it.
 
-Publication requires a successful operation listed by the project as a workspace verifier, bound to the same checkout ID and current exact HEAD. AgentCTL pushes that branch and creates a GitHub review, but stores no PR ledger: review status, mergeability, head identity, and merged state are queried fresh from GitHub. Land rechecks the verification and GitHub head before requesting a squash merge. Finish requires GitHub to report that exact head merged, deletes the remote branch when present, removes the clean managed worktree and local branch, then removes its relationship and checkpoints.
+Publication requires a successful operation listed by the project as a workspace verifier, bound to the same checkout ID and current exact HEAD. AgentCTL pushes that branch and creates a GitHub review, but stores no PR ledger: review status, mergeability, head identity, and merged state are queried fresh from GitHub. Land rechecks the verification and GitHub head before requesting a squash merge. Finish is the hosted-review path. It requires GitHub to report that exact head merged, deletes the remote branch when present, removes the clean managed worktree and local branch, then removes its relationship and checkpoints. Dispose is the no-PR path for a verification-only managed workspace. It requires a clean, branch-identical workspace with no stacked children, proves its HEAD is contained in the declared base, validates every checkpoint artifact, and refuses any checkpoint with staged, unstaged, or untracked content. It then removes the worktree, local branch, relationship, and empty checkpoints. Reap continues to reclaim a clean base-contained managed worktree while retaining its local branch.
 
 The daemon still does not own job queues, retries, task mutation, service leases, arbitrary shells beyond the typed operator contract, admission policy, Git history, hosted review state, or merge state. GitHub remains authoritative for reviews and merges; AgentCTL only applies typed transitions after re-reading it. Descriptor pool, cache, and exclusivity metadata remain descriptive until their existing authorities move behind an explicit shared contract. The gateway’s legacy controllers remain downstream and are unchanged here.
 

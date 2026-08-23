@@ -236,6 +236,11 @@ class SinnixdService:
                 raise ValueError("workspace reap requires agent-control or operator principal")
             assert self.workspaces is not None
             return self.workspaces.reap(self._single_workspace_id(arguments, "workspace.reap"))
+        if operation == "workspace.dispose":
+            if principal not in {"agent-control", "operator"}:
+                raise ValueError("workspace disposal requires agent-control or operator principal")
+            assert self.workspaces is not None
+            return self.workspaces.dispose(self._single_workspace_id(arguments, "workspace.dispose"))
         if operation == "workspace.checkpoint":
             if principal not in {"agent-control", "operator"}:
                 raise ValueError("workspace checkpoint requires agent-control or operator principal")
