@@ -8,30 +8,9 @@ from sinnix_agent_gateway.bindings import TargetToolBinding, TargetToolBindings
 from sinnix_agent_gateway.registry import CatalogRegistry, REGISTRY, RegistryError
 
 
-VALID_BINDINGS = (
-    TargetToolBinding("status", "gateway.status", "gateway", "observe.gateway_status"),
-    TargetToolBinding("catalog", "gateway.catalog", "registry", "registry.search"),
-    TargetToolBinding("get", "resources.get", "resolver", "resources.get"),
-    TargetToolBinding("query", "projects.query", "projects", "projects.search"),
-    TargetToolBinding("query", "beads.query", "beads", "beads.query"),
-    TargetToolBinding(
-        "context", "projects.context", "project-context", "project_context.context"
-    ),
-    TargetToolBinding("events", "audit.events", "audit", "audit.tail"),
-    TargetToolBinding("wait", "jobs.wait", "systemd-jobs", "job.wait"),
-    TargetToolBinding("run", "shell.run", "systemd-jobs", "job.shell.start"),
-    TargetToolBinding("run", "agents.run", "systemd-jobs", "job.agent.start"),
-    TargetToolBinding("change", "projects.change", "projects", "projects.change"),
-    TargetToolBinding("change", "files.change", "files", "files.change"),
-    TargetToolBinding("change", "beads.change", "beads", "beads.write"),
-    TargetToolBinding("change", "beads.changeset", "beads", "beads.changeset"),
-    TargetToolBinding("change", "mcp.change", "mcp-broker", "mcp.call.write"),
-    TargetToolBinding("operate", "machine.operate", "ops-reducer", "ops.actions.execute"),
-    TargetToolBinding("operate", "beads.operate", "beads", "beads.maintenance"),
-    TargetToolBinding("operate", "jobs.cancel", "systemd-jobs", "job.cancel"),
-    TargetToolBinding("operate", "desktop.operate", "desktop", "desktop.action"),
-    TargetToolBinding("operate", "terminals.operate", "terminals", "terminals.action"),
-    TargetToolBinding("operate", "browser.operate", "browser", "browser.action"),
+VALID_BINDINGS = tuple(
+    TargetToolBinding(action.verb.value, action.name, action.owner, action.route)
+    for action in REGISTRY.actions
 )
 
 
@@ -43,6 +22,7 @@ def test_target_tool_bindings_cover_every_declared_action() -> None:
     assert bindings.action_for_tool("get") is REGISTRY.action("resources.get")
     assert bindings.action_for_tool("query", "projects.query") is REGISTRY.action("projects.query")
     assert bindings.action_for_tool("query", "beads.query") is REGISTRY.action("beads.query")
+    assert bindings.action_for_tool("query", "machine.query") is REGISTRY.action("machine.query")
     with pytest.raises(RegistryError, match="requires a declared action selector"):
         bindings.action_for_tool("query")
     assert bindings.action_for_tool("context") is REGISTRY.action("projects.context")
@@ -122,10 +102,11 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
             "unknown actions",
         ),
         (
-            (
-                *VALID_BINDINGS[:9],
-                TargetToolBinding("operate", "agents.run", "systemd-jobs", "job.agent.start"),
-                *VALID_BINDINGS[10:],
+            tuple(
+                TargetToolBinding("operate", "agents.run", "systemd-jobs", "job.agent.start")
+                if binding.action_name == "agents.run"
+                else binding
+                for binding in VALID_BINDINGS
             ),
             "must use action 'agents.run' verb 'run'",
         ),
