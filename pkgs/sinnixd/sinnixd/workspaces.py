@@ -282,6 +282,26 @@ class WorkspaceStore:
             raise WorkspaceError("checkpoint untracked manifest is invalid")
         return CheckpointRecord(*(value[field] for field in fields), tuple(files)), root
 
+    def checkpoints(self, workspace_id: str) -> tuple[tuple[CheckpointRecord, Path], ...]:
+        root = self.checkpoints_root / workspace_id
+        if not root.exists():
+            return ()
+        if not root.is_dir():
+            raise WorkspaceError("workspace checkpoint directory is invalid")
+        try:
+            entries = tuple(sorted(root.iterdir()))
+        except OSError as error:
+            raise WorkspaceError("workspace checkpoints are unavailable") from error
+        checkpoints = []
+        for entry in entries:
+            if not entry.is_dir():
+                raise WorkspaceError("workspace checkpoint directory is invalid")
+            checkpoint, checkpoint_root = self.checkpoint(workspace_id, entry.name)
+            if checkpoint.checkpoint_id != entry.name:
+                raise WorkspaceError("workspace checkpoint identity is invalid")
+            checkpoints.append((checkpoint, checkpoint_root))
+        return tuple(checkpoints)
+
     @staticmethod
     def _write_private(path: Path, content: bytes) -> None:
         descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
@@ -407,14 +427,7 @@ class GitWorkspaces:
             project = self._project(record.project_id)
             assert project.workspace is not None
             head = status["head"]
-            if not isinstance(head, str) or self._git(
-                project.root,
-                "merge-base",
-                "--is-ancestor",
-                head,
-                project.workspace.default_base,
-                check=False,
-            ).returncode != 0:
+            if not isinstance(head, str) or not self._head_is_contained_in_declared_base(project, head):
                 raise WorkspaceError("workspace HEAD is not contained in the declared base")
             removed = self._git(project.root, "worktree", "remove", str(record.path), check=False)
             if removed.returncode != 0:
@@ -426,6 +439,38 @@ class GitWorkspaces:
                 "reaped": True,
                 "relationship_only": False,
                 "retained_branch": record.branch,
+            }
+
+    def dispose(self, workspace_id: str) -> dict[str, Any]:
+        """Delete a clean no-review workspace only when every retained artifact is redundant."""
+        with flock(self.mutation_lock):
+            record = self._record(workspace_id)
+            if not record.managed:
+                raise WorkspaceError("adopted workspaces cannot be disposed")
+            if any(stack.parent_workspace_id == workspace_id for stack in self.store.stack_records()):
+                raise WorkspaceError("workspace cannot be disposed while stacked children exist")
+            status = self._status(record)
+            if status["state"] != "available" or not status["identity_matches"]:
+                raise WorkspaceError("workspace is unavailable or its branch identity changed")
+            if status["dirty"]:
+                raise WorkspaceError("workspace must be clean before disposal")
+            checkout, project = self._available(record)
+            if not self._head_is_contained_in_declared_base(project, checkout.head):
+                raise WorkspaceError("workspace has unpublished committed content")
+            self._verify_disposable_checkpoints(workspace_id)
+            removed = self._git(project.root, "worktree", "remove", str(record.path), check=False)
+            if removed.returncode != 0:
+                raise WorkspaceError(removed.stderr.strip() or "git worktree remove failed")
+            branch = self._git(project.root, "branch", "-D", record.branch, check=False)
+            if branch.returncode != 0:
+                raise WorkspaceError(branch.stderr.strip() or "git branch deletion failed")
+            self.store.remove_stack_references(workspace_id)
+            self.store.remove(workspace_id)
+            return {
+                "workspace_id": workspace_id,
+                "disposed": True,
+                "head": checkout.head,
+                "deleted_branch": record.branch,
             }
 
     def stack(self, *, parent_workspace_id: str, name: str, branch: str) -> dict[str, Any]:
@@ -553,6 +598,30 @@ class GitWorkspaces:
             and merged_tree.returncode == 0
             and target_tree.stdout.strip() == merged_tree.stdout.strip()
         )
+
+    def _head_is_contained_in_declared_base(self, project: ProjectAdapter, head: str) -> bool:
+        assert project.workspace is not None
+        return self._git(
+            project.root,
+            "merge-base",
+            "--is-ancestor",
+            head,
+            project.workspace.default_base,
+            check=False,
+        ).returncode == 0
+
+    def _verify_disposable_checkpoints(self, workspace_id: str) -> None:
+        for checkpoint, root in self.store.checkpoints(workspace_id):
+            staged = self._verified_artifact(root / "staged.patch", checkpoint.staged_sha256)
+            unstaged = self._verified_artifact(root / "unstaged.patch", checkpoint.unstaged_sha256)
+            untracked = self._verified_artifact(root / "untracked.tar", checkpoint.untracked_sha256)
+            try:
+                with tarfile.open(fileobj=io.BytesIO(untracked), mode="r:") as archive:
+                    archive_members = archive.getmembers()
+            except tarfile.TarError as error:
+                raise WorkspaceError("checkpoint archive is invalid") from error
+            if staged or unstaged or checkpoint.untracked_files or archive_members:
+                raise WorkspaceError("workspace checkpoint retains content that must be preserved")
 
     def checkpoint(self, workspace_id: str) -> dict[str, Any]:
         with flock(self.mutation_lock):

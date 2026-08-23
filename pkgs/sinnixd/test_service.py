@@ -96,6 +96,26 @@ def test_agentctl_task_mutations_require_a_stable_request_id() -> None:
         cli_module.parser().parse_args(["task", "claim", "fixture", "fixture-1"])
 
 
+def test_agentctl_workspace_dispose_maps_to_a_typed_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, RequestEnvelope] = {}
+
+    def fake_call(socket_path, request_value):
+        captured["request"] = request_value
+        return {"schema": 1, "ok": True}
+
+    monkeypatch.setattr(sys, "argv", ["agentctl", "workspace", "dispose", "workspace-1"])
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    outbound = captured["request"]
+    assert outbound.operation == "workspace.dispose"
+    assert outbound.owner == "git-workspaces"
+    assert outbound.principal == "agent-control"
+    assert dict(outbound.arguments) == {"workspace_id": "workspace-1"}
+
+
 def write_adapter(root: Path) -> None:
     (root / "modules").mkdir(parents=True)
     (root / "flake.nix").write_text("{}")
@@ -1138,6 +1158,79 @@ def test_workspace_reap_preserves_dirty_divergent_and_adopted_worktrees(tmp_path
     assert (dirty_path / "operator.txt").read_text() == "preserve\n"
     assert divergent_path.is_dir()
     assert external.is_dir()
+
+
+def test_workspace_dispose_deletes_a_clean_no_pr_branch_without_checkpoint_content(tmp_path: Path) -> None:
+    """Anti-vacuity: disposal must remove both Git objects, not just the workspace record."""
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    workspace = service.workspaces.create(
+        project_id="fixture", name="verification-lane", branch="feature/verification-lane", base="HEAD"
+    )
+    checkpoint = service.workspaces.checkpoint(workspace["workspace_id"])
+
+    disposed = service.dispatch(
+        request(
+            "workspace.dispose",
+            "git-workspaces",
+            {"workspace_id": workspace["workspace_id"]},
+            "operator",
+        )
+    )
+
+    assert disposed.ok and disposed.payload is not None
+    assert disposed.payload.inline["disposed"]
+    assert disposed.payload.inline["deleted_branch"] == workspace["branch"]
+    assert not Path(workspace["path"]).exists()
+    assert subprocess.run(
+        ["git", "-C", str(tmp_path), "show-ref", "--verify", "--quiet", f"refs/heads/{workspace['branch']}"]
+    ).returncode == 1
+    assert not (service.workspaces.store.checkpoints_root / workspace["workspace_id"] / checkpoint["checkpoint_id"]).exists()
+    assert service.workspaces.list("fixture") == {"workspaces": []}
+
+
+def test_workspace_dispose_refuses_dirty_divergent_unpublished_and_checkpoint_only_content(tmp_path: Path) -> None:
+    """Anti-vacuity: each rejection leaves the managed worktree and branch available for recovery."""
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    dirty = service.workspaces.create(
+        project_id="fixture", name="dispose-dirty", branch="feature/dispose-dirty", base="HEAD"
+    )
+    (Path(dirty["path"]) / "operator.txt").write_text("preserve\n")
+    divergent = service.workspaces.create(
+        project_id="fixture", name="dispose-divergent", branch="feature/dispose-divergent", base="HEAD"
+    )
+    subprocess.run(["git", "-C", divergent["path"], "switch", "-c", "feature/dispose-replaced"], check=True)
+    unpublished = service.workspaces.create(
+        project_id="fixture", name="dispose-unpublished", branch="feature/dispose-unpublished", base="HEAD"
+    )
+    unpublished_path = Path(unpublished["path"])
+    (unpublished_path / "unpublished.txt").write_text("preserve\n")
+    subprocess.run(["git", "-C", str(unpublished_path), "add", "unpublished.txt"], check=True)
+    subprocess.run(
+        [
+            "git", "-C", str(unpublished_path), "-c", "user.name=Fixture", "-c",
+            "user.email=fixture@example.test", "commit", "--quiet", "-m", "unpublished",
+        ],
+        check=True,
+    )
+    checkpoint_only = service.workspaces.create(
+        project_id="fixture", name="dispose-checkpoint", branch="feature/dispose-checkpoint", base="HEAD"
+    )
+    checkpoint_path = Path(checkpoint_only["path"])
+    (checkpoint_path / "recoverable.txt").write_text("preserve\n")
+    service.workspaces.checkpoint(checkpoint_only["workspace_id"])
+    (checkpoint_path / "recoverable.txt").unlink()
+
+    for workspace in (dirty, divergent, unpublished, checkpoint_only):
+        with pytest.raises(ValueError):
+            service.workspaces.dispose(workspace["workspace_id"])
+        assert Path(workspace["path"]).is_dir()
+        assert subprocess.run(
+            ["git", "-C", str(tmp_path), "show-ref", "--verify", "--quiet", f"refs/heads/{workspace['branch']}"]
+        ).returncode == 0
 
 
 def test_workspace_checkpoint_restore_round_trips_index_worktree_and_untracked_state(tmp_path: Path) -> None:

@@ -62,6 +62,8 @@ def parser() -> argparse.ArgumentParser:
     workspace_adopt.add_argument("name")
     workspace_reap = workspace_subcommands.add_parser("reap")
     workspace_reap.add_argument("workspace_id")
+    workspace_dispose = workspace_subcommands.add_parser("dispose")
+    workspace_dispose.add_argument("workspace_id")
     workspace_checkpoint = workspace_subcommands.add_parser("checkpoint")
     workspace_checkpoint.add_argument("workspace_id")
     workspace_restore = workspace_subcommands.add_parser("restore")
@@ -264,6 +266,13 @@ def main() -> int:
     elif arguments.command == "workspace" and arguments.workspace_command == "reap":
         request = _request(
             "workspace.reap",
+            "git-workspaces",
+            {"workspace_id": arguments.workspace_id},
+            "agent-control",
+        )
+    elif arguments.command == "workspace" and arguments.workspace_command == "dispose":
+        request = _request(
+            "workspace.dispose",
             "git-workspaces",
             {"workspace_id": arguments.workspace_id},
             "agent-control",
