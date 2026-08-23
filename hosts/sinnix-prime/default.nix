@@ -319,7 +319,7 @@
   systemd.services.systemd-tpm2-setup-early.enable = lib.mkForce false;
 
   # Long-term journal on the /realm NVMe rather than the wear-limited MX500
-  # root, so retention can be generous (64G size cap, 365-day time cap). The
+  # root, so retention can be generous (100G size cap, 365-day time cap). The
   # nested subvol /realm/state/journal keeps journal churn out of the /realm
   # btrbk→borg snapshots; sinex's syslog capture is the durable archive and
   # this is the queryable window.
@@ -350,7 +350,7 @@
       # greps out of it. Retention is time-based; the size cap is a backstop,
       # not a preallocation.
       MaxRetentionSec=365day
-      SystemMaxUse=64G
+      SystemMaxUse=100G
       SystemKeepFree=200G
       SystemMaxFileSize=128M
       MaxFileSec=1week
