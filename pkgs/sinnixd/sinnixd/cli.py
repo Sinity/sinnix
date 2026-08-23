@@ -140,7 +140,7 @@ def _request(
     )
 
 
-def main() -> None:
+def main() -> int:
     arguments = parser().parse_args()
     if arguments.command == "status":
         request = _request("runtime.status", "sinnixd", {})
@@ -324,7 +324,9 @@ def main() -> None:
         if not isinstance(owner_arguments, dict):
             parser().error("--arguments-json must be a JSON object")
         request = _request(arguments.operation, arguments.owner, owner_arguments)
-    print(json.dumps(call(arguments.socket, request), indent=2, sort_keys=True))
+    response = call(arguments.socket, request)
+    print(json.dumps(response, indent=2, sort_keys=True))
+    return 0 if response.get("ok") is True else 1
 
 
 def daemon_main() -> None:

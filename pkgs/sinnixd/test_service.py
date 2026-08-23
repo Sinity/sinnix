@@ -16,6 +16,7 @@ from uuid import uuid4
 import pytest
 
 import sinnixd.jobs as jobs_module
+import sinnixd.cli as cli_module
 from sinnix_mcp import OpaquePayload, RequestEnvelope, ResponseEnvelope, SinnixRef, SourceBinding
 from sinnix_mcp.execution import EnvironmentProfile, ExecutionResult
 
@@ -38,6 +39,18 @@ from sinnixd.projects import ProjectCatalog, ProjectConfigError, parse_worktree_
 from sinnixd.runner import RunnerError, _revalidate_checkout
 from sinnixd.service import SinnixdService
 from sinnixd.workspaces import GitWorkspaces, WorkspaceStore
+
+
+@pytest.mark.parametrize(("ok", "expected"), ((True, 0), (False, 1)))
+def test_agentctl_exit_status_matches_response_envelope(
+    ok: bool, expected: int, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    response = {"schema": 1, "ok": ok}
+    monkeypatch.setattr(sys, "argv", ["agentctl", "status"])
+    monkeypatch.setattr(cli_module, "call", lambda socket_path, request: response)
+
+    assert cli_module.main() == expected
+    assert json.loads(capsys.readouterr().out) == response
 
 
 def write_adapter(root: Path) -> None:
