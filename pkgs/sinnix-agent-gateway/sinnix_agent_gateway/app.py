@@ -1150,6 +1150,23 @@ class Runtime:
                     artifact_refs.append(f"sinnix://artifacts/{value}")
                 elif key == "created" and value is True:
                     created_objects.append(action.name)
+            before = result.get("before")
+            after = result.get("after")
+            before_refs = self._resource_refs(before)
+            after_refs = self._resource_refs(after)
+            before_revision = result.get("before_revision")
+            after_revision = result.get("after_revision")
+            owner_route = result.get("owner_route")
+            owner_version = result.get("owner_version")
+            owner_history_ref = result.get("owner_history_ref")
+        else:
+            before_refs = []
+            after_refs = []
+            before_revision = None
+            after_revision = None
+            owner_route = None
+            owner_version = None
+            owner_history_ref = None
         payload = {
             "schema": "sinnix.gateway-receipt.v2",
             "action": action.name,
@@ -1162,11 +1179,14 @@ class Runtime:
             "idempotency_key": context.idempotency_key,
             "target_refs": sorted(set(target_refs)),
             "owner": action.owner,
-            "owner_route": action.route,
-            "owner_version": REGISTRY.revision,
+            "owner_route": owner_route if isinstance(owner_route, str) else action.route,
+            "owner_version": owner_version if isinstance(owner_version, (str, int)) else REGISTRY.revision,
             "preconditions": dict(context.preconditions or {}),
-            "before_refs": [],
-            "after_refs": [],
+            "before_refs": before_refs,
+            "after_refs": after_refs,
+            "before_revision": before_revision,
+            "after_revision": after_revision,
+            "owner_history_ref": owner_history_ref if isinstance(owner_history_ref, str) else None,
             "effects": [],
             "created_objects": created_objects,
             "artifact_refs": sorted(set(artifact_refs)),
