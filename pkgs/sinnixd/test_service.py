@@ -17,7 +17,7 @@ import pytest
 
 import sinnixd.jobs as jobs_module
 from sinnix_mcp import OpaquePayload, RequestEnvelope, ResponseEnvelope, SinnixRef, SourceBinding
-from sinnix_mcp.execution import ExecutionResult
+from sinnix_mcp.execution import EnvironmentProfile, ExecutionResult
 
 from sinnixd.api import UnixSocketServer, call, receive_frame, send_frame
 from sinnixd.environment import build_environment
@@ -1534,6 +1534,7 @@ def test_declared_owner_adapter_runs_fixed_command_and_enforces_source_binding(t
     command, profile = execution.calls[0]
     forwarded = json.loads(profile.stdin_bytes)
     assert result == response
+    assert profile.route.environment_profile is EnvironmentProfile.USER_BUS
     assert command[:7] == (
         "/run/current-system/sw/bin/systemd-run",
         "--user",

@@ -71,7 +71,9 @@ class DeclaredOwnerAdapters:
         result = self.execution.run(
             command,
             ExecutionProfile(
-                route=OwnerRoute("declared-owner-adapter", EnvironmentProfile.PLAIN),
+                route=OwnerRoute(
+                    "declared-owner-adapter", EnvironmentProfile.USER_BUS
+                ),
                 timeout_seconds=adapter.timeout_seconds + 5,
                 max_stdout_bytes=self.max_response_bytes,
                 max_stderr_bytes=8_192,
