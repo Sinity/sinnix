@@ -4,10 +4,11 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from .jobs import MAX_RESULT_BYTES
+from .jobs import MAX_LOG_ARTIFACT_BYTES, MAX_RESULT_BYTES, _read_private_artifact
 from .projects import ProjectConfigError, parse_worktree_records
 
 
@@ -142,6 +143,18 @@ def _current_cgroup() -> str:
     return ""
 
 
+def _emit_native_log(log_path: Path) -> None:
+    """Relay a private native log through the shared bounded capture helper."""
+    try:
+        os.chmod(log_path, 0o600, follow_symlinks=False)
+    except OSError:
+        return
+    content = _read_private_artifact(log_path, MAX_LOG_ARTIFACT_BYTES)
+    if content:
+        sys.stdout.buffer.write(content)
+        sys.stdout.buffer.flush()
+
+
 def _run_agent(
     value: Mapping[str, Any],
     checkout: Path,
@@ -203,6 +216,7 @@ def _run_agent(
     environment.update({"SINNIX_AGENT_SCOPED": "1", "SINNIX_AGENT_SCOPE_UNIT": unit, "SINNIX_AGENT_SCOPE_CGROUP": _current_cgroup(), "SINNIX_AGENT_JOB_STATE_DIR": str(native_state_dir), "SINNIX_CORRELATION_ID": value["job_id"]})
     try:
         completed = subprocess.run(command, cwd=checkout, env=environment, check=False)
+        _emit_native_log(log_path)
         if result_path.exists() and result_path.stat().st_size > MAX_RESULT_BYTES:
             result_path.write_bytes(result_path.read_bytes()[:MAX_RESULT_BYTES])
         return completed.returncode

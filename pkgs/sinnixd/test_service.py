@@ -398,14 +398,14 @@ def native_runner(path: Path) -> None:
     path.write_text(
         "#!/bin/sh\n"
         "set -eu\n"
-        "last= prompt=\n"
+        "last= prompt= log=\n"
         "if [ -n \"${RUNNER_ARGS:-}\" ]; then printf '%s\\n' \"$@\" > \"$RUNNER_ARGS\"; fi\n"
         "while [ $# -gt 0 ]; do\n"
-        "  case $1 in --last-file) last=$2; shift 2 ;; --prompt-file) prompt=$2; shift 2 ;; *) shift ;; esac\n"
+        "  case $1 in --last-file) last=$2; shift 2 ;; --prompt-file) prompt=$2; shift 2 ;; --log-file) log=$2; shift 2 ;; *) shift ;; esac\n"
         "done\n"
         "test -f \"$prompt\"\n"
         "printf native-fixture-result > \"$last\"\n"
-        "printf native-fixture-log\n"
+        "printf native-fixture-log > \"$log\"\n"
     )
     path.chmod(0o700)
 
@@ -2319,6 +2319,7 @@ def test_agent_runner_revalidates_checkout_and_writes_a_bounded_result_fixture(t
     )
 
     assert result.returncode == 0, result.stderr
+    assert result.stdout == "native-fixture-log"
     assert (results / "fixture.result").read_text() == "native-fixture-result"
     assert not prompt.exists()
     assert not input_path.exists()
@@ -2496,31 +2497,15 @@ def test_logs_report_marker_created_during_read(tmp_path: Path, monkeypatch: pyt
     record = jobs.store.load(started["job_id"])
     record.log_path.write_bytes(b"0123")
     overflow_path = record.log_path.with_suffix(".overflow")
-    original_open = Path.open
+    original_read = jobs_module._read_private_artifact
 
-    def interleaving_open(path: Path, *args: object, **kwargs: object):
-        handle = original_open(path, *args, **kwargs)
-        if path != record.log_path or args != ("rb",):
-            return handle
+    def marker_after_read(path: Path, max_bytes: int, *, offset: int = 0) -> bytes | None:
+        content = original_read(path, max_bytes, offset=offset)
+        if path == record.log_path:
+            overflow_path.touch()
+        return content
 
-        class MarkerAfterRead:
-            def __enter__(self) -> MarkerAfterRead:
-                return self
-
-            def __exit__(self, *unused: object) -> None:
-                handle.close()
-
-            def seek(self, *args: object) -> int:
-                return handle.seek(*args)
-
-            def read(self, *args: object) -> bytes:
-                content = handle.read(*args)
-                overflow_path.touch()
-                return content
-
-        return MarkerAfterRead()
-
-    monkeypatch.setattr(Path, "open", interleaving_open)
+    monkeypatch.setattr(jobs_module, "_read_private_artifact", marker_after_read)
 
     log = jobs.logs(started["job_id"], max_bytes=4)
 
