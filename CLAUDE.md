@@ -27,8 +27,8 @@
   `nix eval`/`nix build` on config edits): they are slow on this host and
   repeat work `switch` performs through the intended resource wrapper. If
   `switch` fails during activation, fix the blocker and rerun `switch`.
-- **Beads (`bd`) is the work tracker.** `bd prime` for context; discovered
-  follow-ups become linked issues, not markdown TODO lists. `bd dolt push`
+- **Beads (`bd`) is the work tracker.** Discovered follow-ups become linked
+  issues, not markdown TODO lists. `bd dolt push`
   follows the same policy as `git push`: verified `master` work may be pushed
   directly; explicit hold instructions are never bypassed.
 

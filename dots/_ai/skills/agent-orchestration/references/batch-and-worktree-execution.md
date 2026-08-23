@@ -107,8 +107,8 @@ clustering helper where the repo has one).
   hardest; schema/migration bumps must batch per tier/window; investigation
   items batch over a shared evidence pass; decision items batch into one
   operator review session.
-- **Beads hazards** (branch-reimport time-machining, jsonl conflict
-  resolution, per-operation commit noise): see the `beads` skill's
+- **Beads hazards** (JSONL export conflict resolution and per-operation
+  commit noise): see the `beads` skill's
   "Hazards" section — lane agents make no `bd` writes; coordinators audit
   bead state at merge-train boundaries and batch jsonl commits per unit of
   work.
