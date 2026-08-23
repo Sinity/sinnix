@@ -130,11 +130,6 @@
           },
           {
             "type": "command",
-            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-beads-prime.sh",
-            "timeout": 10
-          },
-          {
-            "type": "command",
             "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-steering.sh",
             "timeout": 8
           },
@@ -163,11 +158,6 @@
           {
             "type": "command",
             "command": "sinnix-context-handoff",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-beads-prime.sh --memories-only",
             "timeout": 10
           }
         ]

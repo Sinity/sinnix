@@ -282,10 +282,6 @@ mkFeatureModule {
                 force = true;
               };
               ".gemini/config/AGENTS.md".source = mkDotsFile "/claude/CLAUDE.md";
-              ".local/bin/bd-prime-if-present" = {
-                source = "${scriptPkgs.bd-prime-if-present}/bin/bd-prime-if-present";
-                force = true;
-              };
               ".local/bin/mcp-firecrawl" = {
                 source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
                 force = true;
