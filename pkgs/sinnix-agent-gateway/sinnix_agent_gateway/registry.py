@@ -576,6 +576,7 @@ BEADS_CHANGE_SCHEMA = _owner_change_schema(
         "dependency.remove",
         "memory.forget",
         "memory.remember",
+        "graph.create",
         "relate",
         "reopen",
         "unclaim",
@@ -585,6 +586,9 @@ BEADS_CHANGE_SCHEMA = _owner_change_schema(
     ),
     precondition_properties={
         "expected_task_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "expected_etag": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "expected_status": {"type": "string", "maxLength": 64},
+        "expected_assignee": {"type": ["string", "null"], "maxLength": 256},
     },
 )
 
@@ -594,11 +598,11 @@ BEADS_QUERY_SCHEMA: dict[str, Any] = _with_request_controls(
         "parameters": {"type": "object", "additionalProperties": False, "properties": {
             "project_ids": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 128}},
             "view": {"enum": ["query", "ready", "blocked", "open", "all", "recent", "overdue", "deferred", "unassigned", "stale_claims", "epic_progress", "changed_since"]},
-            "filters": {"type": "object", "maxProperties": 32}, "expression": {"type": "string", "minLength": 1, "maxLength": 4000},
+            "filters": {"type": "object", "maxProperties": 32}, "expression": {"type": "string", "minLength": 1, "maxLength": 4000}, "native_filters": {"type": "object", "maxProperties": 40},
             "order": {"type": "object", "additionalProperties": False, "properties": {"field": {"enum": ["priority", "created", "updated", "closed", "status", "id", "title", "type", "assignee"]}, "reverse": {"type": "boolean"}}},
             "includes": {"type": "array", "maxItems": 8, "items": {"enum": ["comments", "history", "events", "dependencies", "dependents", "children", "refs"]}},
             "limit": {"type": "integer", "minimum": 1, "maximum": 200}, "cursor": {"type": "string", "minLength": 1, "maxLength": 256},
-            "graph": {"type": "object", "additionalProperties": False, "properties": {"bead_id": {"type": "string"}, "direction": {"enum": ["down", "up", "both"]}, "edge_type": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 20}, "max_rows": {"type": "integer", "minimum": 1, "maximum": 1000}, "mermaid": {"type": "boolean"}}},
+            "graph": {"type": "object", "additionalProperties": False, "properties": {"bead_id": {"type": "string"}, "direction": {"enum": ["down", "up", "both"]}, "edge_type": {"type": "string"}, "status": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 20}, "max_rows": {"type": "integer", "minimum": 1, "maximum": 1000}, "mermaid": {"type": "boolean"}}},
             "memory": {"type": "object", "additionalProperties": False, "properties": {"key": {"type": "string"}, "query": {"type": "string"}}},
         }},
     }}
@@ -611,12 +615,13 @@ BEADS_CHANGE_SCHEMA["properties"]["parameters"] = {
         "preview_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "title": {"type": "string", "maxLength": 512},
         "text": {"type": "string", "maxLength": 32000}, "depends_on": {"type": "string", "maxLength": 128},
         "other_id": {"type": "string", "maxLength": 128}, "parent_id": {"type": "string", "maxLength": 128},
-        "type": {"type": "string", "maxLength": 64}, "reason": {"type": "string", "maxLength": 32000}, "key": {"type": "string", "maxLength": 256},
+        "type": {"type": "string", "maxLength": 64}, "reason": {"type": "string", "maxLength": 32000}, "key": {"type": "string", "maxLength": 256}, "graph": {"type": "object", "maxProperties": 256},
         "patch": {"type": "object", "additionalProperties": False, "properties": {
             "set": {"type": "object"},
             "labels": {"type": "object", "additionalProperties": False, "properties": {"add": {"type": "array", "items": {"type": "string"}}, "remove": {"type": "array", "items": {"type": "string"}}, "replace": {"type": "array", "items": {"type": "string"}}}},
             "metadata": {"type": "object", "additionalProperties": False, "properties": {"set": {"type": "object"}, "unset": {"type": "array", "items": {"type": "string"}}}},
             "notes": {"type": "object", "additionalProperties": False, "required": ["text"], "properties": {"text": {"type": "string", "maxLength": 32000}, "mode": {"enum": ["append", "replace"]}}},
+            "unset": {"type": "array", "items": {"enum": ["due", "defer", "parent"]}},
         }},
     },
 }
