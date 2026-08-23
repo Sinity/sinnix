@@ -142,7 +142,17 @@ def test_runtime_v2_replaces_an_oversized_owner_payload_with_typed_error(tmp_pat
 
 def test_runtime_v2_keeps_each_expected_failure_in_a_typed_envelope(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
-    action = REGISTRY.action("gateway.catalog")
+    action = ActionSpec(
+        name="fixture.typed-failure",
+        verb=VerbFamily.QUERY,
+        domain="fixture",
+        owner="fixture",
+        route="fixture.query",
+        effect=EffectMode.READ,
+        principals=frozenset({"observer"}),
+        input_schema={"type": "object"},
+        output_schema={"type": "object"},
+    )
 
     for code in EXPECTED_ERROR_CODES:
         response = runtime.execute_v2(

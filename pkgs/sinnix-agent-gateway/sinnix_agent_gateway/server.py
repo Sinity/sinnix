@@ -11,15 +11,16 @@ from .contracts import EffectMode, VerbFamily
 from .registry import CatalogSearch, REGISTRY, RegistryError
 from .results import ProtocolError
 from .runtime import (
+    AUDITED_READ_TOOL,
     IDEMPOTENT_MUTATION_TOOL,
     IDEMPOTENT_RUN_TOOL,
-    READ_ONLY_TOOL,
     Runtime,
     _principal_contract,
     canonical_manifest,
     v2_tool_result,
 )
-from .schemas import V2ToolEnvelope
+from .parity import legacy_parity_contract
+from .schemas import V2ManifestEnvelope
 
 
 async def _query_owner(
@@ -123,6 +124,8 @@ async def _query_owner(
         return runtime.artifacts.list(int(values.get("limit", 100)))
     if action_name == "audit.verify":
         return runtime.audit.verify()
+    if action_name == "jobs.query":
+        return runtime.v2_jobs_query(values.get("parameters"))
     if action_name == "captures.query":
         operation = values.pop("operation", "lanes")
         if operation == "lanes":
@@ -175,6 +178,11 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             sort_keys=True,
             separators=(",", ":"),
         )
+
+    @mcp.resource("sinnix://gateway/v2/legacy-parity")
+    def gateway_v2_legacy_parity() -> str:
+        """Return the executable legacy-to-V2 parity contract."""
+        return json.dumps(legacy_parity_contract(REGISTRY), sort_keys=True, separators=(",", ":"))
 
     @mcp.resource("sinnix://gateway/v2/actions/{action_name}")
     def gateway_v2_action_schema(action_name: str) -> str:
@@ -238,7 +246,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
 
     if target_bindings.is_visible("status", principal_name):
 
-        @mcp.tool(title="Gateway status", annotations=READ_ONLY_TOOL)
+        @mcp.tool(title="Gateway status", annotations=AUDITED_READ_TOOL)
         async def status(
             request_id: str | None = None,
             actor: str | None = None,
@@ -246,7 +254,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             idempotency_key: str | None = None,
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
-        ) -> V2ToolEnvelope:
+        ) -> V2ManifestEnvelope:
             """Return the current principal's gateway contract and availability observations."""
             action = target_bindings.action_for_tool("status", principal=principal_name)
             manifest = canonical_manifest(await mcp.list_tools())
@@ -267,11 +275,11 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     "preconditions": preconditions,
                 },
             )
-            return cast(V2ToolEnvelope, v2_tool_result(response))
+            return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("catalog", principal_name):
 
-        @mcp.tool(title="Gateway V2 catalog", annotations=READ_ONLY_TOOL)
+        @mcp.tool(title="Gateway V2 catalog", annotations=AUDITED_READ_TOOL)
         def catalog(
             text: str | None = None,
             domain: str | None = None,
@@ -286,7 +294,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             idempotency_key: str | None = None,
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
-        ) -> V2ToolEnvelope:
+        ) -> V2ManifestEnvelope:
             """Search the principal-filtered V2 resource and executable action catalog."""
             action = target_bindings.action_for_tool("catalog", principal=principal_name)
             response = runtime.execute_v2(
@@ -319,11 +327,11 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     "preconditions": preconditions,
                 },
             )
-            return cast(V2ToolEnvelope, v2_tool_result(response))
+            return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("get", principal_name):
 
-        @mcp.tool(title="Get V2 resource", annotations=READ_ONLY_TOOL)
+        @mcp.tool(title="Get V2 resource", annotations=AUDITED_READ_TOOL)
         def get(
             ref: str,
             projection: str = "summary",
@@ -337,7 +345,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             idempotency_key: str | None = None,
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
-        ) -> V2ToolEnvelope:
+        ) -> V2ManifestEnvelope:
             """Resolve a canonical resource, including bounded daemon job status or output."""
             action = target_bindings.action_for_tool("get", principal=principal_name)
             response = runtime.execute_v2(
@@ -358,11 +366,11 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     "preconditions": preconditions,
                 },
             )
-            return cast(V2ToolEnvelope, v2_tool_result(response))
+            return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("query", principal_name):
 
-        @mcp.tool(title="Query canonical resource", annotations=READ_ONLY_TOOL)
+        @mcp.tool(title="Query canonical resource", annotations=AUDITED_READ_TOOL)
         async def query(
             action_name: str = "projects.query",
             ref: str | None = None,
@@ -375,7 +383,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             idempotency_key: str | None = None,
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
-        ) -> V2ToolEnvelope:
+        ) -> V2ManifestEnvelope:
             """Invoke one catalog-declared, principal-filtered read owner route."""
             try:
                 action = target_bindings.action_for_tool("query", action_name, principal_name)
@@ -410,11 +418,11 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     "preconditions": preconditions,
                 },
             )
-            return cast(V2ToolEnvelope, v2_tool_result(response))
+            return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("context", principal_name):
 
-        @mcp.tool(title="Get V2 project context", annotations=READ_ONLY_TOOL)
+        @mcp.tool(title="Get V2 project context", annotations=AUDITED_READ_TOOL)
         def context(
             ref: str,
             request_id: str | None = None,
@@ -423,7 +431,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             idempotency_key: str | None = None,
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
-        ) -> V2ToolEnvelope:
+        ) -> V2ManifestEnvelope:
             """Compose Git and bounded task orientation for one canonical project."""
             action = target_bindings.action_for_tool("context", principal=principal_name)
             response = runtime.execute_v2(
@@ -439,11 +447,11 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     "preconditions": preconditions,
                 },
             )
-            return cast(V2ToolEnvelope, v2_tool_result(response))
+            return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("events", principal_name):
 
-        @mcp.tool(title="Get V2 audit events", annotations=READ_ONLY_TOOL)
+        @mcp.tool(title="Get V2 audit events", annotations=AUDITED_READ_TOOL)
         def events(
             limit: int = 100,
             request_id: str | None = None,
@@ -452,7 +460,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             idempotency_key: str | None = None,
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
-        ) -> V2ToolEnvelope:
+        ) -> V2ManifestEnvelope:
             """Read bounded audit events visible to the active principal."""
             action = target_bindings.action_for_tool("events", principal=principal_name)
             response = runtime.execute_v2(
@@ -468,11 +476,11 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     "preconditions": preconditions,
                 },
             )
-            return cast(V2ToolEnvelope, v2_tool_result(response))
+            return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("wait", principal_name):
 
-        @mcp.tool(title="Wait for V2 job", annotations=READ_ONLY_TOOL)
+        @mcp.tool(title="Wait for V2 job", annotations=AUDITED_READ_TOOL)
         def wait(
             ref: str,
             timeout_seconds: int = 30,
@@ -482,7 +490,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             idempotency_key: str | None = None,
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
-        ) -> V2ToolEnvelope:
+        ) -> V2ManifestEnvelope:
             """Wait for a bounded interval on one daemon-owned job reference."""
             action = target_bindings.action_for_tool("wait", principal=principal_name)
             response = runtime.execute_v2(
@@ -499,7 +507,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     "preconditions": preconditions,
                 },
             )
-            return cast(V2ToolEnvelope, v2_tool_result(response))
+            return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("run", principal_name):
 
@@ -525,7 +533,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             reason: str | None = None,
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
-        ) -> V2ToolEnvelope:
+        ) -> V2ManifestEnvelope:
             """Start one catalog-declared shell or attested-agent job by action name."""
             request = {
                 "action_name": action_name,
@@ -608,7 +616,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 else:
                     raise RegistryError(f"run action {action.name!r} is not implemented")
             response = runtime.execute_v2(action, callback, request)
-            return cast(V2ToolEnvelope, v2_tool_result(response))
+            return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("change", principal_name):
 
@@ -624,7 +632,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             actor: str | None = None,
             reason: str | None = None,
             deadline_at: float | None = None,
-        ) -> V2ToolEnvelope:
+        ) -> V2ManifestEnvelope:
             """Apply one catalog-declared mutation through its canonical owner route."""
             request = {
                 "action_name": action_name,
@@ -689,7 +697,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     raise RegistryError(f"change action {action.name!r} is not implemented")
 
             response = await runtime.execute_v2_async(action, callback, request)
-            return cast(V2ToolEnvelope, v2_tool_result(response))
+            return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("operate", principal_name):
 
@@ -705,7 +713,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             request_id: str | None = None,
             actor: str | None = None,
             deadline_at: float | None = None,
-        ) -> V2ToolEnvelope:
+        ) -> V2ManifestEnvelope:
             """Run one catalog-declared machine or job operation against a canonical target."""
             request = {
                 "action_name": action_name,
@@ -764,6 +772,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 else:
                     raise RegistryError(f"operate action {contract.name!r} is not implemented")
             response = runtime.execute_v2(contract, callback, request)
-            return cast(V2ToolEnvelope, v2_tool_result(response))
+            return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     return mcp

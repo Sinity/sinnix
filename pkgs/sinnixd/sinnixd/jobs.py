@@ -514,8 +514,13 @@ class GenericJobSpec:
             raise ValueError("job principal is invalid")
         if self.kind == "operator-shell" and self.principal != "operator":
             raise ValueError("operator shell jobs require the operator principal")
-        if self.kind == "attested-agent" and self.principal != "agent-control":
-            raise ValueError("attested agent jobs require the agent-control principal")
+        if self.kind == "attested-agent" and self.principal not in {
+            "agent-control",
+            "operator",
+        }:
+            raise ValueError(
+                "attested agent jobs require the agent-control or operator principal"
+            )
         if self.kind in {"operator-shell", "attested-agent"} and not self.checkout:
             raise ValueError("typed jobs require a registered checkout")
         if self.checkout is not None and (
@@ -1252,7 +1257,9 @@ class GenericJobStore:
             raise JobRecordError(f"malformed job record: {job_id}")
         return GenericJobRecord.from_dict(value, self.root)
 
-    def list(self) -> list[GenericJobRecord]:
+    def list(self, *, limit: int | None = None) -> list[GenericJobRecord]:
+        if limit is not None and limit < 1:
+            raise ValueError("job record list limit must be positive")
         if not self.records_root.exists():
             return []
         records: list[GenericJobRecord] = []
@@ -1261,7 +1268,14 @@ class GenericJobStore:
                 records.append(self.load(path.stem))
             except JobRecordError:
                 continue
+            if limit is not None and len(records) >= limit:
+                break
         return records
+
+    def count(self) -> int:
+        if not self.records_root.exists():
+            return 0
+        return sum(1 for _ in self.records_root.glob("*.json"))
 
     def active_records(self) -> list[GenericJobRecord]:
         """Return the durable nonterminal set without reopening historical jobs.
@@ -1906,14 +1920,21 @@ class GenericJobs:
             self._admit_locked()
         return status
 
-    def list(self) -> dict[str, Any]:
+    def list(self, *, limit: int = 100) -> dict[str, Any]:
+        if not 1 <= limit <= 1_000:
+            raise ValueError("job list limit must be between 1 and 1000")
         with self._admission_lock:
             self._admit_locked()
+        total = self.store.count()
+        records = self.store.list(limit=limit)
         return {
             "jobs": [
                 self._public(record, record.state) if record.state.get("terminal") else self.get(record.job_id)
-                for record in self.store.list()
-            ]
+                for record in records
+            ],
+            "limit": limit,
+            "total": total,
+            "truncated": total > len(records),
         }
 
     def wait(self, job_id: str, timeout_seconds: int = DEFAULT_WAIT_SECONDS) -> dict[str, Any]:

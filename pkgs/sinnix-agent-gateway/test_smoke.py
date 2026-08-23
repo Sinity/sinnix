@@ -58,9 +58,15 @@ def test_official_sdk_principals_expose_only_protocol_verbs(tmp_path: Path) -> N
         "status", "catalog", "query", "get", "context", "events", "wait",
         "operate", "run",
     }
-    assert {row["name"] for row in operator["tools"] if row["annotations"]["readOnlyHint"]} == {
-        "status", "catalog", "query", "get", "context", "events", "wait",
-    }
+    assert not any(row["annotations"]["readOnlyHint"] for row in operator["tools"])
+    assert {
+        row["name"]
+        for row in operator["tools"]
+        if row["annotations"] == {
+            "readOnlyHint": False, "destructiveHint": False, "idempotentHint": True,
+            "openWorldHint": False,
+        }
+    } == {"status", "catalog", "query", "get", "context", "events", "wait"}
     assert next(row for row in operator["tools"] if row["name"] == "change")["annotations"] == {
         "readOnlyHint": False, "destructiveHint": True, "idempotentHint": True,
         "openWorldHint": False,
@@ -75,13 +81,31 @@ def test_official_sdk_principals_expose_only_protocol_verbs(tmp_path: Path) -> N
     }
     assert all(
         row["annotations"] == {
-            "readOnlyHint": True, "destructiveHint": False, "idempotentHint": True,
+            "readOnlyHint": False, "destructiveHint": False, "idempotentHint": True,
             "openWorldHint": False,
         }
         for row in observer["tools"]
     )
     assert all("inputSchema" in row and "outputSchema" in row for row in operator["tools"])
     assert observer["sha256"] != agent_control["sha256"] != operator["sha256"]
+    assert operator["measurement"] == {
+        "schema": "sinnix.gateway-schema-measurement.v1",
+        "canonical_bytes": operator["measurement"]["canonical_bytes"],
+        "tool_count": 10,
+        "baseline": {
+            "source_commit": "e5980a67eae343f954f695c46a8fadda83961a03",
+            "canonical_bytes": 30_350,
+            "tool_count": 49,
+        },
+        "token_lane": operator["measurement"]["token_lane"],
+    }
+    assert operator["measurement"]["canonical_bytes"] < 30_350
+    assert operator["measurement"]["token_lane"] == {
+        "status": "estimated",
+        "method": "canonical_bytes_divided_by_4",
+        "estimated_tokens": (operator["measurement"]["canonical_bytes"] + 3) // 4,
+        "reason": "No tokenizer is a declared gateway runtime dependency.",
+    }
 
 
 def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> None:
@@ -147,6 +171,8 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "sinnix://gateway/v2/documentation"
                 )
                 documentation_rows = json.loads(documentation.contents[0].text)
+                parity = await session.read_resource("sinnix://gateway/v2/legacy-parity")
+                parity_rows = json.loads(parity.contents[0].text)
                 assert action_contract["action"]["schema_ref"] == (
                     "sinnix://gateway/v2/actions/gateway.catalog"
                 )
@@ -176,6 +202,8 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "sessions.query",
                     "mcp.query",
                 } <= {row["name"] for row in documentation_rows["actions"]}
+                assert parity_rows["legacy_manifest"]["tool_count"] == 49
+                assert len(parity_rows["rows"]) == 49
                 assert all(
                     "observer" in row["principals"]
                     for row in documentation_rows["resources"]
@@ -187,7 +215,10 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert result.is_error is False
                 assert result.structured_content == status_envelope
                 status_tool = next(tool for tool in tools.tools if tool.name == "status")
-                assert status_tool.output_schema == REGISTRY.action(
+                assert status_tool.output_schema != REGISTRY.action(
+                    "gateway.status"
+                ).output_schema
+                assert action_contract["action"]["output_schema"] == REGISTRY.action(
                     "gateway.status"
                 ).output_schema
                 assert status_envelope["result"]["action"] == "gateway.status"
