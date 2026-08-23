@@ -58,12 +58,11 @@ def test_official_sdk_principals_expose_only_protocol_verbs(tmp_path: Path) -> N
         "status", "catalog", "query", "get", "context", "events", "wait",
         "operate", "run",
     }
-    assert not any(row["annotations"]["readOnlyHint"] for row in operator["tools"])
     assert {
         row["name"]
         for row in operator["tools"]
         if row["annotations"] == {
-            "readOnlyHint": False, "destructiveHint": False, "idempotentHint": True,
+            "readOnlyHint": True, "destructiveHint": False, "idempotentHint": True,
             "openWorldHint": False,
         }
     } == {"status", "catalog", "query", "get", "context", "events", "wait"}
@@ -81,7 +80,7 @@ def test_official_sdk_principals_expose_only_protocol_verbs(tmp_path: Path) -> N
     }
     assert all(
         row["annotations"] == {
-            "readOnlyHint": False, "destructiveHint": False, "idempotentHint": True,
+            "readOnlyHint": True, "destructiveHint": False, "idempotentHint": True,
             "openWorldHint": False,
         }
         for row in observer["tools"]

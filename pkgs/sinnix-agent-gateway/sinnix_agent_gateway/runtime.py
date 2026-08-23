@@ -57,7 +57,7 @@ DAEMON_ERROR_CLASSES = {
 }
 
 AUDITED_READ_TOOL = ToolAnnotations(
-    readOnlyHint=False,
+    readOnlyHint=True,
     destructiveHint=False,
     idempotentHint=True,
     openWorldHint=False,
