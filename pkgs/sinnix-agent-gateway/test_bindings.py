@@ -13,6 +13,7 @@ VALID_BINDINGS = (
     TargetToolBinding("catalog", "gateway.catalog", "registry", "registry.search"),
     TargetToolBinding("get", "resources.get", "resolver", "resources.get"),
     TargetToolBinding("query", "projects.query", "projects", "projects.search"),
+    TargetToolBinding("query", "beads.query", "beads", "beads.query"),
     TargetToolBinding(
         "context", "projects.context", "project-context", "project_context.context"
     ),
@@ -38,7 +39,10 @@ def test_target_tool_bindings_cover_every_declared_action() -> None:
     assert bindings.action_for_tool("status") is REGISTRY.action("gateway.status")
     assert bindings.action_for_tool("catalog") is REGISTRY.action("gateway.catalog")
     assert bindings.action_for_tool("get") is REGISTRY.action("resources.get")
-    assert bindings.action_for_tool("query") is REGISTRY.action("projects.query")
+    assert bindings.action_for_tool("query", "projects.query") is REGISTRY.action("projects.query")
+    assert bindings.action_for_tool("query", "beads.query") is REGISTRY.action("beads.query")
+    with pytest.raises(RegistryError, match="requires a declared action selector"):
+        bindings.action_for_tool("query")
     assert bindings.action_for_tool("context") is REGISTRY.action("projects.context")
     assert bindings.action_for_tool("events") is REGISTRY.action("audit.events")
     assert bindings.action_for_tool("wait") is REGISTRY.action("jobs.wait")
@@ -115,9 +119,9 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
         ),
         (
             (
-                *VALID_BINDINGS[:8],
+                *VALID_BINDINGS[:9],
                 TargetToolBinding("operate", "agents.run", "systemd-jobs", "job.agent.start"),
-                *VALID_BINDINGS[9:],
+                *VALID_BINDINGS[10:],
             ),
             "must use action 'agents.run' verb 'run'",
         ),

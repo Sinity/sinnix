@@ -61,7 +61,6 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "browser_capture",
         "capability_search",
         "capability_describe",
-        "tasks_read",
         "memory_search",
         "memory_get",
         "timeline_query",
@@ -97,7 +96,6 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "browser_read",
         "browser_capture",
         "terminal_read",
-        "tasks_read",
         "memory_search",
         "memory_get",
         "timeline_query",
@@ -117,7 +115,6 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "wait",
         "capability_search",
         "capability_describe",
-        "tasks_read",
         "memory_search",
         "memory_get",
         "timeline_query",
@@ -261,6 +258,7 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "jobs.wait",
                     "projects.context",
                     "projects.query",
+                    "beads.query",
                     "resources.get",
                 }
                 assert all(
@@ -410,9 +408,9 @@ def test_public_v2_mutation_verbs_preserve_owner_routes(
     runtime = Runtime.create(cfg, "operator")
     calls: dict[str, object] = {}
 
-    def beads_write(project_id: str, operation: str, arguments: dict[str, object]) -> dict[str, object]:
+    def beads_change(project_id: str, operation: str, arguments: dict[str, object], **_kwargs: object) -> dict[str, object]:
         calls["beads"] = (project_id, operation, arguments)
-        return {"project_id": project_id, "operation": operation, "result": {"ok": True}}
+        return {"project_id": project_id, "operation": operation, "mode": "apply", "atomicity": "owner_native"}
 
     async def mcp_call(
         server: str, tool: str, arguments: dict[str, object], *, write: bool
@@ -434,7 +432,7 @@ def test_public_v2_mutation_verbs_preserve_owner_routes(
             return {"operation": operation, "target": {"id": "agent-target", "parked": True}}
         return {"operation": operation, "page_id": arguments["page_id"], "result": {"ok": True}}
 
-    monkeypatch.setattr(runtime.beads, "write", beads_write)
+    monkeypatch.setattr(runtime.beads, "change", beads_change)
     monkeypatch.setattr(runtime.mcp_broker, "call", mcp_call)
     monkeypatch.setattr(runtime.desktop, "action", desktop_owner)
     monkeypatch.setattr(runtime.terminals, "action", terminal_owner)

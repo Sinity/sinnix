@@ -416,6 +416,8 @@ class Runtime:
         projection: str = "summary",
         offset: int = 0,
         max_bytes: int = 64_000,
+        includes: list[str] | None = None,
+        as_of: str | None = None,
     ) -> dict[str, Any]:
         try:
             resource, values = REGISTRY.resolve(reference)
@@ -454,9 +456,7 @@ class Runtime:
             return {
                 "ref": canonical_ref,
                 "kind": resource.kind,
-                "bead": self.beads.read(
-                    values["project_id"], "show", {"id": values["bead_id"]}
-                ),
+                "bead": self.beads.get(values["project_id"], values["bead_id"], includes=includes, as_of=as_of),
             }
         if resource.kind == "task_authority":
             return {
@@ -762,6 +762,22 @@ class Runtime:
             )
         return response
 
+    def v2_beads_query(self, parameters: Mapping[str, Any]) -> dict[str, Any]:
+        values = self._parameters(parameters)
+        graph = values.pop("graph", None)
+        memory = values.pop("memory", None)
+        if graph is not None:
+            projects = values.pop("project_ids", None)
+            if not isinstance(graph, Mapping) or not isinstance(projects, list) or len(projects) != 1:
+                raise ProtocolError("invalid_request", "Beads graph requires one project_id and graph object")
+            return self.beads.graph(projects[0], **dict(graph))
+        if memory is not None:
+            projects = values.pop("project_ids", None)
+            if not isinstance(memory, Mapping) or not isinstance(projects, list) or len(projects) != 1:
+                raise ProtocolError("invalid_request", "Beads memory requires one project_id and memory object")
+            return self.beads.memories(projects[0], **dict(memory))
+        return self.beads.query(**values)
+
     def v2_beads_change(
         self,
         *,
@@ -770,18 +786,17 @@ class Runtime:
         parameters: Mapping[str, Any] | None,
         preconditions: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
-        _resource, values, canonical_ref = self._resource_reference(
-            reference, {"project"}, "ref does not identify a canonical project"
+        resource, values, canonical_ref = self._resource_reference(
+            reference, {"project", "bead"}, "ref does not identify a canonical project or bead"
         )
-        if preconditions is not None:
-            if not isinstance(preconditions, Mapping) or set(preconditions) != {"expected_task_revision"}:
-                raise ProtocolError("invalid_request", "Beads change requires expected_task_revision when preconditions are supplied")
-            expected = preconditions["expected_task_revision"]
-            actual = self.beads.task_authority_status(values["project_id"])["revision"]
-            if not isinstance(expected, str) or expected != actual:
-                raise ProtocolError("precondition_failed", "Beads task revision no longer matches")
-        result = self.beads.write(
-            values["project_id"], operation, self._parameters(parameters)
+        mutation = self._parameters(parameters)
+        if resource.kind == "bead":
+            mutation.setdefault("id", values["bead_id"])
+        result = self.beads.change(
+            values["project_id"], operation, mutation,
+            mode=str(mutation.pop("mode", "apply")),
+            preconditions=preconditions,
+            preview_digest=mutation.pop("preview_digest", None),
         )
         return {"ref": canonical_ref, **result}
 
@@ -1584,6 +1599,12 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 route="projects.search",
             ),
             TargetToolBinding(
+                tool_name="query",
+                action_name="beads.query",
+                owner="beads",
+                route="beads.query",
+            ),
+            TargetToolBinding(
                 tool_name="context",
                 action_name="projects.context",
                 owner="project-context",
@@ -1774,6 +1795,8 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             projection: str = "summary",
             offset: int = 0,
             max_bytes: int = 64_000,
+            includes: list[str] | None = None,
+            as_of: str | None = None,
             request_id: str | None = None,
             actor: str | None = None,
             reason: str | None = None,
@@ -1785,12 +1808,14 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             action = target_bindings.action_for_tool("get", principal=principal_name)
             response = runtime.execute_v2(
                 action,
-                lambda: runtime.v2_get(ref, projection, offset, max_bytes),
+                lambda: runtime.v2_get(ref, projection, offset, max_bytes, includes, as_of),
                 {
                     "ref": ref,
                     "projection": projection,
                     "offset": offset,
                     "max_bytes": max_bytes,
+                    "includes": includes,
+                    "as_of": as_of,
                     "request_id": request_id,
                     "actor": actor,
                     "reason": reason,
@@ -1803,11 +1828,13 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
 
     if target_bindings.is_visible("query", principal_name):
 
-        @mcp.tool(title="Query V2 project", annotations=READ_ONLY_TOOL)
+        @mcp.tool(title="Query V2 resource", annotations=READ_ONLY_TOOL)
         def query(
-            ref: str,
-            query: str,
+            action_name: str = "projects.query",
+            ref: str | None = None,
+            query: str | None = None,
             max_matches: int = 200,
+            parameters: dict[str, Any] | None = None,
             request_id: str | None = None,
             actor: str | None = None,
             reason: str | None = None,
@@ -1815,15 +1842,35 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
         ) -> V2ToolEnvelope:
-            """Search one canonical project or checkout through the bounded project owner."""
-            action = target_bindings.action_for_tool("query", principal=principal_name)
+            """Query one registry-declared canonical resource domain."""
+            try:
+                action = target_bindings.action_for_tool("query", action_name, principal_name)
+            except RegistryError as error:
+                action = target_bindings.fallback_for_tool("query", principal_name)
+                failure = selector_failure("query", error)
+                def callback() -> dict[str, Any]:
+                    raise failure
+            else:
+                if action.name == "projects.query":
+                    def callback() -> dict[str, Any]:
+                        if not isinstance(ref, str) or not isinstance(query, str):
+                            raise ProtocolError("invalid_request", "projects.query requires ref and query")
+                        return runtime.v2_query(ref, query, max_matches)
+                elif action.name == "beads.query":
+                    def callback() -> dict[str, Any]:
+                        return runtime.v2_beads_query(parameters or {})
+                else:
+                    def callback() -> dict[str, Any]:
+                        raise RegistryError(f"query action {action.name!r} is not implemented")
             response = runtime.execute_v2(
                 action,
-                lambda: runtime.v2_query(ref, query, max_matches),
+                callback,
                 {
+                    "action_name": action_name,
                     "ref": ref,
                     "query": query,
                     "max_matches": max_matches,
+                    "parameters": parameters,
                     "request_id": request_id,
                     "actor": actor,
                     "reason": reason,
@@ -2207,17 +2254,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             return await runtime.execute_async(
                 "mcp_read",
                 lambda: runtime.mcp_broker.call(server, tool, arguments, write=False),
-            )
-
-    if Capability.TASK_READ in runtime.principal.capabilities:
-
-        @mcp.tool(title="Read Beads tasks", annotations=READ_ONLY_TOOL)
-        def tasks_read(
-            project_id: str, operation: str, arguments: dict[str, Any] | None = None
-        ) -> dict[str, Any]:
-            """Read bounded Beads records through the native owner CLI."""
-            return runtime.execute(
-                "tasks_read", lambda: runtime.beads.read(project_id, operation, arguments)
             )
 
     if Capability.DESKTOP_READ in runtime.principal.capabilities:

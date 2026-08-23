@@ -15,10 +15,10 @@ class FakeBeads:
         self.result = result
         self.calls = []
 
-    def read(
-        self, project_id: str, operation: str, arguments: dict[str, object]
+    def query(
+        self, *, project_ids: list[str], view: str, limit: int
     ) -> dict[str, object]:
-        self.calls.append((project_id, operation, arguments))
+        self.calls.append((project_ids, view, limit))
         if isinstance(self.result, Exception):
             raise self.result
         return self.result
@@ -85,8 +85,8 @@ def test_project_context_uses_native_ready_task_owner(tmp_path: Path) -> None:
     result = context.context("fixture")
 
     assert result["tasks"]["availability"] == "available"
-    assert beads.calls == [("fixture", "ready", {"limit": 20})]
-    assert "tasks_read" in result["next_routes"]
+    assert beads.calls == [(["fixture"], "ready", 20)]
+    assert "query:beads.query" in result["next_routes"]
 
 
 def test_project_context_reports_unavailable_task_owner_without_hiding_git(
@@ -105,7 +105,7 @@ def test_project_context_reports_unavailable_task_owner_without_hiding_git(
     assert result["tasks"] == {
         "availability": "unavailable",
         "reason": "no beads project found",
-        "next_route": "tasks_read",
+        "next_route": "query:beads.query",
     }
 
 
