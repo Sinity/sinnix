@@ -156,7 +156,7 @@ class BeadsService:
         return {"ref": self.bead_ref(project_id, bead_id), "id": bead_id, "project_id": project_id, "task_revision": revision, "etag": etag, "fields": {key: row[key] for key in sorted(native_keys - {"id", "parent", "parent_id", "dependencies"}) if key in row}, "parent_ref": parent_ref, "links": links, "native": {key: value for key, value in row.items() if key not in native_keys}}
 
     def _includes(self, project: ProjectConfig, project_id: str, bead_id: str, includes: set[str]) -> dict[str, Any]:
-        commands = {"comments": ["comments", bead_id], "history": ["history", bead_id, "--limit", "100"], "events": ["history", bead_id, "--events", "--limit", "100"], "dependencies": ["dep", "list", bead_id, "--direction", "down"], "dependents": ["dep", "list", bead_id, "--direction", "up"], "children": ["list", "--parent", bead_id, "--flat", "--limit", str(_MAX_PAGE), "--max-rows", str(_MAX_PAGE)], "refs": ["show", bead_id, "--refs"]}
+        commands = {"comments": ["comments", bead_id], "history": ["history", bead_id, "--limit", "20"], "events": ["history", bead_id, "--events", "--limit", "20"], "dependencies": ["dep", "list", bead_id, "--direction", "down"], "dependents": ["dep", "list", bead_id, "--direction", "up"], "children": ["list", "--parent", bead_id, "--flat", "--limit", str(_MAX_PAGE), "--max-rows", str(_MAX_PAGE)], "refs": ["show", bead_id, "--refs"]}
         unsupported = includes - set(commands)
         if unsupported: raise BeadsError(f"unsupported_capability: unsupported Beads includes: {sorted(unsupported)}")
         return {name: self._run(project, commands[name], False) for name in sorted(includes)}
@@ -168,7 +168,7 @@ class BeadsService:
         project, status = self._attest(project_id, False)
         command = ["show", self._id(bead_id)]
         requested = set(includes or [])
-        for include, flag in (("comments", "--include-comments"), ("dependents", "--include-dependents"), ("refs", "--refs")):
+        for include, flag in (("comments", "--include-comments"), ("dependents", "--include-dependents")):
             if include in requested:
                 command.append(flag)
         if as_of is not None:

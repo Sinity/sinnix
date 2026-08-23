@@ -23,6 +23,7 @@ def beads_service(tmp_path: Path, principal: str = "operator") -> tuple[BeadsSer
         "if args[-1]=='where': print(json.dumps({'path': project+'/.beads','database_path':project+'/.beads/dolt','schema_version':1}))\n"
         "elif args[-1]=='status': print(json.dumps({'summary':{'total_issues':2}}))\n"
         "elif '--format' in args: print('flowchart TD\\n  fixture-1 --> fixture-2')\n"
+        "elif '--refs' in args: print(json.dumps({'schema_version':1, 'fixture-1':[]}))\n"
         "elif 'show' in args: print(json.dumps({'id':next((x for x in args if x.startswith('fixture-')), 'fixture-1'),'title':'fixture','status':'open','notes':'long existing notes','labels':['lane:gateway']}))\n"
         "elif 'dep' in args: print(json.dumps({'issues':[{'id':'fixture-2','dependency_type':'blocks'}]}))\n"
         "else: print(json.dumps({'issues':[{'id':'fixture-1','title':'first','status':'open'},{'id':'fixture-2','title':'second','status':'open'}]}))\n"
@@ -66,7 +67,7 @@ def test_query_compiles_native_list_filters_and_records_parse_parity(tmp_path: P
 
 
 def test_get_graph_and_memory_keep_owner_features_explicit(tmp_path: Path) -> None:
-    beads, _ = beads_service(tmp_path)
+    beads, log = beads_service(tmp_path)
     item = beads.get("fixture", "fixture-1", includes=["comments", "history", "dependencies", "dependents", "children", "refs"], as_of="HEAD")
     graph = beads.graph("fixture", "fixture-1", direction="both", edge_type="blocks", status="open", max_rows=10, mermaid=True)
     assert item["task_revision"] and item["includes"]["history"]
@@ -74,6 +75,7 @@ def test_get_graph_and_memory_keep_owner_features_explicit(tmp_path: Path) -> No
     assert "flowchart TD" in graph["mermaid"]
     assert item["as_of"] == "HEAD" and item["links"]["jobs"].endswith("/jobs")
     assert graph["owner_capabilities"]["native_cycle_detection"] is True
+    assert any(command[-2:] == ["--limit", "20"] for command in commands(log))
 
 
 def test_preview_never_writes_and_apply_protects_notes_by_default(tmp_path: Path) -> None:
