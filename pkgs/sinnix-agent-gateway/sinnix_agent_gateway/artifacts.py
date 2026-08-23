@@ -26,9 +26,6 @@ class ArtifactService:
         self.root = config.state_dir / "artifacts"
 
     def _source_is_attested(self, source: Path) -> bool:
-        jobs_root = (self.config.state_dir / "jobs").resolve()
-        if source != jobs_root and jobs_root in source.parents:
-            return True
         for directory_name, schema, identifier in (
             ("captures", "sinnix.gateway-capture-receipt.v1", "capture_id"),
             ("diagnostics", "sinnix.gateway-diagnostic-receipt.v1", "diagnostic_id"),

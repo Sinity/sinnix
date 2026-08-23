@@ -35,7 +35,6 @@ from .route_preflight import GatewayRoutePreflight
 from .registry import CatalogSearch, REGISTRY, RegistryError
 from .schemas import AgentLaunchRequest, V2ToolEnvelope
 from .sessions import SessionLogService
-from .shell import ShellService
 from .terminals import TerminalService
 from .timeline import TimelineService
 
@@ -114,7 +113,6 @@ class Runtime:
     memory: MemoryService
     timeline: TimelineService
     mcp_broker: McpBrokerService
-    shell: ShellService
     route_preflight: GatewayRoutePreflight
 
     @classmethod
@@ -133,7 +131,7 @@ class Runtime:
             artifacts=artifacts,
             audit=AuditService(config, principal),
             results=ResultService(config, principal),
-            jobs=JobService(config, principal, artifacts, projects=projects),
+            jobs=JobService(config, principal, projects=projects),
             observe=ObserveService(config, principal),
             machine_actions=MachineActionService(config, principal),
             desktop=DesktopService(config, principal, artifacts),
@@ -147,7 +145,6 @@ class Runtime:
             memory=MemoryService(principal, sessions),
             timeline=TimelineService(principal, sessions),
             mcp_broker=McpBrokerService(config, principal, artifacts),
-            shell=ShellService(config, principal),
             route_preflight=GatewayRoutePreflight(config),
         )
 
@@ -1318,43 +1315,43 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
 
         @mcp.tool(title="Run operator shell command", annotations=DESTRUCTIVE_TOOL)
         def shell_run(
+            project_id: str,
+            checkout_id: str,
             argv: list[str],
-            cwd: str = "/",
+            cwd: str = ".",
             timeout_seconds: int = 300,
             max_bytes: int = 64_000,
-            environment: dict[str, str] | None = None,
-            as_root: bool = False,
         ) -> dict[str, Any]:
-            """Run exact argv as the operator, or explicitly through sudo without a prompt."""
+            """Run exact argv through the typed operator-shell job contract."""
             return runtime.execute(
                 "shell_run",
-                lambda: runtime.shell.run(
-                    argv,
-                    cwd,
-                    timeout_seconds,
-                    max_bytes,
-                    environment,
-                    as_root,
+                lambda: runtime.jobs.run_shell(
+                    project_id=project_id,
+                    checkout_id=checkout_id,
+                    argv=argv,
+                    cwd=cwd,
+                    timeout_seconds=timeout_seconds,
+                    max_bytes=max_bytes,
                 ),
             )
 
         @mcp.tool(title="Start operator shell job", annotations=DESTRUCTIVE_TOOL)
         def shell_start(
+            project_id: str,
+            checkout_id: str,
             argv: list[str],
-            cwd: str = "/",
+            cwd: str = ".",
             timeout_seconds: int = 3_600,
-            environment: dict[str, str] | None = None,
-            as_root: bool = False,
         ) -> dict[str, Any]:
-            """Start exact argv as an attested, cancellable operator shell job."""
+            """Start exact argv through the typed, cancellable operator-shell contract."""
             return runtime.execute(
                 "shell_start",
                 lambda: runtime.jobs.start_shell(
-                    argv,
-                    cwd,
-                    timeout_seconds,
-                    environment,
-                    as_root,
+                    project_id=project_id,
+                    checkout_id=checkout_id,
+                    argv=argv,
+                    cwd=cwd,
+                    timeout_seconds=timeout_seconds,
                 ),
             )
 
@@ -1365,7 +1362,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
 
     @mcp.tool(title="Attested job status", annotations=READ_ONLY_TOOL)
     def job_status(job_id: str) -> dict[str, Any]:
-        """Return manifest and live systemd/cgroup state for one attested job ID."""
+        """Return the daemon-reconciled lifecycle for one typed job ID."""
         return runtime.execute("job_status", lambda: runtime.jobs.status(job_id))
 
     @mcp.tool(title="Read job output", annotations=READ_ONLY_TOOL)
@@ -1375,7 +1372,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         offset: int = 0,
         max_bytes: int = 64_000,
     ) -> dict[str, Any]:
-        """Read a bounded byte range from an attested job artifact."""
+        """Read a bounded daemon-owned log or result artifact."""
         return runtime.execute(
             "job_read_output",
             lambda: runtime.jobs.read_output(job_id, artifact, offset, max_bytes),
@@ -1422,18 +1419,16 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 "capture_query", lambda: runtime.captures.query(lanes, since, limit)
             )
 
-    if Capability.JOB_START in runtime.principal.capabilities:
+    if runtime.principal.name == "agent-control":
 
         @mcp.tool(title="Launch agent job", annotations=AGENT_LAUNCH_TOOL)
         def agent_launch(
             project_id: str,
             prompt: str,
             backend: str,
+            model: str,
+            reasoning_effort: str,
             checkout_id: str | None = None,
-            model: str | None = None,
-            reasoning_effort: str | None = None,
-            job_role: str | None = None,
-            work_item: str | None = None,
             timeout_seconds: int = 14_400,
             credential_profile: str = "subscription",
         ) -> dict[str, Any]:
@@ -1445,8 +1440,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 backend=backend,
                 model=model,
                 reasoning_effort=reasoning_effort,
-                job_role=job_role,
-                work_item=work_item,
                 timeout_seconds=timeout_seconds,
                 credential_profile=credential_profile,
             )

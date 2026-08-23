@@ -417,12 +417,15 @@ when a new script is added.
   selects its principal explicitly. `sinnix-agent-control-mcp` is a thin local wrapper around that
   implementation. Remote ChatGPT access uses the pinned OpenAI
   `tunnel-client` user service; the gateway has no custom HTTP/SSE transport.
-  `pkgs/sinnix-mcp` owns canonical references and the shared envelope/owner
-  contract. `modules/services/sinnixd.nix` runs the local `sinnixd` Unix-socket
-  daemon and installs `agentctl`; it discovers explicit project adapters and
-  launches only their declared operations as transient user services. Systemd
-  owns process lifecycle, cgroups, results, cancellation, and journal evidence;
-  `sinnixd` has no job queue, task, Git, or arbitrary-process authority. Its
+  The gateway retains transport, principal/capability and project authorization,
+  envelopes, audit, and redaction, then forwards typed job requests to the
+  daemon. `pkgs/sinnix-mcp` owns canonical references and the shared
+  envelope/owner contract. `modules/services/sinnixd.nix` runs the local
+  `sinnixd` Unix-socket daemon and installs `agentctl`; it discovers explicit
+  project adapters and launches only their declared operations as transient
+  user services. Systemd owns process lifecycle, cgroups, results,
+  cancellation, and journal evidence; `sinnixd` has no job queue, task, Git,
+  or arbitrary-process authority. Its
   only non-declared execution contracts are typed `operator-shell` and
   `attested-agent` jobs: both bind an explicit principal and registered Git
   checkout, use the durable generic-job record and transient user service,
