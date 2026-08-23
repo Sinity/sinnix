@@ -116,23 +116,83 @@ def test_mixed_workload_injects_light_workers_and_queues_bulk(tmp_path: Path) ->
     assert first["state"]["phase"] == "submitted"
 
 
-def test_exact_coalescing_and_tree_environment_cache_invalidation(tmp_path: Path) -> None:
+def test_cache_and_coalescing_are_principal_isolated(tmp_path: Path) -> None:
     adapter = project(tmp_path / "project", (operation("check", cache="tree+environment"),))
     systemd = FakeSystemd()
     subject = jobs(tmp_path, systemd)
 
-    first = subject.start_declared(project=adapter, operation=adapter.operation("check"), correlation_id="one", parameters={})
-    duplicate = subject.start_declared(project=adapter, operation=adapter.operation("check"), correlation_id="two", parameters={})
-    assert duplicate["job_id"] == first["job_id"]
-    assert duplicate["coalesced"] and len(systemd.started) == 1
+    operator_first = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("check"),
+        correlation_id="operator-first",
+        principal="operator",
+        parameters={},
+    )
+    operator_duplicate = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("check"),
+        correlation_id="operator-duplicate",
+        principal="operator",
+        parameters={},
+    )
+    agent_first = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("check"),
+        correlation_id="agent-first",
+        principal="agent-control",
+        parameters={},
+    )
+    agent_duplicate = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("check"),
+        correlation_id="agent-duplicate",
+        principal="agent-control",
+        parameters={},
+    )
+
+    assert operator_duplicate["job_id"] == operator_first["job_id"]
+    assert operator_duplicate["coalesced"]
+    assert agent_duplicate["job_id"] == agent_first["job_id"]
+    assert agent_duplicate["coalesced"]
+    assert agent_first["job_id"] != operator_first["job_id"]
+    assert len(systemd.started) == 2
+
+    operator_record = subject.store.load(operator_first["job_id"])
+    agent_record = subject.store.load(agent_first["job_id"])
+    assert operator_record.spec.principal == "operator"
+    assert agent_record.spec.principal == "agent-control"
+    assert operator_record.spec.cache_key != agent_record.spec.cache_key
 
     systemd.properties = {"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}
-    assert subject.get(first["job_id"])["state"]["phase"] == "succeeded"
-    cached = subject.start_declared(project=adapter, operation=adapter.operation("check"), correlation_id="three", parameters={})
-    assert cached["job_id"] == first["job_id"] and cached["reused"]
+    assert subject.get(operator_first["job_id"])["state"]["phase"] == "succeeded"
+    assert subject.get(agent_first["job_id"])["state"]["phase"] == "succeeded"
+
+    operator_cached = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("check"),
+        correlation_id="operator-cached",
+        principal="operator",
+        parameters={},
+    )
+    agent_cached = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("check"),
+        correlation_id="agent-cached",
+        principal="agent-control",
+        parameters={},
+    )
+    assert operator_cached["job_id"] == operator_first["job_id"] and operator_cached["reused"]
+    assert agent_cached["job_id"] == agent_first["job_id"] and agent_cached["reused"]
+
     (adapter.root / "tracked").write_text("changed\n")
-    uncached = subject.start_declared(project=adapter, operation=adapter.operation("check"), correlation_id="four", parameters={})
-    assert uncached["job_id"] != first["job_id"] and len(systemd.started) == 2
+    uncached = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("check"),
+        correlation_id="operator-uncached",
+        principal="operator",
+        parameters={},
+    )
+    assert uncached["job_id"] != operator_first["job_id"] and len(systemd.started) == 3
 
 
 def test_dependencies_exclusive_keys_learned_peaks_and_pressure_gate(tmp_path: Path) -> None:
