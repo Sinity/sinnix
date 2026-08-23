@@ -8,9 +8,11 @@ from typing import Any
 import pytest
 from sinnix_mcp import RequestEnvelope
 
+from sinnix_agent_gateway.app import Runtime
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.jobs import JobError, JobService
+from sinnix_agent_gateway.registry import REGISTRY
 from sinnix_agent_gateway.schemas import AgentLaunchRequest
 
 
@@ -41,9 +43,22 @@ def initialize_checkout(path: Path) -> None:
 class FakeSinnixd:
     calls: list[RequestEnvelope] = field(default_factory=list)
     responses: dict[str, dict[str, Any]] = field(default_factory=dict)
+    errors: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def __call__(self, _socket: Path, request: RequestEnvelope) -> dict[str, Any]:
         self.calls.append(request)
+        error = self.errors.get(request.operation)
+        if error is not None:
+            return {
+                "schema": 1,
+                "request_id": request.request_id,
+                "correlation_id": request.correlation_id,
+                "owner": "systemd-jobs",
+                "ok": False,
+                "source_bindings": [],
+                "receipt_ref": None,
+                "error": error,
+            }
         payload = self.responses.get(request.operation, {"job_id": "job-fixture"})
         return {
             "schema": 1,
@@ -57,13 +72,16 @@ class FakeSinnixd:
         }
 
 
-def job_service(tmp_path: Path, principal_name: str) -> tuple[JobService, FakeSinnixd]:
+def job_service(
+    tmp_path: Path, principal_name: str, *, max_result_bytes: int = 1_048_576
+) -> tuple[JobService, FakeSinnixd]:
     checkout = tmp_path / f"checkout-{principal_name}"
     initialize_checkout(checkout)
     config = GatewayConfig(
         state_dir=tmp_path / "state",
         sinnixd_socket=tmp_path / "sinnixd.sock",
         projects={"fixture": ProjectConfig(project_id="fixture", path=checkout)},
+        max_result_bytes=max_result_bytes,
     )
     daemon = FakeSinnixd()
     return JobService(config, Principal.for_name(principal_name), transport=daemon), daemon
@@ -157,6 +175,7 @@ def test_job_lifecycle_and_bounded_artifact_calls_map_to_sinnixd(tmp_path: Path)
     daemon.responses = {
         "job.list": {"jobs": [{"job_id": "one"}, {"job_id": "two"}]},
         "job.get": {"job_id": "one", "state": {"phase": "running"}},
+        "job.wait": {"job_id": "one", "state": {"phase": "succeeded"}},
         "job.logs": {"job_id": "one", "content": "log"},
         "job.result": {"job_id": "one", "content": "result"},
         "job.cancel": {"job_id": "one", "cancel_requested": True},
@@ -164,18 +183,21 @@ def test_job_lifecycle_and_bounded_artifact_calls_map_to_sinnixd(tmp_path: Path)
 
     assert jobs.list(1) == {"jobs": [{"job_id": "one"}]}
     assert jobs.status("one")["state"]["phase"] == "running"
+    assert jobs.wait("one", timeout_seconds=30)["state"]["phase"] == "succeeded"
     assert jobs.read_output("one", "log", 4, 32)["content"] == "log"
     assert jobs.read_output("one", "result", 0, 32)["content"] == "result"
     assert jobs.cancel("one")["cancel_requested"] is True
     assert [request.operation for request in daemon.calls] == [
         "job.list",
         "job.get",
+        "job.wait",
         "job.logs",
         "job.result",
         "job.cancel",
     ]
-    assert daemon.calls[2].arguments == {"job_id": "one", "offset": 4, "max_bytes": 32}
-    assert daemon.calls[3].arguments == {"job_id": "one", "max_bytes": 32}
+    assert daemon.calls[2].arguments == {"job_id": "one", "timeout_seconds": 30}
+    assert daemon.calls[3].arguments == {"job_id": "one", "offset": 4, "max_bytes": 32}
+    assert daemon.calls[4].arguments == {"job_id": "one", "max_bytes": 32}
 
 
 @pytest.mark.parametrize(
@@ -201,3 +223,230 @@ def test_malformed_or_rejected_daemon_responses_fail_closed(
     jobs.transport = malformed
     with pytest.raises(JobError):
         jobs.status("one")
+
+
+def runtime_with_daemon(
+    tmp_path: Path, principal_name: str, *, max_result_bytes: int = 1_048_576
+) -> tuple[Runtime, FakeSinnixd]:
+    jobs, daemon = job_service(
+        tmp_path, principal_name, max_result_bytes=max_result_bytes
+    )
+    runtime = Runtime.create(jobs.config, principal_name)
+    runtime.jobs.transport = daemon
+    return runtime, daemon
+
+
+def test_v2_run_and_wait_forward_the_same_daemon_job_identity(tmp_path: Path) -> None:
+    runtime, daemon = runtime_with_daemon(tmp_path, "operator")
+    job_id = "3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
+    daemon.responses = {
+        "job.shell.start": {"job_id": job_id, "state": {"phase": "running"}},
+        "job.wait": {"job_id": job_id, "state": {"phase": "succeeded"}},
+    }
+
+    run_action = REGISTRY.action("shell.run")
+    run_request = {
+        "project_id": "fixture",
+        "checkout_id": "default",
+        "argv": ["printf", "fixture"],
+        "cwd": ".",
+        "timeout_seconds": 60,
+        "idempotency_key": "run-fixture",
+    }
+    started = runtime.execute_v2(
+        run_action,
+        lambda: runtime.v2_run_shell(
+            project_id="fixture",
+            checkout_id="default",
+            argv=["printf", "fixture"],
+            cwd=".",
+            timeout_seconds=60,
+        ),
+        run_request,
+    )
+    replayed = runtime.execute_v2(
+        run_action,
+        lambda: pytest.fail("idempotent replay invoked the daemon start callback"),
+        run_request,
+    )
+    waited = runtime.execute_v2(
+        REGISTRY.action("jobs.wait"),
+        lambda: runtime.v2_wait(started["data"]["ref"], 30),
+        {"ref": started["data"]["ref"], "timeout_seconds": 30},
+    )
+
+    assert started["result"]["outcome"] == "ok"
+    assert started["data"]["job_id"] == job_id
+    assert started["data"]["ref"] == f"sinnix://jobs/{job_id}"
+    assert replayed == started
+    assert waited["result"]["outcome"] == "ok"
+    assert waited["data"]["job_id"] == job_id
+    assert waited["data"]["ref"] == started["data"]["ref"]
+    assert [request.operation for request in daemon.calls] == [
+        "job.shell.start",
+        "job.wait",
+    ]
+    assert [request.principal for request in daemon.calls] == ["operator", "operator"]
+    assert daemon.calls[0].arguments == {
+        "project_id": "fixture",
+        "checkout_id": "default",
+        "argv": ["printf", "fixture"],
+        "cwd": ".",
+        "timeout_seconds": 60,
+        "result": "exit-status",
+    }
+    assert daemon.calls[1].arguments == {"job_id": job_id, "timeout_seconds": 30}
+    assert set(daemon.calls[0].arguments).isdisjoint(
+        {"environment", "as_root", "command", "unit"}
+    )
+
+
+def test_v2_run_and_wait_preserve_typed_daemon_errors(tmp_path: Path) -> None:
+    runtime, daemon = runtime_with_daemon(tmp_path, "operator")
+    job_id = "3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
+    daemon.errors = {
+        "job.shell.start": {
+            "code": "OWNER_UNAVAILABLE",
+            "message": "daemon start unavailable",
+            "details": {"owner": "systemd-jobs"},
+        },
+        "job.wait": {
+            "code": "RESULT_INVALID",
+            "message": "daemon wait result invalid",
+            "details": {"job_id": job_id},
+        },
+    }
+
+    started = runtime.execute_v2(
+        REGISTRY.action("shell.run"),
+        lambda: runtime.v2_run_shell(
+            project_id="fixture",
+            checkout_id="default",
+            argv=["true"],
+            cwd=".",
+            timeout_seconds=60,
+        ),
+        {
+            "project_id": "fixture",
+            "checkout_id": "default",
+            "argv": ["true"],
+            "idempotency_key": "run-error-fixture",
+        },
+    )
+    waited = runtime.execute_v2(
+        REGISTRY.action("jobs.wait"),
+        lambda: runtime.v2_wait(f"sinnix://jobs/{job_id}", 30),
+        {"ref": f"sinnix://jobs/{job_id}", "timeout_seconds": 30},
+    )
+
+    assert started["error"] == {
+        "code": "unavailable",
+        "message": "daemon start unavailable",
+        "details": {"owner": "systemd-jobs"},
+        "diagnostic_refs": [],
+    }
+    assert waited["error"] == {
+        "code": "owner_failed",
+        "message": "daemon wait result invalid",
+        "details": {"job_id": job_id},
+        "diagnostic_refs": [],
+    }
+    assert [request.operation for request in daemon.calls] == [
+        "job.shell.start",
+        "job.wait",
+    ]
+
+
+def test_v2_wait_rejects_a_different_daemon_job_identity(tmp_path: Path) -> None:
+    runtime, daemon = runtime_with_daemon(tmp_path, "observer")
+    requested = "3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
+    daemon.responses["job.wait"] = {
+        "job_id": "44bca584-51fb-4cf9-bf38-9ea31b8135ba",
+        "state": {"phase": "succeeded"},
+    }
+
+    response = runtime.execute_v2(
+        REGISTRY.action("jobs.wait"),
+        lambda: runtime.v2_wait(f"sinnix://jobs/{requested}", 30),
+        {"ref": f"sinnix://jobs/{requested}", "timeout_seconds": 30},
+    )
+
+    assert response["error"]["code"] == "owner_failed"
+    assert response["error"]["message"] == (
+        "sinnixd wait response does not match the requested job"
+    )
+    assert daemon.calls[-1].arguments == {
+        "job_id": requested,
+        "timeout_seconds": 30,
+    }
+
+
+def test_v2_run_authority_and_wait_result_bound_fail_closed(tmp_path: Path) -> None:
+    observer, daemon = runtime_with_daemon(
+        tmp_path, "observer", max_result_bytes=1_024
+    )
+    run_denied = observer.execute_v2(
+        REGISTRY.action("shell.run"),
+        lambda: observer.v2_run_shell(
+            project_id="fixture",
+            checkout_id="default",
+            argv=["true"],
+            cwd=".",
+            timeout_seconds=60,
+        ),
+        {
+            "project_id": "fixture",
+            "checkout_id": "default",
+            "argv": ["true"],
+            "idempotency_key": "observer-run-denied",
+        },
+    )
+    assert run_denied["error"]["code"] == "policy_denied"
+    assert daemon.calls == []
+
+    job_id = "3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
+    daemon.responses["job.wait"] = {
+        "job_id": job_id,
+        "state": {"phase": "running", "detail": "x" * 2_000},
+    }
+    oversized = observer.execute_v2(
+        REGISTRY.action("jobs.wait"),
+        lambda: observer.v2_wait(f"sinnix://jobs/{job_id}", 30),
+        {"ref": f"sinnix://jobs/{job_id}", "timeout_seconds": 30},
+    )
+
+    assert oversized["error"]["code"] == "response_bound"
+    assert daemon.calls[-1].operation == "job.wait"
+    assert daemon.calls[-1].principal == "observer"
+
+
+def test_v2_run_and_wait_reject_out_of_contract_arguments_before_forwarding(
+    tmp_path: Path,
+) -> None:
+    runtime, daemon = runtime_with_daemon(tmp_path, "operator")
+
+    invalid_run = runtime.execute_v2(
+        REGISTRY.action("shell.run"),
+        lambda: runtime.v2_run_shell(
+            project_id="fixture",
+            checkout_id="default",
+            argv=["true"],
+            cwd=".",
+            timeout_seconds=3_601,
+        ),
+        {
+            "project_id": "fixture",
+            "checkout_id": "default",
+            "argv": ["true"],
+            "idempotency_key": "invalid-run-timeout",
+        },
+    )
+    invalid_wait = runtime.execute_v2(
+        REGISTRY.action("jobs.wait"),
+        lambda: runtime.v2_wait("sinnix://jobs/job-fixture", 301),
+        {"ref": "sinnix://jobs/job-fixture", "timeout_seconds": 301},
+    )
+
+    assert invalid_run["error"]["code"] == "invalid_request"
+    assert invalid_wait["error"]["code"] == "invalid_request"
+    assert daemon.calls == []

@@ -48,7 +48,19 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
     observer_catalog = REGISTRY.search(CatalogSearch(principal="observer"))
     operator_catalog = REGISTRY.search(CatalogSearch(principal="operator"))
 
-    assert observer_catalog["actions"] == operator_catalog["actions"]
+    assert {row["name"] for row in observer_catalog["actions"]} == {
+        "gateway.status",
+        "gateway.catalog",
+        "resources.get",
+        "jobs.wait",
+    }
+    assert {row["name"] for row in operator_catalog["actions"]} == {
+        "gateway.status",
+        "gateway.catalog",
+        "resources.get",
+        "jobs.wait",
+        "shell.run",
+    }
     assert observer_catalog["action_catalog_hash"] != operator_catalog["action_catalog_hash"]
     assert {row["kind"] for row in observer_catalog["resources"]} >= {
         "project",
@@ -237,6 +249,7 @@ def test_catalog_search_scopes_contracts_to_project_resources() -> None:
     assert {action["name"] for action in result["actions"]} == {
         "gateway.catalog",
         "resources.get",
+        "shell.run",
     }
 
 
@@ -245,3 +258,35 @@ def test_catalog_search_applies_text_to_resource_contracts() -> None:
 
     assert result["actions"] == []
     assert [resource["kind"] for resource in result["resources"]] == ["terminal"]
+
+
+def test_run_and_wait_contracts_are_closed_and_authority_scoped() -> None:
+    run = REGISTRY.action_schema("shell.run", "operator")["action"]
+    wait = REGISTRY.action_schema("jobs.wait", "observer")["action"]
+
+    assert run["verb"] == "run"
+    assert run["effect"] == "run"
+    assert run["owner"] == "systemd-jobs"
+    assert run["route"] == "job.shell.start"
+    assert run["principals"] == ["operator"]
+    assert run["supports_idempotency"] is True
+    assert run["input_schema"]["additionalProperties"] is False
+    assert run["input_schema"]["required"] == [
+        "project_id",
+        "checkout_id",
+        "argv",
+        "idempotency_key",
+    ]
+    assert set(run["input_schema"]["properties"]).isdisjoint(
+        {"environment", "as_root", "command", "unit"}
+    )
+    assert wait["verb"] == "wait"
+    assert wait["effect"] == "read"
+    assert wait["owner"] == "systemd-jobs"
+    assert wait["route"] == "job.wait"
+    assert wait["principals"] == ["agent-control", "observer", "operator"]
+    assert wait["input_schema"]["additionalProperties"] is False
+    assert wait["input_schema"]["required"] == ["ref"]
+    assert wait["input_schema"]["properties"]["timeout_seconds"]["maximum"] == 300
+    with pytest.raises(RegistryError, match="cannot read action"):
+        REGISTRY.action_schema("shell.run", "observer")

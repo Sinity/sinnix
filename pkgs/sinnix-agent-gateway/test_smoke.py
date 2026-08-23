@@ -46,6 +46,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
     readonly_names = {row["name"] for row in readonly["tools"]}
     local_names = {row["name"] for row in local["tools"]}
     operator_names = {row["name"] for row in operator["tools"]}
+    assert {"status", "catalog", "get", "wait"} <= readonly_names
     assert {
         "files_read",
         "project_read",
@@ -76,9 +77,17 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "browser_action",
         "shell_run",
         "shell_start",
+        "run",
     }.isdisjoint(readonly_names)
     assert "shell_query" not in readonly_names
-    assert {"agent_launch", "job_cancel", "capability_search", "capability_describe"} <= local_names
+    assert {
+        "agent_launch",
+        "job_cancel",
+        "capability_search",
+        "capability_describe",
+        "wait",
+    } <= local_names
+    assert "run" not in local_names
     assert {
         "desktop_action",
         "desktop_read",
@@ -93,6 +102,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "terminal_read",
         "shell_run",
         "shell_start",
+        "run",
         "tasks_read",
         "tasks_write",
         "memory_search",
@@ -118,6 +128,8 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "terminal_read",
         "shell_run",
         "shell_start",
+        "run",
+        "wait",
         "capability_search",
         "capability_describe",
         "tasks_read",
@@ -131,6 +143,21 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
     } <= operator_names
     assert "agent_launch" not in operator_names
     assert "project_context" in readonly_names & local_names & operator_names
+    run_tool = next(row for row in operator["tools"] if row["name"] == "run")
+    wait_tool = next(row for row in readonly["tools"] if row["name"] == "wait")
+    assert set(run_tool["inputSchema"]["required"]) >= {
+        "project_id",
+        "checkout_id",
+        "argv",
+        "idempotency_key",
+    }
+    assert set(run_tool["inputSchema"]["properties"]).isdisjoint(
+        {"environment", "as_root", "command", "unit"}
+    )
+    assert set(wait_tool["inputSchema"]["required"]) == {"ref"}
+    assert set(wait_tool["inputSchema"]["properties"]).isdisjoint(
+        {"job_id", "operation", "command"}
+    )
     assert readonly["sha256"] != local["sha256"] != operator["sha256"]
     assert all(
         "inputSchema" in row and "outputSchema" in row for row in readonly["tools"]
@@ -189,7 +216,7 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 templates = await session.list_resource_templates()
                 names = {tool.name for tool in tools.tools}
                 assert initialized.server_info.name == "sinnix-agent-gateway"
-                assert {"status", "catalog", "get", "project_read"} <= names
+                assert {"status", "catalog", "get", "wait", "project_read"} <= names
                 assert "project_write" not in names
                 assert "agent_launch" not in names
                 assert {
@@ -226,6 +253,7 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert {row["name"] for row in documentation_rows["actions"]} == {
                     "gateway.catalog",
                     "gateway.status",
+                    "jobs.wait",
                     "resources.get",
                 }
                 assert all(

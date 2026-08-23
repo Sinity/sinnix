@@ -22,7 +22,7 @@ from .contracts import ActionSpec, EffectMode, VerbFamily
 from .desktop import DesktopService
 from sinnix_mcp.execution import ExecutionProfile, OwnerDiagnosticError, OwnerExecution
 from .files import HostFileService
-from .jobs import JobService
+from .jobs import JobError, JobService
 from .machine_actions import MachineActionService
 from .mcp_broker import McpBrokerService
 from .memory import MemoryService
@@ -50,6 +50,12 @@ AGENT_LAUNCH_TOOL = ToolAnnotations(
     readOnlyHint=False,
     destructiveHint=False,
     idempotentHint=False,
+    openWorldHint=True,
+)
+IDEMPOTENT_RUN_TOOL = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=False,
+    idempotentHint=True,
     openWorldHint=True,
 )
 DESTRUCTIVE_TOOL = ToolAnnotations(
@@ -308,6 +314,82 @@ class Runtime:
             }
         raise ValueError(f"V2 get does not support resource kind {resource.kind!r}")
 
+    def v2_run_shell(
+        self,
+        *,
+        project_id: str,
+        checkout_id: str,
+        argv: list[str],
+        cwd: str,
+        timeout_seconds: int,
+    ) -> dict[str, Any]:
+        if not isinstance(project_id, str) or not 1 <= len(project_id) <= 128:
+            raise ProtocolError("invalid_request", "project_id is malformed")
+        if not isinstance(checkout_id, str) or not 1 <= len(checkout_id) <= 128:
+            raise ProtocolError("invalid_request", "checkout_id is malformed")
+        if (
+            not isinstance(argv, list)
+            or not 1 <= len(argv) <= 128
+            or any(
+                not isinstance(argument, str) or not 1 <= len(argument) <= 32_768
+                for argument in argv
+            )
+        ):
+            raise ProtocolError("invalid_request", "argv is malformed")
+        if not isinstance(cwd, str) or not 1 <= len(cwd) <= 4_096:
+            raise ProtocolError("invalid_request", "cwd is malformed")
+        if (
+            not isinstance(timeout_seconds, int)
+            or isinstance(timeout_seconds, bool)
+            or not 1 <= timeout_seconds <= 3_600
+        ):
+            raise ProtocolError(
+                "invalid_request", "run timeout_seconds must be between 1 and 3600"
+            )
+        result = self.jobs.start_shell(
+            project_id=project_id,
+            checkout_id=checkout_id,
+            argv=argv,
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+        )
+        job_id = result.get("job_id")
+        if not isinstance(job_id, str) or not job_id:
+            raise JobError(
+                "sinnixd start response omitted the job ID",
+                failure_class="owner_failed",
+            )
+        return {
+            **result,
+            "ref": REGISTRY.reference("job", {"job_id": job_id}),
+        }
+
+    def v2_wait(self, reference: str, timeout_seconds: int) -> dict[str, Any]:
+        if not isinstance(reference, str) or not 1 <= len(reference) <= 2_048:
+            raise ProtocolError("invalid_request", "wait ref is malformed")
+        if (
+            not isinstance(timeout_seconds, int)
+            or isinstance(timeout_seconds, bool)
+            or not 1 <= timeout_seconds <= 300
+        ):
+            raise ProtocolError(
+                "invalid_request", "wait timeout_seconds must be between 1 and 300"
+            )
+        try:
+            resource, values = REGISTRY.resolve(reference)
+        except RegistryError as exc:
+            raise ProtocolError("not_found", "canonical job resource was not found") from exc
+        if resource.kind != "job":
+            raise ProtocolError("invalid_request", "wait requires a canonical job reference")
+        job_id = values["job_id"]
+        result = self.jobs.wait(job_id, timeout_seconds=timeout_seconds)
+        if result.get("job_id") != job_id:
+            raise JobError(
+                "sinnixd wait response does not match the requested job",
+                failure_class="owner_failed",
+            )
+        return {**result, "ref": REGISTRY.reference("job", {"job_id": job_id})}
+
     def _record_result(
         self, operation: str, result: Any, request_sha256: str | None = None
     ) -> dict[str, Any]:
@@ -499,6 +581,13 @@ class Runtime:
                 "code": exc.failure_class,
                 "message": public_error(exc),
                 "details": {},
+                "diagnostic_refs": [],
+            }
+        elif isinstance(exc, JobError):
+            error = {
+                "code": exc.failure_class,
+                "message": public_error(exc),
+                "details": exc.details,
                 "diagnostic_refs": [],
             }
         elif isinstance(exc, PolicyError):
@@ -797,6 +886,18 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 owner="resolver",
                 route="resources.get",
             ),
+            TargetToolBinding(
+                tool_name="wait",
+                action_name="jobs.wait",
+                owner="systemd-jobs",
+                route="job.wait",
+            ),
+            TargetToolBinding(
+                tool_name="run",
+                action_name="shell.run",
+                owner="systemd-jobs",
+                route="job.shell.start",
+            ),
         ),
     )
 
@@ -904,6 +1005,82 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 lambda: runtime.v2_get(ref),
                 {
                     "ref": ref,
+                    "request_id": request_id,
+                    "actor": actor,
+                    "reason": reason,
+                    "idempotency_key": idempotency_key,
+                    "deadline_at": deadline_at,
+                    "preconditions": preconditions,
+                },
+            )
+            return cast(V2ToolEnvelope, v2_tool_result(response))
+
+    if target_bindings.is_visible("wait", principal_name):
+
+        @mcp.tool(title="Wait for V2 job", annotations=READ_ONLY_TOOL)
+        def wait(
+            ref: str,
+            timeout_seconds: int = 30,
+            request_id: str | None = None,
+            actor: str | None = None,
+            reason: str | None = None,
+            idempotency_key: str | None = None,
+            deadline_at: float | None = None,
+            preconditions: dict[str, Any] | None = None,
+        ) -> V2ToolEnvelope:
+            """Wait for a bounded interval on one daemon-owned job reference."""
+            action = target_bindings.action_for_tool("wait", principal_name)
+            response = runtime.execute_v2(
+                action,
+                lambda: runtime.v2_wait(ref, timeout_seconds),
+                {
+                    "ref": ref,
+                    "timeout_seconds": timeout_seconds,
+                    "request_id": request_id,
+                    "actor": actor,
+                    "reason": reason,
+                    "idempotency_key": idempotency_key,
+                    "deadline_at": deadline_at,
+                    "preconditions": preconditions,
+                },
+            )
+            return cast(V2ToolEnvelope, v2_tool_result(response))
+
+    if target_bindings.is_visible("run", principal_name):
+
+        @mcp.tool(
+            title="Run typed operator shell job", annotations=IDEMPOTENT_RUN_TOOL
+        )
+        def run(
+            project_id: str,
+            checkout_id: str,
+            argv: list[str],
+            idempotency_key: str,
+            cwd: str = ".",
+            timeout_seconds: int = 3_600,
+            request_id: str | None = None,
+            actor: str | None = None,
+            reason: str | None = None,
+            deadline_at: float | None = None,
+            preconditions: dict[str, Any] | None = None,
+        ) -> V2ToolEnvelope:
+            """Start one typed operator-shell job and return its daemon-owned handle."""
+            action = target_bindings.action_for_tool("run", principal_name)
+            response = runtime.execute_v2(
+                action,
+                lambda: runtime.v2_run_shell(
+                    project_id=project_id,
+                    checkout_id=checkout_id,
+                    argv=argv,
+                    cwd=cwd,
+                    timeout_seconds=timeout_seconds,
+                ),
+                {
+                    "project_id": project_id,
+                    "checkout_id": checkout_id,
+                    "argv": argv,
+                    "cwd": cwd,
+                    "timeout_seconds": timeout_seconds,
                     "request_id": request_id,
                     "actor": actor,
                     "reason": reason,

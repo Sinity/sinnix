@@ -22,6 +22,29 @@ MAX_FRAME_BYTES = 1_048_576
 class JobError(ValueError):
     """The authoritative Sinnixd job owner rejected a gateway request."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_class: str = "invalid_request",
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        self.failure_class = failure_class
+        self.details = dict(details or {})
+        super().__init__(message)
+
+
+DAEMON_ERROR_CLASSES = {
+    "INVALID_ARGUMENT": "invalid_request",
+    "POLICY_DENIED": "policy_denied",
+    "OWNER_UNAVAILABLE": "unavailable",
+    "AUTHORITY_MISMATCH": "policy_denied",
+    "RESOURCE_DEFERRED": "unavailable",
+    "RESOURCE_EXHAUSTED": "response_bound",
+    "OPERATION_FAILED": "owner_failed",
+    "RESULT_INVALID": "owner_failed",
+}
+
 
 def _read_exact(connection: socket.socket, length: int) -> bytes:
     chunks: list[bytes] = []
@@ -29,7 +52,10 @@ def _read_exact(connection: socket.socket, length: int) -> bytes:
     while remaining:
         chunk = connection.recv(remaining)
         if not chunk:
-            raise JobError("sinnixd closed the response before it completed")
+            raise JobError(
+                "sinnixd closed the response before it completed",
+                failure_class="owner_failed",
+            )
         chunks.append(chunk)
         remaining -= len(chunk)
     return b"".join(chunks)
@@ -38,13 +64,19 @@ def _read_exact(connection: socket.socket, length: int) -> bytes:
 def _receive_frame(connection: socket.socket) -> dict[str, Any]:
     length = struct.unpack("!I", _read_exact(connection, 4))[0]
     if not length or length > MAX_FRAME_BYTES:
-        raise JobError("sinnixd returned an invalid response frame")
+        raise JobError(
+            "sinnixd returned an invalid response frame", failure_class="owner_failed"
+        )
     try:
         value = json.loads(_read_exact(connection, length))
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        raise JobError("sinnixd returned malformed JSON") from error
+        raise JobError(
+            "sinnixd returned malformed JSON", failure_class="owner_failed"
+        ) from error
     if not isinstance(value, dict):
-        raise JobError("sinnixd returned a non-object response")
+        raise JobError(
+            "sinnixd returned a non-object response", failure_class="owner_failed"
+        )
     return value
 
 
@@ -72,12 +104,16 @@ def socket_transport(socket_path: Path, request: RequestEnvelope) -> dict[str, A
             )
             response = _receive_frame(connection)
     except OSError as error:
-        raise JobError("sinnixd is unavailable") from error
+        raise JobError("sinnixd is unavailable", failure_class="unavailable") from error
     if response.get("jsonrpc") != "2.0" or response.get("id") != request.request_id:
-        raise JobError("sinnixd response does not match the request")
+        raise JobError(
+            "sinnixd response does not match the request", failure_class="owner_failed"
+        )
     result = response.get("result")
     if not isinstance(result, dict):
-        raise JobError("sinnixd response has no result envelope")
+        raise JobError(
+            "sinnixd response has no result envelope", failure_class="owner_failed"
+        )
     return result
 
 
@@ -116,25 +152,44 @@ class JobService:
         if response.get("request_id") != request.request_id or response.get(
             "correlation_id"
         ) != request.correlation_id:
-            raise JobError("sinnixd response identity does not match the request")
+            raise JobError(
+                "sinnixd response identity does not match the request",
+                failure_class="owner_failed",
+            )
         if response.get("owner") != "systemd-jobs" or not isinstance(
             response.get("ok"), bool
         ):
-            raise JobError("sinnixd response violates the job-owner contract")
+            raise JobError(
+                "sinnixd response violates the job-owner contract",
+                failure_class="owner_failed",
+            )
         if response["ok"] is False:
             error = response.get("error")
             message = error.get("message") if isinstance(error, dict) else None
+            daemon_code = error.get("code") if isinstance(error, dict) else None
+            details = error.get("details") if isinstance(error, dict) else None
             raise JobError(
                 message
                 if isinstance(message, str) and message
-                else "sinnixd rejected the job request"
+                else "sinnixd rejected the job request",
+                failure_class=(
+                    DAEMON_ERROR_CLASSES.get(daemon_code, "owner_failed")
+                    if isinstance(daemon_code, str)
+                    else "owner_failed"
+                ),
+                details=details if isinstance(details, Mapping) else None,
             )
         payload = response.get("payload")
         if not isinstance(payload, dict) or payload.get("kind") != "inline":
-            raise JobError("sinnixd job response must contain an inline payload")
+            raise JobError(
+                "sinnixd job response must contain an inline payload",
+                failure_class="owner_failed",
+            )
         value = payload.get("value")
         if not isinstance(value, dict):
-            raise JobError("sinnixd job payload must be an object")
+            raise JobError(
+                "sinnixd job payload must be an object", failure_class="owner_failed"
+            )
         return value
 
     def _checkout_id(self, project_id: str, checkout_id: str | None) -> str:
