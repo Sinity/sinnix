@@ -69,7 +69,9 @@ verification_operations = ["check"]
 [conflicts]
 exact_files = ["fixture.lock"]
 generated_surfaces = ["generated.json"]
-semantic_slots = ["fixture-registry"]
+
+[conflicts.semantic_slots]
+fixture-registry = ["registry/*.toml"]
 
 [operations.check]
 description = "Run fixture checks"
@@ -869,7 +871,13 @@ def test_workspace_stack_restacks_child_onto_parent_and_survives_restart(tmp_pat
         restarted.workspaces.reap(parent["workspace_id"])
 
 
-def test_workspace_restack_reports_declared_collision_without_mutating_child(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("conflict_path", "expected_class"),
+    [("fixture.lock", "exact-file"), ("generated.json", "generated-surface"), ("ordinary.txt", "hard")],
+)
+def test_workspace_restack_reports_declared_collision_without_mutating_child(
+    tmp_path: Path, conflict_path: str, expected_class: str
+) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
@@ -881,8 +889,8 @@ def test_workspace_restack_reports_declared_collision_without_mutating_child(tmp
     )
     for workspace, content, message in ((parent, "parent\n", "parent lock"), (child, "child\n", "child lock")):
         path = Path(workspace["path"])
-        (path / "fixture.lock").write_text(content)
-        subprocess.run(["git", "-C", str(path), "add", "fixture.lock"], check=True)
+        (path / conflict_path).write_text(content)
+        subprocess.run(["git", "-C", str(path), "add", conflict_path], check=True)
         subprocess.run(
             ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", message],
             check=True,
@@ -894,10 +902,45 @@ def test_workspace_restack_reports_declared_collision_without_mutating_child(tmp
     result = service.workspaces.restack(child["workspace_id"])
 
     assert not result["restacked"]
-    assert result["collisions"] == [{"path": "fixture.lock", "class": "exact-file"}]
+    assert result["collisions"] == [{"path": conflict_path, "class": expected_class}]
     assert subprocess.run(
         ["git", "-C", child["path"], "rev-parse", "HEAD"], check=True, capture_output=True, text=True
     ).stdout.strip() == child_head
+
+
+def test_workspace_restack_reports_semantic_slot_collision_across_different_paths(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    parent = service.workspaces.create(
+        project_id="fixture", name="slot-parent", branch="feature/slot-parent", base="HEAD"
+    )
+    child = service.workspaces.stack(
+        parent_workspace_id=parent["workspace_id"], name="slot-child", branch="feature/slot-child"
+    )
+    for workspace, relative, content in (
+        (parent, "registry/parent.toml", "parent = true\n"),
+        (child, "registry/child.toml", "child = true\n"),
+    ):
+        path = Path(workspace["path"])
+        (path / "registry").mkdir()
+        (path / relative).write_text(content)
+        subprocess.run(["git", "-C", str(path), "add", relative], check=True)
+        subprocess.run(
+            ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", relative],
+            check=True,
+        )
+
+    result = service.workspaces.restack(child["workspace_id"])
+
+    assert result["collisions"] == [
+        {
+            "class": "semantic-slot",
+            "slot": "fixture-registry",
+            "child_paths": "registry/child.toml",
+            "parent_paths": "registry/parent.toml",
+        }
+    ]
 
 
 def test_declared_job_binds_workspace_and_exact_head(tmp_path: Path) -> None:
