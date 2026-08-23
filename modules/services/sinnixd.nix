@@ -51,7 +51,13 @@ mkServiceModule {
       ) cfg.projectRoots;
     in
     {
-      environment.systemPackages = [ scriptPkgs.sinnixd ];
+      # Declared owner adapters run under env -i with the daemon's system PATH.
+      # Keep their fixed packaged entrypoints in that PATH rather than relying
+      # on an interactive Home Manager profile.
+      environment.systemPackages = [
+        scriptPkgs.sinnixd
+        scriptPkgs.polylogue-cli
+      ];
       sinnix.persistence.home.directories = [ ".local/state/sinnixd" ];
       sinnix.runtime.surfaces.sinnixd-jobs = {
         unit = "sinnixd-job-.service";
