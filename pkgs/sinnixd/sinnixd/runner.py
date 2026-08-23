@@ -185,7 +185,7 @@ def _run_agent(
         "--agent",
         value["backend"],
         "--registered-project",
-        value["checkout"]["project_id"],
+        value["checkout"]["project_path"],
         "--expected-git-common-dir",
         value["checkout"]["git_common_dir"],
         "--workdir",

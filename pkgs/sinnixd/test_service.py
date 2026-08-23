@@ -676,7 +676,9 @@ def test_agent_runner_revalidates_checkout_and_writes_a_bounded_result_fixture(t
     assert not prompt.exists()
     assert not input_path.exists()
     handoff = runner_arguments.read_text().splitlines()
-    assert handoff[handoff.index("--registered-project") + 1] == "fixture"
+    assert handoff[handoff.index("--registered-project") + 1] == str(
+        checkout.project_path
+    )
     assert handoff[handoff.index("--expected-git-common-dir") + 1] == str(checkout.git_common_dir)
     assert handoff[handoff.index("--workdir") + 1] == str(checkout.path)
 

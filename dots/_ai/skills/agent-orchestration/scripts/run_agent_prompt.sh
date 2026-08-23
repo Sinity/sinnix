@@ -3,6 +3,9 @@ set -euo pipefail
 
 agent=""
 workdir=""
+registered_project=""
+expected_git_common_dir=""
+local_workdir=0
 prompt_file=""
 log_file=""
 json_file=""
@@ -53,6 +56,22 @@ Required:
   --workdir <path>
   --prompt-file <path>
   --log-file <path>
+
+Worktree identity (required: exactly one of the two forms below):
+  --registered-project <path>  Registered project checkout for worktree attestation
+  --expected-git-common-dir <path>  Expected resolved Git common directory
+                                (both required together -- this pair is the
+                                runner's own authorization boundary: --workdir
+                                must resolve to --registered-project itself or
+                                a linked Git worktree of it with a matching
+                                Git common directory)
+  --local-workdir               Explicitly opt out of Git-worktree attestation
+                                for a directory the caller already trusts
+                                directly (a non-Git directory, or a
+                                subdirectory of a Git checkout). Mutually
+                                exclusive with --registered-project/
+                                --expected-git-common-dir. Never used by the
+                                typed sinnixd agent-job path.
 
 Existing options:
   --json-file <path>
@@ -114,6 +133,18 @@ while [[ $# -gt 0 ]]; do
   --workdir)
     workdir="${2:?missing value for --workdir}"
     shift 2
+    ;;
+  --registered-project)
+    registered_project="${2:?missing value for --registered-project}"
+    shift 2
+    ;;
+  --expected-git-common-dir)
+    expected_git_common_dir="${2:?missing value for --expected-git-common-dir}"
+    shift 2
+    ;;
+  --local-workdir)
+    local_workdir=1
+    shift
     ;;
   --prompt-file)
     prompt_file="${2:?missing value for --prompt-file}"
@@ -284,6 +315,24 @@ if [[ -z ${agent} || -z ${workdir} || -z ${prompt_file} || -z ${log_file} ]]; th
   usage >&2
   exit 2
 fi
+# Worktree identity is mandatory in exactly one of two forms: attested
+# (--registered-project + --expected-git-common-dir together) or explicitly
+# local (--local-workdir alone). This is the runner's own authorization
+# boundary for Git-worktree jobs, not an optional extra. The typed sinnixd
+# agent-job runner uses the attested form, so there is no silent
+# "identity omitted" fallback. --local-workdir exists as a distinct, clearly
+# named opt-out for a caller (never the gateway) that already trusts
+# --workdir directly: a non-Git directory, or a subdirectory of a Git
+# checkout that isn't itself a worktree root.
+if [[ ${local_workdir} -eq 1 ]]; then
+  if [[ -n ${registered_project} || -n ${expected_git_common_dir} ]]; then
+    echo "run_agent_prompt.sh: --local-workdir is mutually exclusive with --registered-project/--expected-git-common-dir" >&2
+    exit 2
+  fi
+elif [[ -z ${registered_project} || -z ${expected_git_common_dir} ]]; then
+  usage >&2
+  exit 2
+fi
 [[ -f ${prompt_file} ]] || {
   echo "missing prompt: ${prompt_file}" >&2
   exit 1
@@ -357,7 +406,37 @@ elif [[ ! -r ${reservation}/launch-id || $(<"${reservation}/launch-id") != "${la
   echo "refusing mismatched job reservation: ${job_id}" >&2
   exit 2
 fi
+# --registered-project and --expected-git-common-dir are mandatory together
+# (checked above) whenever --local-workdir was not given, because this block
+# is the runner's own authorization boundary for attested Git-worktree jobs,
+# not an optional extra: the typed sinnixd agent-job runner supplies both for
+# every gateway launch and never sets
+# --local-workdir. This attestation model requires --workdir to itself be a
+# worktree root (the registered project, or one of its linked worktrees) --
+# it does not and cannot attest a subdirectory of one, so a caller with a
+# genuine subdirectory or non-Git target must say so explicitly via
+# --local-workdir rather than this block silently degrading to accept it.
 worktree="$(cd "${workdir}" && pwd -P)"
+if [[ ${local_workdir} -eq 0 ]]; then
+  registered_project="$(cd "${registered_project}" && pwd -P)"
+  actual_common_dir="$(git -C "${worktree}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  actual_root="$(git -C "${worktree}" rev-parse --path-format=absolute --show-toplevel 2>/dev/null || true)"
+  [[ ${actual_common_dir} == "${expected_git_common_dir}" && ${actual_root} == "${worktree}" ]] || {
+    echo "run_agent_prompt.sh: worktree Git identity changed" >&2
+    exit 125
+  }
+  worktree_attested=0
+  while IFS= read -r line; do
+    if [[ ${line} == "worktree "* && "$(realpath "${line#worktree }")" == "${worktree}" ]]; then
+      worktree_attested=1
+      break
+    fi
+  done < <(git -C "${registered_project}" worktree list --porcelain 2>/dev/null)
+  [[ ${worktree_attested} -eq 1 ]] || {
+    echo "run_agent_prompt.sh: worktree is not registered with the project" >&2
+    exit 125
+  }
+fi
 git_common_dir="$(git -C "${worktree}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
 if [[ -n ${git_common_dir} && $(basename "${git_common_dir}") == .git ]]; then
   repo_root="$(dirname "${git_common_dir}")"
@@ -447,9 +526,14 @@ if [[ ${internal_agent_scope} -eq 0 && -z ${SINNIX_AGENT_SCOPED:-} ]]; then
   scope_args+=(--property "RuntimeMaxSec=${timeout_seconds}")
   inner_args=(
     "$0" --internal-agent-scope --job-id "${job_id}" --launch-id "${launch_id}" --job-state-dir "${job_state_dir}"
-    --agent "${agent}" --workdir "${workdir}" --prompt-file "${prompt_file}" --log-file "${log_file}"
+    --agent "${agent}" --workdir "${worktree}" --prompt-file "${prompt_file}" --log-file "${log_file}"
     --timeout-seconds "${timeout_seconds}"
   )
+  if [[ ${local_workdir} -eq 1 ]]; then
+    inner_args+=(--local-workdir)
+  else
+    inner_args+=(--registered-project "${registered_project}" --expected-git-common-dir "${expected_git_common_dir}")
+  fi
   [[ -z ${model} ]] || inner_args+=(--model "${model}")
   [[ -z ${reasoning_effort} ]] || inner_args+=(--reasoning-effort "${reasoning_effort}")
   [[ -z ${job_role} ]] || inner_args+=(--job-role "${job_role}")
@@ -527,7 +611,9 @@ finalize_job() {
   fi
 }
 trap finalize_job EXIT
-cd "${workdir}"
+# Bind execution to the canonical, validated worktree -- not the original
+# (possibly symlinked) --workdir input, which was only used to derive it.
+cd "${worktree}"
 
 resolve_agent_bin() {
   case "$1" in
@@ -565,7 +651,7 @@ codex)
     echo "codex requires --model and --last-file" >&2
     exit 2
   }
-  cmd=("${agent_env[@]}" "${agent_bin}" exec -C "${workdir}" --model "${model}" --output-last-message "${last_file}")
+  cmd=("${agent_env[@]}" "${agent_bin}" exec -C "${worktree}" --model "${model}" --output-last-message "${last_file}")
   [[ -z ${reasoning_effort} ]] || cmd+=(-c "model_reasoning_effort=\"${reasoning_effort}\"")
   [[ -z ${schema_file} ]] || cmd+=(--output-schema "${schema_file}")
   [[ -z ${codex_sandbox} ]] || cmd+=(-s "${codex_sandbox}")
@@ -602,7 +688,7 @@ gemini)
   ;;
 grok)
   prompt_text="$(<"${prompt_file}")"
-  cmd=("${agent_env[@]}" "${agent_bin}" --cwd "${workdir}" --single "${prompt_text}")
+  cmd=("${agent_env[@]}" "${agent_bin}" --cwd "${worktree}" --single "${prompt_text}")
   [[ -z ${model} ]] || cmd+=(--model "${model}")
   [[ -z ${reasoning_effort} ]] || cmd+=(--reasoning-effort "${reasoning_effort}")
   if [[ -n ${schema_file} ]]; then
