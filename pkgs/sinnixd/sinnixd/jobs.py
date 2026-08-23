@@ -24,7 +24,8 @@ MAX_WAIT_SECONDS = 300
 SYSTEMD_COMMAND_TIMEOUT_SECONDS = 0.25
 MAX_LOG_BYTES = 64_000
 MAX_LOG_ARTIFACT_BYTES = 1_048_576
-JOB_SCHEMA_VERSION = 2
+MAX_RESULT_BYTES = 64_000
+JOB_SCHEMA_VERSION = 3
 JOB_UNIT_PREFIX = "sinnixd-job-"
 SYSTEMD_ERROR_CODE = "systemd-job-error"
 
@@ -208,9 +209,13 @@ class GenericJobSpec:
     operation: str | None = None
     environment_keys: tuple[str, ...] = ()
     command_digest: str | None = None
+    principal: str | None = None
+    checkout: Mapping[str, str] | None = None
+    contract: Mapping[str, Any] = field(default_factory=dict)
+    result_kind: str = "exit-status"
 
     def __post_init__(self) -> None:
-        if self.kind not in {"declared-operation", "foreground-command"}:
+        if self.kind not in {"declared-operation", "foreground-command", "operator-shell", "attested-agent"}:
             raise ValueError("job kind is invalid")
         if not self.command and not self.command_digest:
             raise ValueError("job needs a launch command or command digest")
@@ -231,6 +236,27 @@ class GenericJobSpec:
             raise ValueError("job environment must be string key/value pairs")
         if any(not isinstance(key, str) or not key for key in self.environment_keys):
             raise ValueError("job environment metadata must be non-empty strings")
+        if self.principal is not None and self.principal not in {"operator", "agent-control"}:
+            raise ValueError("job principal is invalid")
+        if self.kind == "operator-shell" and self.principal != "operator":
+            raise ValueError("operator shell jobs require the operator principal")
+        if self.kind == "attested-agent" and self.principal != "agent-control":
+            raise ValueError("attested agent jobs require the agent-control principal")
+        if self.kind in {"operator-shell", "attested-agent"} and not self.checkout:
+            raise ValueError("typed jobs require a registered checkout")
+        if self.checkout is not None and (
+            set(self.checkout) != {"project_id", "project_path", "checkout_id", "path", "git_common_dir", "head"}
+            or any(not isinstance(value, str) or not value for value in self.checkout.values())
+        ):
+            raise ValueError("job checkout identity is invalid")
+        if not isinstance(self.contract, Mapping) or any(not isinstance(key, str) or not key for key in self.contract):
+            raise ValueError("job contract is invalid")
+        if self.result_kind not in {"exit-status", "last-message"}:
+            raise ValueError("job result kind is invalid")
+        if self.kind == "operator-shell" and self.result_kind != "exit-status":
+            raise ValueError("operator shell jobs only support exit-status results")
+        if self.kind == "attested-agent" and self.result_kind != "last-message":
+            raise ValueError("attested agent jobs require last-message results")
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -240,11 +266,15 @@ class GenericJobSpec:
             "timeout_seconds": self.timeout_seconds,
             "project_id": self.project_id,
             "operation": self.operation,
+            "principal": self.principal,
+            "checkout": dict(self.checkout) if self.checkout is not None else None,
+            "contract": dict(self.contract),
+            "result_kind": self.result_kind,
         }
-        if self.kind == "foreground-command":
+        if self.kind != "declared-operation":
             result["command"] = {
                 "digest": self.command_digest or _command_digest(self.command),
-                "display": "synthetic foreground command",
+                "display": "synthetic foreground command" if self.kind == "foreground-command" else f"{self.kind} contract runner",
             }
         else:
             result["command"] = {
@@ -262,8 +292,8 @@ class GenericJobSpec:
             raise JobRecordError("job spec has invalid command or environment metadata")
         kind = value.get("kind")
         digest = command.get("digest")
-        if kind == "foreground-command" and not isinstance(digest, str):
-            raise JobRecordError("foreground job spec requires a command digest")
+        if kind != "declared-operation" and not isinstance(digest, str):
+            raise JobRecordError("non-declared job spec requires a command digest")
         if kind == "declared-operation":
             digest = "0" * 64
         try:
@@ -277,6 +307,10 @@ class GenericJobSpec:
                 operation=value.get("operation"),
                 environment_keys=tuple(environment_keys),
                 command_digest=digest,
+                principal=value.get("principal"),
+                checkout=value.get("checkout"),
+                contract=value.get("contract", {}),
+                result_kind=value.get("result_kind", "exit-status"),
             )
         except ValueError as error:
             raise JobRecordError(str(error)) from error
@@ -288,6 +322,7 @@ class GenericJobRecord:
     unit: str
     spec: GenericJobSpec
     log_path: Path
+    result_path: Path | None
     created_at: str
     cancel_requested_at: str | None = None
     cancel_requested_invocation_id: str | None = None
@@ -301,7 +336,10 @@ class GenericJobRecord:
             "job_id": self.job_id,
             "unit": self.unit,
             "spec": self.spec.to_dict(),
-            "artifacts": {"log": str(self.log_path)},
+            "artifacts": {
+                "log": str(self.log_path),
+                "result": str(self.result_path) if self.result_path is not None else None,
+            },
             "created_at": self.created_at,
             "cancel_requested_at": self.cancel_requested_at,
             "cancel_requested_invocation_id": self.cancel_requested_invocation_id,
@@ -315,7 +353,7 @@ class GenericJobRecord:
         job_id = value.get("job_id")
         unit = value.get("unit")
         artifacts = value.get("artifacts")
-        if value.get("schema_version") != JOB_SCHEMA_VERSION or not isinstance(job_id, str):
+        if value.get("schema_version") not in {2, JOB_SCHEMA_VERSION} or not isinstance(job_id, str):
             raise JobRecordError("job record schema or ID is invalid")
         if unit != job_unit_name(job_id):
             raise JobRecordError("job record unit does not match its ID")
@@ -325,6 +363,15 @@ class GenericJobRecord:
         logs_root = (root / "logs").resolve()
         if logs_root not in log_path.parents:
             raise JobRecordError("job log artifact escapes state root")
+        raw_result = artifacts.get("result")
+        result_path: Path | None = None
+        if raw_result is not None:
+            if not isinstance(raw_result, str):
+                raise JobRecordError("job result artifact is invalid")
+            result_path = Path(raw_result).resolve()
+            results_root = (root / "results").resolve()
+            if results_root not in result_path.parents:
+                raise JobRecordError("job result artifact escapes state root")
         spec = value.get("spec")
         state = value.get("state", {})
         if not isinstance(spec, Mapping) or not isinstance(state, Mapping):
@@ -349,6 +396,7 @@ class GenericJobRecord:
             unit=unit,
             spec=GenericJobSpec.from_dict(spec),
             log_path=log_path,
+            result_path=result_path,
             created_at=created_at,
             cancel_requested_at=cancelled,
             cancel_requested_invocation_id=invocation,
@@ -374,9 +422,15 @@ class GenericJobStore:
     def logs_root(self) -> Path:
         return self.root / "logs"
 
+    @property
+    def results_root(self) -> Path:
+        return self.root / "results"
+
     def create(self, spec: GenericJobSpec, job_id: str | None = None) -> GenericJobRecord:
         _ensure_durable_directory(self.records_root)
         _ensure_durable_directory(self.logs_root)
+        if spec.result_kind == "last-message":
+            _ensure_durable_directory(self.results_root)
         candidates = (job_id,) if job_id is not None else tuple(str(uuid4()) for _ in range(8))
         for candidate in candidates:
             _ = job_unit_name(candidate)
@@ -389,11 +443,13 @@ class GenericJobStore:
             except FileExistsError:
                 continue
             _fsync_directory(self.logs_root)
+            result_path = self.results_root / f"{candidate}.result" if spec.result_kind == "last-message" else None
             record = GenericJobRecord(
                 job_id=candidate,
                 unit=job_unit_name(candidate),
                 spec=spec,
                 log_path=log_path.resolve(),
+                result_path=result_path.resolve() if result_path is not None else None,
                 created_at=_timestamp(),
                 state={"phase": "launching", "terminal": False, "observed_at": _timestamp()},
             )
@@ -597,6 +653,26 @@ class GenericJobs:
             "artifact_truncated": overflowed,
         }
 
+    def result(self, job_id: str, *, max_bytes: int = MAX_RESULT_BYTES) -> dict[str, Any]:
+        if not 1 <= max_bytes <= MAX_RESULT_BYTES:
+            raise ValueError(f"result max_bytes must be between 1 and {MAX_RESULT_BYTES}")
+        with self.store.locked(job_id):
+            record = self.store.load(job_id)
+        if record.result_path is None:
+            raise ValueError("job has no result artifact")
+        try:
+            with record.result_path.open("rb") as handle:
+                content = handle.read(max_bytes + 1)
+        except FileNotFoundError:
+            content = b""
+        return {
+            "job_id": job_id,
+            "kind": record.spec.result_kind,
+            "content": content[:max_bytes].decode(errors="replace"),
+            "truncated": len(content) > max_bytes,
+            "artifact": {"ref": f"sinnix://jobs/{job_id}/artifacts/result", "max_bytes": MAX_RESULT_BYTES},
+        }
+
     def _get_locked(
         self,
         job_id: str,
@@ -669,6 +745,13 @@ class GenericJobs:
                     "cancellation": self._stop_acknowledgement(record),
                     "observed_at": _timestamp(),
                 }
+            if properties.get("Result") == "success" and properties.get("ExecMainStatus", "0") == "0":
+                return {
+                    "phase": "succeeded",
+                    "terminal": True,
+                    "systemd": dict(properties),
+                    "observed_at": _timestamp(),
+                }
             return {"phase": "missing", "terminal": True, "systemd": dict(properties), "observed_at": _timestamp()}
         active = properties.get("ActiveState", "unknown")
         if active in {"active", "activating", "reloading"}:
@@ -698,6 +781,7 @@ class GenericJobs:
             unit=record.unit,
             spec=record.spec,
             log_path=record.log_path,
+            result_path=record.result_path,
             created_at=record.created_at,
             cancel_requested_at=record.cancel_requested_at,
             cancel_requested_invocation_id=record.cancel_requested_invocation_id,
@@ -713,6 +797,7 @@ class GenericJobs:
             unit=record.unit,
             spec=record.spec,
             log_path=record.log_path,
+            result_path=record.result_path,
             created_at=record.created_at,
             cancel_requested_at=record.cancel_requested_at or _timestamp(),
             cancel_requested_invocation_id=invocation_id if isinstance(invocation_id, str) else None,
@@ -731,6 +816,7 @@ class GenericJobs:
             unit=record.unit,
             spec=record.spec,
             log_path=record.log_path,
+            result_path=record.result_path,
             created_at=record.created_at,
             cancel_requested_at=record.cancel_requested_at,
             cancel_requested_invocation_id=record.cancel_requested_invocation_id,
@@ -775,9 +861,19 @@ class GenericJobs:
             "kind": record.spec.kind,
             "project_id": record.spec.project_id,
             "operation": record.spec.operation,
+            "principal": record.spec.principal,
+            "checkout": dict(record.spec.checkout) if record.spec.checkout is not None else None,
+            "contract": dict(record.spec.contract),
             "created_at": record.created_at,
             "timeout_seconds": record.spec.timeout_seconds,
-            "artifacts": {"log": str(record.log_path)},
+            "artifacts": {
+                "log": {"ref": f"sinnix://jobs/{record.job_id}/artifacts/log", "max_bytes": MAX_LOG_BYTES},
+                "result": (
+                    {"ref": f"sinnix://jobs/{record.job_id}/artifacts/result", "max_bytes": MAX_RESULT_BYTES}
+                    if record.result_path is not None
+                    else None
+                ),
+            },
             "state": dict(state),
         }
 

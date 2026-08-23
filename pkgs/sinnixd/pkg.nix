@@ -1,6 +1,7 @@
 {
   python3Packages,
   sinnix-mcp,
+  git,
   ...
 }:
 python3Packages.buildPythonApplication {
@@ -11,7 +12,10 @@ python3Packages.buildPythonApplication {
 
   build-system = [ python3Packages.setuptools ];
   dependencies = [ sinnix-mcp ];
-  nativeCheckInputs = [ python3Packages.pytest ];
+  nativeCheckInputs = [
+    python3Packages.pytest
+    git
+  ];
 
   checkPhase = ''
     runHook preCheck
