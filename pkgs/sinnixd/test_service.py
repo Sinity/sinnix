@@ -34,6 +34,7 @@ from sinnixd.jobs import (
     JobResultError,
     JobResultLimitError,
     SystemdJobError,
+    SystemdJobTimeout,
     UserSystemdJobs,
     capture_executable,
     capture_main,
@@ -1171,10 +1172,17 @@ def test_user_systemd_calls_use_finite_timeouts_and_redact_timeout_details(
         raise subprocess.TimeoutExpired([*args, secret], kwargs["timeout"])
 
     monkeypatch.setattr("sinnixd.jobs.subprocess.run", timed_out)
-    with pytest.raises(SystemdJobError) as error:
+    with pytest.raises(SystemdJobTimeout) as error:
         systemd.show("sinnixd-job-00000000-0000-0000-0000-000000000001.service")
     assert str(error.value) == "systemd command timed out"
     assert secret not in str(error.value)
+
+    monkeypatch.setattr(
+        "sinnixd.jobs.subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout="malformed-systemctl-output"),
+    )
+    with pytest.raises(SystemdJobError, match="show output is malformed"):
+        systemd.show("sinnixd-job-00000000-0000-0000-0000-000000000001.service")
 
 
 def test_user_systemd_os_error_reconciles_without_persisting_raw_error(monkeypatch, tmp_path: Path) -> None:

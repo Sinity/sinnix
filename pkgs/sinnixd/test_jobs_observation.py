@@ -13,6 +13,7 @@ from sinnixd.jobs import (
     GenericJobs,
     JobResultError,
     SystemdJobError,
+    SystemdJobTimeout,
     capture_main,
 )
 
@@ -117,7 +118,7 @@ def test_repeated_wait_deadline_preserves_authoritatively_running_state(
                 return super().show(unit, timeout_seconds=timeout_seconds)
             if self.calls == 2:
                 clock[0] = 1.0
-                raise SystemdJobError("wait deadline exhausted")
+                raise SystemdJobTimeout("wait deadline exhausted")
             return super().show(unit, timeout_seconds=timeout_seconds)
 
     monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
@@ -139,6 +140,45 @@ def test_repeated_wait_deadline_preserves_authoritatively_running_state(
     assert durable.state["phase"] == "running"
     assert current["state"]["phase"] == "running"
     assert [job["state"]["phase"] for job in listed] == ["running"]
+
+
+def test_wait_deadline_persists_non_timeout_observation_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Anti-vacuity: a deadline must not retain running after a non-timeout systemd failure."""
+    clock = [0.0]
+
+    class FirstLiveThenUnavailable(FakeSystemdJobs):
+        calls = 0
+
+        def show(
+            self,
+            unit: str,
+            *,
+            timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+        ) -> dict[str, str]:
+            self.calls += 1
+            clock[0] = 1.0
+            if self.calls == 1:
+                return super().show(unit, timeout_seconds=timeout_seconds)
+            raise SystemdJobError("systemctl is unavailable")
+
+    monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
+    systemd = FirstLiveThenUnavailable()
+    jobs = generic_jobs(tmp_path, systemd)
+    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+
+    first = jobs.wait(started["job_id"], timeout_seconds=1)
+    clock[0] = 0.0
+    failed = jobs.wait(started["job_id"], timeout_seconds=1)
+    durable = jobs.store.load(started["job_id"])
+
+    assert first["state"]["phase"] == "running"
+    assert first["wait_timed_out"]
+    assert failed["state"]["phase"] == "observation-unknown"
+    assert not failed["state"]["terminal"]
+    assert failed["wait_timed_out"]
+    assert durable.state["phase"] == "observation-unknown"
 
 
 @pytest.mark.parametrize(
