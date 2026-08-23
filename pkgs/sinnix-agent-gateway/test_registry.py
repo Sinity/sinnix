@@ -52,12 +52,18 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "gateway.status",
         "gateway.catalog",
         "resources.get",
+        "projects.query",
+        "projects.context",
+        "audit.events",
         "jobs.wait",
     }
     assert {row["name"] for row in operator_catalog["actions"]} == {
         "gateway.status",
         "gateway.catalog",
         "resources.get",
+        "projects.query",
+        "projects.context",
+        "audit.events",
         "jobs.wait",
         "shell.run",
     }
@@ -221,6 +227,7 @@ def test_catalog_search_filters_resource_kind_and_text() -> None:
     assert [action["name"] for action in result["actions"]] == [
         "gateway.catalog",
         "resources.get",
+        "projects.context",
     ]
     assert result["resources"] == [
         {
@@ -249,6 +256,8 @@ def test_catalog_search_scopes_contracts_to_project_resources() -> None:
     assert {action["name"] for action in result["actions"]} == {
         "gateway.catalog",
         "resources.get",
+        "projects.query",
+        "projects.context",
         "shell.run",
     }
 
@@ -290,3 +299,30 @@ def test_run_and_wait_contracts_are_closed_and_authority_scoped() -> None:
     assert wait["input_schema"]["properties"]["timeout_seconds"]["maximum"] == 300
     with pytest.raises(RegistryError, match="cannot read action"):
         REGISTRY.action_schema("shell.run", "observer")
+
+
+def test_query_context_and_events_contracts_bind_existing_read_owners() -> None:
+    query = REGISTRY.action_schema("projects.query", "observer")["action"]
+    context = REGISTRY.action_schema("projects.context", "agent-control")["action"]
+    events = REGISTRY.action_schema("audit.events", "operator")["action"]
+
+    assert query["verb"] == "query"
+    assert query["owner"] == "projects"
+    assert query["route"] == "projects.search"
+    assert query["input_schema"]["additionalProperties"] is False
+    assert query["input_schema"]["required"] == ["ref", "query"]
+    assert query["input_schema"]["properties"]["ref"]["pattern"] == (
+        "^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$"
+    )
+    assert query["input_schema"]["properties"]["max_matches"]["maximum"] == 1_000
+    assert context["verb"] == "context"
+    assert context["owner"] == "project-context"
+    assert context["route"] == "project_context.context"
+    assert context["input_schema"]["additionalProperties"] is False
+    assert context["input_schema"]["required"] == ["ref"]
+    assert events["verb"] == "events"
+    assert events["owner"] == "audit"
+    assert events["route"] == "audit.tail"
+    assert events["resource_kinds"] == ["receipt"]
+    assert events["input_schema"]["additionalProperties"] is False
+    assert events["input_schema"]["properties"]["limit"]["maximum"] == 1_000

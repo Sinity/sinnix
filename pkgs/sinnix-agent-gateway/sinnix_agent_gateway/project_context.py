@@ -46,7 +46,7 @@ class ProjectContextService:
             "next_routes": [
                 "project_tree",
                 "project_read",
-                "project_search",
+                "query",
                 "project_diff",
                 "tasks_read",
             ],

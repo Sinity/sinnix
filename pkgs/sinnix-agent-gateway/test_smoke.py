@@ -46,7 +46,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
     readonly_names = {row["name"] for row in readonly["tools"]}
     local_names = {row["name"] for row in local["tools"]}
     operator_names = {row["name"] for row in operator["tools"]}
-    assert {"status", "catalog", "get", "wait"} <= readonly_names
+    assert {"status", "catalog", "query", "get", "context", "events", "wait"} <= readonly_names
     assert {
         "files_read",
         "project_read",
@@ -80,6 +80,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "run",
     }.isdisjoint(readonly_names)
     assert "shell_query" not in readonly_names
+    assert {"project_context", "project_search", "audit_tail"}.isdisjoint(readonly_names)
     assert {
         "agent_launch",
         "job_cancel",
@@ -142,7 +143,7 @@ def test_official_sdk_principals_have_stable_distinct_manifests(tmp_path: Path) 
         "mcp_write",
     } <= operator_names
     assert "agent_launch" not in operator_names
-    assert "project_context" in readonly_names & local_names & operator_names
+    assert "context" in readonly_names & local_names & operator_names
     run_tool = next(row for row in operator["tools"] if row["name"] == "run")
     wait_tool = next(row for row in readonly["tools"] if row["name"] == "wait")
     assert set(run_tool["inputSchema"]["required"]) >= {
@@ -251,9 +252,12 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "supports_query": True,
                 }
                 assert {row["name"] for row in documentation_rows["actions"]} == {
+                    "audit.events",
                     "gateway.catalog",
                     "gateway.status",
                     "jobs.wait",
+                    "projects.context",
+                    "projects.query",
                     "resources.get",
                 }
                 assert all(
@@ -350,13 +354,35 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 checkout_resource = json.loads(checkout_result.content[0].text)["data"]
                 assert checkout_resource["kind"] == "checkout"
                 assert checkout_resource["checkout"]["checkout"]["checkout_id"] == "default"
-                context_result = await session.call_tool(
-                    "project_context", {"project_id": "fixture"}
+                query_result = await session.call_tool(
+                    "query", {"ref": checkout["ref"], "query": "fixture"}
                 )
-                context = json.loads(context_result.content[0].text)
+                query_envelope = json.loads(query_result.content[0].text)
+                assert query_envelope["result"]["action"] == "projects.query"
+                assert query_envelope["data"]["ref"] == checkout["ref"]
+                assert query_envelope["data"]["project_ref"] == "sinnix://projects/fixture"
+                assert query_envelope["meta"]["resource_refs"] == [
+                    "sinnix://projects/fixture",
+                    checkout["ref"],
+                ]
+                context_result = await session.call_tool(
+                    "context", {"ref": "sinnix://projects/fixture"}
+                )
+                context_envelope = json.loads(context_result.content[0].text)
+                context = context_envelope["data"]
+                assert context_envelope["result"]["action"] == "projects.context"
+                assert context["ref"] == "sinnix://projects/fixture"
                 assert context["authority"]["canonical_checkout_ref"] == checkout["ref"]
                 assert len(context["authority"]["code_revision"]) == 64
                 assert context["authority"]["task_authority"]["availability"] == "unavailable"
+                events_result = await session.call_tool("events", {"limit": 100})
+                events_envelope = json.loads(events_result.content[0].text)
+                assert events_envelope["result"]["action"] == "audit.events"
+                assert events_envelope["data"]["events"]
+                assert all(
+                    event["ref"] == f"sinnix://receipts/{event['event_id']}"
+                    for event in events_envelope["data"]["events"]
+                )
                 invalid_catalog_result = await session.call_tool(
                     "catalog", {"verb": "unrecognized"}
                 )
@@ -556,6 +582,28 @@ def test_audit_chain_survives_concurrent_writers(tmp_path: Path) -> None:
     assert {event["principal"] for event in runtime.audit.tail(240)["events"]} == {
         "observer"
     }
+
+
+def test_v2_events_are_principal_scoped_and_receipted(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    observer = Runtime.create(cfg, "observer")
+    operator = Runtime.create(cfg, "operator")
+    observer.audit.append("observer_event", "ok")
+    operator.audit.append("operator_event", "ok")
+
+    response = observer.execute_v2(
+        REGISTRY.action("audit.events"),
+        lambda: observer.v2_events(100),
+        {"limit": 100},
+    )
+
+    events = response["data"]["events"]
+    assert {event["principal"] for event in events} == {"observer"}
+    assert {event["operation"] for event in events} == {"observer_event"}
+    assert response["meta"]["resource_refs"] == [
+        f"sinnix://receipts/{events[0]['event_id']}"
+    ]
+    assert response["receipt"]["ref"].startswith("sinnix://receipts/")
 
 
 def test_runtime_returns_owner_diagnostic_and_audits_its_reference(tmp_path: Path) -> None:

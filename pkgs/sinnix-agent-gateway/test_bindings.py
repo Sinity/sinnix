@@ -12,6 +12,11 @@ VALID_BINDINGS = (
     TargetToolBinding("status", "gateway.status", "gateway", "observe.gateway_status"),
     TargetToolBinding("catalog", "gateway.catalog", "registry", "registry.search"),
     TargetToolBinding("get", "resources.get", "resolver", "resources.get"),
+    TargetToolBinding("query", "projects.query", "projects", "projects.search"),
+    TargetToolBinding(
+        "context", "projects.context", "project-context", "project_context.context"
+    ),
+    TargetToolBinding("events", "audit.events", "audit", "audit.tail"),
     TargetToolBinding("wait", "jobs.wait", "systemd-jobs", "job.wait"),
     TargetToolBinding("run", "shell.run", "systemd-jobs", "job.shell.start"),
 )
@@ -23,6 +28,9 @@ def test_target_tool_bindings_cover_every_declared_action() -> None:
     assert bindings.action_for_tool("status") is REGISTRY.action("gateway.status")
     assert bindings.action_for_tool("catalog") is REGISTRY.action("gateway.catalog")
     assert bindings.action_for_tool("get") is REGISTRY.action("resources.get")
+    assert bindings.action_for_tool("query") is REGISTRY.action("projects.query")
+    assert bindings.action_for_tool("context") is REGISTRY.action("projects.context")
+    assert bindings.action_for_tool("events") is REGISTRY.action("audit.events")
     assert bindings.action_for_tool("wait") is REGISTRY.action("jobs.wait")
     assert bindings.action_for_tool("run") is REGISTRY.action("shell.run")
 

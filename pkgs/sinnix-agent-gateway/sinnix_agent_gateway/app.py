@@ -276,6 +276,90 @@ class Runtime:
             "task_authority": task_authority,
         }
 
+    def _project_reference(
+        self, reference: str, *, allow_checkout: bool
+    ) -> tuple[str, str | None, str]:
+        if not isinstance(reference, str) or not 1 <= len(reference) <= 2_048:
+            raise ProtocolError("invalid_request", "project ref is malformed")
+        try:
+            resource, values = REGISTRY.resolve(reference)
+        except RegistryError as exc:
+            raise ProtocolError("not_found", "canonical project resource was not found") from exc
+        allowed = {"project", "checkout"} if allow_checkout else {"project"}
+        if resource.kind not in allowed:
+            raise ProtocolError("invalid_request", "ref does not identify the required project resource")
+        return (
+            values["project_id"],
+            values.get("checkout_id"),
+            str(resource.ref_template.format(values)),
+        )
+
+    def _bounded_project_context(self, project_id: str) -> dict[str, Any]:
+        context = self.project_context.context(project_id)
+        authority = self.project_authority(project_id)
+        response = {**context, "authority": authority}
+        if (
+            len(json.dumps(response, sort_keys=True, separators=(",", ":")).encode())
+            <= self.config.max_result_bytes
+        ):
+            return response
+        return {
+            **context,
+            "authority": {
+                "availability": "unavailable",
+                "reason": "project authority exceeded project context response bound",
+                "ref": REGISTRY.reference("project", {"project_id": project_id}),
+            },
+        }
+
+    def v2_query(
+        self, reference: str, query: str, max_matches: int
+    ) -> dict[str, Any]:
+        project_id, checkout_id, canonical_ref = self._project_reference(
+            reference, allow_checkout=True
+        )
+        if (
+            not isinstance(max_matches, int)
+            or isinstance(max_matches, bool)
+            or not 1 <= max_matches <= 1_000
+        ):
+            raise ProtocolError("invalid_request", "max_matches must be 1-1000")
+        result = self.projects.search(project_id, query, max_matches, checkout_id)
+        selected_checkout = checkout_id or "default"
+        return {
+            "ref": canonical_ref,
+            "project_ref": REGISTRY.reference("project", {"project_id": project_id}),
+            "checkout_ref": REGISTRY.reference(
+                "checkout",
+                {"project_id": project_id, "checkout_id": selected_checkout},
+            ),
+            **result,
+        }
+
+    def v2_context(self, reference: str) -> dict[str, Any]:
+        project_id, _checkout_id, canonical_ref = self._project_reference(
+            reference, allow_checkout=False
+        )
+        return {"ref": canonical_ref, **self._bounded_project_context(project_id)}
+
+    def v2_events(self, limit: int) -> dict[str, Any]:
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or not 1 <= limit <= 1_000
+        ):
+            raise ProtocolError("invalid_request", "limit must be 1-1000")
+        events = self.audit.tail(limit)["events"]
+        return {
+            "events": [
+                {
+                    "ref": REGISTRY.reference("receipt", {"receipt_id": event["event_id"]}),
+                    **event,
+                }
+                for event in events
+            ]
+        }
+
     def v2_get(self, reference: str) -> dict[str, Any]:
         try:
             resource, values = REGISTRY.resolve(reference)
@@ -436,6 +520,34 @@ class Runtime:
             payload["request_sha256"] = request_sha256
         return self.audit.append(operation, "ok", payload)
 
+    @staticmethod
+    def _resource_refs(result: Any) -> list[str]:
+        refs: list[str] = []
+
+        def collect(value: Any) -> None:
+            if len(refs) >= 128:
+                return
+            if isinstance(value, Mapping):
+                for key, item in value.items():
+                    if (
+                        (key == "ref" or key.endswith("_ref"))
+                        and isinstance(item, str)
+                        and item.startswith("sinnix://")
+                    ):
+                        try:
+                            REGISTRY.resolve(item)
+                        except RegistryError:
+                            continue
+                        refs.append(item)
+                    else:
+                        collect(item)
+            elif isinstance(value, list):
+                for item in value:
+                    collect(item)
+
+        collect(result)
+        return sorted(set(refs))
+
     def _record_v2_receipt(
         self,
         action: ActionSpec,
@@ -444,16 +556,12 @@ class Runtime:
         result: Any | None = None,
         error: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        target_refs: list[str] = []
+        target_refs: list[str] = self._resource_refs(result)
         artifact_refs: list[str] = []
         created_objects: list[str] = []
         if isinstance(result, Mapping):
             for key, value in result.items():
-                if key == "ref" and isinstance(value, str) and value.startswith("sinnix://"):
-                    target_refs.append(value)
-                elif key.endswith("_ref") and isinstance(value, str) and value.startswith("sinnix://"):
-                    target_refs.append(value)
-                elif key in {"artifact_id", "diagnostic_artifact_id"} and isinstance(value, str):
+                if key in {"artifact_id", "diagnostic_artifact_id"} and isinstance(value, str):
                     artifact_refs.append(f"sinnix://artifacts/{value}")
                 elif key == "created" and value is True:
                     created_objects.append(action.name)
@@ -551,6 +659,7 @@ class Runtime:
             payload=result,
             receipt=receipt,
             request=context,
+            meta={"resource_refs": self._resource_refs(result)},
         )
 
     def _v2_failure(
@@ -887,6 +996,24 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 route="resources.get",
             ),
             TargetToolBinding(
+                tool_name="query",
+                action_name="projects.query",
+                owner="projects",
+                route="projects.search",
+            ),
+            TargetToolBinding(
+                tool_name="context",
+                action_name="projects.context",
+                owner="project-context",
+                route="project_context.context",
+            ),
+            TargetToolBinding(
+                tool_name="events",
+                action_name="audit.events",
+                owner="audit",
+                route="audit.tail",
+            ),
+            TargetToolBinding(
                 tool_name="wait",
                 action_name="jobs.wait",
                 owner="systemd-jobs",
@@ -1005,6 +1132,97 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 lambda: runtime.v2_get(ref),
                 {
                     "ref": ref,
+                    "request_id": request_id,
+                    "actor": actor,
+                    "reason": reason,
+                    "idempotency_key": idempotency_key,
+                    "deadline_at": deadline_at,
+                    "preconditions": preconditions,
+                },
+            )
+            return cast(V2ToolEnvelope, v2_tool_result(response))
+
+    if target_bindings.is_visible("query", principal_name):
+
+        @mcp.tool(title="Query V2 project", annotations=READ_ONLY_TOOL)
+        def query(
+            ref: str,
+            query: str,
+            max_matches: int = 200,
+            request_id: str | None = None,
+            actor: str | None = None,
+            reason: str | None = None,
+            idempotency_key: str | None = None,
+            deadline_at: float | None = None,
+            preconditions: dict[str, Any] | None = None,
+        ) -> V2ToolEnvelope:
+            """Search one canonical project or checkout through the bounded project owner."""
+            action = target_bindings.action_for_tool("query", principal_name)
+            response = runtime.execute_v2(
+                action,
+                lambda: runtime.v2_query(ref, query, max_matches),
+                {
+                    "ref": ref,
+                    "query": query,
+                    "max_matches": max_matches,
+                    "request_id": request_id,
+                    "actor": actor,
+                    "reason": reason,
+                    "idempotency_key": idempotency_key,
+                    "deadline_at": deadline_at,
+                    "preconditions": preconditions,
+                },
+            )
+            return cast(V2ToolEnvelope, v2_tool_result(response))
+
+    if target_bindings.is_visible("context", principal_name):
+
+        @mcp.tool(title="Get V2 project context", annotations=READ_ONLY_TOOL)
+        def context(
+            ref: str,
+            request_id: str | None = None,
+            actor: str | None = None,
+            reason: str | None = None,
+            idempotency_key: str | None = None,
+            deadline_at: float | None = None,
+            preconditions: dict[str, Any] | None = None,
+        ) -> V2ToolEnvelope:
+            """Compose Git and bounded task orientation for one canonical project."""
+            action = target_bindings.action_for_tool("context", principal_name)
+            response = runtime.execute_v2(
+                action,
+                lambda: runtime.v2_context(ref),
+                {
+                    "ref": ref,
+                    "request_id": request_id,
+                    "actor": actor,
+                    "reason": reason,
+                    "idempotency_key": idempotency_key,
+                    "deadline_at": deadline_at,
+                    "preconditions": preconditions,
+                },
+            )
+            return cast(V2ToolEnvelope, v2_tool_result(response))
+
+    if target_bindings.is_visible("events", principal_name):
+
+        @mcp.tool(title="Get V2 audit events", annotations=READ_ONLY_TOOL)
+        def events(
+            limit: int = 100,
+            request_id: str | None = None,
+            actor: str | None = None,
+            reason: str | None = None,
+            idempotency_key: str | None = None,
+            deadline_at: float | None = None,
+            preconditions: dict[str, Any] | None = None,
+        ) -> V2ToolEnvelope:
+            """Read bounded audit events visible to the active principal."""
+            action = target_bindings.action_for_tool("events", principal_name)
+            response = runtime.execute_v2(
+                action,
+                lambda: runtime.v2_events(limit),
+                {
+                    "limit": limit,
                     "request_id": request_id,
                     "actor": actor,
                     "reason": reason,
@@ -1305,32 +1523,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         """List projects available to the active principal without exposing host paths."""
         return runtime.execute("project_list", runtime.projects.list)
 
-    @mcp.tool(title="Get project context", annotations=READ_ONLY_TOOL)
-    def project_context(project_id: str) -> dict[str, Any]:
-        """Get structured Git and ready-work orientation from existing project owners."""
-
-        def read_context() -> dict[str, Any]:
-            context = runtime.project_context.context(project_id)
-            authority = runtime.project_authority(project_id)
-            response = {**context, "authority": authority}
-            if (
-                len(json.dumps(response, sort_keys=True, separators=(",", ":")).encode())
-                <= config.max_result_bytes
-            ):
-                return response
-            return {
-                **context,
-                "authority": {
-                    "availability": "unavailable",
-                    "reason": "project authority exceeded project context response bound",
-                    "ref": REGISTRY.reference(
-                        "project", {"project_id": project_id}
-                    ),
-                },
-            }
-
-        return runtime.execute("project_context", read_context)
-
     @mcp.tool(title="Project tree", annotations=READ_ONLY_TOOL)
     def project_tree(
         project_id: str,
@@ -1359,19 +1551,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             lambda: runtime.projects.read(
                 project_id, path, start_line, end_line, max_bytes, checkout_id
             ),
-        )
-
-    @mcp.tool(title="Search project", annotations=READ_ONLY_TOOL)
-    def project_search(
-        project_id: str,
-        query: str,
-        max_matches: int = 200,
-        checkout_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Search project text with bounded results and safe leading-dash handling."""
-        return runtime.execute(
-            "project_search",
-            lambda: runtime.projects.search(project_id, query, max_matches, checkout_id),
         )
 
     @mcp.tool(title="Project diff", annotations=READ_ONLY_TOOL)
@@ -1569,11 +1748,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             "artifact_read",
             lambda: runtime.artifacts.read(artifact_id, offset, max_bytes),
         )
-
-    @mcp.tool(title="Audit tail", annotations=READ_ONLY_TOOL)
-    def audit_tail(limit: int = 100) -> dict[str, Any]:
-        """Return recent semantic gateway audit events."""
-        return runtime.execute("audit_tail", lambda: runtime.audit.tail(limit))
 
     @mcp.tool(title="Verify audit ledger", annotations=READ_ONLY_TOOL)
     def audit_verify() -> dict[str, Any]:

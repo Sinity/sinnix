@@ -221,8 +221,8 @@ class AuditService:
         limit = max(1, min(limit, 1000))
         with self._connect() as connection:
             rows = connection.execute(
-                "select sequence,event_id,occurred_at,profile,operation,outcome,payload_json,previous_hash,entry_hash from events order by sequence desc limit ?",
-                (limit,),
+                "select sequence,event_id,occurred_at,profile,operation,outcome,payload_json,previous_hash,entry_hash from events where profile = ? order by sequence desc limit ?",
+                (self.principal.name, limit),
             ).fetchall()
         events = [
             {
