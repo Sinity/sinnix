@@ -422,7 +422,13 @@ when a new script is added.
   daemon and installs `agentctl`; it discovers explicit project adapters and
   launches only their declared operations as transient user services. Systemd
   owns process lifecycle, cgroups, results, cancellation, and journal evidence;
-  `sinnixd` has no job queue, task, Git, or arbitrary-process authority.
+  `sinnixd` has no job queue, task, Git, or arbitrary-process authority. Its
+  only non-declared execution contracts are typed `operator-shell` and
+  `attested-agent` jobs: both bind an explicit principal and registered Git
+  checkout, use the durable generic-job record and transient user service,
+  and revalidate the worktree/common-dir identity immediately before exec.
+  Shell argv and agent prompts remain private launch inputs; durable public
+  metadata retains only redacted digests and bounded artifact references.
 
 ## Secrets
 
