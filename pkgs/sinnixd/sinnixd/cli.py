@@ -67,6 +67,12 @@ def parser() -> argparse.ArgumentParser:
     workspace_restore = workspace_subcommands.add_parser("restore")
     workspace_restore.add_argument("workspace_id")
     workspace_restore.add_argument("checkpoint_id")
+    workspace_stack = workspace_subcommands.add_parser("stack")
+    workspace_stack.add_argument("parent_workspace_id")
+    workspace_stack.add_argument("name")
+    workspace_stack.add_argument("--branch", required=True)
+    workspace_restack = workspace_subcommands.add_parser("restack")
+    workspace_restack.add_argument("workspace_id")
     job = subcommands.add_parser("job")
     job_subcommands = job.add_subparsers(dest="job_command", required=True)
     start = job_subcommands.add_parser("start")
@@ -212,11 +218,29 @@ def main() -> None:
             {"workspace_id": arguments.workspace_id},
             "agent-control",
         )
-    elif arguments.command == "workspace":
+    elif arguments.command == "workspace" and arguments.workspace_command == "restore":
         request = _request(
             "workspace.restore",
             "git-workspaces",
             {"workspace_id": arguments.workspace_id, "checkpoint_id": arguments.checkpoint_id},
+            "agent-control",
+        )
+    elif arguments.command == "workspace" and arguments.workspace_command == "stack":
+        request = _request(
+            "workspace.stack",
+            "git-workspaces",
+            {
+                "parent_workspace_id": arguments.parent_workspace_id,
+                "name": arguments.name,
+                "branch": arguments.branch,
+            },
+            "agent-control",
+        )
+    elif arguments.command == "workspace":
+        request = _request(
+            "workspace.restack",
+            "git-workspaces",
+            {"workspace_id": arguments.workspace_id},
             "agent-control",
         )
     elif arguments.command == "job" and arguments.job_command == "start":
