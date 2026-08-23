@@ -441,6 +441,9 @@ when a new script is added.
   landing remain the next lifecycle slices. Safe reap removes only clean,
   branch-matching, base-contained AgentCTL-created worktrees and retains their
   branches; adopted or divergent worktrees remain operator-owned.
+  Checkpoints are private, bounded, digest-verified artifacts tied to one
+  workspace and exact HEAD; separate index/worktree patches plus an optional
+  untracked archive preserve Git state without creating stashes or commits.
 
 ## Secrets
 

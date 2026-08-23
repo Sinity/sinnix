@@ -724,6 +724,65 @@ def test_workspace_reap_preserves_dirty_divergent_and_adopted_worktrees(tmp_path
     assert external.is_dir()
 
 
+def test_workspace_checkpoint_restore_round_trips_index_worktree_and_untracked_state(tmp_path: Path) -> None:
+    """Anti-vacuity: dropping any artifact loses one of the three asserted Git states."""
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    created = service.workspaces.create(
+        project_id="fixture", name="checkpoint-lane", branch="feature/checkpoint-lane", base="HEAD"
+    )
+    path = Path(created["path"])
+    (path / "flake.nix").write_text('{"staged": true}\n')
+    subprocess.run(["git", "-C", str(path), "add", "flake.nix"], check=True)
+    with (path / "flake.nix").open("a") as handle:
+        handle.write("unstaged\n")
+    (path / "untracked.txt").write_text("untracked payload\n")
+
+    checkpoint = service.workspaces.checkpoint(created["workspace_id"])
+    subprocess.run(["git", "-C", str(path), "reset", "--hard", "HEAD"], check=True, capture_output=True)
+    (path / "untracked.txt").unlink()
+    restored = service.workspaces.restore(created["workspace_id"], checkpoint["checkpoint_id"])
+
+    assert restored["restored"]
+    assert (path / "flake.nix").read_text() == '{"staged": true}\nunstaged\n'
+    assert (path / "untracked.txt").read_text() == "untracked payload\n"
+    assert "staged" in subprocess.run(
+        ["git", "-C", str(path), "diff", "--cached"], check=True, capture_output=True, text=True
+    ).stdout
+    assert "unstaged" in subprocess.run(
+        ["git", "-C", str(path), "diff"], check=True, capture_output=True, text=True
+    ).stdout
+
+
+def test_workspace_restore_rejects_dirty_or_stale_head_targets(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    created = service.workspaces.create(
+        project_id="fixture", name="restore-guards", branch="feature/restore-guards", base="HEAD"
+    )
+    path = Path(created["path"])
+    (path / "untracked.txt").write_text("checkpoint\n")
+    checkpoint = service.workspaces.checkpoint(created["workspace_id"])
+
+    with pytest.raises(ValueError, match="clean workspace"):
+        service.workspaces.restore(created["workspace_id"], checkpoint["checkpoint_id"])
+
+    (path / "untracked.txt").unlink()
+    (path / "advance.txt").write_text("advance\n")
+    subprocess.run(["git", "-C", str(path), "add", "advance.txt"], check=True)
+    subprocess.run(
+        [
+            "git", "-C", str(path), "-c", "user.name=Fixture", "-c",
+            "user.email=fixture@example.test", "commit", "--quiet", "-m", "advance",
+        ],
+        check=True,
+    )
+    with pytest.raises(ValueError, match="source HEAD"):
+        service.workspaces.restore(created["workspace_id"], checkpoint["checkpoint_id"])
+
+
 def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: Path) -> None:
     """Anti-vacuity: typed contracts must reach GenericJobs, not a second controller."""
     write_adapter(tmp_path)
