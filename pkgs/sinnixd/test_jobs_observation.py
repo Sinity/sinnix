@@ -96,6 +96,51 @@ def test_observation_timeout_remains_retryable_until_systemd_recovers(
     assert succeeded["state"]["terminal"]
 
 
+def test_repeated_wait_deadline_preserves_authoritatively_running_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Anti-vacuity: persisting the deadline-bound observation error would replace running with unknown."""
+    clock = [0.0]
+
+    class FirstLiveThenDeadlineExpires(FakeSystemdJobs):
+        calls = 0
+
+        def show(
+            self,
+            unit: str,
+            *,
+            timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+        ) -> dict[str, str]:
+            self.calls += 1
+            if self.calls == 1:
+                clock[0] = 1.0
+                return super().show(unit, timeout_seconds=timeout_seconds)
+            if self.calls == 2:
+                clock[0] = 1.0
+                raise SystemdJobError("wait deadline exhausted")
+            return super().show(unit, timeout_seconds=timeout_seconds)
+
+    monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
+    systemd = FirstLiveThenDeadlineExpires()
+    jobs = generic_jobs(tmp_path, systemd)
+    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+
+    first = jobs.wait(started["job_id"], timeout_seconds=1)
+    clock[0] = 0.0
+    second = jobs.wait(started["job_id"], timeout_seconds=1)
+    durable = jobs.store.load(started["job_id"])
+    current = jobs.get(started["job_id"])
+    listed = jobs.list()["jobs"]
+
+    assert first["state"]["phase"] == "running"
+    assert first["wait_timed_out"]
+    assert second["state"]["phase"] == "running"
+    assert second["wait_timed_out"]
+    assert durable.state["phase"] == "running"
+    assert current["state"]["phase"] == "running"
+    assert [job["state"]["phase"] for job in listed] == ["running"]
+
+
 @pytest.mark.parametrize(
     ("result", "status", "expected"),
     [("signal", "15", "cancelled"), ("success", "0", "succeeded")],

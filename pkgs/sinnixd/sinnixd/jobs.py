@@ -766,6 +766,7 @@ class GenericJobs:
                 status = self._get_locked(
                     job_id,
                     systemd_timeout_seconds=min(SYSTEMD_COMMAND_TIMEOUT_SECONDS, remaining),
+                    wait_deadline=deadline,
                 )
             if status["state"]["terminal"]:
                 return status
@@ -848,6 +849,7 @@ class GenericJobs:
         job_id: str,
         *,
         systemd_timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+        wait_deadline: float | None = None,
     ) -> dict[str, Any]:
         record = self.store.load(job_id)
         if record.state.get("terminal") and not self._terminal_state_requires_reconciliation(record):
@@ -857,6 +859,8 @@ class GenericJobs:
                 self.systemd.show(record.unit, timeout_seconds=systemd_timeout_seconds)
             )
         except SystemdJobError:
+            if wait_deadline is not None and time.monotonic() >= wait_deadline:
+                return self._public(record, record.state)
             state = self._observation_unknown_state()
         else:
             state = self._classify(properties, record)
