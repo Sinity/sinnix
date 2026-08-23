@@ -1,0 +1,46 @@
+schema = 1
+
+[project]
+id = "sinnix"
+display_name = "Sinnix"
+root_markers = ["flake.nix", "modules", "dots"]
+
+[environment]
+kind = "nix-develop"
+command = ["nix", "develop", "--accept-flake-config", "--command"]
+inherit = ["HOME", "USER", "LANG", "TERM", "SSH_AUTH_SOCK", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "WAYLAND_DISPLAY", "DISPLAY"]
+unset = ["PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "_PYTHON_SYSCONFIGDATA_NAME", "_PYTHON_HOST_PLATFORM", "PYTHONPYCACHEPREFIX"]
+
+[workspace]
+provider = "git-worktree"
+default_base = "origin/master"
+identity_check = ["git", "diff", "--quiet", "--", "flake.nix"]
+checkpoint_untracked = true
+
+[operations.check]
+description = "Run default Sinnix checks"
+exec = ["check"]
+pool = "bulk"
+result = "exit"
+cache = "tree+environment"
+exclusive_keys = ["sinnix:nix-store-pressure"]
+
+[operations.lint]
+description = "Run maintained Nix and shell linters"
+exec = ["lint"]
+pool = "normal"
+result = "exit"
+cache = "tree+environment"
+
+[operations.switch]
+description = "Build and activate the workstation configuration"
+exec = ["switch"]
+pool = "bulk"
+result = "json"
+cache = "none"
+exclusive_keys = ["host:nixos-switch", "sinnix:nix-store-pressure"]
+
+[conflicts]
+exact_files = ["flake.lock", "flake.nix"]
+generated_surfaces = ["docs/agent-environment.md", "docs/config-default-audit-features.md"]
+semantic_slots = ["nixos-generation", "ports-registry", "project-registry", "service-registry"]

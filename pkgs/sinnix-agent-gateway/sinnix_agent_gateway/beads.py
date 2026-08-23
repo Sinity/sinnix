@@ -1,17 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
-import select
-import signal
-import subprocess
-import time
 from pathlib import Path
 from typing import Any
 
 from .capabilities import Capability, Principal
-from .config import GatewayConfig, ProjectConfig
+from .config import GatewayConfig, ProjectConfig, TaskAuthorityConfig
+from sinnix_mcp.execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
 class BeadsError(ValueError):
@@ -25,6 +23,7 @@ class BeadsService:
     def __init__(self, config: GatewayConfig, principal: Principal):
         self.config = config
         self.principal = principal
+        self.execution = OwnerExecution(base_environment={})
 
     @staticmethod
     def _string(value: Any, name: str, maximum: int = 8_192) -> str:
@@ -51,6 +50,57 @@ class BeadsService:
             raise BeadsError(f"project checkout is unavailable: {project_id}")
         return project
 
+    def _authority(
+        self, project_id: str, *, write: bool
+    ) -> tuple[ProjectConfig, TaskAuthorityConfig]:
+        project = self._project(project_id, write=write)
+        authority = project.task_authority
+        if authority is None:
+            raise BeadsError(f"project has no declared Beads task authority: {project_id}")
+        return project, authority
+
+    @staticmethod
+    def _where_payload(value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise BeadsError("Beads where did not return an object")
+        workspace = value.get("path")
+        database = value.get("database_path")
+        if not isinstance(workspace, str) or not isinstance(database, str):
+            raise BeadsError("Beads where did not return path and database_path")
+        return value
+
+    def task_authority_status(self, project_id: str) -> dict[str, Any]:
+        project, authority = self._authority(project_id, write=False)
+        actual = self._where_payload(self._run(project, ["where"], write=False))
+        actual_workspace = Path(actual["path"]).resolve()
+        actual_database = Path(actual["database_path"]).resolve()
+        if actual_workspace != authority.workspace or actual_database != authority.database:
+            raise BeadsError(
+                "task_authority_mismatch: configured Beads workspace or database "
+                "does not match bd where"
+            )
+        status = self._run(project, ["status"], write=False)
+        if not isinstance(status, dict):
+            raise BeadsError("Beads status did not return an object")
+        task_revision = hashlib.sha256(
+            json.dumps(status, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        return {
+            "project_id": project.project_id,
+            "owner": authority.owner,
+            "publication_policy": authority.publication_policy,
+            "project_uuid": authority.project_uuid,
+            "schema_version": actual.get("schema_version"),
+            "revision": task_revision,
+            "summary": status.get("summary"),
+            "attested": True,
+        }
+
+    def _attest_task_authority(self, project_id: str, *, write: bool) -> ProjectConfig:
+        project, _ = self._authority(project_id, write=write)
+        self.task_authority_status(project_id)
+        return project
+
     def _run(self, project: ProjectConfig, arguments: list[str], *, write: bool) -> Any:
         command = [
             self.config.beads_command,
@@ -67,68 +117,28 @@ class BeadsService:
             "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
             "BEADS_ACTOR": f"sinnix-gateway:{self.principal.name}",
         }
-        process = subprocess.Popen(
+        result = self.execution.run(
             command,
-            cwd=project.path,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=environment,
-            start_new_session=True,
+            ExecutionProfile(
+                route=OwnerRoute("beads"),
+                timeout_seconds=30,
+                max_stdout_bytes=self.config.max_result_bytes,
+                max_stderr_bytes=self.config.max_result_bytes,
+                cwd=project.path,
+                environment=environment,
+            ),
         )
-        assert process.stdout is not None
-        assert process.stderr is not None
-        deadline = time.monotonic() + 30
-        stdout = bytearray()
-        stderr = bytearray()
-        streams = {
-            process.stdout.fileno(): stdout,
-            process.stderr.fileno(): stderr,
-        }
-        bounded = False
-        try:
-            while streams:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise subprocess.TimeoutExpired(command, 30)
-                ready, _, _ = select.select(list(streams), [], [], remaining)
-                if not ready:
-                    raise subprocess.TimeoutExpired(command, 30)
-                for descriptor in ready:
-                    destination = streams[descriptor]
-                    chunk = os.read(descriptor, 65_536)
-                    if not chunk:
-                        del streams[descriptor]
-                        continue
-                    destination.extend(chunk)
-                    if len(stdout) + len(stderr) > self.config.max_result_bytes:
-                        bounded = True
-                        break
-                if bounded:
-                    break
-            if bounded:
-                if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    result_code = process.wait(timeout=0.5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    result_code = process.wait()
-            else:
-                result_code = process.wait(timeout=max(0.1, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired as exc:
-            if process.poll() is None:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-            raise BeadsError("Beads operation timed out") from exc
-        if bounded:
+        if result.failure_class == "command_timeout":
+            raise BeadsError("Beads operation timed out")
+        if result.failure_class == "command_output_bound":
             raise BeadsError("Beads response exceeded response bound")
-        text = stdout.decode("utf-8", errors="replace")
-        if result_code != 0:
-            error = (stdout + b"\n" + stderr).decode("utf-8", errors="replace").strip()
+        if result.failure_class is not None:
+            error = (result.stdout + b"\n" + result.stderr).decode(
+                "utf-8", errors="replace"
+            ).strip()
             raise BeadsError(error or "Beads operation failed")
         try:
-            return json.loads(text)
+            return json.loads(result.stdout)
         except json.JSONDecodeError as exc:
             raise BeadsError("Beads did not return JSON") from exc
 
@@ -143,7 +153,7 @@ class BeadsService:
     def read(
         self, project_id: str, operation: str, arguments: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        project = self._project(project_id, write=False)
+        project = self._attest_task_authority(project_id, write=False)
         arguments = self._arguments(arguments)
         if operation == "list":
             allowed = {"status", "assignee", "label", "limit", "include_closed", "ready"}
@@ -206,7 +216,7 @@ class BeadsService:
         }
 
     def write(self, project_id: str, operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        project = self._project(project_id, write=True)
+        project = self._attest_task_authority(project_id, write=True)
         arguments = self._arguments(arguments)
         if operation == "create":
             allowed = {"title", "description", "type", "priority", "labels", "parent", "dependencies", "append_notes"}

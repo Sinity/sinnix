@@ -33,6 +33,7 @@ kitty_socket=""
 kitty_window_id=""
 hyprland_address=""
 quota_snapshot_id=""
+checkout_ref=""
 memory_high=""
 memory_max=""
 cpu_weight=""
@@ -70,7 +71,7 @@ Worktree identity (required: exactly one of the two forms below):
                                 subdirectory of a Git checkout). Mutually
                                 exclusive with --registered-project/
                                 --expected-git-common-dir. Never used by the
-                                gateway's attested job path.
+                                typed sinnixd agent-job path.
 
 Existing options:
   --json-file <path>
@@ -114,6 +115,7 @@ Attested job options:
   --kitty-window-id <id>
   --hyprland-address <address>
   --quota-snapshot-id <id>
+  --checkout-ref <canonical-ref>
   --memory-high <limit>
   --memory-max <limit>
   --cpu-weight <1-10000>
@@ -232,6 +234,10 @@ while [[ $# -gt 0 ]]; do
     quota_snapshot_id="${2:?missing value for --quota-snapshot-id}"
     shift 2
     ;;
+  --checkout-ref)
+    checkout_ref="${2:?missing value for --checkout-ref}"
+    shift 2
+    ;;
   --memory-high)
     memory_high="${2:?missing value for --memory-high}"
     shift 2
@@ -312,8 +318,8 @@ fi
 # Worktree identity is mandatory in exactly one of two forms: attested
 # (--registered-project + --expected-git-common-dir together) or explicitly
 # local (--local-workdir alone). This is the runner's own authorization
-# boundary for Git-worktree jobs, not an optional extra -- the gateway's
-# JobService always uses the attested form -- so there is no silent
+# boundary for Git-worktree jobs, not an optional extra. The typed sinnixd
+# agent-job runner uses the attested form, so there is no silent
 # "identity omitted" fallback. --local-workdir exists as a distinct, clearly
 # named opt-out for a caller (never the gateway) that already trusts
 # --workdir directly: a non-Git directory, or a subdirectory of a Git
@@ -403,8 +409,8 @@ fi
 # --registered-project and --expected-git-common-dir are mandatory together
 # (checked above) whenever --local-workdir was not given, because this block
 # is the runner's own authorization boundary for attested Git-worktree jobs,
-# not an optional extra: the gateway (JobService.launch_agent) always
-# supplies both, unconditionally, for every launch it makes, and never sets
+# not an optional extra: the typed sinnixd agent-job runner supplies both for
+# every gateway launch and never sets
 # --local-workdir. This attestation model requires --workdir to itself be a
 # worktree root (the registered project, or one of its linked worktrees) --
 # it does not and cannot attest a subdirectory of one, so a caller with a
@@ -480,6 +486,7 @@ job_args=(
   --kitty-window-id "${kitty_window_id}"
   --hyprland-address "${hyprland_address}"
   --quota-snapshot-id "${quota_snapshot_id}"
+  --checkout-ref "${checkout_ref}"
   --scope-unit "${SINNIX_AGENT_SCOPE_UNIT:-${scope_unit}}"
   --scope-cgroup "${scope_cgroup}"
   --launcher-pid "$$"
@@ -541,6 +548,7 @@ if [[ ${internal_agent_scope} -eq 0 && -z ${SINNIX_AGENT_SCOPED:-} ]]; then
   [[ -z ${kitty_window_id} ]] || inner_args+=(--kitty-window-id "${kitty_window_id}")
   [[ -z ${hyprland_address} ]] || inner_args+=(--hyprland-address "${hyprland_address}")
   [[ -z ${quota_snapshot_id} ]] || inner_args+=(--quota-snapshot-id "${quota_snapshot_id}")
+  [[ -z ${checkout_ref} ]] || inner_args+=(--checkout-ref "${checkout_ref}")
   [[ -z ${memory_high} ]] || inner_args+=(--memory-high "${memory_high}")
   [[ -z ${memory_max} ]] || inner_args+=(--memory-max "${memory_max}")
   [[ -z ${cpu_weight} ]] || inner_args+=(--cpu-weight "${cpu_weight}")

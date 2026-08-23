@@ -2,11 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import shutil
-import subprocess
 import uuid
-from pathlib import Path
 from typing import Any
 
 from mcp import ClientSession
@@ -15,6 +12,12 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
+from sinnix_mcp.execution import (
+    EnvironmentProfile,
+    ExecutionProfile,
+    OwnerExecution,
+    OwnerRoute,
+)
 
 
 class McpBrokerError(ValueError):
@@ -23,11 +26,16 @@ class McpBrokerError(ValueError):
 
 class McpBrokerService:
     def __init__(
-        self, config: GatewayConfig, principal: Principal, artifacts: ArtifactService
+        self,
+        config: GatewayConfig,
+        principal: Principal,
+        artifacts: ArtifactService,
+        execution: OwnerExecution | None = None,
     ):
         self.config = config
         self.principal = principal
         self.artifacts = artifacts
+        self.execution = execution
 
     @staticmethod
     def _string(value: Any, name: str, maximum: int = 8_192) -> str:
@@ -35,26 +43,111 @@ class McpBrokerService:
             raise McpBrokerError(f"{name} must be a bounded non-empty string")
         return value
 
-    def catalog(self) -> dict[str, Any]:
+    async def catalog(self) -> dict[str, Any]:
+        """Return current upstream availability from bounded MCP handshakes."""
         self.principal.require(Capability.MCP_READ)
-        servers = []
-        for name, row in sorted(self.config.mcp_broker_servers.items()):
-            if not isinstance(row, dict):
-                continue
-            server = {
-                "name": name,
-                "description": row.get("description"),
-                "transport": row.get("transport"),
-                "tier": row.get("tier"),
-                "brokered": row.get("brokered") is True,
+        rows = sorted(self.config.mcp_broker_servers.items())
+        probes = await asyncio.gather(
+            *(self._catalog_server(name, row) for name, row in rows if isinstance(row, dict))
+        )
+        return {"servers": list(probes)}
+
+    async def _catalog_server(self, name: str, row: dict[str, Any]) -> dict[str, Any]:
+        server = {
+            "name": name,
+            "description": row.get("description"),
+            "transport": row.get("transport"),
+            "tier": row.get("tier"),
+            "brokered": row.get("brokered") is True,
+        }
+        if row.get("brokered") is not True:
+            return {
+                **server,
+                "availability": "unavailable",
+                "reason": row.get("reason", "not admitted to the broker"),
             }
-            if row.get("brokered") is True:
-                server["availability"] = "unprobed"
-            else:
-                server["availability"] = "unavailable"
-                server["reason"] = row.get("reason", "not admitted to the broker")
-            servers.append(server)
-        return {"servers": servers}
+        try:
+            configured = self._server(name)
+        except McpBrokerError as exc:
+            return {
+                **server,
+                "availability": "unavailable",
+                "failure_class": "configuration_error",
+                "reason": str(exc),
+            }
+        environment = self._environment(configured)
+        return {**server, **await self._probe(configured, name, environment)}
+
+    def _environment(self, server: dict[str, Any]) -> dict[str, str]:
+        route = OwnerRoute(
+            "mcp-broker",
+            (
+                EnvironmentProfile.USER_BUS_OPTIONAL
+                if self.principal.name == "observer"
+                else EnvironmentProfile.PLAIN
+            ),
+        )
+        execution = self.execution or OwnerExecution()
+        environment, _ = execution.environment_for(route, server["env"])
+        return environment
+
+    async def _probe(
+        self, server: dict[str, Any], server_name: str, environment: dict[str, str]
+    ) -> dict[str, Any]:
+        """Prove one upstream can initialize and disclose its live tools."""
+        parameters, observer_unit = self._parameters(server, environment)
+        stderr_directory = self.config.state_dir / "captures" / uuid.uuid4().hex
+        stderr_directory.mkdir(mode=0o700, parents=True)
+        stderr_path = stderr_directory / "stderr.log"
+
+        async def inspect() -> tuple[int, int]:
+            with stderr_path.open("w", encoding="utf-8") as stderr:
+                async with stdio_client(parameters, errlog=stderr) as (read, write_stream):
+                    async with ClientSession(read, write_stream) as session:
+                        await session.initialize()
+                        tools = (await session.list_tools()).tools
+            return len(tools), sum(
+                getattr(getattr(tool, "annotations", None), "read_only_hint", None)
+                is True
+                for tool in tools
+            )
+
+        try:
+            tool_count, read_only_tool_count = await asyncio.wait_for(inspect(), timeout=5)
+        except asyncio.TimeoutError:
+            if observer_unit is not None:
+                self._stop(observer_unit)
+            artifact_id = self._store_upstream_stderr(
+                stderr_directory, server_name, "tools/list"
+            )
+            result: dict[str, Any] = {
+                "availability": "unavailable",
+                "failure_class": "timeout",
+                "reason": "upstream did not complete initialize and tools/list within 5 seconds",
+            }
+            if artifact_id is not None:
+                result["diagnostic_artifact_id"] = artifact_id
+            return result
+        except Exception:
+            if observer_unit is not None:
+                self._stop(observer_unit)
+            artifact_id = self._store_upstream_stderr(
+                stderr_directory, server_name, "tools/list"
+            )
+            result = {
+                "availability": "unavailable",
+                "failure_class": "upstream_unavailable",
+                "reason": "upstream did not complete initialize and tools/list",
+            }
+            if artifact_id is not None:
+                result["diagnostic_artifact_id"] = artifact_id
+            return result
+        shutil.rmtree(stderr_directory, ignore_errors=True)
+        return {
+            "availability": "available",
+            "tool_count": tool_count,
+            "read_only_tool_count": read_only_tool_count,
+        }
 
     def _server(self, name: str) -> dict[str, Any]:
         name = self._string(name, "server", 128)
@@ -106,6 +199,9 @@ class McpBrokerService:
                 None,
             )
         unit = f"sinnix-gateway-mcp-read-{uuid.uuid4().hex}.service"
+        unit_environment = [
+            f"--setenv={name}={value}" for name, value in sorted(environment.items())
+        ]
         return (
             StdioServerParameters(
                 command=self.config.systemd_run_command,
@@ -115,6 +211,7 @@ class McpBrokerService:
                     "--quiet",
                     "--collect",
                     f"--unit={unit}",
+                    *unit_environment,
                     "--property=RuntimeMaxSec=30",
                     "--property=ReadOnlyPaths=/",
                     "--property=PrivateTmp=true",
@@ -122,7 +219,6 @@ class McpBrokerService:
                     "--property=ProtectSystem=strict",
                     "--property=ProtectHome=read-only",
                     "--property=PrivateNetwork=true",
-                    "--property=InaccessiblePaths=/run/user",
                     "--",
                     server["command"],
                     *server["args"],
@@ -133,12 +229,17 @@ class McpBrokerService:
         )
 
     def _stop(self, unit: str) -> None:
-        subprocess.run(
+        execution = self.execution or OwnerExecution()
+        execution.run(
             [self.config.systemctl_command, "--user", "stop", unit],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
+            ExecutionProfile(
+                route=OwnerRoute(
+                    "mcp-broker-cancel", EnvironmentProfile.USER_BUS_OPTIONAL
+                ),
+                timeout_seconds=5,
+                max_stdout_bytes=16_384,
+                max_stderr_bytes=8_192,
+            ),
         )
 
     def _store_large_response(
@@ -194,13 +295,7 @@ class McpBrokerService:
         if not isinstance(arguments, dict):
             raise McpBrokerError("arguments must be an object")
         server = self._server(server_name)
-        environment = {
-            "HOME": str(Path.home()),
-            "LANG": os.environ.get("LANG", "C.UTF-8"),
-            "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
-            **server["env"],
-        }
-        parameters, observer_unit = self._parameters(server, environment)
+        parameters, observer_unit = self._parameters(server, self._environment(server))
         stderr_directory = self.config.state_dir / "captures" / uuid.uuid4().hex
         stderr_directory.mkdir(mode=0o700, parents=True)
         stderr_path = stderr_directory / "stderr.log"

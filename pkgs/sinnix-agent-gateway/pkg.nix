@@ -9,6 +9,7 @@
   gnutar,
   gzip,
   coreutils,
+  sinnix-mcp,
   ...
 }:
 let
@@ -116,7 +117,10 @@ python3Packages.buildPythonApplication {
 
   build-system = [ python3Packages.setuptools ];
 
-  dependencies = [ mcp-sdk ];
+  dependencies = [
+    mcp-sdk
+    sinnix-mcp
+  ];
 
   nativeCheckInputs = [
     git

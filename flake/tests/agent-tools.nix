@@ -820,6 +820,21 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/bd-safety.sh} "$hook"
             touch "$out"
           '';
+      bdDoltAuthorityFixture =
+        pkgs.runCommand "bd-dolt-authority-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.git
+              pkgs.jq
+              scriptRegistry.packageSet.beads
+            ];
+          }
+          ''
+            ${pkgs.bash}/bin/bash ${../../flake/tests/bd-dolt-authority.sh} ${scriptRegistry.packageSet.beads}/bin/bd
+            touch "$out"
+          '';
       contextHandoffFixture =
         pkgs.runCommand "context-handoff-fixture"
           {
@@ -1017,6 +1032,7 @@ in
         preflight = preflightFixture;
         kitty-agent-here = kittyAgentHereFixture;
         bd-safety-hook = bdSafetyHookFixture;
+        bd-dolt-authority = bdDoltAuthorityFixture;
         context-handoff = contextHandoffFixture;
         skill-authoring = skillAuthoringFixture;
         desktop-capture = desktopCaptureFixture;

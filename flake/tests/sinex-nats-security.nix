@@ -44,6 +44,7 @@ in
           let
             settings = config.services.nats.settings;
             clientNats = config.services.sinex.runtime.nats;
+            bootstrap = config.systemd.services.sinex-nats-bootstrap;
             fromAgenix = path: lib.hasPrefix "/run/agenix/" (toString path);
           in
           [
@@ -77,6 +78,10 @@ in
             {
               assertion = fromAgenix clientNats.tls.caCertFile && fromAgenix clientNats.auth.nkeySeedFile;
               message = "Managed Sinex clients must take their CA and NKey seed from agenix rather than the store.";
+            }
+            {
+              assertion = bootstrap.serviceConfig.User == "sinex" && bootstrap.serviceConfig.Group == "sinex";
+              message = "The NATS bootstrapper must run as the Sinex client identity that owns its CA and NKey.";
             }
           ];
       };

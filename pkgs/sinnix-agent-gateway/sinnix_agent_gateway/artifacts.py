@@ -10,6 +10,8 @@ from typing import Any
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
+from sinnix_mcp.execution import ExecutionResult
+from .redaction import redact
 
 
 class ArtifactError(ValueError):
@@ -24,22 +26,25 @@ class ArtifactService:
         self.root = config.state_dir / "artifacts"
 
     def _source_is_attested(self, source: Path) -> bool:
-        jobs_root = (self.config.state_dir / "jobs").resolve()
-        if source != jobs_root and jobs_root in source.parents:
-            return True
-        captures_root = (self.config.state_dir / "captures").resolve()
-        if source == captures_root or captures_root not in source.parents:
-            return False
-        try:
-            receipt = json.loads((source.parent / "receipt.json").read_text())
-        except (OSError, json.JSONDecodeError):
-            return False
-        return (
-            receipt.get("schema") == "sinnix.gateway-capture-receipt.v1"
-            and isinstance(receipt.get("capture_id"), str)
-            and isinstance(receipt.get("files"), list)
-            and source.name in receipt["files"]
-        )
+        for directory_name, schema, identifier in (
+            ("captures", "sinnix.gateway-capture-receipt.v1", "capture_id"),
+            ("diagnostics", "sinnix.gateway-diagnostic-receipt.v1", "diagnostic_id"),
+        ):
+            root = (self.config.state_dir / directory_name).resolve()
+            if source == root or root not in source.parents:
+                continue
+            try:
+                receipt = json.loads((source.parent / "receipt.json").read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            if (
+                receipt.get("schema") == schema
+                and isinstance(receipt.get(identifier), str)
+                and isinstance(receipt.get("files"), list)
+                and source.name in receipt["files"]
+            ):
+                return True
+        return False
 
     def attest_capture(
         self,
@@ -79,6 +84,53 @@ class ArtifactService:
         finally:
             temporary.unlink(missing_ok=True)
         return receipt
+
+    def record_owner_diagnostic(
+        self, route: str, result: ExecutionResult
+    ) -> dict[str, object]:
+        """Persist a bounded direct-owner failure without storing request input."""
+        if not route or result.failure_class is None:
+            raise ArtifactError("owner diagnostic requires a failed route result")
+        diagnostic_id = str(uuid.uuid4())
+        directory = self.config.state_dir / "diagnostics" / diagnostic_id
+        directory.mkdir(mode=0o700, parents=True)
+        source = directory / "diagnostic.json"
+        diagnostic = {
+            "schema": "sinnix.gateway-owner-diagnostic.v1",
+            "route": route,
+            "failure_class": result.failure_class,
+            "exit_status": result.exit_status,
+            "timed_out": result.timed_out,
+            "output_exceeded": result.output_exceeded,
+            "stdout_bytes": len(result.stdout),
+            "stderr_bytes": len(result.stderr),
+            "stderr_excerpt": redact(result.stderr_excerpt()),
+        }
+        source.write_text(json.dumps(diagnostic, sort_keys=True, separators=(",", ":")))
+        source.chmod(0o600)
+        receipt = {
+            "schema": "sinnix.gateway-diagnostic-receipt.v1",
+            "diagnostic_id": diagnostic_id,
+            "route": route,
+            "files": [source.name],
+        }
+        receipt_path = directory / "receipt.json"
+        receipt_path.write_text(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
+        receipt_path.chmod(0o600)
+        artifact_id = self.register(
+            source,
+            kind="owner-diagnostic",
+            owner_id=route,
+        )
+        return {
+            "available": False,
+            "failure_class": result.failure_class,
+            "route": route,
+            "exit_status": result.exit_status,
+            "timed_out": result.timed_out,
+            "output_exceeded": result.output_exceeded,
+            "diagnostic_artifact_id": artifact_id,
+        }
 
     def register(self, source: Path, *, kind: str, owner_id: str) -> str:
         source = source.resolve(strict=True)

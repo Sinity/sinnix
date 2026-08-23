@@ -323,6 +323,64 @@ def test_cli_parse_args_defaults() -> None:
     assert args.limit == 3
 
 
+def test_cli_section_collects_only_its_requested_owner(monkeypatch) -> None:
+    args = argparse.Namespace(
+        offline=True,
+        limit=2,
+        since="10 min ago",
+        duration="10 min",
+        format="json",
+        section="pressure",
+    )
+    calls = []
+    monkeypatch.setattr(
+        cli,
+        "collect_pressure",
+        lambda offline: calls.append(("pressure", offline)) or {"available": True},
+    )
+    monkeypatch.setattr(
+        cli,
+        "collect_storage",
+        lambda _offline: pytest.fail("unrequested storage collector ran"),
+    )
+
+    report = cli.collect_report(args)
+
+    assert calls == [("pressure", True)]
+    assert report["live_pressure"] == {"available": True}
+    assert set(report) == {"schema", "generated_at", "window", "live_pressure"}
+
+
+def test_cli_section_pages_rows_at_the_owner(monkeypatch) -> None:
+    args = argparse.Namespace(
+        offline=True,
+        limit=20,
+        since="10 min ago",
+        duration="10 min",
+        format="json",
+        section="units",
+        cursor=1,
+        page_limit=2,
+    )
+    monkeypatch.setattr(
+        cli,
+        "collect_systemd_units",
+        lambda _offline: [{"unit": f"fixture-{index}.service"} for index in range(4)],
+    )
+
+    report = cli.collect_report(args)
+
+    assert report["systemd_units"] == {
+        "total": 4,
+        "cursor": 1,
+        "next_cursor": 3,
+        "rows": [
+            {"unit": "fixture-1.service"},
+            {"unit": "fixture-2.service"},
+        ],
+    }
+
+
 def test_cli_collect_report_offline() -> None:
     args = argparse.Namespace(
         offline=True, limit=2, since="10 min ago", duration="10 min", format="json"

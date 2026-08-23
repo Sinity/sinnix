@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import base64
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TextIO
+from typing import Sequence, TextIO
 
 import anyio
 import pytest
@@ -12,6 +13,12 @@ import pytest
 from sinnix_agent_gateway.artifacts import ArtifactService
 from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig
+from sinnix_mcp.execution import (
+    EnvironmentProfile,
+    ExecutionProfile,
+    ExecutionResult,
+    OwnerExecution,
+)
 from sinnix_agent_gateway.mcp_broker import McpBrokerError, McpBrokerService
 
 
@@ -21,6 +28,16 @@ class FakeTransport:
 
     async def __aexit__(self, *args: object) -> None:
         return None
+
+
+class RecordingExecution(OwnerExecution):
+    def __init__(self) -> None:
+        self.calls: list[tuple[tuple[str, ...], ExecutionProfile]] = []
+
+    def run(self, command: Sequence[str], profile: ExecutionProfile) -> ExecutionResult:
+        normalized = tuple(command)
+        self.calls.append((normalized, profile))
+        return ExecutionResult(normalized, 0, b"", b"")
 
 
 class FailingTransport:
@@ -96,10 +113,54 @@ def broker_service(tmp_path: Path, principal_name: str, max_bytes: int = 262_144
     return McpBrokerService(config, principal, ArtifactService(config, principal))
 
 
-def test_catalog_reports_registry_admission_without_connecting(tmp_path: Path) -> None:
+def test_broker_stop_uses_the_shared_execution_kernel(tmp_path: Path) -> None:
     broker = broker_service(tmp_path, "observer")
+    execution = RecordingExecution()
+    broker.execution = execution
 
-    assert broker.catalog() == {
+    broker._stop("sinnix-gateway-mcp-read-fixture.service")
+
+    command, profile = execution.calls[0]
+    assert command == (
+        broker.config.systemctl_command,
+        "--user",
+        "stop",
+        "sinnix-gateway-mcp-read-fixture.service",
+    )
+    assert profile.route.name == "mcp-broker-cancel"
+    assert profile.route.environment_profile == EnvironmentProfile.USER_BUS_OPTIONAL
+    assert profile.timeout_seconds == 5
+
+
+def test_observer_catalog_allows_a_broker_without_user_bus_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    broker = broker_service(tmp_path, "observer")
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
+
+    catalog = anyio.run(broker.catalog)
+
+    fixture = next(server for server in catalog["servers"] if server["name"] == "fixture")
+    assert fixture["availability"] == "available"
+
+
+def test_catalog_probes_admitted_servers_and_keeps_exclusions_static(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
+
+    assert anyio.run(broker.catalog) == {
         "servers": [
             {
                 "name": "blocked",
@@ -116,10 +177,87 @@ def test_catalog_reports_registry_admission_without_connecting(tmp_path: Path) -
                 "transport": "stdio",
                 "tier": "evidence",
                 "brokered": True,
-                "availability": "unprobed",
+                "availability": "available",
+                "tool_count": 1,
+                "read_only_tool_count": 1,
             },
         ]
     }
+
+
+def write_stdio_fixture(tmp_path: Path, source: str) -> Path:
+    fixture = tmp_path / "fixture_mcp.py"
+    fixture.write_text(source)
+    return fixture
+
+
+def test_catalog_probes_real_stdio_mcp_fixture(tmp_path: Path) -> None:
+    broker = broker_service(tmp_path, "operator")
+    fixture = write_stdio_fixture(
+        tmp_path,
+        """import json
+import sys
+
+for line in sys.stdin:
+    request = json.loads(line)
+    if request[\"method\"] == \"initialize\":
+        result = {
+            \"protocolVersion\": request[\"params\"][\"protocolVersion\"],
+            \"capabilities\": {\"tools\": {}},
+            \"serverInfo\": {\"name\": \"fixture\", \"version\": \"1\"},
+        }
+    elif request[\"method\"] == \"tools/list\":
+        result = {
+            \"tools\": [{
+                \"name\": \"fixture_read\",
+                \"description\": \"Fixture read tool\",
+                \"inputSchema\": {\"type\": \"object\", \"properties\": {}},
+                \"annotations\": {\"readOnlyHint\": True},
+            }]
+        }
+    else:
+        continue
+    print(json.dumps({\"jsonrpc\": \"2.0\", \"id\": request[\"id\"], \"result\": result}), flush=True)
+""",
+    )
+    broker.config.mcp_broker_servers["fixture"].update(
+        command=sys.executable, args=[str(fixture)]
+    )
+
+    result = anyio.run(broker.catalog)
+
+    assert result["servers"][1] == {
+        "name": "fixture",
+        "description": "Fixture server",
+        "transport": "stdio",
+        "tier": "evidence",
+        "brokered": True,
+        "availability": "available",
+        "tool_count": 1,
+        "read_only_tool_count": 1,
+    }
+
+
+def test_catalog_attests_real_stdio_probe_failure(tmp_path: Path) -> None:
+    broker = broker_service(tmp_path, "operator")
+    fixture = write_stdio_fixture(
+        tmp_path,
+        """import sys
+sys.stderr.write(\"fixture launch failed\\n\")
+sys.exit(17)
+""",
+    )
+    broker.config.mcp_broker_servers["fixture"].update(
+        command=sys.executable, args=[str(fixture)]
+    )
+
+    result = anyio.run(broker.catalog)
+    fixture_result = result["servers"][1]
+
+    assert fixture_result["availability"] == "unavailable"
+    assert fixture_result["failure_class"] == "upstream_unavailable"
+    artifact = broker.artifacts.read(fixture_result["diagnostic_artifact_id"])
+    assert base64.b64decode(artifact["base64"]) == b"fixture launch failed\n"
 
 
 def test_broker_enforces_live_read_only_tool_metadata(
@@ -152,6 +290,8 @@ def test_observer_broker_runs_upstream_in_read_only_unit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     broker = broker_service(tmp_path, "observer")
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
     captured = []
 
     def stdio(parameters: object, **_kwargs: object) -> FakeTransport:
@@ -166,7 +306,11 @@ def test_observer_broker_runs_upstream_in_read_only_unit(
     assert captured[0].command == broker.config.systemd_run_command
     assert "--property=ReadOnlyPaths=/" in captured[0].args
     assert "--property=PrivateNetwork=true" in captured[0].args
-    assert "--property=InaccessiblePaths=/run/user" in captured[0].args
+    assert "--property=InaccessiblePaths=/run/user" not in captured[0].args
+    assert "--setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus" in captured[0].args
+    assert "--setenv=XDG_RUNTIME_DIR=/run/user/1000" in captured[0].args
+    assert captured[0].env["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/run/user/1000/bus"
+    assert captured[0].env["XDG_RUNTIME_DIR"] == "/run/user/1000"
     separator = captured[0].args.index("--")
     assert captured[0].args[separator + 1 :] == ["fixture-mcp", "--fixture"]
 

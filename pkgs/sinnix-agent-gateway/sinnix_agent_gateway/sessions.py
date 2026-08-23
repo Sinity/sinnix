@@ -20,6 +20,14 @@ class SessionSource:
 
 
 class SessionLogService:
+    @staticmethod
+    def default_sources(home: Path | None = None) -> tuple[SessionSource, ...]:
+        home = Path.home() if home is None else home
+        return (
+            SessionSource("claude-code", home / ".claude" / "projects"),
+            SessionSource("codex", home / ".codex" / "sessions"),
+        )
+
     def __init__(
         self,
         config: GatewayConfig,
@@ -28,9 +36,10 @@ class SessionLogService:
     ):
         self.config = config
         self.principal = principal
-        self.sources = sources or (
-            SessionSource("claude-code", Path.home() / ".claude" / "projects"),
-            SessionSource("codex", Path.home() / ".codex"),
+        configured_sources = sources or self.default_sources()
+        self.sources = tuple(
+            SessionSource(source.provider, source.root.resolve())
+            for source in configured_sources
         )
 
     def _source(self, provider: str) -> SessionSource:

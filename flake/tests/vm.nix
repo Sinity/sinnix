@@ -69,6 +69,70 @@ in
             }/bin/polylogued status --format json | jq -e '.daemon == \"polylogued\" and (.live.source_count >= 0)' >/dev/null")
           '';
         };
+        sinnixd-vm = mkVmCheck system {
+          name = "sinnixd-vm";
+          nodes.machine =
+            { pkgs, ... }:
+            {
+              environment.systemPackages = [ pkgs.jq ];
+              sinnix.features.desktop = {
+                activitywatch.enable = false;
+                audio.enable = false;
+                base.enable = false;
+                browser.enable = false;
+                "common-apps".enable = false;
+                gaming.enable = false;
+                hyprland.enable = false;
+                hyprlandAnimations.enable = false;
+                media.enable = false;
+                mime.enable = false;
+                noctalia.enable = false;
+                storage.enable = false;
+                terminal.enable = false;
+                theming.enable = false;
+                ui.enable = false;
+              };
+              sinnix.paths.projectRoot = "/realm/project/fixture";
+              sinnix.services.sinnixd.enable = true;
+              sinnix.services.sinnixd.agentRunner = "/realm/project/fixture/native-runner";
+              home-manager.users.sinity.systemd.user.services.sinnixd.Unit.ConditionPathExists =
+                "/realm/project/fixture/.agentctl/project.toml";
+            };
+          testScript = ''
+            start_all()
+            machine.wait_for_unit("multi-user.target")
+            uid = machine.succeed("id -u sinity").strip()
+            as_user = f"XDG_RUNTIME_DIR=/run/user/{uid} runuser -u sinity --"
+
+            machine.succeed("loginctl enable-linger sinity")
+            machine.wait_for_unit(f"user@{uid}.service")
+            machine.succeed("mkdir -p /realm/project/fixture/modules /realm/project/fixture/.agentctl")
+            machine.succeed("printf '{}' > /realm/project/fixture/flake.nix")
+            machine.succeed("cat > /realm/project/fixture/.agentctl/project.toml <<'EOF'\nschema = 1\n\n[project]\nid = \"fixture\"\ndisplay_name = \"Fixture\"\nroot_markers = [\"flake.nix\", \"modules\"]\n\n[environment]\nkind = \"fixture\"\ncommand = [\"/run/current-system/sw/bin/env\"]\ninherit = []\nunset = []\n\n[operations.descendants]\ndescription = \"Run a parent and child\"\nexec = [\"/realm/project/fixture/parent.sh\"]\npool = \"normal\"\nresult = \"exit\"\ncache = \"none\"\nexclusive_keys = []\nEOF")
+            machine.succeed("cat > /realm/project/fixture/parent.sh <<'EOF'\n#!/bin/sh\necho $$ > /home/sinity/.local/state/sinnixd-parent.pid\nsleep 30 &\necho $! > /home/sinity/.local/state/sinnixd-child.pid\nwait\nEOF\nchmod 755 /realm/project/fixture/parent.sh")
+            machine.succeed("cat > /realm/project/fixture/native-runner <<'EOF'\n#!/bin/sh\nset -eu\nlast=\nprompt=\nwhile [ $# -gt 0 ]; do\n  case $1 in\n    --last-file) last=$2; shift 2 ;;\n    --prompt-file) prompt=$2; shift 2 ;;\n    *) shift ;;\n  esac\ndone\ntest -f \"$prompt\"\nprintf 'native-agent-result' > \"$last\"\nprintf 'native-agent-log\\n'\nEOF\nchmod 755 /realm/project/fixture/native-runner\ngit -C /realm/project/fixture init --quiet\ngit -C /realm/project/fixture add .\ngit -C /realm/project/fixture -c user.name=Fixture -c user.email=fixture@example.test commit --quiet -m fixture\nchown -R sinity:users /realm/project/fixture")
+            machine.succeed(f"{as_user} systemctl --user restart sinnixd.service")
+            machine.wait_until_succeeds(f"{as_user} systemctl --user is-active --quiet sinnixd.service")
+            machine.succeed(f"timeout 5 sh -c 'until test -S /run/user/{uid}/sinnixd.sock; do sleep 0.1; done'")
+            job_id = machine.succeed(f"{as_user} agentctl job start fixture descendants | jq -r '.payload.value.job_id'").strip()
+            machine.wait_until_succeeds("test -s /home/sinity/.local/state/sinnixd-parent.pid && test -s /home/sinity/.local/state/sinnixd-child.pid")
+            parent = machine.succeed("cat /home/sinity/.local/state/sinnixd-parent.pid").strip()
+            child = machine.succeed("cat /home/sinity/.local/state/sinnixd-child.pid").strip()
+            cancellation_started = int(machine.succeed("date +%s").strip())
+            machine.succeed(f"{as_user} agentctl job cancel {job_id} | jq -e '.ok and .payload.value.cancel_requested' >/dev/null")
+            machine.succeed(f"XDG_RUNTIME_DIR=/run/user/{uid} timeout 5 runuser -u sinity -- agentctl job wait {job_id} --timeout-seconds 3 | jq -e '.ok and (.payload.value.wait_timed_out != true) and .payload.value.state.terminal and .payload.value.state.phase == \"cancelled\"' >/dev/null")
+            machine.succeed(f"timeout 3 sh -c 'until ! test -e /proc/{parent} && ! test -e /proc/{child}; do sleep 0.1; done'")
+            assert int(machine.succeed("date +%s").strip()) - cancellation_started < 5
+            shell_id = machine.succeed(f"{as_user} agentctl shell --project fixture --checkout default --cwd . --timeout-seconds 60 -- /bin/sh -c 'printf shell-fixture' | jq -r '.payload.value.job_id'").strip()
+            machine.succeed(f"{as_user} agentctl job wait {shell_id} --timeout-seconds 3 | jq -e '.ok and .payload.value.state.terminal and .payload.value.state.phase == \"succeeded\"' >/dev/null")
+            machine.succeed(f"{as_user} agentctl job logs {shell_id} | jq -e '.ok and (.payload.value.content | contains(\"shell-fixture\"))' >/dev/null")
+            machine.succeed("printf 'fixture prompt' > /realm/project/fixture/prompt.md && chown sinity:users /realm/project/fixture/prompt.md")
+            agent_id = machine.succeed(f"{as_user} agentctl agent --project fixture --checkout default --prompt-file /realm/project/fixture/prompt.md --backend codex --model fixture --effort high --timeout-seconds 60 | jq -r '.payload.value.job_id'").strip()
+            machine.succeed(f"{as_user} agentctl job wait {agent_id} --timeout-seconds 3 | jq -e '.ok and .payload.value.state.terminal and .payload.value.state.phase == \"succeeded\"' >/dev/null")
+            machine.succeed(f"{as_user} agentctl job result {agent_id} | jq -e '.ok and .payload.value.content == \"native-agent-result\"' >/dev/null")
+            machine.succeed(f"test ! -e /home/sinity/.local/state/sinnixd/inputs/{agent_id}.prompt && test ! -e /home/sinity/.local/state/sinnixd/inputs/{agent_id}.json")
+          '';
+        };
         transmission-vm = mkVmCheck system {
           name = "transmission-vm";
           nodes.machine =

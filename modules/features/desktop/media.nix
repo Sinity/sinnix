@@ -77,7 +77,7 @@ mkFeatureModule {
                 profile = "normal";
                 fs = true;
                 force-window = "yes";
-                hwdec = "no";
+                hwdec = "auto-safe";
                 video-sync = "display-resample";
                 drm-vrr-enabled = "no";
                 wayland-content-type = "none";
@@ -244,11 +244,18 @@ mkFeatureModule {
 
       # Recording and media tools
       (lib.mkIf cfg.recording.enable {
+        # KMS capture needs the system wrapper so interactive recordings do
+        # not fall back to a polkit/root-authentication round trip. The
+        # command-line full-quality profile lives in scripts/screen-record;
+        # GTK remains available for ad-hoc recordings with lighter settings.
+        programs.gpu-screen-recorder.enable = true;
+
         home-manager.users.${user}.home.packages = with pkgs; [
           gpu-screen-recorder
           gpu-screen-recorder-gtk
           ffmpeg
           yt-dlp
+          scriptPkgs.screen-record
           # Clipboard->yt-dlp watcher. It must drain wl-paste's pipe; a
           # `wl-paste -w sh -c '...'` one-liner that leaves it undrained
           # freezes single-instance kitty.

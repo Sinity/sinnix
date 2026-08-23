@@ -159,6 +159,7 @@ sinnix-chrome-control upload-files <page_id> \
 - `hypr-control.sh paste` closes part of that gap for GUI apps by using clipboard plus Hyprland `sendshortcut`; it is reliable for native Wayland clients and best-effort for XWayland clients.
 - `hypr-control.sh paste` restores only text clipboard content, and only if a text clipboard existed when the command started.
 - For deterministic automation loops, prefer `send-await` over blind sleeps.
+- A non-interactive caller without `KITTY_LISTEN_ON` resolves the live `terminal` instance socket before falling back to another live per-user Kitty socket. This keeps remote control working from systemd and MCP processes that have no controlling TTY.
 - `send-await` defaults to `--extent last_cmd_output` to avoid false positives from echoed input.
 - For window layout/navigation primitives, reuse existing system scripts in `/realm/project/sinnix/scripts`:
   - `kitty-grid` for deterministic grid placement

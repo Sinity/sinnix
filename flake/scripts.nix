@@ -137,7 +137,13 @@ let
       surfaces = runtimeDefaults.baseSurfaces;
     }
   );
-  agentGatewayPackage = pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix { };
+  sinnixMcpPackage = pkgs.callPackage ../pkgs/sinnix-mcp/pkg.nix { };
+  sinnixdPackage = pkgs.callPackage ../pkgs/sinnixd/pkg.nix {
+    sinnix-mcp = sinnixMcpPackage;
+  };
+  agentGatewayPackage = pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix {
+    sinnix-mcp = sinnixMcpPackage;
+  };
 
   mkSanitizedPythonWrapper =
     {
@@ -297,6 +303,8 @@ let
       npmDepsHash = "sha256-/duhx34Iiq+7ZOaRTTAWChbGjJhxiVvWOoaLJsH2USc=";
     };
 
+    sinnix-mcp = sinnixMcpPackage;
+    sinnixd = sinnixdPackage;
     sinnix-agent-gateway = agentGatewayPackage;
     sinnix-agent-control-mcp = pkgs.writeShellApplication {
       name = "sinnix-agent-control-mcp";
@@ -308,6 +316,8 @@ let
       meta.description = "Local agent-control principal of the shared Sinnix MCP gateway";
     };
     tunnel-client = pkgs.callPackage ../pkgs/tunnel-client { };
+
+    chatgpt-app = pkgs.callPackage ../pkgs/chatgpt-app { };
 
     sinnix-observe = pkgs.callPackage ../pkgs/sinnix-observe/pkg.nix {
       inherit defaultRuntimeInventoryJson;

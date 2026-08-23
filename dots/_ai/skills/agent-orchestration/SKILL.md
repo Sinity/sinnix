@@ -68,8 +68,8 @@ shell invocation. It exposes only `start_agent_job`, `list_agent_jobs`,
   resource options when an operator needs a stable control handle. `--workdir`
   identity is mandatory in exactly one form: `--registered-project` +
   `--expected-git-common-dir` together attest `--workdir` as that project's own
-  checkout or a linked Git worktree of it (this is what the gateway always
-  uses); `--local-workdir` is the explicit opt-out for a directory the caller
+  checkout or a linked Git worktree of it (this is what typed Sinnixd agent
+  jobs use); `--local-workdir` is the explicit opt-out for a directory the caller
   already trusts directly -- a non-Git target, or a subdirectory of a Git
   checkout (the attested form can only authorize a whole worktree root, never
   a subdirectory of one). `launch_agent_tabs.sh` picks the right form for you.

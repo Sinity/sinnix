@@ -9,7 +9,8 @@ import pytest
 from sinnix_agent_gateway.artifacts import ArtifactError, ArtifactService
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_agent_gateway.desktop import DesktopService
+from sinnix_agent_gateway.desktop import DesktopDiagnosticError, DesktopService
+from sinnix_mcp.execution import OwnerExecution
 
 
 def desktop_service(tmp_path: Path, principal_name: str) -> tuple[DesktopService, Path]:
@@ -38,7 +39,19 @@ def desktop_service(tmp_path: Path, principal_name: str) -> tuple[DesktopService
         screenshot_control_command=str(runner),
     )
     principal = Principal.for_name(principal_name)
-    return DesktopService(config, principal, ArtifactService(config, principal)), captured
+    execution = OwnerExecution(
+        {
+            "HOME": str(tmp_path),
+            "LANG": "C.UTF-8",
+            "PATH": "/run/current-system/sw/bin",
+            "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
+            "WAYLAND_DISPLAY": "wayland-1",
+            "HYPRLAND_INSTANCE_SIGNATURE": "fixture",
+        }
+    )
+    return DesktopService(
+        config, principal, ArtifactService(config, principal), execution
+    ), captured
 
 
 def commands(path: Path) -> list[list[str]]:
@@ -87,6 +100,20 @@ def test_observer_cannot_take_desktop_action(tmp_path: Path) -> None:
 
     with pytest.raises(PolicyError, match="desktop.action"):
         desktop.action("focus_window", {"window": "address:0xfixture"})
+
+
+def test_desktop_requires_wayland_environment_before_launch(tmp_path: Path) -> None:
+    desktop, _ = desktop_service(tmp_path, "observer")
+    desktop.execution = OwnerExecution({})
+
+    with pytest.raises(DesktopDiagnosticError) as caught:
+        desktop.read("clients")
+
+    response = caught.value.response
+    assert response["failure_class"] == "environment_unavailable:XDG_RUNTIME_DIR"
+    assert response["route"] == "desktop-hypr"
+    artifact = desktop.artifacts.read(str(response["diagnostic_artifact_id"]))
+    assert artifact["kind"] == "owner-diagnostic"
 
 
 def test_artifact_rejects_unreceipted_capture_source(tmp_path: Path) -> None:

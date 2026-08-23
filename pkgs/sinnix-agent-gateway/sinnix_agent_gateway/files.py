@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import mimetypes
+import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +33,28 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _copy_exclusive(source: Path, destination: Path) -> None:
+    """Copy a regular file without ever replacing an existing destination."""
+    try:
+        destination_fd = os.open(
+            destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+        )
+    except FileExistsError as exc:
+        raise FileError("destination already exists") from exc
+    try:
+        with source.open("rb") as input_handle, os.fdopen(
+            destination_fd, "wb"
+        ) as output_handle:
+            destination_fd = -1
+            shutil.copyfileobj(input_handle, output_handle)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        if destination_fd != -1:
+            os.close(destination_fd)
+
+
 class HostFileService:
     def __init__(self, config: GatewayConfig, principal: Principal):
         self.config = config
@@ -53,6 +78,16 @@ class HostFileService:
         ):
             raise FileError("path is unavailable to this principal")
         return resolved
+
+    def _destination(self, path: str) -> Path:
+        candidate = Path(path).expanduser()
+        if not candidate.is_absolute():
+            candidate = Path.home() / candidate
+        if candidate.is_symlink():
+            raise FileError("mutating symlinks is not supported")
+        if candidate.exists():
+            raise FileError("destination already exists")
+        return self._resolve(path, existing=False)
 
     def _read_file(self, path: Path, offset: int, max_bytes: int) -> dict[str, Any]:
         if not path.is_file():
@@ -140,6 +175,7 @@ class HostFileService:
         path: str,
         *,
         content: str | None = None,
+        destination: str | None = None,
         expected_sha256: str | None = None,
     ) -> dict[str, Any]:
         self.principal.require(Capability.FILE_WRITE)
@@ -148,13 +184,13 @@ class HostFileService:
             candidate = Path.home() / candidate
         if candidate.is_symlink():
             raise FileError("mutating symlinks is not supported")
-        existing = operation in {"append", "remove"}
+        existing = operation in {"append", "remove", "copy", "move"}
         target = self._resolve(path, existing=existing)
         if operation == "mkdir":
             target.mkdir(mode=0o700)
             return {"operation": operation, "path": str(target), "created": True}
         if operation == "remove":
-            if target.is_dir():
+            if not target.is_file():
                 raise FileError("remove supports regular files only")
             before_hash = _sha256(target)
             if expected_sha256 is not None and expected_sha256 != before_hash:
@@ -166,8 +202,36 @@ class HostFileService:
                 "removed": True,
                 "previous_sha256": before_hash,
             }
+        if operation in {"copy", "move"}:
+            if not target.is_file():
+                raise FileError(f"{operation} supports regular files only")
+            if destination is None:
+                raise FileError("destination is required")
+            before_hash = _sha256(target)
+            if expected_sha256 is not None and expected_sha256 != before_hash:
+                raise FileError("expected_sha256 does not match the current file")
+            destination_path = self._destination(destination)
+            if operation == "copy":
+                _copy_exclusive(target, destination_path)
+            else:
+                try:
+                    os.link(target, destination_path)
+                except FileExistsError as exc:
+                    raise FileError("destination already exists") from exc
+                except OSError as exc:
+                    if exc.errno != errno.EXDEV:
+                        raise
+                    _copy_exclusive(target, destination_path)
+                target.unlink()
+            return {
+                "operation": operation,
+                "path": str(target),
+                "destination": str(destination_path),
+                "sha256": before_hash,
+                "removed": operation == "move",
+            }
         if operation not in {"replace", "append"}:
-            raise FileError("operation must be replace, append, mkdir, or remove")
+            raise FileError("operation must be replace, append, mkdir, remove, copy, or move")
         if content is None:
             raise FileError("content is required")
         encoded = content.encode()
