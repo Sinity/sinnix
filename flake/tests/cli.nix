@@ -63,6 +63,7 @@ in
           polylogue --help | grep -q '^Usage: polylogue'
           polylogue find --help | grep -q 'Search the archive'
           polylogue config --help | grep -q 'Show resolved Polylogue configuration'
+          test -x "$(command -v polylogue-agentctl-adapter)"
           polylogue-python - <<'EOF'
           import sys
           print(sys.executable)
