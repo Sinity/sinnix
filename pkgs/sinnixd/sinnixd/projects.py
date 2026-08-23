@@ -21,8 +21,17 @@ class ProjectConfigError(ValueError):
 MAX_OPERATION_PARAMETERS = 16
 MAX_PARAMETER_LIST_ITEMS = 32
 MAX_PARAMETER_STRING_LENGTH = 128
+MAX_PARAMETER_ENUM_VALUES = 64
+MIN_PARAMETER_INTEGER = -(2**31)
+MAX_PARAMETER_INTEGER = 2**31 - 1
 _PARAMETER_FLAG = re.compile(r"--[a-z][a-z0-9-]*\Z")
-_PACKAGE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
+_PARAMETER_GRAMMARS = {
+    "identifier": re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z"),
+    "package-name": re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z"),
+    "safe-token": re.compile(r"[A-Za-z0-9][A-Za-z0-9._:+@=-]*\Z"),
+    "duration": re.compile(r"[1-9][0-9]{0,8}(?:ms|s|m|h)\Z"),
+}
+DEFAULT_PARAMETER_GRAMMAR = "safe-token"
 
 
 def _parameter_digest(parameters: Mapping[str, Any]) -> str:
@@ -132,32 +141,63 @@ class OperationParameter:
     flag: str
     max_items: int | None = None
     max_length: int | None = None
+    grammar: str | None = None
+    values: tuple[str, ...] = ()
+    minimum: int | None = None
+    maximum: int | None = None
 
     def catalog_row(self) -> dict[str, Any]:
         row: dict[str, Any] = {"name": self.name, "type": self.kind, "flag": self.flag}
-        if self.kind == "string-list":
-            row.update({"max_items": self.max_items, "max_length": self.max_length})
+        if self.kind in {"string", "string-list"}:
+            row.update({"max_length": self.max_length, "grammar": self.grammar})
+        if self.kind in {"string-list", "enum-list"}:
+            row["max_items"] = self.max_items
+        if self.kind in {"enum", "enum-list"}:
+            row.update(
+                {
+                    "values": list(self.values),
+                    "max_length": self.max_length,
+                    "grammar": self.grammar,
+                }
+            )
+        if self.kind == "integer":
+            row.update({"min": self.minimum, "max": self.maximum})
         return row
 
-    def canonicalize(self, value: Any) -> bool | tuple[str, ...]:
+    def canonicalize(self, value: Any) -> bool | int | str | tuple[str, ...]:
         if self.kind == "bool":
             if not isinstance(value, bool):
                 raise ValueError(f"parameter {self.name} must be boolean")
             return value
+        if self.kind == "integer":
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError(f"parameter {self.name} must be an integer")
+            assert self.minimum is not None and self.maximum is not None
+            if not self.minimum <= value <= self.maximum:
+                raise ValueError(f"parameter {self.name} is outside its declared range")
+            return value
+        if self.kind in {"string", "enum"}:
+            self._validate_string(value)
+            if self.kind == "enum" and value not in self.values:
+                raise ValueError(f"parameter {self.name} must be one of its declared values")
+            return value
         if not isinstance(value, list) or not value:
             raise ValueError(f"parameter {self.name} must be a non-empty list")
-        assert self.max_items is not None and self.max_length is not None
+        assert self.max_items is not None
         if len(value) > self.max_items:
             raise ValueError(f"parameter {self.name} exceeds max_items")
-        if any(
-            not isinstance(item, str)
-            or not item
-            or len(item) > self.max_length
-            or _PACKAGE_NAME.fullmatch(item) is None
-            for item in value
-        ):
-            raise ValueError(f"parameter {self.name} must contain bounded package strings")
+        for item in value:
+            self._validate_string(item)
+            if self.kind == "enum-list" and item not in self.values:
+                raise ValueError(f"parameter {self.name} must contain only declared values")
         return tuple(sorted(set(value)))
+
+    def _validate_string(self, value: Any) -> None:
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"parameter {self.name} must be a non-empty string")
+        assert self.max_length is not None and self.grammar is not None
+        if len(value) > self.max_length or _PARAMETER_GRAMMARS[self.grammar].fullmatch(value) is None:
+            raise ValueError(f"parameter {self.name} contains an unsafe or malformed string")
 
 
 @dataclass(frozen=True)
@@ -192,10 +232,15 @@ class ProjectOperation:
                     canonical[parameter.name] = True
                     argv.append(parameter.flag)
                 continue
-            assert isinstance(value, tuple)
-            canonical[parameter.name] = list(value)
-            for item in value:
-                argv.extend((parameter.flag, item))
+            if parameter.kind in {"string-list", "enum-list"}:
+                assert isinstance(value, tuple)
+                canonical[parameter.name] = list(value)
+                for item in value:
+                    argv.extend((parameter.flag, item))
+                continue
+            assert isinstance(value, (int, str))
+            canonical[parameter.name] = value
+            argv.extend((parameter.flag, str(value)))
         return tuple(argv), _parameter_digest(canonical)
 
     def catalog_row(self) -> dict[str, Any]:
@@ -284,35 +329,104 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
     if not isinstance(value, Mapping) or len(value) > MAX_OPERATION_PARAMETERS:
         raise ProjectConfigError(f"{field} must be a bounded table")
     parameters: list[OperationParameter] = []
-    for name, definition in sorted(value.items()):
+    for name, definition in value.items():
         if not isinstance(name, str) or not name.isidentifier() or not isinstance(definition, Mapping):
             raise ProjectConfigError(f"{field} contains an invalid parameter declaration")
         kind = definition.get("type")
         flag = definition.get("flag")
-        if kind not in {"bool", "string-list"} or not isinstance(flag, str) or _PARAMETER_FLAG.fullmatch(flag) is None:
+        if kind not in {"bool", "string", "enum", "integer", "string-list", "enum-list"} or not isinstance(flag, str) or _PARAMETER_FLAG.fullmatch(flag) is None:
             raise ProjectConfigError(f"{field}.{name} has an invalid type or flag")
         if kind == "bool":
             if set(definition) != {"type", "flag"}:
                 raise ProjectConfigError(f"{field}.{name} bool parameters only accept type and flag")
             parameters.append(OperationParameter(name=name, kind=kind, flag=flag))
             continue
-        if set(definition) != {"type", "flag", "max_items", "max_length"}:
-            raise ProjectConfigError(f"{field}.{name} string-list parameters require explicit bounds")
-        max_items = definition.get("max_items")
+        if kind == "integer":
+            if set(definition) != {"type", "flag", "min", "max"}:
+                raise ProjectConfigError(f"{field}.{name} integer parameters require min and max")
+            minimum = definition.get("min")
+            maximum = definition.get("max")
+            if (
+                not isinstance(minimum, int)
+                or isinstance(minimum, bool)
+                or not isinstance(maximum, int)
+                or isinstance(maximum, bool)
+                or not MIN_PARAMETER_INTEGER <= minimum <= maximum <= MAX_PARAMETER_INTEGER
+            ):
+                raise ProjectConfigError(f"{field}.{name} has invalid integer bounds")
+            parameters.append(
+                OperationParameter(name=name, kind=kind, flag=flag, minimum=minimum, maximum=maximum)
+            )
+            continue
+        if kind in {"enum", "enum-list"}:
+            allowed = {"type", "flag", "values"}
+            if kind == "enum-list":
+                allowed.add("max_items")
+            if set(definition) != allowed:
+                raise ProjectConfigError(f"{field}.{name} {kind} parameters require declared values and bounds")
+            values = definition.get("values")
+            if not isinstance(values, list) or not 1 <= len(values) <= MAX_PARAMETER_ENUM_VALUES:
+                raise ProjectConfigError(f"{field}.{name} must declare bounded enum values")
+            if any(
+                not isinstance(item, str)
+                or not item
+                or len(item) > MAX_PARAMETER_STRING_LENGTH
+                or _PARAMETER_GRAMMARS[DEFAULT_PARAMETER_GRAMMAR].fullmatch(item) is None
+                for item in values
+            ) or len(set(values)) != len(values):
+                raise ProjectConfigError(f"{field}.{name} has invalid or duplicate enum values")
+            max_items = None
+            if kind == "enum-list":
+                max_items = definition.get("max_items")
+                if not _bounded_parameter_count(max_items, MAX_PARAMETER_LIST_ITEMS):
+                    raise ProjectConfigError(f"{field}.{name} has invalid list bounds")
+            parameters.append(
+                OperationParameter(
+                    name=name,
+                    kind=kind,
+                    flag=flag,
+                    max_items=max_items,
+                    max_length=MAX_PARAMETER_STRING_LENGTH,
+                    grammar=DEFAULT_PARAMETER_GRAMMAR,
+                    values=tuple(values),
+                )
+            )
+            continue
+        allowed = {"type", "flag", "max_length", "grammar"}
+        if kind == "string-list":
+            allowed.add("max_items")
+        if set(definition) != allowed - {"grammar"} and set(definition) != allowed:
+            raise ProjectConfigError(f"{field}.{name} {kind} parameters require explicit bounds")
         max_length = definition.get("max_length")
+        grammar = definition.get("grammar", DEFAULT_PARAMETER_GRAMMAR)
         if (
-            not isinstance(max_items, int)
-            or isinstance(max_items, bool)
-            or not 1 <= max_items <= MAX_PARAMETER_LIST_ITEMS
-            or not isinstance(max_length, int)
-            or isinstance(max_length, bool)
-            or not 1 <= max_length <= MAX_PARAMETER_STRING_LENGTH
+            not _bounded_parameter_count(max_length, MAX_PARAMETER_STRING_LENGTH)
+            or not isinstance(grammar, str)
+            or grammar not in _PARAMETER_GRAMMARS
         ):
-            raise ProjectConfigError(f"{field}.{name} has invalid bounds")
-        parameters.append(OperationParameter(name=name, kind=kind, flag=flag, max_items=max_items, max_length=max_length))
+            raise ProjectConfigError(f"{field}.{name} has invalid string constraints")
+        max_items = None
+        if kind == "string-list":
+            max_items = definition.get("max_items")
+            if not _bounded_parameter_count(max_items, MAX_PARAMETER_LIST_ITEMS):
+                raise ProjectConfigError(f"{field}.{name} has invalid list bounds")
+        parameters.append(
+            OperationParameter(
+                name=name,
+                kind=kind,
+                flag=flag,
+                max_items=max_items,
+                max_length=max_length,
+                grammar=grammar,
+            )
+        )
     if len({parameter.flag for parameter in parameters}) != len(parameters):
         raise ProjectConfigError(f"{field} parameter flags must be unique")
     return tuple(parameters)
+
+
+def _bounded_parameter_count(value: Any, maximum: int) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= maximum
 
 
 def _owner_adapters(raw: Mapping[str, Any], descriptor: Path) -> tuple[ProjectOwnerAdapter, ...]:

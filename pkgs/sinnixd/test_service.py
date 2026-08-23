@@ -337,6 +337,43 @@ flag = "--package"
 max_items = 4
 max_length = 32
 
+[operations.sinex_test]
+description = "Run the residual Sinex foreground test shape"
+exec = ["xtask", "test"]
+pool = "normal"
+result = "exit"
+cache = "tree+environment"
+
+[operations.sinex_test.parameters.profile]
+type = "enum"
+flag = "--impact-mode"
+values = ["balanced", "strict"]
+
+[operations.sinex_test.parameters.threads]
+type = "integer"
+flag = "--threads"
+min = 1
+max = 16
+
+[operations.sinex_test.parameters.timeout]
+type = "string"
+flag = "--timeout"
+max_length = 10
+grammar = "duration"
+
+[operations.sinex_test.parameters.feature]
+type = "string-list"
+flag = "--features"
+max_items = 4
+max_length = 32
+grammar = "safe-token"
+
+[operations.sinex_test.parameters.package]
+type = "enum-list"
+flag = "--package"
+values = ["sinexd", "xtask"]
+max_items = 4
+
 [operations.pytest_receipt]
 description = "Run fixture pytest receipt"
 exec = ["fixture-pytest"]
@@ -371,8 +408,13 @@ documentation = "Bounded Polylogue archive status."
     "fragment",
     (
         "unknown = true\n",
-        "[operations.parameterized.parameters.broken]\ntype = \"integer\"\nflag = \"--broken\"\n",
+        "[operations.parameterized.parameters.broken]\ntype = \"integer\"\nflag = \"--broken\"\nmin = 1\n",
         "[operations.parameterized.parameters.unbounded]\ntype = \"string-list\"\nflag = \"--unbounded\"\nmax_items = 4\n",
+        "[operations.parameterized.parameters.unknown_string]\ntype = \"string\"\nflag = \"--string\"\nmax_length = 4\ngrammar = \"shell\"\n",
+        "[operations.parameterized.parameters.boolean_integer]\ntype = \"integer\"\nflag = \"--integer\"\nmin = true\nmax = 4\n",
+        "[operations.parameterized.parameters.empty_enum]\ntype = \"enum\"\nflag = \"--enum\"\nvalues = []\n",
+        "[operations.parameterized.parameters.duplicate_enum]\ntype = \"enum\"\nflag = \"--enum\"\nvalues = [\"same\", \"same\"]\n",
+        "[operations.parameterized.parameters.unbounded_enum_list]\ntype = \"enum-list\"\nflag = \"--enum-list\"\nvalues = [\"one\"]\n",
     ),
 )
 def test_project_operation_parameter_schema_is_closed_and_bounded(tmp_path: Path, fragment: str) -> None:
@@ -1160,7 +1202,43 @@ def test_project_catalog_is_explicit_and_operation_catalog_is_bounded(tmp_path: 
     assert operations["check"]["result"] == "exit"
     assert operations["parameterized"]["parameters"] == [
         {"name": "full", "type": "bool", "flag": "--full"},
-        {"name": "package", "type": "string-list", "flag": "--package", "max_items": 4, "max_length": 32},
+        {
+            "name": "package",
+            "type": "string-list",
+            "flag": "--package",
+            "max_items": 4,
+            "max_length": 32,
+            "grammar": "safe-token",
+        },
+    ]
+    assert operations["sinex_test"]["parameters"] == [
+        {
+            "name": "profile",
+            "type": "enum",
+            "flag": "--impact-mode",
+            "values": ["balanced", "strict"],
+            "max_length": 128,
+            "grammar": "safe-token",
+        },
+        {"name": "threads", "type": "integer", "flag": "--threads", "min": 1, "max": 16},
+        {"name": "timeout", "type": "string", "flag": "--timeout", "max_length": 10, "grammar": "duration"},
+        {
+            "name": "feature",
+            "type": "string-list",
+            "flag": "--features",
+            "max_items": 4,
+            "max_length": 32,
+            "grammar": "safe-token",
+        },
+        {
+            "name": "package",
+            "type": "enum-list",
+            "flag": "--package",
+            "max_items": 4,
+            "values": ["sinexd", "xtask"],
+            "max_length": 128,
+            "grammar": "safe-token",
+        },
     ]
     assert operations["parameterized"]["result"] == "json"
     assert operations["pytest_receipt"]["result"] == "pytest"
@@ -1427,6 +1505,82 @@ def test_declared_parameters_reject_unknown_malformed_and_unbounded_input(
     assert response.error is not None
     assert response.error.code.value == "INVALID_ARGUMENT"
     assert systemd.started == []
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    (
+        {"profile": "unknown"},
+        {"threads": True},
+        {"threads": 0},
+        {"threads": 17},
+        {"timeout": "0m"},
+        {"timeout": "10 minutes"},
+        {"feature": ["--release"]},
+        {"package": ["sinexd", "unknown"]},
+        {"package": []},
+    ),
+)
+def test_extended_declared_parameters_reject_invalid_values_before_launch(
+    tmp_path: Path, parameters: dict[str, object]
+) -> None:
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs()
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+
+    response = service.dispatch(
+        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "sinex_test", "parameters": parameters})
+    )
+
+    assert response.error is not None
+    assert response.error.code.value == "INVALID_ARGUMENT"
+    assert systemd.started == []
+
+
+def test_sinex_foreground_fixture_derives_descriptor_ordered_argv_and_digest(tmp_path: Path) -> None:
+    """Audit-backed residual fixture: xtask test accepts all bounded parameter forms without a shell."""
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "operation": "sinex_test",
+                "parameters": {
+                    "package": ["xtask", "sinexd", "xtask"],
+                    "feature": ["serde", "tokio", "serde"],
+                    "timeout": "15m",
+                    "threads": 4,
+                    "profile": "strict",
+                },
+            },
+        )
+    )
+
+    assert started.ok and started.payload is not None
+    expected_canonical = {
+        "feature": ["serde", "tokio"],
+        "package": ["sinexd", "xtask"],
+        "profile": "strict",
+        "threads": 4,
+        "timeout": "15m",
+    }
+    assert systemd.started[0]["command"] == (
+        "fixture-env", "--command", "xtask", "test",
+        "--impact-mode", "strict", "--threads", "4", "--timeout", "15m",
+        "--features", "serde", "--features", "tokio",
+        "--package", "sinexd", "--package", "xtask",
+    )
+    assert started.payload.inline["parameters"] == {
+        "digest": hashlib.sha256(
+            json.dumps(expected_canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+        ).hexdigest()
+    }
 
 
 def test_fixed_operation_rejects_parameters_and_retains_its_declared_argv(tmp_path: Path) -> None:
