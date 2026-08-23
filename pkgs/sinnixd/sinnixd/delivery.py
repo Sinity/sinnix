@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
@@ -45,8 +46,18 @@ class GitHubDelivery:
                 cwd=path,
             ).stdout.strip()
             created = True
-        review = self.review_status(workspace_id)
+        review = self._review_after_push(workspace_id)
         return {**review, "published": True, "created": created, "publication_output": publication_output}
+
+    def _review_after_push(self, workspace_id: str) -> dict[str, Any]:
+        for attempt in range(10):
+            try:
+                return self.review_status(workspace_id)
+            except DeliveryError as error:
+                if "review head does not match" not in str(error) or attempt == 9:
+                    raise
+                time.sleep(0.5)
+        raise AssertionError("bounded review reconciliation exhausted")
 
     def review_status(self, workspace_id: str) -> dict[str, Any]:
         workspace = self.workspaces.get(workspace_id)

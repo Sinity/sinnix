@@ -998,9 +998,10 @@ def test_exact_head_verified_workspace_publishes_lands_and_finishes_without_a_pr
     calls: list[list[str]] = []
     merged = False
     created = False
+    review_reads = 0
 
     def fake_run(argv, **_kwargs):
-        nonlocal created, merged
+        nonlocal created, merged, review_reads
         command = list(argv)
         calls.append(command)
         if command[:3] == ["gh", "pr", "merge"]:
@@ -1014,13 +1015,14 @@ def test_exact_head_verified_workspace_publishes_lands_and_finishes_without_a_pr
                 return subprocess.CompletedProcess(
                     command, 0 if created else 1, json.dumps({"url": "https://github.test/example/pull/17"}), "missing"
                 )
+            review_reads += 1
             payload = {
                 "number": 17,
                 "url": "https://github.test/example/pull/17",
                 "state": "MERGED" if merged else "OPEN",
                 "isDraft": False,
                 "mergeStateStatus": "CLEAN",
-                "headRefOid": workspace["head"],
+                "headRefOid": "0" * 40 if review_reads == 1 else workspace["head"],
                 "baseRefName": "master",
                 "statusCheckRollup": [],
             }
