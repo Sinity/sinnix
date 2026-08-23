@@ -38,6 +38,7 @@ from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from sinnixd.projects import ProjectCatalog, ProjectConfigError, parse_worktree_records
 from sinnixd.runner import RunnerError, _revalidate_checkout
 from sinnixd.service import SinnixdService
+from sinnixd.tasks import MAX_TASK_OUTPUT_BYTES, TaskService
 from sinnixd.workspaces import GitWorkspaces, WorkspaceStore
 
 
@@ -51,6 +52,40 @@ def test_agentctl_exit_status_matches_response_envelope(
 
     assert cli_module.main() == expected
     assert json.loads(capsys.readouterr().out) == response
+
+
+@pytest.mark.parametrize(
+    ("argv", "operation", "payload"),
+    (
+        (("agentctl", "task", "list", "fixture", "--status", "open"), "task.list", {"project_id": "fixture", "status": "open", "limit": 100}),
+        (("agentctl", "task", "get", "fixture", "fixture-1"), "task.get", {"project_id": "fixture", "task_id": "fixture-1"}),
+        (("agentctl", "task", "claim", "fixture", "fixture-1"), "task.claim", {"project_id": "fixture", "task_id": "fixture-1"}),
+        (("agentctl", "task", "note", "fixture", "fixture-1", "note"), "task.note", {"project_id": "fixture", "task_id": "fixture-1", "text": "note"}),
+        (("agentctl", "task", "relate", "fixture", "fixture-1", "fixture-2"), "task.relate", {"project_id": "fixture", "task_id": "fixture-1", "related_task_id": "fixture-2"}),
+        (("agentctl", "task", "complete", "fixture", "fixture-1", "--reason", "done"), "task.complete", {"project_id": "fixture", "task_id": "fixture-1", "reason": "done"}),
+        (("agentctl", "task", "release", "fixture", "fixture-1", "--if-assignee", "worker"), "task.release", {"project_id": "fixture", "task_id": "fixture-1", "if_assignee": "worker"}),
+        (("agentctl", "task", "reconcile", "fixture"), "task.reconcile", {"project_id": "fixture"}),
+        (("agentctl", "task", "snapshot", "fixture"), "task.snapshot", {"project_id": "fixture"}),
+    ),
+)
+def test_agentctl_task_commands_map_to_task_envelopes(
+    argv: tuple[str, ...], operation: str, payload: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, RequestEnvelope] = {}
+
+    def fake_call(socket_path, request_value):
+        captured["request"] = request_value
+        return {"schema": 1, "ok": True}
+
+    monkeypatch.setattr(sys, "argv", list(argv))
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    outbound = captured["request"]
+    assert outbound.operation == operation
+    assert outbound.owner == "task-backend"
+    assert outbound.principal == "operator"
+    assert dict(outbound.arguments) == payload
 
 
 def write_adapter(root: Path) -> None:
@@ -254,6 +289,200 @@ class FakeExecution:
     def run(self, command, profile) -> ExecutionResult:
         self.calls.append((tuple(command), profile))
         return self.result
+
+
+@dataclass
+class FakeTaskBoundary:
+    results: list[ExecutionResult]
+    calls: list[tuple[tuple[str, ...], Path]] = field(default_factory=list)
+    entered: threading.Event | None = None
+    release: threading.Event | None = None
+    active: int = 0
+    max_active: int = 0
+    _guard: threading.Lock = field(default_factory=threading.Lock)
+
+    def run(self, *, argv: tuple[str, ...], cwd: Path) -> ExecutionResult:
+        self.calls.append((argv, cwd))
+        with self._guard:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        if self.entered is not None:
+            self.entered.set()
+        if self.release is not None:
+            assert self.release.wait(1), "task command was not released"
+        with self._guard:
+            self.active -= 1
+        return self.results.pop(0)
+
+
+def task_result(value: object) -> ExecutionResult:
+    return ExecutionResult(
+        command=(),
+        exit_status=0,
+        stdout=json.dumps(value).encode(),
+        stderr=b"",
+    )
+
+
+def task_service(tmp_path: Path, boundary: FakeTaskBoundary | None = None) -> tuple[TaskService, FakeTaskBoundary]:
+    write_adapter(tmp_path)
+    fake = boundary or FakeTaskBoundary([task_result({"ok": True})])
+    return TaskService(ProjectCatalog([tmp_path]), fake), fake
+
+
+def test_task_reads_resolve_catalog_projects_and_use_readonly_fixed_argv(tmp_path: Path) -> None:
+    service, boundary = task_service(
+        tmp_path,
+        FakeTaskBoundary([task_result({"issues": [{"id": "fixture-1"}]}), task_result({"id": "fixture-1"})]),
+    )
+
+    listed = service.execute(
+        operation="task.list",
+        arguments={"project_id": "fixture", "status": "open", "limit": 20},
+        principal="observer",
+    )
+    fetched = service.execute(
+        operation="task.get",
+        arguments={"project_id": "fixture", "task_id": "fixture-1"},
+        principal="observer",
+    )
+
+    assert listed["result"] == {"issues": [{"id": "fixture-1"}]}
+    assert fetched["result"] == {"id": "fixture-1"}
+    prefix = ("--directory", str(tmp_path), "--json", "--readonly")
+    assert boundary.calls == [
+        ((*prefix, "list", "--flat", "--status", "open", "--limit", "20"), tmp_path),
+        ((*prefix, "show", "fixture-1"), tmp_path),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("operation", "arguments", "expected"),
+    (
+        ("task.claim", {"task_id": "fixture-1"}, ("update", "fixture-1", "--claim")),
+        ("task.note", {"task_id": "fixture-1", "text": "append this"}, ("note", "fixture-1", "append this")),
+        ("task.relate", {"task_id": "fixture-1", "related_task_id": "fixture-2"}, ("link", "fixture-1", "fixture-2", "--type", "related")),
+        ("task.complete", {"task_id": "fixture-1", "reason": "verified"}, ("close", "fixture-1", "--reason", "verified")),
+        ("task.release", {"task_id": "fixture-1", "reason": "stopped", "if_assignee": "worker"}, ("unclaim", "fixture-1", "--reason", "stopped", "--if-assignee", "worker")),
+        ("task.reconcile", {}, ("sync", "--no-adopt")),
+    ),
+)
+def test_task_mutations_map_to_fixed_beads_argv(
+    tmp_path: Path, operation: str, arguments: dict[str, str], expected: tuple[str, ...]
+) -> None:
+    service, boundary = task_service(tmp_path, FakeTaskBoundary([task_result({"ok": True})]))
+
+    result = service.execute(
+        operation=operation,
+        arguments={"project_id": "fixture", **arguments},
+        principal="agent-control",
+    )
+
+    assert result == {"project_id": "fixture", "operation": operation, "result": {"ok": True}}
+    assert boundary.calls == [
+        (("--directory", str(tmp_path), "--json", *expected), tmp_path)
+    ]
+
+
+def test_task_snapshot_parses_jsonl_without_writing_a_store(tmp_path: Path) -> None:
+    snapshot = ExecutionResult(
+        command=(),
+        exit_status=0,
+        stdout=b'{"id":"fixture-1"}\n{"id":"fixture-2"}\n',
+        stderr=b"",
+    )
+    service, boundary = task_service(tmp_path, FakeTaskBoundary([snapshot]))
+
+    result = service.execute(
+        operation="task.snapshot", arguments={"project_id": "fixture"}, principal="observer"
+    )
+
+    assert result == {
+        "project_id": "fixture",
+        "operation": "task.snapshot",
+        "result": [{"id": "fixture-1"}, {"id": "fixture-2"}],
+    }
+    assert boundary.calls == [
+        (("--directory", str(tmp_path), "--json", "--readonly", "export"), tmp_path)
+    ]
+
+
+def test_task_mutations_are_serialized_per_project(tmp_path: Path) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    boundary = FakeTaskBoundary([task_result({"ok": 1}), task_result({"ok": 2})], entered=entered, release=release)
+    service, _ = task_service(tmp_path, boundary)
+    errors: list[BaseException] = []
+
+    def mutate(task_id: str) -> None:
+        try:
+            service.execute(
+                operation="task.claim",
+                arguments={"project_id": "fixture", "task_id": task_id},
+                principal="agent-control",
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    first = threading.Thread(target=mutate, args=("fixture-1",))
+    second = threading.Thread(target=mutate, args=("fixture-2",))
+    first.start()
+    assert entered.wait(1), "first task mutation did not reach the backend"
+    second.start()
+    assert len(boundary.calls) == 1
+    release.set()
+    first.join(1)
+    second.join(1)
+
+    assert not errors
+    assert boundary.max_active == 1
+    assert len(boundary.calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("backend_result", "expected_code"),
+    (
+        (ExecutionResult(command=(), exit_status=None, stdout=b"", stderr=b"", timed_out=True), "OWNER_UNAVAILABLE"),
+        (ExecutionResult(command=(), exit_status=0, stdout=b"x" * (MAX_TASK_OUTPUT_BYTES + 1), stderr=b""), "RESOURCE_EXHAUSTED"),
+        (ExecutionResult(command=(), exit_status=1, stdout=b"", stderr=b"private backend detail"), "OPERATION_FAILED"),
+        (ExecutionResult(command=(), exit_status=0, stdout=b"not-json", stderr=b""), "RESULT_INVALID"),
+    ),
+)
+def test_task_backend_failures_map_to_clean_error_envelopes(
+    tmp_path: Path, backend_result: ExecutionResult, expected_code: str
+) -> None:
+    write_adapter(tmp_path)
+    tasks = TaskService(ProjectCatalog([tmp_path]), FakeTaskBoundary([backend_result]))
+    service = SinnixdService(ProjectCatalog([tmp_path]), tasks=tasks)
+
+    response = service.dispatch(
+        request("task.get", "task-backend", {"project_id": "fixture", "task_id": "fixture-1"}, "observer")
+    )
+
+    assert response.error is not None
+    assert response.error.code.value == expected_code
+    assert "private backend detail" not in response.error.message
+
+
+def test_task_rejects_unauthorized_principals_and_invalid_arguments(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    tasks = TaskService(ProjectCatalog([tmp_path]), FakeTaskBoundary([task_result({"ok": True})]))
+    service = SinnixdService(ProjectCatalog([tmp_path]), tasks=tasks)
+
+    denied = service.dispatch(
+        request("task.claim", "task-backend", {"project_id": "fixture", "task_id": "fixture-1"}, "observer")
+    )
+    invalid = service.dispatch(
+        request("task.get", "task-backend", {"project_id": "fixture", "task_id": "--bad", "extra": True}, "observer")
+    )
+    unknown = service.dispatch(
+        request("task.list", "task-backend", {"project_id": "missing"}, "observer")
+    )
+
+    assert denied.error is not None and denied.error.code.value == "POLICY_DENIED"
+    assert invalid.error is not None and invalid.error.code.value == "INVALID_ARGUMENT"
+    assert unknown.error is not None and unknown.error.code.value == "INVALID_ARGUMENT"
+    assert not tasks.boundary.calls
 
 
 def start_server(

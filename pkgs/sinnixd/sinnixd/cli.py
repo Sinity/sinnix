@@ -115,6 +115,38 @@ def parser() -> argparse.ArgumentParser:
     call_owner.add_argument("owner")
     call_owner.add_argument("operation")
     call_owner.add_argument("--arguments-json", default="{}")
+    task = subcommands.add_parser("task")
+    task_subcommands = task.add_subparsers(dest="task_command", required=True)
+    task_list = task_subcommands.add_parser("list")
+    task_list.add_argument("project_id")
+    task_list.add_argument("--status")
+    task_list.add_argument("--assignee")
+    task_list.add_argument("--label")
+    task_list.add_argument("--limit", type=int, default=100)
+    task_list.add_argument("--include-closed", action="store_true")
+    task_list.add_argument("--ready", action="store_true")
+    task_get = task_subcommands.add_parser("get")
+    task_get.add_argument("project_id")
+    task_get.add_argument("task_id")
+    for command in ("claim", "complete", "release"):
+        command_parser = task_subcommands.add_parser(command)
+        command_parser.add_argument("project_id")
+        command_parser.add_argument("task_id")
+        if command in {"complete", "release"}:
+            command_parser.add_argument("--reason")
+        if command == "release":
+            command_parser.add_argument("--if-assignee")
+    task_note = task_subcommands.add_parser("note")
+    task_note.add_argument("project_id")
+    task_note.add_argument("task_id")
+    task_note.add_argument("text")
+    task_relate = task_subcommands.add_parser("relate")
+    task_relate.add_argument("project_id")
+    task_relate.add_argument("task_id")
+    task_relate.add_argument("related_task_id")
+    for command in ("reconcile", "snapshot"):
+        command_parser = task_subcommands.add_parser(command)
+        command_parser.add_argument("project_id")
     return result
 
 
@@ -316,6 +348,29 @@ def main() -> int:
         )
     elif arguments.command == "job":
         request = _request("job.cancel", "systemd-jobs", {"job_id": arguments.job_id})
+    elif arguments.command == "task":
+        task_arguments: dict[str, object] = {"project_id": arguments.project_id}
+        if arguments.task_command == "list":
+            task_arguments["limit"] = arguments.limit
+            for name in ("status", "assignee", "label"):
+                value = getattr(arguments, name)
+                if value is not None:
+                    task_arguments[name] = value
+            for name in ("include_closed", "ready"):
+                if getattr(arguments, name):
+                    task_arguments[name] = True
+        elif arguments.task_command in {"get", "claim", "complete", "release", "note", "relate"}:
+            task_arguments["task_id"] = arguments.task_id
+            if arguments.task_command == "note":
+                task_arguments["text"] = arguments.text
+            elif arguments.task_command == "relate":
+                task_arguments["related_task_id"] = arguments.related_task_id
+            elif arguments.task_command in {"complete", "release"}:
+                if arguments.reason is not None:
+                    task_arguments["reason"] = arguments.reason
+                if arguments.task_command == "release" and arguments.if_assignee is not None:
+                    task_arguments["if_assignee"] = arguments.if_assignee
+        request = _request(f"task.{arguments.task_command}", "task-backend", task_arguments, "operator")
     else:
         try:
             owner_arguments = json.loads(arguments.arguments_json)

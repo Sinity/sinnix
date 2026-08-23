@@ -22,6 +22,7 @@ from .contracts import TypedJobContracts
 from .delivery import DeliveryError, GitHubDelivery
 from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from .projects import ProjectCatalog
+from .tasks import TaskError, TaskService
 from .workspaces import GitWorkspaces, WorkspaceError, WorkspaceStore
 
 
@@ -45,6 +46,7 @@ class SinnixdService:
     native_runner: Path = Path("/home/sinity/.config/hermes/skills/agent-orchestration/scripts/run_agent_prompt.sh")
     workspaces: GitWorkspaces | None = None
     delivery: GitHubDelivery | None = None
+    tasks: TaskService | None = None
 
     def __post_init__(self) -> None:
         if self.workspaces is None:
@@ -52,6 +54,8 @@ class SinnixdService:
         if self.delivery is None:
             assert self.workspaces is not None
             object.__setattr__(self, "delivery", GitHubDelivery(self.projects, self.workspaces, self.jobs))
+        if self.tasks is None:
+            object.__setattr__(self, "tasks", TaskService(self.projects))
         _ = self.owners
 
     @property
@@ -89,6 +93,14 @@ class SinnixdService:
                 versions=frozenset({1}),
                 documentation="Durable workspace relationships over Git-owned linked worktrees.",
             ),
+            OwnerSpec(
+                namespace="task",
+                owner="task-backend",
+                authority=Authority.TASK_BACKEND,
+                lifecycle=Lifecycle.DAEMON_OWNED,
+                versions=frozenset({1}),
+                documentation="Backend-neutral AgentCTL task operations through the current task authority.",
+            ),
         )
         return OwnerRegistry((*builtin, *(adapter.spec for adapter in self.projects.owner_adapters())))
 
@@ -121,6 +133,8 @@ class SinnixdService:
             return self._error(request, owner_name, ErrorCode.OPERATION_FAILED, str(error))
         except (WorkspaceError, DeliveryError) as error:
             return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
+        except TaskError as error:
+            return self._error(request, owner_name, error.code, str(error))
         except ValueError as error:
             return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
         try:
@@ -163,6 +177,9 @@ class SinnixdService:
                 "project_id": project.project_id,
                 "operations": [operation.catalog_row() for operation in project.operations],
             }
+        if operation.startswith("task."):
+            assert self.tasks is not None
+            return self.tasks.execute(operation=operation, arguments=dict(arguments), principal=principal)
         if operation == "workspace.list":
             if set(arguments) - {"project_id"}:
                 raise ValueError("workspace.list accepts optional project_id")
