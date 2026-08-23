@@ -425,7 +425,9 @@ when a new script is added.
   declaratively listed project roots (Sinnix, Polylogue, and Sinex by default), then
   discovers their explicit adapters and launches only their declared operations as transient
   user services. Systemd owns process lifecycle, cgroups, results,
-  cancellation, and journal evidence; `sinnixd` has no job queue, Git history,
+  cancellation, journal evidence, and the descriptor-owned timeout. Operations default
+  to 3,600 seconds and may declare up to 14,400 seconds for finite full suites;
+  typed shell and attested-agent contracts remain capped at 3,600 seconds. `sinnixd` has no job queue, Git history,
   or arbitrary-process authority. Its task facade binds every registered project
   to one standalone Beads workspace under `/realm/state/tasks/<project>`, whose
   physical database is `.beads/dolt`; task commands select it through a fixed

@@ -50,9 +50,10 @@ from sinnixd.jobs import (
     capture_executable,
     capture_main,
 )
+from sinnixd.limits import MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
 from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from sinnixd.projects import ProjectCatalog, ProjectConfigError, parse_worktree_records
-from sinnixd.runner import RunnerError, _revalidate_checkout
+from sinnixd.runner import RunnerError, _require_environment, _revalidate_checkout
 from sinnixd.service import SinnixdService
 from sinnixd.tasks import (
     FLOCK_EXECUTABLE,
@@ -445,6 +446,69 @@ def test_project_operation_parameter_schema_is_closed_and_bounded(tmp_path: Path
 
     with pytest.raises(ProjectConfigError):
         ProjectCatalog([tmp_path])
+
+
+@pytest.mark.parametrize("value", ("true", '"3600"', "0", "-1", "14401"))
+def test_declared_operation_timeout_must_be_a_positive_bounded_integer(tmp_path: Path, value: str) -> None:
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'exclusive_keys = ["fixture:check"]',
+            f'timeout_seconds = {value}\nexclusive_keys = ["fixture:check"]',
+        )
+    )
+
+    with pytest.raises(ProjectConfigError, match="operations.check.timeout_seconds"):
+        ProjectCatalog([tmp_path])
+
+
+def test_declared_operation_timeout_defaults_and_survives_launch_recovery(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'exclusive_keys = ["fixture:check"]',
+            f'timeout_seconds = {MAX_DECLARED_OPERATION_TIMEOUT_SECONDS}\nexclusive_keys = ["fixture:check"]',
+        )
+    )
+    catalog = ProjectCatalog([tmp_path])
+    check = catalog.get("fixture").operation("check")
+    assert check.timeout_seconds == MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
+    assert catalog.get("fixture").operation("parameterized").timeout_seconds == DEFAULT_TIMEOUT_SECONDS
+    assert check.catalog_row()["timeout_seconds"] == MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
+
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(catalog, jobs=jobs)
+    response = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"}))
+    assert response.ok and response.payload is not None
+    launched = response.payload.inline
+    assert launched["timeout_seconds"] == MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
+    assert systemd.started[0]["timeout_seconds"] == MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
+
+    record = jobs.store.load(launched["job_id"])
+    assert record.spec.timeout_seconds == MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
+    recovered = GenericJobs(systemd, jobs.store, wait_poll_seconds=0.001)
+    assert recovered.get(launched["job_id"])["timeout_seconds"] == MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
+    assert GenericJobSpec(
+        kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={}
+    ).timeout_seconds == DEFAULT_TIMEOUT_SECONDS
+
+
+def test_typed_runner_keeps_the_one_hour_timeout_identity_bound(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SINNIXD_TIMEOUT_SECONDS", str(MAX_DECLARED_OPERATION_TIMEOUT_SECONDS))
+
+    with pytest.raises(RunnerError, match="typed-job timeout identity is invalid"):
+        _require_environment(
+            "00000000-0000-0000-0000-000000000001",
+            "sinnixd-job-00000000-0000-0000-0000-000000000001.service",
+            {
+                "kind": "operator-shell",
+                "principal": "operator",
+                "checkout": {"project_id": "fixture", "checkout_id": "default"},
+            },
+        )
 
 
 def test_project_operation_result_must_have_an_executable_declared_contract(tmp_path: Path) -> None:
@@ -1458,7 +1522,7 @@ def test_declared_and_foreground_jobs_share_the_generic_route(tmp_path: Path) ->
     assert launch["kind"] == "declared-operation"
     assert len(systemd.started) == 1
     assert systemd.started[0]["working_directory"] == str(tmp_path.resolve())
-    assert systemd.started[0]["timeout_seconds"] == 3_600
+    assert systemd.started[0]["timeout_seconds"] == DEFAULT_TIMEOUT_SECONDS
     assert systemd.started[0]["environment"]["SINNIXD_JOB_ID"] == launch["job_id"]
     assert systemd.started[0]["environment"]["SINNIXD_OPERATION"] == "check"
 

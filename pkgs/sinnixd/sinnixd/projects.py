@@ -12,6 +12,7 @@ from typing import Any, Iterable, Mapping
 from sinnix_mcp import Authority, Lifecycle, OwnerRegistry, OwnerSpec, SinnixRef
 
 from .environment import build_environment
+from .limits import DEFAULT_TIMEOUT_SECONDS, MAX_DECLARED_OPERATION_TIMEOUT_SECONDS, valid_timeout_seconds
 
 
 class ProjectConfigError(ValueError):
@@ -208,6 +209,7 @@ class ProjectOperation:
     pool: str
     result: str
     cache: str
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     exclusive_keys: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
     estimate_memory_bytes: int | None = None
@@ -251,6 +253,7 @@ class ProjectOperation:
             "pool": self.pool,
             "result": self.result,
             "cache": self.cache,
+            "timeout_seconds": self.timeout_seconds,
             "exclusive_keys": list(self.exclusive_keys),
             "dependencies": list(self.dependencies),
             "estimate_memory_bytes": self.estimate_memory_bytes,
@@ -608,7 +611,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             raise ProjectConfigError(f"{descriptor} contains an invalid operation declaration")
         allowed_operation = {
             "description", "exec", "pool", "result", "cache", "exclusive_keys",
-            "dependencies", "estimate_memory_bytes", "scratch", "parameters",
+            "dependencies", "estimate_memory_bytes", "scratch", "parameters", "timeout_seconds",
         }
         if set(definition) - allowed_operation:
             raise ProjectConfigError(f"{descriptor} operation {name} contains unknown fields")
@@ -627,6 +630,12 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             raise ProjectConfigError(f"operations.{name}.cache must be non-empty")
         if cache not in {"none", "tree+environment"}:
             raise ProjectConfigError(f"operations.{name}.cache is invalid")
+        timeout_seconds = definition.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
+        if not valid_timeout_seconds(timeout_seconds, kind="declared-operation"):
+            raise ProjectConfigError(
+                f"operations.{name}.timeout_seconds must be between 1 and "
+                f"{MAX_DECLARED_OPERATION_TIMEOUT_SECONDS}"
+            )
         dependencies = _optional_string_list(definition.get("dependencies"), f"operations.{name}.dependencies")
         if name in dependencies or len(set(dependencies)) != len(dependencies):
             raise ProjectConfigError(f"operations.{name}.dependencies is invalid")
@@ -648,6 +657,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 pool=pool,
                 result=result,
                 cache=cache,
+                timeout_seconds=timeout_seconds,
                 exclusive_keys=_optional_string_list(
                     definition.get("exclusive_keys"), f"operations.{name}.exclusive_keys"
                 ),

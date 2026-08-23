@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .jobs import MAX_RESULT_BYTES
+from .limits import maximum_timeout_seconds, valid_timeout_seconds
 from .projects import ProjectConfigError, parse_worktree_records
 
 
@@ -105,7 +106,7 @@ def _require_environment(job_id: str, unit: str, value: Mapping[str, Any]) -> No
         "SINNIXD_TIMEOUT_SECONDS": os.environ.get("SINNIXD_TIMEOUT_SECONDS", ""),
     }
     timeout_seconds = expected["SINNIXD_TIMEOUT_SECONDS"]
-    if not timeout_seconds.isdecimal() or not 1 <= int(timeout_seconds) <= 3_600:
+    if not timeout_seconds.isdecimal() or not valid_timeout_seconds(int(timeout_seconds), kind=value["kind"]):
         raise RunnerError("typed-job timeout identity is invalid")
     if any(os.environ.get(key) != expected_value for key, expected_value in expected.items()):
         raise RunnerError("typed-job environment identity is invalid")

@@ -19,9 +19,9 @@ from threading import Lock, RLock
 from typing import Any, Iterator, Protocol
 from uuid import UUID, uuid4
 
+from .limits import DEFAULT_TIMEOUT_SECONDS, maximum_timeout_seconds, valid_timeout_seconds
 from .projects import ProjectAdapter, ProjectOperation, RegisteredCheckout
 
-DEFAULT_TIMEOUT_SECONDS = 3_600
 DEFAULT_WAIT_SECONDS = 30
 MAX_WAIT_SECONDS = 300
 SYSTEMD_COMMAND_TIMEOUT_SECONDS = 0.25
@@ -396,8 +396,9 @@ class GenericJobSpec:
             raise ValueError("only declared operation jobs may have a parameter digest")
         if not isinstance(self.working_directory, str) or not self.working_directory:
             raise ValueError("job working_directory must be non-empty")
-        if not 1 <= self.timeout_seconds <= DEFAULT_TIMEOUT_SECONDS:
-            raise ValueError(f"job timeout_seconds must be between 1 and {DEFAULT_TIMEOUT_SECONDS}")
+        maximum_timeout = maximum_timeout_seconds(self.kind)
+        if not valid_timeout_seconds(self.timeout_seconds, kind=self.kind):
+            raise ValueError(f"job timeout_seconds must be between 1 and {maximum_timeout}")
         if any(
             not isinstance(key, str) or not key or not isinstance(value, str)
             for key, value in self.environment.items()
@@ -970,6 +971,7 @@ class GenericJobs:
             kind="declared-operation", command=(*project.environment.command, *operation_argv),
             working_directory=str(workdir), environment=environment, project_id=project.project_id,
             operation=operation.name, parameter_digest=parameter_digest,
+            timeout_seconds=operation.timeout_seconds,
             checkout=checkout.to_dict() if checkout is not None else None,
             result_kind={"exit": "exit-status", "json": "json", "pytest": "pytest"}[operation.result],
             pool=operation.pool, exclusive_keys=operation.exclusive_keys, dependency_job_ids=dependency_ids,
