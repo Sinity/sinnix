@@ -121,15 +121,18 @@ def test_public_v2_job_verbs_dispatch_catalog_bound_owner(
             "preconditions": {"expected_phase": "running"},
         },
     )
-    rejected = anyio.run(
+    operator_daemon.responses = {
+        "job.agent.start": {"job_id": "operator-agent", "state": {"phase": "running"}},
+    }
+    operator_started = anyio.run(
         invoke,
         operator_server,
         "run",
         {
             "action_name": "agents.run",
-            "idempotency_key": "public-agent-denied",
+            "idempotency_key": "public-agent-operator",
             "project_id": "fixture",
-            "prompt": "must not launch",
+            "prompt": "launch under the operator principal",
             "backend": "codex",
             "model": "gpt-5.6-terra",
             "reasoning_effort": "high",
@@ -140,8 +143,10 @@ def test_public_v2_job_verbs_dispatch_catalog_bound_owner(
     assert started["data"]["ref"] == f"sinnix://jobs/{job_id}"
     assert cancelled["result"]["action"] == "jobs.cancel"
     assert cancelled["data"]["cancel"]["cancel_requested"] is False
-    assert rejected["error"]["code"] == "policy_denied"
-    assert operator_daemon.calls == []
+    assert operator_started["result"]["action"] == "agents.run"
+    assert operator_started["data"]["ref"] == "sinnix://jobs/operator-agent"
+    assert [request.operation for request in operator_daemon.calls] == ["job.agent.start"]
+    assert operator_daemon.calls[0].principal == "operator"
     assert [request.operation for request in daemon.calls] == [
         "job.agent.start",
         "job.get",
@@ -416,6 +421,57 @@ def test_v2_agent_run_and_cancel_preserve_daemon_cancellation_truth(
         "timeout_seconds": 14_400,
         "result": "last-message",
     }
+
+
+def test_v2_jobs_query_bounds_daemon_job_list_and_preserves_job_refs(tmp_path: Path) -> None:
+    runtime, daemon = runtime_with_daemon(tmp_path, "observer")
+    daemon.responses = {
+        "job.list": {
+            "jobs": [
+                {"job_id": "first", "state": {"phase": "running"}},
+            ],
+            "limit": 1,
+            "total": 2,
+            "truncated": True,
+        }
+    }
+
+    response = runtime.execute_v2(
+        REGISTRY.action("jobs.query"),
+        lambda: runtime.v2_jobs_query({"limit": 1}),
+        {"parameters": {"limit": 1}},
+    )
+
+    assert response["data"] == {
+        "jobs": [
+            {
+                "ref": "sinnix://jobs/first",
+                "job_id": "first",
+                "state": {"phase": "running"},
+            }
+        ],
+        "limit": 1,
+        "total": 2,
+        "truncated": True,
+    }
+    assert [request.operation for request in daemon.calls] == ["job.list"]
+    assert daemon.calls[0].arguments == {"limit": 1}
+
+
+def test_v2_jobs_query_emits_a_declared_typed_failure_for_an_invalid_bound(
+    tmp_path: Path,
+) -> None:
+    runtime, _daemon = runtime_with_daemon(tmp_path, "observer")
+    action = REGISTRY.action("jobs.query")
+
+    response = runtime.execute_v2(
+        action,
+        lambda: runtime.v2_jobs_query({"limit": 0}),
+        {"parameters": {"limit": 0}},
+    )
+
+    assert response["error"]["code"] == "invalid_request"
+    assert response["error"]["code"] in action.typed_failures
 
 
 def test_v2_job_routes_preserve_principal_policy(tmp_path: Path) -> None:

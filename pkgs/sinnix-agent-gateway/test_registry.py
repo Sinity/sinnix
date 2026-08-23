@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from sinnix_agent_gateway.contracts import ActionSpec, EffectMode, ResourceSpec, VerbFamily
+from sinnix_agent_gateway.contracts import (
+    BASE_TYPED_FAILURES,
+    ActionSpec,
+    EffectMode,
+    ResourceSpec,
+    VerbFamily,
+)
 from sinnix_mcp.refs import RefTemplate, ReferenceError, SinnixRef
 from sinnix_agent_gateway.registry import CatalogRegistry, CatalogSearch, RegistryError, REGISTRY
 
@@ -125,6 +131,20 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "session",
         "context_snapshot",
     }
+
+
+def test_action_failure_contracts_follow_public_controls_and_owner_capabilities() -> None:
+    read_failures = BASE_TYPED_FAILURES | {"precondition_failed"}
+
+    assert REGISTRY.action("jobs.query").typed_failures == read_failures
+    assert REGISTRY.action("agents.run").typed_failures == read_failures | {
+        "idempotency_conflict"
+    }
+    assert REGISTRY.action("mcp.change").typed_failures == read_failures | {
+        "idempotency_conflict",
+        "unsupported_capability",
+    }
+    assert "deadline" not in REGISTRY.action("jobs.query").typed_failures
 
 
 def test_every_retained_owner_capability_has_a_read_action_and_resource_route() -> None:
@@ -367,7 +387,7 @@ def test_run_and_wait_contracts_are_closed_and_authority_scoped() -> None:
     assert agent["verb"] == "run"
     assert agent["owner"] == "systemd-jobs"
     assert agent["route"] == "job.agent.start"
-    assert agent["principals"] == ["agent-control"]
+    assert agent["principals"] == ["agent-control", "operator"]
     assert agent["input_schema"]["additionalProperties"] is False
     assert agent["input_schema"]["required"] == [
         "project_id",

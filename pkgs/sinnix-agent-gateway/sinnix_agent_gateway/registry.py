@@ -3,10 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Mapping
 
-from .contracts import ActionSpec, EffectMode, ResourceSpec, VerbFamily
+from .contracts import (
+    BASE_TYPED_FAILURES,
+    ActionSpec,
+    EffectMode,
+    ResourceSpec,
+    VerbFamily,
+)
 from .schemas import V2ToolEnvelope
 from sinnix_mcp.refs import RefTemplate, SinnixRef
 
@@ -332,6 +338,27 @@ JOB_WAIT_SCHEMA: dict[str, Any] = _with_request_controls(
                 "maximum": 300,
                 "default": 30,
             },
+        },
+    }
+)
+
+JOBS_QUERY_SCHEMA: dict[str, Any] = _with_request_controls(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1_000,
+                        "default": 100,
+                    }
+                },
+            }
         },
     }
 )
@@ -824,6 +851,21 @@ def _owner_query_actions() -> tuple[ActionSpec, ...]:
         _owner_query_action("artifacts.query", "artifacts", "artifacts", "artifacts.query", all_principals, ("artifact",), "List opaque artifact metadata or read a bounded artifact range."),
         _owner_query_action("audit.verify", "audit", "audit", "audit.verify", all_principals, ("receipt",), "Verify the tamper-evident audit hash chain."),
         _owner_query_action("captures.query", "captures", "captures", "captures.query", all_principals, ("capture_lane",), "List visible capture lanes or query their declared native owner roots."),
+        ActionSpec(
+            name="jobs.query",
+            verb=VerbFamily.QUERY,
+            domain="jobs",
+            owner="systemd-jobs",
+            route="job.list",
+            effect=EffectMode.READ,
+            principals=all_principals,
+            input_schema=JOBS_QUERY_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("job",),
+            receipt_policy="audit",
+            examples=({"input": {"parameters": {"limit": 100}}},),
+            documentation="List bounded daemon-owned job summaries with canonical job references.",
+        ),
     )
 
 
@@ -1158,7 +1200,7 @@ def build_registry() -> CatalogRegistry:
             owner="systemd-jobs",
             route="job.agent.start",
             effect=EffectMode.RUN,
-            principals=frozenset({"agent-control"}),
+            principals=frozenset({"agent-control", "operator"}),
             input_schema=AGENT_RUN_SCHEMA,
             output_schema=V2_ENVELOPE_SCHEMA,
             resource_kinds=("project", "checkout", "job"),
@@ -1279,7 +1321,21 @@ def build_registry() -> CatalogRegistry:
             documentation="Start one typed operator-shell job and return its daemon-owned handle.",
         ),
     )
-    return CatalogRegistry(resources, (*actions, *_owner_query_actions()))
+    def with_failure_contract(action: ActionSpec) -> ActionSpec:
+        failures = set(BASE_TYPED_FAILURES)
+        # Every V2 verb accepts request preconditions, including reads. The
+        # runtime rejects a failed check before calling the owner.
+        failures.add("precondition_failed")
+        if action.supports_idempotency:
+            failures.add("idempotency_conflict")
+        if action.name in {"mcp.change", "mcp.query", "projects.change"}:
+            failures.add("unsupported_capability")
+        return replace(action, failure_codes=frozenset(failures))
+
+    return CatalogRegistry(
+        resources,
+        tuple(with_failure_contract(action) for action in (*actions, *_owner_query_actions())),
+    )
 
 
 REGISTRY = build_registry()

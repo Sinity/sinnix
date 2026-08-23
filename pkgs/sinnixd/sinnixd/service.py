@@ -379,9 +379,12 @@ class SinnixdService:
         if operation == "job.get":
             return self._cleanup_terminal(self.jobs.get(self._single_job_id(arguments, "job.get")))
         if operation == "job.list":
-            if arguments:
-                raise ValueError("job.list accepts no arguments")
-            return {"jobs": [self._cleanup_terminal(job) for job in self.jobs.list()["jobs"]]}
+            if set(arguments) - {"limit"}:
+                raise ValueError("job.list accepts an optional limit")
+            limit = arguments.get("limit", 100)
+            if not isinstance(limit, int) or isinstance(limit, bool):
+                raise ValueError("job.list limit must be an integer")
+            return self._cleanup_terminal(self.jobs.list(limit=limit))
         if operation == "job.wait":
             job_id = self._job_argument(arguments, "job_id")
             timeout_seconds = arguments.get("timeout_seconds", 30)

@@ -124,7 +124,7 @@ def _run_agent(
     state_root: Path,
 ) -> int:
     _require_strings(value, ("backend", "model", "effort", "credential_profile", "prompt_path", "result_path"))
-    if value.get("principal") != "agent-control" or value["backend"] not in {"claude", "codex", "gemini", "grok", "antigravity"}:
+    if value.get("principal") not in {"agent-control", "operator"} or value["backend"] not in {"claude", "codex", "gemini", "grok", "antigravity"}:
         raise RunnerError("attested agent contract is invalid")
     if value["credential_profile"] not in {"subscription", "api"}:
         raise RunnerError("attested agent credential profile is invalid")

@@ -97,6 +97,20 @@ class V2ToolEnvelope(GatewayModel):
         return self
 
 
+class V2ManifestEnvelope(GatewayModel):
+    """Compact top-level MCP schema; full action schemas stay lazy in the catalog."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    protocol_schema: Literal["sinnix.gateway-result.v3"] = Field(alias="schema")
+    result: dict[str, Any]
+    receipt: dict[str, Any]
+    meta: dict[str, Any]
+    page: dict[str, Any] | None = None
+    data: Any | None = None
+    error: dict[str, Any] | None = None
+
+
 class ProjectReadRequest(GatewayModel):
     project_id: str = Field(min_length=1, max_length=128)
     path: str = Field(min_length=1, max_length=4096)

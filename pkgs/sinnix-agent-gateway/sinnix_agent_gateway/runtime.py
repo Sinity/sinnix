@@ -23,6 +23,7 @@ from .captures import CaptureService
 from .config import GatewayConfig
 from .contracts import ActionSpec, EffectMode, VerbFamily
 from .desktop import DesktopService
+from .legacy_manifest import LEGACY_MANIFEST
 from sinnix_mcp.execution import ExecutionProfile, OwnerDiagnosticError, OwnerExecution
 from .files import HostFileService
 from .machine_actions import MachineActionService
@@ -55,12 +56,16 @@ DAEMON_ERROR_CLASSES = {
     ErrorCode.RESULT_INVALID: "owner_failed",
 }
 
-READ_ONLY_TOOL = ToolAnnotations(
-    readOnlyHint=True,
+AUDITED_READ_TOOL = ToolAnnotations(
+    readOnlyHint=False,
     destructiveHint=False,
     idempotentHint=True,
     openWorldHint=False,
 )
+
+LEGACY_OPERATOR_MANIFEST_BYTES = LEGACY_MANIFEST["canonical_bytes"]
+LEGACY_OPERATOR_TOOL_COUNT = len(LEGACY_MANIFEST["tools"])
+TOKEN_ESTIMATE_BYTES_PER_TOKEN = 4
 IDEMPOTENT_RUN_TOOL = ToolAnnotations(
     readOnlyHint=False,
     destructiveHint=False,
@@ -84,6 +89,33 @@ def canonical_manifest(tools: list[Any]) -> dict[str, Any]:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     payload["sha256"] = hashlib.sha256(encoded).hexdigest()
     return payload
+
+
+def manifest_measurement(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Measure the canonical manifest without adding a runtime tokenizer dependency."""
+    canonical = {
+        "schema": manifest.get("schema"),
+        "tools": manifest.get("tools"),
+    }
+    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
+    canonical_bytes = len(encoded)
+    return {
+        "schema": "sinnix.gateway-schema-measurement.v1",
+        "canonical_bytes": canonical_bytes,
+        "tool_count": len(manifest.get("tools", [])),
+        "baseline": {
+            "source_commit": LEGACY_MANIFEST["source_commit"],
+            "canonical_bytes": LEGACY_OPERATOR_MANIFEST_BYTES,
+            "tool_count": LEGACY_OPERATOR_TOOL_COUNT,
+        },
+        "token_lane": {
+            "status": "estimated",
+            "method": "canonical_bytes_divided_by_4",
+            "estimated_tokens": (canonical_bytes + TOKEN_ESTIMATE_BYTES_PER_TOKEN - 1)
+            // TOKEN_ESTIMATE_BYTES_PER_TOKEN,
+            "reason": "No tokenizer is a declared gateway runtime dependency.",
+        },
+    }
 
 
 def v2_tool_result(envelope: Mapping[str, Any]) -> dict[str, Any] | CallToolResult:
@@ -596,8 +628,8 @@ class Runtime:
         credential_profile: str,
     ) -> dict[str, Any]:
         self.principal.require(Capability.JOB_START)
-        if self.principal.name != "agent-control":
-            raise PolicyError("agent jobs require the agent-control principal")
+        if self.principal.name not in {"agent-control", "operator"}:
+            raise PolicyError("agent jobs require an agent-control or operator principal")
         request = AgentLaunchRequest(
             project_id=project_id,
             checkout_id=checkout_id,
@@ -621,7 +653,7 @@ class Runtime:
                 "timeout_seconds": request.timeout_seconds,
                 "result": "last-message",
             },
-            principal="agent-control",
+            principal=self.principal.name,
         )
         job_id = result.get("job_id")
         if not isinstance(job_id, str) or not job_id:
@@ -1130,6 +1162,39 @@ class Runtime:
             )
         return {**result, "ref": REGISTRY.reference("job", {"job_id": job_id})}
 
+    def v2_jobs_query(self, parameters: Mapping[str, Any] | None) -> dict[str, Any]:
+        values = self._parameters(parameters)
+        if set(values) - {"limit"}:
+            raise ProtocolError("invalid_request", "jobs.query parameters are not recognized")
+        limit = values.get("limit", 100)
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1_000:
+            raise ProtocolError("invalid_request", "jobs.query limit must be 1-1000")
+        self.principal.require(Capability.JOB_READ)
+        response = self._sinnixd_job("job.list", {"limit": limit})
+        jobs = response.get("jobs")
+        if not isinstance(jobs, list) or any(not isinstance(job, Mapping) for job in jobs):
+            raise ProtocolError("owner_failed", "sinnixd job list response is malformed")
+        if len(jobs) > limit:
+            raise ProtocolError("owner_failed", "sinnixd job list response exceeds its bound")
+        total = response.get("total")
+        truncated = response.get("truncated")
+        if not isinstance(total, int) or total < len(jobs) or not isinstance(truncated, bool):
+            raise ProtocolError("owner_failed", "sinnixd job list response omits paging metadata")
+        if truncated != (total > len(jobs)):
+            raise ProtocolError("owner_failed", "sinnixd job list paging metadata is inconsistent")
+        rows: list[dict[str, Any]] = []
+        for job in jobs:
+            job_id = job.get("job_id")
+            if not isinstance(job_id, str) or not job_id:
+                raise ProtocolError("owner_failed", "sinnixd job list response omitted a job ID")
+            rows.append({"ref": REGISTRY.reference("job", {"job_id": job_id}), **job})
+        return {
+            "jobs": rows,
+            "limit": limit,
+            "total": total,
+            "truncated": truncated,
+        }
+
     def _record_result(
         self, operation: str, result: Any, request_sha256: str | None = None
     ) -> dict[str, Any]:
@@ -1258,7 +1323,7 @@ class Runtime:
             "before_revision": before_revision,
             "after_revision": after_revision,
             "owner_history_ref": owner_history_ref if isinstance(owner_history_ref, str) else None,
-            "effects": [],
+            "effects": sorted(effect.value for effect in action.storage_effects),
             "created_objects": created_objects,
             "artifact_refs": sorted(set(artifact_refs)),
             "owner_receipt_id": (
@@ -1269,7 +1334,7 @@ class Runtime:
                 else None
             ),
             "atomicity": (
-                "read_only"
+                "read_only_with_observability_persistence"
                 if action.effect is EffectMode.READ
                 else result.get("atomicity", "owner_declared")
                 if isinstance(result, Mapping)
@@ -1394,6 +1459,10 @@ class Runtime:
             }
         else:
             raise exc
+        if action.failure_codes is not None and error["code"] not in action.typed_failures:
+            raise RuntimeError(
+                f"action {action.name!r} emitted undeclared typed failure {error['code']!r}"
+            )
         receipt = self._record_v2_receipt(action, "error", context, error=error)
         return self.results.record(
             action=action.name,

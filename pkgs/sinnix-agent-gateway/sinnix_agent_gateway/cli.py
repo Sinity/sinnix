@@ -4,15 +4,19 @@ import argparse
 import json
 import os
 from pathlib import Path
+from typing import Any
+
 import anyio
 
 from .app import canonical_manifest, create_server
+from .runtime import manifest_measurement
 from .capabilities import PRINCIPAL_CAPABILITIES
 from .config import GatewayConfig
 from .registry import REGISTRY
 
 async def build_manifest(config: GatewayConfig, principal_name: str) -> dict[str, Any]:
-    return canonical_manifest(await create_server(config, principal_name).list_tools())
+    manifest = canonical_manifest(await create_server(config, principal_name).list_tools())
+    return {**manifest, "measurement": manifest_measurement(manifest)}
 
 
 def verify_approval(config: GatewayConfig, principal_name: str) -> dict[str, object]:

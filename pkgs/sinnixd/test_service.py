@@ -3537,9 +3537,17 @@ def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: P
             "agent-control",
         )
     )
+    operator_agent = service.dispatch(
+        request(
+            "job.agent.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "checkout_id": "default", "prompt": "operator prompt", "backend": "codex", "model": "fixture", "effort": "high", "credential_profile": "subscription", "timeout_seconds": 60, "result": "last-message"},
+            "operator",
+        )
+    )
 
-    assert shell.ok and agent.ok
-    assert shell.payload is not None and agent.payload is not None
+    assert shell.ok and agent.ok and operator_agent.ok
+    assert shell.payload is not None and agent.payload is not None and operator_agent.payload is not None
     shell_job = shell.payload.inline
     agent_job = agent.payload.inline
     assert shell_job["kind"] == "operator-shell"
@@ -3552,10 +3560,15 @@ def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: P
     persisted = (tmp_path / "state" / "jobs" / f"{agent_job['job_id']}.json").read_text()
     assert "private prompt" not in persisted
     assert "shell-secret" not in persisted
-    assert len(systemd.started) == 2
+    assert operator_agent.payload.inline["principal"] == "operator"
+    assert len(systemd.started) == 3
     assert all(start["unit"].startswith("sinnixd-job-") for start in systemd.started)
     restarted = GenericJobs(systemd, service.jobs.store, wait_poll_seconds=0.001)
-    assert {job["job_id"] for job in restarted.list()["jobs"]} == {shell_job["job_id"], agent_job["job_id"]}
+    assert {job["job_id"] for job in restarted.list()["jobs"]} == {
+        shell_job["job_id"],
+        agent_job["job_id"],
+        operator_agent.payload.inline["job_id"],
+    }
 
 
 def test_typed_contracts_refuse_spoofed_principals_checkout_backend_environment_and_results(tmp_path: Path) -> None:
@@ -4455,7 +4468,7 @@ def test_job_rpc_get_list_wait_logs_and_cancel_share_one_record(tmp_path: Path) 
     job_id = started.payload.inline["job_id"]
 
     get = service.dispatch(request("job.get", "systemd-jobs", {"job_id": job_id}))
-    listed = service.dispatch(request("job.list", "systemd-jobs"))
+    listed = service.dispatch(request("job.list", "systemd-jobs", {"limit": 1}))
     waited = service.dispatch(request("job.wait", "systemd-jobs", {"job_id": job_id, "timeout_seconds": 1}))
     logs = service.dispatch(request("job.logs", "systemd-jobs", {"job_id": job_id, "max_bytes": 10}))
     cancelled = service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": job_id}))
@@ -4463,6 +4476,9 @@ def test_job_rpc_get_list_wait_logs_and_cancel_share_one_record(tmp_path: Path) 
     assert all(response.ok for response in (get, listed, waited, logs, cancelled))
     assert listed.payload is not None
     assert listed.payload.inline["jobs"][0]["job_id"] == job_id
+    assert listed.payload.inline["limit"] == 1
+    assert listed.payload.inline["total"] == 1
+    assert not listed.payload.inline["truncated"]
     assert cancelled.payload is not None
     assert cancelled.payload.inline["already_terminal"]
 

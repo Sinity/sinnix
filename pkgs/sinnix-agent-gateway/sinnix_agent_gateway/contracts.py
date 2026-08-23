@@ -33,6 +33,39 @@ class EffectMode(StrEnum):
     RUN = "run"
 
 
+class StorageEffect(StrEnum):
+    """Gateway-owned persistence that can accompany a protocol action."""
+
+    AUDIT_APPEND = "audit_append"
+    RESULT_SNAPSHOT = "result_snapshot"
+
+
+OBSERVABILITY_PERSISTENCE = frozenset(
+    {StorageEffect.AUDIT_APPEND, StorageEffect.RESULT_SNAPSHOT}
+)
+
+BASE_TYPED_FAILURES = frozenset(
+    {
+        "invalid_request",
+        "not_found",
+        "unavailable",
+        "response_bound",
+        "owner_failed",
+        "policy_denied",
+    }
+)
+KNOWN_TYPED_FAILURES = BASE_TYPED_FAILURES | {
+    "precondition_failed",
+    "idempotency_conflict",
+    "stale_cursor",
+    "source_changed",
+    "conflict",
+    "partial_completion",
+    "deadline",
+    "unsupported_capability",
+}
+
+
 @dataclass(frozen=True)
 class ResourceSpec:
     """The one executable declaration for a canonical resource kind."""
@@ -102,7 +135,9 @@ class ActionSpec:
     supports_idempotency: bool = False
     supports_precondition: bool = False
     execution_profile: str | None = None
-    receipt_policy: str = "none"
+    receipt_policy: str = "audit"
+    storage_effects: frozenset[StorageEffect] = OBSERVABILITY_PERSISTENCE
+    failure_codes: frozenset[str] | None = None
     examples: tuple[Mapping[str, Any], ...] = ()
     documentation: str = ""
 
@@ -153,6 +188,18 @@ class ActionSpec:
             raise ValueError(f"mutating action {self.name!r} uses a read verb")
         if self.receipt_policy not in {"none", "audit", "owner"}:
             raise ValueError(f"action {self.name!r} has unknown receipt policy")
+        if not self.storage_effects <= frozenset(StorageEffect):
+            raise ValueError(f"action {self.name!r} has unknown storage effects")
+        if self.failure_codes is not None and not self.failure_codes <= KNOWN_TYPED_FAILURES:
+            raise ValueError(f"action {self.name!r} has unknown typed failures")
+        if self.receipt_policy == "audit" and StorageEffect.AUDIT_APPEND not in self.storage_effects:
+            raise ValueError(f"action {self.name!r} audit receipts require audit persistence")
+
+    @property
+    def typed_failures(self) -> frozenset[str]:
+        return (self.failure_codes or KNOWN_TYPED_FAILURES) | (
+            {"precondition_failed"} if self.supports_precondition else set()
+        ) | ({"idempotency_conflict"} if self.supports_idempotency else set())
 
     @property
     def schema_ref(self) -> str:
@@ -174,6 +221,8 @@ class ActionSpec:
             "supports_precondition": self.supports_precondition,
             "execution_profile": self.execution_profile,
             "receipt_policy": self.receipt_policy,
+            "storage_effects": sorted(effect.value for effect in self.storage_effects),
+            "typed_failures": sorted(self.typed_failures),
             "input_schema": dict(self.input_schema),
             "output_schema": dict(self.output_schema),
             "examples": [dict(example) for example in self.examples],

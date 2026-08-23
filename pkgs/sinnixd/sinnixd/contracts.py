@@ -111,8 +111,10 @@ class TypedJobContracts:
         timeout_seconds: int,
         result: str,
     ) -> dict[str, Any]:
-        if principal != "agent-control":
-            raise ContractError("attested agent jobs require the agent-control principal")
+        if principal not in {"agent-control", "operator"}:
+            raise ContractError(
+                "attested agent jobs require the agent-control or operator principal"
+            )
         if backend not in AGENT_BACKENDS:
             raise ContractError("agent backend is invalid")
         if not isinstance(model, str) or not model or len(model) > 256:
