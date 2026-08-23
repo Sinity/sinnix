@@ -698,12 +698,7 @@ class GenericJobs:
                 self.systemd.show(record.unit, timeout_seconds=systemd_timeout_seconds)
             )
         except SystemdJobError:
-            state = {
-                "phase": "launch-unknown" if record.state.get("phase") == "launch-unknown" else "lost",
-                "error": {"code": SYSTEMD_ERROR_CODE},
-                "terminal": record.state.get("phase") != "launch-unknown",
-                "observed_at": _timestamp(),
-            }
+            state = self._observation_unknown_state()
         else:
             state = self._classify(properties, record)
         updated = self._with_state(record, state)
@@ -737,6 +732,16 @@ class GenericJobs:
         updated = self._with_state(record, state)
         self.store.save(updated)
         return self._public(updated, state)
+
+    @staticmethod
+    def _observation_unknown_state() -> dict[str, Any]:
+        """Keep transport failures retryable until systemd supplies an observation."""
+        return {
+            "phase": "observation-unknown",
+            "error": {"code": SYSTEMD_ERROR_CODE},
+            "terminal": False,
+            "observed_at": _timestamp(),
+        }
 
     def _classify(self, properties: Mapping[str, str], record: GenericJobRecord) -> dict[str, Any]:
         if properties.get("LoadState") != "loaded":
