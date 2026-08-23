@@ -433,6 +433,12 @@ when a new script is added.
   and revalidate the worktree/common-dir identity immediately before exec.
   Shell argv and agent prompts remain private launch inputs; durable public
   metadata retains only redacted digests and bounded artifact references.
+  Sinnixd also owns durable workspace relationships over Git-owned linked
+  worktrees. Project descriptors constrain one workspace root and base policy;
+  AgentCTL creates or adopts a canonical linked worktree and derives current
+  HEAD, branch, membership, and dirty state from Git on every read. It does not
+  duplicate Git history or hosted review/merge state. Checkpoint, publication,
+  landing, and reap remain the next lifecycle slices.
 
 ## Secrets
 

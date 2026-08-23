@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .jobs import MAX_RESULT_BYTES
+from .projects import ProjectConfigError, parse_worktree_records
 
 
 class RunnerError(ValueError):
@@ -22,24 +23,6 @@ def _git(path: Path, *arguments: str) -> str:
     except (OSError, subprocess.SubprocessError) as error:
         raise RunnerError("could not revalidate registered checkout") from error
     return result.stdout
-
-
-def _worktree_records(output: str) -> tuple[dict[str, str], ...]:
-    records: list[dict[str, str]] = []
-    record: dict[str, str] = {}
-    for line in output.splitlines():
-        if not line:
-            if record:
-                records.append(record)
-                record = {}
-            continue
-        key, separator, value = line.partition(" ")
-        if not separator or key in record:
-            raise RunnerError("git worktree returned malformed porcelain")
-        record[key] = value
-    if record:
-        records.append(record)
-    return tuple(records)
 
 
 def _require_strings(value: Mapping[str, Any], fields: Sequence[str]) -> None:
@@ -102,7 +85,10 @@ def _revalidate_checkout(checkout: Mapping[str, Any]) -> Path:
         or common_dir != project_common_dir
     ):
         raise RunnerError("registered checkout identity changed")
-    records = _worktree_records(_git(path, "worktree", "list", "--porcelain"))
+    try:
+        records = parse_worktree_records(_git(path, "worktree", "list", "--porcelain"))
+    except ProjectConfigError as error:
+        raise RunnerError(str(error)) from error
     if not any(
         record.get("worktree") == str(path) and record.get("HEAD") == checkout["head"] for record in records
     ):

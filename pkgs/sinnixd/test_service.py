@@ -33,9 +33,10 @@ from sinnixd.jobs import (
     capture_main,
 )
 from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
-from sinnixd.projects import ProjectCatalog, ProjectConfigError
+from sinnixd.projects import ProjectCatalog, ProjectConfigError, parse_worktree_records
 from sinnixd.runner import RunnerError, _revalidate_checkout
 from sinnixd.service import SinnixdService
+from sinnixd.workspaces import GitWorkspaces, WorkspaceStore
 
 
 def write_adapter(root: Path) -> None:
@@ -43,7 +44,7 @@ def write_adapter(root: Path) -> None:
     (root / "flake.nix").write_text("{}")
     (root / ".agentctl").mkdir()
     (root / ".agentctl" / "project.toml").write_text(
-        """schema = 1
+        f"""schema = 1
 
 [project]
 id = "fixture"
@@ -55,6 +56,18 @@ kind = "fixture"
 command = ["fixture-env", "--command"]
 inherit = ["HOME"]
 unset = ["PYTHONPATH"]
+
+[workspace]
+provider = "git-worktree"
+root = "{root / 'worktrees'}"
+default_base = "HEAD"
+identity_check = ["git", "diff", "--quiet"]
+checkpoint_untracked = true
+
+[conflicts]
+exact_files = ["fixture.lock"]
+generated_surfaces = ["generated.json"]
+semantic_slots = ["fixture-registry"]
 
 [operations.check]
 description = "Run fixture checks"
@@ -167,6 +180,24 @@ def initialize_git_checkout(root: Path) -> None:
         ("git", "-C", str(root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "fixture"),
     ):
         subprocess.run(arguments, check=True)
+
+
+def test_worktree_porcelain_parser_accepts_flags_and_rejects_unknown_shapes() -> None:
+    parsed = parse_worktree_records(
+        "worktree /repo\nHEAD " + "a" * 40 + "\ndetached\nlocked operator reason\nprunable stale\n\n"
+    )
+
+    assert parsed == (
+        {
+            "worktree": "/repo",
+            "HEAD": "a" * 40,
+            "detached": "",
+            "locked": "operator reason",
+            "prunable": "stale",
+        },
+    )
+    with pytest.raises(ProjectConfigError):
+        parse_worktree_records("worktree /repo\nunknown value\n\n")
 
 
 def native_runner(path: Path) -> None:
@@ -492,6 +523,132 @@ def test_declared_project_job_rejects_arbitrary_execution(tmp_path: Path) -> Non
     assert unknown_operation.error.code.value == "INVALID_ARGUMENT"
     assert direct_argv.error is not None
     assert direct_argv.error.code.value == "INVALID_ARGUMENT"
+
+
+def test_workspace_create_is_git_derived_durable_and_restart_safe(tmp_path: Path) -> None:
+    """Anti-vacuity: create must reach Git worktree authority and survive service restart."""
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    jobs = generic_jobs(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+
+    created = service.dispatch(
+        request(
+            "workspace.create",
+            "git-workspaces",
+            {
+                "project_id": "fixture",
+                "name": "fixture-lane",
+                "branch": "feature/fixture-lane",
+                "base": "HEAD",
+            },
+            "agent-control",
+        )
+    )
+
+    assert created.ok and created.payload is not None
+    workspace = created.payload.inline
+    assert workspace["state"] == "available"
+    assert workspace["current_branch"] == "feature/fixture-lane"
+    assert workspace["identity_matches"]
+    assert workspace["managed"]
+    assert Path(workspace["path"]).is_dir()
+    porcelain = subprocess.run(
+        ["git", "-C", str(tmp_path), "worktree", "list", "--porcelain"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert f"worktree {workspace['path']}" in porcelain
+
+    restarted = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    recovered = restarted.dispatch(
+        request("workspace.get", "git-workspaces", {"workspace_id": workspace["workspace_id"]})
+    )
+    assert recovered.ok and recovered.payload is not None
+    assert recovered.payload.inline["head"] == workspace["head"]
+    assert recovered.payload.inline["checkout_id"].startswith("worktree-")
+
+
+def test_workspace_adopt_uses_existing_linked_checkout_without_claiming_creation(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    linked = tmp_path / "external-linked"
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "worktree", "add", "-b", "feature/adopted", str(linked), "HEAD"],
+        check=True,
+        capture_output=True,
+    )
+    catalog = ProjectCatalog([tmp_path])
+    checkout = next(item for item in catalog.checkouts("fixture") if item.path == linked)
+    service = SinnixdService(catalog, jobs=generic_jobs(tmp_path))
+
+    adopted = service.dispatch(
+        request(
+            "workspace.adopt",
+            "git-workspaces",
+            {"project_id": "fixture", "checkout_id": checkout.checkout_id, "name": "adopted-lane"},
+            "operator",
+        )
+    )
+
+    assert adopted.ok and adopted.payload is not None
+    assert adopted.payload.inline["path"] == str(linked)
+    assert not adopted.payload.inline["managed"]
+    assert adopted.payload.inline["current_branch"] == "feature/adopted"
+
+
+def test_workspace_mutations_reject_weak_principals_paths_refs_and_duplicates(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    arguments = {
+        "project_id": "fixture",
+        "name": "safe-lane",
+        "branch": "feature/safe-lane",
+        "base": "HEAD",
+    }
+
+    weak = service.dispatch(request("workspace.create", "git-workspaces", arguments, "observer"))
+    escaped = service.dispatch(
+        request("workspace.create", "git-workspaces", {**arguments, "name": "../escape"}, "agent-control")
+    )
+    invalid_ref = service.dispatch(
+        request("workspace.create", "git-workspaces", {**arguments, "base": "missing-ref"}, "agent-control")
+    )
+    created = service.dispatch(request("workspace.create", "git-workspaces", arguments, "agent-control"))
+    duplicate = service.dispatch(request("workspace.create", "git-workspaces", arguments, "agent-control"))
+    adopt_root = service.dispatch(
+        request(
+            "workspace.adopt",
+            "git-workspaces",
+            {"project_id": "fixture", "checkout_id": "default", "name": "root"},
+            "operator",
+        )
+    )
+
+    assert created.ok
+    for response in (weak, escaped, invalid_ref, duplicate, adopt_root):
+        assert response.error is not None
+        assert response.error.code.value == "INVALID_ARGUMENT"
+
+
+def test_workspace_status_exposes_branch_drift_and_dirty_state(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    created = service.workspaces.create(
+        project_id="fixture", name="drift-lane", branch="feature/drift-lane", base="HEAD"
+    )
+    path = Path(created["path"])
+    (path / "untracked.txt").write_text("operator work\n")
+    subprocess.run(["git", "-C", str(path), "switch", "--detach"], check=True, capture_output=True)
+
+    observed = service.workspaces.get(created["workspace_id"])
+
+    assert observed["state"] == "missing"
+    assert observed["dirty"] is None
+    assert not observed["identity_matches"]
 
 
 def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: Path) -> None:

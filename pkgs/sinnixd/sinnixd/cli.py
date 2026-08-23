@@ -45,6 +45,21 @@ def parser() -> argparse.ArgumentParser:
     get.add_argument("project_id")
     operations = project_subcommands.add_parser("operations")
     operations.add_argument("project_id")
+    workspace = subcommands.add_parser("workspace")
+    workspace_subcommands = workspace.add_subparsers(dest="workspace_command", required=True)
+    workspace_list = workspace_subcommands.add_parser("list")
+    workspace_list.add_argument("--project")
+    workspace_get = workspace_subcommands.add_parser("get")
+    workspace_get.add_argument("workspace_id")
+    workspace_create = workspace_subcommands.add_parser("create")
+    workspace_create.add_argument("project_id")
+    workspace_create.add_argument("name")
+    workspace_create.add_argument("--branch", required=True)
+    workspace_create.add_argument("--base")
+    workspace_adopt = workspace_subcommands.add_parser("adopt")
+    workspace_adopt.add_argument("project_id")
+    workspace_adopt.add_argument("checkout_id")
+    workspace_adopt.add_argument("name")
     job = subcommands.add_parser("job")
     job_subcommands = job.add_subparsers(dest="job_command", required=True)
     start = job_subcommands.add_parser("start")
@@ -147,6 +162,34 @@ def main() -> None:
     elif arguments.command == "project":
         request = _request(
             "project.operations", "project-adapters", {"project_id": arguments.project_id}
+        )
+    elif arguments.command == "workspace" and arguments.workspace_command == "list":
+        payload = {"project_id": arguments.project} if arguments.project else {}
+        request = _request("workspace.list", "git-workspaces", payload)
+    elif arguments.command == "workspace" and arguments.workspace_command == "get":
+        request = _request("workspace.get", "git-workspaces", {"workspace_id": arguments.workspace_id})
+    elif arguments.command == "workspace" and arguments.workspace_command == "create":
+        request = _request(
+            "workspace.create",
+            "git-workspaces",
+            {
+                "project_id": arguments.project_id,
+                "name": arguments.name,
+                "branch": arguments.branch,
+                "base": arguments.base,
+            },
+            "agent-control",
+        )
+    elif arguments.command == "workspace":
+        request = _request(
+            "workspace.adopt",
+            "git-workspaces",
+            {
+                "project_id": arguments.project_id,
+                "checkout_id": arguments.checkout_id,
+                "name": arguments.name,
+            },
+            "agent-control",
         )
     elif arguments.command == "job" and arguments.job_command == "start":
         request = _request(

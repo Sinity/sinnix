@@ -140,6 +140,7 @@ let
   sinnixMcpPackage = pkgs.callPackage ../pkgs/sinnix-mcp/pkg.nix { };
   sinnixdPackage = pkgs.callPackage ../pkgs/sinnixd/pkg.nix {
     sinnix-mcp = sinnixMcpPackage;
+    sinnix-lib = externalPackages.sinnix-lib;
   };
   agentGatewayPackage = pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix {
     sinnix-mcp = sinnixMcpPackage;

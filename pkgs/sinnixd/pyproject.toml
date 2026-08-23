@@ -7,7 +7,7 @@ name = "sinnixd"
 version = "0.1.0"
 description = "Sinnix local runtime daemon and agentctl client"
 requires-python = ">=3.12"
-dependencies = ["sinnix-mcp==0.1.0"]
+dependencies = ["sinnix-mcp==0.1.0", "sinnix-lib==0.1.0"]
 
 [project.scripts]
 agentctl = "sinnixd.cli:main"
