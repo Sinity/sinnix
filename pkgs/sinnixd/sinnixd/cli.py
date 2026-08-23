@@ -141,6 +141,8 @@ def parser() -> argparse.ArgumentParser:
         command_parser.add_argument("--request-id", required=True)
         if command in {"complete", "release"}:
             command_parser.add_argument("--reason")
+        if command == "complete":
+            command_parser.add_argument("--merge-sha", required=True)
         if command == "release":
             command_parser.add_argument("--if-assignee")
     task_note = task_subcommands.add_parser("note")
@@ -404,6 +406,8 @@ def main() -> int:
             elif arguments.task_command in {"complete", "release"}:
                 if arguments.reason is not None:
                     task_arguments["reason"] = arguments.reason
+                if arguments.task_command == "complete":
+                    task_arguments["merge_sha"] = arguments.merge_sha
                 if arguments.task_command == "release" and arguments.if_assignee is not None:
                     task_arguments["if_assignee"] = arguments.if_assignee
         mutation_id = getattr(arguments, "request_id", None)

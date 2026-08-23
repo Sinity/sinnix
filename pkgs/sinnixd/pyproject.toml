@@ -14,6 +14,7 @@ agentctl = "sinnixd.cli:main"
 sinnixd = "sinnixd.cli:daemon_main"
 sinnixd-capture = "sinnixd.jobs:capture_cli"
 sinnixd-contract-runner = "sinnixd.runner:main"
+sinnixd-task-reconcile = "sinnixd.tasks:task_reconcile_main"
 
 [tool.setuptools.packages.find]
 include = ["sinnixd*"]
