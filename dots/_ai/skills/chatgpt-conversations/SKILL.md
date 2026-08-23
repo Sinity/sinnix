@@ -70,6 +70,16 @@ turns are frequently expired on ChatGPT's side; a null `href` plus a button
 control is the normal rendering, and absence of a working link is not a
 capture defect.
 
+Before considering any browser download, run
+`scripts/sinnix-chatgpt-conversations locate "<attachment label>"`. Uploaded
+files always originated on this machine and generated bundles are often
+already downloaded, so the file is usually findable locally — the command
+strips kind words from the label, tries the exact name, collision-suffix
+variants (" (1)" added or removed), and a de-parenthesized core substring
+across the inbox, scratch, exports, trash, and home roots (extendable with
+`--root`). Trash hits include the `.trashinfo` sidecar, which records the
+original path.
+
 Canvas documents ("writing blocks") are captured completely: a canvas body is
 part of the containing turn's `text` exactly as rendered, and each turn also
 carries a `canvases` array identifying every canvas — `block_id`, `title`
