@@ -465,7 +465,10 @@ def test_project_operation_parameter_schema_is_closed_and_bounded(tmp_path: Path
         ProjectCatalog([tmp_path])
 
 
-@pytest.mark.parametrize("value", ("true", '"3600"', "0", "-1", "14401"))
+@pytest.mark.parametrize(
+    "value",
+    ("true", '"3600"', "0", "-1", str(MAX_DECLARED_OPERATION_TIMEOUT_SECONDS + 1)),
+)
 def test_declared_operation_timeout_must_be_a_positive_bounded_integer(tmp_path: Path, value: str) -> None:
     write_adapter(tmp_path)
     descriptor = tmp_path / ".agentctl" / "project.toml"
