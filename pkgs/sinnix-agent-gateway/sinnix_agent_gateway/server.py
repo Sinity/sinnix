@@ -372,7 +372,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
 
         @mcp.tool(title="Query canonical resource", annotations=AUDITED_READ_TOOL)
         async def query(
-            action_name: str = "projects.query",
+            action_name: str,
             ref: str | None = None,
             query: str | None = None,
             max_matches: int = 200,
@@ -384,7 +384,12 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
         ) -> V2ManifestEnvelope:
-            """Invoke one catalog-declared, principal-filtered read owner route."""
+            """Invoke the exact read action_name returned by catalog.
+
+            Use projects.list with no ref, query, or parameters to list every
+            principal-visible project.  Other actions describe their required
+            arguments in the catalog and action-schema resource.
+            """
             try:
                 action = target_bindings.action_for_tool("query", action_name, principal_name)
             except RegistryError as error:
