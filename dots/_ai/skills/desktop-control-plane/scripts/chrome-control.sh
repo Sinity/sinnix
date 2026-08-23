@@ -273,15 +273,15 @@ agent-window)
 
   hyprland_available="false"
   if command -v hyprctl >/dev/null 2>&1; then
-    if [[ -z ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
-      hyprland_instances=$(hyprctl instances -j 2>/dev/null || printf '[]')
-      hyprland_instance_count=$(jq 'length' <<<"$hyprland_instances")
-      if [[ $hyprland_instance_count -eq 1 ]]; then
-        HYPRLAND_INSTANCE_SIGNATURE=$(jq -r '.[0].instance' <<<"$hyprland_instances")
-        export HYPRLAND_INSTANCE_SIGNATURE
-      fi
+    hyprland_instances=$(hyprctl instances -j 2>/dev/null || printf '[]')
+    hyprland_instance_count=$(jq 'length' <<<"$hyprland_instances")
+    if [[ $hyprland_instance_count -eq 1 ]]; then
+      HYPRLAND_INSTANCE_SIGNATURE=$(jq -r '.[0].instance' <<<"$hyprland_instances")
+      export HYPRLAND_INSTANCE_SIGNATURE
     fi
-    [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && hyprland_available="true"
+    if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && hyprctl clients -j >/dev/null 2>&1; then
+      hyprland_available="true"
+    fi
   fi
 
   marker="sinnix-agent-window-${BASHPID}-${RANDOM}-${RANDOM}"
