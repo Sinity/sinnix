@@ -32,12 +32,21 @@ class GitHubDelivery:
         path = workspace["path"]
         branch = workspace["branch"]
         self._command([*project.environment.command, "git", "-C", path, "push", "-u", "origin", branch], cwd=path)
-        created = self._command(
-            ["gh", "pr", "create", "--head", branch, "--base", base, "--title", title, "--body", body],
-            cwd=path,
+        existing = self.run(
+            ["gh", "pr", "view", branch, "--json", "url"],
+            cwd=path, capture_output=True, text=True, timeout=60, check=False,
         )
+        if existing.returncode == 0:
+            publication_output = existing.stdout.strip()
+            created = False
+        else:
+            publication_output = self._command(
+                ["gh", "pr", "create", "--head", branch, "--base", base, "--title", title, "--body", body],
+                cwd=path,
+            ).stdout.strip()
+            created = True
         review = self.review_status(workspace_id)
-        return {**review, "published": True, "create_output": created.stdout.strip()}
+        return {**review, "published": True, "created": created, "publication_output": publication_output}
 
     def review_status(self, workspace_id: str) -> dict[str, Any]:
         workspace = self.workspaces.get(workspace_id)
