@@ -23,6 +23,7 @@ StableErrorCode = Literal[
     "owner_failed",
     "policy_denied",
     "idempotency_conflict",
+    "unsupported_capability",
 ]
 
 

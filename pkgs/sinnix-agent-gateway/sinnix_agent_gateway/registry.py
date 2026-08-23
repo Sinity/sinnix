@@ -509,6 +509,98 @@ PROJECT_CHANGE_SCHEMA: dict[str, Any] = _with_request_controls(
     }
 )
 
+
+def _owner_change_schema(
+    *,
+    ref_pattern: str,
+    operations: tuple[str, ...],
+    precondition_properties: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    properties: dict[str, Any] = {
+        "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8_192,
+            "pattern": ref_pattern,
+        },
+        "operation": {"enum": list(operations)},
+        "parameters": {
+            "type": "object",
+            "maxProperties": 32,
+        },
+    }
+    if precondition_properties is not None:
+        properties["preconditions"] = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": dict(precondition_properties),
+        }
+    return _with_request_controls(
+        {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["ref", "operation", "parameters", "idempotency_key"],
+            "properties": properties,
+        }
+    )
+
+
+PROJECT_CHANGE_SCHEMA = _owner_change_schema(
+    ref_pattern=r"^sinnix://projects/[^/]+(?:/checkouts/[^/]+)?$",
+    operations=("apply_patch", "write"),
+    precondition_properties={
+        "head": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+        "dirty_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    },
+)
+
+
+FILES_CHANGE_SCHEMA = _owner_change_schema(
+    ref_pattern=r"^sinnix://files/[A-Za-z0-9_-]{1,8192}$",
+    operations=("append", "copy", "mkdir", "move", "remove", "replace"),
+    precondition_properties={
+        "expected_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    },
+)
+
+BEADS_CHANGE_SCHEMA = _owner_change_schema(
+    ref_pattern=r"^sinnix://projects/[^/]+$",
+    operations=(
+        "claim",
+        "close",
+        "comment",
+        "create",
+        "dependency_add",
+        "relate",
+        "reopen",
+        "unclaim",
+        "update",
+    ),
+    precondition_properties={
+        "expected_task_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    },
+)
+
+MCP_CHANGE_SCHEMA = _owner_change_schema(
+    ref_pattern=r"^sinnix://mcp/[^/]+/tools/[^/]+$",
+    operations=("call",),
+)
+
+DESKTOP_OPERATE_SCHEMA = _owner_change_schema(
+    ref_pattern=r"^sinnix://desktop/current$",
+    operations=("dispatch", "focus_window", "keyword", "paste", "send_keystate", "send_shortcut"),
+)
+
+TERMINAL_OPERATE_SCHEMA = _owner_change_schema(
+    ref_pattern=r"^sinnix://terminals/[^/]+$",
+    operations=("focus", "key", "run", "send"),
+)
+
+BROWSER_OPERATE_SCHEMA = _owner_change_schema(
+    ref_pattern=r"^sinnix://browser/(?:agent-workspace|pages/[^/]+)$",
+    operations=("agent_window", "await", "click", "close", "evaluate", "fill_form", "inject_text", "navigate", "reload", "wait_selector"),
+)
+
 MACHINE_OPERATE_SCHEMA: dict[str, Any] = _with_request_controls(
     {
         "type": "object",
@@ -574,7 +666,11 @@ def build_registry() -> CatalogRegistry:
         ResourceSpec("scope", RefTemplate("scope", "sinnix://scopes/{scope_unit}"), "machine", ("status",), True),
         ResourceSpec("process", RefTemplate("process", "sinnix://processes/{pid}/{start_ticks}"), "machine", ("status",), True),
         ResourceSpec("browser_page", RefTemplate("browser_page", "sinnix://browser/pages/{page_id}"), "browser", ("summary", "content"), True),
+        ResourceSpec("browser_workspace", RefTemplate("browser_workspace", "sinnix://browser/agent-workspace"), "browser", ("summary",), False, principals=frozenset({"operator"})),
         ResourceSpec("terminal", RefTemplate("terminal", "sinnix://terminals/{terminal_id}"), "terminals", ("summary", "scrollback"), True),
+        ResourceSpec("desktop", RefTemplate("desktop", "sinnix://desktop/current"), "desktop", ("summary",), False, principals=frozenset({"operator"})),
+        ResourceSpec("host_file", RefTemplate("host_file", "sinnix://files/{file_token}"), "files", ("summary",), False, principals=frozenset({"operator"})),
+        ResourceSpec("mcp_tool", RefTemplate("mcp_tool", "sinnix://mcp/{server}/tools/{tool}"), "mcp-broker", ("summary",), False, principals=frozenset({"operator"})),
         ResourceSpec("capture_lane", RefTemplate("capture_lane", "sinnix://captures/{lane}"), "captures", ("summary", "query"), True),
         ResourceSpec("session", RefTemplate("session", "sinnix://sessions/{provider}/{session_id}"), "sessions", ("summary", "messages"), True),
         ResourceSpec("context_snapshot", RefTemplate("context_snapshot", "sinnix://contexts/{snapshot_id}"), "context", ("summary", "sources"), True),
@@ -731,6 +827,56 @@ def build_registry() -> CatalogRegistry:
             documentation="Apply one bounded, precondition-checked project write or patch through a canonical project or checkout reference.",
         ),
         ActionSpec(
+            name="files.change",
+            verb=VerbFamily.CHANGE,
+            domain="files",
+            owner="files",
+            route="files.change",
+            effect=EffectMode.CHANGE,
+            principals=frozenset({"operator"}),
+            input_schema=FILES_CHANGE_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("host_file",),
+            supports_idempotency=True,
+            supports_precondition=True,
+            receipt_policy="audit",
+            examples=({"input": {"ref": "sinnix://files/L3JlYWxtL3RtcC9maWxl", "operation": "replace", "parameters": {"content": "updated content\\n"}, "idempotency_key": "file-replace-example"}},),
+            documentation="Apply one bounded host-file mutation through an opaque canonical file reference.",
+        ),
+        ActionSpec(
+            name="beads.change",
+            verb=VerbFamily.CHANGE,
+            domain="beads",
+            owner="beads",
+            route="beads.write",
+            effect=EffectMode.CHANGE,
+            principals=frozenset({"operator"}),
+            input_schema=BEADS_CHANGE_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("project", "bead", "task_authority"),
+            supports_idempotency=True,
+            supports_precondition=True,
+            receipt_policy="audit",
+            examples=({"input": {"ref": "sinnix://projects/sinnix", "operation": "comment", "parameters": {"id": "sinnix-example", "text": "recorded by the operator"}, "idempotency_key": "bead-comment-example"}},),
+            documentation="Perform one structured, attested Beads mutation for a canonical project.",
+        ),
+        ActionSpec(
+            name="mcp.change",
+            verb=VerbFamily.CHANGE,
+            domain="mcp",
+            owner="mcp-broker",
+            route="mcp.call.write",
+            effect=EffectMode.CHANGE,
+            principals=frozenset({"operator"}),
+            input_schema=MCP_CHANGE_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("mcp_tool",),
+            supports_idempotency=True,
+            receipt_policy="audit",
+            examples=({"input": {"ref": "sinnix://mcp/lynchpin/tools/refresh", "operation": "call", "parameters": {}, "idempotency_key": "mcp-refresh-example"}},),
+            documentation="Call one brokered upstream MCP tool whose live metadata does not declare it read-only.",
+        ),
+        ActionSpec(
             name="machine.operate",
             verb=VerbFamily.OPERATE,
             domain="machine",
@@ -809,6 +955,54 @@ def build_registry() -> CatalogRegistry:
                 },
             ),
             documentation="Request cancellation for one phase-checked daemon job and return the owner truth without asserting terminal completion.",
+        ),
+        ActionSpec(
+            name="desktop.operate",
+            verb=VerbFamily.OPERATE,
+            domain="desktop",
+            owner="desktop",
+            route="desktop.action",
+            effect=EffectMode.OPERATE,
+            principals=frozenset({"operator"}),
+            input_schema=DESKTOP_OPERATE_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("desktop",),
+            supports_idempotency=True,
+            receipt_policy="audit",
+            examples=({"input": {"ref": "sinnix://desktop/current", "operation": "focus_window", "parameters": {"window": "address:0xfixture"}, "idempotency_key": "desktop-focus-example"}},),
+            documentation="Operate the current desktop through the declared Hyprland owner route.",
+        ),
+        ActionSpec(
+            name="terminals.operate",
+            verb=VerbFamily.OPERATE,
+            domain="terminals",
+            owner="terminals",
+            route="terminals.action",
+            effect=EffectMode.OPERATE,
+            principals=frozenset({"operator"}),
+            input_schema=TERMINAL_OPERATE_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("terminal",),
+            supports_idempotency=True,
+            receipt_policy="audit",
+            examples=({"input": {"ref": "sinnix://terminals/7", "operation": "send", "parameters": {"text": "printf fixture", "enter": True}, "idempotency_key": "terminal-send-example"}},),
+            documentation="Operate one canonical Kitty terminal without accepting an arbitrary matcher.",
+        ),
+        ActionSpec(
+            name="browser.operate",
+            verb=VerbFamily.OPERATE,
+            domain="browser",
+            owner="browser",
+            route="browser.action",
+            effect=EffectMode.OPERATE,
+            principals=frozenset({"operator"}),
+            input_schema=BROWSER_OPERATE_SCHEMA,
+            output_schema=V2_ENVELOPE_SCHEMA,
+            resource_kinds=("browser_workspace", "browser_page"),
+            supports_idempotency=True,
+            receipt_policy="audit",
+            examples=({"input": {"ref": "sinnix://browser/agent-workspace", "operation": "agent_window", "parameters": {"url": "https://example.test"}, "idempotency_key": "browser-window-example"}},),
+            documentation="Create or operate only a gateway-owned browser target on the hidden agent workspace.",
         ),
         ActionSpec(
             name="shell.run",
