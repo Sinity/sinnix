@@ -87,13 +87,13 @@ class WorkspacePolicy:
 class ConflictPolicy:
     exact_files: tuple[str, ...]
     generated_surfaces: tuple[str, ...]
-    semantic_slots: tuple[str, ...]
+    semantic_slots: Mapping[str, tuple[str, ...]]
 
-    def catalog_row(self) -> dict[str, list[str]]:
+    def catalog_row(self) -> dict[str, Any]:
         return {
             "exact_files": list(self.exact_files),
             "generated_surfaces": list(self.generated_surfaces),
-            "semantic_slots": list(self.semantic_slots),
+            "semantic_slots": {name: list(paths) for name, paths in self.semantic_slots.items()},
         }
 
 
@@ -343,12 +343,24 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         "exact_files", "generated_surfaces", "semantic_slots"
     }:
         raise ProjectConfigError(f"{descriptor} [conflicts] is invalid")
+    raw_semantic_slots = raw_conflicts.get("semantic_slots", {})
+    if isinstance(raw_semantic_slots, list):
+        semantic_slots = {
+            name: () for name in _optional_string_list(raw_semantic_slots, "conflicts.semantic_slots")
+        }
+    elif isinstance(raw_semantic_slots, Mapping) and all(isinstance(name, str) and name for name in raw_semantic_slots):
+        semantic_slots = {
+            name: _string_list(paths, f"conflicts.semantic_slots.{name}")
+            for name, paths in sorted(raw_semantic_slots.items())
+        }
+    else:
+        raise ProjectConfigError(f"{descriptor} conflicts.semantic_slots is invalid")
     conflicts = ConflictPolicy(
         exact_files=_optional_string_list(raw_conflicts.get("exact_files"), "conflicts.exact_files"),
         generated_surfaces=_optional_string_list(
             raw_conflicts.get("generated_surfaces"), "conflicts.generated_surfaces"
         ),
-        semantic_slots=_optional_string_list(raw_conflicts.get("semantic_slots"), "conflicts.semantic_slots"),
+        semantic_slots=semantic_slots,
     )
 
     owner_adapters = _owner_adapters(raw, descriptor)

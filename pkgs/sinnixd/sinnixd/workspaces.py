@@ -4,6 +4,7 @@ import hashlib
 import io
 import os
 import re
+from fnmatch import fnmatch
 import shutil
 import subprocess
 import tarfile
@@ -458,11 +459,28 @@ class GitWorkspaces:
         overlap = child_paths & parent_paths
         exact = set(project.conflicts.exact_files)
         generated = set(project.conflicts.generated_surfaces)
-        return [
+        collisions = [
             {"path": path, "class": "exact-file" if path in exact else "generated-surface"}
             for path in sorted(overlap)
             if path in exact or path in generated
         ]
+        classified = exact | generated
+        collisions.extend(
+            {"path": path, "class": "hard"} for path in sorted(overlap - classified)
+        )
+        for slot, patterns in project.conflicts.semantic_slots.items():
+            child_slot = sorted(path for path in child_paths if any(fnmatch(path, pattern) for pattern in patterns))
+            parent_slot = sorted(path for path in parent_paths if any(fnmatch(path, pattern) for pattern in patterns))
+            if child_slot and parent_slot:
+                collisions.append(
+                    {
+                        "class": "semantic-slot",
+                        "slot": slot,
+                        "child_paths": ",".join(child_slot),
+                        "parent_paths": ",".join(parent_slot),
+                    }
+                )
+        return collisions
 
     def checkpoint(self, workspace_id: str) -> dict[str, Any]:
         with flock(self.mutation_lock):
