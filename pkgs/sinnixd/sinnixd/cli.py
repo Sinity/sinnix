@@ -90,6 +90,9 @@ def parser() -> argparse.ArgumentParser:
     workspace_land.add_argument("--job", required=True)
     workspace_finish = workspace_subcommands.add_parser("finish")
     workspace_finish.add_argument("workspace_id")
+    workspace_finish_integrated = workspace_subcommands.add_parser("finish-integrated")
+    workspace_finish_integrated.add_argument("workspace_id")
+    workspace_finish_integrated.add_argument("--target", required=True)
     job = subcommands.add_parser("job")
     job_subcommands = job.add_subparsers(dest="job_command", required=True)
     start = job_subcommands.add_parser("start")
@@ -328,6 +331,13 @@ def main() -> int:
         request = _request(
             "workspace.land", "git-workspaces",
             {"workspace_id": arguments.workspace_id, "job_id": arguments.job}, "agent-control",
+        )
+    elif arguments.command == "workspace" and arguments.workspace_command == "finish-integrated":
+        request = _request(
+            "workspace.finish-integrated",
+            "git-workspaces",
+            {"workspace_id": arguments.workspace_id, "target_ref": arguments.target},
+            "agent-control",
         )
     elif arguments.command == "workspace":
         request = _request(

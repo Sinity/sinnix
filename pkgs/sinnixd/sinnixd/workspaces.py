@@ -362,6 +362,43 @@ class GitWorkspaces:
             self.store.remove(workspace_id)
             return {"workspace_id": workspace_id, "finished": True, "head": expected_head}
 
+    def finish_integrated(self, workspace_id: str, target_ref: str) -> dict[str, Any]:
+        """Remove a clean workspace whose tree contribution is present in a declared-base commit."""
+        with flock(self.mutation_lock):
+            record = self._record(workspace_id)
+            if not record.managed:
+                raise WorkspaceError("adopted workspaces cannot be finished")
+            if any(stack.parent_workspace_id == workspace_id for stack in self.store.stack_records()):
+                raise WorkspaceError("workspace cannot be finished while stacked children exist")
+            checkout, project = self._available(record)
+            if self._git(checkout.path, "status", "--porcelain", "--untracked-files=all").stdout:
+                raise WorkspaceError("integrated workspace must be clean before finish")
+            self._verify_ref(project.root, target_ref, "integration target")
+            assert project.workspace is not None
+            if self._git(
+                project.root,
+                "merge-base",
+                "--is-ancestor",
+                target_ref,
+                project.workspace.default_base,
+                check=False,
+            ).returncode != 0:
+                raise WorkspaceError("integration target is not contained in the declared default base")
+            if not self._tree_equivalent(project.root, target_ref, checkout.head):
+                raise WorkspaceError("workspace changes are not fully represented by the integration target")
+            removed = self._git(project.root, "worktree", "remove", str(record.path), check=False)
+            if removed.returncode != 0:
+                raise WorkspaceError(removed.stderr.strip() or "git worktree remove failed")
+            self._git(project.root, "branch", "-D", record.branch, check=False)
+            self.store.remove_stack_references(workspace_id)
+            self.store.remove(workspace_id)
+            return {
+                "workspace_id": workspace_id,
+                "finished": True,
+                "head": checkout.head,
+                "integration_target": self._git(project.root, "rev-parse", f"{target_ref}^{{commit}}").stdout.strip(),
+            }
+
     def create(self, *, project_id: str, name: str, branch: str, base: str | None) -> dict[str, Any]:
         with flock(self.mutation_lock):
             return self._create_locked(project_id=project_id, name=name, branch=branch, base=base)
