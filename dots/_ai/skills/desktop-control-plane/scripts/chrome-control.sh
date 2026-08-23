@@ -272,7 +272,17 @@ agent-window)
   }
 
   hyprland_available="false"
-  command -v hyprctl >/dev/null 2>&1 && hyprland_available="true"
+  if command -v hyprctl >/dev/null 2>&1; then
+    if [[ -z ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
+      hyprland_instances=$(hyprctl instances -j 2>/dev/null || printf '[]')
+      hyprland_instance_count=$(jq 'length' <<<"$hyprland_instances")
+      if [[ $hyprland_instance_count -eq 1 ]]; then
+        HYPRLAND_INSTANCE_SIGNATURE=$(jq -r '.[0].instance' <<<"$hyprland_instances")
+        export HYPRLAND_INSTANCE_SIGNATURE
+      fi
+    fi
+    [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && hyprland_available="true"
+  fi
 
   marker="sinnix-agent-window-${BASHPID}-${RANDOM}-${RANDOM}"
   marker_url="data:text/html,<title>${marker}</title>"
@@ -316,11 +326,16 @@ agent-window)
       for _ in {1..20}; do
         hyprctl dispatch movetoworkspacesilent "${AGENT_WORKSPACE_TARGET},address:${addr}" >/dev/null 2>&1 || true
         sleep 0.1
-        workspace=$(hyprctl clients -j 2>/dev/null | jq -r --arg address "$addr" \
-          '.[] | select(.address == $address) | .workspace.name // empty')
+        client_state=$(hyprctl clients -j 2>/dev/null | jq -c --arg address "$addr" \
+          '.[] | select(.address == $address) | {workspace: .workspace.name, floating, pinned, fullscreen}')
+        workspace=$(jq -r '.workspace // empty' <<<"$client_state")
+        floating=$(jq -r '.floating' <<<"$client_state")
+        pinned=$(jq -r '.pinned' <<<"$client_state")
+        fullscreen=$(jq -r '.fullscreen' <<<"$client_state")
         visible=$(hyprctl monitors -j 2>/dev/null | jq -r --arg workspace "$AGENT_WORKSPACE" \
           'any(.[]; .activeWorkspace.name == $workspace)')
-        if [[ $workspace == "$AGENT_WORKSPACE" && $visible == "false" ]]; then
+        if [[ $workspace == "$AGENT_WORKSPACE" && $visible == "false" && $floating == "false" && \
+          $pinned == "false" && $fullscreen == "0" ]]; then
           ((stable_checks += 1))
           if [[ $stable_checks -ge 3 ]]; then
             parked="true"
@@ -351,7 +366,7 @@ agent-window)
     --arg ws "$AGENT_WORKSPACE" --arg key "$SUMMON_BINDING" \
     '{id: $id, url: $url, parked: $parked, workspace: $ws, show_with: $key}'
   if [[ $parked != "true" ]]; then
-    echo "window ${page_id} opened but was not verified on ${AGENT_WORKSPACE}" >&2
+    echo "window ${page_id} opened but was not verified on ${AGENT_WORKSPACE}; last compositor state: ${client_state:-unavailable}; visible=${visible:-unknown}; stable_checks=${stable_checks:-0}" >&2
     exit 1
   fi
   retain_created_target="true"
