@@ -318,7 +318,7 @@ def test_declared_deadline_and_idempotency_failures_persist_bounded_envelopes(tm
     conflict = runtime.execute_v2(
         action,
         lambda: pytest.fail("conflicting request reached the owner"),
-        {**request, "work_item": "different request"},
+        {**request, "instructions": "different request"},
     )
     unexpected = runtime.execute_v2(
         action,

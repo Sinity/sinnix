@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -245,7 +246,7 @@ class TypedJobContracts:
             return None
         expected = {
             "bead_ref", "project_ref", "checkout_ref", "task_revision",
-            "task_etag", "claim_ref", "claim_receipt", "request_id", "work_item",
+            "task_etag", "claim_ref", "claim_receipt", "request_id", "assignment_ref",
         }
         if not isinstance(value, Mapping) or set(value) != expected:
             raise ContractError("agent bead binding is malformed")
@@ -265,7 +266,10 @@ class TypedJobContracts:
             or len(binding["task_revision"]) != 64
             or not isinstance(binding["task_etag"], str)
             or len(binding["task_etag"]) != 64
-            or binding["work_item"] is not None and (not isinstance(binding["work_item"], str) or len(binding["work_item"]) > 2_000)
+            or binding["assignment_ref"] is not None and (
+                not isinstance(binding["assignment_ref"], str)
+                or not re.fullmatch(r"sinnix://jobs/[0-9a-f-]{36}", binding["assignment_ref"])
+            )
         ):
             raise ContractError("agent bead binding is malformed")
         claim_ref = binding["claim_ref"]

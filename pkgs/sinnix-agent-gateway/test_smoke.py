@@ -180,7 +180,7 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "contract_ref": "sinnix://gateway/v2/resources/bead",
                     "kind": "bead",
                     "owner": "beads",
-                    "principals": ["agent-control", "observer", "operator"],
+                    "principals": ["observer", "operator"],
                     "readable_projections": ["summary", "history", "graph"],
                     "ref_template": "sinnix://projects/{project_id}/beads/{bead_id}",
                     "supports_query": True,

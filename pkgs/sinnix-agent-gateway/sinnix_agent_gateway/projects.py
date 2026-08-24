@@ -302,7 +302,9 @@ class ProjectService:
             "truncated": truncated,
         }
 
-    def _run_bounded(self, command: list[str], cwd: Path, timeout: int = 15) -> str:
+    def _run_bounded_result(
+        self, command: list[str], cwd: Path, timeout: int = 15
+    ) -> tuple[str, bool]:
         safe_env = {
             "HOME": str(Path.home()),
             "LANG": os.environ.get("LANG", "C.UTF-8"),
@@ -324,11 +326,14 @@ class ProjectService:
         if result.timed_out:
             raise ProjectError("project operation timed out")
         if result.output_exceeded:
-            return text
+            return text, True
         if result.exit_status not in (0, 1):
             diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
             raise ProjectError(diagnostic or text.strip() or "project operation failed")
-        return text
+        return text, False
+
+    def _run_bounded(self, command: list[str], cwd: Path, timeout: int = 15) -> str:
+        return self._run_bounded_result(command, cwd, timeout)[0]
 
     def search(
         self,
@@ -399,6 +404,56 @@ class ProjectService:
         return {
             "project_id": project_id,
             "diff": self._run_bounded(command, project.path),
+        }
+
+    def commit_range(
+        self,
+        project_id: str,
+        checkout_id: str,
+        base_revision: str,
+        head_revision: str,
+    ) -> dict[str, Any]:
+        """Read one exact, immutable Git range through the selected checkout."""
+        project = self.code_checkout(
+            project_id, checkout_id, write=False, require_explicit=True
+        )
+
+        def resolve(revision: str) -> str:
+            if not re.fullmatch(r"[0-9a-f]{40,64}", revision):
+                raise ProjectError("commit revision is malformed")
+            resolved = self._run_bounded(
+                [
+                    "git",
+                    "rev-parse",
+                    "--verify",
+                    "--end-of-options",
+                    f"{revision}^{{commit}}",
+                ],
+                project.path,
+            ).strip()
+            if not re.fullmatch(r"[0-9a-f]{40,64}", resolved):
+                raise ProjectError("commit revision did not resolve to a commit")
+            return resolved
+
+        base = resolve(base_revision)
+        head = resolve(head_revision)
+        merge_base = self._run_bounded(
+            ["git", "merge-base", base, head], project.path
+        ).strip()
+        if not re.fullmatch(r"[0-9a-f]{40,64}", merge_base):
+            raise ProjectError("commit range has no merge base")
+        content, truncated = self._run_bounded_result(
+            ["git", "diff", "--no-ext-diff", "--no-textconv", f"{base}..{head}", "--"],
+            project.path,
+        )
+        return {
+            "base_revision": base,
+            "head_revision": head,
+            "range": f"{base}..{head}",
+            "relation": "base_is_ancestor" if merge_base == base else "diverged",
+            "merge_base": merge_base,
+            "diff": content,
+            "truncated": truncated,
         }
 
     def summary(self, project_id: str) -> dict[str, Any]:

@@ -77,6 +77,33 @@ def test_project_summary_reports_structured_git_state(tmp_path: Path) -> None:
     assert index.read_bytes() == before_index
 
 
+def test_commit_range_uses_immutable_two_commit_relation(tmp_path: Path) -> None:
+    projects = project_service(tmp_path, "operator")
+    project = projects.config.projects["fixture"].path
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=project, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (project / "tracked.txt").write_text("committed change\n")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=project, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=Gateway Fixture", "-c", "user.email=gateway@example.invalid", "commit", "-m", "second gateway fixture"],
+        cwd=project, check=True, stdout=subprocess.DEVNULL,
+    )
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=project, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    result = projects.commit_range("fixture", "default", base, head)
+
+    assert result["base_revision"] == base
+    assert result["head_revision"] == head
+    assert result["range"] == f"{base}..{head}"
+    assert result["relation"] == "base_is_ancestor"
+    assert result["merge_base"] == base
+    assert "committed change" in result["diff"]
+    assert result["truncated"] is False
+
+
 def test_project_context_uses_native_ready_task_owner(tmp_path: Path) -> None:
     projects = project_service(tmp_path, "observer")
     beads = FakeBeads({"project_id": "fixture", "operation": "ready", "result": []})
@@ -109,7 +136,7 @@ def test_project_context_reports_unavailable_task_owner_without_hiding_git(
     }
 
 
-def test_project_context_exposes_task_section_to_agent_control(
+def test_project_context_does_not_expose_ready_tasks_to_agent_control(
     tmp_path: Path,
 ) -> None:
     projects = project_service(tmp_path, "agent-control")
@@ -118,6 +145,8 @@ def test_project_context_exposes_task_section_to_agent_control(
 
     result = context.context("fixture")
 
-    assert result["tasks"]["availability"] == "available"
-    assert result["tasks"] == {"availability": "available", "unexpected": True}
-    assert beads.calls == [(["fixture"], "ready", 20)]
+    assert result["tasks"] == {
+        "availability": "unavailable",
+        "reason": "assigned Beads context requires a bound job reference",
+    }
+    assert beads.calls == []
