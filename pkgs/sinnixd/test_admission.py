@@ -135,6 +135,28 @@ def test_lone_job_larger_than_pool_budget_is_not_permanently_starved(tmp_path: P
     assert [entry["command"] for entry in systemd.started] == [("env", "oversized")]
 
 
+def test_failed_launch_peak_does_not_replace_declared_memory_estimate(tmp_path: Path) -> None:
+    adapter = project(
+        tmp_path / "project",
+        (operation("heavy", pool="bulk", estimate_memory_bytes=12 * 1024 * 1024 * 1024),),
+    )
+    systemd = FakeSystemd()
+    subject = jobs(tmp_path, systemd)
+    started = subject.start_declared(project=adapter, operation=adapter.operation("heavy"), correlation_id="failed", parameters={})
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "exit-code",
+        "ExecMainStatus": "1",
+        "MemoryPeak": str(128 * 1024 * 1024),
+    }
+    subject.get(started["job_id"])
+
+    repeated = subject.start_declared(project=adapter, operation=adapter.operation("heavy"), correlation_id="retry", parameters={})
+
+    assert repeated["state"]["admission"]["estimate_memory_bytes"] == 12 * 1024 * 1024 * 1024
+
+
 def test_cache_and_coalescing_are_principal_isolated(tmp_path: Path) -> None:
     adapter = project(tmp_path / "project", (operation("check", cache="tree+environment"),))
     systemd = FakeSystemd()
