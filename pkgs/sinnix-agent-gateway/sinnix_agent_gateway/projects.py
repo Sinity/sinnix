@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import stat
 import tempfile
 from contextlib import contextmanager
@@ -97,6 +96,8 @@ def _open_pinned_directory(
                     os.mkdir(part, 0o700, dir_fd=current)
                 except FileExistsError:
                     pass
+                else:
+                    os.fsync(current)
                 child = os.open(part, _DIRECTORY_OPEN_FLAGS, dir_fd=current)
             os.close(current)
             current = child
@@ -136,6 +137,8 @@ def _unlink_at(parent: int, name: str) -> None:
         os.unlink(name, dir_fd=parent)
     except FileNotFoundError:
         pass
+    else:
+        os.fsync(parent)
 
 
 def _atomic_publish(
@@ -157,6 +160,7 @@ def _atomic_publish(
             src_dir_fd=parent,
             dst_dir_fd=parent,
         )
+        os.fsync(parent)
         temporary_name = None
     finally:
         if descriptor >= 0:
@@ -184,6 +188,7 @@ def _atomic_publish_symlink(parent: int, target_name: str, target: str) -> None:
             src_dir_fd=parent,
             dst_dir_fd=parent,
         )
+        os.fsync(parent)
         temporary_name = None
     finally:
         if temporary_name is not None:
@@ -784,14 +789,103 @@ class ProjectService:
             max_output_bytes=self.config.max_result_bytes,
         )
 
+    def _seed_index_entry(
+        self,
+        root: Path,
+        index: Path,
+        parent: int,
+        target_name: str,
+        relative: str,
+    ) -> None:
+        try:
+            metadata = os.stat(target_name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        if stat.S_ISLNK(metadata.st_mode):
+            content = os.readlink(target_name, dir_fd=parent).encode(
+                "utf-8", errors="surrogateescape"
+            )
+            mode = 0o120000
+        elif stat.S_ISREG(metadata.st_mode):
+            descriptor = os.open(
+                target_name,
+                os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                dir_fd=parent,
+            )
+            try:
+                with os.fdopen(descriptor, "rb") as handle:
+                    content = handle.read(self.config.max_result_bytes + 1)
+            except BaseException:
+                raise
+            if len(content) > self.config.max_result_bytes:
+                raise ProjectError("patched project file exceeds configured bound")
+            mode = 0o100755 if metadata.st_mode & 0o111 else 0o100644
+        else:
+            raise ProjectError("git patch target has an unsupported file type")
+        object_id = self._owner_result(
+            ["git", "hash-object", "-w", "--stdin"],
+            root,
+            stdin_bytes=content,
+        ).decode().strip()
+        if not re.fullmatch(r"[0-9a-f]{40,64}", object_id):
+            raise ProjectError("git returned a malformed patch seed object")
+        self._owner_result(
+            [
+                "git",
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                format(mode, "o"),
+                object_id,
+                relative,
+            ],
+            root,
+            environment={"GIT_INDEX_FILE": str(index)},
+        )
+
+    def _index_tree(self, root: Path, index: Path) -> str:
+        tree = self._owner_result(
+            ["git", "write-tree"],
+            root,
+            environment={"GIT_INDEX_FILE": str(index)},
+        ).decode().strip()
+        if not re.fullmatch(r"[0-9a-f]{40,64}", tree):
+            raise ProjectError("git returned a malformed temporary tree")
+        return tree
+
+    def _changed_tree_paths(
+        self, root: Path, before_tree: str, after_tree: str
+    ) -> tuple[str, ...]:
+        output = self._owner_result(
+            [
+                "git",
+                "diff",
+                "--name-only",
+                "-z",
+                "--no-renames",
+                before_tree,
+                after_tree,
+                "--",
+            ],
+            root,
+            max_output_bytes=self.config.max_result_bytes,
+        )
+        return tuple(os.fsdecode(path) for path in output.split(b"\0") if path)
+
     def _publish_index_entry(
         self,
         project: ProjectConfig,
         relative: str,
         entry: tuple[int, bytes] | None,
+        *,
+        pinned_parent: int | None = None,
     ) -> None:
         parts = _mutation_parts(project, relative)
-        parent = _open_pinned_directory(project, parts[:-1], create=entry is not None)
+        parent = (
+            pinned_parent
+            if pinned_parent is not None
+            else _open_pinned_directory(project, parts[:-1], create=entry is not None)
+        )
         try:
             if entry is None:
                 _unlink_at(parent, parts[-1])
@@ -808,7 +902,8 @@ class ProjectService:
             else:
                 raise ProjectError("git apply produced an unsupported file type")
         finally:
-            os.close(parent)
+            if pinned_parent is None:
+                os.close(parent)
 
     def apply_patch(
         self,
@@ -823,62 +918,67 @@ class ProjectService:
             patch_bytes = patch.encode()
             root = _open_pinned_directory(project, (), create=False)
             root_path = Path(f"/proc/self/fd/{root}")
+            pinned_parents: dict[tuple[str, ...], int] = {}
             try:
                 paths = self._patch_paths(root_path, patch_bytes)
                 for relative in paths:
-                    _mutation_parts(project, relative)
-                with tempfile.TemporaryDirectory(prefix="sinnix-gateway-apply-") as staging:
-                    index = Path(staging) / "index"
-                    index_source = Path(
-                        self._owner_result(["git", "rev-parse", "--git-path", "index"], root_path)
-                        .decode()
-                        .strip()
-                    )
-                    if not index_source.is_absolute():
-                        index_source = project.path / index_source
-                    if index_source.is_file():
-                        shutil.copyfile(index_source, index)
-                    else:
+                    parts = _mutation_parts(project, relative)
+                    parent_parts = parts[:-1]
+                    if parent_parts not in pinned_parents:
                         try:
-                            self._owner_result(
-                                ["git", "read-tree", "HEAD"],
-                                root_path,
-                                environment={"GIT_INDEX_FILE": str(index)},
+                            pinned_parents[parent_parts] = _open_pinned_directory(
+                                project, parent_parts, create=False
                             )
                         except ProjectError as exc:
-                            if not any(
-                                marker in str(exc)
-                                for marker in (
-                                    "bad revision",
-                                    "ambiguous argument",
-                                    "Not a valid object name HEAD",
-                                )
-                            ):
+                            if str(exc) != "path does not exist":
                                 raise
+                with tempfile.TemporaryDirectory(prefix="sinnix-gateway-apply-") as staging:
+                    index = Path(staging) / "index"
                     environment = {"GIT_INDEX_FILE": str(index)}
-                    self._owner_result(
-                        ["git", "add", "-f", "--all", "--", "."],
-                        root_path,
-                        environment=environment,
-                    )
-                    before = {
-                        relative: self._index_entry(root_path, index, relative)
-                        for relative in paths
-                    }
+                    try:
+                        self._owner_result(
+                            ["git", "read-tree", "HEAD"],
+                            root_path,
+                            environment=environment,
+                        )
+                    except ProjectError as exc:
+                        if not any(
+                            marker in str(exc)
+                            for marker in (
+                                "bad revision",
+                                "ambiguous argument",
+                                "Not a valid object name HEAD",
+                            )
+                        ):
+                            raise
+                    for relative in paths:
+                        parts = _mutation_parts(project, relative)
+                        parent = pinned_parents.get(parts[:-1])
+                        if parent is not None:
+                            self._seed_index_entry(
+                                root_path,
+                                index,
+                                parent,
+                                parts[-1],
+                                relative,
+                            )
+                    before_tree = self._index_tree(root_path, index)
                     self._owner_result(
                         ["git", "apply", "--cached", "--whitespace=nowarn", "-"],
                         root_path,
                         stdin_bytes=patch_bytes,
                         environment=environment,
                     )
+                    after_tree = self._index_tree(root_path, index)
+                    paths = self._changed_tree_paths(root_path, before_tree, after_tree)
+                    for relative in paths:
+                        _mutation_parts(project, relative)
                     after = {
                         relative: self._index_entry(root_path, index, relative)
                         for relative in paths
                     }
                     changes: list[tuple[str, tuple[int, bytes] | None]] = []
                     for relative in paths:
-                        if before[relative] == after[relative]:
-                            continue
                         entry = after[relative]
                         changes.append(
                             (
@@ -892,7 +992,15 @@ class ProjectService:
                             )
                         )
                     for relative, entry in changes:
-                        self._publish_index_entry(project, relative, entry)
+                        parts = _mutation_parts(project, relative)
+                        self._publish_index_entry(
+                            project,
+                            relative,
+                            entry,
+                            pinned_parent=pinned_parents.get(parts[:-1]),
+                        )
             finally:
+                for parent in pinned_parents.values():
+                    os.close(parent)
                 os.close(root)
         return {"project_id": project_id, "applied": True}

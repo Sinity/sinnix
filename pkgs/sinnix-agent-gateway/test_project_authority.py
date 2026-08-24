@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import stat
 from pathlib import Path
 
 import pytest
@@ -138,6 +139,27 @@ def test_project_write_cleans_collision_safe_temporary_after_publication_failure
     assert not (project / "failure.txt").exists()
 
 
+def test_project_write_syncs_file_and_parent_directory_before_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _observer, project, _linked = project_service(tmp_path)
+    operator = ProjectService(_observer.config, Principal.for_name("operator"))
+    original_fsync = projects_module.os.fsync
+    synced_kinds: list[str] = []
+
+    def recording_fsync(descriptor: int) -> None:
+        mode = projects_module.os.fstat(descriptor).st_mode
+        synced_kinds.append("directory" if stat.S_ISDIR(mode) else "file")
+        original_fsync(descriptor)
+
+    monkeypatch.setattr(projects_module.os, "fsync", recording_fsync)
+    operator.write("fixture", "durable/result.txt", "published", "default")
+
+    assert (project / "durable" / "result.txt").read_text() == "published"
+    assert "file" in synced_kinds
+    assert synced_kinds.count("directory") >= 2
+
+
 def test_gateway_temporary_artifacts_are_excluded_from_project_apis(tmp_path: Path) -> None:
     _observer, project, _linked = project_service(tmp_path)
     observer = ProjectService(_observer.config, Principal.for_name("observer"))
@@ -148,6 +170,40 @@ def test_gateway_temporary_artifacts_are_excluded_from_project_apis(tmp_path: Pa
         observer.read("fixture", temporary.name, checkout_id="default")
     assert all(row["path"] != temporary.name for row in observer.tree("fixture")["entries"])
     assert observer.search("fixture", "private temporary")["matches"] == []
+
+
+def test_project_patch_rename_removes_source_without_ingesting_ignored_files(
+    tmp_path: Path,
+) -> None:
+    _observer, project, _linked = project_service(tmp_path)
+    operator = ProjectService(_observer.config, Principal.for_name("operator"))
+    source = project / "old.txt"
+    source.write_text("tracked\n")
+    git(project, "add", "old.txt")
+    git(project, "commit", "--quiet", "-m", "tracked rename source")
+    ignored = project / "private.payload"
+    ignored.write_text("must never enter the object database")
+    (project / ".gitignore").write_text("private.payload\n")
+    private_object = git_stdout(project, "hash-object", "private.payload")
+
+    operator.apply_patch(
+        "fixture",
+        """diff --git a/old.txt b/new.txt
+similarity index 100%
+rename from old.txt
+rename to new.txt
+""",
+        "default",
+    )
+
+    assert not source.exists()
+    assert (project / "new.txt").read_text() == "tracked\n"
+    assert ignored.read_text() == "must never enter the object database"
+    assert subprocess.run(
+        ["git", "-C", str(project), "cat-file", "-e", private_object],
+        check=False,
+        capture_output=True,
+    ).returncode != 0
 
 
 def git_stdout(path: Path, *arguments: str) -> str:
