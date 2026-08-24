@@ -1522,6 +1522,103 @@ def test_queued_service_cancellation_wins_the_admission_start_interleaving(
     assert not (store.leases_root / f"{job_id}.json").exists()
 
 
+def test_queued_declared_cancellation_survives_service_refresh_and_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: a queued cancellation stays terminal when its unit never existed."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'cache = "none"\n\n[operations.service.service]',
+            'cache = "none"\nestimate_memory_bytes = 4294967296\n\n[operations.service.service]',
+        )
+    )
+    systemd = FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"})
+    store = GenericJobStore(tmp_path / "state")
+    jobs = GenericJobs(
+        systemd,
+        store,
+        wait_poll_seconds=0.001,
+        pressure_probe=lambda: {"memory_full_avg10": 0.2},
+    )
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    started = service.dispatch(
+        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"})
+    )
+    assert started.ok and started.payload is not None
+    job_id = started.payload.inline["job_id"]
+    assert started.payload.inline["state"]["phase"] == "queued"
+
+    cancelled = service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": job_id}))
+    assert cancelled.ok and cancelled.payload is not None
+    assert cancelled.payload.inline["state"]["phase"] == "cancelled"
+    assert cancelled.payload.inline["state"]["launch_evidence"] == "not-started"
+
+    def assert_cancelled_truth(current: SinnixdService) -> None:
+        for _ in range(2):
+            refreshed = current.dispatch(request("job.get", "systemd-jobs", {"job_id": job_id}))
+            assert refreshed.ok and refreshed.payload is not None
+            assert refreshed.payload.inline["state"] == cancelled.payload.inline["state"]
+
+            listed = current.dispatch(request("job.list", "systemd-jobs", {}))
+            assert listed.ok and listed.payload is not None
+            assert listed.payload.inline["jobs"][0]["job_id"] == job_id
+            assert listed.payload.inline["jobs"][0]["state"] == cancelled.payload.inline["state"]
+
+            result = current.dispatch(request("job.result", "systemd-jobs", {"job_id": job_id}))
+            assert not result.ok
+            assert result.error is not None
+            assert result.error.code.value == "RESULT_INVALID"
+            assert result.error.message == "job exit result is unavailable"
+            assert result.payload is None
+
+    assert_cancelled_truth(service)
+
+    restarted = SinnixdService(
+        ProjectCatalog([tmp_path]),
+        jobs=GenericJobs(
+            FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"}),
+            GenericJobStore(store.root),
+            wait_poll_seconds=0.001,
+            pressure_probe=lambda: {"memory_full_avg10": 0.0},
+        ),
+    )
+    assert_cancelled_truth(restarted)
+
+
+def test_declared_missing_unit_without_cancellation_evidence_stays_missing(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: an absent post-launch declared unit is not inferred cancelled."""
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"})
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+
+    started = service.dispatch(
+        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"})
+    )
+    assert started.ok and started.payload is not None
+    job_id = started.payload.inline["job_id"]
+    assert started.payload.inline["state"]["phase"] == "submitted"
+
+    missing = service.dispatch(request("job.get", "systemd-jobs", {"job_id": job_id}))
+    assert missing.ok and missing.payload is not None
+    assert missing.payload.inline["state"]["phase"] == "missing"
+    assert missing.payload.inline["state"]["terminal"]
+    assert "launch_evidence" not in missing.payload.inline["state"]
+    record = service.jobs.store.load(job_id)
+    assert record.cancel_requested_at is None
+    assert "cancellation" not in record.state
+
+    result = service.dispatch(request("job.result", "systemd-jobs", {"job_id": job_id}))
+    assert not result.ok
+    assert result.error is not None
+    assert result.error.code.value == "RESULT_INVALID"
+    assert result.error.message == "job exit result is unavailable"
+
+
 def test_dependency_admission_never_nests_candidate_and_dependency_job_locks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Malformed durable dependency cycles cannot create a cross-process job-lock cycle during admission."""
     store = GenericJobStore(tmp_path / "state")

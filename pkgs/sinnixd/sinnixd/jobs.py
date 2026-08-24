@@ -2323,6 +2323,8 @@ class GenericJobs:
         }
 
     def _classify(self, properties: Mapping[str, str], record: GenericJobRecord) -> dict[str, Any]:
+        if self._is_authoritative_not_started_cancellation(record):
+            return dict(record.state)
         if properties.get("LoadState") != "loaded":
             if record.spec.kind == "declared-operation" and record.state.get("phase") in {
                 "launching",
@@ -2446,6 +2448,8 @@ class GenericJobs:
         return (datetime.now(UTC) - requested_at).total_seconds() >= CANCEL_OUTCOME_RECONCILIATION_GRACE_SECONDS
 
     def _terminal_state_requires_reconciliation(self, record: GenericJobRecord) -> bool:
+        if self._is_authoritative_not_started_cancellation(record):
+            return False
         if (
             record.spec.lease is not None
             and not self.store._service_lease_released(record.spec.lease.lease_id)
@@ -2578,6 +2582,14 @@ class GenericJobs:
             record.cancel_stop_acknowledged_at is not None
             and record.cancel_stop_acknowledged_invocation_id is not None
             and record.cancel_stop_acknowledged_invocation_id == record.cancel_requested_invocation_id
+        )
+
+    @staticmethod
+    def _is_authoritative_not_started_cancellation(record: GenericJobRecord) -> bool:
+        return (
+            record.state.get("phase") == "cancelled"
+            and record.state.get("terminal") is True
+            and record.state.get("launch_evidence") == "not-started"
         )
 
     @staticmethod
