@@ -285,10 +285,13 @@ class BeadsService:
         for project_id in sorted(project_ids):
             try:
                 project, status = self._attest(project_id, False); revisions[project_id] = status["revision"]
+                owner_cap = _MAX_PAGE
                 if expression: parsed[project_id] = self._run(project, ["query", expression, "--parse-only"], False)
                 if (expression or view == "query") and native_args:
                     raise BeadsError("native list filters cannot be combined with the owner query route", "unsupported_capability")
-                if view == "ready": command = ["ready", "--limit", str(_MAX_PAGE), "--max-rows", str(_MAX_PAGE), "--explain"]
+                if view == "ready":
+                    owner_cap = self._limit(limit)
+                    command = ["ready", "--limit", str(owner_cap), "--max-rows", str(owner_cap)]
                 elif view == "blocked": command = ["blocked"]
                 elif view in {"open", "all", "recent", "overdue", "deferred", "unassigned", "stale_claims", "epic_progress", "changed_since"}:
                     command = ["list", "--flat", "--limit", str(_MAX_PAGE), "--max-rows", str(_MAX_PAGE)]
@@ -310,7 +313,7 @@ class BeadsService:
                 normalized = [self._normalize(project_id, row, status["revision"]) for row in self._issues(self._run(project, command, False))]
                 for row in normalized:
                     if requested: row["includes"] = self._includes(project, project_id, row["id"], requested)
-                rows += normalized; coverage[project_id] = {"state": "complete", "returned": len(normalized), "total": len(normalized), "total_exact": len(normalized) < _MAX_PAGE, "paging": "owner_native_unavailable" if len(normalized) == _MAX_PAGE else "complete", "revision": status["revision"]}
+                rows += normalized; coverage[project_id] = {"state": "complete", "returned": len(normalized), "total": len(normalized), "total_exact": len(normalized) < owner_cap, "paging": "owner_native_unavailable" if len(normalized) == owner_cap else "complete", "revision": status["revision"]}
             except BeadsError as exc: coverage[project_id] = {"state": "partial", "error": str(exc), "code": exc.code}
         rows.sort(key=lambda row: (row["project_id"], row["id"])); key = hashlib.sha256(json.dumps({"principal": self.principal.name, "projects": sorted(project_ids), "view": view, "filters": filters or {}, "expression": expression, "order": order or {}, "includes": sorted(requested)}, sort_keys=True, separators=(",", ":")).encode()).hexdigest(); source_revision = hashlib.sha256(json.dumps(revisions, sort_keys=True).encode()).hexdigest(); page_rows, page = self._snapshot_page(key, source_revision, rows, self._limit(limit), cursor)
         totals = {"returned": len(rows), "projects": len(project_ids), "healthy_projects": sum(item["state"] == "complete" for item in coverage.values()), "partial_projects": sum(item["state"] == "partial" for item in coverage.values()), "exact": all(item.get("total_exact", False) for item in coverage.values() if item["state"] == "complete") and not any(item["state"] == "partial" for item in coverage.values())}

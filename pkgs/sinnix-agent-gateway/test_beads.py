@@ -88,6 +88,18 @@ def test_query_compiles_native_list_filters_and_records_parse_parity(tmp_path: P
     assert result["owner_capabilities"]["native_offset_paging"] is False
 
 
+def test_ready_query_requests_issue_rows_without_unbounded_explanation(tmp_path: Path) -> None:
+    beads, log = beads_service(tmp_path)
+
+    result = beads.query(project_ids=["fixture"], view="ready", limit=20)
+
+    ready = next(command for command in commands(log) if "ready" in command)
+    assert "--explain" not in ready
+    assert ready[ready.index("--limit") + 1] == "20"
+    assert result["items"]
+    assert result["coverage"]["fixture"]["total_exact"] is True
+
+
 def test_get_graph_and_memory_keep_owner_features_explicit(tmp_path: Path) -> None:
     beads, log = beads_service(tmp_path)
     item = beads.get("fixture", "fixture-1", includes=["blockers", "comments", "history", "dependencies", "dependents", "children", "refs"], as_of="HEAD")
