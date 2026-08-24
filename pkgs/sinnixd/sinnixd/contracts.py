@@ -7,7 +7,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from .jobs import GenericJobSpec, GenericJobs
 from .limits import maximum_timeout_seconds, valid_timeout_seconds
@@ -110,6 +110,7 @@ class TypedJobContracts:
         credential_profile: str,
         timeout_seconds: int,
         result: str,
+        bead_binding: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if principal not in {"agent-control", "operator"}:
             raise ContractError(
@@ -130,6 +131,7 @@ class TypedJobContracts:
         if not self.native_runner.is_file() or not os.access(self.native_runner, os.X_OK):
             raise ContractError("native agent runner is unavailable")
         checkout = self.projects.checkout(project_id, checkout_id)
+        binding = self._bead_binding(bead_binding, checkout)
         job_id = str(uuid4())
         prompt_path = self.inputs_root / f"{job_id}.prompt"
         public_contract = {
@@ -139,6 +141,7 @@ class TypedJobContracts:
             "credential_profile": credential_profile,
             "prompt": {"sha256": hashlib.sha256(prompt.encode()).hexdigest(), "bytes": len(prompt.encode())},
             "result": result,
+            **({"bead_binding": binding} if binding is not None else {}),
         }
         private = {
             "schema_version": 1,
@@ -151,6 +154,7 @@ class TypedJobContracts:
             "effort": effort,
             "credential_profile": credential_profile,
             "prompt_path": str(prompt_path),
+            **({"bead_binding": binding} if binding is not None else {}),
         }
         self._write_private(prompt_path, prompt.encode())
         try:
@@ -231,6 +235,59 @@ class TypedJobContracts:
             if isinstance(prompt_path, str):
                 Path(prompt_path).unlink(missing_ok=True)
         return response
+
+    @staticmethod
+    def _bead_binding(
+        value: Mapping[str, Any] | None, checkout: RegisteredCheckout
+    ) -> dict[str, Any] | None:
+        """Validate public Beads provenance carried by an attested agent job."""
+        if value is None:
+            return None
+        expected = {
+            "bead_ref", "project_ref", "checkout_ref", "task_revision",
+            "task_etag", "claim_ref", "claim_receipt", "request_id", "work_item",
+        }
+        if not isinstance(value, Mapping) or set(value) != expected:
+            raise ContractError("agent bead binding is malformed")
+        binding = dict(value)
+        project_ref = f"sinnix://projects/{checkout.project_id}"
+        checkout_ref = f"{project_ref}/checkouts/{checkout.checkout_id}"
+        bead_prefix = f"{project_ref}/beads/"
+        bead_ref = binding["bead_ref"]
+        if (
+            not isinstance(bead_ref, str)
+            or not bead_ref.startswith(bead_prefix)
+            or not bead_ref.removeprefix(bead_prefix)
+            or "/" in bead_ref.removeprefix(bead_prefix)
+            or binding["project_ref"] != project_ref
+            or binding["checkout_ref"] != checkout_ref
+            or not isinstance(binding["task_revision"], str)
+            or len(binding["task_revision"]) != 64
+            or not isinstance(binding["task_etag"], str)
+            or len(binding["task_etag"]) != 64
+            or binding["work_item"] is not None and (not isinstance(binding["work_item"], str) or len(binding["work_item"]) > 2_000)
+        ):
+            raise ContractError("agent bead binding is malformed")
+        claim_ref = binding["claim_ref"]
+        claim_receipt = binding["claim_receipt"]
+        if (claim_ref is None) != (claim_receipt is None):
+            raise ContractError("agent bead binding claim is malformed")
+        if claim_ref is not None and (
+            not isinstance(claim_ref, str)
+            or not claim_ref.startswith(f"{bead_ref}/claims/")
+            or not claim_ref.removeprefix(f"{bead_ref}/claims/")
+            or "/" in claim_ref.removeprefix(f"{bead_ref}/claims/")
+            or not isinstance(claim_receipt, Mapping)
+            or claim_receipt.get("ref") != claim_ref
+        ):
+            raise ContractError("agent bead binding claim is malformed")
+        if any(character not in "0123456789abcdef" for character in binding["task_revision"] + binding["task_etag"]):
+            raise ContractError("agent bead binding is malformed")
+        try:
+            UUID(str(binding["request_id"]))
+        except (TypeError, ValueError, AttributeError) as error:
+            raise ContractError("agent bead binding request_id is malformed") from error
+        return binding
 
     def _environment(
         self, checkout: RegisteredCheckout, job_id: str, principal: str, timeout_seconds: int
