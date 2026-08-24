@@ -350,9 +350,13 @@ install_agent_window_rules() {
   class_lua=$(lua_quote '^(google-chrome|google-chrome-unstable|chromium-browser|Chromium)$')
   title_lua=$(lua_quote "^${marker}$")
   workspace_lua=$(lua_quote "${AGENT_WORKSPACE_TARGET} silent")
-  rule_lua="sinnix_agent_window_guard = hl.window_rule({name = ${guard_name_lua}, match = {initial_class = ${class_lua}}, no_initial_focus = true, no_focus = true, focus_on_activate = false, suppress_event = 'activate activatefocus'}); sinnix_agent_window_placement = hl.window_rule({name = ${placement_name_lua}, match = {initial_class = ${class_lua}, initial_title = ${title_lua}}, workspace = ${workspace_lua}, no_initial_focus = true, no_focus = true, focus_on_activate = false, suppress_event = 'activate activatefocus'})"
+  rule_lua="sinnix_agent_window_guard = hl.window_rule({name = ${guard_name_lua}, match = {initial_class = ${class_lua}}, no_initial_focus = true, focus_on_activate = false, suppress_event = 'activate activatefocus'}); sinnix_agent_window_placement = hl.window_rule({name = ${placement_name_lua}, match = {initial_class = ${class_lua}, initial_title = ${title_lua}}, workspace = ${workspace_lua}, no_initial_focus = true, focus_on_activate = false, suppress_event = 'activate activatefocus'})"
   compositor_rules_installed="true"
   hyprctl_call eval "$rule_lua" >/dev/null
+}
+
+clear_stale_agent_window_rules() {
+  hyprctl_call eval 'if sinnix_agent_window_guard ~= nil then sinnix_agent_window_guard:set_enabled(false); sinnix_agent_window_guard = nil end; if sinnix_agent_window_placement ~= nil then sinnix_agent_window_placement:set_enabled(false); sinnix_agent_window_placement = nil end' >/dev/null
 }
 
 disable_agent_window_rules() {
@@ -454,6 +458,16 @@ agent-window)
   fi
   if [[ $hyprland_available != "true" || -z $focus_before || -z $compositor_state_before ]]; then
     echo "agent-window requires a live Hyprland compositor with a focused operator client; hyprctl=${hyprctl_bin:-unavailable}; instances=${hyprland_instance_count:-unknown}; signature=$([[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && printf set || printf missing); focus=${focus_before:-unavailable}" >&2
+    exit 1
+  fi
+  if ! clear_stale_agent_window_rules; then
+    echo "failed to clear stale agent-window compositor rules" >&2
+    exit 1
+  fi
+  compositor_state_before=$(hyprland_compositor_state)
+  focus_before=$(jq -r '.active_window.address // empty' <<<"$compositor_state_before")
+  if [[ -z $focus_before ]]; then
+    echo "focused operator client disappeared while clearing stale agent-window rules" >&2
     exit 1
   fi
 
