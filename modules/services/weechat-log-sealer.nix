@@ -2,9 +2,9 @@
 #
 # Daily user timer that hashes "old enough" per-day IRC logs in the
 # captures archive and renames them to ``YYYY-MM-DD.b2-<12hex>.log``.
-# The script lives next to the rest of the IRC pipeline at
-# ``${activityRoot}/irc/scripts/seal_logs.py`` so the user can
-# edit it inplace; this module just schedules it.
+# The script is packaged from ./weechat-log-sealer/seal_logs.py — the lake
+# holds data only (the in-lake scripts/ copy was retired 2026-08-24; the
+# ad-hoc analysis siblings moved to sinity-lynchpin scripts/irc/).
 #
 # See the seal_logs.py header for the 2-day buffer rationale (avoids
 # racing weechat fds across midnight on dormant channels).
@@ -64,7 +64,7 @@ mkServiceModule {
       # The registered surface unit is the *timer*, so the service resolves
       # its class directly rather than by unit lookup.
       resourceClass = "background-maintenance";
-      execStart = "${pkgs.python3}/bin/python3 ${ircRoot}/scripts/seal_logs.py ${ircRoot}";
+      execStart = "${pkgs.python3}/bin/python3 ${./weechat-log-sealer/seal_logs.py} ${ircRoot}";
       serviceConfig = {
         # Bound runtime so a stuck mount doesn't pin a stale unit.
         TimeoutStartSec = "10min";
