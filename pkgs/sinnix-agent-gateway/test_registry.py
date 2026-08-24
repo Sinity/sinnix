@@ -327,7 +327,7 @@ def test_catalog_search_filters_resource_kind_and_text() -> None:
             "contract_ref": "sinnix://gateway/v2/resources/bead",
             "ref_template": "sinnix://projects/{project_id}/beads/{bead_id}",
             "owner": "beads",
-            "principals": ["agent-control", "observer", "operator"],
+            "principals": ["observer", "operator"],
             "readable_projections": ["summary", "history", "graph"],
             "supports_query": True,
             "availability": "declared",
@@ -396,7 +396,7 @@ def test_run_and_wait_contracts_are_closed_and_authority_scoped() -> None:
     assert agent["verb"] == "run"
     assert agent["owner"] == "systemd-jobs"
     assert agent["route"] == "job.agent.start"
-    assert agent["principals"] == ["operator"]
+    assert agent["principals"] == ["agent-control", "operator"]
     assert agent["input_schema"]["additionalProperties"] is False
     assert agent["input_schema"]["required"] == [
         "ref",
@@ -417,8 +417,7 @@ def test_run_and_wait_contracts_are_closed_and_authority_scoped() -> None:
     assert wait["input_schema"]["properties"]["timeout_seconds"]["maximum"] == 300
     with pytest.raises(RegistryError, match="cannot read action"):
         REGISTRY.action_schema("shell.run", "observer")
-    with pytest.raises(RegistryError, match="cannot read action"):
-        REGISTRY.action_schema("agent.for_bead", "agent-control")
+    assert REGISTRY.action_schema("agent.for_bead", "agent-control")["action"]["principals"] == ["agent-control", "operator"]
 
 
 def test_catalog_exposes_bead_workflow_without_a_legacy_agent_selector() -> None:
@@ -531,6 +530,8 @@ def test_query_context_and_events_contracts_bind_existing_read_owners() -> None:
     beads = REGISTRY.action_schema("beads.query", "observer")["action"]
     assert beads["owner"] == "beads"
     assert beads["route"] == "beads.query"
+    with pytest.raises(RegistryError, match="cannot read action"):
+        REGISTRY.action_schema("beads.query", "agent-control")
     assert beads["input_schema"]["properties"]["parameters"]["properties"]["cursor"]["maxLength"] == 256
     assert "preview_digest" in REGISTRY.action_schema("beads.change", "operator")["action"]["input_schema"]["properties"]["parameters"]["properties"]
     changeset = REGISTRY.action_schema("beads.changeset", "operator")["action"]
