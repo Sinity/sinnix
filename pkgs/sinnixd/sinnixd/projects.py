@@ -19,7 +19,7 @@ class ProjectConfigError(ValueError):
     """Raised when a project adapter is missing or violates the v1 contract."""
 
 
-MAX_OPERATION_PARAMETERS = 16
+MAX_OPERATION_PARAMETERS = 32
 MAX_PARAMETER_LIST_ITEMS = 32
 MAX_PARAMETER_STRING_LENGTH = 128
 MAX_PARAMETER_ENUM_VALUES = 64
