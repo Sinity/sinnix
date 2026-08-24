@@ -4,6 +4,7 @@ import asyncio
 import json
 import shutil
 import uuid
+from pathlib import Path
 from typing import Any
 
 from mcp import ClientSession
@@ -21,6 +22,10 @@ from sinnix_mcp.execution import (
 
 
 class McpBrokerError(ValueError):
+    pass
+
+
+class McpEnvironmentError(McpBrokerError):
     pass
 
 
@@ -51,8 +56,18 @@ class McpBrokerService:
             *(self._catalog_server(name, row) for name, row in rows if isinstance(row, dict))
         )
         servers = list(probes)
+        full_response = {"servers": servers}
+        if len(json.dumps(full_response, sort_keys=True, separators=(",", ":")).encode()) > self.config.max_result_bytes:
+            catalog_artifact = self._store_json_artifact(
+                full_response, kind="mcp-catalog", owner_id="mcp-broker", source="mcp-catalog"
+            )
+        else:
+            catalog_artifact = None
         while True:
             response = {"servers": servers}
+            if catalog_artifact is not None:
+                response["truncated"] = True
+                response["catalog_artifact"] = catalog_artifact
             if len(json.dumps(response, sort_keys=True, separators=(",", ":")).encode()) <= self.config.max_result_bytes:
                 return response
             candidates = [
@@ -60,7 +75,14 @@ class McpBrokerService:
                 if isinstance(server.get("tools"), list) and server["tools"]
             ]
             if not candidates:
-                raise McpBrokerError("broker catalog metadata exceeded response bound")
+                if catalog_artifact is None:
+                    catalog_artifact = self._store_json_artifact(
+                        response, kind="mcp-catalog", owner_id="mcp-broker", source="mcp-catalog"
+                    )
+                return {
+                    "truncated": True,
+                    "catalog_artifact": catalog_artifact,
+                }
             largest = max(candidates, key=lambda server: len(json.dumps(server["tools"])))
             largest["tools"].pop()
             largest["tools_truncated"] = True
@@ -88,20 +110,31 @@ class McpBrokerService:
                 "failure_class": "configuration_error",
                 "reason": str(exc),
             }
-        environment = self._environment(configured)
-        return {**server, **await self._probe(configured, name, environment)}
+        try:
+            environment = self._environment(configured)
+            probe = await self._probe(configured, name, environment)
+        except McpBrokerError as exc:
+            return {
+                **server,
+                "availability": "unavailable",
+                "failure_class": "environment_unavailable",
+                "reason": str(exc),
+            }
+        return {**server, **probe}
 
     def _environment(self, server: dict[str, Any]) -> dict[str, str]:
         route = OwnerRoute(
             "mcp-broker",
             (
-                EnvironmentProfile.USER_BUS_OPTIONAL
+                EnvironmentProfile.USER_BUS
                 if self.principal.name == "observer"
                 else EnvironmentProfile.PLAIN
             ),
         )
         execution = self.execution or OwnerExecution()
-        environment, _ = execution.environment_for(route, server["env"])
+        environment, missing = execution.environment_for(route, server["env"])
+        if missing is not None:
+            raise McpEnvironmentError(f"observer MCP environment is missing {missing}")
         return environment
 
     async def _probe(
@@ -160,8 +193,7 @@ class McpBrokerService:
             "tools": tools,
         }
 
-    @staticmethod
-    def _tool_contract(server_name: str, tool: Any) -> dict[str, Any]:
+    def _tool_contract(self, server_name: str, tool: Any) -> dict[str, Any]:
         """Expose the upstream's actual namespaced schema and declared effect."""
         name = getattr(tool, "name", None)
         if not isinstance(name, str) or not name:
@@ -170,13 +202,35 @@ class McpBrokerService:
         if not isinstance(schema, dict):
             raise McpBrokerError(f"MCP tool {name!r} has no input schema")
         read_only = getattr(getattr(tool, "annotations", None), "read_only_hint", None) is True
-        return {
+        contract: dict[str, Any] = {
             "name": name,
             "ref": f"sinnix://mcp/{server_name}/tools/{name}",
             "description": getattr(tool, "description", None),
-            "input_schema": schema,
             "effect": "read" if read_only else "change",
         }
+        encoded_schema = json.dumps(schema, sort_keys=True, separators=(",", ":")).encode()
+        if len(encoded_schema) <= max(1, self.config.max_result_bytes // 2):
+            contract["input_schema"] = schema
+        else:
+            artifact = self._store_json_artifact(
+                schema,
+                kind="mcp-schema",
+                owner_id=server_name,
+                source="mcp-schema",
+                target={"server": server_name, "tool": name},
+            )
+            contract.update(
+                {
+                    "input_schema": {
+                        "type": "object",
+                        "additionalProperties": True,
+                        "x-sinnix-schema-truncated": True,
+                    },
+                    "input_schema_artifact": artifact,
+                    "input_schema_bytes": len(encoded_schema),
+                }
+            )
+        return contract
 
     def _server(self, name: str) -> dict[str, Any]:
         name = self._string(name, "server", 128)
@@ -299,6 +353,23 @@ class McpBrokerService:
                 "target": receipt["target"],
             },
         }
+
+    def _store_json_artifact(
+        self,
+        payload: Any,
+        *,
+        kind: str,
+        owner_id: str,
+        source: str,
+        target: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self.artifacts.register_json(
+            payload,
+            kind=kind,
+            owner_id=owner_id,
+            source=source,
+            target=target or {"owner": owner_id},
+        )
 
     def _store_upstream_stderr(
         self, directory: Path, server_name: str, tool_name: str

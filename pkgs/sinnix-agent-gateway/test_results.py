@@ -128,7 +128,7 @@ def test_runtime_v2_envelopes_success_and_public_error(tmp_path) -> None:
     ).hexdigest()
 
 
-def test_runtime_v2_replaces_an_oversized_owner_payload_with_typed_error(tmp_path) -> None:
+def test_runtime_v2_replaces_an_oversized_owner_payload_with_an_artifact(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path, max_result_bytes=1_024), "observer")
     action = REGISTRY.action("gateway.catalog")
 
@@ -136,8 +136,10 @@ def test_runtime_v2_replaces_an_oversized_owner_payload_with_typed_error(tmp_pat
         action, lambda: {"rows": ["x" * 2_000]}, {"text": "large"}
     )
 
-    assert response["result"]["outcome"] == "error"
-    assert response["error"]["code"] == "response_bound"
+    assert response["result"]["outcome"] == "ok"
+    assert response["data"]["truncated"] is True
+    assert response["data"]["artifact"]["ref"].startswith("sinnix://artifacts/")
+    assert response["meta"]["artifact_refs"] == [response["data"]["artifact"]["ref"]]
     assert response["receipt"]["ref"].startswith("sinnix://receipts/")
 
 

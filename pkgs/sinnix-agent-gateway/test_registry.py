@@ -6,6 +6,7 @@ from sinnix_agent_gateway.contracts import (
     BASE_TYPED_FAILURES,
     ActionSpec,
     EffectMode,
+    OwnerRoute,
     ResourceSpec,
     VerbFamily,
 )
@@ -41,6 +42,12 @@ def test_canonical_reference_round_trips_escaped_segments() -> None:
     resource, values = REGISTRY.resolve(reference)
     assert resource.kind == "bead"
     assert values == {"project_id": "sinnix main", "bead_id": "sinnix-gw2.5"}
+
+
+def test_registry_routes_are_typed_executable_contracts() -> None:
+    assert all(isinstance(action.route, OwnerRoute) for action in REGISTRY.actions)
+    assert REGISTRY.action("machine.operate").route is OwnerRoute.OPS_ACTIONS_EXECUTE
+    assert REGISTRY.action("browser.query").route is OwnerRoute.BROWSER_READ
 
 
 @pytest.mark.parametrize(
@@ -131,6 +138,9 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "capture_lane",
         "session",
         "context_snapshot",
+        "desktop",
+        "host_file",
+        "mcp_tool",
     }
 
 

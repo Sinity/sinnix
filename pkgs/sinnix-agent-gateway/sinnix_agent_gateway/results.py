@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
 from .schemas import V2ToolEnvelope
@@ -192,9 +193,15 @@ class ResultService:
     schema = "sinnix.gateway-result.v3"
     cursor_ttl_seconds = 3_600
 
-    def __init__(self, config: GatewayConfig, principal: Principal):
+    def __init__(
+        self,
+        config: GatewayConfig,
+        principal: Principal,
+        artifacts: ArtifactService | None = None,
+    ):
         self.config = config
         self.principal = principal
+        self.artifacts = artifacts or ArtifactService(config, principal)
         config.initialize_state()
         self.root = config.state_dir / "results"
         self.snapshots_root = self.root / "snapshots"
@@ -452,7 +459,26 @@ class ResultService:
         request = request or RequestContext.create(
             hashlib.sha256(b"{}").hexdigest()
         )
-        self.require_payload_bound(payload)
+        artifact: dict[str, Any] | None = None
+        try:
+            self.require_payload_bound(payload)
+        except ResultError as exc:
+            if outcome != "ok" or exc.failure_class != "response_bound":
+                raise
+            artifact = self.artifacts.register_json(
+                payload,
+                kind="v2-result",
+                owner_id=owner,
+                source="v2-result",
+                target={"action": action, "route": route},
+            )
+            payload = {"truncated": True, "artifact": artifact}
+            self.require_payload_bound(payload)
+        effective_meta = dict(meta or {})
+        if artifact is not None:
+            refs = set(effective_meta.get("artifact_refs", []))
+            refs.add(artifact["ref"])
+            effective_meta["artifact_refs"] = sorted(refs)
         metadata = {
             "source": {"owner": owner, "route": route},
             "source_revisions": {},
@@ -461,7 +487,7 @@ class ResultService:
             "resource_refs": [],
             "artifact_refs": [],
             "correlation_id": request.request_id,
-            **dict(meta or {}),
+            **effective_meta,
         }
         result_id = str(uuid.uuid4())
         observed_at = time.time()

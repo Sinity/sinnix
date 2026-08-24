@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
 from sinnix_mcp.execution import ExecutionProfile, OwnerExecution, OwnerRoute
@@ -35,9 +36,15 @@ class ObserveService:
         "ingestion": ("polylogue_live_attempts", "sinex_xtask_history"),
     }
 
-    def __init__(self, config: GatewayConfig, principal: Principal):
+    def __init__(
+        self,
+        config: GatewayConfig,
+        principal: Principal,
+        artifacts: ArtifactService | None = None,
+    ):
         self.config = config
         self.principal = principal
+        self.artifacts = artifacts or ArtifactService(config, principal)
         self.execution = OwnerExecution()
 
     def _connector_snapshot(self) -> dict[str, str] | None:
@@ -130,14 +137,31 @@ class ObserveService:
                 "command": list(result.command),
             }
 
-    def _within_response_bound(self, response: dict[str, Any]) -> dict[str, Any]:
+    def _within_response_bound(
+        self, response: dict[str, Any], *, artifact_on_overflow: bool = False
+    ) -> dict[str, Any]:
         encoded = json.dumps(response, separators=(",", ":")).encode()
         if len(encoded) <= self.config.max_result_bytes:
             return response
+        if not artifact_on_overflow:
+            return {
+                "available": False,
+                "failure_class": "response_bound",
+                "reason": "selected machine response exceeded response bound",
+            }
+        artifact = self.artifacts.register_json(
+            response,
+            kind="machine-query",
+            owner_id="machine",
+            source="sinnix-observe",
+            target={"operation": response.get("operation")},
+        )
         return {
-            "available": False,
-            "failure_class": "response_bound",
-            "reason": "selected machine response exceeded response bound",
+            "available": True,
+            "operation": response.get("operation"),
+            "source": response.get("source", {}),
+            "truncated": True,
+            "artifact": artifact,
         }
 
     def machine_query(
@@ -225,7 +249,7 @@ class ObserveService:
             "source": source,
             "sections": {key: report.get(key) for key in keys},
         }
-        return self._within_response_bound(response)
+        return self._within_response_bound(response, artifact_on_overflow=True)
 
     def gateway_status(
         self,
