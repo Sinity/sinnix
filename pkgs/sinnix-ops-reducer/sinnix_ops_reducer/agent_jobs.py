@@ -36,14 +36,18 @@ class AgentCtlClient:
             raise AgentCtlError("AgentCTL job.list payload has no jobs array")
         truncated = value.get("truncated")
         next_cursor = value.get("next_cursor")
-        if not isinstance(truncated, bool) or (
-            next_cursor is not None and not isinstance(next_cursor, str)
+        if (
+            not isinstance(truncated, bool)
+            or (truncated and (not isinstance(next_cursor, str) or not next_cursor))
+            or (not truncated and next_cursor is not None)
         ):
             raise AgentCtlError("AgentCTL job.list payload has invalid paging metadata")
-        jobs = [job for job in raw_jobs if isinstance(job, dict)]
-        jobs.sort(key=lambda job: str(job.get("created_at") or ""), reverse=True)
+        if len(raw_jobs) > MAX_SNAPSHOT_JOBS or any(
+            not isinstance(job, dict) for job in raw_jobs
+        ):
+            raise AgentCtlError("AgentCTL job.list payload has an invalid bounded page")
         return {
-            "jobs": jobs[:MAX_SNAPSHOT_JOBS],
+            "jobs": raw_jobs,
             "truncated": truncated,
             "next_cursor": next_cursor,
         }
