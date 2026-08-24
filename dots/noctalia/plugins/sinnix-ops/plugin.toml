@@ -47,10 +47,6 @@ step = 5
 id = "capsule"
 entry = "bar.luau"
 
-[[widget]]
-id = "attention"
-entry = "bar-attention.luau"
-
 [[panel]]
 id = "now"
 entry = "panel.luau"

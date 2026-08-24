@@ -3,6 +3,7 @@
   sinnix-mcp,
   sinnix-lib,
   git,
+  beads,
   ...
 }:
 python3Packages.buildPythonApplication {
@@ -16,6 +17,7 @@ python3Packages.buildPythonApplication {
   nativeCheckInputs = [
     python3Packages.pytest
     git
+    beads
   ];
 
   checkPhase = ''

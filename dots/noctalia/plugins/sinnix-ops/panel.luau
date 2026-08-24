@@ -134,17 +134,7 @@ local function governanceText()
   return "Governance: " .. tostring(surfaces) .. " surfaces, " .. tostring(captures) .. " capture lanes, " .. tostring(sliceCount) .. " slices live"
 end
 
--- ## Agents: attention, jobs, quota ##
-
-local function attentionText()
-  local attention = stateValue("attention")
-  if type(attention) ~= "table" then return "Attention: unavailable (no attention in snapshot)" end
-  local count = attention.pending_count or 0
-  if count == 0 then return "Attention: none pending" end
-  local oldest = type(attention.pending) == "table" and attention.pending[1] or nil
-  local detail = oldest ~= nil and ("; oldest: " .. text(oldest.summary or oldest.state)) or ""
-  return "Attention: " .. tostring(count) .. " pending" .. detail
-end
+-- ## Agents: jobs and quota ##
 
 local TERMINAL_LIFECYCLES = { completed = true, failed = true, cancelled = true, expired = true }
 
@@ -283,7 +273,7 @@ local function render()
   table.insert(fleet, gapsText())
   table.insert(fleet, governanceText())
   table.insert(rows, infoSection("Fleet", fleet))
-  local agents = { attentionText() }
+  local agents = {}
   for _, line in ipairs(agentLines()) do table.insert(agents, line) end
   for _, line in ipairs(quotaLines()) do table.insert(agents, line) end
   table.insert(rows, infoSection("Agents", agents))

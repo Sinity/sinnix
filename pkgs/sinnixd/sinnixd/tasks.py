@@ -537,6 +537,12 @@ class TaskService:
             if record.state == "applied":
                 assert record.result is not None
                 response["task_ref"] = self._task_ref(project.project_id, record.result["created_task_id"])
+        if record.state == "failed":
+            assert record.failure is not None
+            raise TaskError(
+                ErrorCode(record.failure["code"]),
+                "task backend mutation failed",
+            )
         return response
 
     def _execute(self, project: ProjectAdapter, operation: str, arguments: dict[str, Any], *, principal: str) -> dict[str, Any]:
@@ -1016,8 +1022,9 @@ class TaskService:
 
     @staticmethod
     def _created_task_id(result: Any) -> str:
-        task = TaskService._single_task_result(result, operation="task.create")
-        value = task.get("id")
+        if not isinstance(result, dict):
+            raise TaskError(ErrorCode.RESULT_INVALID, "task backend returned an invalid task.create result")
+        value = result.get("id")
         if not isinstance(value, str) or not _ID_RE.fullmatch(value):
             raise TaskError(ErrorCode.RESULT_INVALID, "task backend omitted the created task")
         return value
