@@ -59,14 +59,18 @@ def test_principals_have_full_operator_authorized_capture_read_access(
 
 
 def test_capture_lanes_tool_lists_runtime_declared_envelope_lanes(tmp_path: Path) -> None:
-    gateway_config, _ = config(tmp_path)
+    gateway_config, lane_paths = config(tmp_path)
     service = CaptureService(gateway_config, Principal.for_name("observer"))
 
     result = service.lanes_visible()
 
     assert result == {
-        "lanes": ["clipboard", "mpris", "router"],
-        "total_queryable_lanes": 3,
+        "lanes": [
+            {"name": "clipboard", "ref": "sinnix://captures/clipboard", "path": str(lane_paths["clipboard"]), "capture_root": str(lane_paths["clipboard"].parent), "native_lane": "clipboard", "native_contract": "sinnix-capture-v1-sidecar"},
+            {"name": "mpris", "ref": "sinnix://captures/mpris", "path": str(lane_paths["mpris"]), "capture_root": str(lane_paths["mpris"].parent), "native_lane": "mpris", "native_contract": "sinnix-capture-v1-sidecar"},
+            {"name": "router", "ref": "sinnix://captures/router", "path": str(lane_paths["router"]), "capture_root": str(lane_paths["router"].parent), "native_lane": "router", "native_contract": "sinnix-capture-v1-sidecar"},
+        ],
+        "total_declared_lanes": 3,
     }
 
 
@@ -160,6 +164,63 @@ def test_capture_query_reports_missing_collector_for_declared_lane(tmp_path: Pat
             "mpris",
         ],
     }
+
+
+def test_declared_file_lane_remains_visible_without_a_sidecar_guess(tmp_path: Path) -> None:
+    inventory = tmp_path / "runtime-inventory.json"
+    lane = tmp_path / "machine" / "telemetry.jsonl"
+    lane.parent.mkdir(parents=True)
+    lane.write_text("{}\n")
+    inventory.write_text(json.dumps({"captures": [{"name": "telemetry", "path": str(lane)}]}))
+
+    service = CaptureService(
+        GatewayConfig(state_dir=tmp_path / "state", projects={}, runtime_inventory=inventory),
+        Principal.for_name("observer"),
+    )
+
+    assert service.lane("telemetry") == {
+        "ref": "sinnix://captures/telemetry",
+        "name": "telemetry",
+        "path": str(lane),
+        "native_contract": "runtime-declared-path",
+    }
+    assert service.query(["telemetry"]) == {
+        "available": False,
+        "failure_class": "native_contract_unavailable",
+        "reason": "selected runtime capture paths have no admitted query reader",
+        "lanes": ["telemetry"],
+    }
+
+
+def test_capture_query_uses_the_native_lane_derived_from_a_nested_declared_path(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "machine" / "peripherals"
+    path = root / "logitech"
+    path.mkdir(parents=True)
+    (path / "logitech-index.jsonl").write_text('{"ts": 1, "seq": 1}\n')
+    inventory = tmp_path / "runtime-inventory.json"
+    inventory.write_text(json.dumps({"captures": [{"name": "peripherals-logitech", "path": str(path)}]}))
+    captured = tmp_path / "collector-commands.jsonl"
+    collector = tmp_path / "sinnix-capture"
+    collector.write_text(
+        f"#!{sys.executable}\n"
+        "import json, pathlib, sys\n"
+        f"pathlib.Path({str(captured)!r}).write_text(json.dumps(sys.argv[1:]))\n"
+        "print('[]')\n"
+    )
+    collector.chmod(0o700)
+    service = CaptureService(
+        GatewayConfig(state_dir=tmp_path / "state", projects={}, runtime_inventory=inventory, capture_command=str(collector)),
+        Principal.for_name("observer"),
+    )
+
+    assert service.query(["peripherals-logitech"]) == {
+        "records": [], "lanes_queried": ["peripherals-logitech"], "truncated": False,
+    }
+    assert json.loads(captured.read_text()) == [
+        "query", "--capture-root", str(root), "--since", "0.0", "--lane", "logitech",
+    ]
 
 
 def test_capture_read_without_a_lane_access_entry_is_a_config_error() -> None:

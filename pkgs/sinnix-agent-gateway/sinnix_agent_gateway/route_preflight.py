@@ -93,14 +93,24 @@ class GatewayRoutePreflight:
         captures_by_root = {}
         for lane in sorted(lanes):
             capture = lanes[lane]
+            if capture.native_contract != "sinnix-capture-v1-sidecar" or capture.root is None:
+                continue
             captures_by_root.setdefault(capture.root, capture)
+
+        if not captures_by_root:
+            return {
+                "route": "capture.query",
+                "status": "unavailable",
+                "failure_class": "no_admitted_sidecar_lane",
+            }
 
         selected_captures = sorted(
             captures_by_root.values(), key=lambda value: str(value.root)
         )[:2]
         probes = []
         for capture in selected_captures:
-            lane = capture.name
+            assert capture.native_lane is not None
+            lane = capture.native_lane
             probes.append(
                 self._probe(
                     "capture.query",

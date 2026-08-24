@@ -44,13 +44,26 @@ class McpBrokerService:
         return value
 
     async def catalog(self) -> dict[str, Any]:
-        """Return current upstream availability from bounded MCP handshakes."""
+        """Return admitted upstream tool contracts from bounded handshakes."""
         self.principal.require(Capability.MCP_READ)
         rows = sorted(self.config.mcp_broker_servers.items())
         probes = await asyncio.gather(
             *(self._catalog_server(name, row) for name, row in rows if isinstance(row, dict))
         )
-        return {"servers": list(probes)}
+        servers = list(probes)
+        while True:
+            response = {"servers": servers}
+            if len(json.dumps(response, sort_keys=True, separators=(",", ":")).encode()) <= self.config.max_result_bytes:
+                return response
+            candidates = [
+                server for server in servers
+                if isinstance(server.get("tools"), list) and server["tools"]
+            ]
+            if not candidates:
+                raise McpBrokerError("broker catalog metadata exceeded response bound")
+            largest = max(candidates, key=lambda server: len(json.dumps(server["tools"])))
+            largest["tools"].pop()
+            largest["tools_truncated"] = True
 
     async def _catalog_server(self, name: str, row: dict[str, Any]) -> dict[str, Any]:
         server = {
@@ -100,20 +113,17 @@ class McpBrokerService:
         stderr_directory.mkdir(mode=0o700, parents=True)
         stderr_path = stderr_directory / "stderr.log"
 
-        async def inspect() -> tuple[int, int]:
+        async def inspect() -> tuple[list[dict[str, Any]], int]:
             with stderr_path.open("w", encoding="utf-8") as stderr:
                 async with stdio_client(parameters, errlog=stderr) as (read, write_stream):
                     async with ClientSession(read, write_stream) as session:
                         await session.initialize()
                         tools = (await session.list_tools()).tools
-            return len(tools), sum(
-                getattr(getattr(tool, "annotations", None), "read_only_hint", None)
-                is True
-                for tool in tools
-            )
+            contracts = [self._tool_contract(server_name, tool) for tool in tools]
+            return contracts, sum(contract["effect"] == "read" for contract in contracts)
 
         try:
-            tool_count, read_only_tool_count = await asyncio.wait_for(inspect(), timeout=5)
+            tools, read_only_tool_count = await asyncio.wait_for(inspect(), timeout=5)
         except asyncio.TimeoutError:
             if observer_unit is not None:
                 self._stop(observer_unit)
@@ -145,8 +155,27 @@ class McpBrokerService:
         shutil.rmtree(stderr_directory, ignore_errors=True)
         return {
             "availability": "available",
-            "tool_count": tool_count,
+            "tool_count": len(tools),
             "read_only_tool_count": read_only_tool_count,
+            "tools": tools,
+        }
+
+    @staticmethod
+    def _tool_contract(server_name: str, tool: Any) -> dict[str, Any]:
+        """Expose the upstream's actual namespaced schema and declared effect."""
+        name = getattr(tool, "name", None)
+        if not isinstance(name, str) or not name:
+            raise McpBrokerError("MCP server returned a tool without a name")
+        schema = getattr(tool, "inputSchema", getattr(tool, "input_schema", None))
+        if not isinstance(schema, dict):
+            raise McpBrokerError(f"MCP tool {name!r} has no input schema")
+        read_only = getattr(getattr(tool, "annotations", None), "read_only_hint", None) is True
+        return {
+            "name": name,
+            "ref": f"sinnix://mcp/{server_name}/tools/{name}",
+            "description": getattr(tool, "description", None),
+            "input_schema": schema,
+            "effect": "read" if read_only else "change",
         }
 
     def _server(self, name: str) -> dict[str, Any]:
@@ -325,7 +354,7 @@ class McpBrokerService:
                     "MCP tool is not explicitly declared read-only; select mcp.change through change"
                 )
             if write and read_only is True:
-                raise McpBrokerError("MCP tool is declared read-only; use mcp_read")
+                raise McpBrokerError("MCP tool is declared read-only; invoke its read contract")
             if response is None:
                 raise McpBrokerError("MCP server returned no tool result")
             return self._response_payload(response)

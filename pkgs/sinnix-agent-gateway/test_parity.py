@@ -28,18 +28,25 @@ def test_legacy_to_v2_parity_is_exhaustive_and_registry_bound() -> None:
     assert len(contract["rows"]) == len(manifest["tools"]) == 49
     assert {row["legacy_tool"] for row in contract["rows"]} == set(manifest["tools"])
     assert set(V2_MIGRATIONS) == set(manifest["tools"])
-    assert all(row["bound"] == "owner_limit_and_result_snapshot" for row in contract["rows"])
+    assert contract["summary"] == {"migrated": 48, "deleted": 1, "unexplained": 0}
+    assert all(
+        row["bound"] == "owner_limit_and_result_snapshot"
+        for row in contract["rows"]
+        if row["disposition"] == "migrated"
+    )
     assert all(
         row["required_principals"]
         == tuple(sorted(REGISTRY.action(row["v2_action"]).principals))
         for row in contract["rows"]
+        if row["disposition"] == "migrated"
     )
     assert all(
         row["typed_failures"]
         == tuple(sorted(REGISTRY.action(row["v2_action"]).typed_failures))
         for row in contract["rows"]
+        if row["disposition"] == "migrated"
     )
-    assert {row["receipt_policy"] for row in contract["rows"]} == {"audit", "owner"}
+    assert {row["receipt_policy"] for row in contract["rows"] if row["disposition"] == "migrated"} == {"audit", "owner"}
 
 
 def test_parity_map_preserves_the_checked_in_historical_order() -> None:
@@ -74,3 +81,13 @@ def test_shell_query_semantic_change_is_explicit() -> None:
         "V2 retires arbitrary read-only shell execution; typed shell jobs require "
         "operator authority."
     )
+
+
+def test_machine_report_has_an_evidence_backed_deletion_verdict() -> None:
+    row = {
+        row["legacy_tool"]: row for row in legacy_parity_contract(REGISTRY)["rows"]
+    }["machine_report"]
+
+    assert row["disposition"] == "deleted"
+    assert row["v2_action"] is None
+    assert "cursor continuation" in row["deletion_verdict"]

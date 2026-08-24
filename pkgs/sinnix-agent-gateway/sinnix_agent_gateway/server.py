@@ -67,11 +67,24 @@ async def _query_owner(
         return runtime.capability_index.search(str(values.get("query", "")), values.get("kind"), values.get("enabled"), int(values.get("cursor", 0)), int(values.get("limit", 100)))
     if action_name == "mcp.query":
         if values.get("operation", "catalog") == "catalog":
+            if reference is not None:
+                raise ProtocolError("invalid_request", "MCP catalog does not accept a target ref")
+            if set(values) - {"operation"}:
+                raise ProtocolError("invalid_request", "MCP catalog accepts no tool arguments")
             return await runtime.mcp_broker.catalog()
-        server, tool, arguments = values.get("server"), values.get("tool"), values.get("arguments")
-        if not isinstance(server, str) or not isinstance(tool, str) or not isinstance(arguments, Mapping):
-            raise ProtocolError("invalid_request", "MCP read requires server, tool, and arguments")
-        return await runtime.mcp_broker.call(server, tool, dict(arguments), write=False)
+        if values.get("operation") != "call" or not isinstance(reference, str):
+            raise ProtocolError("invalid_request", "MCP calls require operation=call and a canonical tool ref")
+        if set(values) - {"operation", "arguments"}:
+            raise ProtocolError("invalid_request", "MCP calls accept only declared tool arguments")
+        arguments = values.get("arguments")
+        if not isinstance(arguments, Mapping):
+            raise ProtocolError("invalid_request", "MCP calls require arguments")
+        _resource, target, _canonical_ref = runtime._resource_reference(
+            reference, {"mcp_tool"}, "MCP calls require a canonical admitted tool ref"
+        )
+        return await runtime.mcp_broker.call(
+            target["server"], target["tool"], dict(arguments), write=False
+        )
     if action_name == "desktop.query":
         if values.get("operation") == "capture":
             return runtime.desktop.capture_output(bool(values.get("fix_hdr", True)))

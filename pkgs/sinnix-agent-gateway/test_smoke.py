@@ -283,7 +283,6 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert unavailable_catalog["actions"] == []
                 assert {resource["kind"] for resource in unavailable_catalog["resources"]} == {
                     "context_snapshot",
-                    "result",
                 }
                 assert all(
                     resource["availability_reason"]
@@ -566,6 +565,36 @@ def test_query_adapter_consumes_capture_selector_before_owner_invocation(
     assert captured == {"lanes": ["shell"], "since": 1.5, "limit": 4}
 
 
+def test_mcp_query_derives_server_and_tool_from_a_canonical_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = Runtime.create(config(tmp_path), "observer")
+    captured: dict[str, object] = {}
+
+    async def call(server: str, tool: str, arguments: dict[str, object], *, write: bool) -> dict[str, object]:
+        captured.update(server=server, tool=tool, arguments=arguments, write=write)
+        return {"response": {"ok": True}}
+
+    monkeypatch.setattr(runtime.mcp_broker, "call", call)
+    result = anyio.run(
+        _query_owner,
+        runtime,
+        "mcp.query",
+        "sinnix://mcp/fixture/tools/lookup",
+        None,
+        200,
+        {"operation": "call", "arguments": {"query": "fixture"}},
+    )
+
+    assert result == {"response": {"ok": True}}
+    assert captured == {
+        "server": "fixture",
+        "tool": "lookup",
+        "arguments": {"query": "fixture"},
+        "write": False,
+    }
+
+
 def test_readonly_policy_is_checked_inside_write_operation(tmp_path: Path) -> None:
     cfg = config(tmp_path)
     runtime = Runtime.create(cfg, "observer")
@@ -815,7 +844,7 @@ def test_runtime_audit_carries_returned_job_correlation(tmp_path: Path) -> None:
 def test_runtime_audit_carries_upstream_mcp_target(tmp_path: Path) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
     runtime.execute(
-        "mcp_read",
+        "mcp.query",
         lambda: {
             "server": "fixture",
             "tool": "fixture_read",
@@ -1186,27 +1215,6 @@ def test_config_rejects_retired_project_visibility_fields(tmp_path: Path) -> Non
         GatewayConfig.load(path)
 
 
-def test_machine_report_timeout_is_a_typed_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runtime = Runtime.create(config(tmp_path), "observer")
-
-    monkeypatch.setattr(
-        runtime.observe.execution,
-        "run",
-        lambda *_args, **_kwargs: ExecutionResult(
-            command=("sinnix-observe",),
-            exit_status=-15,
-            stdout=b"",
-            stderr=b"",
-            timed_out=True,
-            failure_class="command_timeout",
-        ),
-    )
-    result = runtime.observe.machine_report()
-    assert result["failure_class"] == "collector_timeout"
-
-
 def test_machine_query_selects_and_pages_large_collector_report(tmp_path: Path) -> None:
     report = {
         "schema": "sinnix.observe.v1",
@@ -1259,13 +1267,9 @@ print(json.dumps(report))
     )
     runtime = Runtime.create(cfg, "observer")
 
-    machine_report = runtime.observe.machine_report()
     overview = runtime.observe.machine_query("overview")
     units = runtime.observe.machine_query("units", cursor=20, limit=3)
 
-    assert machine_report["available"] is True
-    assert machine_report["operation"] == "overview"
-    assert machine_report["sections"]["live_pressure"] == {"state": "quiet"}
     assert overview["available"] is True
     assert overview["source"]["schema"] == "sinnix.observe.v1"
     assert overview["sections"]["live_pressure"] == {"state": "quiet"}

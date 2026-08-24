@@ -292,11 +292,9 @@ def test_resource_get_contract_formats_canonical_project_relationships() -> None
 
     assert action["verb"] == "get"
     assert action["resource_kinds"] == [
-        "project",
-        "checkout",
-        "bead",
-        "task_authority",
-        "job",
+        "project", "checkout", "bead", "task_authority", "job", "artifact",
+        "receipt", "result", "machine_unit", "browser_page", "browser_workspace",
+        "terminal", "desktop", "host_file", "capture_lane", "capability", "session",
     ]
     assert action["input_schema"]["required"] == ["ref"]
     assert action["input_schema"]["properties"]["projection"]["enum"] == [
