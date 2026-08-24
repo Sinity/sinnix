@@ -34,11 +34,18 @@ class AgentCtlClient:
         raw_jobs = value.get("jobs")
         if not isinstance(raw_jobs, list):
             raise AgentCtlError("AgentCTL job.list payload has no jobs array")
+        truncated = value.get("truncated")
+        next_cursor = value.get("next_cursor")
+        if not isinstance(truncated, bool) or (
+            next_cursor is not None and not isinstance(next_cursor, str)
+        ):
+            raise AgentCtlError("AgentCTL job.list payload has invalid paging metadata")
         jobs = [job for job in raw_jobs if isinstance(job, dict)]
         jobs.sort(key=lambda job: str(job.get("created_at") or ""), reverse=True)
         return {
             "jobs": jobs[:MAX_SNAPSHOT_JOBS],
-            "truncated": len(jobs) > MAX_SNAPSHOT_JOBS,
+            "truncated": truncated,
+            "next_cursor": next_cursor,
         }
 
     def get(self, job_id: str) -> dict[str, Any]:

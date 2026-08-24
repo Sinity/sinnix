@@ -78,3 +78,28 @@ def test_agentctl_failure_degrades_only_the_job_source(tmp_path: Path) -> None:
         "degradation": "socket unavailable",
     }
     assert snapshot["state"]["agentctl"] == {"jobs": [], "truncated": False}
+
+
+def test_agentctl_paging_metadata_survives_into_reducer_state(tmp_path: Path) -> None:
+    jobs = [
+        {"job_id": f"job-{number}", "created_at": f"2026-08-23T10:{number:02d}:00Z"}
+        for number in range(100)
+    ]
+    reducer = Reducer(
+        tmp_path / "status.json",
+        tmp_path / "token",
+        lambda: {"report": 1},
+        agent_jobs_source=lambda: {
+            "jobs": jobs,
+            "truncated": True,
+            "next_cursor": "cursor-page-2",
+        },
+    )
+
+    snapshot = reducer.refresh()
+
+    assert snapshot["state"]["agentctl"] == {
+        "jobs": jobs,
+        "truncated": True,
+        "next_cursor": "cursor-page-2",
+    }
