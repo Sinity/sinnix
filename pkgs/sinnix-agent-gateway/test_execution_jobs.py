@@ -11,7 +11,7 @@ import pytest
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.registry import REGISTRY
-from sinnix_agent_gateway.runtime import ProtocolError
+from sinnix_agent_gateway.runtime import DAEMON_ERROR_CLASSES, ProtocolError
 from sinnix_mcp import (
     ErrorCode,
     ErrorEnvelope,
@@ -65,6 +65,10 @@ def runtime_with_daemon(
     daemon = FakeSinnixd()
     runtime.sinnixd = daemon  # type: ignore[assignment]
     return runtime, daemon
+
+
+def test_gateway_preserves_sinnixd_stale_task_cursor_class() -> None:
+    assert DAEMON_ERROR_CLASSES[ErrorCode.STALE_CURSOR] == "stale_cursor"
 
 
 def test_public_v2_job_verbs_dispatch_catalog_bound_owner(
