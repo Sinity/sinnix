@@ -58,7 +58,7 @@ from sinnixd.jobs import (
 )
 from sinnixd.limits import MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
 from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
-from sinnixd.projects import ProjectCatalog, ProjectConfigError, parse_worktree_records
+from sinnixd.projects import ProjectCatalog, ProjectConfigError, RegisteredCheckout, parse_worktree_records
 from sinnixd.runner import RunnerError, _require_environment, _revalidate_checkout, _run_declared
 from sinnixd.service import SinnixdService
 from sinnixd.tasks import (
@@ -695,6 +695,98 @@ def test_live_service_leases_never_share_a_port(tmp_path: Path, monkeypatch: pyt
     assert first.ok and second.ok and first.payload is not None and second.payload is not None
     assert first.payload.inline["lease"]["ports"][0]["port"] == 41000
     assert second.payload.inline["lease"]["ports"][0]["port"] == 41001
+
+
+def test_tree_cached_service_coalesces_within_scope_and_retires_terminal_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Service reuse is scoped to its root or registered checkout and never caches a dead success."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        .replace('cache = "none"\n\n[operations.service.service]', 'cache = "tree+environment"\n\n[operations.service.service]')
+        .replace("range = [41000, 41001]", "range = [41000, 41003]")
+    )
+    initialize_git_checkout(tmp_path)
+    other_checkout = tmp_path.parent / "other-checkout"
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "worktree", "add", "--quiet", "--detach", str(other_checkout), "HEAD"],
+        check=True,
+    )
+
+    catalog = ProjectCatalog([tmp_path])
+    project = catalog.get("fixture")
+    default_checkout = catalog.checkout("fixture", "default")
+    other_checkout_record = next(
+        checkout for checkout in catalog.checkouts("fixture") if checkout.path == other_checkout.resolve()
+    )
+    jobs = generic_jobs(tmp_path.parent / "job-state")
+    operation = project.operation("service")
+    assert operation.cache == "tree+environment"
+
+    def start(checkout: RegisteredCheckout | None) -> dict[str, object]:
+        return jobs.start_declared(
+            project=project,
+            operation=operation,
+            correlation_id="service-scope",
+            parameters={},
+            checkout=checkout,
+        )
+
+    root_first = start(None)
+    root_record = jobs.store.load(root_first["job_id"])
+    assert root_record.spec.cache_key is not None
+    assert jobs._admission_state()["active"][root_record.spec.cache_key] == root_first["job_id"]
+    root_duplicate = start(None)
+    assert root_duplicate["job_id"] == root_first["job_id"]
+    assert root_duplicate["coalesced"]
+    assert jobs.store.load(root_first["job_id"]).state["subscribers"] == 2
+    assert len(list(jobs.store.leases_root.glob("*.json"))) == 1
+
+    default_started = start(default_checkout)
+    default_duplicate = start(default_checkout)
+    assert default_duplicate["job_id"] == default_started["job_id"]
+    assert default_duplicate["coalesced"]
+    assert jobs.store.load(default_started["job_id"]).state["subscribers"] == 2
+    assert len(list(jobs.store.leases_root.glob("*.json"))) == 2
+    other_started = start(other_checkout_record)
+    assert default_started["job_id"] != root_first["job_id"]
+    assert other_started["job_id"] not in {root_first["job_id"], default_started["job_id"]}
+    default_record = jobs.store.load(default_started["job_id"])
+    other_record = jobs.store.load(other_started["job_id"])
+    assert default_record.spec.cache_key != other_record.spec.cache_key
+    assert default_record.spec.lease is not None and other_record.spec.lease is not None
+    assert default_record.spec.lease.ports[0].port != other_record.spec.lease.ports[0].port
+    assert len(list(jobs.store.leases_root.glob("*.json"))) == 3
+
+    jobs.systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "failed",
+        "Result": "exit-code",
+        "ExecMainStatus": "1",
+        "InvocationID": "fixture-failure",
+    }
+    failed = jobs.get(root_first["job_id"])
+    assert failed["state"]["phase"] == "failed"
+    assert not (jobs.store.leases_root / f"{root_first['job_id']}.json").exists()
+    root_after_failure = start(None)
+    assert root_after_failure["job_id"] != root_first["job_id"]
+
+    jobs.systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "InvocationID": "fixture-success",
+    }
+    succeeded = jobs.get(root_after_failure["job_id"])
+    assert succeeded["state"]["phase"] == "succeeded"
+    root_after_success = start(None)
+    assert root_after_success["job_id"] != root_after_failure["job_id"]
+    assert "reused" not in root_after_success
+    assert len(list(jobs.store.leases_root.glob("*.json"))) == 3
 
 
 def test_terminal_service_jobs_release_port_leases_for_success_failure_timeout_and_cancellation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
