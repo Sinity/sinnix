@@ -77,7 +77,7 @@ recursive = true
 position = "bottom"
 thickness = 56
 # Cockpit widgets at the end of the bar: capture-verb strip (F8/F6/F7 as
-# buttons), the agent-attention badge, and the capability-index entry point,
+# buttons) and the capability-index entry point,
 # ahead of the sysmon the live state already carries. NOTE the layer trap
 # documented at the top of this file: the state layer defines its own
 # [bar.default] end array and WINS, so this line is declared intent — the
@@ -85,7 +85,6 @@ thickness = 56
 # ~/.local/state/noctalia/settings.toml) as well.
 end = [
   "sinity/sinnix-cockpit:capture-strip",
-  "sinity/sinnix-ops:attention",
   "sinity/sinnix-cockpit:capabilities",
   "sysmon",
 ]

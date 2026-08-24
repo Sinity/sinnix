@@ -22,7 +22,7 @@ import sinnixd.api as api_module
 import sinnixd.cli as cli_module
 import sinnixd.jobs as jobs_module
 from sinnix_mcp import ErrorCode, OpaquePayload, RequestEnvelope, ResponseEnvelope, SinnixRef, SourceBinding
-from sinnix_mcp.execution import EnvironmentProfile, ExecutionResult
+from sinnix_mcp.execution import EnvironmentProfile, ExecutionResult, OwnerExecution
 
 from sinnixd.api import (
     CONNECTION_TIMEOUT_SECONDS,
@@ -62,6 +62,7 @@ from sinnixd.projects import ProjectCatalog, ProjectConfigError, RegisteredCheck
 from sinnixd.runner import RunnerError, _require_environment, _revalidate_checkout, _run_declared
 from sinnixd.service import SinnixdService
 from sinnixd.tasks import (
+    BeadsCommandBoundary,
     FLOCK_EXECUTABLE,
     MAX_TASK_OUTPUT_BYTES,
     TASK_MUTATION_JOURNAL_DIRECTORY,
@@ -2316,7 +2317,7 @@ def test_task_mutations_map_to_fixed_beads_argv(
 def test_task_create_returns_a_replay_safe_canonical_ref_and_owner_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Anti-vacuity: the replay reads the durable receipt, so a second backend create would fail this test."""
     isolate_job_scratch(monkeypatch, tmp_path)
-    boundary = FakeTaskBoundary([task_result([{"id": "fixture-new", "title": "backend-only"}])])
+    boundary = FakeTaskBoundary([task_result({"id": "fixture-new", "title": "backend-only"})])
     service, _ = task_service(tmp_path, boundary)
     arguments = {
         "project_id": "fixture",
@@ -2341,7 +2342,7 @@ def test_task_create_returns_a_replay_safe_canonical_ref_and_owner_evidence(tmp_
         "owner": "task-backend",
         "state": "applied",
         "attempts": 1,
-        "result": {"sha256": TaskMutationJournal(TaskAuthority.load(tmp_path / "task-state", "fixture").root / TASK_MUTATION_JOURNAL_DIRECTORY).records()[0].result["sha256"], "bytes": len(json.dumps([{"id": "fixture-new", "title": "backend-only"}], sort_keys=True, separators=(",", ":")).encode()), "created_task_id": "fixture-new"},
+        "result": {"sha256": TaskMutationJournal(TaskAuthority.load(tmp_path / "task-state", "fixture").root / TASK_MUTATION_JOURNAL_DIRECTORY).records()[0].result["sha256"], "bytes": len(json.dumps({"id": "fixture-new", "title": "backend-only"}, sort_keys=True, separators=(",", ":")).encode()), "created_task_id": "fixture-new"},
         "failure": None,
     }
     assert boundary.calls == [
@@ -2350,6 +2351,72 @@ def test_task_create_returns_a_replay_safe_canonical_ref_and_owner_evidence(tmp_
     journal = TaskMutationJournal(TaskAuthority.load(tmp_path / "task-state", "fixture").root / TASK_MUTATION_JOURNAL_DIRECTORY)
     public_record = next(journal.records_root.glob("*.json"))
     assert "private create description" not in public_record.read_text()
+
+
+def test_task_create_uses_the_real_beads_result_shape_and_replays_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Production boundary: current bd emits one object for create, and replay must not create twice."""
+    isolate_job_scratch(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    write_adapter(project_root)
+    task_state_root = tmp_path / "task-state"
+    authority_root = task_state_root / "fixture"
+    authority_root.mkdir(parents=True)
+    beads_environment = {
+        **os.environ,
+        "HOME": str(authority_root),
+        "XDG_CONFIG_HOME": str(authority_root / ".config"),
+        "XDG_DATA_HOME": str(authority_root / ".local" / "share"),
+        "XDG_STATE_HOME": str(authority_root / ".local" / "state"),
+    }
+    subprocess.run(
+        ["bd", "init", "--skip-agents", "--skip-hooks", "--non-interactive", "--prefix", "fixture"],
+        cwd=authority_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=beads_environment,
+    )
+    activate_task_authority(project_root, task_state_root, rows=0)
+    service = TaskService(
+        ProjectCatalog([project_root]),
+        generic_jobs(tmp_path / "jobs"),
+        BeadsCommandBoundary(execution=OwnerExecution(beads_environment)),
+        task_state_root=task_state_root,
+    )
+    arguments = {
+        "project_id": "fixture",
+        "title": "real boundary task",
+        "description": "created through the production bd boundary",
+        "issue_type": "task",
+        "priority": 2,
+        "labels": [],
+        "dependencies": [],
+    }
+
+    first = service.execute(
+        operation="task.create",
+        arguments=arguments,
+        principal="agent-control",
+        mutation_id="real-boundary-request",
+    )
+    replayed = service.execute(
+        operation="task.create",
+        arguments=arguments,
+        principal="agent-control",
+        mutation_id="real-boundary-request",
+    )
+    listed = service.execute(
+        operation="task.list",
+        arguments={"project_id": "fixture", "status": "open", "limit": 20},
+        principal="observer",
+    )
+
+    assert first == replayed
+    assert first["task_ref"].startswith("sinnix://projects/fixture/beads/fixture-")
+    assert first["owner_evidence"]["result"]["created_task_id"] == first["task_ref"].rsplit("/", 1)[1]
+    assert listed["result"]["total"] == 1
+    assert [issue["title"] for issue in listed["result"]["issues"]] == ["real boundary task"]
 
 
 def test_task_create_outage_replays_without_dirtying_the_registered_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2374,7 +2441,7 @@ def test_task_create_outage_replays_without_dirtying_the_registered_checkout(tmp
     assert "private replay description" not in next(journal.records_root.glob("*.json")).read_text()
     assert subprocess.run(["git", "-C", str(tmp_path), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout == ""
 
-    second_boundary = FakeTaskBoundary([task_result([{"id": "fixture-replayed"}])])
+    second_boundary = FakeTaskBoundary([task_result({"id": "fixture-replayed"})])
     receipts = reconcile_task_mutations(journal=journal, authority=authority, cwd=tmp_path, boundary=second_boundary)
     restarted = TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path.parent / f"second-jobs-{tmp_path.name}"), second_boundary, task_state_root=task_state_root)
     replayed = restarted.execute(operation="task.create", arguments=arguments, principal="agent-control", mutation_id="request-1")
@@ -2421,10 +2488,14 @@ def test_task_create_relation_failure_is_a_failed_journalled_receipt(tmp_path: P
         )
     )
 
-    assert response.ok and response.payload is not None
-    payload = response.payload.inline
-    assert payload["owner_evidence"] == {"owner": "task-backend", "state": "failed", "attempts": 1, "result": None, "failure": {"code": "OPERATION_FAILED"}}
-    assert "task_ref" not in payload
+    assert not response.ok and response.error is not None
+    assert response.error.code == ErrorCode.OPERATION_FAILED
+    record = TaskMutationJournal(
+        TaskAuthority.load(tmp_path / "task-state", "fixture").root
+        / TASK_MUTATION_JOURNAL_DIRECTORY
+    ).records()[0]
+    assert record.state == "failed"
+    assert record.failure == {"code": "OPERATION_FAILED"}
     assert boundary.calls == [(("--json", "create", "--title", "relation failure", "--description", "body", "--type", "task", "--priority", "2", "--parent", "fixture-parent", "--deps", "depends-on:fixture-blocker"), tmp_path)]
 
 
