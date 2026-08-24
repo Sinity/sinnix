@@ -43,12 +43,14 @@ dual_endpoints_json="$(nix eval --impure --json --expr "
         approvedActionCatalogHash = \"test-operator-catalog\";
       };
     }) ]; };
+    agentControlConfig = dual.config.environment.etc.\"sinnix/agent-gateway.json\".source;
     observerConfig = dual.config.environment.etc.\"sinnix/agent-gateway-observer.json\".source;
     operatorConfig = dual.config.environment.etc.\"sinnix/agent-gateway-operator.json\".source;
   in {
     services = dual.config.home-manager.users.sinity.systemd.user.services;
     surfaces = dual.config.sinnix.runtime.surfaces;
     configs = {
+      agentControl = { output = toString agentControlConfig; derivation = agentControlConfig.drvPath; };
       observer = { output = toString observerConfig; derivation = observerConfig.drvPath; };
       operator = { output = toString operatorConfig; derivation = operatorConfig.drvPath; };
     };
@@ -72,12 +74,14 @@ jq -e 'has("tunnel") | not' <<<"$service_json" >/dev/null
 
 etc_json="$(eval_json 'environment.etc')"
 observer_config="$(jq -r '."sinnix/agent-gateway-observer.json".source' <<<"$etc_json")"
+test "$(jq 'has("sinnix/agent-gateway.json")' <<<"$etc_json")" = true
 case "$observer_config" in
   *sinnix-agent-gateway-observer.json) ;;
   *) exit 1 ;;
 esac
 test "$(jq 'has("sinnix/agent-gateway-operator.json")' <<<"$etc_json")" = false
 
+agent_control_config="$(jq -r '.configs.agentControl.output' <<<"$dual_endpoints_json")"
 dual_observer_config="$(jq -r '.configs.observer.output' <<<"$dual_endpoints_json")"
 dual_operator_config="$(jq -r '.configs.operator.output' <<<"$dual_endpoints_json")"
 case "$dual_observer_config" in
@@ -88,10 +92,21 @@ case "$dual_operator_config" in
   *sinnix-agent-gateway-operator.json) ;;
   *) exit 1 ;;
 esac
+case "$agent_control_config" in
+  *sinnix-agent-gateway.json) ;;
+  *) exit 1 ;;
+esac
 test "$dual_observer_config" != "$dual_operator_config"
 nix-store --realise \
+  "$(jq -r '.configs.agentControl.derivation' <<<"$dual_endpoints_json")" \
   "$(jq -r '.configs.observer.derivation' <<<"$dual_endpoints_json")" \
   "$(jq -r '.configs.operator.derivation' <<<"$dual_endpoints_json")" >/dev/null
+jq -e '
+  .endpoint.name == "agent-control" and
+  .endpoint.principal == "agent-control" and
+  (.projects | length) > 0 and
+  (.captureCommand | endswith("/bin/sinnix-capture"))
+' "$agent_control_config" >/dev/null
 jq -e '
   .approvedManifestPrincipal == "observer" and
   .endpoint.principal == "observer" and
