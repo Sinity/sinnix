@@ -291,6 +291,36 @@ def test_owned_scratch_is_injected_cleaned_on_terminal_and_recovered(tmp_path: P
     assert not protected.scratch_path.exists()
 
 
+def test_queued_job_recreates_aged_scratch_before_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SINNIXD_NVME_SCRATCH_ROOT", str(tmp_path / "nvme"))
+    adapter = project(
+        tmp_path / "project",
+        (operation("heavy", pool="bulk", estimate_memory_bytes=12 * 1024 * 1024 * 1024, scratch="nvme"),),
+    )
+    systemd = FakeSystemd()
+    subject = jobs(tmp_path, systemd)
+    first = subject.start_declared(project=adapter, operation=adapter.operation("heavy"), correlation_id="one", parameters={})
+    queued = subject.start_declared(project=adapter, operation=adapter.operation("heavy"), correlation_id="two", parameters={})
+    queued_record = subject.store.load(queued["job_id"])
+    assert queued["state"]["phase"] == "queued"
+    assert queued_record.scratch_path is not None
+    queued_record.scratch_path.rmdir()
+
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "MemoryPeak": str(12 * 1024 * 1024 * 1024),
+    }
+    subject.get(first["job_id"])
+    systemd.properties = {"LoadState": "loaded", "ActiveState": "active", "Result": "success", "ExecMainStatus": "0"}
+    launched = subject.get(queued["job_id"])
+
+    assert launched["state"]["phase"] in {"submitted", "running"}
+    assert queued_record.scratch_path.is_dir()
+    assert systemd.started[-1]["environment"]["TMPDIR"] == str(queued_record.scratch_path)
+
 def test_exit_json_pytest_and_agent_result_parsers_are_contract_specific(tmp_path: Path) -> None:
     systemd = FakeSystemd(properties={"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"})
     subject = jobs(tmp_path, systemd)
