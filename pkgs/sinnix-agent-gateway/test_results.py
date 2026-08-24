@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import concurrent.futures
 import hashlib
 import json
 import subprocess
@@ -490,6 +491,93 @@ def test_v2_change_uses_canonical_checkout_preconditions_and_idempotency(tmp_pat
     assert replay == first
     assert stale["error"]["code"] == "precondition_failed"
     assert (tmp_path / "project" / "tracked.txt").read_text() == "after\n"
+
+
+def test_v2_change_project_root_selects_default_checkout_with_worktrees(tmp_path) -> None:
+    runtime = _project_runtime(tmp_path)
+    project = tmp_path / "project"
+    linked = tmp_path / "linked"
+    subprocess.run(
+        ["git", "worktree", "add", "--quiet", "-b", "fixture-linked", linked],
+        cwd=project,
+        check=True,
+    )
+    preconditions = _checkout_preconditions(runtime)
+
+    response = runtime.execute_v2(
+        REGISTRY.action("projects.change"),
+        lambda: runtime.v2_change(
+            reference="sinnix://projects/fixture",
+            operation="write",
+            path="tracked.txt",
+            content="root checkout\n",
+            patch=None,
+            preconditions=preconditions,
+        ),
+        {
+            "ref": "sinnix://projects/fixture",
+            "operation": "write",
+            "parameters": {"path": "tracked.txt", "content": "root checkout\n"},
+            "preconditions": preconditions,
+            "idempotency_key": "project-root-worktree",
+        },
+    )
+
+    assert response["result"]["outcome"] == "ok"
+    assert response["data"]["checkout_ref"] == (
+        "sinnix://projects/fixture/checkouts/default"
+    )
+    assert (project / "tracked.txt").read_text() == "root checkout\n"
+    assert (linked / "tracked.txt").read_text() == "before\n"
+
+
+def test_v2_change_rechecks_preconditions_atomically_for_concurrent_mutations(tmp_path) -> None:
+    runtime = _project_runtime(tmp_path)
+    action = REGISTRY.action("projects.change")
+    reference = "sinnix://projects/fixture/checkouts/default"
+    preconditions = _checkout_preconditions(runtime)
+
+    def mutate(content: str, idempotency_key: str) -> dict[str, object]:
+        request = {
+            "ref": reference,
+            "operation": "write",
+            "parameters": {"path": "tracked.txt", "content": content},
+            "preconditions": preconditions,
+            "idempotency_key": idempotency_key,
+        }
+        return runtime.execute_v2(
+            action,
+            lambda: runtime.v2_change(
+                reference=reference,
+                operation="write",
+                path="tracked.txt",
+                content=content,
+                patch=None,
+                preconditions=preconditions,
+            ),
+            request,
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(
+            executor.map(
+                lambda item: mutate(*item),
+                (("first\n", "concurrent-first"), ("second\n", "concurrent-second")),
+            )
+        )
+
+    assert sorted(response["result"]["outcome"] for response in responses) == [
+        "error",
+        "ok",
+    ]
+    failure = next(
+        response for response in responses if response["result"]["outcome"] == "error"
+    )
+    assert failure["error"]["code"] == "precondition_failed"
+    assert (tmp_path / "project" / "tracked.txt").read_text() in {
+        "first\n",
+        "second\n",
+    }
 
 
 def test_v2_change_preserves_project_patch_owner_contract(tmp_path) -> None:

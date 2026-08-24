@@ -31,7 +31,7 @@ from .mcp_broker import McpBrokerService
 from .memory import MemoryService
 from .observe import ObserveService
 from .project_context import ProjectContextService
-from .projects import ProjectService
+from .projects import ProjectPreconditionError, ProjectService
 from .redaction import public_error
 from .results import ProtocolError, RequestContext, ResultError, ResultService
 from .route_preflight import GatewayRoutePreflight
@@ -1072,13 +1072,30 @@ class Runtime:
                 raise ProtocolError("invalid_request", "write requires path and content")
             if patch is not None:
                 raise ProtocolError("invalid_request", "write does not accept patch")
-            result = self.projects.write(project_id, path, content, checkout_id)
+            try:
+                result = self.projects.write(
+                    project_id,
+                    path,
+                    content,
+                    selected_checkout,
+                    preconditions,
+                )
+            except ProjectPreconditionError as exc:
+                raise ProtocolError("precondition_failed", str(exc)) from exc
         elif operation == "apply_patch":
             if not isinstance(patch, str) or not patch:
                 raise ProtocolError("invalid_request", "apply_patch requires patch")
             if path is not None or content is not None:
                 raise ProtocolError("invalid_request", "apply_patch does not accept path or content")
-            result = self.projects.apply_patch(project_id, patch, checkout_id)
+            try:
+                result = self.projects.apply_patch(
+                    project_id,
+                    patch,
+                    selected_checkout,
+                    preconditions,
+                )
+            except ProjectPreconditionError as exc:
+                raise ProtocolError("precondition_failed", str(exc)) from exc
         else:
             raise ProtocolError("invalid_request", "project change operation is not recognized")
         return {
