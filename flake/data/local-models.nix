@@ -104,6 +104,7 @@ let
       expectedBytes = null;
       litellmModel = "openai/muse-glimmer";
       litellmApiBase = "http://127.0.0.1:8083/v1";
+      litellmApiKey = "sk-local";
       notes = ''
         Official Muse Glimmer 30B Q4 deployment (about 17 GB), served by the
         dedicated llama.cpp endpoint. Its fit policy places as many layers as
@@ -195,6 +196,8 @@ rec {
       litellm_params = {
         model = if m ? litellmModel then m.litellmModel else "ollama_chat/${m.ollamaTag}";
         api_base = if m ? litellmApiBase then m.litellmApiBase else ollamaApiBase;
+      } // lib.optionalAttrs (m ? litellmApiKey) {
+        api_key = m.litellmApiKey;
       };
     }
   ) litellmOrder;

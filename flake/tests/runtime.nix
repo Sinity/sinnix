@@ -367,6 +367,17 @@ in
                 && lib.hasInfix "podman" (execStartOf "podman-openedai-speech");
               message = "The AI factory must leave the native and containerized launch commands visible in their units";
             }
+            {
+              # LiteLLM routes to several independently activated backends.
+              # Requiring Ollama here starts its GPU occupant for every
+              # gateway request and evicts direct GPU backends such as Glimmer.
+              assertion =
+                !(lib.elem "ollama-proxy.service" (config.systemd.services.litellm.requires or [ ]))
+                && !(lib.elem "ollama-proxy" (
+                  config.sinnix.runtime.inventory.surfaces."litellm-proxy".activation.dependsOn or [ ]
+                ));
+              message = "LiteLLM must not unconditionally start the Ollama GPU backend; model backends activate independently";
+            }
           ];
       };
       aiActivationEvaluated = evalTestSpec system aiActivationSpec;
@@ -474,6 +485,8 @@ in
         ) "The local model roster must expose Muse Glimmer to LiteLLM as local-glimmer";
         assert lib.assertMsg (glimmerEntry.litellm_params.api_base == "http://${glimmerEndpoint}/v1")
           "LiteLLM's local-glimmer api_base must be the muse-glimmer-proxy endpoint the runtime inventory advertises";
+        assert lib.assertMsg (glimmerEntry.litellm_params.api_key == "sk-local")
+          "LiteLLM's local-glimmer entry must carry the loopback backend credential required by the OpenAI provider";
         pkgs.runCommand "local-model-roster-check" { } ''
           cat > "$out" <<'EOF_ROSTER'
           ${localModelRosterJson}

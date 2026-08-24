@@ -187,7 +187,6 @@ let
     # Lightweight gateway process, unmeasured; kept at the baseline default.
     idleTimeout = "30s";
     readinessTimeout = 30;
-    dependsOn = [ "ollama-proxy" ];
   };
   # No exclusiveResource: Kokoro is CPU-only (modules/services/kokoro.nix)
   # and must stay answerable regardless of which CUDA backend, if any,
