@@ -1,0 +1,16 @@
+diff --git a/src/shell/notification/notification_toast.cpp b/src/shell/notification/notification_toast.cpp
+index 977b44b..294899f 100644
+--- a/src/shell/notification/notification_toast.cpp
++++ b/src/shell/notification/notification_toast.cpp
+@@ -1985,7 +1985,10 @@ void NotificationToast::ensureSurfaces() {
+         .keyboard = LayerShellKeyboard::None,
+         .defaultWidth = surfaceWidth,
+         .defaultHeight = surfaceHeightForOutput(output.output),
+-        .prewarmBlur = true,
++        // This surface spans the output height. Prewarming applies the
++        // background effect before the card-only region exists, visibly
++        // darkening the entire notification column on Hyprland.
++        .prewarmBlur = false,
+     };
+
+     inst->surface = std::make_unique<LayerSurface>(*m_wayland, std::move(surfaceConfig));

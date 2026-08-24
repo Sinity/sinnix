@@ -66,6 +66,9 @@ mkFeatureModule {
         }:
         let
           mkDotsFile = mkDotsFileFor config;
+          noctalia = inputs.noctalia.packages.${pkgs.stdenv.hostPlatform.system}.default.overrideAttrs (old: {
+            patches = (old.patches or [ ]) ++ [ ./noctalia-notification-prewarm.patch ];
+          });
           officialPlugins = pkgs.fetchFromGitHub {
             owner = "noctalia-dev";
             repo = "official-plugins";
@@ -87,7 +90,7 @@ mkFeatureModule {
           # config.toml is provided as a writable dots/ symlink (meta.dotfiles).
           programs.noctalia = {
             enable = true;
-            package = inputs.noctalia.packages.${pkgs.stdenv.hostPlatform.system}.default;
+            package = noctalia;
             systemd.enable = true;
           };
 
