@@ -66,6 +66,7 @@ class TypedJobContracts:
         if sum(len(item) for item in argv) > 32_768:
             raise ContractError("shell argv exceeds the configured bound")
         checkout = self.projects.checkout(project_id, checkout_id)
+        project = self.projects.get(project_id)
         workdir = self._working_directory(checkout, cwd)
         job_id = str(uuid4())
         public_contract = {
@@ -86,6 +87,7 @@ class TypedJobContracts:
             "checkout": checkout.to_dict(),
             "cwd": str(workdir),
             "argv": list(argv),
+            "environment_command": list(project.environment.command),
         }
         return self._start(
             job_id=job_id,

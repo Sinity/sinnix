@@ -59,7 +59,7 @@ from sinnixd.jobs import (
 from sinnixd.limits import MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
 from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from sinnixd.projects import ProjectCatalog, ProjectConfigError, RegisteredCheckout, parse_worktree_records
-from sinnixd.runner import RunnerError, _require_environment, _revalidate_checkout, _run_declared
+from sinnixd.runner import RunnerError, _exec_shell, _require_environment, _revalidate_checkout, _run_declared
 from sinnixd.service import SinnixdService
 from sinnixd.tasks import (
     BeadsCommandBoundary,
@@ -4565,6 +4565,8 @@ def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: P
     assert shell_job["kind"] == "operator-shell"
     assert shell_job["principal"] == "operator"
     assert shell_job["contract"]["argv"]["executable"] == "printf"
+    shell_input = json.loads((tmp_path / "state" / "inputs" / f"{shell_job['job_id']}.json").read_text())
+    assert shell_input["environment_command"] == ["fixture-env", "--command"]
     assert agent_job["kind"] == "attested-agent"
     assert agent_job["principal"] == "agent-control"
     assert agent_job["contract"]["backend"] == "codex"
@@ -4584,6 +4586,39 @@ def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: P
         agent_job["job_id"],
         operator_agent.payload.inline["job_id"],
     }
+
+
+def test_typed_shell_runner_enters_the_registered_project_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout = tmp_path.resolve()
+    workdir = checkout / "nested"
+    workdir.mkdir()
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(os, "chdir", lambda path: observed.update(cwd=path))
+
+    def execute(executable: str, argv: list[str], environment: dict[str, str]) -> None:
+        observed.update(executable=executable, argv=argv, environment=environment)
+        raise RuntimeError("exec intercepted")
+
+    monkeypatch.setattr(os, "execvpe", execute)
+
+    with pytest.raises(RuntimeError, match="exec intercepted"):
+        _exec_shell(
+            {
+                "kind": "operator-shell",
+                "principal": "operator",
+                "cwd": str(workdir),
+                "argv": ["python", "-m", "fixture"],
+                "environment_command": ["nix", "develop", "--command"],
+            },
+            checkout,
+        )
+
+    assert observed["cwd"] == workdir
+    assert observed["executable"] == "nix"
+    assert observed["argv"] == ["nix", "develop", "--command", "python", "-m", "fixture"]
 
 
 def test_typed_contracts_refuse_spoofed_principals_checkout_backend_environment_and_results(tmp_path: Path) -> None:
