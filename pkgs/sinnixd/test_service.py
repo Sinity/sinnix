@@ -789,6 +789,185 @@ def test_tree_cached_service_coalesces_within_scope_and_retires_terminal_entries
     assert len(list(jobs.store.leases_root.glob("*.json"))) == 3
 
 
+def test_tree_cached_service_retires_after_cancellation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cancelled cached service releases admission and its descriptor-owned lease."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'cache = "none"\n\n[operations.service.service]',
+            'cache = "tree+environment"\n\n[operations.service.service]',
+        )
+    )
+    initialize_git_checkout(tmp_path)
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "InvocationID": "fixture-invocation",
+            "Result": "success",
+        }
+    )
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+
+    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    assert started.ok and started.payload is not None
+    job_id = started.payload.inline["job_id"]
+    record = jobs.store.load(job_id)
+    assert record.spec.cache_key is not None and record.spec.lease is not None
+    cache_key = record.spec.cache_key
+    assert jobs._admission_state()["active"][cache_key] == job_id
+
+    cancelled = service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": job_id}))
+    assert cancelled.ok and cancelled.payload is not None
+    assert cancelled.payload.inline["state"]["phase"] == "cancelled"
+    admission = jobs._admission_state()
+    assert cache_key not in admission["active"]
+    assert cache_key not in admission["cache"]
+    assert jobs.store.service_lease_records() == []
+    assert not (jobs.store.leases_root / f"{job_id}.json").exists()
+
+    replacement = service.dispatch(
+        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"})
+    )
+    assert replacement.ok and replacement.payload is not None
+    assert replacement.payload.inline["job_id"] != job_id
+    assert "reused" not in replacement.payload.inline
+    assert replacement.payload.inline["lease"]["ports"][0]["port"] == 41000
+
+
+def test_tree_cached_service_retires_after_terminal_outcome_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A terminal cancellation-unknown service cannot remain in cache or lease state."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'cache = "none"\n\n[operations.service.service]',
+            'cache = "tree+environment"\n\n[operations.service.service]',
+        )
+    )
+    initialize_git_checkout(tmp_path)
+
+    class StopTimesOutThenCollects(FakeSystemdJobs):
+        def stop(self, unit: str) -> None:
+            self.stopped.append(unit)
+            self.properties = {
+                "LoadState": "not-found",
+                "ActiveState": "inactive",
+                "InvocationID": "",
+                "Result": "success",
+                "ExecMainStatus": "0",
+            }
+            raise SystemdJobError("fixture stop timeout")
+
+    systemd = StopTimesOutThenCollects(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "InvocationID": "fixture-invocation",
+            "Result": "success",
+        }
+    )
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+
+    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    assert started.ok and started.payload is not None
+    job_id = started.payload.inline["job_id"]
+    record = jobs.store.load(job_id)
+    assert record.spec.cache_key is not None and record.spec.lease is not None
+    cache_key = record.spec.cache_key
+    assert jobs._admission_state()["active"][cache_key] == job_id
+
+    cancelled = service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": job_id}))
+    assert cancelled.error is not None
+    jobs.store.save(replace(jobs.store.load(job_id), cancel_requested_at="2000-01-01T00:00:00+00:00"))
+
+    restarted = GenericJobs(systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.001)
+    reconciled = restarted.get(job_id)
+    assert reconciled["state"]["phase"] == "outcome-unknown"
+    assert reconciled["state"]["terminal"]
+    admission = restarted._admission_state()
+    assert cache_key not in admission["active"]
+    assert cache_key not in admission["cache"]
+    assert restarted.store.service_lease_records() == []
+    assert not (restarted.store.leases_root / f"{job_id}.json").exists()
+    assert (restarted.store.leases_root / f"{job_id}.released").exists()
+
+    replacement = SinnixdService(ProjectCatalog([tmp_path]), jobs=restarted).dispatch(
+        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"})
+    )
+    assert replacement.ok and replacement.payload is not None
+    assert replacement.payload.inline["job_id"] != job_id
+    assert "reused" not in replacement.payload.inline
+    assert replacement.payload.inline["lease"]["ports"][0]["port"] == 41000
+
+
+def test_tree_cached_services_isolate_distinct_project_roots_in_one_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Identical trees from distinct roots must not coalesce a lease-owning service."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    roots = (tmp_path / "project-a", tmp_path / "project-b")
+    for root in roots:
+        write_adapter(root)
+        descriptor = root / ".agentctl" / "project.toml"
+        descriptor.write_text(
+            descriptor.read_text()
+            .replace(
+                'cache = "none"\n\n[operations.service.service]',
+                'cache = "tree+environment"\n\n[operations.service.service]',
+            )
+            .replace(f'root = "{root / "worktrees"}"', 'root = "/fixture-worktrees"')
+        )
+        initialize_git_checkout(root)
+
+    first_project = ProjectCatalog([roots[0]]).get("fixture")
+    second_project = ProjectCatalog([roots[1]]).get("fixture")
+    assert GenericJobs._cache_tree(first_project.root) == GenericJobs._cache_tree(second_project.root)
+    assert first_project.environment.values() == second_project.environment.values()
+
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path / "shared-job-state", systemd)
+    first_service = SinnixdService(ProjectCatalog([roots[0]]), jobs=jobs)
+    second_service = SinnixdService(ProjectCatalog([roots[1]]), jobs=jobs)
+    start_arguments = {"project_id": "fixture", "operation": "service"}
+    first = first_service.dispatch(request("job.start", "systemd-jobs", start_arguments))
+    second = second_service.dispatch(request("job.start", "systemd-jobs", start_arguments))
+    assert first.ok and second.ok and first.payload is not None and second.payload is not None
+    first_id = first.payload.inline["job_id"]
+    second_id = second.payload.inline["job_id"]
+    assert first_id != second_id
+    first_record = jobs.store.load(first_id)
+    second_record = jobs.store.load(second_id)
+    assert first_record.spec.cache_key is not None and second_record.spec.cache_key is not None
+    assert first_record.spec.cache_key != second_record.spec.cache_key
+    assert first_record.spec.lease is not None and second_record.spec.lease is not None
+    assert first_record.spec.lease.ports[0].port == 41000
+    assert second_record.spec.lease.ports[0].port == 41001
+    assert jobs._admission_state()["active"] == {
+        first_record.spec.cache_key: first_id,
+        second_record.spec.cache_key: second_id,
+    }
+
+    first_duplicate = first_service.dispatch(request("job.start", "systemd-jobs", start_arguments))
+    second_duplicate = second_service.dispatch(request("job.start", "systemd-jobs", start_arguments))
+    assert first_duplicate.ok and second_duplicate.ok
+    assert first_duplicate.payload is not None and second_duplicate.payload is not None
+    assert first_duplicate.payload.inline["job_id"] == first_id
+    assert second_duplicate.payload.inline["job_id"] == second_id
+    assert first_duplicate.payload.inline["coalesced"]
+    assert second_duplicate.payload.inline["coalesced"]
+    assert len(systemd.started) == 2
+
+
 def test_terminal_service_jobs_release_port_leases_for_success_failure_timeout_and_cancellation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Anti-vacuity: every terminal systemd outcome must make the port available to the next declared service."""
     monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
