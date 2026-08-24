@@ -39,6 +39,9 @@ CDP_RESPONSE_TIMEOUT_SEC="${SINNIX_CDP_TIMEOUT_SEC:-5}"
   echo "SINNIX_CDP_TIMEOUT_SEC must be a positive integer: ${CDP_RESPONSE_TIMEOUT_SEC}" >&2
   exit 2
 }
+# Chrome accepts command IDs as signed 32-bit integers. Keep the sequence in
+# that range and wrap it, rather than deriving a JSON number from a process ID.
+CDP_REQUEST_ID_MAX=2147483647
 cdp_request_seq=0
 
 # The inactive named workspace agent windows are parked on, and the key that
@@ -152,6 +155,12 @@ target_status() {
 
 # ── CDP WebSocket helpers ──────────────────────────────────────────────
 
+cdp_next_request_id() {
+  local -n result="$1"
+  ((cdp_request_seq = cdp_request_seq % CDP_REQUEST_ID_MAX + 1))
+  result="$cdp_request_seq"
+}
+
 cdp_send() {
   local ws_url method params_json request_id request read_fd write_fd cdp_pid response status
   ws_url="$1"
@@ -159,11 +168,9 @@ cdp_send() {
   params_json="${3:-}"
   [[ -n $params_json ]] || params_json='{}'
 
-  # A cdp_send invocation uses one WebSocket request. The process-derived
-  # prefix keeps IDs distinct when command substitutions run in subshells,
-  # while the sequence keeps direct calls in the same shell distinct.
-  ((cdp_request_seq += 1))
-  request_id=$((BASHPID * 1000000 + cdp_request_seq))
+  # Each invocation owns a fresh WebSocket, so a bounded positive ID is enough
+  # to match its response while ignoring unsolicited protocol events.
+  cdp_next_request_id request_id
   request=$(jq -nc --argjson id "$request_id" --arg method "$method" --argjson params "$params_json" \
     '{id: $id, method: $method, params: $params}')
 
@@ -1149,6 +1156,9 @@ fill-form)
 upload-files)
   page_id=""
   selector=""
+  upload_resolve_id=""
+  upload_attach_id=""
+  upload_dispatch_id=""
   files=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1196,8 +1206,7 @@ upload-files)
   read_fd="${SINNIX_CDP_UPLOAD[0]}"
   write_fd="${SINNIX_CDP_UPLOAD[1]}"
 
-  ((cdp_request_seq += 1))
-  upload_resolve_id=$((BASHPID * 1000000 + cdp_request_seq))
+  cdp_next_request_id upload_resolve_id
   request=$(jq -nc --argjson id "$upload_resolve_id" --arg selector "$selector" \
     '{id: $id, method: "Runtime.evaluate", params: {expression: ("document.querySelector(" + ($selector | tojson) + ")")}}')
   printf '%s\n' "$request" >&"$write_fd"
@@ -1211,8 +1220,7 @@ upload-files)
     exit 1
   }
 
-  ((cdp_request_seq += 1))
-  upload_attach_id=$((BASHPID * 1000000 + cdp_request_seq))
+  cdp_next_request_id upload_attach_id
   request=$(jq -nc --argjson id "$upload_attach_id" --arg objectId "$object_id" --argjson files "$files_json" \
     '{id: $id, method: "DOM.setFileInputFiles", params: {objectId: $objectId, files: $files}}')
   printf '%s\n' "$request" >&"$write_fd"
@@ -1225,8 +1233,7 @@ upload-files)
     exit 1
   fi
 
-  ((cdp_request_seq += 1))
-  upload_dispatch_id=$((BASHPID * 1000000 + cdp_request_seq))
+  cdp_next_request_id upload_dispatch_id
   request=$(jq -nc --argjson id "$upload_dispatch_id" --arg objectId "$object_id" \
     '{id: $id, method: "Runtime.callFunctionOn", params: {objectId: $objectId, functionDeclaration: "function(){this.dispatchEvent(new Event(\"input\",{bubbles:true}));this.dispatchEvent(new Event(\"change\",{bubbles:true}));return this.files.length}", returnByValue: true}}')
   printf '%s\n' "$request" >&"$write_fd"

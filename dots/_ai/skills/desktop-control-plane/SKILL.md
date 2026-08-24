@@ -154,9 +154,9 @@ sinnix-chrome-control upload-files <page_id> \
   navigation lands in his session, not a sandbox.
 - `agent-window` returns only after the exact new compositor address has stayed
   tiled, unpinned, non-fullscreen, and invisible on `agentbrowser` while the
-  focused operator client remains unchanged. CDP command responses are matched
-  by request ID with a five-second default deadline; a failed transaction closes
-  only its own created target.
+  focused operator client remains unchanged. CDP command responses use positive
+  signed-32-bit request IDs, are matched with a five-second default deadline,
+  and a failed transaction closes only its own created target.
 
 ## Notes
 

@@ -45,6 +45,17 @@ set -euo pipefail
 
 state="${FAKE_STATE:?}"
 request="$(IFS= read -r line; printf '%s' "$line")"
+
+# Chromium accepts CDP request IDs as positive signed 32-bit integers. Its
+# invalid-request error is uncorrelated, so a caller that awaits its own ID
+# must keep waiting until its response deadline.
+if ! jq -e '(.id | type == "number" and floor == . and . >= 1 and . <= 2147483647)' \
+  >/dev/null <<<"$request"; then
+  printf '%s\n' "{\"error\":{\"code\":-32600,\"message\":\"Message must have integer 'id' property\"}}"
+  trap 'exit 0' TERM INT
+  while :; do sleep 1; done
+fi
+
 id="$(jq -r '.id' <<<"$request")"
 method="$(jq -r '.method' <<<"$request")"
 printf '%s\t%s\n' "$id" "$method" >>"$state/request-ids"
@@ -196,6 +207,35 @@ run_with_deadline() {
   return "$status"
 }
 
+assert_fake_wire_rejects_out_of_range_id() {
+  local state="$fixture_root/invalid-id" expected_message
+  expected_message="Message must have integer 'id' property"
+  mkdir -p "$state"
+  : >"$state/request-ids"
+  if timeout 1 env \
+    FAKE_STATE="$state" \
+    FAKE_CDP_SCENARIO=match \
+    "$fixture_root/bin/websocat" \
+    <<< '{"id":2147483648,"method":"Target.createTarget","params":{}}' \
+    >"$state/response" 2>"$state/stderr"; then
+    printf 'fake CDP wire accepted an out-of-range request ID\n' >&2
+    return 1
+  fi
+  jq -e --arg message "$expected_message" '. == {error: {code: -32600, message: $message}}' \
+    "$state/response" >/dev/null
+  test ! -e "$state/agent-target"
+}
+
+assert_positive_accepted_request_ids() {
+  local requests="$1/request-ids" id method
+  while IFS=$'\t' read -r id method; do
+    [[ $id =~ ^[1-9][0-9]*$ ]] && ((id <= 2147483647)) || {
+      printf 'helper emitted an invalid CDP request ID: %s (%s)\n' "$id" "$method" >&2
+      return 1
+    }
+  done <"$requests"
+}
+
 mode="${1:-final}"
 case "$mode" in
 baseline)
@@ -211,17 +251,20 @@ baseline)
   run_with_deadline delayed delayed 8
   ;;
 final)
+  assert_fake_wire_rejects_out_of_range_id
+
   run_with_deadline matching match 8
   state="$fixture_root/matching"
   jq -e '.parked == true and .workspace == "agentbrowser" and .url == "https://example.test"' "$state/stdout" >/dev/null
   test "$(cat "$state/navigated-url")" = https://example.test
   ! grep -Fq 'dispatch workspace' "$state/hyprctl-calls"
   ! grep -Fq 'address:0xoperator' "$state/hyprctl-calls"
-  test "$(sort "$state/request-ids" | cut -f1 | uniq -d | wc -l)" -eq 0
+  assert_positive_accepted_request_ids "$state"
 
   run_with_deadline unsolicited event-first 8
   state="$fixture_root/unsolicited"
   jq -e '.parked == true' "$state/stdout" >/dev/null
+  assert_positive_accepted_request_ids "$state"
 
   if run_with_deadline missing missing 6; then
     printf 'missing CDP response unexpectedly succeeded\n' >&2
@@ -231,10 +274,12 @@ final)
   test ! -e "$state/agent-target"
   test "$(cat "$state/closed-targets")" = agent-target
   grep -Fq 'timed out waiting for CDP response' "$state/stderr"
+  assert_positive_accepted_request_ids "$state"
 
   run_with_deadline delayed delayed 8
   state="$fixture_root/delayed"
   jq -e '.parked == true' "$state/stdout" >/dev/null
+  assert_positive_accepted_request_ids "$state"
 
   FAKE_COMPOSITOR_MAP=false run_with_deadline compositor-map-failure match 8 || true
   state="$fixture_root/compositor-map-failure"
