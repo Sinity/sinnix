@@ -222,6 +222,32 @@ def test_agentctl_task_mutations_require_a_stable_request_id() -> None:
         cli_module.parser().parse_args(["task", "create", "fixture", "title", "--description", "body", "--type", "task", "--priority", "5", "--request-id", "request-1"])
 
 
+def test_agentctl_task_list_preserves_cursor_and_order_controls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, RequestEnvelope] = {}
+
+    def fake_call(socket_path, request_value):
+        captured["request"] = request_value
+        return {"schema": 1, "ok": True}
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["agentctl", "task", "list", "fixture", "--limit", "2", "--cursor", "cursor-fixture", "--sort", "id", "--reverse"],
+    )
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    outbound = captured["request"]
+    assert dict(outbound.arguments) == {
+        "project_id": "fixture",
+        "limit": 2,
+        "cursor": "cursor-fixture",
+        "order": {"field": "id", "reverse": True},
+    }
+
+
 def test_agentctl_workspace_dispose_maps_to_a_typed_envelope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -291,7 +317,7 @@ def test_agentctl_job_start_maps_parameters_json_to_the_typed_request(
     }
 
 
-def write_adapter(root: Path) -> None:
+def write_adapter(root: Path, *, project_id: str = "fixture") -> None:
     (root / "modules").mkdir(parents=True)
     (root / "flake.nix").write_text("{}")
     (root / ".agentctl").mkdir()
@@ -299,8 +325,8 @@ def write_adapter(root: Path) -> None:
         f"""schema = 1
 
 [project]
-id = "fixture"
-display_name = "Fixture"
+id = "{project_id}"
+display_name = "{project_id.title()}"
 root_markers = ["flake.nix", "modules"]
 
 [environment]
@@ -1496,7 +1522,7 @@ class FakeTaskBoundary:
     max_active: int = 0
     _guard: threading.Lock = field(default_factory=threading.Lock)
 
-    def run(self, *, argv: tuple[str, ...], cwd: Path, environment: dict[str, str], lock_path: Path | None = None) -> ExecutionResult:
+    def run(self, *, argv: tuple[str, ...], cwd: Path, environment: dict[str, str], lock_path: Path | None = None, max_stdout_bytes: int | None = None) -> ExecutionResult:
         self.calls.append((argv, cwd))
         self.lock_paths.append(lock_path)
         with self._guard:
@@ -1517,7 +1543,7 @@ class CanonicalTaskBoundary:
     calls: list[tuple[tuple[str, ...], Path]] = field(default_factory=list)
     databases: list[Path] = field(default_factory=list)
 
-    def run(self, *, argv: tuple[str, ...], cwd: Path, environment: dict[str, str], lock_path: Path | None = None) -> ExecutionResult:
+    def run(self, *, argv: tuple[str, ...], cwd: Path, environment: dict[str, str], lock_path: Path | None = None, max_stdout_bytes: int | None = None) -> ExecutionResult:
         self.calls.append((argv, cwd))
         database = Path(environment["BEADS_DIR"]) / "dolt"
         self.databases.append(database)
@@ -1547,11 +1573,12 @@ def activate_task_authority(
     project_root: Path,
     state_root: Path,
     *,
+    project_id: str = "fixture",
     source_database: Path | None = None,
     rows: int = 1,
     digest: str = "sha256:" + "a" * 64,
 ) -> Path:
-    authority_root = state_root / "fixture"
+    authority_root = state_root / project_id
     database = authority_root / ".beads" / "dolt"
     database.mkdir(mode=0o700, parents=True)
     source_database = source_database or project_root / ".beads" / "dolt"
@@ -1561,7 +1588,7 @@ def activate_task_authority(
         json.dumps(
             {
                 "schema": 1,
-                "project_id": "fixture",
+                "project_id": project_id,
                 "database": str(database),
                 "source_database": str(source_database),
                 "verification": {
@@ -1614,15 +1641,129 @@ def test_task_reads_resolve_catalog_projects_and_use_readonly_fixed_argv(tmp_pat
         principal="observer",
     )
 
-    assert listed["result"] == {"issues": [{"id": "fixture-1"}]}
+    assert listed["result"]["issues"] == [{"id": "fixture-1"}]
+    assert listed["result"]["total"] == 1
+    assert listed["result"]["next_cursor"] is None
+    assert listed["result"]["coverage"]["total_exact"] is True
     assert fetched["result"] == {"id": "fixture-1"}
     authority_root = tmp_path / "task-state" / "fixture"
     database = authority_root / ".beads" / "dolt"
     prefix = ("--json", "--readonly")
     assert boundary.calls == [
-        ((*prefix, "list", "--flat", "--status", "open", "--limit", "20"), tmp_path),
+        ((*prefix, "list", "--flat", "--status", "open", "--limit", "0", "--max-rows", "100000"), tmp_path),
         ((*prefix, "show", "fixture-1"), tmp_path),
     ]
+
+
+def test_task_list_traverses_real_pages_from_one_immutable_snapshot(tmp_path: Path) -> None:
+    rows = [{"id": f"fixture-{index}", "status": "open"} for index in range(1, 6)]
+    service, boundary = task_service(tmp_path, FakeTaskBoundary([task_result({"issues": rows})]))
+    arguments: dict[str, object] = {"project_id": "fixture", "status": "open", "limit": 2}
+    seen: list[str] = []
+    source_revision: str | None = None
+    cursor: str | None = None
+
+    while True:
+        page_arguments = dict(arguments)
+        if cursor is not None:
+            page_arguments["cursor"] = cursor
+        page = service.execute(operation="task.list", arguments=page_arguments, principal="observer")
+        result = page["result"]
+        assert result["coverage"] == {
+            "state": "complete",
+            "kind": "result_snapshot",
+            "returned": 5,
+            "total": 5,
+            "total_exact": True,
+            "source_revision": result["source_revision"],
+        }
+        assert result["page"]["complete"] is (result["next_cursor"] is None)
+        seen.extend(row["id"] for row in result["issues"])
+        source_revision = source_revision or result["source_revision"]
+        assert result["source_revision"] == source_revision
+        cursor = result["next_cursor"]
+        if cursor is None:
+            break
+
+    assert seen == [f"fixture-{index}" for index in range(1, 6)]
+    assert len(boundary.calls) == 1
+    assert boundary.calls[0][0][-4:] == ("--limit", "0", "--max-rows", "100000")
+
+
+def test_task_list_cursor_rejects_negative_cases_before_owner_dispatch(tmp_path: Path) -> None:
+    service, boundary = task_service(tmp_path, FakeTaskBoundary([task_result({"issues": [{"id": "fixture-1"}, {"id": "fixture-2"}]})]))
+    first = service.execute(
+        operation="task.list", arguments={"project_id": "fixture", "limit": 1}, principal="observer"
+    )["result"]
+    cursor = first["next_cursor"]
+    assert isinstance(cursor, str)
+    owner_calls = len(boundary.calls)
+
+    cases = (
+        ("malformed", "not-a-cursor", "INVALID_ARGUMENT"),
+        ("oversized", "x" * 513, "INVALID_ARGUMENT"),
+    )
+    for _, bad_cursor, code in cases:
+        with pytest.raises(TaskError) as error:
+            service.execute(
+                operation="task.list",
+                arguments={"project_id": "fixture", "limit": 1, "cursor": bad_cursor},
+                principal="observer",
+            )
+        assert error.value.code.value == code
+
+    with pytest.raises(TaskError, match="principal") as foreign:
+        service.execute(
+            operation="task.list",
+            arguments={"project_id": "fixture", "limit": 1, "cursor": cursor},
+            principal="operator",
+        )
+    assert foreign.value.code.value == "INVALID_ARGUMENT"
+
+    other_project = tmp_path / "other-project"
+    write_adapter(other_project, project_id="other")
+    activate_task_authority(other_project, tmp_path / "task-state", project_id="other")
+    service.projects = ProjectCatalog([tmp_path, other_project])
+    with pytest.raises(TaskError):
+        service.execute(
+            operation="task.list",
+            arguments={"project_id": "other", "limit": 1, "cursor": cursor},
+            principal="observer",
+        )
+
+    with pytest.raises(TaskError, match="query") as mismatched:
+        service.execute(
+            operation="task.list",
+            arguments={"project_id": "fixture", "status": "closed", "limit": 1, "cursor": cursor},
+            principal="observer",
+        )
+    assert mismatched.value.code.value == "INVALID_ARGUMENT"
+    assert len(boundary.calls) == owner_calls
+
+    snapshot = next((tmp_path / "task-state" / "fixture" / "sinnixd-task-list-snapshots").glob("*.json"))
+    snapshot.unlink()
+    with pytest.raises(TaskError) as missing:
+        service.execute(
+            operation="task.list", arguments={"project_id": "fixture", "limit": 1, "cursor": cursor}, principal="observer"
+        )
+    assert missing.value.code.value == "STALE_CURSOR"
+    assert len(boundary.calls) == owner_calls
+
+
+def test_task_list_service_returns_structured_stale_cursor_error(tmp_path: Path) -> None:
+    service, _ = task_service(tmp_path, FakeTaskBoundary([task_result({"issues": [{"id": "fixture-1"}, {"id": "fixture-2"}]})]))
+    daemon = SinnixdService(ProjectCatalog([tmp_path]), tasks=service)
+    first = daemon.dispatch(
+        request("task.list", "task-backend", {"project_id": "fixture", "limit": 1}, "observer")
+    )
+    assert first.ok and first.payload is not None
+    cursor = first.payload.inline["result"]["next_cursor"]
+    next((tmp_path / "task-state" / "fixture" / "sinnixd-task-list-snapshots").glob("*.json")).unlink()
+    response = daemon.dispatch(
+        request("task.list", "task-backend", {"project_id": "fixture", "limit": 1, "cursor": cursor}, "observer")
+    )
+    assert response.error is not None
+    assert response.error.code is ErrorCode.STALE_CURSOR
 
 
 @pytest.mark.parametrize(

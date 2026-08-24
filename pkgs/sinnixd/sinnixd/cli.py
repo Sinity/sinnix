@@ -137,6 +137,9 @@ def parser() -> argparse.ArgumentParser:
     task_list.add_argument("--assignee")
     task_list.add_argument("--label")
     task_list.add_argument("--limit", type=int, default=100)
+    task_list.add_argument("--cursor")
+    task_list.add_argument("--sort", choices=("priority", "created", "updated", "closed", "status", "id", "title", "type", "assignee"))
+    task_list.add_argument("--reverse", action="store_true")
     task_list.add_argument("--include-closed", action="store_true")
     task_list.add_argument("--ready", action="store_true")
     task_get = task_subcommands.add_parser("get")
@@ -417,10 +420,16 @@ def main() -> int:
         task_arguments: dict[str, object] = {"project_id": arguments.project_id}
         if arguments.task_command == "list":
             task_arguments["limit"] = arguments.limit
+            if arguments.cursor is not None:
+                task_arguments["cursor"] = arguments.cursor
             for name in ("status", "assignee", "label"):
                 value = getattr(arguments, name)
                 if value is not None:
                     task_arguments[name] = value
+            if arguments.sort is not None:
+                task_arguments["order"] = {"field": arguments.sort, "reverse": arguments.reverse}
+            elif arguments.reverse:
+                parser().error("--reverse requires --sort")
             for name in ("include_closed", "ready"):
                 if getattr(arguments, name):
                     task_arguments[name] = True

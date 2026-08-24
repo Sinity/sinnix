@@ -47,6 +47,7 @@ T = TypeVar("T")
 
 DAEMON_ERROR_CLASSES = {
     ErrorCode.INVALID_ARGUMENT: "invalid_request",
+    ErrorCode.STALE_CURSOR: "stale_cursor",
     ErrorCode.POLICY_DENIED: "policy_denied",
     ErrorCode.OWNER_UNAVAILABLE: "unavailable",
     ErrorCode.AUTHORITY_MISMATCH: "policy_denied",
