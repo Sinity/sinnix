@@ -1549,7 +1549,11 @@ class Runtime:
         mutation = self.beads.change(
             project_id,
             "close",
-            {"id": bead_id, "reason": json.dumps(evidence, sort_keys=True, separators=(",", ":"))},
+            {
+                "id": bead_id,
+                "reason": json.dumps(evidence, sort_keys=True, separators=(",", ":")),
+                "force": True,
+            },
             preconditions={"expected_task_revision": current["task_revision"], "expected_etag": current["etag"]},
         )
         return {"closure": evidence, "bead": mutation}

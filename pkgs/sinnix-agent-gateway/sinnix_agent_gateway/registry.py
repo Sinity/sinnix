@@ -717,6 +717,7 @@ BEADS_CHANGE_SCHEMA["properties"]["parameters"] = {
         "text": {"type": "string", "maxLength": 32000}, "depends_on": {"type": "string", "maxLength": 128},
         "other_id": {"type": "string", "maxLength": 128}, "parent_id": {"type": "string", "maxLength": 128},
         "type": {"type": "string", "maxLength": 64}, "reason": {"type": "string", "maxLength": 32000}, "key": {"type": "string", "maxLength": 256}, "graph": {"type": "object", "maxProperties": 256},
+        "force": {"type": "boolean", "const": True},
         "verdict": {"enum": ["accepted", "rejected", "partial"]}, "residuals": {"type": "array", "maxItems": 32, "items": {"type": "string", "maxLength": 2_000}}, "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string", "pattern": "^sinnix://"}}, "job_ref": {"type": "string", "pattern": "^sinnix://jobs/[^/]+$"}, "code_revision": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"}, "task_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "task_etag": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "patch": {"type": "object", "additionalProperties": False, "properties": {
             "set": {"type": "object"},

@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v2-g2.10-context-events -->
-<!-- gateway-catalog-sha256: e397d251c8fe961b76d414c244fc283fc03da2840b3382a13ea0cb84f456a267 -->
+<!-- gateway-catalog-sha256: 4fd6f1e385f1b6747354dfa003d42cef761a629f8ddab79a2f0a6311b5b4acd3 -->
 # Sinnix Agent Gateway V2 reference
 
 This reference is generated from `sinnix_agent_gateway.registry.REGISTRY`. The catalog hash changes when an action, resource, schema, route, principal, bound, or example changes.
 
-Revision: `v2-g2.10-context-events`. Catalog SHA-256: `e397d251c8fe961b76d414c244fc283fc03da2840b3382a13ea0cb84f456a267`.
+Revision: `v2-g2.10-context-events`. Catalog SHA-256: `4fd6f1e385f1b6747354dfa003d42cef761a629f8ddab79a2f0a6311b5b4acd3`.
 
 ## Ten CLI verbs
 
@@ -1087,6 +1087,10 @@ Input schema:
           "maxItems": 32,
           "minItems": 1,
           "type": "array"
+        },
+        "force": {
+          "const": true,
+          "type": "boolean"
         },
         "graph": {
           "maxProperties": 256,

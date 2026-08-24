@@ -431,6 +431,10 @@ class BeadsService:
         elif operation == "memory.forget": command = ["forget", self._string(values.pop("key", None), "key", 256)]
         else: raise BeadsError(f"unsupported_capability: Beads operation {operation!r} is not declared")
         if operation in {"unclaim", "close", "reopen"} and "reason" in values: command += ["--reason", self._string(values.pop("reason"), "reason", 32000)]
+        if operation == "close" and "force" in values:
+            if values.pop("force") is not True:
+                raise BeadsError("close force must be true when supplied")
+            command += ["--force"]
         if values: raise BeadsError(f"{operation} received unsupported parameters: {sorted(values)}")
         return target, command
 

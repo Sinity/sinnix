@@ -565,6 +565,7 @@ def test_bead_review_and_evidence_close_require_bound_successful_job(
     assert review["evidence"]["tests"]["availability"] == "unavailable"
     assert closed["closure"]["launch_task_revision"] == "z" * 64
     assert changes[0]["operation"] == "close"
+    assert changes[0]["parameters"]["force"] is True
     assert json.loads(changes[0]["parameters"]["reason"])["code_revision"] == "d" * 40
 
     daemon.responses["job.get"] = {**daemon.responses["job.get"], "state": {"phase": "cancelled"}}
