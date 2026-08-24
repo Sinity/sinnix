@@ -86,6 +86,25 @@ IDEMPOTENT_MUTATION_TOOL = ToolAnnotations(
 )
 
 
+def _orientation_task_summary(result: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep project orientation useful without embedding full Beads bodies."""
+    items = result.get("items")
+    if not isinstance(items, list):
+        return dict(result)
+    fields = (
+        "id", "ref", "title", "status", "priority", "issue_type",
+        "assignee", "labels", "parent", "task_revision", "etag",
+    )
+    return {
+        **result,
+        "items": [
+            {field: item[field] for field in fields if field in item}
+            for item in items
+            if isinstance(item, Mapping)
+        ],
+    }
+
+
 def canonical_manifest(tools: list[Any]) -> dict[str, Any]:
     rows = [
         tool.model_dump(by_alias=True, exclude_none=True, mode="json") for tool in tools
@@ -548,7 +567,7 @@ class Runtime:
             components = [
                 component("project", lambda: self.projects.summary(project_id), project_ref),
                 component("checkout", lambda: self.projects.checkout(project_id, "default"), REGISTRY.reference("checkout", {"project_id": project_id, "checkout_id": "default"})),
-                component("tasks", lambda: self.beads.query(project_ids=[project_id], view="ready", limit=20), f"{project_ref}/beads"),
+                component("tasks", lambda: _orientation_task_summary(self.beads.query(project_ids=[project_id], view="ready", limit=20)), f"{project_ref}/beads"),
                 component("authority", lambda: self.project_authority(project_id), f"{project_ref}/task-authority"),
             ]
         elif intent == "project.triage":
