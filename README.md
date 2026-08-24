@@ -161,7 +161,6 @@ AgentCTL project operation; `switch` remains the supported activation command.
 
 - [Agent gateway](docs/agent-gateway.md)
 - [Agent environment reference](docs/agent-environment.md)
-- [Infrastructure default audit](docs/config-default-audit-infrastructure.md)
 - [Headless replica bootstrap](docs/ethereal-bootstrap.md)
 - [Project overview](https://sinity.github.io/sinnix/)
 - [Roadmap and operating record](https://sinity.github.io/sinnix/beads/)
