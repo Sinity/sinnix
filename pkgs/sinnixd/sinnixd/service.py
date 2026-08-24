@@ -194,6 +194,7 @@ class SinnixdService:
             project = self.projects.get(project_id)
             return {
                 "project_id": project.project_id,
+                "descriptor_status": project.descriptor_status(),
                 "operations": [operation.catalog_row() for operation in project.operations],
             }
         if operation.startswith("task."):
