@@ -346,7 +346,11 @@ class SinnixdService:
             if workspace_id is not None and (not isinstance(workspace_id, str) or not workspace_id):
                 raise ValueError("job.start workspace_id must be null or non-empty")
             assert self.workspaces is not None
-            checkout = self.workspaces.checkout(workspace_id) if workspace_id is not None else None
+            checkout = (
+                self.workspaces.checkout(workspace_id)
+                if workspace_id is not None
+                else self.projects.checkout(project_id, "default")
+            )
             return self._cleanup_terminal(self.jobs.start_declared(
                 project=project,
                 operation=project.operation(operation_name),

@@ -478,6 +478,7 @@ result = "pytest"
 cache = "tree+environment"
 """
     )
+    initialize_git_checkout(root)
 
 
 def write_owner_adapter(root: Path) -> None:
@@ -1905,7 +1906,7 @@ def initialize_git_checkout(root: Path) -> None:
     for arguments in (
         ("git", "init", "--quiet", str(root)),
         ("git", "-C", str(root), "add", "."),
-        ("git", "-C", str(root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "fixture"),
+        ("git", "-C", str(root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "--allow-empty", "-m", "fixture"),
     ):
         subprocess.run(arguments, check=True)
     subprocess.run(
@@ -3071,6 +3072,9 @@ def test_declared_and_foreground_jobs_share_the_generic_route(tmp_path: Path) ->
     assert systemd.started[0]["timeout_seconds"] == DEFAULT_TIMEOUT_SECONDS
     assert systemd.started[0]["environment"]["SINNIXD_JOB_ID"] == launch["job_id"]
     assert systemd.started[0]["environment"]["SINNIXD_OPERATION"] == "check"
+    assert systemd.started[0]["environment"]["SINNIXD_CHECKOUT_ID"] == "default"
+    assert systemd.started[0]["environment"]["SINNIXD_CHECKOUT_HEAD"] == launch["checkout"]["head"]
+    assert launch["checkout"]["path"] == str(tmp_path.resolve())
 
     foreground = service.start_foreground(
         command=("fixture-foreground",),
@@ -3080,7 +3084,9 @@ def test_declared_and_foreground_jobs_share_the_generic_route(tmp_path: Path) ->
     )
     assert foreground["kind"] == "foreground-command"
     assert len(systemd.started) == 2
-    assert systemd.started[0]["command"] == ("fixture-env", "--command", "fixture-check")
+    assert service.jobs.store.declared_launch(launch["job_id"])[0] == (
+        "fixture-env", "--command", "fixture-check"
+    )
     assert systemd.started[1]["command"] == ("fixture-foreground",)
     foreground_record = service.jobs.store.load(foreground["job_id"])
     assert foreground_record.spec.to_dict()["environment_keys"] == ["EMPTY", "SINNIXD_JOB_ID"]
@@ -3122,7 +3128,9 @@ timeout_seconds = 7200
 
     assert started.ok and started.payload is not None
     assert started.payload.inline["timeout_seconds"] == 7200
-    assert systemd.started[0]["command"] == ("fixture-env", "--command", "fixture-long")
+    assert service.jobs.store.declared_launch(started.payload.inline["job_id"])[0] == (
+        "fixture-env", "--command", "fixture-long"
+    )
     assert systemd.started[0]["timeout_seconds"] == 7200
 
 
@@ -3148,7 +3156,7 @@ def test_declared_parameters_canonicalize_argv_and_persist_only_the_digest(tmp_p
     assert started.ok and started.payload is not None
     launch = started.payload.inline
     digest = hashlib.sha256(b'{"full":true,"package":["sinexd","xtask"]}').hexdigest()
-    assert systemd.started[0]["command"] == (
+    assert jobs.store.declared_launch(launch["job_id"])[0] == (
         "fixture-env", "--command", "fixture-check", "--full", "--package", "sinexd", "--package", "xtask"
     )
     assert launch["parameters"] == {"digest": digest}
@@ -3250,7 +3258,7 @@ def test_generic_extended_parameters_derive_canonical_argv_and_digest(tmp_path: 
         "package": ["sinexd", "xtask"],
         "profile": "strict",
     }
-    assert systemd.started[0]["command"] == (
+    assert jobs.store.declared_launch(started.payload.inline["job_id"])[0] == (
         "fixture-env", "--command", "fixture-check",
         "--profile", "strict", "--attempts", "4",
         "--features", "serde", "--features", "tokio",
@@ -3324,7 +3332,7 @@ def test_sinex_all_sources_fixture_derives_exact_argv_and_digest(tmp_path: Path)
         "reconcile": True,
         "service_name": "source-driver-browser.history-3",
     }
-    assert systemd.started[0]["command"] == (
+    assert jobs.store.declared_launch(started.payload.inline["job_id"])[0] == (
         "fixture-env", "--command", "xtask", "run", "all-sources",
         "--instance-id", "operator-source-driver-browser.history-3",
         "--reconcile",
@@ -3360,7 +3368,7 @@ def test_required_positional_parameter_derives_before_optional_flags_and_contrib
     )
 
     assert started.ok and started.payload is not None
-    assert systemd.started[0]["command"] == (
+    assert jobs.store.declared_launch(started.payload.inline["job_id"])[0] == (
         "fixture-env", "--command", "xtask", "verify", "closure", "sinex-a1b2", "--json", "--dry-run",
     )
     assert started.payload.inline["parameters"] == {
@@ -3415,7 +3423,9 @@ def test_fixed_operation_rejects_parameters_and_retains_its_declared_argv(tmp_pa
     )
 
     assert fixed.ok and fixed.payload is not None
-    assert systemd.started[0]["command"] == ("fixture-env", "--command", "fixture-check")
+    assert service.jobs.store.declared_launch(fixed.payload.inline["job_id"])[0] == (
+        "fixture-env", "--command", "fixture-check"
+    )
     assert rejected.error is not None
     assert rejected.error.code.value == "INVALID_ARGUMENT"
     assert len(systemd.started) == 1
