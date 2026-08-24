@@ -559,36 +559,54 @@ def test_mcp_dispatches_v2_change_and_operate_through_real_owners(tmp_path: Path
     subprocess.run(["git", "add", "tracked.txt"], cwd=project, check=True)
     subprocess.run(["git", "commit", "-qm", "fixture"], cwd=project, check=True)
 
+    expected_owner_request = {
+        "action": "restart",
+        "target": {"unit": "fixture.service"},
+        "expected_revision": 17,
+        "idempotency_key": "integration-machine-operate",
+        "operator_reason": "integration fixture",
+        "parameters": {},
+    }
+    owner_requests: list[dict[str, object]] = []
+    owner_failures: list[str] = []
+
     class Handler(socketserver.StreamRequestHandler):
         def handle(self) -> None:
-            request = self.rfile.readline().decode()
-            assert request.startswith("POST /v1/actions HTTP/")
-            headers: dict[str, str] = {}
-            while True:
-                line = self.rfile.readline().decode().rstrip("\r\n")
-                if not line:
-                    break
-                name, value = line.split(":", 1)
-                headers[name.lower()] = value.strip()
-            body = json.loads(self.rfile.read(int(headers["content-length"])))
-            payload = json.dumps(
-                {
-                    "schema": "sinnix-ops-action-v1",
-                    "receipt_id": "integration-owner-receipt",
-                    "idempotency_key": body["idempotency_key"],
-                    "action": body["action"],
-                    "target": body["target"],
-                    "operator_reason": body["operator_reason"],
-                    "expected_revision": body["expected_revision"],
-                    "status": "accepted",
-                },
-                separators=(",", ":"),
-            ).encode()
-            self.wfile.write(
-                b"HTTP/1.1 201 Created\r\n"
-                + f"Content-Length: {len(payload)}\r\nContent-Type: application/json\r\n\r\n".encode()
-                + payload
-            )
+            try:
+                request = self.rfile.readline().decode()
+                if not request.startswith("POST /v1/actions HTTP/"):
+                    raise AssertionError("unexpected owner request line")
+                headers: dict[str, str] = {}
+                while True:
+                    line = self.rfile.readline().decode().rstrip("\r\n")
+                    if not line:
+                        break
+                    name, value = line.split(":", 1)
+                    headers[name.lower()] = value.strip()
+                body = json.loads(self.rfile.read(int(headers["content-length"])))
+                owner_requests.append(body)
+                if body != expected_owner_request:
+                    owner_failures.append(f"unexpected owner request: {body!r}")
+                payload = json.dumps(
+                    {
+                        "schema": "sinnix-ops-action-v1",
+                        "receipt_id": "integration-owner-receipt",
+                        "idempotency_key": "integration-machine-operate",
+                        "action": "restart",
+                        "target": {"unit": "fixture.service"},
+                        "operator_reason": "integration fixture",
+                        "expected_revision": 17,
+                        "status": "accepted",
+                    },
+                    separators=(",", ":"),
+                ).encode()
+                self.wfile.write(
+                    b"HTTP/1.1 201 Created\r\n"
+                    + f"Content-Length: {len(payload)}\r\nContent-Type: application/json\r\n\r\n".encode()
+                    + payload
+                )
+            except Exception as exc:
+                owner_failures.append(f"owner fixture failure: {exc!r}")
 
         def log_message(self, *_args: object) -> None:
             return
@@ -644,9 +662,19 @@ def test_mcp_dispatches_v2_change_and_operate_through_real_owners(tmp_path: Path
     )
     assert target.read_text() == "after\n"
     assert operate.structured_content["result"]["outcome"] == "ok"
-    assert operate.structured_content["data"]["owner_receipt"]["receipt_id"] == (
-        "integration-owner-receipt"
-    )
+    assert owner_failures == []
+    assert owner_requests == [expected_owner_request]
+    assert operate.structured_content["result"]["principal"] == "operator"
+    assert operate.structured_content["data"]["owner_receipt"] == {
+        "schema": "sinnix-ops-action-v1",
+        "receipt_id": "integration-owner-receipt",
+        "idempotency_key": "integration-machine-operate",
+        "action": "restart",
+        "target": {"unit": "fixture.service"},
+        "operator_reason": "integration fixture",
+        "expected_revision": 17,
+        "status": "accepted",
+    }
 
 
 def test_query_adapter_consumes_capture_selector_before_owner_invocation(

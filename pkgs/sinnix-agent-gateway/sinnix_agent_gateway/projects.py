@@ -4,6 +4,9 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import stat
+import tempfile
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -44,15 +47,147 @@ LOCAL_ONLY_PATHS = (
     ("dots", "codex", "skills", ".system"),
 )
 LOCAL_ONLY_FILES = frozenset({(".mcp.json",)})
+_DIRECTORY_OPEN_FLAGS = (
+    os.O_RDONLY
+    | os.O_DIRECTORY
+    | os.O_NOFOLLOW
+    | getattr(os, "O_CLOEXEC", 0)
+)
 
 
 def _is_excluded(path: Path) -> bool:
     parts = path.parts
     if any(part.lower() in SENSITIVE_PARTS for part in parts):
         return True
+    if any(part.startswith(".") and ".gateway-tmp-" in part for part in parts):
+        return True
     if parts in LOCAL_ONLY_FILES:
         return True
     return any(parts[: len(prefix)] == prefix for prefix in LOCAL_ONLY_PATHS)
+
+
+def _mutation_parts(project: ProjectConfig, relative: str) -> tuple[str, ...]:
+    try:
+        candidate = Path(relative)
+    except TypeError as exc:
+        raise ProjectError("path must be relative and remain inside the project") from exc
+    if candidate.is_absolute() or not candidate.parts or ".." in candidate.parts:
+        raise ProjectError("path must be relative and remain inside the project")
+    if _is_excluded(candidate):
+        raise ProjectError("path is excluded by project policy")
+    return candidate.parts
+
+
+def _open_pinned_directory(
+    project: ProjectConfig, parts: tuple[str, ...], *, create: bool
+) -> int:
+    """Traverse one project directory with pinned, no-follow descriptors."""
+    try:
+        current = os.open(project.path, _DIRECTORY_OPEN_FLAGS)
+    except OSError as exc:
+        raise ProjectError("project checkout directory is unavailable") from exc
+    try:
+        for part in parts:
+            try:
+                child = os.open(part, _DIRECTORY_OPEN_FLAGS, dir_fd=current)
+            except FileNotFoundError:
+                if not create:
+                    raise ProjectError("path does not exist")
+                try:
+                    os.mkdir(part, 0o700, dir_fd=current)
+                except FileExistsError:
+                    pass
+                child = os.open(part, _DIRECTORY_OPEN_FLAGS, dir_fd=current)
+            os.close(current)
+            current = child
+        return current
+    except (OSError, ProjectError) as exc:
+        os.close(current)
+        if isinstance(exc, ProjectError):
+            raise
+        raise ProjectError("project path contains a symlink or is unavailable") from exc
+
+
+def _temporary_name(target_name: str) -> str:
+    return f".{target_name}.gateway-tmp-{os.urandom(16).hex()}"
+
+
+def _open_temporary(parent: int, target_name: str) -> tuple[str, int]:
+    for _ in range(8):
+        name = _temporary_name(target_name)
+        try:
+            return name, os.open(
+                name,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | os.O_NOFOLLOW
+                | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=parent,
+            )
+        except FileExistsError:
+            continue
+    raise ProjectError("could not allocate a private project temporary")
+
+
+def _unlink_at(parent: int, name: str) -> None:
+    try:
+        os.unlink(name, dir_fd=parent)
+    except FileNotFoundError:
+        pass
+
+
+def _atomic_publish(
+    parent: int, target_name: str, content: bytes, mode: int = 0o600
+) -> None:
+    temporary_name: str | None = None
+    descriptor = -1
+    try:
+        temporary_name, descriptor = _open_temporary(parent, target_name)
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = -1
+            os.fchmod(handle.fileno(), mode & 0o777)
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(
+            temporary_name,
+            target_name,
+            src_dir_fd=parent,
+            dst_dir_fd=parent,
+        )
+        temporary_name = None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary_name is not None:
+            _unlink_at(parent, temporary_name)
+
+
+def _atomic_publish_symlink(parent: int, target_name: str, target: str) -> None:
+    temporary_name: str | None = None
+    try:
+        for _ in range(8):
+            candidate = _temporary_name(target_name)
+            try:
+                os.symlink(target, candidate, dir_fd=parent)
+            except FileExistsError:
+                continue
+            temporary_name = candidate
+            break
+        if temporary_name is None:
+            raise ProjectError("could not allocate a private project temporary")
+        os.replace(
+            temporary_name,
+            target_name,
+            src_dir_fd=parent,
+            dst_dir_fd=parent,
+        )
+        temporary_name = None
+    finally:
+        if temporary_name is not None:
+            _unlink_at(parent, temporary_name)
 
 
 class ProjectService:
@@ -560,13 +695,120 @@ class ProjectService:
         preconditions: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         with self._locked_mutation(project_id, checkout_id, preconditions) as project:
-            target = self._safe_path(project, path, existing=False)
-            target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            temp = target.with_name(f".{target.name}.gateway-tmp")
-            temp.write_text(content)
-            temp.chmod(0o600)
-            temp.replace(target)
+            parts = _mutation_parts(project, path)
+            parent = _open_pinned_directory(project, parts[:-1], create=True)
+            try:
+                _atomic_publish(parent, parts[-1], content.encode(), 0o600)
+            finally:
+                os.close(parent)
         return {"project_id": project_id, "path": path, "bytes": len(content.encode())}
+
+    @staticmethod
+    def _owner_result(
+        command: list[str],
+        cwd: Path,
+        *,
+        stdin_bytes: bytes | None = None,
+        environment: Mapping[str, str] | None = None,
+        timeout: int = 20,
+        max_output_bytes: int = 64_000,
+    ) -> bytes:
+        safe_env = {
+            "HOME": str(Path.home()),
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
+            "GIT_OPTIONAL_LOCKS": "0",
+        }
+        if environment:
+            safe_env.update(environment)
+        result = OwnerExecution(safe_env).run(
+            command,
+            ExecutionProfile(
+                route=OwnerRoute("project-apply-patch"),
+                cwd=cwd,
+                timeout_seconds=timeout,
+                max_stdout_bytes=max_output_bytes,
+                max_stderr_bytes=max_output_bytes,
+                stdin_bytes=stdin_bytes,
+                environment=environment,
+            ),
+        )
+        if result.timed_out:
+            raise ProjectError("project operation timed out")
+        if result.output_exceeded:
+            raise ProjectError("project operation exceeded its output bound")
+        if result.failure_class is not None or result.exit_status != 0:
+            diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+            output = result.stdout.decode("utf-8", errors="replace").strip()
+            raise ProjectError(diagnostic or output or "project operation failed")
+        return result.stdout
+
+    def _patch_paths(self, root: Path, patch: bytes) -> tuple[str, ...]:
+        output = self._owner_result(
+            ["git", "apply", "--numstat", "-z", "--whitespace=nowarn", "-"],
+            root,
+            stdin_bytes=patch,
+        )
+        paths: list[str] = []
+        for row in output.split(b"\0"):
+            if not row:
+                continue
+            fields = row.split(b"\t", 2)
+            if len(fields) != 3:
+                raise ProjectError("git apply returned malformed path metadata")
+            paths.append(os.fsdecode(fields[2]))
+        return tuple(dict.fromkeys(paths))
+
+    def _index_entry(
+        self, root: Path, index: Path, relative: str
+    ) -> tuple[int, str] | None:
+        output = self._owner_result(
+            ["git", "ls-files", "--stage", "-z", "--", relative],
+            root,
+            environment={"GIT_INDEX_FILE": str(index)},
+        )
+        if not output:
+            return None
+        row = output.rstrip(b"\0").split(b"\0")[-1]
+        metadata, raw_path = row.split(b"\t", 1)
+        mode, object_id, stage = metadata.split()
+        if stage != b"0" or os.fsdecode(raw_path) != relative:
+            raise ProjectError("git apply returned an unsupported index entry")
+        return int(mode, 8), os.fsdecode(object_id)
+
+    def _index_blob(self, root: Path, index: Path, object_id: str) -> bytes:
+        return self._owner_result(
+            ["git", "cat-file", "blob", object_id],
+            root,
+            environment={"GIT_INDEX_FILE": str(index)},
+            max_output_bytes=self.config.max_result_bytes,
+        )
+
+    def _publish_index_entry(
+        self,
+        project: ProjectConfig,
+        relative: str,
+        entry: tuple[int, bytes] | None,
+    ) -> None:
+        parts = _mutation_parts(project, relative)
+        parent = _open_pinned_directory(project, parts[:-1], create=entry is not None)
+        try:
+            if entry is None:
+                _unlink_at(parent, parts[-1])
+                return
+            mode, content = entry
+            if stat.S_ISREG(mode):
+                _atomic_publish(parent, parts[-1], content, mode)
+            elif stat.S_ISLNK(mode):
+                _atomic_publish_symlink(
+                    parent,
+                    parts[-1],
+                    content.decode("utf-8", errors="surrogateescape"),
+                )
+            else:
+                raise ProjectError("git apply produced an unsupported file type")
+        finally:
+            os.close(parent)
 
     def apply_patch(
         self,
@@ -578,26 +820,79 @@ class ProjectService:
         if len(patch.encode()) > self.config.max_result_bytes:
             raise ProjectError("patch exceeds configured bound")
         with self._locked_mutation(project_id, checkout_id, preconditions) as project:
-            safe_env = {
-                "HOME": str(Path.home()),
-                "LANG": os.environ.get("LANG", "C.UTF-8"),
-                "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
-            }
-            result = OwnerExecution(safe_env).run(
-                ["git", "apply", "--whitespace=nowarn", "-"],
-                ExecutionProfile(
-                    route=OwnerRoute("project-apply-patch"),
-                    cwd=project.path,
-                    timeout_seconds=20,
-                    max_stdout_bytes=self.config.max_result_bytes,
-                    max_stderr_bytes=self.config.max_result_bytes,
-                    stdin_bytes=patch.encode(),
-                ),
-            )
-            if result.timed_out:
-                raise ProjectError("patch application timed out")
-            if result.exit_status != 0:
-                diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
-                output = result.stdout.decode("utf-8", errors="replace").strip()
-                raise ProjectError(diagnostic or output or "patch was rejected")
+            patch_bytes = patch.encode()
+            root = _open_pinned_directory(project, (), create=False)
+            root_path = Path(f"/proc/self/fd/{root}")
+            try:
+                paths = self._patch_paths(root_path, patch_bytes)
+                for relative in paths:
+                    _mutation_parts(project, relative)
+                with tempfile.TemporaryDirectory(prefix="sinnix-gateway-apply-") as staging:
+                    index = Path(staging) / "index"
+                    index_source = Path(
+                        self._owner_result(["git", "rev-parse", "--git-path", "index"], root_path)
+                        .decode()
+                        .strip()
+                    )
+                    if not index_source.is_absolute():
+                        index_source = project.path / index_source
+                    if index_source.is_file():
+                        shutil.copyfile(index_source, index)
+                    else:
+                        try:
+                            self._owner_result(
+                                ["git", "read-tree", "HEAD"],
+                                root_path,
+                                environment={"GIT_INDEX_FILE": str(index)},
+                            )
+                        except ProjectError as exc:
+                            if not any(
+                                marker in str(exc)
+                                for marker in (
+                                    "bad revision",
+                                    "ambiguous argument",
+                                    "Not a valid object name HEAD",
+                                )
+                            ):
+                                raise
+                    environment = {"GIT_INDEX_FILE": str(index)}
+                    self._owner_result(
+                        ["git", "add", "-f", "--all", "--", "."],
+                        root_path,
+                        environment=environment,
+                    )
+                    before = {
+                        relative: self._index_entry(root_path, index, relative)
+                        for relative in paths
+                    }
+                    self._owner_result(
+                        ["git", "apply", "--cached", "--whitespace=nowarn", "-"],
+                        root_path,
+                        stdin_bytes=patch_bytes,
+                        environment=environment,
+                    )
+                    after = {
+                        relative: self._index_entry(root_path, index, relative)
+                        for relative in paths
+                    }
+                    changes: list[tuple[str, tuple[int, bytes] | None]] = []
+                    for relative in paths:
+                        if before[relative] == after[relative]:
+                            continue
+                        entry = after[relative]
+                        changes.append(
+                            (
+                                relative,
+                                None
+                                if entry is None
+                                else (
+                                    entry[0],
+                                    self._index_blob(root_path, index, entry[1]),
+                                ),
+                            )
+                        )
+                    for relative, entry in changes:
+                        self._publish_index_entry(project, relative, entry)
+            finally:
+                os.close(root)
         return {"project_id": project_id, "applied": True}
