@@ -17,6 +17,7 @@ let
     rule:
     (lib.optionalAttrs (rule ? class) { class = rule.class; })
     // (lib.optionalAttrs (rule ? title) { title = rule.title; })
+    // (lib.optionalAttrs (rule ? initialTitle) { initial_title = rule.initialTitle; })
     // (lib.optionalAttrs (rule ? floating) { float = rule.floating; });
   formatOpacity =
     opacity:
@@ -38,7 +39,10 @@ let
     // (lib.optionalAttrs (rule ? workspace) { workspace = rule.workspace; })
     // (lib.optionalAttrs (rule ? opacity) { opacity = formatOpacity rule.opacity; })
     // (lib.optionalAttrs (rule ? group) { group = rule.group; })
-    // (lib.optionalAttrs (rule ? idleInhibit) { idle_inhibit = rule.idleInhibit; });
+    // (lib.optionalAttrs (rule ? idleInhibit) { idle_inhibit = rule.idleInhibit; })
+    // (lib.optionalAttrs (rule.noInitialFocus or false) { no_initial_focus = true; })
+    // (lib.optionalAttrs (rule ? focusOnActivate) { focus_on_activate = rule.focusOnActivate; })
+    // (lib.optionalAttrs (rule ? suppressEvent) { suppress_event = rule.suppressEvent; });
   mkRule =
     name: rule:
     {
