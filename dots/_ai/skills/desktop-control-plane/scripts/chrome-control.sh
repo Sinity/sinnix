@@ -328,6 +328,10 @@ assert_hyprland_compositor_state() {
   local phase="$1" current_state
   current_state=$(hyprland_compositor_state)
   if [[ $current_state != "$compositor_state_before" ]]; then
+    restore_operator_focus_after_failed_agent_window
+    current_state=$(hyprland_compositor_state)
+  fi
+  if [[ $current_state != "$compositor_state_before" ]]; then
     printf 'compositor state changed %s: before=%s after=%s\n' \
       "$phase" "$compositor_state_before" "$current_state" >&2
     return 1
@@ -337,6 +341,20 @@ assert_hyprland_compositor_state() {
     printf 'focused compositor client disappeared %s: address=%s\n' "$phase" "$focus_before" >&2
     return 1
   fi
+}
+
+restore_operator_focus_after_failed_agent_window() {
+  local current_state current_focus current_workspaces expected_workspaces
+  [[ -n ${focus_before:-} && -n ${compositor_state_before:-} ]] || return 0
+  hyprctl_call clients -j 2>/dev/null | jq -e --arg address "$focus_before" \
+    'any(.[]; .address == $address)' >/dev/null || return 0
+  current_state=$(hyprland_compositor_state)
+  current_focus=$(jq -r '.active_window.address // empty' <<<"$current_state")
+  [[ $current_focus != "$focus_before" ]] || return 0
+  current_workspaces=$(jq -c '.active_workspaces' <<<"$current_state")
+  expected_workspaces=$(jq -c '.active_workspaces' <<<"$compositor_state_before")
+  [[ $current_workspaces == "$expected_workspaces" ]] || return 0
+  hyprctl_call dispatch focuswindow "address:${focus_before}" >/dev/null
 }
 
 lua_quote() {
@@ -488,6 +506,7 @@ agent-window)
   cleanup_failed_agent_window() {
     disable_agent_window_rules
     [[ $retain_created_target == "true" ]] || close_created_target
+    restore_operator_focus_after_failed_agent_window
   }
   trap cleanup_failed_agent_window EXIT
 
