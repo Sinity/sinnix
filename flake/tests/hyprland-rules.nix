@@ -47,7 +47,7 @@ in
                   no_initial_focus = true;
                   suppress_event = "activate activatefocus";
                   tile = true;
-                  workspace = "special:agentbrowser silent";
+                  workspace = "name:agentbrowser silent";
                 }
               ];
               message = "Agent browser windows must remain hidden and activation-suppressed after their creation transaction ends.";

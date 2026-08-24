@@ -62,7 +62,7 @@ let
   applications = [
     (mkRule "agent-browser-window" {
       initialTitle = "^sinnix-agent-window-.*$";
-      workspace = "special:agentbrowser silent";
+      workspace = "name:agentbrowser silent";
       tile = true;
       noInitialFocus = true;
       focusOnActivate = false;

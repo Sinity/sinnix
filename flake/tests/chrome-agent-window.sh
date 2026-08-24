@@ -182,8 +182,14 @@ eval\ *)
   fi
   ;;
 dispatch\ *)
-  printf 'agent-window issued an unexpected compositor dispatch: %s\n' "$*" >&2
-  exit 1
+  if [[ $1 == dispatch && $2 == focuswindow && $3 == address:0xoperator ]]; then
+    printf '%s\n' 0xoperator >"$state/active-window"
+    printf '%s\n' "$*" >>"$state/focus-workspace-actions"
+    printf '%s\n' ok
+  else
+    printf 'agent-window issued an unexpected compositor dispatch: %s\n' "$*" >&2
+    exit 1
+  fi
   ;;
 *)
   printf 'unexpected hyprctl call: %s\n' "$*" >&2
@@ -369,11 +375,12 @@ final)
     assert_rules_cleaned "$state"
   done
 
-  FAKE_FOCUS_CHANGE=true run_with_deadline focus-change match 8 || true
+  FAKE_FOCUS_CHANGE=true run_with_deadline focus-change match 8
   state="$fixture_root/focus-change"
-  test ! -e "$state/agent-target"
-  test "$(cat "$state/closed-targets")" = agent-target
-  grep -Fq 'compositor state changed after CDP target creation' "$state/stderr"
+  test -e "$state/agent-target"
+  test ! -s "$state/closed-targets"
+  test "$(cat "$state/active-window")" = 0xoperator
+  test "$(cat "$state/focus-workspace-actions")" = 'dispatch focuswindow address:0xoperator'
   assert_rules_cleaned "$state"
   ;;
 *)
