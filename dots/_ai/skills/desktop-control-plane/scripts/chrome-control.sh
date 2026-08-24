@@ -316,6 +316,55 @@ hyprctl_call() {
   env -u LD_LIBRARY_PATH "$hyprctl_bin" "$@"
 }
 
+hyprland_compositor_state() {
+  local active_window active_workspaces
+  active_window=$(hyprctl_call activewindow -j 2>/dev/null | jq -c '{address: (.address // null)}')
+  active_workspaces=$(hyprctl_call monitors -j 2>/dev/null | jq -c '[.[] | {monitor: .name, workspace: .activeWorkspace.name}]')
+  jq -nc --argjson active_window "$active_window" --argjson active_workspaces "$active_workspaces" \
+    '{active_window: $active_window, active_workspaces: $active_workspaces}'
+}
+
+assert_hyprland_compositor_state() {
+  local phase="$1" current_state
+  current_state=$(hyprland_compositor_state)
+  if [[ $current_state != "$compositor_state_before" ]]; then
+    printf 'compositor state changed %s: before=%s after=%s\n' \
+      "$phase" "$compositor_state_before" "$current_state" >&2
+    return 1
+  fi
+  if [[ -n $focus_before ]] && ! hyprctl_call clients -j 2>/dev/null | jq -e --arg address "$focus_before" \
+    'any(.[]; .address == $address)' >/dev/null; then
+    printf 'focused compositor client disappeared %s: address=%s\n' "$phase" "$focus_before" >&2
+    return 1
+  fi
+}
+
+lua_quote() {
+  jq -nr --arg value "$1" '$value | tojson'
+}
+
+install_agent_window_rules() {
+  local guard_name_lua placement_name_lua class_lua title_lua workspace_lua rule_lua
+  guard_name_lua=$(lua_quote "sinnix-agent-window-guard-${BASHPID}")
+  placement_name_lua=$(lua_quote "sinnix-agent-window-placement-${BASHPID}")
+  class_lua=$(lua_quote '^(google-chrome|google-chrome-unstable|chromium-browser|Chromium)$')
+  title_lua=$(lua_quote "^${marker}$")
+  workspace_lua=$(lua_quote "${AGENT_WORKSPACE_TARGET} silent")
+  rule_lua="sinnix_agent_window_guard = hl.window_rule({name = ${guard_name_lua}, match = {initial_class = ${class_lua}}, no_initial_focus = true, no_focus = true, focus_on_activate = false, suppress_event = 'activate activatefocus'}); sinnix_agent_window_placement = hl.window_rule({name = ${placement_name_lua}, match = {initial_class = ${class_lua}, initial_title = ${title_lua}}, workspace = ${workspace_lua}, no_initial_focus = true, no_focus = true, focus_on_activate = false, suppress_event = 'activate activatefocus'})"
+  compositor_rules_installed="true"
+  hyprctl_call eval "$rule_lua" >/dev/null
+}
+
+disable_agent_window_rules() {
+  [[ ${compositor_rules_installed:-false} == "true" ]] || return 0
+  if hyprctl_call eval 'if sinnix_agent_window_guard ~= nil then sinnix_agent_window_guard:set_enabled(false); sinnix_agent_window_guard = nil end; if sinnix_agent_window_placement ~= nil then sinnix_agent_window_placement:set_enabled(false); sinnix_agent_window_placement = nil end' >/dev/null; then
+    compositor_rules_installed="false"
+  else
+    printf 'failed to disable temporary agent-window compositor rules\n' >&2
+    return 1
+  fi
+}
+
 resolve_page_id() {
   local maybe_id="$1"
   # If it looks like a full UUID, use it directly
@@ -346,18 +395,13 @@ status)
 # entire point -- the operator's logins are the agent's logins, with nothing
 # to sync and nothing to go stale.
 #
-# The window is identified by first creating the target at a unique marker
-# document, then matching that marker in Hyprland before any caller URL is
-# loaded. Every window of one Chrome process carries the same class, and a
-# before/after client diff becomes ambiguous if another window maps during the
-# transaction. The marker binds the CDP target to exactly one compositor
-# client; only after that client is parked do we navigate to the caller URL.
-# The whole create-to-park transaction is serialized so concurrent marker
-# windows cannot compete for compositor placement and stability checks.
-# `movetoworkspacesilent` moves that unique address without pulling the
-# operator's view along with it. Chrome may still finish mapping its native
-# window after CDP returns, so success requires observing that exact address on
-# the hidden workspace after the move.
+# The compositor rules are installed before CDP creates the target. The guard
+# suppresses activation for a new Chrome client, while the exact initial-title
+# rule places only this marker window on the hidden workspace as it maps. This
+# closes the activation-before-identification gap: the helper never has to
+# focus or move a live client after creation. The whole transaction is
+# serialized so concurrent agent markers cannot compete for rule handles or
+# stability checks.
 agent-window)
   url="about:blank"
   while [[ $# -gt 0 ]]; do
@@ -392,6 +436,8 @@ agent-window)
 
   hyprland_available="false"
   focus_before=""
+  compositor_state_before=""
+  compositor_rules_installed="false"
   hyprctl_bin=$(get_hyprctl_bin || true)
   if [[ -n $hyprctl_bin ]]; then
     hyprland_instances=$(hyprctl_call instances -j 2>/dev/null || printf '[]')
@@ -403,7 +449,12 @@ agent-window)
     if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && hyprctl_call clients -j >/dev/null 2>&1; then
       hyprland_available="true"
       focus_before=$(hyprctl_call activewindow -j 2>/dev/null | jq -r '.address // empty')
+      compositor_state_before=$(hyprland_compositor_state)
     fi
+  fi
+  if [[ $hyprland_available != "true" || -z $focus_before || -z $compositor_state_before ]]; then
+    echo "agent-window requires a live Hyprland compositor with a focused operator client; hyprctl=${hyprctl_bin:-unavailable}; instances=${hyprland_instance_count:-unknown}; signature=$([[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && printf set || printf missing); focus=${focus_before:-unavailable}" >&2
+    exit 1
   fi
 
   marker="sinnix-agent-window-${BASHPID}-${RANDOM}-${RANDOM}"
@@ -421,9 +472,16 @@ agent-window)
       printf 'failed to close created agent target: %s\n' "$page_id" >&2
   }
   cleanup_failed_agent_window() {
+    disable_agent_window_rules
     [[ $retain_created_target == "true" ]] || close_created_target
   }
   trap cleanup_failed_agent_window EXIT
+
+  if ! install_agent_window_rules; then
+    echo "failed to install temporary agent-window compositor rules" >&2
+    exit 1
+  fi
+  assert_hyprland_compositor_state "before CDP target creation"
 
   params=$(jq -nc --arg url "$marker_url" '{url: $url, newWindow: true, background: true}')
   if response=$(cdp_send "$ws_url" "Target.createTarget" "$params"); then
@@ -443,13 +501,14 @@ agent-window)
     jq . >&2 <<<"$response"
     exit 1
   }
+  assert_hyprland_compositor_state "after CDP target creation"
 
   parked="false"
   addr=""
-  focus_after=""
   if [[ $hyprland_available == "true" ]]; then
     for _ in {1..40}; do
       sleep 0.1
+      assert_hyprland_compositor_state "while identifying target"
       matches=$(hyprctl_call clients -j 2>/dev/null | jq -r --arg marker "$marker" \
         '[.[] | select(.class == "google-chrome" and (.title | contains($marker))) | .address] | unique | .[]')
       match_count=$(wc -l <<<"$matches")
@@ -462,8 +521,8 @@ agent-window)
     if [[ -n $addr ]]; then
       stable_checks=0
       for _ in {1..20}; do
-        hyprctl_call dispatch movetoworkspacesilent "${AGENT_WORKSPACE_TARGET},address:${addr}" >/dev/null 2>&1 || true
         sleep 0.1
+        assert_hyprland_compositor_state "while verifying target placement"
         client_state=$(hyprctl_call clients -j 2>/dev/null | jq -c --arg address "$addr" \
           '.[] | select(.address == $address) | {workspace: .workspace.name, floating, pinned, fullscreen}')
         workspace=$(jq -r '.workspace // empty' <<<"$client_state")
@@ -487,12 +546,6 @@ agent-window)
   fi
 
   if [[ $parked == "true" ]]; then
-    focus_after=$(hyprctl_call activewindow -j 2>/dev/null | jq -r '.address // empty')
-    if [[ -z $focus_before || $focus_after != "$focus_before" ]]; then
-      printf 'focused compositor client changed while parking agent window: before=%s after=%s\n' \
-        "${focus_before:-unavailable}" "${focus_after:-unavailable}" >&2
-      exit 1
-    fi
     page_ws_url=$(get_ws_url "$page_id")
     if [[ -z $page_ws_url ]]; then
       echo "parked agent target disappeared before navigation" >&2
@@ -510,18 +563,15 @@ agent-window)
       jq . <<<"$navigate_response" >&2
       exit 1
     fi
-    focus_after=$(hyprctl_call activewindow -j 2>/dev/null | jq -r '.address // empty')
-    if [[ $focus_after != "$focus_before" ]]; then
-      printf 'focused compositor client changed while navigating agent window: before=%s after=%s\n' \
-        "$focus_before" "${focus_after:-unavailable}" >&2
-      exit 1
-    fi
+    assert_hyprland_compositor_state "after navigating agent window"
   fi
 
   if [[ $parked != "true" ]]; then
-    echo "window ${page_id} opened but was not verified on ${AGENT_WORKSPACE}; last compositor state: ${client_state:-unavailable}; visible=${visible:-unknown}; stable_checks=${stable_checks:-0}; focus_before=${focus_before:-unavailable}; focus_after=${focus_after:-unavailable}; hyprctl=${hyprctl_bin:-unavailable}; instances=${hyprland_instance_count:-unknown}; signature=$([[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && printf set || printf missing)" >&2
+    echo "window ${page_id} opened but was not verified on ${AGENT_WORKSPACE}; last compositor state: ${client_state:-unavailable}; visible=${visible:-unknown}; stable_checks=${stable_checks:-0}; focus_before=${focus_before:-unavailable}; hyprctl=${hyprctl_bin:-unavailable}; instances=${hyprland_instance_count:-unknown}; signature=$([[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && printf set || printf missing)" >&2
     exit 1
   fi
+  disable_agent_window_rules
+  assert_hyprland_compositor_state "after agent-window transaction"
   jq -nc --arg id "$page_id" --arg url "$url" --argjson parked "$parked" \
     --arg ws "$AGENT_WORKSPACE" --arg key "$SUMMON_BINDING" \
     '{id: $id, url: $url, parked: $parked, workspace: $ws, show_with: $key}'
