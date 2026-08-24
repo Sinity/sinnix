@@ -107,8 +107,10 @@ units_json="$(eval_json 'home-manager.users.sinity.systemd.user.services')"
 jq -e '
   (has("sinnix-agent-gateway-tunnel") | not) and
   ."sinnix-agent-gateway-observer".Unit.ConditionPathExists == "/run/agenix/openai-tunnel-runtime-key" and
-  (."sinnix-agent-gateway-observer".Service.ExecStartPre | length) == 1 and
-  (."sinnix-agent-gateway-observer".Service.ExecStartPre[0] | contains("observer-approval-gate")) and
+  (."sinnix-agent-gateway-observer".Service.ExecStartPre | length) == 2 and
+  (."sinnix-agent-gateway-observer".Service.ExecStartPre[0] | contains("observer-state-scaffold")) and
+  (."sinnix-agent-gateway-observer".Service.ExecStartPre[1] | contains("observer-approval-gate")) and
+  ."sinnix-agent-gateway-observer".Service.ReadWritePaths == ["-/home/sinity/.local/state/sinnix/agent-gateway/observer"] and
   (."sinnix-agent-gateway-observer".Service.ExecStart | join(" ") | contains("127.0.0.1:3088")) and
   (."sinnix-agent-gateway-observer".Service.ExecStart | join(" ") | contains("tunnel_6a2eb972c3bc8191be437670f455ebd9")) and
   ."sinnix-agent-gateway-observer".Service.ProtectSystem == "strict" and
