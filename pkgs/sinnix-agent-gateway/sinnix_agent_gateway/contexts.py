@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
+from pathlib import Path
 
 
 def _canonical(value: Any) -> bytes:
@@ -20,6 +23,77 @@ def source_revision(value: Any) -> str:
     """
 
     return hashlib.sha256(_canonical(value)).hexdigest()
+
+
+class ContextSnapshotStore:
+    """Persist a bounded set of immutable, principal-scoped context snapshots."""
+
+    def __init__(self, state_dir: Path, principal: str, *, max_entries: int = 64) -> None:
+        if not principal or max_entries < 1:
+            raise ValueError("context snapshot store requires a principal and positive bound")
+        self.root = state_dir / "contexts" / principal
+        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.root.chmod(0o700)
+        self.max_entries = max_entries
+
+    @staticmethod
+    def _snapshot_id(snapshot: Mapping[str, Any]) -> str:
+        body = {key: value for key, value in snapshot.items() if key != "snapshot_ref"}
+        components = body.get("components")
+        if isinstance(components, list):
+            body["components"] = [
+                {**component, "snapshot_ref": "pending"}
+                if isinstance(component, Mapping)
+                else component
+                for component in components
+            ]
+        return source_revision(body)
+
+    def put(self, snapshot: Mapping[str, Any]) -> str:
+        snapshot_id = self._snapshot_id(snapshot)
+        snapshot_ref = f"sinnix://contexts/{snapshot_id}"
+        if snapshot.get("snapshot_ref") != snapshot_ref:
+            raise ValueError("context snapshot ref does not match its content")
+        destination = self.root / f"{snapshot_id}.json"
+        if not destination.exists():
+            temporary = self.root / f".{snapshot_id}.{uuid.uuid4().hex}.tmp"
+            try:
+                with temporary.open("x", encoding="utf-8") as handle:
+                    json.dump(snapshot, handle, sort_keys=True, separators=(",", ":"))
+                    handle.write("\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                temporary.chmod(0o600)
+                os.replace(temporary, destination)
+                directory_fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            finally:
+                temporary.unlink(missing_ok=True)
+        os.utime(destination, None)
+        retained = sorted(
+            self.root.glob("*.json"),
+            key=lambda path: (path.stat().st_mtime_ns, path.name),
+            reverse=True,
+        )
+        for stale in retained[self.max_entries:]:
+            stale.unlink(missing_ok=True)
+        return snapshot_ref
+
+    def get(self, snapshot_id: str) -> dict[str, Any]:
+        if len(snapshot_id) != 64 or any(char not in "0123456789abcdef" for char in snapshot_id):
+            raise KeyError(snapshot_id)
+        path = self.root / f"{snapshot_id}.json"
+        try:
+            snapshot = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise KeyError(snapshot_id) from exc
+        if not isinstance(snapshot, dict) or self._snapshot_id(snapshot) != snapshot_id:
+            raise KeyError(snapshot_id)
+        os.utime(path, None)
+        return snapshot
 
 
 @dataclass(frozen=True)

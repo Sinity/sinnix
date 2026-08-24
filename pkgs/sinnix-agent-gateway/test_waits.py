@@ -1,8 +1,21 @@
 from __future__ import annotations
 
 import anyio
+import pytest
 
 from sinnix_agent_gateway.waits import BoundedWaitService, WaitEvidence, WaitRequest, WaitTarget
+
+
+@pytest.mark.parametrize("expected", [[], "open", 3])
+def test_wait_request_rejects_non_object_expectations(expected: object) -> None:
+    with pytest.raises(ValueError, match="expected state must be an object"):
+        WaitRequest(WaitTarget.BEAD_STATUS, "sinnix://beads/example", expected=expected)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("poll_seconds", [True, "0.25", 0, 5.1])
+def test_wait_request_rejects_invalid_poll_interval(poll_seconds: object) -> None:
+    with pytest.raises(ValueError, match="poll_seconds must be 0.01-5"):
+        WaitRequest(WaitTarget.BEAD_STATUS, "sinnix://beads/example", poll_seconds=poll_seconds)  # type: ignore[arg-type]
 
 
 class Clock:

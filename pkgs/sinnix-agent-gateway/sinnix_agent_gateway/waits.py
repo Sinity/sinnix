@@ -31,10 +31,14 @@ class WaitRequest:
         if not isinstance(self.reference, str) or not self.reference:
             raise ValueError("wait reference is required")
         if not isinstance(self.expected, Mapping):
-            object.__setattr__(self, "expected", {})
+            raise ValueError("wait expected state must be an object")
         if not isinstance(self.timeout_seconds, int) or isinstance(self.timeout_seconds, bool) or not 1 <= self.timeout_seconds <= 300:
             raise ValueError("wait timeout_seconds must be 1-300")
-        if not 0.01 <= self.poll_seconds <= 5:
+        if (
+            not isinstance(self.poll_seconds, (int, float))
+            or isinstance(self.poll_seconds, bool)
+            or not 0.01 <= self.poll_seconds <= 5
+        ):
             raise ValueError("wait poll_seconds must be 0.01-5")
 
 

@@ -8,7 +8,7 @@ import pytest
 from sinnix_agent_gateway.audit import AuditService
 from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
-from sinnix_agent_gateway.events import EventCursorError, NormalizedEventService
+from sinnix_agent_gateway.events import MAX_EVENT_PROJECTS, EventCursorError, NormalizedEventService
 
 
 class FakeProjects:
@@ -98,6 +98,36 @@ def test_event_cursor_secret_is_private_principal_bound_and_bounded(tmp_path: Pa
         rotated.read(limit=2, cursor=cursor)
     with pytest.raises(EventCursorError, match="too large"):
         events.read(limit=2, cursor="x" * 4_097)
+
+
+def test_event_scope_bound_matches_cursor_capacity(tmp_path: Path) -> None:
+    project_ids = [f"project-{index:02d}" for index in range(MAX_EVENT_PROJECTS + 1)]
+    projects = FakeProjects(tmp_path / "project")
+    projects.config.projects = {
+        project_id: ProjectConfig(project_id, tmp_path / project_id)
+        for project_id in project_ids
+    }
+    beads = FakeBeads()
+    config = GatewayConfig(state_dir=tmp_path / "state", projects=projects.config.projects)
+    audit = AuditService(config, Principal.for_name("observer"))
+    events = NormalizedEventService(
+        principal="observer",
+        cursor_key=b"e" * 32,
+        projects=projects,  # type: ignore[arg-type]
+        beads=beads,  # type: ignore[arg-type]
+        audit=audit,
+        transitions_path=tmp_path / "missing.jsonl",
+    )
+
+    page = events.read(limit=1_000, project_ids=project_ids[:MAX_EVENT_PROJECTS])
+    assert len(page["next_cursor"].encode()) <= 4_096
+    events.read(
+        limit=1_000,
+        project_ids=project_ids[:MAX_EVENT_PROJECTS],
+        cursor=page["next_cursor"],
+    )
+    with pytest.raises(ValueError, match="1-16 projects"):
+        events.read(limit=1_000, project_ids=project_ids)
 
 
 def test_event_cursor_state_and_runtime_continuation_preserve_rows(tmp_path: Path) -> None:
