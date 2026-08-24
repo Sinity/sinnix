@@ -328,11 +328,25 @@ class OwnerExecution:
                 if exceeded or stream_failure is not None:
                     break
         finally:
+            if process.poll() is None:
+                self.terminate(process)
+            # Termination may race a selector event: stderr can already be in
+            # the pipe even when the failing stdout event was delivered first.
+            # The child is reaped above, so bounded reads cannot wait for more
+            # producer output and retain diagnostics without weakening limits.
+            for stream, destination, limit in (
+                (process.stdout, stdout, profile.max_stdout_bytes),
+                (process.stderr, stderr, profile.max_stderr_bytes),
+            ):
+                room = limit + 1 - len(destination)
+                if room <= 0:
+                    continue
+                remainder = stream.read(room)
+                if remainder:
+                    destination.extend(remainder)
             selector.close()
             if process.stdin is not None:
                 process.stdin.close()
-            if process.poll() is None:
-                self.terminate(process)
         exit_status = process.wait()
         if stream_failure is not None:
             failure = stream_failure
