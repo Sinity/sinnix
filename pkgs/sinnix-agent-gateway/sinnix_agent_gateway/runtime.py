@@ -579,22 +579,61 @@ class Runtime:
             timeout_seconds=timeout_seconds,
             credential_profile=credential_profile,
         )
-        result = self._sinnixd_job(
-            "job.agent.start",
-            {
-                "project_id": request.project_id,
-                "checkout_id": request.checkout_id,
-                "prompt": request.prompt,
-                "backend": request.backend,
-                "model": request.model,
-                "effort": request.reasoning_effort,
-                "credential_profile": request.credential_profile,
-                "timeout_seconds": request.timeout_seconds,
-                "result": "last-message",
-                "bead_binding": binding,
-            },
-            principal=self.principal.name,
-        )
+        try:
+            result = self._sinnixd_job(
+                "job.agent.start",
+                {
+                    "project_id": request.project_id,
+                    "checkout_id": request.checkout_id,
+                    "prompt": request.prompt,
+                    "backend": request.backend,
+                    "model": request.model,
+                    "effort": request.reasoning_effort,
+                    "credential_profile": request.credential_profile,
+                    "timeout_seconds": request.timeout_seconds,
+                    "result": "last-message",
+                    "bead_binding": binding,
+                },
+                principal=self.principal.name,
+            )
+        except ProtocolError as exc:
+            if claim_ref is None:
+                raise
+            raise ProtocolError(
+                "partial_completion",
+                "Beads claim succeeded but agent launch failed",
+                details={
+                    "bead_ref": bead_ref,
+                    "project_ref": project_ref,
+                    "checkout_ref": checkout_ref,
+                    "claim_ref": claim_ref,
+                    "claim_receipt": claim_receipt,
+                    "request_id": request_id,
+                    "launch_error": {
+                        "code": exc.code,
+                        "details": exc.details,
+                    },
+                },
+            ) from exc
+        if result.get("state", {}).get("phase") == "launch-failed":
+            job_id = result.get("job_id")
+            launch_details = {
+                "bead_ref": bead_ref,
+                "project_ref": project_ref,
+                "checkout_ref": checkout_ref,
+                "claim_ref": claim_ref,
+                "claim_receipt": claim_receipt,
+                "request_id": request_id,
+            }
+            if isinstance(job_id, str) and job_id:
+                launch_details["job_ref"] = REGISTRY.reference("job", {"job_id": job_id})
+            raise ProtocolError(
+                "partial_completion" if claim_ref else "owner_failed",
+                "Beads claim succeeded but agent launch failed"
+                if claim_ref
+                else "agent launch failed",
+                details=launch_details,
+            )
         job_id = result.get("job_id")
         if not isinstance(job_id, str) or not job_id:
             raise ProtocolError("owner_failed", "sinnixd bead-agent start response omitted the job ID")
@@ -1009,7 +1048,15 @@ class Runtime:
     def _close_with_evidence(
         self, project_id: str, bead_id: str, bead_ref: str, values: Mapping[str, Any]
     ) -> dict[str, Any]:
-        required = {"verdict", "residuals", "evidence_refs", "job_ref", "code_revision", "task_revision"}
+        required = {
+            "verdict",
+            "residuals",
+            "evidence_refs",
+            "job_ref",
+            "code_revision",
+            "task_revision",
+            "task_etag",
+        }
         if set(values) != required:
             raise ProtocolError("invalid_request", "close_with_evidence requires a complete evidence record")
         job_ref = values["job_ref"]
@@ -1023,11 +1070,14 @@ class Runtime:
         if not isinstance(binding, Mapping) or binding.get("bead_ref") != bead_ref:
             raise ProtocolError("precondition_failed", "job is not bound to the requested bead")
         checkout = job.get("checkout")
-        if not isinstance(checkout, Mapping) or values["code_revision"] != checkout.get("head"):
-            raise ProtocolError("precondition_failed", "code_revision does not match the launch checkout")
+        if not isinstance(checkout, Mapping) or not isinstance(checkout.get("checkout_id"), str):
+            raise ProtocolError("owner_failed", "bead-bound job omitted its checkout identity")
+        current_checkout = self.projects.checkout(project_id, checkout["checkout_id"])["checkout"]
+        if values["code_revision"] != current_checkout.get("head"):
+            raise ProtocolError("precondition_failed", "code_revision does not match the current checkout")
         current = self.beads.get(project_id, bead_id)
-        if values["task_revision"] != current.get("task_revision"):
-            raise ProtocolError("precondition_failed", "task_revision does not match the current bead")
+        if values["task_revision"] != current.get("task_revision") or values["task_etag"] != current.get("etag"):
+            raise ProtocolError("precondition_failed", "task revision does not match the current bead")
         if not isinstance(values["residuals"], list) or not isinstance(values["evidence_refs"], list):
             raise ProtocolError("invalid_request", "closure residuals and evidence_refs must be lists")
         evidence = {
@@ -1038,6 +1088,8 @@ class Runtime:
             "job_ref": canonical_job_ref,
             "code_revision": values["code_revision"],
             "task_revision": values["task_revision"],
+            "task_etag": values["task_etag"],
+            "launch_code_revision": checkout.get("head"),
             "launch_task_revision": binding.get("task_revision"),
             "launch_task_etag": binding.get("task_etag"),
         }

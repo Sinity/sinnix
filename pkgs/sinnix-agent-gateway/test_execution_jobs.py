@@ -470,6 +470,71 @@ def test_v2_bead_agent_run_and_cancel_preserve_daemon_cancellation_truth(
     assert "display only" not in daemon.calls[0].arguments["prompt"]
 
 
+def test_claimed_bead_launch_failure_is_partial_completion_and_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, daemon = runtime_with_daemon(tmp_path, "operator")
+    monkeypatch.setattr(
+        runtime.beads,
+        "get",
+        lambda _project, _bead, **_kwargs: {
+            "ref": "sinnix://projects/fixture/beads/fixture-1",
+            "task_revision": "a" * 64,
+            "etag": "b" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        runtime.projects,
+        "checkout",
+        lambda _project, _checkout: {"checkout": {"checkout_id": "default", "head": "c" * 40}},
+    )
+    monkeypatch.setattr(
+        runtime.beads,
+        "change",
+        lambda *_args, **_kwargs: {
+            "after": {
+                "ref": "sinnix://projects/fixture/beads/fixture-1",
+                "task_revision": "c" * 64,
+                "etag": "d" * 64,
+            },
+            "owner_route": "beads.change",
+        },
+    )
+    daemon.responses["job.agent.start"] = {
+        "job_id": "3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c",
+        "state": {"phase": "launch-failed"},
+    }
+    request = {
+        "ref": "sinnix://projects/fixture/beads/fixture-1",
+        "checkout_id": "default",
+        "backend": "codex",
+        "model": "gpt-5.6-terra",
+        "reasoning_effort": "high",
+        "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b",
+        "idempotency_key": "claim-launch-failure",
+    }
+    first = runtime.execute_v2(
+        REGISTRY.action("agent.for_bead"),
+        lambda: runtime.v2_run_for_bead(
+            reference=request["ref"], checkout_id="default", claim_mode="claim",
+            work_item=None, instructions=None, backend="codex", model="gpt-5.6-terra",
+            reasoning_effort="high", timeout_seconds=3_600,
+            credential_profile="subscription", request_id=request["request_id"],
+        ),
+        request,
+    )
+    replay = runtime.execute_v2(
+        REGISTRY.action("agent.for_bead"),
+        lambda: pytest.fail("idempotent retry launched a second agent"),
+        request,
+    )
+
+    assert first["error"]["code"] == "partial_completion"
+    assert first["error"]["details"]["claim_ref"].endswith("/claims/" + "d" * 64)
+    assert replay == first
+    assert [request.operation for request in daemon.calls] == ["job.agent.start"]
+
+
 def test_bead_review_and_evidence_close_require_bound_successful_job(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -486,17 +551,19 @@ def test_bead_review_and_evidence_close_require_bound_successful_job(
     monkeypatch.setattr(runtime.projects, "diff", lambda *_args, **_kwargs: {"diff": "fixture diff"})
 
     review = runtime.v2_context(bead["ref"], "bead.review", f"sinnix://jobs/{job_id}")
-    closed = runtime.v2_beads_change(reference=bead["ref"], operation="close_with_evidence", parameters={"verdict": "accepted", "residuals": [], "evidence_refs": [f"sinnix://jobs/{job_id}", f"sinnix://jobs/{job_id}/artifacts/result"], "job_ref": f"sinnix://jobs/{job_id}", "code_revision": "c" * 40, "task_revision": "a" * 64}, preconditions=None)
+    with pytest.raises(ProtocolError, match="current checkout"):
+        runtime.v2_beads_change(reference=bead["ref"], operation="close_with_evidence", parameters={"verdict": "accepted", "residuals": [], "evidence_refs": [f"sinnix://jobs/{job_id}", f"sinnix://jobs/{job_id}/artifacts/result"], "job_ref": f"sinnix://jobs/{job_id}", "code_revision": "c" * 40, "task_revision": "a" * 64, "task_etag": "b" * 64}, preconditions=None)
+    closed = runtime.v2_beads_change(reference=bead["ref"], operation="close_with_evidence", parameters={"verdict": "accepted", "residuals": [], "evidence_refs": [f"sinnix://jobs/{job_id}", f"sinnix://jobs/{job_id}/artifacts/result"], "job_ref": f"sinnix://jobs/{job_id}", "code_revision": "d" * 40, "task_revision": "a" * 64, "task_etag": "b" * 64}, preconditions=None)
 
     assert review["revision_mismatch"] == {"task_revision": True, "task_etag": True, "code_revision": True}
     assert review["tests_and_artifacts"]["result"]["ref"].endswith("/result")
     assert closed["closure"]["launch_task_revision"] == "z" * 64
     assert changes[0]["operation"] == "close"
-    assert json.loads(changes[0]["parameters"]["reason"])["code_revision"] == "c" * 40
+    assert json.loads(changes[0]["parameters"]["reason"])["code_revision"] == "d" * 40
 
     daemon.responses["job.get"] = {**daemon.responses["job.get"], "state": {"phase": "cancelled"}}
     with pytest.raises(ProtocolError, match="cannot close"):
-        runtime.v2_beads_change(reference=bead["ref"], operation="close_with_evidence", parameters={"verdict": "accepted", "residuals": [], "evidence_refs": [f"sinnix://jobs/{job_id}"], "job_ref": f"sinnix://jobs/{job_id}", "code_revision": "c" * 40, "task_revision": "a" * 64}, preconditions=None)
+        runtime.v2_beads_change(reference=bead["ref"], operation="close_with_evidence", parameters={"verdict": "accepted", "residuals": [], "evidence_refs": [f"sinnix://jobs/{job_id}"], "job_ref": f"sinnix://jobs/{job_id}", "code_revision": "d" * 40, "task_revision": "a" * 64, "task_etag": "b" * 64}, preconditions=None)
 
 
 def test_v2_jobs_query_bounds_daemon_job_list_and_preserves_job_refs(tmp_path: Path) -> None:
