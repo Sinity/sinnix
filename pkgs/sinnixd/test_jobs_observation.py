@@ -435,6 +435,72 @@ def test_collected_exit_status_job_uses_capture_completion_marker(tmp_path: Path
     assert terminal["state"]["result_evidence"] == "completed"
 
 
+@pytest.mark.parametrize(
+    ("state", "expected_message"),
+    [
+        (
+            {
+                "phase": "outcome-unknown",
+                "terminal": True,
+                "systemd": {"LoadState": "not-found", "ExecMainStatus": "0", "Result": "success"},
+            },
+            "unavailable",
+        ),
+        (
+            {
+                "phase": "missing",
+                "terminal": True,
+                "systemd": {"LoadState": "not-found", "ExecMainStatus": "0", "Result": "success"},
+            },
+            "unavailable",
+        ),
+        (
+            {
+                "phase": "launch-failed",
+                "terminal": True,
+                "systemd": {"LoadState": "not-found", "ExecMainStatus": "0", "Result": "success"},
+            },
+            "unavailable",
+        ),
+        (
+            {"phase": "launch-failed", "terminal": True, "launch_evidence": "not-started"},
+            "unavailable",
+        ),
+    ],
+)
+def test_exit_result_rejects_default_success_without_authoritative_completion(
+    tmp_path: Path, state: dict[str, object], expected_message: str
+) -> None:
+    """The result route must not promote systemd's absent-unit default status to success."""
+    jobs = generic_jobs(tmp_path, FakeSystemdJobs())
+    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    record = jobs.store.load(started["job_id"])
+    jobs.store.save(jobs._with_state(record, state))
+
+    with pytest.raises(JobResultError, match=expected_message):
+        jobs.result(started["job_id"])
+
+
+@pytest.mark.parametrize(
+    ("properties", "expected"),
+    [
+        ({"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}, {"code": 0, "result": "success"}),
+        ({"LoadState": "loaded", "ActiveState": "failed", "Result": "exit-code", "ExecMainStatus": "7"}, {"code": 7, "result": "exit-code"}),
+        ({"LoadState": "loaded", "ActiveState": "failed", "Result": "timeout", "ExecMainStatus": "1"}, {"code": 1, "result": "timeout"}),
+        ({"LoadState": "loaded", "ActiveState": "inactive", "Result": "signal", "ExecMainStatus": "15"}, {"code": 15, "result": "signal"}),
+    ],
+)
+def test_exit_result_preserves_authoritative_observed_outcomes(
+    tmp_path: Path, properties: dict[str, str], expected: dict[str, object]
+) -> None:
+    """Exact loaded systemd outcomes remain the public exit result."""
+    systemd = FakeSystemdJobs(properties=properties)
+    jobs = generic_jobs(tmp_path, systemd)
+    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+
+    assert jobs.result(started["job_id"])["value"] == expected
+
+
 def test_schema_v3_native_success_reconciles_after_restart_without_exec_main_status(tmp_path: Path) -> None:
     """Evidence harness: a retained inactive unit must retain schema-v3 native completion evidence."""
     job_id = "74e64cb4-282e-4b27-b4b1-af052b268161"
