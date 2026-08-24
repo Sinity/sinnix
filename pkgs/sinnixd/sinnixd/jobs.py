@@ -1693,7 +1693,7 @@ class GenericJobs:
     ) -> dict[str, Any]:
         if operation.name in lineage:
             raise ValueError("declared operation dependency cycle")
-        dependency_ids = tuple(
+        dependency_jobs = tuple(
             self._start_declared_locked(
                 project,
                 project.operation(name),
@@ -1702,9 +1702,22 @@ class GenericJobs:
                 {},
                 checkout,
                 (*lineage, operation.name),
-            )["job_id"]
+            )
             for name in operation.dependencies
         )
+        dependency_ids = tuple(job["job_id"] for job in dependency_jobs)
+        dependency_environment: dict[str, str] = {}
+        for dependency_id in dependency_ids:
+            dependency = self.store.load(dependency_id)
+            if dependency.spec.lease is None:
+                continue
+            for port in dependency.spec.lease.ports:
+                existing = dependency_environment.get(port.environment)
+                if existing is not None and existing != str(port.port):
+                    raise ValueError(
+                        f"declared operation dependencies provide conflicting {port.environment} leases"
+                    )
+                dependency_environment[port.environment] = str(port.port)
         operation_argv, parameter_digest = operation.derive_argv(parameters)
         workdir = checkout.path if checkout is not None else project.root
         environment = project.environment.values()
@@ -1753,6 +1766,7 @@ class GenericJobs:
 
         def build_spec(lease: ServiceLease | None) -> GenericJobSpec:
             launch_environment = dict(environment)
+            launch_environment.update(dependency_environment)
             if lease is not None:
                 launch_environment.update({port.environment: str(port.port) for port in lease.ports})
             return GenericJobSpec(
@@ -1971,6 +1985,14 @@ class GenericJobs:
                     "dependencies": list(record.spec.dependency_job_ids),
                 }
             if not dependency["state"].get("terminal"):
+                dependency_record = self.store.load(job_id)
+                lease = dependency_record.spec.lease
+                if (
+                    lease is not None
+                    and dependency["state"].get("phase") in {"submitted", "running"}
+                    and all(not _loopback_port_available(port.port) for port in lease.ports)
+                ):
+                    continue
                 return {"phase": "waiting-dependencies", "terminal": False, "observed_at": _timestamp(), "dependencies": list(record.spec.dependency_job_ids)}
         return None
 
