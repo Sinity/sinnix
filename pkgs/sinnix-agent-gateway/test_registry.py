@@ -140,7 +140,8 @@ def test_action_failure_contracts_follow_public_controls_and_owner_capabilities(
     assert REGISTRY.action("jobs.query").typed_failures == read_failures
     assert REGISTRY.action("agent.for_bead").typed_failures == read_failures | {
         "conflict",
-        "idempotency_conflict"
+        "idempotency_conflict",
+        "partial_completion",
     }
     assert REGISTRY.action("mcp.change").typed_failures == read_failures | {
         "conflict",
