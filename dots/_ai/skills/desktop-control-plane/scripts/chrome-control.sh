@@ -471,8 +471,16 @@ close)
     exit 2
   }
   page_id=$(resolve_page_id "$1")
-  response=$(curl -fsS "${CDP_BASE}/json/close/${page_id}")
-  print_cdp_http_response "$response"
+  curl -fsS "${CDP_BASE}/json/close/${page_id}" >/dev/null
+  for _attempt in {1..50}; do
+    if ! curl -fsS "${CDP_BASE}/json/list" | jq -e --arg id "$page_id" 'any(.[]; .id == $id)' >/dev/null; then
+      jq -nc --arg id "$page_id" '{id: $id, closed: true}'
+      exit 0
+    fi
+    sleep 0.1
+  done
+  printf 'CDP accepted close but target remained present: %s\n' "$page_id" >&2
+  exit 1
   ;;
 
 activate)
