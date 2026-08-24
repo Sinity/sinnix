@@ -29,28 +29,11 @@ in
           config:
           let
             settings = (hmFor config).wayland.windowManager.hyprland.settings;
-            agentBrowserRules = builtins.filter (
-              rule: rule.name or null == "agent-browser-window"
-            ) settings.window_rule;
           in
           [
             {
               assertion = !settings.config.decoration.blur.enabled;
               message = "Global Hyprland blur must remain disabled while Noctalia uses a full-height notification surface.";
-            }
-            {
-              assertion = agentBrowserRules == [
-                {
-                  name = "agent-browser-window";
-                  match.initial_title = "^sinnix-agent-window-.*$";
-                  focus_on_activate = false;
-                  no_initial_focus = true;
-                  suppress_event = "activate activatefocus";
-                  tile = true;
-                  workspace = "name:agentbrowser silent";
-                }
-              ];
-              message = "Agent browser windows must remain hidden and activation-suppressed after their creation transaction ends.";
             }
           ];
       };
@@ -63,9 +46,6 @@ in
         cat > "$out" <<'EOF_CONTRACT'
         ${builtins.toJSON {
           globalBlur = settings.config.decoration.blur.enabled;
-          agentBrowserRule = builtins.head (
-            builtins.filter (rule: rule.name or null == "agent-browser-window") settings.window_rule
-          );
         }}
         EOF_CONTRACT
       '';

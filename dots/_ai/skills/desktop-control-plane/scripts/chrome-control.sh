@@ -355,6 +355,11 @@ restore_operator_focus_after_failed_agent_window() {
   expected_workspaces=$(jq -c '.active_workspaces' <<<"$compositor_state_before")
   [[ $current_workspaces == "$expected_workspaces" ]] || return 0
   hyprctl_call dispatch focuswindow "address:${focus_before}" >/dev/null
+  for _ in {1..10}; do
+    current_focus=$(hyprctl_call activewindow -j 2>/dev/null | jq -r '.address // empty')
+    [[ $current_focus == "$focus_before" ]] && return 0
+    sleep 0.05
+  done
 }
 
 lua_quote() {
@@ -362,24 +367,57 @@ lua_quote() {
 }
 
 install_agent_window_rules() {
-  local guard_name_lua placement_name_lua class_lua title_lua workspace_lua rule_lua
+  local guard_name_lua class_lua workspace_lua rule_lua provider
+  provider=$(hyprctl_call -j status | jq -r '.configProvider // empty')
+  if [[ $provider == "hyprlang" ]]; then
+    hyprctl_call keyword 'windowrule[sinnix-agent-window-guard]:match:class' \
+      '^(google-chrome|google-chrome-unstable|chromium-browser|Chromium)$' >/dev/null
+    hyprctl_call keyword 'windowrule[sinnix-agent-window-guard]:workspace' \
+      "${AGENT_WORKSPACE_TARGET} silent" >/dev/null
+    hyprctl_call keyword 'windowrule[sinnix-agent-window-guard]:tile' true >/dev/null
+    hyprctl_call keyword 'windowrule[sinnix-agent-window-guard]:no_initial_focus' true >/dev/null
+    hyprctl_call keyword 'windowrule[sinnix-agent-window-guard]:focus_on_activate' false >/dev/null
+    hyprctl_call keyword 'windowrule[sinnix-agent-window-guard]:suppress_event' \
+      'activate activatefocus' >/dev/null
+    hyprctl_call keyword 'windowrule[sinnix-agent-window-guard]:enable' true >/dev/null
+    compositor_rule_provider="hyprlang"
+    compositor_rules_installed="true"
+    return 0
+  fi
+  [[ $provider == "lua" ]] || {
+    printf 'unsupported Hyprland config provider: %s\n' "${provider:-unknown}" >&2
+    return 1
+  }
   guard_name_lua=$(lua_quote "sinnix-agent-window-guard-${BASHPID}")
-  placement_name_lua=$(lua_quote "sinnix-agent-window-placement-${BASHPID}")
   class_lua=$(lua_quote '^(google-chrome|google-chrome-unstable|chromium-browser|Chromium)$')
-  title_lua=$(lua_quote "^${marker}$")
   workspace_lua=$(lua_quote "${AGENT_WORKSPACE_TARGET} silent")
-  rule_lua="sinnix_agent_window_guard = hl.window_rule({name = ${guard_name_lua}, match = {initial_class = ${class_lua}}, no_initial_focus = true, focus_on_activate = false, suppress_event = 'activate activatefocus'}); sinnix_agent_window_placement = hl.window_rule({name = ${placement_name_lua}, match = {initial_class = ${class_lua}, initial_title = ${title_lua}}, workspace = ${workspace_lua}, no_initial_focus = true, focus_on_activate = false, suppress_event = 'activate activatefocus'})"
+  rule_lua="sinnix_agent_window_guard = hl.window_rule({name = ${guard_name_lua}, match = {initial_class = ${class_lua}}, workspace = ${workspace_lua}, tile = true, no_initial_focus = true, focus_on_activate = false, suppress_event = 'activate activatefocus'})"
+  compositor_rule_provider="lua"
   compositor_rules_installed="true"
   hyprctl_call eval "$rule_lua" >/dev/null
 }
 
 clear_stale_agent_window_rules() {
-  hyprctl_call eval 'if sinnix_agent_window_guard ~= nil then sinnix_agent_window_guard:set_enabled(false); sinnix_agent_window_guard = nil end; if sinnix_agent_window_placement ~= nil then sinnix_agent_window_placement:set_enabled(false); sinnix_agent_window_placement = nil end' >/dev/null
+  local provider
+  provider=$(hyprctl_call -j status | jq -r '.configProvider // empty')
+  if [[ $provider == "hyprlang" ]]; then
+    hyprctl_call keyword 'windowrule[sinnix-agent-window-guard]:enable' false >/dev/null
+  elif [[ $provider == "lua" ]]; then
+    hyprctl_call eval 'if sinnix_agent_window_guard ~= nil then sinnix_agent_window_guard:set_enabled(false); sinnix_agent_window_guard = nil end' >/dev/null
+  else
+    printf 'unsupported Hyprland config provider: %s\n' "${provider:-unknown}" >&2
+    return 1
+  fi
 }
 
 disable_agent_window_rules() {
   [[ ${compositor_rules_installed:-false} == "true" ]] || return 0
-  if hyprctl_call eval 'if sinnix_agent_window_guard ~= nil then sinnix_agent_window_guard:set_enabled(false); sinnix_agent_window_guard = nil end; if sinnix_agent_window_placement ~= nil then sinnix_agent_window_placement:set_enabled(false); sinnix_agent_window_placement = nil end' >/dev/null; then
+  if [[ ${compositor_rule_provider:-} == "hyprlang" ]]; then
+    disable_output=$(hyprctl_call keyword 'windowrule[sinnix-agent-window-guard]:enable' false)
+  else
+    disable_output=$(hyprctl_call eval 'if sinnix_agent_window_guard ~= nil then sinnix_agent_window_guard:set_enabled(false); sinnix_agent_window_guard = nil end')
+  fi
+  if [[ $disable_output == "ok" || -z $disable_output ]]; then
     compositor_rules_installed="false"
   else
     printf 'failed to disable temporary agent-window compositor rules\n' >&2

@@ -131,6 +131,9 @@ set -euo pipefail
 state="${FAKE_STATE:?}"
 printf '%s\n' "$*" >>"$state/hyprctl-calls"
 case "$1 $2" in
+'-j status')
+  jq -nc --arg provider "${FAKE_CONFIG_PROVIDER:-lua}" '{configProvider: $provider, backend: "fixture"}'
+  ;;
 'instances -j')
   printf '%s\n' '[{"instance":"fake-hyprland"}]'
   ;;
@@ -141,6 +144,15 @@ eval\ *)
   if [[ $* == *set_enabled* ]]; then
     touch "$state/rules-disabled"
     rm -f "$state/pre-map-rules"
+  fi
+  printf '%s\n' ok
+  ;;
+keyword\ *)
+  if [[ $2 == 'windowrule[sinnix-agent-window-guard]:enable' && $3 == false ]]; then
+    touch "$state/rules-disabled"
+    rm -f "$state/pre-map-rules"
+  else
+    touch "$state/pre-map-rules"
   fi
   printf '%s\n' ok
   ;;
@@ -322,6 +334,12 @@ final)
   ! grep -Fq 'dispatch' "$state/hyprctl-calls"
   assert_rules_cleaned "$state"
   assert_positive_accepted_request_ids "$state"
+
+  FAKE_CONFIG_PROVIDER=hyprlang run_with_deadline matching-hyprlang match 8
+  state="$fixture_root/matching-hyprlang"
+  jq -e '.parked == true and .workspace == "agentbrowser"' "$state/stdout" >/dev/null
+  test ! -e "$state/activation-stolen"
+  assert_rules_cleaned "$state"
 
   run_with_deadline unsolicited event-first 8
   state="$fixture_root/unsolicited"
