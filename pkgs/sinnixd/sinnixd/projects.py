@@ -7,7 +7,7 @@ import subprocess
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from sinnix_mcp import Authority, Lifecycle, OwnerRegistry, OwnerSpec, SinnixRef
 
@@ -198,6 +198,23 @@ class ProjectEnvironment:
 
     def values(self) -> dict[str, str]:
         return build_environment(inherit=self.inherit, unset=self.unset)
+
+    def command_for(
+        self, payload: Sequence[str], *, overrides: Mapping[str, str] | None = None
+    ) -> tuple[str, ...]:
+        """Enter the project environment and apply runtime-owned payload variables.
+
+        Nix creates a per-invocation ``nix-shell.*`` TMPDIR while entering a
+        development shell.  That directory is an implementation detail, not a
+        durable job scratch contract.  Place runtime-owned overrides after
+        ``nix develop --command`` so the payload sees the job-owned path.
+        """
+        assignments = tuple(f"{name}={value}" for name, value in sorted((overrides or {}).items()))
+        if not assignments:
+            return (*self.command, *payload)
+        if self.kind == "nix-develop":
+            return (*self.command, "env", *assignments, *payload)
+        return ("env", *assignments, *self.command, *payload)
 
 
 @dataclass(frozen=True)

@@ -785,6 +785,34 @@ def test_service_lease_is_bounded_public_metadata_and_injects_only_declared_port
     assert rejected.error.code.value == "INVALID_ARGUMENT"
 
 
+def test_nix_develop_payload_receives_job_owned_tmpdir_after_environment_entry(tmp_path: Path) -> None:
+    """The Nix shell's transient TMPDIR must not replace durable job scratch."""
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        .replace('kind = "fixture"', 'kind = "nix-develop"')
+        .replace('command = ["fixture-env", "--command"]', 'command = ["nix", "develop", "--command"]')
+        .replace('exclusive_keys = ["fixture:check"]', 'exclusive_keys = ["fixture:check"]\nscratch = "nvme"')
+    )
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+
+    started = service.dispatch(
+        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"})
+    )
+
+    assert started.ok and started.payload is not None
+    record = jobs.store.load(started.payload.inline["job_id"])
+    assert record.scratch_path is not None
+    expected = str(record.scratch_path)
+    command, environment = jobs.store.declared_launch(record.job_id)
+    assert command == ("nix", "develop", "--command", "env", f"TMPDIR={expected}", "fixture-check")
+    assert environment["TMPDIR"] == expected
+    assert systemd.started[0]["environment"]["TMPDIR"] == expected
+
+
 def test_declared_service_dependency_supplies_lease_and_unblocks_when_bound(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
