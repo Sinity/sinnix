@@ -841,6 +841,10 @@ class GenericJobStore:
         return self.root / "results"
 
     @property
+    def readiness_root(self) -> Path:
+        return self.root / "readiness"
+
+    @property
     def tmpfs_scratch_root(self) -> Path:
         configured = os.environ.get("SINNIXD_TMPFS_SCRATCH_ROOT")
         return Path(configured) if configured else Path("/dev/shm/sinnixd")
@@ -1250,6 +1254,40 @@ class GenericJobStore:
                 if path.name not in active and path.is_dir() and not path.is_symlink():
                     self._cleanup_scratch_path(resolved_root, path)
 
+    def prepare_service_readiness(self, job_id: str) -> Path:
+        _ = job_unit_name(job_id)
+        _ensure_durable_directory(self.readiness_root)
+        path = self.readiness_root / job_id
+        path.unlink(missing_ok=True)
+        return path
+
+    def service_ready(self, job_id: str) -> bool:
+        _ = job_unit_name(job_id)
+        path = self.readiness_root / job_id
+        try:
+            return not path.is_symlink() and path.is_file() and path.read_text() == f"{job_id}\n"
+        except OSError:
+            return False
+
+    def cleanup_service_readiness(self, job_id: str) -> None:
+        _ = job_unit_name(job_id)
+        path = self.readiness_root / job_id
+        if path.exists() or path.is_symlink():
+            path.unlink()
+            _fsync_directory(self.readiness_root)
+
+    def cleanup_inactive_readiness(self, records: Sequence[GenericJobRecord]) -> None:
+        if not self.readiness_root.exists():
+            return
+        active = {record.job_id for record in records if not record.state.get("terminal")}
+        for path in sorted(self.readiness_root.iterdir()):
+            try:
+                _ = job_unit_name(path.name)
+            except (ValueError, JobRecordError):
+                continue
+            if path.name not in active:
+                path.unlink(missing_ok=True)
+
     @staticmethod
     def _cleanup_scratch_path(root: Path, path: Path) -> None:
         if path.exists():
@@ -1547,6 +1585,7 @@ class GenericJobs:
         else:
             records = []
         self.store.cleanup_inactive_scratch(records)
+        self.store.cleanup_inactive_readiness(records)
         finalized: list[GenericJobRecord] = []
         for record in records:
             with self.store.locked(record.job_id):
@@ -1754,6 +1793,11 @@ class GenericJobs:
                         response["coalesced"] = True
                         return response
         job_id = str(uuid4())
+        readiness_path = (
+            self.store.prepare_service_readiness(job_id)
+            if operation.service is not None and operation.service.readiness == "project-command"
+            else None
+        )
         environment.update({
             "SINNIXD_JOB_ID": job_id, "SINNIXD_CORRELATION_ID": correlation_id,
             "SINNIXD_PROJECT_ID": project.project_id, "SINNIXD_OPERATION": operation.name,
@@ -1769,6 +1813,8 @@ class GenericJobs:
             launch_environment.update(dependency_environment)
             if lease is not None:
                 launch_environment.update({port.environment: str(port.port) for port in lease.ports})
+                if readiness_path is not None:
+                    launch_environment["SINNIXD_SERVICE_READY_FILE"] = str(readiness_path)
             return GenericJobSpec(
                 kind="declared-operation", command=(*project.environment.command, *operation_argv),
                 working_directory=str(workdir), environment=launch_environment, project_id=project.project_id,
@@ -1990,6 +2036,10 @@ class GenericJobs:
                 if (
                     lease is not None
                     and dependency["state"].get("phase") in {"submitted", "running"}
+                    and (
+                        lease.readiness == "none"
+                        or self.store.service_ready(job_id)
+                    )
                     and all(not _loopback_port_available(port.port) for port in lease.ports)
                 ):
                     continue
@@ -2015,6 +2065,7 @@ class GenericJobs:
 
     def _terminal_cleanup(self, record: GenericJobRecord) -> None:
         self.store.cleanup_scratch(record)
+        self.store.cleanup_service_readiness(record.job_id)
         if record.spec.kind == "declared-operation":
             self.store.cleanup_declared_launch(record.job_id)
         self.store.release_terminal_service_lease(record)

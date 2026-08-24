@@ -441,10 +441,10 @@ when a new script is added.
   descriptor supplies named loopback-port slots, and the durable record retains
   only lease ID, loopback host, slot and environment names, allocated ports,
   readiness and lifetime metadata. Declared operations may depend on such a
-  service: admission waits until its leased ports are bound and injects those
-  descriptor-named ports into the dependent launch environment. Systemd remains
-  authoritative for their process tree, timeout, cancellation, logs, and
-  terminal state.
+  service: admission waits for its job-bound readiness marker and leased ports,
+  then injects those descriptor-named ports into the dependent launch
+  environment. Systemd remains authoritative for their process tree, timeout,
+  cancellation, logs, and terminal state.
   Sinnixd also owns durable workspace relationships over Git-owned linked
   worktrees. Project descriptors constrain one workspace root and base policy;
   AgentCTL creates or adopts a canonical linked worktree and derives current
