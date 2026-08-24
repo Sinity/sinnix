@@ -2,11 +2,18 @@
 # @sinnix-package
 # description: Write a private atomic pre-compaction handoff record
 # runtimeInputs: bash coreutils git jq
+#
+# Input contract: the Claude Code PreCompact hook payload — session_id,
+# transcript_path, cwd, trigger, custom_instructions. (Schema v1 read
+# imagined `.handoff.mission`/`.handoff.task_ids` fields no harness ever
+# sent, so every record was empty boilerplate; v2 records session identity
+# and a transcript pointer instead. Transcript CONTENT stays excluded —
+# the record may land in an arbitrary repo's .agent/scratch.)
 set -euo pipefail
 
 umask 077
 input="$(cat)"
-cwd="$(printf '%s' "$input" | jq -r '.cwd // .working_directory // .handoff.cwd // empty')"
+cwd="$(printf '%s' "$input" | jq -r '.cwd // .working_directory // empty')"
 cwd="${cwd:-$PWD}"
 
 repo_root=""
@@ -40,33 +47,33 @@ yaml_string() {
   jq -rn --arg value "$1" '$value | @json'
 }
 
-yaml_array() {
-  local expression="$1"
-  printf '%s' "$input" | jq -c "${expression} // []"
-}
-
-mission="$(printf '%s' "$input" | jq -r '.handoff.mission // .mission // ""')"
-next_action="$(printf '%s' "$input" | jq -r '.handoff.next_action // .next_action // ""')"
-source_client="$(printf '%s' "$input" | jq -r '.client // .provider // "unknown"')"
+session_id="$(printf '%s' "$input" | jq -r '.session_id // ""')"
+transcript_path="$(printf '%s' "$input" | jq -r '.transcript_path // ""')"
+trigger="$(printf '%s' "$input" | jq -r '.trigger // ""')"
+custom_instructions="$(printf '%s' "$input" | jq -r '(.custom_instructions // "") | .[0:300]')"
+source_client="$(printf '%s' "$input" | jq -r '.client // .provider // (if .hook_event_name then "claude-code" else "unknown" end)')"
 created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 {
   printf '%s\n' '---'
-  printf 'schema_version: 1\n'
+  printf 'schema_version: 2\n'
   printf 'created_at: %s\n' "$(yaml_string "$created_at")"
   printf 'source_client: %s\n' "$(yaml_string "$source_client")"
+  printf 'session_id: %s\n' "$(yaml_string "$session_id")"
+  printf 'transcript_path: %s\n' "$(yaml_string "$transcript_path")"
+  printf 'trigger: %s\n' "$(yaml_string "$trigger")"
+  printf 'custom_instructions: %s\n' "$(yaml_string "$custom_instructions")"
   printf 'repo_root: %s\n' "$(yaml_string "$repo_root")"
   printf 'branch: %s\n' "$(yaml_string "$branch")"
   printf 'worktree: %s\n' "$(yaml_string "$worktree")"
   printf 'dirty_paths: %s\n' "$(printf '%s\n' "$dirty_paths" | jq -Rsc 'split("\n") | map(select(length > 0))')"
-  printf 'task_ids: %s\n' "$(yaml_array '.handoff.task_ids // .task_ids')"
-  printf 'active_jobs: %s\n' "$(yaml_array '.handoff.active_jobs // .active_jobs')"
-  printf 'completed_verification: %s\n' "$(yaml_array '.handoff.completed_verification // .completed_verification')"
-  printf 'evidence_paths: %s\n' "$(yaml_array '.handoff.evidence_paths // .evidence_paths')"
-  printf 'blockers: %s\n' "$(yaml_array '.handoff.blockers // .blockers')"
-  printf 'mission: %s\n' "$(yaml_string "$mission")"
-  printf 'next_action: %s\n' "$(yaml_string "$next_action")"
-  printf '%s\n' '---' '# Pre-compaction handoff' '' 'This record contains structured resume state only. Transcript content and environment values are intentionally excluded.'
+  printf '%s\n' '---' '# Pre-compaction handoff' ''
+  if [[ -n "$session_id" ]]; then
+    printf 'Session `%s` compacted here (trigger: %s). Full resume state is the\n' "$session_id" "${trigger:-unknown}"
+    printf 'transcript itself; render its prose with:\n\n'
+    printf '    sinnix-claude-session prose %s\n\n' "$session_id"
+  fi
+  printf '%s\n' 'Transcript content and environment values are intentionally excluded.'
 } >"$tmp"
 
 chmod 600 "$tmp"
