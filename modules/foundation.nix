@@ -69,10 +69,6 @@ in
               default = "${config.dataRoot}/ai";
               description = "AI chat/dialogue archives and analyses, including the live polylogue capture lane.";
             };
-            exportsRoot = mkOption {
-              type = types.str;
-              default = "${config.dataRoot}/exports";
-            };
             selfRoot = mkOption {
               type = types.str;
               default = "${config.dataRoot}/self";
