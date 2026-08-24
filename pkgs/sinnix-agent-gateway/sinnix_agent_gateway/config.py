@@ -206,6 +206,7 @@ class GatewayConfig:
             self.state_dir / "audit",
             self.state_dir / "artifacts",
             self.state_dir / "captures",
+            self.state_dir / "contexts",
             self.state_dir / "diagnostics",
             self.state_dir / "legacy",
             self.state_dir / "results",

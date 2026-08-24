@@ -1,14 +1,40 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from sinnix_agent_gateway.contexts import (
     CONTEXT_INTENTS,
     ComponentResult,
     ComponentSpec,
     ContextComposer,
+    ContextSnapshotStore,
     RevisionReuseCache,
 )
+
+
+def test_context_snapshot_survives_store_recreation_and_rejects_tampering(tmp_path: Path) -> None:
+    snapshot = ContextComposer().compose(
+        "project.orientation",
+        "sinnix://projects/fixture",
+        [
+            ComponentSpec("project", 12_000, lambda: ComponentResult.available("project", {"head": "a"})),
+            ComponentSpec("checkout", 12_000, lambda: ComponentResult.available("checkout", {"head": "a"})),
+            ComponentSpec("tasks", 16_000, lambda: ComponentResult.available("tasks", {"items": []})),
+            ComponentSpec("authority", 8_000, lambda: ComponentResult.available("authority", {"revision": "a"})),
+        ],
+    )
+    snapshot_id = snapshot["snapshot_ref"].rsplit("/", 1)[1]
+    ContextSnapshotStore(tmp_path, "observer").put(snapshot)
+
+    restarted = ContextSnapshotStore(tmp_path, "observer")
+    assert restarted.get(snapshot_id) == snapshot
+    path = tmp_path / "contexts" / "observer" / f"{snapshot_id}.json"
+    path.write_text(path.read_text().replace('"head":"a"', '"head":"b"'))
+    with pytest.raises(KeyError):
+        restarted.get(snapshot_id)
 
 
 def test_declared_contexts_are_bounded_and_isolate_unavailable_components() -> None:

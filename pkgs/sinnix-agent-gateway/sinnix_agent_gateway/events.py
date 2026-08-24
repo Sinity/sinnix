@@ -17,7 +17,11 @@ from .results import derive_cursor_key
 
 MAX_CURSOR_BYTES = 4_096
 MAX_RESPONSE_BYTES = 262_144
-MAX_PROJECTS = 128
+# A cursor carries two independent owner revisions per selected project. The
+# authenticated token is deliberately capped at 4 KiB, so the event scope is
+# tighter than the registry-wide project bound.
+MAX_EVENT_PROJECTS = 16
+MAX_OWNER_REVISIONS = MAX_EVENT_PROJECTS * 2
 MAX_RUNTIME_ROW_BYTES = 1_048_576
 
 
@@ -80,7 +84,7 @@ class OpaqueEventCursor:
         if any(not isinstance(state[key], int) or isinstance(state[key], bool) or state[key] < 0 for key in ("audit_sequence", "runtime_offset")):
             raise EventCursorError("event cursor position is malformed")
         owner_revisions = state["owner_revisions"]
-        if not isinstance(owner_revisions, Mapping) or len(owner_revisions) > MAX_PROJECTS:
+        if not isinstance(owner_revisions, Mapping) or len(owner_revisions) > MAX_OWNER_REVISIONS:
             raise EventCursorError("event cursor owner state is too large")
         if any(not isinstance(key, str) or not isinstance(revision, str) or len(revision) > 256 for key, revision in owner_revisions.items()):
             raise EventCursorError("event cursor owner state is malformed")
@@ -231,7 +235,9 @@ class NormalizedEventService:
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1_000:
             raise ValueError("event limit must be 1-1000")
         selected = sorted(project_ids or self.projects.config.projects)
-        if not selected or len(selected) > MAX_PROJECTS or any(project_id not in self.projects.config.projects for project_id in selected):
+        if not selected or len(selected) > MAX_EVENT_PROJECTS:
+            raise ValueError(f"event project scope must contain 1-{MAX_EVENT_PROJECTS} projects")
+        if any(project_id not in self.projects.config.projects for project_id in selected):
             raise ValueError("event project scope contains an unknown project")
         state = self.cursor.decode(cursor, selected)
         events: list[dict[str, Any]] = []

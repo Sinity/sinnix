@@ -23,7 +23,7 @@ from .capabilities import Capability, PolicyError, Principal
 from .capability_index import CapabilityIndexService
 from .captures import CaptureService
 from .config import GatewayConfig
-from .contexts import ComponentResult, ComponentSpec, ContextComposer, CONTEXT_INTENTS, source_revision
+from .contexts import ComponentResult, ComponentSpec, ContextComposer, ContextSnapshotStore, CONTEXT_INTENTS, source_revision
 from .contracts import ActionSpec, EffectMode, VerbFamily
 from .desktop import DesktopService
 from .legacy_manifest import LEGACY_MANIFEST
@@ -170,7 +170,7 @@ class Runtime:
     context_composer: ContextComposer = field(default_factory=ContextComposer)
     normalized_events: NormalizedEventService | None = None
     waits: BoundedWaitService | None = None
-    context_snapshots: dict[str, dict[str, Any]] = field(default_factory=dict)
+    context_snapshots: ContextSnapshotStore | None = None
 
     @classmethod
     def create(cls, config: GatewayConfig, principal_name: str) -> "Runtime":
@@ -215,6 +215,7 @@ class Runtime:
                 {"limit": limit, **({"cursor": cursor} if cursor else {})}
             ),
         )
+        runtime.context_snapshots = ContextSnapshotStore(config.state_dir, principal_name)
         runtime.waits = BoundedWaitService(runtime._resolve_wait)
         return runtime
 
@@ -684,11 +685,9 @@ class Runtime:
         context["snapshot_ref"] = snapshot_ref
         for component in context["components"]:
             component["snapshot_ref"] = snapshot_ref
-        self.context_snapshots[context["snapshot_ref"]] = context
-        if len(self.context_snapshots) > 64:
-            oldest = next(iter(self.context_snapshots))
-            if oldest != context["snapshot_ref"]:
-                del self.context_snapshots[oldest]
+        if self.context_snapshots is None:
+            raise ProtocolError("unavailable", "context snapshot store is unavailable")
+        self.context_snapshots.put(context)
         return {"ref": target_ref, **context}
 
     def _context_assignment(self, bead_ref: str, project_id: str, job_ref: str | None) -> dict[str, Any]:
@@ -968,6 +967,8 @@ class Runtime:
             )
         except EventCursorError as exc:
             raise ProtocolError("stale_cursor", str(exc)) from exc
+        except ValueError as exc:
+            raise ProtocolError("invalid_request", str(exc)) from exc
         rows = []
         for event in result["events"]:
             row = dict(event)
@@ -1155,10 +1156,12 @@ class Runtime:
                 "session": self.sessions.read(f"{values['provider']}:{values['session_id']}", offset, max_bytes),
             }
         if resource.kind == "context_snapshot":
+            if self.context_snapshots is None:
+                raise ProtocolError("unavailable", "context snapshot store is unavailable")
             try:
-                snapshot = self.context_snapshots[canonical_ref]
+                snapshot = self.context_snapshots.get(values["snapshot_id"])
             except KeyError as exc:
-                raise ProtocolError("not_found", "context snapshot is no longer retained by this gateway process") from exc
+                raise ProtocolError("not_found", "context snapshot is not retained") from exc
             return {"ref": canonical_ref, "kind": resource.kind, "snapshot": snapshot}
         raise ValueError(f"V2 get does not support resource kind {resource.kind!r}")
 
@@ -1854,9 +1857,9 @@ class Runtime:
             request = WaitRequest(
                 target=wait_target,
                 reference=reference,
-                expected=expected or {},
+                expected={} if expected is None else expected,
                 timeout_seconds=timeout_seconds,
-                poll_seconds=float(poll_seconds),
+                poll_seconds=poll_seconds,
             )
             return self.waits.wait(request)
         except ValueError as exc:
@@ -1926,7 +1929,13 @@ class Runtime:
         if self.waits is None:
             raise ProtocolError("unavailable", "wait owner is unavailable")
         try:
-            request = WaitRequest(target=wait_target, reference=reference, expected=expected or {}, timeout_seconds=timeout_seconds, poll_seconds=float(poll_seconds))
+            request = WaitRequest(
+                target=wait_target,
+                reference=reference,
+                expected={} if expected is None else expected,
+                timeout_seconds=timeout_seconds,
+                poll_seconds=poll_seconds,
+            )
             return await self.waits.wait_async(request, cancelled=cancelled)
         except ValueError as exc:
             raise ProtocolError("invalid_request", str(exc)) from exc
