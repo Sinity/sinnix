@@ -146,7 +146,7 @@ The old prototype state may be retained under the canonical state root's `legacy
 <!-- BEGIN GENERATED GATEWAY V2 REFERENCE -->
 ## Generated V2 reference
 
-This section is generated from the canonical gateway registry. Revision `v2-g2.10-context-events`, catalog SHA-256 `e397d251c8fe961b76d414c244fc283fc03da2840b3382a13ea0cb84f456a267`.
+This section is generated from the canonical gateway registry. Revision `v2-g2.10-context-events`, catalog SHA-256 `4fd6f1e385f1b6747354dfa003d42cef761a629f8ddab79a2f0a6311b5b4acd3`.
 
 The full schemas and executable examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 

@@ -149,6 +149,21 @@ def test_typed_mutations_and_owner_authority_are_enforced(tmp_path: Path) -> Non
         worker.change("fixture", "close", {"id":"fixture-1"})
 
 
+def test_operator_close_requires_an_explicit_true_force_override(tmp_path: Path) -> None:
+    beads, _log = beads_service(tmp_path)
+
+    preview = beads.change(
+        "fixture",
+        "close",
+        {"id": "fixture-1", "reason": "accepted evidence", "force": True},
+        mode="preview",
+    )
+
+    assert preview["command"][-1] == "--force"
+    with pytest.raises(BeadsError, match="force must be true"):
+        beads.change("fixture", "close", {"id": "fixture-1", "force": False}, mode="preview")
+
+
 @pytest.mark.parametrize(("operation", "parameters"), [
     ("create", {"title": "created"}),
     ("update", {"id": "fixture-1", "patch": {"set": {"title": "updated"}}}),
