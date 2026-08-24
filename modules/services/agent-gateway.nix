@@ -151,25 +151,16 @@ mkServiceModule {
     { cfg, ... }:
     let
       enabledEndpoints = lib.filterAttrs (_: endpoint: endpoint.enable) cfg.endpoints;
-      endpointProjects =
-        endpoint:
-        lib.filterAttrs (
-          projectId: _: endpoint.scope.projects == [ ] || builtins.elem projectId endpoint.scope.projects
-        ) config.sinnix.projects.entries;
-      endpointConfigs = lib.mapAttrs (
-        name: endpoint:
-        jsonFormat.generate "sinnix-agent-gateway-${name}.json" {
-          stateDir = endpoint.stateDir;
+      mkGatewayConfig =
+        {
+          stateDir,
+          endpoint,
+          projects,
+          approvals ? { },
+        }:
+        {
+          inherit stateDir endpoint projects;
           inherit (cfg) maxResultBytes;
-          endpoint = {
-            inherit name;
-            label = endpoint.label;
-            principal = endpoint.principal;
-            scope = endpoint.scope;
-          };
-          approvedManifestHash = endpoint.approvedManifestHash;
-          approvedActionCatalogHash = endpoint.approvedActionCatalogHash;
-          approvedManifestPrincipal = endpoint.principal;
           runtimeInventory = "/etc/sinnix/runtime-inventory.json";
           capabilityIndex = "/etc/sinnix/capability-index.json";
           systemdRunCommand = "${pkgs.systemd}/bin/systemd-run";
@@ -181,9 +172,44 @@ mkServiceModule {
           chromeControlCommand = "/home/${userName}/.local/bin/sinnix-chrome-control";
           beadsCommand = "${scriptPkgs.beads}/bin/bd";
           captureCommand = "${scriptPkgs.sinnix-capture}/bin/sinnix-capture";
-          mcpBrokerServers = mcpBrokerServers;
-          projects = endpointProjects endpoint;
+          inherit mcpBrokerServers;
         }
+        // approvals;
+      localAgentControlConfig = jsonFormat.generate "sinnix-agent-gateway.json" (mkGatewayConfig {
+        stateDir = cfg.stateDir;
+        projects = config.sinnix.projects.entries;
+        endpoint = {
+          name = "agent-control";
+          label = "Local agent control";
+          principal = "agent-control";
+          scope = {
+            projects = [ ];
+            captures = [ ];
+          };
+        };
+      });
+      endpointProjects =
+        endpoint:
+        lib.filterAttrs (
+          projectId: _: endpoint.scope.projects == [ ] || builtins.elem projectId endpoint.scope.projects
+        ) config.sinnix.projects.entries;
+      endpointConfigs = lib.mapAttrs (
+        name: endpoint:
+        jsonFormat.generate "sinnix-agent-gateway-${name}.json" (mkGatewayConfig {
+          stateDir = endpoint.stateDir;
+          endpoint = {
+            inherit name;
+            label = endpoint.label;
+            principal = endpoint.principal;
+            scope = endpoint.scope;
+          };
+          projects = endpointProjects endpoint;
+          approvals = {
+            approvedManifestHash = endpoint.approvedManifestHash;
+            approvedActionCatalogHash = endpoint.approvedActionCatalogHash;
+            approvedManifestPrincipal = endpoint.principal;
+          };
+        })
       ) enabledEndpoints;
       endpointArtifacts = lib.mapAttrs (
         name: endpoint:
@@ -272,7 +298,10 @@ mkServiceModule {
         ]) enabledEndpoints
       );
 
-      environment.etc = lib.mapAttrs' (
+      environment.etc = {
+        "sinnix/agent-gateway.json".source = localAgentControlConfig;
+      }
+      // lib.mapAttrs' (
         name: _:
         lib.nameValuePair "sinnix/agent-gateway-${name}.json" {
           source = endpointConfigs.${name};
