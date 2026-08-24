@@ -48,11 +48,11 @@ The configured commands are:
 sinnix-agent-gateway-observer-mcp
 sinnix-agent-control-mcp
 sinnix-agent-gateway-observer-schema
-sinnix-agent-gateway --config /etc/sinnix/agent-gateway.json --principal agent-control info
+sinnix-agent-gateway --principal agent-control info
 sinnix-agent-gateway --config /etc/sinnix/agent-gateway-observer.json --principal observer info
 ```
 
-The local `agent-control` wrapper uses the generated `/etc/sinnix/agent-gateway.json`, which contains all registered projects and the same declared owner command paths as remote endpoint configs. It has no tunnel or publication approval state because it is a local stdio principal.
+The bare local CLI and `agent-control` wrapper default to the generated `/etc/sinnix/agent-gateway.json`, which contains all registered projects and the same declared owner command paths as remote endpoint configs. `--config` and `SINNIX_AGENT_GATEWAY_CONFIG` remain explicit overrides. The local config has no tunnel or publication approval state because it is a local stdio principal.
 
 Each endpoint-specific schema command emits a canonical, sorted tool manifest and SHA-256. The endpoint's selected principal manifest is compared with its Nix-approved hash before startup. A local server manifest, an approved Nix manifest, and an externally observed ChatGPT connector snapshot are distinct facts. The private state file `connector-snapshot.json` records an external snapshot with schema `sinnix.gateway-connector-snapshot.v1`, principal, and manifest SHA-256. The gateway reports every comparison as `match`, `mismatch`, or `unobserved`; it does not claim connector parity until an actual product-level observation has been recorded. `status` also exposes the principal contract hash and the principal-filtered action catalog hash separately, so a stable MCP tool manifest cannot conceal a widened action contract.
 
