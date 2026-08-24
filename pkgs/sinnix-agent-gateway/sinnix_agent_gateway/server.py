@@ -430,6 +430,8 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         @mcp.tool(title="Get V2 project context", annotations=AUDITED_READ_TOOL)
         def context(
             ref: str,
+            intent: str = "project",
+            job_ref: str | None = None,
             request_id: str | None = None,
             actor: str | None = None,
             reason: str | None = None,
@@ -437,13 +439,15 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
         ) -> V2ManifestEnvelope:
-            """Compose Git and bounded task orientation for one canonical project."""
+            """Compose project, assigned Beads-task, or evidence-review context."""
             action = target_bindings.action_for_tool("context", principal=principal_name)
             response = runtime.execute_v2(
                 action,
-                lambda: runtime.v2_context(ref),
+                lambda: runtime.v2_context(ref, intent, job_ref),
                 {
                     "ref": ref,
+                    "intent": intent,
+                    "job_ref": job_ref,
                     "request_id": request_id,
                     "actor": actor,
                     "reason": reason,
@@ -520,6 +524,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         def run(
             action_name: str,
             idempotency_key: str,
+            ref: str | None = None,
             project_id: str | None = None,
             checkout_id: str | None = None,
             argv: list[str] | None = None,
@@ -528,6 +533,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             model: str | None = None,
             reasoning_effort: str | None = None,
             credential_profile: str = "subscription",
+            claim_mode: str = "none",
+            work_item: str | None = None,
+            instructions: str | None = None,
             cwd: str = ".",
             timeout_seconds: int | None = None,
             operation: str | None = None,
@@ -542,6 +550,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             """Start one catalog-declared shell or attested-agent job by action name."""
             request = {
                 "action_name": action_name,
+                "ref": ref,
                 "project_id": project_id,
                 "checkout_id": checkout_id,
                 "argv": argv,
@@ -550,6 +559,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 "model": model,
                 "reasoning_effort": reasoning_effort,
                 "credential_profile": credential_profile,
+                "claim_mode": claim_mode,
+                "work_item": work_item,
+                "instructions": instructions,
                 "cwd": cwd,
                 "timeout_seconds": timeout_seconds,
                 "operation": operation,
@@ -582,16 +594,19 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                         cwd=cwd,
                         timeout_seconds=3_600 if timeout_seconds is None else timeout_seconds,
                     )
-                elif action.name == "agents.run":
-                    callback = lambda: runtime.v2_run_agent(
-                        project_id=project_id,
+                elif action.name == "agent.for_bead":
+                    callback = lambda: runtime.v2_run_for_bead(
+                        reference=ref,
                         checkout_id=checkout_id,
-                        prompt=prompt,
+                        claim_mode=claim_mode,
+                        work_item=work_item,
+                        instructions=instructions,
                         backend=backend,
                         model=model,
                         reasoning_effort=reasoning_effort,
                         timeout_seconds=3_600 if timeout_seconds is None else timeout_seconds,
                         credential_profile=credential_profile,
+                        request_id=request_id,
                     )
                 elif action.name == "operations.run":
                     if any(

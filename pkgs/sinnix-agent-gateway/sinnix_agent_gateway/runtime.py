@@ -418,11 +418,196 @@ class Runtime:
             **result,
         }
 
-    def v2_context(self, reference: str) -> dict[str, Any]:
-        project_id, _checkout_id, canonical_ref = self._project_reference(
-            reference, allow_checkout=False
+    def v2_context(
+        self, reference: str, intent: str = "project", job_ref: str | None = None
+    ) -> dict[str, Any]:
+        if intent == "project":
+            project_id, _checkout_id, canonical_ref = self._project_reference(
+                reference, allow_checkout=False
+            )
+            return {"ref": canonical_ref, **self._bounded_project_context(project_id)}
+        resource, values, canonical_ref = self._resource_reference(
+            reference, {"bead"}, "bead context requires a canonical Beads reference"
         )
-        return {"ref": canonical_ref, **self._bounded_project_context(project_id)}
+        del resource
+        bead = self.beads.get(
+            values["project_id"], values["bead_id"],
+            includes=["blockers", "comments", "history", "dependencies", "dependents", "children", "refs"],
+        )
+        if intent == "bead.work":
+            jobs_page = self.v2_jobs_query({"limit": 100})
+            related_jobs = [
+                job
+                for job in jobs_page["jobs"]
+                if isinstance(job.get("contract"), Mapping)
+                and isinstance(job["contract"].get("bead_binding"), Mapping)
+                and job["contract"]["bead_binding"].get("bead_ref") == canonical_ref
+            ]
+            return {
+                "ref": canonical_ref,
+                "intent": intent,
+                "bead": bead,
+                "project": self.projects.summary(values["project_id"]),
+                "related_jobs": {
+                    "jobs": related_jobs,
+                    "observed_page": {
+                        "limit": jobs_page["limit"],
+                        "total": jobs_page["total"],
+                        "truncated": jobs_page["truncated"],
+                        "next_cursor": jobs_page["next_cursor"],
+                        "snapshot": jobs_page["snapshot"],
+                    },
+                },
+            }
+        if intent != "bead.review" or not isinstance(job_ref, str):
+            raise ProtocolError("invalid_request", "bead.review requires job_ref")
+        _job_resource, job_values, canonical_job_ref = self._resource_reference(
+            job_ref, {"job"}, "bead.review requires a canonical job reference"
+        )
+        job = self._sinnixd_job("job.get", {"job_id": job_values["job_id"]})
+        binding = job.get("contract", {}).get("bead_binding")
+        if not isinstance(binding, Mapping) or binding.get("bead_ref") != canonical_ref:
+            raise ProtocolError("precondition_failed", "job is not bound to the requested bead")
+        checkout = job.get("checkout")
+        if not isinstance(checkout, Mapping) or not isinstance(checkout.get("checkout_id"), str):
+            raise ProtocolError("owner_failed", "bead-bound job omitted its checkout identity")
+        current_checkout = self.projects.checkout(values["project_id"], checkout["checkout_id"])["checkout"]
+        revision_mismatch = {
+            "task_revision": binding.get("task_revision") != bead.get("task_revision"),
+            "task_etag": binding.get("task_etag") != bead.get("etag"),
+            "code_revision": checkout.get("head") != current_checkout.get("head"),
+        }
+        return {
+            "ref": canonical_ref,
+            "intent": intent,
+            "bead": {"launch": dict(binding), "current": bead},
+            "job": {"ref": canonical_job_ref, **job},
+            "checkout": {
+                "launch": dict(checkout),
+                "current": current_checkout,
+                "diff": self.projects.diff(values["project_id"], checkout_id=checkout["checkout_id"]),
+            },
+            "tests_and_artifacts": job.get("artifacts"),
+            "revision_mismatch": revision_mismatch,
+        }
+
+    def v2_run_for_bead(
+        self,
+        *,
+        reference: str | None,
+        checkout_id: str | None,
+        claim_mode: str,
+        work_item: str | None,
+        instructions: str | None,
+        backend: str | None,
+        model: str | None,
+        reasoning_effort: str | None,
+        timeout_seconds: int,
+        credential_profile: str,
+        request_id: str | None,
+    ) -> dict[str, Any]:
+        self.principal.require(Capability.JOB_START)
+        if self.principal.name != "operator":
+            raise PolicyError("bead-bound agent jobs require the operator principal")
+        if not isinstance(request_id, str):
+            raise ProtocolError("invalid_request", "bead-bound agent launch requires request_id")
+        _resource, values, bead_ref = self._resource_reference(
+            reference or "", {"bead"}, "bead-bound agent launch requires a canonical Beads reference"
+        )
+        if not isinstance(checkout_id, str) or not checkout_id:
+            raise ProtocolError("invalid_request", "bead-bound agent launch requires an explicit checkout_id")
+        if claim_mode not in {"none", "claim"}:
+            raise ProtocolError("invalid_request", "claim_mode must be none or claim")
+        project_id, bead_id = values["project_id"], values["bead_id"]
+        bead = self.beads.get(project_id, bead_id, includes=["blockers", "dependencies", "dependents", "children", "refs"])
+        checkout = self.projects.checkout(project_id, checkout_id)["checkout"]
+        project_ref = REGISTRY.reference("project", {"project_id": project_id})
+        checkout_ref = REGISTRY.reference("checkout", {"project_id": project_id, "checkout_id": checkout_id})
+        claim_receipt: dict[str, Any] | None = None
+        claim_ref: str | None = None
+        if claim_mode == "claim":
+            claim = self.beads.change(
+                project_id,
+                "claim",
+                {"id": bead_id},
+                preconditions={
+                    "expected_task_revision": bead["task_revision"],
+                    "expected_etag": bead["etag"],
+                },
+            )
+            after = claim.get("after")
+            if not isinstance(after, Mapping):
+                raise ProtocolError("owner_failed", "Beads claim omitted its after state")
+            bead = dict(after)
+            claim_ref = f"{bead_ref}/claims/{bead['etag']}"
+            claim_receipt = {
+                "ref": claim_ref,
+                "owner_route": claim.get("owner_route"),
+                "before_revision": claim.get("before_revision"),
+                "after_revision": claim.get("after_revision"),
+                "owner_history_ref": claim.get("owner_history_ref"),
+            }
+        binding = {
+            "bead_ref": bead_ref,
+            "project_ref": project_ref,
+            "checkout_ref": checkout_ref,
+            "task_revision": bead["task_revision"],
+            "task_etag": bead["etag"],
+            "claim_ref": claim_ref,
+            "claim_receipt": claim_receipt,
+            "request_id": request_id,
+            "work_item": work_item,
+        }
+        assigned_context = {
+            "bead": bead,
+            "project_ref": project_ref,
+            "checkout_ref": checkout_ref,
+            "worker_authority": "task.read only; task mutation and closure require an explicit operator call",
+        }
+        prompt = (
+            "Work the assigned canonical Beads task. Read the supplied context, make and verify the requested code change in the assigned checkout, and report evidence plus residuals. Do not mutate or close Beads.\n\n"
+            + json.dumps(assigned_context, sort_keys=True, separators=(",", ":"))
+            + ("\n\nOperator instructions:\n" + instructions if isinstance(instructions, str) and instructions else "")
+        )
+        request = AgentLaunchRequest(
+            project_id=project_id,
+            checkout_id=checkout_id,
+            prompt=prompt,
+            backend=backend,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout_seconds=timeout_seconds,
+            credential_profile=credential_profile,
+        )
+        result = self._sinnixd_job(
+            "job.agent.start",
+            {
+                "project_id": request.project_id,
+                "checkout_id": request.checkout_id,
+                "prompt": request.prompt,
+                "backend": request.backend,
+                "model": request.model,
+                "effort": request.reasoning_effort,
+                "credential_profile": request.credential_profile,
+                "timeout_seconds": request.timeout_seconds,
+                "result": "last-message",
+                "bead_binding": binding,
+            },
+            principal=self.principal.name,
+        )
+        job_id = result.get("job_id")
+        if not isinstance(job_id, str) or not job_id:
+            raise ProtocolError("owner_failed", "sinnixd bead-agent start response omitted the job ID")
+        return {
+            **result,
+            "ref": REGISTRY.reference("job", {"job_id": job_id}),
+            "bead_ref": bead_ref,
+            "project_ref": project_ref,
+            "checkout_ref": checkout_ref,
+            "claim_ref": claim_ref,
+            "claim_receipt": claim_receipt,
+            "atomicity": "native_claim_then_daemon_launch" if claim_ref else "daemon_launch",
+        }
 
     def v2_events(self, limit: int) -> dict[str, Any]:
         if (
@@ -615,56 +800,6 @@ class Runtime:
             raise ProtocolError("owner_failed", "sinnixd declared-operation start response omitted the job ID")
         return {**result, "ref": REGISTRY.reference("job", {"job_id": job_id})}
 
-    def v2_run_agent(
-        self,
-        *,
-        project_id: str | None,
-        checkout_id: str | None,
-        prompt: str | None,
-        backend: str | None,
-        model: str | None,
-        reasoning_effort: str | None,
-        timeout_seconds: int,
-        credential_profile: str,
-    ) -> dict[str, Any]:
-        self.principal.require(Capability.JOB_START)
-        if self.principal.name not in {"agent-control", "operator"}:
-            raise PolicyError("agent jobs require an agent-control or operator principal")
-        request = AgentLaunchRequest(
-            project_id=project_id,
-            checkout_id=checkout_id,
-            prompt=prompt,
-            backend=backend,
-            model=model,
-            reasoning_effort=reasoning_effort,
-            timeout_seconds=timeout_seconds,
-            credential_profile=credential_profile,
-        )
-        result = self._sinnixd_job(
-            "job.agent.start",
-            {
-                "project_id": request.project_id,
-                "checkout_id": request.checkout_id or "default",
-                "prompt": request.prompt,
-                "backend": request.backend,
-                "model": request.model,
-                "effort": request.reasoning_effort,
-                "credential_profile": request.credential_profile,
-                "timeout_seconds": request.timeout_seconds,
-                "result": "last-message",
-            },
-            principal=self.principal.name,
-        )
-        job_id = result.get("job_id")
-        if not isinstance(job_id, str) or not job_id:
-            raise ProtocolError(
-                "owner_failed", "sinnixd agent start response omitted the job ID"
-            )
-        return {
-            **result,
-            "ref": REGISTRY.reference("job", {"job_id": job_id}),
-        }
-
     @staticmethod
     def _required_preconditions(
         preconditions: Mapping[str, Any] | None,
@@ -856,6 +991,11 @@ class Runtime:
             reference, {"project", "bead"}, "ref does not identify a canonical project or bead"
         )
         mutation = self._parameters(parameters)
+        if operation == "close_with_evidence":
+            if resource.kind != "bead":
+                raise ProtocolError("invalid_request", "close_with_evidence requires a canonical Beads ref")
+            result = self._close_with_evidence(values["project_id"], values["bead_id"], canonical_ref, mutation)
+            return {"ref": canonical_ref, **result}
         if resource.kind == "bead":
             mutation.setdefault("id", values["bead_id"])
         result = self.beads.change(
@@ -865,6 +1005,49 @@ class Runtime:
             preview_digest=mutation.pop("preview_digest", None),
         )
         return {"ref": canonical_ref, **result}
+
+    def _close_with_evidence(
+        self, project_id: str, bead_id: str, bead_ref: str, values: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        required = {"verdict", "residuals", "evidence_refs", "job_ref", "code_revision", "task_revision"}
+        if set(values) != required:
+            raise ProtocolError("invalid_request", "close_with_evidence requires a complete evidence record")
+        job_ref = values["job_ref"]
+        _resource, job_values, canonical_job_ref = self._resource_reference(
+            job_ref, {"job"}, "close_with_evidence requires a canonical job ref"
+        )
+        job = self._sinnixd_job("job.get", {"job_id": job_values["job_id"]})
+        if job.get("state", {}).get("phase") != "succeeded":
+            raise ProtocolError("precondition_failed", "failed or cancelled jobs cannot close a bead")
+        binding = job.get("contract", {}).get("bead_binding")
+        if not isinstance(binding, Mapping) or binding.get("bead_ref") != bead_ref:
+            raise ProtocolError("precondition_failed", "job is not bound to the requested bead")
+        checkout = job.get("checkout")
+        if not isinstance(checkout, Mapping) or values["code_revision"] != checkout.get("head"):
+            raise ProtocolError("precondition_failed", "code_revision does not match the launch checkout")
+        current = self.beads.get(project_id, bead_id)
+        if values["task_revision"] != current.get("task_revision"):
+            raise ProtocolError("precondition_failed", "task_revision does not match the current bead")
+        if not isinstance(values["residuals"], list) or not isinstance(values["evidence_refs"], list):
+            raise ProtocolError("invalid_request", "closure residuals and evidence_refs must be lists")
+        evidence = {
+            "schema": "sinnix.bead-close-evidence.v1",
+            "verdict": values["verdict"],
+            "residuals": values["residuals"],
+            "evidence_refs": values["evidence_refs"],
+            "job_ref": canonical_job_ref,
+            "code_revision": values["code_revision"],
+            "task_revision": values["task_revision"],
+            "launch_task_revision": binding.get("task_revision"),
+            "launch_task_etag": binding.get("task_etag"),
+        }
+        mutation = self.beads.change(
+            project_id,
+            "close",
+            {"id": bead_id, "reason": json.dumps(evidence, sort_keys=True, separators=(",", ":"))},
+            preconditions={"expected_task_revision": current["task_revision"], "expected_etag": current["etag"]},
+        )
+        return {"closure": evidence, "bead": mutation}
 
     def v2_beads_changeset(
         self,

@@ -29,7 +29,7 @@ def test_target_tool_bindings_cover_every_declared_action() -> None:
     assert bindings.action_for_tool("events") is REGISTRY.action("audit.events")
     assert bindings.action_for_tool("wait") is REGISTRY.action("jobs.wait")
     assert bindings.action_for_tool("run", "shell.run") is REGISTRY.action("shell.run")
-    assert bindings.action_for_tool("run", "agents.run") is REGISTRY.action("agents.run")
+    assert bindings.action_for_tool("run", "agent.for_bead") is REGISTRY.action("agent.for_bead")
     assert bindings.action_for_tool("change", "projects.change") is REGISTRY.action("projects.change")
     assert bindings.action_for_tool("change", "files.change") is REGISTRY.action("files.change")
     assert bindings.action_for_tool("change", "beads.change") is REGISTRY.action("beads.change")
@@ -67,7 +67,7 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
     assert bindings.is_visible("change", "observer") is False
     assert bindings.is_visible("operate", "observer") is False
     with pytest.raises(RegistryError, match="cannot invoke"):
-        bindings.action_for_tool("run", "agents.run", "observer")
+        bindings.action_for_tool("run", "agent.for_bead", "observer")
 
 
 @pytest.mark.parametrize(
@@ -103,12 +103,12 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
         ),
         (
             tuple(
-                TargetToolBinding("operate", "agents.run", "systemd-jobs", "job.agent.start")
-                if binding.action_name == "agents.run"
+                TargetToolBinding("operate", "agent.for_bead", "systemd-jobs", "job.agent.start")
+                if binding.action_name == "agent.for_bead"
                 else binding
                 for binding in VALID_BINDINGS
             ),
-            "must use action 'agents.run' verb 'run'",
+            "must use action 'agent.for_bead' verb 'run'",
         ),
     ],
 )

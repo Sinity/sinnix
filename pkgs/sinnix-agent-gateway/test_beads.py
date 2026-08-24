@@ -131,6 +131,10 @@ def test_typed_mutations_and_owner_authority_are_enforced(tmp_path: Path) -> Non
     observer, _ = beads_service(tmp_path / "observer", "observer")
     with pytest.raises(PolicyError, match="task.write"):
         observer.change("fixture", "claim", {"id":"fixture-1"})
+    worker, _ = beads_service(tmp_path / "worker", "agent-control")
+    assert worker.get("fixture", "fixture-1")["ref"].endswith("fixture-1")
+    with pytest.raises(PolicyError, match="task.write"):
+        worker.change("fixture", "close", {"id":"fixture-1"})
 
 
 @pytest.mark.parametrize(("operation", "parameters"), [

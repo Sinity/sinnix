@@ -806,7 +806,7 @@ def test_runtime_returns_owner_diagnostic_and_audits_its_reference(tmp_path: Pat
 def test_runtime_audit_carries_returned_job_correlation(tmp_path: Path) -> None:
     runtime = Runtime.create(config(tmp_path), "agent-control")
     runtime.execute(
-        "agents.run", lambda: {"job_id": "job-correlation", "secret": "hidden"}
+        "agent.for_bead", lambda: {"job_id": "job-correlation", "secret": "hidden"}
     )
     payload = runtime.audit.tail(1)["events"][0]["payload"]
     assert payload == {"job_id": "job-correlation", "correlation_id": "job-correlation"}

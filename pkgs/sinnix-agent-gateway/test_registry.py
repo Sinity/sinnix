@@ -99,8 +99,9 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "shell.run",
         "projects.change",
         "files.change",
-        "beads.change",
-        "beads.changeset",
+            "beads.change",
+            "beads.changeset",
+        "agent.for_bead",
         "mcp.change",
         "machine.operate",
         "beads.operate",
@@ -137,7 +138,7 @@ def test_action_failure_contracts_follow_public_controls_and_owner_capabilities(
     read_failures = BASE_TYPED_FAILURES | {"deadline"}
 
     assert REGISTRY.action("jobs.query").typed_failures == read_failures
-    assert REGISTRY.action("agents.run").typed_failures == read_failures | {
+    assert REGISTRY.action("agent.for_bead").typed_failures == read_failures | {
         "conflict",
         "idempotency_conflict"
     }
@@ -315,9 +316,10 @@ def test_catalog_search_filters_resource_kind_and_text() -> None:
         "resources.get",
         "beads.query",
         "projects.context",
-        "beads.change",
-        "beads.changeset",
-    ]
+            "beads.change",
+            "beads.changeset",
+            "agent.for_bead",
+        ]
     assert result["resources"] == [
         {
             "kind": "bead",
@@ -353,7 +355,7 @@ def test_catalog_search_scopes_contracts_to_project_resources() -> None:
         "beads.changeset",
         "beads.operate",
         "operations.run",
-        "agents.run",
+        "agent.for_bead",
         "shell.run",
         "projects.list",
         "projects.tree",
@@ -370,7 +372,7 @@ def test_catalog_search_applies_text_to_resource_contracts() -> None:
 
 
 def test_run_and_wait_contracts_are_closed_and_authority_scoped() -> None:
-    agent = REGISTRY.action_schema("agents.run", "agent-control")["action"]
+    agent = REGISTRY.action_schema("agent.for_bead", "operator")["action"]
     run = REGISTRY.action_schema("shell.run", "operator")["action"]
     wait = REGISTRY.action_schema("jobs.wait", "observer")["action"]
 
@@ -393,15 +395,16 @@ def test_run_and_wait_contracts_are_closed_and_authority_scoped() -> None:
     assert agent["verb"] == "run"
     assert agent["owner"] == "systemd-jobs"
     assert agent["route"] == "job.agent.start"
-    assert agent["principals"] == ["agent-control", "operator"]
+    assert agent["principals"] == ["operator"]
     assert agent["input_schema"]["additionalProperties"] is False
     assert agent["input_schema"]["required"] == [
-        "project_id",
-        "prompt",
+        "ref",
+        "checkout_id",
         "backend",
         "model",
         "reasoning_effort",
         "idempotency_key",
+        "request_id",
     ]
     assert wait["verb"] == "wait"
     assert wait["effect"] == "read"
@@ -413,6 +416,17 @@ def test_run_and_wait_contracts_are_closed_and_authority_scoped() -> None:
     assert wait["input_schema"]["properties"]["timeout_seconds"]["maximum"] == 300
     with pytest.raises(RegistryError, match="cannot read action"):
         REGISTRY.action_schema("shell.run", "observer")
+    with pytest.raises(RegistryError, match="cannot read action"):
+        REGISTRY.action_schema("agent.for_bead", "agent-control")
+
+
+def test_catalog_exposes_bead_workflow_without_a_legacy_agent_selector() -> None:
+    catalog = REGISTRY.search(CatalogSearch(principal="operator", text="Beads task"))
+
+    actions = {action["name"]: action for action in catalog["actions"]}
+    assert "agent.for_bead" in actions
+    assert actions["agent.for_bead"]["schema_ref"].endswith("agent.for_bead")
+    assert "agents.run" not in {action.name for action in REGISTRY.actions}
 
 
 def test_change_and_operate_contracts_bind_closed_canonical_owner_targets() -> None:

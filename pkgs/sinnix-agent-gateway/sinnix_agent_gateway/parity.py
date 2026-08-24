@@ -100,7 +100,11 @@ V2_MIGRATIONS = {
     "audit_verify": _migration("audit.verify", "audit.verify"),
     "capture_lanes": _migration("captures.lanes_visible", "captures.query"),
     "capture_query": _migration("captures.query", "captures.query"),
-    "agent_launch": _migration("jobs.launch_agent", "agents.run"),
+    "agent_launch": _migration(
+        "jobs.launch_agent",
+        "agent.for_bead",
+        semantic_change="V2 replaces free-form gateway agent prompts with a canonical Beads task, explicit checkout, and durable task evidence.",
+    ),
     "job_cancel": _migration("jobs.cancel", "jobs.cancel"),
     "project_write": _migration("projects.write", "projects.change"),
     "project_apply_patch": _migration("projects.apply_patch", "projects.change"),

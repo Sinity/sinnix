@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ import pytest
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.registry import REGISTRY
+from sinnix_agent_gateway.runtime import ProtocolError
 from sinnix_mcp import (
     ErrorCode,
     ErrorEnvelope,
@@ -68,8 +70,7 @@ def runtime_with_daemon(
 def test_public_v2_job_verbs_dispatch_catalog_bound_owner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    runtime, daemon = runtime_with_daemon(tmp_path, "agent-control")
-    operator_runtime, operator_daemon = runtime_with_daemon(tmp_path, "operator")
+    runtime, daemon = runtime_with_daemon(tmp_path, "operator")
     job_id = "3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
     daemon.responses = {
         "job.agent.start": {"job_id": job_id, "state": {"phase": "running"}},
@@ -79,15 +80,44 @@ def test_public_v2_job_verbs_dispatch_catalog_bound_owner(
     monkeypatch.setattr(
         Runtime,
         "create",
-        classmethod(
-            lambda _cls, _config, principal_name: {
-                "agent-control": runtime,
-                "operator": operator_runtime,
-            }[principal_name]
-        ),
+        classmethod(lambda _cls, _config, _principal_name: runtime),
     )
-    server = create_server(runtime.config, "agent-control")
-    operator_server = create_server(operator_runtime.config, "operator")
+    monkeypatch.setattr(
+        runtime.beads,
+        "get",
+        lambda _project, _bead, **_kwargs: {
+            "ref": "sinnix://projects/fixture/beads/fixture-1",
+            "task_revision": "a" * 64,
+            "etag": "b" * 64,
+            "fields": {"title": "fixture", "status": "open"},
+        },
+    )
+    claim_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        runtime.beads,
+        "change",
+        lambda _project, operation, parameters, **kwargs: claim_calls.append(
+            {"operation": operation, "parameters": parameters, **kwargs}
+        )
+        or {
+            "after": {
+                "ref": "sinnix://projects/fixture/beads/fixture-1",
+                "task_revision": "c" * 64,
+                "etag": "d" * 64,
+                "fields": {"title": "fixture", "status": "in_progress"},
+            },
+            "owner_route": "beads.change",
+            "before_revision": "a" * 64,
+            "after_revision": "c" * 64,
+            "owner_history_ref": "sinnix://projects/fixture/beads/fixture-1/history/claim",
+        },
+    )
+    monkeypatch.setattr(
+        runtime.projects,
+        "checkout",
+        lambda _project, _checkout: {"checkout": {"checkout_id": "default", "head": "c" * 40}},
+    )
+    server = create_server(runtime.config, "operator")
 
     async def invoke(
         target: Any, name: str, arguments: dict[str, Any]
@@ -101,10 +131,12 @@ def test_public_v2_job_verbs_dispatch_catalog_bound_owner(
         server,
         "run",
         {
-            "action_name": "agents.run",
+            "action_name": "agent.for_bead",
             "idempotency_key": "public-agent-fixture",
-            "project_id": "fixture",
-            "prompt": "inspect fixture",
+            "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b",
+            "ref": "sinnix://projects/fixture/beads/fixture-1",
+            "checkout_id": "default",
+            "claim_mode": "claim",
             "backend": "codex",
             "model": "gpt-5.6-terra",
             "reasoning_effort": "high",
@@ -121,38 +153,42 @@ def test_public_v2_job_verbs_dispatch_catalog_bound_owner(
             "preconditions": {"expected_phase": "running"},
         },
     )
-    operator_daemon.responses = {
-        "job.agent.start": {"job_id": "operator-agent", "state": {"phase": "running"}},
-    }
-    operator_started = anyio.run(
-        invoke,
-        operator_server,
-        "run",
-        {
-            "action_name": "agents.run",
-            "idempotency_key": "public-agent-operator",
-            "project_id": "fixture",
-            "prompt": "launch under the operator principal",
-            "backend": "codex",
-            "model": "gpt-5.6-terra",
-            "reasoning_effort": "high",
-        },
-    )
-
-    assert started["result"]["action"] == "agents.run"
+    assert started["result"]["action"] == "agent.for_bead"
     assert started["data"]["ref"] == f"sinnix://jobs/{job_id}"
+    assert started["data"]["bead_ref"] == "sinnix://projects/fixture/beads/fixture-1"
+    assert started["data"]["claim_ref"] == "sinnix://projects/fixture/beads/fixture-1/claims/" + "d" * 64
+    assert started["data"]["atomicity"] == "native_claim_then_daemon_launch"
     assert cancelled["result"]["action"] == "jobs.cancel"
     assert cancelled["data"]["cancel"]["cancel_requested"] is False
-    assert operator_started["result"]["action"] == "agents.run"
-    assert operator_started["data"]["ref"] == "sinnix://jobs/operator-agent"
-    assert [request.operation for request in operator_daemon.calls] == ["job.agent.start"]
-    assert operator_daemon.calls[0].principal == "operator"
     assert [request.operation for request in daemon.calls] == [
         "job.agent.start",
         "job.get",
         "job.cancel",
     ]
+    assert daemon.calls[0].principal == "operator"
     assert daemon.calls[0].arguments["timeout_seconds"] == 3_600
+    assert daemon.calls[0].arguments["bead_binding"] == {
+        "bead_ref": "sinnix://projects/fixture/beads/fixture-1",
+        "project_ref": "sinnix://projects/fixture",
+        "checkout_ref": "sinnix://projects/fixture/checkouts/default",
+        "task_revision": "c" * 64,
+        "task_etag": "d" * 64,
+        "claim_ref": "sinnix://projects/fixture/beads/fixture-1/claims/" + "d" * 64,
+        "claim_receipt": {
+            "ref": "sinnix://projects/fixture/beads/fixture-1/claims/" + "d" * 64,
+            "owner_route": "beads.change",
+            "before_revision": "a" * 64,
+            "after_revision": "c" * 64,
+            "owner_history_ref": "sinnix://projects/fixture/beads/fixture-1/history/claim",
+        },
+        "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b",
+        "work_item": None,
+    }
+    assert claim_calls == [{
+        "operation": "claim",
+        "parameters": {"id": "fixture-1"},
+        "preconditions": {"expected_task_revision": "a" * 64, "expected_etag": "b" * 64},
+    }]
 
 
 def test_v2_shell_run_wait_and_get_forward_one_daemon_job_identity(
@@ -361,34 +397,53 @@ def test_v2_declared_operation_run_rejects_overlays_and_preserves_daemon_errors(
     }
 
 
-def test_v2_agent_run_and_cancel_preserve_daemon_cancellation_truth(
-    tmp_path: Path,
+def test_v2_bead_agent_run_and_cancel_preserve_daemon_cancellation_truth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    runtime, daemon = runtime_with_daemon(tmp_path, "agent-control")
+    runtime, daemon = runtime_with_daemon(tmp_path, "operator")
     job_id = "3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
     daemon.responses = {
         "job.agent.start": {"job_id": job_id, "state": {"phase": "running"}},
         "job.get": {"job_id": job_id, "state": {"phase": "running"}},
         "job.cancel": {"job_id": job_id, "cancel_requested": False},
     }
+    monkeypatch.setattr(
+        runtime.beads,
+        "get",
+        lambda _project, _bead, **_kwargs: {
+            "ref": "sinnix://projects/fixture/beads/fixture-1",
+            "task_revision": "a" * 64,
+            "etag": "b" * 64,
+            "fields": {"title": "fixture", "status": "open"},
+        },
+    )
+    monkeypatch.setattr(
+        runtime.projects,
+        "checkout",
+        lambda _project, _checkout: {"checkout": {"checkout_id": "default", "head": "c" * 40}},
+    )
     started = runtime.execute_v2(
-        REGISTRY.action("agents.run"),
-        lambda: runtime.v2_run_agent(
-            project_id="fixture",
-            checkout_id=None,
-            prompt="inspect fixture",
+        REGISTRY.action("agent.for_bead"),
+        lambda: runtime.v2_run_for_bead(
+            reference="sinnix://projects/fixture/beads/fixture-1",
+            checkout_id="default",
+            claim_mode="none",
+            work_item="display only",
+            instructions=None,
             backend="codex",
             model="gpt-5.6-terra",
             reasoning_effort="high",
             timeout_seconds=3_600,
             credential_profile="subscription",
+            request_id="2e46daf5-e9b1-4c6e-b99d-bcd46631730b",
         ),
         {
-            "project_id": "fixture",
-            "prompt": "inspect fixture",
+            "ref": "sinnix://projects/fixture/beads/fixture-1",
+            "checkout_id": "default",
             "backend": "codex",
             "model": "gpt-5.6-terra",
             "reasoning_effort": "high",
+            "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b",
             "idempotency_key": "agent-fixture",
         },
     )
@@ -411,17 +466,37 @@ def test_v2_agent_run_and_cancel_preserve_daemon_cancellation_truth(
         "job.get",
         "job.cancel",
     ]
-    assert daemon.calls[0].arguments == {
-        "project_id": "fixture",
-        "checkout_id": "default",
-        "prompt": "inspect fixture",
-        "backend": "codex",
-        "model": "gpt-5.6-terra",
-        "effort": "high",
-        "credential_profile": "subscription",
-        "timeout_seconds": 3_600,
-        "result": "last-message",
-    }
+    assert daemon.calls[0].arguments["bead_binding"]["work_item"] == "display only"
+    assert "display only" not in daemon.calls[0].arguments["prompt"]
+
+
+def test_bead_review_and_evidence_close_require_bound_successful_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, daemon = runtime_with_daemon(tmp_path, "operator")
+    job_id = "3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
+    bead = {"ref": "sinnix://projects/fixture/beads/fixture-1", "task_revision": "a" * 64, "etag": "b" * 64, "fields": {"title": "fixture", "status": "open"}}
+    binding = {"bead_ref": bead["ref"], "project_ref": "sinnix://projects/fixture", "checkout_ref": "sinnix://projects/fixture/checkouts/default", "task_revision": "z" * 64, "task_etag": "y" * 64, "claim_ref": None, "claim_receipt": None, "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b", "work_item": "display only"}
+    daemon.responses["job.get"] = {"job_id": job_id, "state": {"phase": "succeeded"}, "checkout": {"checkout_id": "default", "head": "c" * 40}, "contract": {"bead_binding": binding}, "artifacts": {"result": {"ref": f"sinnix://jobs/{job_id}/artifacts/result"}}}
+    monkeypatch.setattr(runtime.beads, "get", lambda *_args, **_kwargs: bead)
+    changes: list[dict[str, Any]] = []
+    monkeypatch.setattr(runtime.beads, "change", lambda _project, operation, parameters, **kwargs: changes.append({"operation": operation, "parameters": parameters, **kwargs}) or {"after": bead})
+    monkeypatch.setattr(runtime.projects, "checkout", lambda *_args: {"checkout": {"checkout_id": "default", "head": "d" * 40}})
+    monkeypatch.setattr(runtime.projects, "summary", lambda *_args: {"head": "d" * 40})
+    monkeypatch.setattr(runtime.projects, "diff", lambda *_args, **_kwargs: {"diff": "fixture diff"})
+
+    review = runtime.v2_context(bead["ref"], "bead.review", f"sinnix://jobs/{job_id}")
+    closed = runtime.v2_beads_change(reference=bead["ref"], operation="close_with_evidence", parameters={"verdict": "accepted", "residuals": [], "evidence_refs": [f"sinnix://jobs/{job_id}", f"sinnix://jobs/{job_id}/artifacts/result"], "job_ref": f"sinnix://jobs/{job_id}", "code_revision": "c" * 40, "task_revision": "a" * 64}, preconditions=None)
+
+    assert review["revision_mismatch"] == {"task_revision": True, "task_etag": True, "code_revision": True}
+    assert review["tests_and_artifacts"]["result"]["ref"].endswith("/result")
+    assert closed["closure"]["launch_task_revision"] == "z" * 64
+    assert changes[0]["operation"] == "close"
+    assert json.loads(changes[0]["parameters"]["reason"])["code_revision"] == "c" * 40
+
+    daemon.responses["job.get"] = {**daemon.responses["job.get"], "state": {"phase": "cancelled"}}
+    with pytest.raises(ProtocolError, match="cannot close"):
+        runtime.v2_beads_change(reference=bead["ref"], operation="close_with_evidence", parameters={"verdict": "accepted", "residuals": [], "evidence_refs": [f"sinnix://jobs/{job_id}"], "job_ref": f"sinnix://jobs/{job_id}", "code_revision": "c" * 40, "task_revision": "a" * 64}, preconditions=None)
 
 
 def test_v2_jobs_query_bounds_daemon_job_list_and_preserves_job_refs(tmp_path: Path) -> None:

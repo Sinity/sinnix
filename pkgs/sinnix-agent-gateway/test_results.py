@@ -297,14 +297,15 @@ def test_mutation_idempotency_replays_receipt_without_second_owner_write(tmp_pat
 
 
 def test_declared_deadline_and_idempotency_failures_persist_bounded_envelopes(tmp_path) -> None:
-    runtime = Runtime.create(config(tmp_path), "agent-control")
-    action = REGISTRY.action("agents.run")
+    runtime = Runtime.create(config(tmp_path), "operator")
+    action = REGISTRY.action("agent.for_bead")
     request = {
-        "project_id": "fixture",
-        "prompt": "inspect fixture",
+        "ref": "sinnix://projects/fixture/beads/fixture-1",
+        "checkout_id": "default",
         "backend": "codex",
         "model": "gpt-5.6-terra",
         "reasoning_effort": "high",
+        "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b",
         "idempotency_key": "agent-failure-fixture",
     }
 
@@ -317,7 +318,7 @@ def test_declared_deadline_and_idempotency_failures_persist_bounded_envelopes(tm
     conflict = runtime.execute_v2(
         action,
         lambda: pytest.fail("conflicting request reached the owner"),
-        {**request, "prompt": "different request"},
+        {**request, "work_item": "different request"},
     )
     unexpected = runtime.execute_v2(
         action,

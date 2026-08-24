@@ -412,22 +412,25 @@ DECLARED_OPERATION_RUN_SCHEMA: dict[str, Any] = _with_request_controls(
     }
 )
 
-AGENT_RUN_SCHEMA: dict[str, Any] = _with_request_controls(
+AGENT_FOR_BEAD_SCHEMA: dict[str, Any] = _with_request_controls(
     {
         "type": "object",
         "additionalProperties": False,
         "required": [
-            "project_id",
-            "prompt",
+            "ref",
+            "checkout_id",
             "backend",
             "model",
             "reasoning_effort",
             "idempotency_key",
+            "request_id",
         ],
         "properties": {
-            "project_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "ref": {"type": "string", "minLength": 1, "maxLength": 2_048, "pattern": "^sinnix://projects/[^/]+/beads/[^/]+$"},
             "checkout_id": {"type": "string", "minLength": 1, "maxLength": 128},
-            "prompt": {"type": "string", "minLength": 1, "maxLength": 200_000},
+            "claim_mode": {"enum": ["none", "claim"], "default": "none"},
+            "work_item": {"type": "string", "maxLength": 2_000},
+            "instructions": {"type": "string", "maxLength": 32_000},
             "backend": {"enum": ["claude", "codex", "gemini", "grok", "antigravity"]},
             "model": {"type": "string", "minLength": 1, "maxLength": 256},
             "reasoning_effort": {"type": "string", "minLength": 1, "maxLength": 32},
@@ -522,8 +525,10 @@ PROJECT_CONTEXT_SCHEMA: dict[str, Any] = _with_request_controls(
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 2_048,
-                "pattern": "^sinnix://projects/[^/]+$",
+                "pattern": "^sinnix://projects/[^/]+(?:/beads/[^/]+)?$",
             },
+            "intent": {"enum": ["project", "bead.work", "bead.review"], "default": "project"},
+            "job_ref": {"type": "string", "minLength": 1, "maxLength": 2_048, "pattern": "^sinnix://jobs/[^/]+$"},
         },
     }
 )
@@ -629,6 +634,7 @@ BEADS_CHANGE_SCHEMA = _owner_change_schema(
         "unrelate",
         "update",
         "reparent",
+        "close_with_evidence",
     ),
     precondition_properties={
         "expected_task_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -662,6 +668,7 @@ BEADS_CHANGE_SCHEMA["properties"]["parameters"] = {
         "text": {"type": "string", "maxLength": 32000}, "depends_on": {"type": "string", "maxLength": 128},
         "other_id": {"type": "string", "maxLength": 128}, "parent_id": {"type": "string", "maxLength": 128},
         "type": {"type": "string", "maxLength": 64}, "reason": {"type": "string", "maxLength": 32000}, "key": {"type": "string", "maxLength": 256}, "graph": {"type": "object", "maxProperties": 256},
+        "verdict": {"enum": ["accepted", "rejected", "partial"]}, "residuals": {"type": "array", "maxItems": 32, "items": {"type": "string", "maxLength": 2_000}}, "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string", "pattern": "^sinnix://"}}, "job_ref": {"type": "string", "pattern": "^sinnix://jobs/[^/]+$"}, "code_revision": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"}, "task_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "patch": {"type": "object", "additionalProperties": False, "properties": {
             "set": {"type": "object"},
             "labels": {"type": "object", "additionalProperties": False, "properties": {"add": {"type": "array", "items": {"type": "string"}}, "remove": {"type": "array", "items": {"type": "string"}}, "replace": {"type": "array", "items": {"type": "string"}}}},
@@ -1198,31 +1205,32 @@ def build_registry() -> CatalogRegistry:
             documentation="Start one project-declared operation through the daemon-owned generic job route.",
         ),
         ActionSpec(
-            name="agents.run",
+            name="agent.for_bead",
             verb=VerbFamily.RUN,
             domain="agents",
             owner="systemd-jobs",
             route="job.agent.start",
             effect=EffectMode.RUN,
-            principals=frozenset({"agent-control", "operator"}),
-            input_schema=AGENT_RUN_SCHEMA,
+            principals=frozenset({"operator"}),
+            input_schema=AGENT_FOR_BEAD_SCHEMA,
             output_schema=V2_ENVELOPE_SCHEMA,
-            resource_kinds=("project", "checkout", "job"),
+            resource_kinds=("project", "checkout", "bead", "job"),
             supports_idempotency=True,
             receipt_policy="audit",
             examples=(
                 {
                     "input": {
-                        "project_id": "sinnix",
-                        "prompt": "Inspect the declared task and report evidence.",
+                        "ref": "sinnix://projects/sinnix/beads/sinnix-example",
+                        "checkout_id": "default",
                         "backend": "codex",
                         "model": "gpt-5.6-terra",
                         "reasoning_effort": "high",
-                        "idempotency_key": "agent-inspect-example",
+                        "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b",
+                        "idempotency_key": "bead-agent-example",
                     }
                 },
             ),
-            documentation="Launch one typed attested coding-agent job and return its daemon-owned handle.",
+            documentation="Claim an optional canonical Beads task, launch one attested coding agent in an explicit checkout, and retain task provenance in the daemon job manifest.",
         ),
         ActionSpec(
             name="jobs.cancel",
