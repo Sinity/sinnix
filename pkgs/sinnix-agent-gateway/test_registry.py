@@ -166,9 +166,10 @@ def test_action_failure_contracts_follow_public_controls_and_owner_capabilities(
 
 
 def test_resource_template_pages_are_principal_scoped_and_cursor_bound() -> None:
-    first = REGISTRY.template_page(principal="observer", limit=2)
+    key = b"t" * 32
+    first = REGISTRY.template_page(principal="observer", cursor_key=key, limit=2)
     second = REGISTRY.template_page(
-        principal="observer", limit=2, cursor=first["next_cursor"]
+        principal="observer", cursor_key=key, limit=2, cursor=first["next_cursor"]
     )
 
     assert len(first["templates"]) == 2
@@ -177,7 +178,11 @@ def test_resource_template_pages_are_principal_scoped_and_cursor_bound() -> None
     )
     assert all("browser_workspace" != row["kind"] for row in first["templates"] + second["templates"])
     with pytest.raises(RegistryError, match="principal"):
-        REGISTRY.template_page(principal="operator", limit=2, cursor=first["next_cursor"])
+        REGISTRY.template_page(principal="operator", cursor_key=key, limit=2, cursor=first["next_cursor"])
+    with pytest.raises(RegistryError, match="principal"):
+        REGISTRY.template_page(principal="operator", cursor_key=b"o" * 32, limit=2, cursor=first["next_cursor"])
+    with pytest.raises(RegistryError, match="stale"):
+        REGISTRY.template_page(principal="observer", cursor_key=b"r" * 32, limit=2, cursor=first["next_cursor"])
 
 
 def test_every_retained_owner_capability_has_a_read_action_and_resource_route() -> None:

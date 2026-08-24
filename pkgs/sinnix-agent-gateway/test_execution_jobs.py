@@ -653,6 +653,33 @@ def test_agent_control_bead_scope_requires_matching_current_assignment(
         )
 
 
+def test_agent_control_bead_review_authorizes_assignment_before_bead_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime, daemon = runtime_with_daemon(tmp_path, "agent-control")
+    assignment_id = "3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
+    bead_ref = "sinnix://projects/fixture/beads/fixture-1"
+    binding = {
+        "bead_ref": "sinnix://projects/fixture/beads/fixture-2",
+        "project_ref": "sinnix://projects/fixture",
+        "checkout_ref": "sinnix://projects/fixture/checkouts/default",
+        "task_revision": "a" * 64,
+        "task_etag": "b" * 64,
+    }
+    daemon.responses["job.get"] = {
+        "job_id": assignment_id,
+        "principal": "agent-control",
+        "state": {"phase": "running"},
+        "checkout": {"checkout_id": "default", "head": "c" * 40},
+        "contract": {"bead_binding": binding},
+        "artifacts": {"result": None},
+    }
+    monkeypatch.setattr(runtime.beads, "get", lambda *_args, **_kwargs: pytest.fail("bead owner was read before assignment authorization"))
+
+    with pytest.raises(ProtocolError, match="not the requested"):
+        runtime.v2_context(bead_ref, "bead.review", f"sinnix://jobs/{assignment_id}")
+
+
 def test_v2_jobs_query_bounds_daemon_job_list_and_preserves_job_refs(tmp_path: Path) -> None:
     runtime, daemon = runtime_with_daemon(tmp_path, "observer")
     daemon.responses = {

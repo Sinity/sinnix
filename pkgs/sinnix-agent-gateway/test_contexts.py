@@ -20,7 +20,7 @@ def test_declared_contexts_are_bounded_and_isolate_unavailable_components() -> N
             ComponentSpec("project", 12_000, lambda: ComponentResult.available("project", {"head": "a"})),
             ComponentSpec("checkout", 12_000, lambda: ComponentResult.unavailable("checkout", "checkout owner offline")),
             ComponentSpec("tasks", 16_000, lambda: ComponentResult.available("tasks", {"items": [1, 2]})),
-            ComponentSpec("authority", 8_000, lambda: ComponentResult.stale("authority", "owner revision is stale", revision="b")),
+            ComponentSpec("authority", 8_000, lambda: ComponentResult.unavailable("authority", "owner freshness evidence is unavailable", revision="b")),
         ],
     )
 
@@ -28,7 +28,7 @@ def test_declared_contexts_are_bounded_and_isolate_unavailable_components() -> N
     assert result["snapshot_ref"].startswith("sinnix://contexts/")
     assert len(json.dumps(result, separators=(",", ":")).encode()) <= CONTEXT_INTENTS["project.orientation"].total_budget_bytes
     states = {row["name"]: row["status"] for row in result["components"]}
-    assert states == {"project": "available", "checkout": "unavailable", "tasks": "available", "authority": "stale"}
+    assert states == {"project": "available", "checkout": "unavailable", "tasks": "available", "authority": "unavailable"}
     assert all(row["snapshot_ref"] == result["snapshot_ref"] for row in result["components"])
 
 
@@ -60,6 +60,26 @@ def test_revision_cache_never_reuses_a_different_owner_revision() -> None:
     assert cache.get("project", "rev-a") is first
     assert cache.get("project", "rev-b") is second
     assert cache.get("project", "rev-c") is None
+
+
+def test_revision_cache_evicts_by_entries_and_bytes_before_growth() -> None:
+    cache = RevisionReuseCache(max_entries=2, max_bytes=500)
+    first = ComponentResult.available("first", {"value": "a"}, revision="a")
+    second = ComponentResult.available("second", {"value": "b"}, revision="b")
+    third = ComponentResult.available("third", {"value": "c"}, revision="c")
+    cache.put(first)
+    cache.put(second)
+    cache.put(third)
+    assert cache.get("first", "a") is None
+    assert cache.get("second", "b") is second
+    assert cache.get("third", "c") is third
+
+
+def test_revision_cache_rejects_oversized_component_without_insertion() -> None:
+    cache = RevisionReuseCache(max_entries=4, max_bytes=128)
+    oversized = ComponentResult.available("large", {"body": "x" * 10_000}, revision="large")
+    cache.put(oversized)
+    assert cache.get("large", "large") is None
 
 
 def test_missing_declared_component_is_explicitly_unavailable() -> None:

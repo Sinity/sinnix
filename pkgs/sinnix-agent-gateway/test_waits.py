@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import anyio
+
 from sinnix_agent_gateway.waits import BoundedWaitService, WaitEvidence, WaitRequest, WaitTarget
 
 
@@ -39,3 +41,24 @@ def test_cancellation_returns_evidence_without_spawning_work() -> None:
     assert result["outcome"] == "cancelled"
     assert result["evidence"]["status"] == "open"
     assert result["continuation"]
+
+
+def test_async_wait_observes_request_cancellation_between_owner_polls() -> None:
+    calls = 0
+
+    def resolve(_request: WaitRequest) -> WaitEvidence:
+        nonlocal calls
+        calls += 1
+        return WaitEvidence(False, {"poll": calls}, f"rev-{calls}")
+
+    service = BoundedWaitService(resolve)
+
+    async def scenario() -> None:
+        result = await service.wait_async(
+            WaitRequest(WaitTarget.BEAD_STATUS, "sinnix://projects/p/beads/b", timeout_seconds=2, poll_seconds=0.01),
+            cancelled=lambda: calls >= 2,
+        )
+        assert result["outcome"] == "cancelled"
+        assert result["evidence"] == {"poll": 2}
+
+    anyio.run(scenario)

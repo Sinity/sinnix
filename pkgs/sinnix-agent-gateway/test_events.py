@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import pytest
 
@@ -36,7 +37,7 @@ def service(tmp_path: Path) -> tuple[NormalizedEventService, FakeProjects, FakeB
     transitions.write_text('{"schema":"sinnix-health-transition-v1","event_id":"transition-1"}\n')
     return NormalizedEventService(
         principal="observer",
-        state_dir=config.state_dir,
+        cursor_key=b"e" * 32,
         projects=projects,  # type: ignore[arg-type]
         beads=beads,  # type: ignore[arg-type]
         audit=audit,
@@ -69,4 +70,80 @@ def test_event_cursor_is_opaque_tamper_and_scope_bound(tmp_path: Path) -> None:
     with pytest.raises(EventCursorError, match="authentication"):
         events.read(limit=2, cursor=altered)
     with pytest.raises(EventCursorError, match="scope"):
-        events.read(limit=2, cursor=events.cursor.encode({"audit_sequence": 0}, ["other"]))
+        events.read(limit=2, project_ids=["fixture"], cursor=events.cursor.encode({"audit_sequence": 0, "runtime_offset": 0, "owner_revisions": {}, "job_revision": None}, ["other"]))
+
+
+def test_event_cursor_secret_is_private_principal_bound_and_bounded(tmp_path: Path) -> None:
+    events, _projects, _beads, _audit = service(tmp_path)
+    cursor = events.read(limit=2)["next_cursor"]
+    other = NormalizedEventService(
+        principal="operator",
+        cursor_key=b"e" * 32,
+        projects=events.projects,  # type: ignore[arg-type]
+        beads=events.beads,  # type: ignore[arg-type]
+        audit=events.audit,
+        transitions_path=events.transitions_path,
+    )
+    with pytest.raises(EventCursorError, match="authentication|scope"):
+        other.read(limit=2, cursor=cursor)
+    rotated = NormalizedEventService(
+        principal="observer",
+        cursor_key=b"r" * 32,
+        projects=events.projects,  # type: ignore[arg-type]
+        beads=events.beads,  # type: ignore[arg-type]
+        audit=events.audit,
+        transitions_path=events.transitions_path,
+    )
+    with pytest.raises(EventCursorError, match="authentication"):
+        rotated.read(limit=2, cursor=cursor)
+    with pytest.raises(EventCursorError, match="too large"):
+        events.read(limit=2, cursor="x" * 4_097)
+
+
+def test_event_cursor_state_and_runtime_continuation_preserve_rows(tmp_path: Path) -> None:
+    events, _projects, _beads, _audit = service(tmp_path)
+    events.transitions_path.write_text("".join(f'{{"schema":"sinnix-health-transition-v1","event_id":"row-{i}","data":"{i}"}}\n' for i in range(4)))
+    seen: list[str] = []
+    cursor = None
+    for _ in range(8):
+        page = events.read(limit=1, cursor=cursor)
+        seen.extend(row["event_id"] for row in page["events"] if row["event_id"].startswith("row-"))
+        cursor = page["next_cursor"]
+        assert len(cursor.encode()) <= 4_096
+        if not page["truncated"]:
+            break
+    assert seen == ["row-0", "row-1", "row-2", "row-3"]
+    assert len(seen) == len(set(seen))
+
+
+def test_event_cursor_state_is_bounded_independently_of_job_population(tmp_path: Path) -> None:
+    events, _projects, _beads, _audit = service(tmp_path)
+    jobs = [{"job_id": f"job-{index}", "state": {"phase": "running"}} for index in range(10_000)]
+    events.jobs = lambda _limit, _cursor: {"jobs": jobs, "snapshot": {"ordering": "created_at_desc_job_id_desc", "ceiling": ["", ""]}}
+
+    response = events.read(limit=1_000)
+    assert len(response["next_cursor"].encode()) <= 4_096
+    job_events = [row for row in response["events"] if row["kind"] == "job_state"]
+    assert len(job_events) == 1
+    assert job_events[0]["data"]["truncated"] is True
+
+
+def test_oversized_runtime_row_is_compacted_without_advancing_past_next_row(tmp_path: Path) -> None:
+    events, _projects, _beads, _audit = service(tmp_path)
+    events.transitions_path.write_text(
+        json.dumps({"schema": "sinnix-health-transition-v1", "event_id": "huge", "data": "x" * 1_100_000}) + "\n"
+        + json.dumps({"schema": "sinnix-health-transition-v1", "event_id": "after"}) + "\n"
+    )
+    cursor = None
+    runtime = None
+    first = None
+    for _ in range(10):
+        first = events.read(limit=1, cursor=cursor)
+        cursor = first["next_cursor"]
+        runtime = next((row for row in first["events"] if row["data"].get("truncated") is True), None)
+        if runtime is not None:
+            break
+    assert runtime is not None
+    assert runtime["data"]["truncated"] is True
+    second = events.read(limit=1, cursor=cursor)
+    assert [row["event_id"] for row in second["events"] if row["event_id"] == "after"] == ["after"]
