@@ -4,16 +4,22 @@ import hashlib
 import json
 import os
 import re
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator, Mapping
 
 from .capabilities import Capability, Principal
 from .config import GatewayConfig, ProjectConfig
 from sinnix_mcp.execution import ExecutionProfile, OwnerExecution, OwnerRoute
+from sinnix_lib.lock import flock
 
 
 class ProjectError(ValueError):
+    pass
+
+
+class ProjectPreconditionError(ProjectError):
     pass
 
 
@@ -335,6 +341,33 @@ class ProjectService:
     def _run_bounded(self, command: list[str], cwd: Path, timeout: int = 15) -> str:
         return self._run_bounded_result(command, cwd, timeout)[0]
 
+    @contextmanager
+    def _locked_mutation(
+        self,
+        project_id: str,
+        checkout_id: str | None,
+        preconditions: Mapping[str, Any] | None,
+    ) -> Iterator[ProjectConfig]:
+        lock_name = hashlib.sha256(project_id.encode()).hexdigest() + ".lock"
+        with flock(self.config.state_dir / "project-mutations" / lock_name):
+            project = self.code_checkout(
+                project_id, checkout_id, write=True, require_explicit=True
+            )
+            if preconditions is not None:
+                if checkout_id is None:
+                    raise ProjectPreconditionError(
+                        "preconditioned mutation requires checkout_id"
+                    )
+                if set(preconditions) - {"head", "dirty_sha256"}:
+                    raise ProjectError("project mutation preconditions are not recognized")
+                checkout = self.checkout(project_id, checkout_id)["checkout"]
+                for name, expected in preconditions.items():
+                    if not isinstance(expected, str) or checkout.get(name) != expected:
+                        raise ProjectPreconditionError(
+                            f"project checkout {name} no longer matches"
+                        )
+            yield project
+
     def search(
         self,
         project_id: str,
@@ -519,47 +552,52 @@ class ProjectService:
         }
 
     def write(
-        self, project_id: str, path: str, content: str, checkout_id: str | None = None
+        self,
+        project_id: str,
+        path: str,
+        content: str,
+        checkout_id: str | None = None,
+        preconditions: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        project = self.code_checkout(
-            project_id, checkout_id, write=True, require_explicit=True
-        )
-        target = self._safe_path(project, path, existing=False)
-        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        temp = target.with_name(f".{target.name}.gateway-tmp")
-        temp.write_text(content)
-        temp.chmod(0o600)
-        temp.replace(target)
+        with self._locked_mutation(project_id, checkout_id, preconditions) as project:
+            target = self._safe_path(project, path, existing=False)
+            target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            temp = target.with_name(f".{target.name}.gateway-tmp")
+            temp.write_text(content)
+            temp.chmod(0o600)
+            temp.replace(target)
         return {"project_id": project_id, "path": path, "bytes": len(content.encode())}
 
     def apply_patch(
-        self, project_id: str, patch: str, checkout_id: str | None = None
+        self,
+        project_id: str,
+        patch: str,
+        checkout_id: str | None = None,
+        preconditions: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        project = self.code_checkout(
-            project_id, checkout_id, write=True, require_explicit=True
-        )
         if len(patch.encode()) > self.config.max_result_bytes:
             raise ProjectError("patch exceeds configured bound")
-        safe_env = {
-            "HOME": str(Path.home()),
-            "LANG": os.environ.get("LANG", "C.UTF-8"),
-            "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
-        }
-        result = OwnerExecution(safe_env).run(
-            ["git", "apply", "--whitespace=nowarn", "-"],
-            ExecutionProfile(
-                route=OwnerRoute("project-apply-patch"),
-                cwd=project.path,
-                timeout_seconds=20,
-                max_stdout_bytes=self.config.max_result_bytes,
-                max_stderr_bytes=self.config.max_result_bytes,
-                stdin_bytes=patch.encode(),
-            ),
-        )
-        if result.timed_out:
-            raise ProjectError("patch application timed out")
-        if result.exit_status != 0:
-            diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
-            output = result.stdout.decode("utf-8", errors="replace").strip()
-            raise ProjectError(diagnostic or output or "patch was rejected")
+        with self._locked_mutation(project_id, checkout_id, preconditions) as project:
+            safe_env = {
+                "HOME": str(Path.home()),
+                "LANG": os.environ.get("LANG", "C.UTF-8"),
+                "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
+            }
+            result = OwnerExecution(safe_env).run(
+                ["git", "apply", "--whitespace=nowarn", "-"],
+                ExecutionProfile(
+                    route=OwnerRoute("project-apply-patch"),
+                    cwd=project.path,
+                    timeout_seconds=20,
+                    max_stdout_bytes=self.config.max_result_bytes,
+                    max_stderr_bytes=self.config.max_result_bytes,
+                    stdin_bytes=patch.encode(),
+                ),
+            )
+            if result.timed_out:
+                raise ProjectError("patch application timed out")
+            if result.exit_status != 0:
+                diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
+                output = result.stdout.decode("utf-8", errors="replace").strip()
+                raise ProjectError(diagnostic or output or "patch was rejected")
         return {"project_id": project_id, "applied": True}
