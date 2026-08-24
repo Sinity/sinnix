@@ -247,6 +247,7 @@ class McpBrokerService:
         command = server.get("command")
         args = server.get("args", [])
         environment = server.get("env", {})
+        observer_writable_paths = server.get("observerWritablePaths", [])
         if (
             not isinstance(command, str)
             or not command
@@ -254,6 +255,12 @@ class McpBrokerService:
             or any(not isinstance(value, str) for value in args)
             or not isinstance(environment, dict)
             or any(not isinstance(key, str) or not isinstance(value, str) for key, value in environment.items())
+            or not isinstance(observer_writable_paths, list)
+            or any(
+                not isinstance(path, str)
+                or not path.startswith(("/", "%t/"))
+                for path in observer_writable_paths
+            )
         ):
             raise McpBrokerError("MCP broker server configuration is malformed")
         return server
@@ -285,6 +292,10 @@ class McpBrokerService:
         unit_environment = [
             f"--setenv={name}={value}" for name, value in sorted(environment.items())
         ]
+        writable_paths = [
+            f"--property=ReadWritePaths={path}"
+            for path in server.get("observerWritablePaths", [])
+        ]
         return (
             StdioServerParameters(
                 command=self.config.systemd_run_command,
@@ -295,6 +306,7 @@ class McpBrokerService:
                     "--collect",
                     f"--unit={unit}",
                     *unit_environment,
+                    *writable_paths,
                     "--property=RuntimeMaxSec=30",
                     "--property=ReadOnlyPaths=/",
                     "--property=PrivateTmp=true",
