@@ -5,8 +5,10 @@ import concurrent.futures
 import dataclasses
 import json
 import os
+import socketserver
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import anyio
@@ -540,6 +542,111 @@ def test_public_v2_mutation_verbs_preserve_owner_routes(
     assert browser_result["data"]["ref"] == "sinnix://browser/pages/agent-target"
     assert unsupported["error"]["code"] == "unsupported_capability"
     assert undeclared["error"]["code"] == "unsupported_capability"
+
+
+def test_mcp_dispatches_v2_change_and_operate_through_real_owners(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    project = cfg.projects["fixture"].path
+    subprocess.run(["git", "init", "--quiet", project], check=True)
+    subprocess.run(["git", "config", "user.name", "Gateway Test"], cwd=project, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "gateway-test@example.invalid"],
+        cwd=project,
+        check=True,
+    )
+    target = project / "tracked.txt"
+    target.write_text("before\n")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=project, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=project, check=True)
+
+    class Handler(socketserver.StreamRequestHandler):
+        def handle(self) -> None:
+            request = self.rfile.readline().decode()
+            assert request.startswith("POST /v1/actions HTTP/")
+            headers: dict[str, str] = {}
+            while True:
+                line = self.rfile.readline().decode().rstrip("\r\n")
+                if not line:
+                    break
+                name, value = line.split(":", 1)
+                headers[name.lower()] = value.strip()
+            body = json.loads(self.rfile.read(int(headers["content-length"])))
+            payload = json.dumps(
+                {
+                    "schema": "sinnix-ops-action-v1",
+                    "receipt_id": "integration-owner-receipt",
+                    "idempotency_key": body["idempotency_key"],
+                    "action": body["action"],
+                    "target": body["target"],
+                    "operator_reason": body["operator_reason"],
+                    "expected_revision": body["expected_revision"],
+                    "status": "accepted",
+                },
+                separators=(",", ":"),
+            ).encode()
+            self.wfile.write(
+                b"HTTP/1.1 201 Created\r\n"
+                + f"Content-Length: {len(payload)}\r\nContent-Type: application/json\r\n\r\n".encode()
+                + payload
+            )
+
+        def log_message(self, *_args: object) -> None:
+            return
+
+    socket_path = tmp_path / "ops.sock"
+    owner_server = socketserver.UnixStreamServer(str(socket_path), Handler)
+    owner_thread = threading.Thread(target=owner_server.serve_forever)
+    owner_thread.start()
+    try:
+        runtime = Runtime.create(cfg, "operator")
+        checkout = runtime.projects.checkout("fixture", "default")["checkout"]
+        preconditions = {
+            "head": checkout["head"],
+            "dirty_sha256": checkout["dirty_sha256"],
+        }
+        gateway = create_server(
+            dataclasses.replace(cfg, ops_socket_path=socket_path), "operator"
+        )
+
+        change = anyio.run(
+            gateway.call_tool,
+            "change",
+            {
+                "action_name": "projects.change",
+                "ref": "sinnix://projects/fixture",
+                "operation": "write",
+                "parameters": {"path": "tracked.txt", "content": "after\n"},
+                "preconditions": preconditions,
+                "idempotency_key": "integration-project-change",
+            },
+        )
+        operate = anyio.run(
+            gateway.call_tool,
+            "operate",
+            {
+                "action_name": "machine.operate",
+                "ref": "sinnix://machine/units/user/fixture.service",
+                "operation": "restart",
+                "parameters": {},
+                "reason": "integration fixture",
+                "preconditions": {"expected_revision": 17},
+                "idempotency_key": "integration-machine-operate",
+            },
+        )
+    finally:
+        owner_server.shutdown()
+        owner_server.server_close()
+        owner_thread.join(timeout=5)
+
+    assert change.structured_content["result"]["outcome"] == "ok"
+    assert change.structured_content["data"]["checkout_ref"] == (
+        "sinnix://projects/fixture/checkouts/default"
+    )
+    assert target.read_text() == "after\n"
+    assert operate.structured_content["result"]["outcome"] == "ok"
+    assert operate.structured_content["data"]["owner_receipt"]["receipt_id"] == (
+        "integration-owner-receipt"
+    )
 
 
 def test_query_adapter_consumes_capture_selector_before_owner_invocation(
