@@ -240,6 +240,32 @@ class AuditService:
         ]
         return {"events": events}
 
+    def events_since(self, sequence: int, limit: int = 100) -> list[dict[str, Any]]:
+        """Read existing audit rows after an opaque sequence position."""
+        self.principal.require(Capability.AUDIT_READ)
+        if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
+            raise ValueError("audit sequence must be non-negative")
+        limit = max(1, min(limit, 1_000))
+        with self._connect() as connection:
+            rows = connection.execute(
+                "select sequence,event_id,occurred_at,profile,operation,outcome,payload_json,previous_hash,entry_hash from events where profile = ? and sequence > ? order by sequence asc limit ?",
+                (self.principal.name, sequence, limit),
+            ).fetchall()
+        return [
+            {
+                "sequence": row[0],
+                "event_id": row[1],
+                "occurred_at": row[2],
+                "principal": row[3],
+                "operation": row[4],
+                "outcome": row[5],
+                "payload": json.loads(row[6]),
+                "previous_hash": row[7],
+                "entry_hash": row[8],
+            }
+            for row in rows
+        ]
+
     def verify(self) -> dict[str, Any]:
         self.principal.require(Capability.AUDIT_READ)
         previous_hash = GENESIS_HASH

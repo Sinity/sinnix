@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import base64
+import binascii
+import hmac
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Mapping
@@ -54,7 +57,7 @@ def _templates_overlap(left: RefTemplate, right: RefTemplate) -> bool:
 class CatalogRegistry:
     """One declaration registry for V2 resource and action contracts."""
 
-    revision = "v2-operator-verbs"
+    revision = "v2-g2.10-context-events"
 
     def __init__(
         self,
@@ -125,6 +128,39 @@ class CatalogRegistry:
             "resources": self._resource_rows(principal=principal),
             "actions": self._action_rows(principal=principal),
         }
+
+    def template_page(
+        self, *, principal: str, limit: int = 100, cursor: str | None = None
+    ) -> dict[str, Any]:
+        """Return principal-filtered resource templates with an opaque cursor."""
+        if principal not in {"observer", "agent-control", "operator"}:
+            raise RegistryError("unknown template principal")
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 500:
+            raise RegistryError("template page limit must be 1-500")
+        rows = [
+            resource.catalog_row()
+            for resource in self.resources
+            if principal in resource.principals
+        ]
+        offset = 0
+        if cursor is not None:
+            try:
+                encoded, mac = cursor.rsplit(".", 1)
+                expected = hashlib.sha256((self.revision + "|" + encoded).encode()).hexdigest()
+                if not hmac.compare_digest(mac, expected):
+                    raise ValueError
+                payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode())
+                if payload.get("revision") != self.revision or payload.get("principal") != principal:
+                    raise ValueError
+                offset = int(payload["offset"])
+            except (ValueError, KeyError, TypeError, json.JSONDecodeError, binascii.Error) as exc:
+                raise RegistryError("template cursor is stale or belongs to another principal") from exc
+        page = rows[offset:offset + limit]
+        next_cursor = None
+        if offset + limit < len(rows):
+            encoded = base64.urlsafe_b64encode(_canonical_json({"revision": self.revision, "principal": principal, "offset": offset + limit}).encode()).decode().rstrip("=")
+            next_cursor = encoded + "." + hashlib.sha256((self.revision + "|" + encoded).encode()).hexdigest()
+        return {"templates": page, "limit": limit, "next_cursor": next_cursor, "total": len(rows)}
 
     def _resource_rows(
         self,
@@ -338,6 +374,15 @@ JOB_WAIT_SCHEMA: dict[str, Any] = _with_request_controls(
                 "maximum": 300,
                 "default": 30,
             },
+            "target": {
+                "enum": [
+                    "job_terminal", "bead_status", "bead_revision", "unit_state",
+                    "file_hash", "capture_freshness", "receipt_appearance",
+                ],
+                "default": "job_terminal",
+            },
+            "expected": {"type": "object", "maxProperties": 8},
+            "poll_seconds": {"type": "number", "minimum": 0.01, "maximum": 5, "default": 0.25},
         },
     }
 )
@@ -525,9 +570,9 @@ PROJECT_CONTEXT_SCHEMA: dict[str, Any] = _with_request_controls(
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 2_048,
-                "pattern": "^sinnix://projects/[^/]+(?:/beads/[^/]+)?$",
+                "pattern": "^sinnix://(?:projects/[^/]+(?:/beads/[^/]+)?|jobs/[^/]+)$",
             },
-            "intent": {"enum": ["project", "bead.work", "bead.review"], "default": "project"},
+            "intent": {"enum": ["project", "project.orientation", "project.triage", "bead.work", "bead.review", "job.review", "incident"], "default": "project.orientation"},
             "job_ref": {"type": "string", "minLength": 1, "maxLength": 2_048, "pattern": "^sinnix://jobs/[^/]+$"},
         },
     }
@@ -798,6 +843,11 @@ AUDIT_EVENTS_SCHEMA: dict[str, Any] = _with_request_controls(
                 "maximum": 1_000,
                 "default": 100,
             },
+            "cursor": {"type": "string", "minLength": 1, "maxLength": 2_048},
+            "project_ids": {
+                "type": "array", "maxItems": 32,
+                "items": {"type": "string", "minLength": 1, "maxLength": 128},
+            },
         },
     }
 )
@@ -892,9 +942,9 @@ def build_registry() -> CatalogRegistry:
         ResourceSpec("receipt", RefTemplate("receipt", "sinnix://receipts/{receipt_id}"), "audit", ("summary",), True),
         ResourceSpec("result", RefTemplate("result", "sinnix://results/{result_id}"), "results", ("metadata", "page"), True),
         ResourceSpec("machine_unit", RefTemplate("machine_unit", "sinnix://machine/units/{manager}/{unit}"), "machine", ("status", "health"), True),
-        ResourceSpec("process", RefTemplate("process", "sinnix://processes/{pid}/{start_ticks}"), "machine", ("status",), True),
         ResourceSpec("browser_page", RefTemplate("browser_page", "sinnix://browser/pages/{page_id}"), "browser", ("summary", "content"), True),
         ResourceSpec("browser_workspace", RefTemplate("browser_workspace", "sinnix://browser/agent-workspace"), "browser", ("summary",), False, principals=frozenset({"operator"})),
+        ResourceSpec("process", RefTemplate("process", "sinnix://processes/{pid}/{start_ticks}"), "machine", ("status",), True),
         ResourceSpec("terminal", RefTemplate("terminal", "sinnix://terminals/{terminal_id}"), "terminals", ("summary", "scrollback"), True),
         ResourceSpec("desktop", RefTemplate("desktop", "sinnix://desktop/current"), "desktop", ("summary",), True, principals=frozenset({"observer", "operator"})),
         ResourceSpec("host_file", RefTemplate("host_file", "sinnix://files/{file_token}"), "files", ("summary",), True, principals=frozenset({"observer", "operator"})),
@@ -952,8 +1002,8 @@ def build_registry() -> CatalogRegistry:
             resource_kinds=(
                 "project", "checkout", "bead", "task_authority", "job",
                 "artifact", "receipt", "result", "machine_unit", "browser_page",
-                "browser_workspace", "terminal", "desktop", "host_file",
-                "capture_lane", "capability", "session",
+                "browser_workspace", "process", "terminal", "desktop", "host_file",
+                "mcp_tool", "capture_lane", "capability", "session", "context_snapshot",
             ),
             examples=({"input": {"ref": "sinnix://projects/sinnix"}},),
             documentation="Resolve one canonical owner-backed resource through its registered source of truth.",

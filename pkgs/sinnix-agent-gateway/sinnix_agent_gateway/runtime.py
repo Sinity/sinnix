@@ -5,7 +5,8 @@ import binascii
 import hashlib
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, TypeVar, cast
 from uuid import uuid4
 
@@ -21,6 +22,7 @@ from .capabilities import Capability, PolicyError, Principal
 from .capability_index import CapabilityIndexService
 from .captures import CaptureService
 from .config import GatewayConfig
+from .contexts import ComponentResult, ComponentSpec, ContextComposer, CONTEXT_INTENTS, source_revision
 from .contracts import ActionSpec, EffectMode, VerbFamily
 from .desktop import DesktopService
 from .legacy_manifest import LEGACY_MANIFEST
@@ -32,6 +34,7 @@ from .memory import MemoryService
 from .observe import ObserveService
 from .project_context import ProjectContextService
 from .projects import ProjectPreconditionError, ProjectService
+from .events import EventCursorError, NormalizedEventService
 from .redaction import public_error
 from .results import ProtocolError, RequestContext, ResultError, ResultService
 from .route_preflight import GatewayRoutePreflight
@@ -40,6 +43,7 @@ from .schemas import AgentLaunchRequest, V2ToolEnvelope
 from .sessions import SessionLogService
 from .terminals import TerminalService
 from .timeline import TimelineService
+from .waits import BoundedWaitService, WaitEvidence, WaitRequest, WaitTarget
 from sinnix_mcp import ErrorCode, RequestEnvelope
 from sinnixd.api import SinnixdClient, SinnixdClientError
 
@@ -162,6 +166,10 @@ class Runtime:
     timeline: TimelineService
     mcp_broker: McpBrokerService
     route_preflight: GatewayRoutePreflight
+    context_composer: ContextComposer = field(default_factory=ContextComposer)
+    normalized_events: NormalizedEventService | None = None
+    waits: BoundedWaitService | None = None
+    context_snapshots: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def create(cls, config: GatewayConfig, principal_name: str) -> "Runtime":
@@ -170,7 +178,7 @@ class Runtime:
         sessions = SessionLogService(config, principal)
         projects = ProjectService(config, principal)
         beads = BeadsService(config, principal)
-        return cls(
+        runtime = cls(
             principal_name=principal_name,
             principal=principal,
             config=config,
@@ -195,6 +203,19 @@ class Runtime:
             mcp_broker=McpBrokerService(config, principal, artifacts),
             route_preflight=GatewayRoutePreflight(config),
         )
+        runtime.normalized_events = NormalizedEventService(
+            principal=principal_name,
+            state_dir=config.state_dir,
+            projects=runtime.projects,
+            beads=runtime.beads,
+            audit=runtime.audit,
+            transitions_path=config.runtime_transitions,
+            jobs=lambda limit, cursor: runtime.v2_jobs_query(
+                {"limit": limit, **({"cursor": cursor} if cursor else {})}
+            ),
+        )
+        runtime.waits = BoundedWaitService(runtime._resolve_wait)
+        return runtime
 
     async def gateway_status(
         self,
@@ -419,103 +440,219 @@ class Runtime:
             **result,
         }
 
+    def compose_context(
+        self, reference: str, intent: str, job_ref: str | None = None
+    ) -> dict[str, Any]:
+        if intent == "project":
+            intent = "project.orientation"
+        if intent not in CONTEXT_INTENTS:
+            raise ProtocolError("invalid_request", f"unknown context intent: {intent}")
+        try:
+            resource, values = REGISTRY.resolve(reference)
+        except RegistryError as exc:
+            raise ProtocolError("not_found", "context target is not canonical") from exc
+        if intent in {"project.orientation", "project.triage", "incident"}:
+            if resource.kind not in {"project", "checkout"}:
+                raise ProtocolError("invalid_request", f"{intent} requires a project reference")
+            project_id = values["project_id"]
+            target_ref = str(resource.ref_template.format(values))
+        elif intent in {"bead.work", "bead.review"}:
+            if resource.kind != "bead":
+                raise ProtocolError("invalid_request", f"{intent} requires a Beads reference")
+            project_id = values["project_id"]
+            target_ref = str(resource.ref_template.format(values))
+        else:
+            if resource.kind != "job":
+                raise ProtocolError("invalid_request", "job.review requires a job reference")
+            project_id = None
+            target_ref = str(resource.ref_template.format(values))
+        if self.principal.name == "agent-control" and intent in {"project.orientation", "project.triage"}:
+            raise PolicyError("agent-control project context is limited to an assigned Beads job")
+
+        declared = dict(CONTEXT_INTENTS[intent].components)
+
+        def component(name: str, fn: Callable[[], Any], source_ref: str | None = None) -> ComponentSpec:
+            def probe() -> ComponentResult:
+                try:
+                    value = fn()
+                except ProtocolError as exc:
+                    if exc.code in {"invalid_request", "not_found", "policy_denied", "precondition_failed"}:
+                        raise
+                    return ComponentResult.unavailable(name, public_error(exc), source_ref=source_ref)
+                except Exception as exc:
+                    return ComponentResult.unavailable(name, public_error(exc), source_ref=source_ref)
+                revision = value.get("source_revision") if isinstance(value, Mapping) else None
+                return ComponentResult.available(
+                    name,
+                    value,
+                    revision=revision if isinstance(revision, str) else source_revision(value),
+                    source_ref=source_ref,
+                )
+            return ComponentSpec(name, declared[name], probe)
+
+        project_ref = REGISTRY.reference("project", {"project_id": project_id}) if project_id else None
+        if intent == "bead.work" and self.principal.name == "agent-control":
+            self._assigned_bead_job(target_ref, project_id, None, job_ref)
+        components: list[ComponentSpec] = []
+        if intent == "project.orientation":
+            assert project_id is not None
+            components = [
+                component("project", lambda: self.projects.summary(project_id), project_ref),
+                component("checkout", lambda: self.projects.checkout(project_id, "default"), REGISTRY.reference("checkout", {"project_id": project_id, "checkout_id": "default"})),
+                component("tasks", lambda: self.beads.query(project_ids=[project_id], view="ready", limit=20), f"{project_ref}/beads"),
+                component("authority", lambda: self.project_authority(project_id), f"{project_ref}/task-authority"),
+            ]
+        elif intent == "project.triage":
+            assert project_id is not None
+            components = [
+                component("project", lambda: self.projects.summary(project_id), project_ref),
+                component("open_beads", lambda: self.beads.query(project_ids=[project_id], view="open", limit=50), f"{project_ref}/beads"),
+                component("stale_claims", lambda: self.beads.query(project_ids=[project_id], view="stale_claims", limit=50), f"{project_ref}/beads"),
+                component("changes", lambda: self.projects.diff(project_id, None, None), project_ref),
+            ]
+        elif intent == "bead.work":
+            bead_ref = target_ref
+            bead_id = values["bead_id"]
+            components = [
+                component("bead", lambda: self.beads.get(project_id, bead_id, includes=["blockers", "dependencies", "dependents", "children", "refs"]), bead_ref),
+                component("project", lambda: self.projects.summary(project_id), project_ref),
+                component("checkout", lambda: self.projects.checkout(project_id, "default"), REGISTRY.reference("checkout", {"project_id": project_id, "checkout_id": "default"})),
+                component("assignment", lambda: self._context_assignment(bead_ref, project_id, job_ref), job_ref),
+                component("blockers", lambda: self.beads.graph(project_id, bead_id, direction="down", edge_type="blocks", max_rows=50), f"{bead_ref}/blockers"),
+            ]
+        elif intent == "bead.review":
+            if not isinstance(job_ref, str):
+                raise ProtocolError("invalid_request", "bead.review requires job_ref")
+            _job_resource, job_values, canonical_job_ref = self._resource_reference(job_ref, {"job"}, "bead.review requires a canonical job reference")
+            bead_id = values["bead_id"]
+            job_observation: dict[str, Any] | None = None
+
+            def job() -> dict[str, Any]:
+                nonlocal job_observation
+                if job_observation is None:
+                    job_observation = self._sinnixd_job("job.get", {"job_id": job_values["job_id"]})
+                return job_observation
+
+            components = [
+                component("bead", lambda: self.beads.get(project_id, bead_id, includes=["history", "events", "dependencies", "dependents", "refs"]), target_ref),
+                component("job", job, canonical_job_ref),
+                component("checkout", lambda: self.projects.checkout(project_id, "default"), REGISTRY.reference("checkout", {"project_id": project_id, "checkout_id": "default"})),
+                component("diff", lambda: self.projects.diff(project_id, None, None), project_ref),
+                component("evidence", lambda: self._review_evidence(job_values["job_id"], job()), canonical_job_ref),
+            ]
+        elif intent == "job.review":
+            job_id = values["job_id"]
+            job_observation: dict[str, Any] | None = None
+
+            def job_value() -> dict[str, Any]:
+                nonlocal job_observation
+                if job_observation is None:
+                    job_observation = self._sinnixd_job("job.get", {"job_id": job_id})
+                return job_observation
+
+            components = [
+                component("job", job_value, target_ref),
+                component("result", lambda: self._sinnixd_job("job.result", {"job_id": job_id, "max_bytes": 64_000}), target_ref),
+                component("project", lambda: self.projects.summary(str(job_value().get("project_id"))), project_ref),
+                component("events", lambda: self.audit.tail(50), f"sinnix://receipts"),
+            ]
+        else:
+            components = [
+                component("runtime", lambda: self.observe.machine_query("overview"), "sinnix://machine/overview"),
+                component("transitions", lambda: (self.normalized_events.read(limit=50) if self.normalized_events else {"events": []}), "sinnix://events"),
+                component("receipts", lambda: self.audit.tail(50), "sinnix://receipts"),
+                component("jobs", lambda: self.v2_jobs_query({"limit": 50}), "sinnix://jobs"),
+            ]
+        context = self.context_composer.compose(intent, target_ref, components)
+        by_name = {row["name"]: row for row in context["components"]}
+        if intent == "bead.review" and by_name.get("job", {}).get("status") == "available":
+            job_data = by_name["job"].get("data")
+            binding = job_data.get("contract", {}).get("bead_binding") if isinstance(job_data, Mapping) else None
+            if not isinstance(binding, Mapping) or binding.get("bead_ref") != target_ref:
+                raise ProtocolError("precondition_failed", "job is not the requested Beads assignment")
+        compatibility: dict[str, Any] = {}
+        if intent == "project.orientation" and all(
+            by_name.get(name, {}).get("status") == "available"
+            for name in ("project", "tasks", "authority")
+        ):
+            compatibility.update(
+                {
+                    "project": by_name["project"]["data"],
+                    "tasks": by_name["tasks"]["data"],
+                    "authority": by_name["authority"]["data"],
+                }
+            )
+        elif intent in {"bead.work", "job.review", "incident"}:
+            compatibility.update(
+                {
+                    name: row["data"]
+                    for name, row in by_name.items()
+                    if row.get("status") == "available" and "data" in row
+                }
+            )
+        elif intent == "bead.review":
+            if all(by_name.get(name, {}).get("status") == "available" for name in ("bead", "job", "checkout", "evidence")):
+                bead_data = by_name["bead"]["data"]
+                job_data = by_name["job"]["data"]
+                checkout_data = by_name["checkout"]["data"]
+                binding = job_data.get("contract", {}).get("bead_binding") if isinstance(job_data, Mapping) else None
+                launch_checkout = job_data.get("checkout") if isinstance(job_data, Mapping) else None
+                current_checkout = checkout_data.get("checkout") if isinstance(checkout_data, Mapping) else None
+                if isinstance(binding, Mapping) and isinstance(launch_checkout, Mapping) and isinstance(current_checkout, Mapping):
+                    try:
+                        compatibility = {
+                            "bead": {"launch": dict(binding), "current": bead_data},
+                            "job": {"ref": by_name["job"].get("source_ref"), **job_data},
+                            "checkout": {
+                                "launch": dict(launch_checkout),
+                                "current": dict(current_checkout),
+                                "commit_range": self.projects.commit_range(
+                                    values["project_id"],
+                                    launch_checkout["checkout_id"],
+                                    launch_checkout["head"],
+                                    current_checkout["head"],
+                                ),
+                            },
+                            "evidence": by_name["evidence"]["data"],
+                            "revision_mismatch": {
+                                "task_revision": binding.get("task_revision") != bead_data.get("task_revision"),
+                                "task_etag": binding.get("task_etag") != bead_data.get("etag"),
+                                "code_revision": launch_checkout.get("head") != current_checkout.get("head"),
+                            },
+                        }
+                    except (KeyError, TypeError, ValueError):
+                        compatibility = {}
+        if compatibility:
+            candidate = {**context, **compatibility}
+            if len(json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode()) <= context["total_budget_bytes"]:
+                context = candidate
+        snapshot_body = {key: value for key, value in context.items() if key != "snapshot_ref"}
+        snapshot_body["components"] = [
+            {**component, "snapshot_ref": "pending"}
+            for component in context["components"]
+        ]
+        snapshot_ref = f"sinnix://contexts/{source_revision(snapshot_body)}"
+        context["snapshot_ref"] = snapshot_ref
+        for component in context["components"]:
+            component["snapshot_ref"] = snapshot_ref
+        self.context_snapshots[context["snapshot_ref"]] = context
+        if len(self.context_snapshots) > 64:
+            oldest = next(iter(self.context_snapshots))
+            if oldest != context["snapshot_ref"]:
+                del self.context_snapshots[oldest]
+        return {"ref": target_ref, **context}
+
+    def _context_assignment(self, bead_ref: str, project_id: str, job_ref: str | None) -> dict[str, Any]:
+        if self.principal.name == "agent-control":
+            job, binding, checkout, assignment_ref = self._assigned_bead_job(bead_ref, project_id, None, job_ref)
+            return {"ref": assignment_ref, "job": job, "binding": dict(binding), "checkout": checkout}
+        jobs = self.v2_jobs_query({"limit": 50})
+        return {"jobs": [job for job in jobs.get("jobs", []) if isinstance(job.get("contract"), Mapping) and job["contract"].get("bead_binding", {}).get("bead_ref") == bead_ref]}
+
     def v2_context(
         self, reference: str, intent: str = "project", job_ref: str | None = None
     ) -> dict[str, Any]:
-        if self.principal.name == "agent-control" and intent == "project":
-            raise PolicyError("agent-control project context is limited to an assigned Beads job")
-        if intent == "project":
-            project_id, _checkout_id, canonical_ref = self._project_reference(
-                reference, allow_checkout=False
-            )
-            return {"ref": canonical_ref, **self._bounded_project_context(project_id)}
-        resource, values, canonical_ref = self._resource_reference(
-            reference, {"bead"}, "bead context requires a canonical Beads reference"
-        )
-        del resource
-        assignment: tuple[dict[str, Any], Mapping[str, Any], dict[str, Any], str] | None = None
-        if self.principal.name == "agent-control":
-            assignment = self._assigned_bead_job(
-                canonical_ref, values["project_id"], None, job_ref
-            )
-        bead = self.beads.get(
-            values["project_id"], values["bead_id"],
-            includes=["blockers", "comments", "history", "dependencies", "dependents", "children", "refs"],
-        )
-        if assignment is not None:
-            self._assert_assignment_current(assignment[1], bead)
-        if intent == "bead.work":
-            if assignment is not None:
-                job, _binding, _checkout, assignment_ref = assignment
-                return {
-                    "ref": canonical_ref,
-                    "intent": intent,
-                    "bead": bead,
-                    "project": self.projects.summary(values["project_id"]),
-                    "assignment": {"ref": assignment_ref, "job": job},
-                }
-            jobs_page = self.v2_jobs_query({"limit": 100})
-            related_jobs = [
-                job for job in jobs_page["jobs"]
-                if isinstance(job.get("contract"), Mapping)
-                and isinstance(job["contract"].get("bead_binding"), Mapping)
-                and job["contract"]["bead_binding"].get("bead_ref") == canonical_ref
-            ]
-            return {
-                "ref": canonical_ref,
-                "intent": intent,
-                "bead": bead,
-                "project": self.projects.summary(values["project_id"]),
-                "related_jobs": {
-                    "jobs": related_jobs,
-                    "observed_page": {
-                        "limit": jobs_page["limit"],
-                        "total": jobs_page["total"],
-                        "truncated": jobs_page["truncated"],
-                        "next_cursor": jobs_page["next_cursor"],
-                        "snapshot": jobs_page["snapshot"],
-                    },
-                },
-            }
-        if intent != "bead.review" or not isinstance(job_ref, str):
-            raise ProtocolError("invalid_request", "bead.review requires job_ref")
-        _job_resource, job_values, canonical_job_ref = self._resource_reference(
-            job_ref, {"job"}, "bead.review requires a canonical job reference"
-        )
-        job = assignment[0] if assignment is not None else self._sinnixd_job(
-            "job.get", {"job_id": job_values["job_id"]}
-        )
-        binding = job.get("contract", {}).get("bead_binding")
-        if not isinstance(binding, Mapping) or binding.get("bead_ref") != canonical_ref:
-            raise ProtocolError("precondition_failed", "job is not bound to the requested bead")
-        checkout = job.get("checkout")
-        if not isinstance(checkout, Mapping) or not isinstance(checkout.get("checkout_id"), str):
-            raise ProtocolError("owner_failed", "bead-bound job omitted its checkout identity")
-        current_checkout = self.projects.checkout(values["project_id"], checkout["checkout_id"])["checkout"]
-        revision_mismatch = {
-            "task_revision": binding.get("task_revision") != bead.get("task_revision"),
-            "task_etag": binding.get("task_etag") != bead.get("etag"),
-            "code_revision": checkout.get("head") != current_checkout.get("head"),
-        }
-        launch_revision = checkout.get("head")
-        current_revision = current_checkout.get("head")
-        if not isinstance(launch_revision, str) or not isinstance(current_revision, str):
-            raise ProtocolError("owner_failed", "bead-bound job omitted immutable checkout revisions")
-        return {
-            "ref": canonical_ref,
-            "intent": intent,
-            "bead": {"launch": dict(binding), "current": bead},
-            "job": {"ref": canonical_job_ref, **job},
-            "checkout": {
-                "launch": dict(checkout),
-                "current": current_checkout,
-                "commit_range": self.projects.commit_range(
-                    values["project_id"], checkout["checkout_id"], launch_revision, current_revision
-                ),
-            },
-            "evidence": self._review_evidence(job_values["job_id"], job),
-            "revision_mismatch": revision_mismatch,
-        }
+        return self.compose_context(reference, intent, job_ref)
 
     def _assigned_bead_job(
         self,
@@ -762,23 +899,36 @@ class Runtime:
             "atomicity": "native_claim_then_daemon_launch" if claim_ref else "daemon_launch",
         }
 
-    def v2_events(self, limit: int) -> dict[str, Any]:
+    def v2_events(
+        self,
+        limit: int,
+        cursor: str | None = None,
+        project_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
         if (
             not isinstance(limit, int)
             or isinstance(limit, bool)
             or not 1 <= limit <= 1_000
         ):
             raise ProtocolError("invalid_request", "limit must be 1-1000")
-        events = self.audit.tail(limit)["events"]
-        return {
-            "events": [
-                {
-                    "ref": REGISTRY.reference("receipt", {"receipt_id": event["event_id"]}),
-                    **event,
-                }
-                for event in events
-            ]
-        }
+        if self.normalized_events is None:
+            raise ProtocolError("unavailable", "normalized event owner is unavailable")
+        try:
+            result = self.normalized_events.read(
+                limit=limit, cursor=cursor, project_ids=project_ids
+            )
+        except EventCursorError as exc:
+            raise ProtocolError("stale_cursor", str(exc)) from exc
+        rows = []
+        for event in result["events"]:
+            row = dict(event)
+            if event.get("exact") is True and event.get("source") == "gateway.audit":
+                row["ref"] = REGISTRY.reference("receipt", {"receipt_id": event["event_id"]})
+            elif isinstance(event.get("subject_ref"), str):
+                row["ref"] = event["subject_ref"]
+            rows.append(row)
+        result["events"] = rows
+        return result
 
     def v2_get(
         self,
@@ -899,6 +1049,23 @@ class Runtime:
             if unit is None:
                 raise ProtocolError("not_found", "machine unit is not in the current bounded owner page")
             return {"ref": canonical_ref, "kind": resource.kind, "unit": dict(unit), "source": page.get("source")}
+        if resource.kind == "process":
+            page = self.observe.machine_query("workloads", limit=500)
+            rows = page.get("rows") if isinstance(page, Mapping) else None
+            if not isinstance(rows, list):
+                raise ProtocolError("unavailable", "process owner is unavailable")
+            process = next(
+                (
+                    row for row in rows
+                    if isinstance(row, Mapping)
+                    and str(row.get("pid")) == values["pid"]
+                    and str(row.get("start_ticks", row.get("start_time", ""))) == values["start_ticks"]
+                ),
+                None,
+            )
+            if process is None:
+                raise ProtocolError("not_found", "process is not in the current bounded owner page")
+            return {"ref": canonical_ref, "kind": resource.kind, "process": dict(process), "source": page.get("source")}
         if resource.kind == "browser_page":
             return {"ref": canonical_ref, "kind": resource.kind, "page": self.browser.describe_target(values["page_id"])}
         if resource.kind == "browser_workspace":
@@ -918,10 +1085,16 @@ class Runtime:
                 "file": self.files.read("stat", self._decode_file_token(values["file_token"])),
             }
         if resource.kind == "mcp_tool":
-            raise ProtocolError(
-                "unsupported_capability",
-                "MCP tool schemas are resolved by the asynchronous mcp.query catalog owner",
-            )
+            return {
+                "ref": canonical_ref,
+                "kind": resource.kind,
+                "tool": {
+                    "server": values["server"],
+                    "name": values["tool"],
+                    "availability": "unavailable",
+                    "reason": "live MCP tool metadata requires an asynchronous owner read",
+                },
+            }
         if resource.kind == "capture_lane":
             return {"ref": canonical_ref, "kind": resource.kind, "lane": self.captures.lane(values["lane"])}
         if resource.kind == "capability":
@@ -932,6 +1105,12 @@ class Runtime:
                 "kind": resource.kind,
                 "session": self.sessions.read(f"{values['provider']}:{values['session_id']}", offset, max_bytes),
             }
+        if resource.kind == "context_snapshot":
+            try:
+                snapshot = self.context_snapshots[canonical_ref]
+            except KeyError as exc:
+                raise ProtocolError("not_found", "context snapshot is no longer retained by this gateway process") from exc
+            return {"ref": canonical_ref, "kind": resource.kind, "snapshot": snapshot}
         raise ValueError(f"V2 get does not support resource kind {resource.kind!r}")
 
     def v2_run_shell(
@@ -1572,7 +1751,14 @@ class Runtime:
             "cancel": cancelled,
         }
 
-    def v2_wait(self, reference: str, timeout_seconds: int) -> dict[str, Any]:
+    def v2_wait(
+        self,
+        reference: str,
+        timeout_seconds: int,
+        target: str = "job_terminal",
+        expected: Mapping[str, Any] | None = None,
+        poll_seconds: float = 0.25,
+    ) -> dict[str, Any]:
         if not isinstance(reference, str) or not 1 <= len(reference) <= 2_048:
             raise ProtocolError("invalid_request", "wait ref is malformed")
         if (
@@ -1587,18 +1773,88 @@ class Runtime:
             resource, values = REGISTRY.resolve(reference)
         except RegistryError as exc:
             raise ProtocolError("not_found", "canonical job resource was not found") from exc
-        if resource.kind != "job":
-            raise ProtocolError("invalid_request", "wait requires a canonical job reference")
-        job_id = values["job_id"]
-        self.principal.require(Capability.JOB_READ)
-        result = self._sinnixd_job(
-            "job.wait", {"job_id": job_id, "timeout_seconds": timeout_seconds}
-        )
-        if result.get("job_id") != job_id:
-            raise ProtocolError(
-                "owner_failed", "sinnixd wait response does not match the requested job"
+        try:
+            wait_target = WaitTarget(target)
+        except ValueError as exc:
+            raise ProtocolError("invalid_request", "wait target is not recognized") from exc
+        if wait_target is WaitTarget.JOB_TERMINAL:
+            if resource.kind != "job":
+                raise ProtocolError("invalid_request", "job_terminal requires a canonical job reference")
+            job_id = values["job_id"]
+            self.principal.require(Capability.JOB_READ)
+            result = self._sinnixd_job(
+                "job.wait", {"job_id": job_id, "timeout_seconds": timeout_seconds}
             )
-        return {**result, "ref": REGISTRY.reference("job", {"job_id": job_id})}
+            if result.get("job_id") != job_id:
+                raise ProtocolError(
+                    "owner_failed", "sinnixd wait response does not match the requested job"
+                )
+            if result.get("timed_out") is True:
+                evidence = result.get("state", result)
+                result = {
+                    **result,
+                    "outcome": "timeout",
+                    "evidence": evidence if isinstance(evidence, Mapping) else {"value": evidence},
+                    "source_revision": source_revision(evidence),
+                    "continuation": source_revision({"ref": reference, "evidence": evidence}),
+                }
+            return {**result, "ref": REGISTRY.reference("job", {"job_id": job_id}), "target": wait_target.value}
+        if self.waits is None:
+            raise ProtocolError("unavailable", "wait owner is unavailable")
+        try:
+            request = WaitRequest(
+                target=wait_target,
+                reference=reference,
+                expected=expected or {},
+                timeout_seconds=timeout_seconds,
+                poll_seconds=float(poll_seconds),
+            )
+            return self.waits.wait(request)
+        except ValueError as exc:
+            raise ProtocolError("invalid_request", str(exc)) from exc
+
+    def _resolve_wait(self, request: WaitRequest) -> WaitEvidence:
+        resource, values = REGISTRY.resolve(request.reference)
+        expected = dict(request.expected)
+        if request.target is WaitTarget.BEAD_STATUS or request.target is WaitTarget.BEAD_REVISION:
+            if resource.kind != "bead":
+                raise ValueError("Beads waits require a canonical bead reference")
+            bead = self.beads.get(values["project_id"], values["bead_id"])
+            fields = bead.get("fields", {}) if isinstance(bead.get("fields"), Mapping) else {}
+            current = fields.get("status") if request.target is WaitTarget.BEAD_STATUS else bead.get("task_revision")
+            wanted = expected.get("status") if request.target is WaitTarget.BEAD_STATUS else expected.get("revision", expected.get("task_revision"))
+            return WaitEvidence(current == wanted, {"current": current, "bead": bead}, str(bead.get("task_revision", source_revision(bead))))
+        if request.target is WaitTarget.UNIT_STATE:
+            if resource.kind != "machine_unit":
+                raise ValueError("unit waits require a canonical machine unit reference")
+            current = self.v2_get(request.reference)["unit"]
+            state = current.get("active_state", current.get("state")) if isinstance(current, Mapping) else None
+            wanted = expected.get("state", expected.get("active_state"))
+            return WaitEvidence(state == wanted, {"state": state, "unit": current}, source_revision(current))
+        if request.target is WaitTarget.FILE_HASH:
+            if resource.kind != "host_file":
+                raise ValueError("file waits require a canonical host file reference")
+            current = self.files.read("stat", self._decode_file_token(values["file_token"]))
+            wanted = expected.get("sha256") or expected.get("hash")
+            return WaitEvidence(current.get("sha256") == wanted, current, str(current.get("sha256")))
+        if request.target is WaitTarget.CAPTURE_FRESHNESS:
+            if resource.kind != "capture_lane":
+                raise ValueError("capture waits require a canonical capture lane reference")
+            lane = self.captures.lane(values["lane"])
+            path = Path(str(lane["path"]))
+            mtime = path.stat().st_mtime if path.exists() else 0.0
+            age = max(0.0, time.time() - mtime) if mtime else None
+            max_age = float(expected.get("max_age_seconds", 0))
+            return WaitEvidence(age is not None and age <= max_age, {"mtime": mtime, "age_seconds": age, "lane": lane}, source_revision({"mtime": mtime, "lane": lane.get("name")}))
+        if request.target is WaitTarget.RECEIPT_APPEARANCE:
+            if resource.kind != "receipt":
+                raise ValueError("receipt waits require a canonical receipt reference")
+            try:
+                receipt = self.audit.receipt(values["receipt_id"])
+            except ValueError:
+                return WaitEvidence(False, {"available": False, "ref": request.reference}, "missing")
+            return WaitEvidence(True, {"available": True, "receipt": receipt}, str(receipt["entry_hash"]))
+        raise ValueError(f"wait target {request.target.value} is not implemented")
 
     def v2_jobs_query(self, parameters: Mapping[str, Any] | None) -> dict[str, Any]:
         values = self._parameters(parameters)

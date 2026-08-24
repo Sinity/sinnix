@@ -45,6 +45,7 @@ class GatewayConfig:
     state_dir: Path
     projects: dict[str, ProjectConfig]
     runtime_inventory: Path = Path("/etc/sinnix/runtime-inventory.json")
+    runtime_transitions: Path = Path("/run/sinnix/health-transitions.jsonl")
     capability_index: Path = Path("/etc/sinnix/capability-index.json")
     sinnixd_socket: Path = field(default_factory=default_sinnixd_socket_path)
     observe_command: str = "sinnix-observe"
@@ -167,6 +168,9 @@ class GatewayConfig:
             projects=projects,
             runtime_inventory=Path(
                 raw.get("runtimeInventory", "/etc/sinnix/runtime-inventory.json")
+            ),
+            runtime_transitions=Path(
+                raw.get("runtimeTransitions", "/run/sinnix/health-transitions.jsonl")
             ),
             capability_index=Path(
                 raw.get("capabilityIndex", "/etc/sinnix/capability-index.json")
