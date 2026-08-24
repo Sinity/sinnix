@@ -12,7 +12,7 @@
 let
   inherit (lib.generators) mkLuaInline toLua;
   script = rel: "${sinnix.paths.projectRoot}/scripts/${rel}";
-  lua = expr: mkLuaInline expr;
+  lua = mkLuaInline;
   string = value: toLua { } value;
   call = name: args: lua "hl.dsp.${name}(${args})";
   callback = body: lua "function() ${body} end";
@@ -30,7 +30,6 @@ let
   run =
     keys: description: command:
     simple keys description (exec command);
-  focus = direction: call "focus" "{ direction = ${string direction} }";
   workspace = id: call "focus" "{ workspace = ${toString id} }";
   moveWorkspace = id: call "window.move" "{ workspace = ${toString id} }";
   locked =
