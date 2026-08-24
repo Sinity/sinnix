@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-import json
+import base64
+import hashlib
+import hmac
 import inspect
+import json
 from typing import Any, Mapping, cast
 
 from mcp.server import MCPServer
 from mcp.server.subscriptions import InMemorySubscriptionBus
 from mcp.shared.subscriptions import ResourceUpdated
+from mcp.types import ListResourceTemplatesResult, PaginatedRequestParams, ResourceTemplate
 
 from .bindings import TargetToolBinding, TargetToolBindings
 from .config import GatewayConfig
@@ -374,6 +378,69 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             )(read_template)
 
     register_canonical_templates()
+
+    template_cursor_key = hashlib.sha256(
+        f"sinnix-template-list:{config.state_dir.resolve()}".encode()
+    ).digest()
+
+    def template_cursor(offset: int) -> str:
+        body = json.dumps(
+            {"revision": REGISTRY.revision, "principal": principal_name, "offset": offset},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        encoded = base64.urlsafe_b64encode(body).decode().rstrip("=")
+        mac = hmac.new(template_cursor_key, encoded.encode(), hashlib.sha256).hexdigest()
+        return f"{encoded}.{mac}"
+
+    def template_offset(cursor: str | None) -> int:
+        if cursor is None:
+            return 0
+        try:
+            encoded, mac = cursor.rsplit(".", 1)
+            expected = hmac.new(template_cursor_key, encoded.encode(), hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(mac, expected):
+                raise ValueError
+            body = json.loads(
+                base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode()
+            )
+            if body.get("revision") != REGISTRY.revision or body.get("principal") != principal_name:
+                raise ValueError
+            offset = body.get("offset")
+            if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+                raise ValueError
+            return offset
+        except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ProtocolError("stale_cursor", "resource template cursor is stale or out of scope") from exc
+
+    async def list_resource_templates(_ctx: Any, params: PaginatedRequestParams) -> ListResourceTemplatesResult:
+        templates = await mcp.list_resource_templates()
+        offset = template_offset(params.cursor)
+        page_size = 16
+        page = templates[offset:offset + page_size]
+        next_cursor = template_cursor(offset + page_size) if offset + page_size < len(templates) else None
+        return ListResourceTemplatesResult(
+            resource_templates=[
+                ResourceTemplate(
+                    uri_template=template.uri_template,
+                    name=template.name,
+                    title=template.title,
+                    description=template.description,
+                    mime_type=template.mime_type,
+                    icons=template.icons,
+                    annotations=template.annotations,
+                    _meta=template.meta,
+                )
+                for template in page
+            ],
+            next_cursor=next_cursor,
+        )
+
+    # MCP 2.0.0 exposes the low-level replacement seam, while its default
+    # MCPServer handler ignores PaginatedRequestParams for this method.
+    mcp._lowlevel_server.add_request_handler(
+        "resources/templates/list", PaginatedRequestParams, list_resource_templates
+    )
 
     prompt_generator = PromptGenerator(
         principal=principal_name,
