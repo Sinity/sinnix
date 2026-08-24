@@ -123,7 +123,6 @@ mkServiceModule {
         approvedActionCatalogHash = cfg.tunnel.approvedActionCatalogHash;
         approvedManifestPrincipal = cfg.tunnel.principal;
         runtimeInventory = "/etc/sinnix/runtime-inventory.json";
-        runtimeTransitions = "/run/sinnix/health-transitions.jsonl";
         capabilityIndex = "/etc/sinnix/capability-index.json";
         systemdRunCommand = "${pkgs.systemd}/bin/systemd-run";
         systemctlCommand = "${pkgs.systemd}/bin/systemctl";
