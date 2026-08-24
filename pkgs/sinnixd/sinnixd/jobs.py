@@ -1237,6 +1237,14 @@ class GenericJobStore:
         _fsync_directory(root)
         return path.resolve()
 
+    def scratch_path_for(self, kind: str, job_id: str) -> Path | None:
+        """Return the deterministic job-owned scratch path before allocation."""
+        if kind == "none":
+            return None
+        _ = job_unit_name(job_id)
+        root = self.tmpfs_scratch_root if kind == "tmpfs" else self.nvme_scratch_root
+        return (root / job_id).resolve()
+
     def cleanup_scratch(self, record: GenericJobRecord) -> None:
         if record.scratch_path is None:
             return
@@ -1840,8 +1848,14 @@ class GenericJobs:
                 launch_environment.update({port.environment: str(port.port) for port in lease.ports})
                 if readiness_path is not None:
                     launch_environment["SINNIXD_SERVICE_READY_FILE"] = str(readiness_path)
+            scratch_path = self.store.scratch_path_for(operation.scratch, job_id)
+            payload_overrides: dict[str, str] = {}
+            if scratch_path is not None:
+                launch_environment["TMPDIR"] = str(scratch_path)
+                payload_overrides["TMPDIR"] = str(scratch_path)
             return GenericJobSpec(
-                kind="declared-operation", command=(*project.environment.command, *operation_argv),
+                kind="declared-operation",
+                command=project.environment.command_for(operation_argv, overrides=payload_overrides),
                 working_directory=str(workdir), environment=launch_environment, project_id=project.project_id,
                 operation=operation.name, parameter_digest=parameter_digest,
                 principal=principal,
