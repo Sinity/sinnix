@@ -43,6 +43,7 @@ check_root() {
 # respectively -- their absence here is deliberate, not an omission.
 check_root /realm \
   project data library state backup swap cache worktrees tmp inbox \
+  code-snapshots \
   INVENTORY.md .btrfs .Trash-1000
 
 check_root /outer-realm \
@@ -56,7 +57,7 @@ check_root /outer-realm \
 # public dataset is, so they sit here rather than in library/, despite the
 # owner not being the operator (system charter Section 3).
 check_root /realm/data \
-  captures exports self knowledgebase derived secrets accounts \
+  captures self knowledgebase derived secrets accounts \
   activity ai code decisions comms health machine records notes reports \
   INVENTORY.md
 

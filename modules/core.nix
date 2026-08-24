@@ -99,7 +99,6 @@ in
         "d ${paths.aiRoot} 0755 ${username} users -"
         "d ${paths.activityRoot}/shell 0755 ${username} users -"
         "d ${paths.activityRoot}/shell/zsh 0700 ${username} users -"
-        "d ${paths.exportsRoot} 0755 ${username} users -"
         "d ${paths.selfRoot} 0755 ${username} users -"
         "d ${paths.mediaRoot} 0755 ${username} users -"
         "d ${paths.dataRoot}/records 0755 ${username} users -"
