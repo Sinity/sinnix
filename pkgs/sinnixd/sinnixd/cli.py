@@ -110,7 +110,12 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("--parameters-json", default="{}")
     get = job_subcommands.add_parser("get")
     get.add_argument("job_id")
-    job_subcommands.add_parser("list")
+    job_list = job_subcommands.add_parser("list")
+    job_list.add_argument("--limit", type=int, choices=range(1, 1001), default=100)
+    job_list.add_argument("--cursor")
+    job_list.add_argument("--project")
+    job_list.add_argument("--phase", action="append", default=[])
+    job_list.add_argument("--active", action="store_true")
     wait = job_subcommands.add_parser("wait")
     wait.add_argument("job_id")
     wait.add_argument("--timeout-seconds", type=int, default=30)
@@ -395,7 +400,17 @@ def main() -> int:
     elif arguments.command == "job" and arguments.job_command == "get":
         request = _request("job.get", "systemd-jobs", {"job_id": arguments.job_id})
     elif arguments.command == "job" and arguments.job_command == "list":
-        request = _request("job.list", "systemd-jobs", {})
+        request = _request(
+            "job.list",
+            "systemd-jobs",
+            {
+                "limit": arguments.limit,
+                "cursor": arguments.cursor,
+                "project_id": arguments.project,
+                "phases": arguments.phase,
+                "active_only": arguments.active,
+            },
+        )
     elif arguments.command == "job" and arguments.job_command == "wait":
         request = _request(
             "job.wait",

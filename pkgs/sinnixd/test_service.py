@@ -223,6 +223,50 @@ def test_agentctl_task_mutations_require_a_stable_request_id() -> None:
         cli_module.parser().parse_args(["task", "create", "fixture", "title", "--description", "body", "--type", "task", "--priority", "5", "--request-id", "request-1"])
 
 
+def test_agentctl_job_list_exposes_service_pagination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, RequestEnvelope] = {}
+
+    def fake_call(socket_path, request_value):
+        captured["request"] = request_value
+        return {"schema": 1, "ok": True}
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "agentctl",
+            "job",
+            "list",
+            "--limit",
+            "250",
+            "--cursor",
+            "next-page",
+            "--project",
+            "polylogue",
+            "--phase",
+            "queued",
+            "--phase",
+            "running",
+            "--active",
+        ],
+    )
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    outbound = captured["request"]
+    assert outbound.operation == "job.list"
+    assert outbound.owner == "systemd-jobs"
+    assert dict(outbound.arguments) == {
+        "limit": 250,
+        "cursor": "next-page",
+        "project_id": "polylogue",
+        "phases": ["queued", "running"],
+        "active_only": True,
+    }
+
+
 def test_agentctl_task_list_preserves_cursor_and_order_controls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -5671,6 +5715,16 @@ def test_job_owner_boundary_filters_before_pagination_and_denies_cross_principal
             )
             assert rebound.error is not None
             assert rebound.error.code is ErrorCode.INVALID_ARGUMENT
+            changed_filter = service.dispatch(
+                request(
+                    "job.list",
+                    "systemd-jobs",
+                    {"limit": 1, "cursor": cursor, "active_only": True},
+                    principal="operator",
+                )
+            )
+            assert changed_filter.error is not None
+            assert changed_filter.error.code is ErrorCode.INVALID_ARGUMENT
         if cursor is None:
             break
     assert set(seen) == {agent_job, *operator_jobs}
