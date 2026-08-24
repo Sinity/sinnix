@@ -112,6 +112,11 @@ def parser() -> argparse.ArgumentParser:
     get.add_argument("job_id")
     status = job_subcommands.add_parser("status")
     status.add_argument("job_id")
+    status.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON (accepted explicitly for scripting; JSON is the default output format).",
+    )
     job_list = job_subcommands.add_parser("list")
     job_list.add_argument("--limit", type=int, choices=range(1, 1001), default=100)
     job_list.add_argument("--cursor")
