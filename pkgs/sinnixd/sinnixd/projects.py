@@ -419,6 +419,17 @@ class ProjectAdapter:
                 return operation
         raise KeyError(f"unknown project operation: {self.project_id}.{name}")
 
+    def descriptor_status(self) -> dict[str, Any]:
+        try:
+            on_disk_digest = "sha256:" + hashlib.sha256(self.descriptor.read_bytes()).hexdigest()
+        except OSError:
+            on_disk_digest = None
+        return {
+            "loaded_digest": self.digest,
+            "on_disk_digest": on_disk_digest,
+            "matches_loaded": on_disk_digest == self.digest,
+        }
+
     def catalog_row(self) -> dict[str, Any]:
         return {
             "id": self.project_id,
@@ -426,6 +437,7 @@ class ProjectAdapter:
             "root": str(self.root),
             "descriptor": str(self.descriptor),
             "digest": self.digest,
+            "descriptor_status": self.descriptor_status(),
             "workspace": self.workspace.catalog_row() if self.workspace is not None else None,
             "conflicts": self.conflicts.catalog_row(),
             "operations": [operation.catalog_row() for operation in self.operations],

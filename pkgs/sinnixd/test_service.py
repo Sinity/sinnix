@@ -2995,6 +2995,11 @@ def test_project_catalog_is_explicit_and_operation_catalog_is_bounded(tmp_path: 
     assert response.payload is not None
     catalog = response.payload.inline
     assert catalog["project_id"] == "fixture"
+    assert catalog["descriptor_status"] == {
+        "loaded_digest": catalog["descriptor_status"]["on_disk_digest"],
+        "on_disk_digest": catalog["descriptor_status"]["on_disk_digest"],
+        "matches_loaded": True,
+    }
     operations = {operation["name"]: operation for operation in catalog["operations"]}
     assert operations["check"]["parameters"] == []
     assert operations["check"]["result"] == "exit"
@@ -3073,6 +3078,23 @@ def test_project_catalog_is_explicit_and_operation_catalog_is_bounded(tmp_path: 
     ]
     assert operations["parameterized"]["result"] == "json"
     assert operations["pytest_receipt"]["result"] == "pytest"
+
+
+def test_project_operations_reports_descriptor_drift(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]))
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(descriptor.read_text() + "\n# changed after daemon startup\n")
+
+    response = service.dispatch(request("project.operations", "project-adapters", {"project_id": "fixture"}))
+
+    assert response.ok
+    assert response.payload is not None
+    status = response.payload.inline["descriptor_status"]
+    assert status["matches_loaded"] is False
+    assert status["loaded_digest"].startswith("sha256:")
+    assert status["on_disk_digest"].startswith("sha256:")
+    assert status["loaded_digest"] != status["on_disk_digest"]
 
 
 def test_owner_mismatch_is_a_typed_error(tmp_path: Path) -> None:
