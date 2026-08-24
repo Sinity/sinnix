@@ -121,6 +121,8 @@ sinnix-chrome-control status
 
 # Open an agent window on the inactive named agentbrowser workspace. Prints its page id.
 # Authenticated exactly where the operator is, because it IS his profile.
+# Each request waits for its matching CDP response within a bounded deadline;
+# nonmatching protocol messages are retained on stderr for diagnosis.
 sinnix-chrome-control agent-window --url https://example.com
 
 # See everything open, the operator's tabs included
@@ -150,6 +152,11 @@ sinnix-chrome-control upload-files <page_id> \
   F7 is how the operator looks at it. Operate on his existing pages only when
   he asked for that specific thing — the profile is shared, so a stray
   navigation lands in his session, not a sandbox.
+- `agent-window` returns only after the exact new compositor address has stayed
+  tiled, unpinned, non-fullscreen, and invisible on `agentbrowser` while the
+  focused operator client remains unchanged. CDP command responses are matched
+  by request ID with a five-second default deadline; a failed transaction closes
+  only its own created target.
 
 ## Notes
 
