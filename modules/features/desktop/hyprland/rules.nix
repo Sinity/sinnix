@@ -13,7 +13,6 @@ let
     mkScratchpad
     mkDialog
     mkIdleInhibit
-    mkLayerRule
     ;
 
   idleRules = [
