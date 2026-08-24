@@ -523,6 +523,34 @@ dependencies = ["verify_closure"]
         ProjectCatalog([tmp_path])
 
 
+def test_required_parameter_operations_reject_dependencies(tmp_path: Path) -> None:
+    """Anti-vacuity: required input validation cannot follow dependency launch."""
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + """
+[operations.required_with_dependency]
+description = "Run a required operation after a dependency"
+exec = ["fixture-check"]
+pool = "normal"
+result = "exit"
+cache = "none"
+dependencies = ["check"]
+
+[operations.required_with_dependency.parameters.bead_id]
+type = "string"
+position = 1
+required = true
+max_length = 128
+grammar = "safe-token"
+"""
+    )
+
+    with pytest.raises(ProjectConfigError, match="cannot declare dependencies.*required_with_dependency"):
+        ProjectCatalog([tmp_path])
+
+
 @pytest.mark.parametrize(
     "value",
     ("true", '"3600"', "0", "-1", str(MAX_DECLARED_OPERATION_TIMEOUT_SECONDS + 1)),

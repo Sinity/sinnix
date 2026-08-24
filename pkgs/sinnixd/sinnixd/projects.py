@@ -901,6 +901,16 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             f"{descriptor} operation dependencies cannot target operations with required parameters: "
             + ", ".join(sorted(invalid_parameter_dependencies))
         )
+    invalid_required_parameter_operations = {
+        operation.name
+        for operation in operations
+        if operation.dependencies and operation.name in required_parameter_operations
+    }
+    if invalid_required_parameter_operations:
+        raise ProjectConfigError(
+            f"{descriptor} operations with required parameters cannot declare dependencies: "
+            + ", ".join(sorted(invalid_required_parameter_operations))
+        )
     if workspace is not None:
         unknown_verifiers = set(workspace.verification_operations) - operation_names
         if unknown_verifiers:
