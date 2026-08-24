@@ -165,6 +165,21 @@ def test_action_failure_contracts_follow_public_controls_and_owner_capabilities(
         assert ("preconditions" in properties) is action.supports_precondition
 
 
+def test_resource_template_pages_are_principal_scoped_and_cursor_bound() -> None:
+    first = REGISTRY.template_page(principal="observer", limit=2)
+    second = REGISTRY.template_page(
+        principal="observer", limit=2, cursor=first["next_cursor"]
+    )
+
+    assert len(first["templates"]) == 2
+    assert {row["kind"] for row in first["templates"]}.isdisjoint(
+        {row["kind"] for row in second["templates"]}
+    )
+    assert all("browser_workspace" != row["kind"] for row in first["templates"] + second["templates"])
+    with pytest.raises(RegistryError, match="principal"):
+        REGISTRY.template_page(principal="operator", limit=2, cursor=first["next_cursor"])
+
+
 def test_every_retained_owner_capability_has_a_read_action_and_resource_route() -> None:
     for capability, action_name in RETAINED_OWNER_ACTIONS.items():
         action = REGISTRY.action(action_name)
@@ -304,7 +319,7 @@ def test_resource_get_contract_formats_canonical_project_relationships() -> None
     assert action["resource_kinds"] == [
         "project", "checkout", "bead", "task_authority", "job", "artifact",
         "receipt", "result", "machine_unit", "browser_page", "browser_workspace",
-        "terminal", "desktop", "host_file", "capture_lane", "capability", "session",
+        "process", "terminal", "desktop", "host_file", "mcp_tool", "capture_lane", "capability", "session", "context_snapshot",
     ]
     assert action["input_schema"]["required"] == ["ref"]
     assert action["input_schema"]["properties"]["projection"]["enum"] == [
