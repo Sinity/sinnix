@@ -293,7 +293,7 @@ class McpBrokerService:
             f"--setenv={name}={value}" for name, value in sorted(environment.items())
         ]
         writable_paths = [
-            f"--property=ReadWritePaths={path}"
+            f"--property=ReadWritePaths={self._observer_writable_path(path, environment)}"
             for path in server.get("observerWritablePaths", [])
         ]
         return (
@@ -322,6 +322,18 @@ class McpBrokerService:
             ),
             unit,
         )
+
+    @staticmethod
+    def _observer_writable_path(path: str, environment: dict[str, str]) -> str:
+        """Resolve systemd specifiers before passing transient-unit properties."""
+        if not path.startswith("%t/"):
+            return path
+        runtime_directory = environment.get("XDG_RUNTIME_DIR")
+        if not runtime_directory or not runtime_directory.startswith("/"):
+            raise McpEnvironmentError(
+                "observer MCP writable paths using %t require XDG_RUNTIME_DIR"
+            )
+        return f"{runtime_directory.rstrip('/')}/{path[3:]}"
 
     def _stop(self, unit: str) -> None:
         execution = self.execution or OwnerExecution()
