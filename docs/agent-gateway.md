@@ -121,9 +121,9 @@ sinnix.services.agent-gateway.enable = true;
 After creating a tunnel and a dedicated runtime key with the required permissions:
 
 ```nix
-sinnix.services.agent-gateway.endpoints.observer = {
+sinnix.services.agent-gateway.endpoints.operator = {
   enable = true;
-  principal = "observer";
+  principal = "operator";
   tunnelId = "tunnel_...";
   runtimeKeyFile = "/run/agenix/openai-tunnel-runtime-key";
   approvedManifestHash = "...";
@@ -131,7 +131,7 @@ sinnix.services.agent-gateway.endpoints.observer = {
 };
 ```
 
-The observer runtime key is the agenix secret `openai-tunnel-runtime-key`. Tunnel-management credentials are not installed in the steady-state service. Every enabled endpoint receives its own generated config, MCP wrapper, approval gate, state directory, runtime credential, health port, systemd user service, and runtime surface. The prime host currently enables only the provisioned observer endpoint on loopback port 3088. The operator definition remains disabled until its real private tunnel and dedicated runtime key exist.
+The private operator runtime key is the agenix secret `openai-tunnel-runtime-key`. Tunnel-management credentials are not installed in the steady-state service. Every enabled endpoint receives its own generated config, MCP wrapper, approval gate, state directory, runtime credential, health port, systemd user service, and runtime surface. Prime enables the private operator endpoint on loopback port 3088. A separately credentialed observer endpoint remains optional for deliberately constrained sharing.
 
 ## Deployment and proof
 

@@ -101,6 +101,7 @@ def broker_service(tmp_path: Path, principal_name: str, max_bytes: int = 262_144
                 "command": "fixture-mcp",
                 "args": ["--fixture"],
                 "env": {"FIXTURE": "1"},
+                "observerWritablePaths": ["%t/fixture-locks"],
             },
             "blocked": {
                 "description": "Excluded server",
@@ -342,6 +343,7 @@ def test_observer_broker_runs_upstream_in_read_only_unit(
 
     assert captured[0].command == broker.config.systemd_run_command
     assert "--property=ReadOnlyPaths=/" in captured[0].args
+    assert "--property=ReadWritePaths=%t/fixture-locks" in captured[0].args
     assert "--property=PrivateNetwork=true" in captured[0].args
     assert "--property=InaccessiblePaths=/run/user" not in captured[0].args
     assert "--setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus" in captured[0].args

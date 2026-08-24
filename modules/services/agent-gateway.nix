@@ -30,6 +30,11 @@ let
     polylogue = "${mcpTools.mcpPolylogueBin}/bin/mcp-polylogue";
     sinex = "${scriptPkgs.sinnix-mcp-sinex}/bin/sinnix-mcp-sinex";
   };
+  mcpBrokerObserverWritablePaths = {
+    # Lynchpin readers and publishers coordinate through one runtime-scoped
+    # flock. The checkout and substrate remain read-only in the observer unit.
+    lynchpin = [ "%t/lynchpin/substrate-locks" ];
+  };
   mcpBrokerServers = lib.mapAttrs (
     name: server:
     let
@@ -44,6 +49,7 @@ let
       command = mcpBrokerCommands.${name};
       args = profile.args or server.args or [ ];
       env = server.env or { };
+      observerWritablePaths = mcpBrokerObserverWritablePaths.${name} or [ ];
     }
     // lib.optionalAttrs (!brokered) {
       reason =

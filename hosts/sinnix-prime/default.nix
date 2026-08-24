@@ -38,37 +38,16 @@
     agent-gateway = {
       enable = true;
       endpoints = {
-        observer = {
+        operator = {
+          # This is the operator's private ChatGPT connector. The stable
+          # tunnel was previously constrained to observer authority; retain
+          # its credential while promoting the endpoint truthfully.
           enable = true;
-          label = "ChatGPT observer";
-          principal = "observer";
+          label = "Private ChatGPT operator";
+          principal = "operator";
           tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
           runtimeKeyFile = "/run/agenix/openai-tunnel-runtime-key";
           healthPort = 3088;
-          scope = {
-            projects = [
-              "sinnix"
-              "sinex"
-              "polylogue"
-              "lynchpin"
-            ];
-            captures = [
-              "ai"
-              "machine"
-            ];
-          };
-          # The ten top-level names are stable across principals. This
-          # endpoint's separately approved catalog contains read actions only.
-          approvedManifestHash = "78d04f9a59828ec9c5283058b5b4f39f9fbdf4bc6ee2b2db22861221e51fc87e";
-          approvedActionCatalogHash = "a0de0f9ed00ca514272098740b0049ff653948908c1f9eb53e6712c4086d3535";
-        };
-        operator = {
-          # Enable only after a real private tunnel and dedicated runtime key
-          # have been provisioned. Placeholder authority is never activated.
-          enable = false;
-          label = "Private ChatGPT operator";
-          principal = "operator";
-          healthPort = 3089;
           scope = {
             projects = [
               "sinnix"
@@ -85,6 +64,8 @@
               "self"
             ];
           };
+          approvedManifestHash = "78d04f9a59828ec9c5283058b5b4f39f9fbdf4bc6ee2b2db22861221e51fc87e";
+          approvedActionCatalogHash = "738942447310f3d10a9c09046c1572e1bc408f0f620bba88d4ee37de9182c06e";
         };
       };
     };
