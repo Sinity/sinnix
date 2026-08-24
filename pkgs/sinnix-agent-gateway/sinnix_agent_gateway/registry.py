@@ -847,9 +847,9 @@ AUDIT_EVENTS_SCHEMA: dict[str, Any] = _with_request_controls(
                 "maximum": 1_000,
                 "default": 100,
             },
-            "cursor": {"type": "string", "minLength": 1, "maxLength": 2_048},
+            "cursor": {"type": "string", "minLength": 1, "maxLength": 4_096},
             "project_ids": {
-                "type": "array", "maxItems": 32,
+                "type": "array", "maxItems": 16,
                 "items": {"type": "string", "minLength": 1, "maxLength": 128},
             },
         },
