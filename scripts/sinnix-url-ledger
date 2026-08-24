@@ -962,7 +962,7 @@ COPY (
 def add_common_paths(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--state-root",
-        default=str(DEFAULT_CAPTURES_ROOT / "url-ledger" / "state"),
+        default=str(DEFAULT_ACTIVITY_ROOT / "url-ledger" / "state"),
         help="Directory for urls.jsonl / resolution.jsonl (default: %(default)s)",
     )
 
@@ -980,7 +980,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     resolve = sub.add_parser("resolve", help="Query CDX/Memento providers for unresolved URLs")
     add_common_paths(resolve)
-    resolve.add_argument("--cdx-raw-root", default=str(DEFAULT_CAPTURES_ROOT / "url-ledger" / "cdx-raw"))
+    resolve.add_argument("--cdx-raw-root", default=str(DEFAULT_ACTIVITY_ROOT / "url-ledger" / "cdx-raw"))
     resolve.add_argument(
         "--provider",
         action="append",
@@ -1013,7 +1013,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--url-field", default="url")
     run.add_argument("--time-field", default="iso_time")
     add_common_paths(run)
-    run.add_argument("--cdx-raw-root", default=str(DEFAULT_CAPTURES_ROOT / "url-ledger" / "cdx-raw"))
+    run.add_argument("--cdx-raw-root", default=str(DEFAULT_ACTIVITY_ROOT / "url-ledger" / "cdx-raw"))
     run.add_argument("--derived-root", default=str(DEFAULT_DERIVED_ROOT / "url-ledger"))
     run.add_argument("--provider", action="append", choices=list(PROVIDERS))
     run.add_argument("--max-requests", type=int, default=200000)
