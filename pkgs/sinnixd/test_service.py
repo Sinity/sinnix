@@ -713,11 +713,16 @@ def test_declared_service_dependency_supplies_lease_and_unblocks_when_bound(
     assert launch_environment["FIXTURE_HTTP_PORT"] == "41000"
     assert check_record.state["phase"] == "waiting-dependencies"
     dependency_id = check_record.spec.dependency_job_ids[0]
-    dependency_command, _ = jobs.store.declared_launch(dependency_id)
+    dependency_command, dependency_environment = jobs.store.declared_launch(dependency_id)
     assert dependency_command == ("fixture-env", "--command", "fixture-service")
     assert len(systemd.started) == 1
 
     port_available = False
+    jobs.get(check_id)
+    assert len(systemd.started) == 1, "a transient port bind is not readiness"
+
+    readiness_file = Path(dependency_environment["SINNIXD_SERVICE_READY_FILE"])
+    readiness_file.write_text(f"{dependency_id}\n")
     jobs.get(check_id)
     check_command, _ = jobs.store.declared_launch(check_id)
     assert check_command == ("fixture-env", "--command", "fixture-check")
