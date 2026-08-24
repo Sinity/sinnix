@@ -2022,9 +2022,9 @@ class CanonicalTaskBoundary:
         if command[:1] == ("update",) and command[2:] == ("--claim",):
             task = self.tasks[command[1]]
             task["status"] = "claimed"
-            return task_result(dict(task))
+            return task_result([dict(task)])
         if command[:1] == ("show",):
-            return task_result(dict(self.tasks[command[1]]))
+            return task_result([dict(self.tasks[command[1]])])
         raise AssertionError(f"unexpected canonical task command: {command}")
 
 
@@ -2095,7 +2095,7 @@ def isolate_job_scratch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
 def test_task_reads_resolve_catalog_projects_and_use_readonly_fixed_argv(tmp_path: Path) -> None:
     service, boundary = task_service(
         tmp_path,
-        FakeTaskBoundary([task_result({"issues": [{"id": "fixture-1"}]}), task_result({"id": "fixture-1"})]),
+        FakeTaskBoundary([task_result([{"id": "fixture-1"}]), task_result([{"id": "fixture-1"}])]),
     )
 
     listed = service.execute(
@@ -2125,7 +2125,7 @@ def test_task_reads_resolve_catalog_projects_and_use_readonly_fixed_argv(tmp_pat
 
 def test_task_list_traverses_real_pages_from_one_immutable_snapshot(tmp_path: Path) -> None:
     rows = [{"id": f"fixture-{index}", "status": "open"} for index in range(1, 6)]
-    service, boundary = task_service(tmp_path, FakeTaskBoundary([task_result({"issues": rows})]))
+    service, boundary = task_service(tmp_path, FakeTaskBoundary([task_result(rows)]))
     arguments: dict[str, object] = {"project_id": "fixture", "status": "open", "limit": 2}
     seen: list[str] = []
     source_revision: str | None = None
@@ -2159,7 +2159,7 @@ def test_task_list_traverses_real_pages_from_one_immutable_snapshot(tmp_path: Pa
 
 
 def test_task_list_cursor_rejects_negative_cases_before_owner_dispatch(tmp_path: Path) -> None:
-    service, boundary = task_service(tmp_path, FakeTaskBoundary([task_result({"issues": [{"id": "fixture-1"}, {"id": "fixture-2"}]})]))
+    service, boundary = task_service(tmp_path, FakeTaskBoundary([task_result([{"id": "fixture-1"}, {"id": "fixture-2"}])]))
     first = service.execute(
         operation="task.list", arguments={"project_id": "fixture", "limit": 1}, principal="observer"
     )["result"]
@@ -2219,7 +2219,7 @@ def test_task_list_cursor_rejects_negative_cases_before_owner_dispatch(tmp_path:
 
 
 def test_task_list_service_returns_structured_stale_cursor_error(tmp_path: Path) -> None:
-    service, _ = task_service(tmp_path, FakeTaskBoundary([task_result({"issues": [{"id": "fixture-1"}, {"id": "fixture-2"}]})]))
+    service, _ = task_service(tmp_path, FakeTaskBoundary([task_result([{"id": "fixture-1"}, {"id": "fixture-2"}])]))
     daemon = SinnixdService(ProjectCatalog([tmp_path]), tasks=service)
     first = daemon.dispatch(
         request("task.list", "task-backend", {"project_id": "fixture", "limit": 1}, "observer")
@@ -2270,7 +2270,7 @@ def test_task_mutations_map_to_fixed_beads_argv(
 def test_task_create_returns_a_replay_safe_canonical_ref_and_owner_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Anti-vacuity: the replay reads the durable receipt, so a second backend create would fail this test."""
     isolate_job_scratch(monkeypatch, tmp_path)
-    boundary = FakeTaskBoundary([task_result({"id": "fixture-new", "title": "backend-only"})])
+    boundary = FakeTaskBoundary([task_result([{"id": "fixture-new", "title": "backend-only"}])])
     service, _ = task_service(tmp_path, boundary)
     arguments = {
         "project_id": "fixture",
@@ -2295,7 +2295,7 @@ def test_task_create_returns_a_replay_safe_canonical_ref_and_owner_evidence(tmp_
         "owner": "task-backend",
         "state": "applied",
         "attempts": 1,
-        "result": {"sha256": TaskMutationJournal(TaskAuthority.load(tmp_path / "task-state", "fixture").root / TASK_MUTATION_JOURNAL_DIRECTORY).records()[0].result["sha256"], "bytes": len(json.dumps({"id": "fixture-new", "title": "backend-only"}, sort_keys=True, separators=(",", ":")).encode()), "created_task_id": "fixture-new"},
+        "result": {"sha256": TaskMutationJournal(TaskAuthority.load(tmp_path / "task-state", "fixture").root / TASK_MUTATION_JOURNAL_DIRECTORY).records()[0].result["sha256"], "bytes": len(json.dumps([{"id": "fixture-new", "title": "backend-only"}], sort_keys=True, separators=(",", ":")).encode()), "created_task_id": "fixture-new"},
         "failure": None,
     }
     assert boundary.calls == [
@@ -2328,7 +2328,7 @@ def test_task_create_outage_replays_without_dirtying_the_registered_checkout(tmp
     assert "private replay description" not in next(journal.records_root.glob("*.json")).read_text()
     assert subprocess.run(["git", "-C", str(tmp_path), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout == ""
 
-    second_boundary = FakeTaskBoundary([task_result({"id": "fixture-replayed"})])
+    second_boundary = FakeTaskBoundary([task_result([{"id": "fixture-replayed"}])])
     receipts = reconcile_task_mutations(journal=journal, authority=authority, cwd=tmp_path, boundary=second_boundary)
     restarted = TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path.parent / f"second-jobs-{tmp_path.name}"), second_boundary, task_state_root=task_state_root)
     replayed = restarted.execute(operation="task.create", arguments=arguments, principal="agent-control", mutation_id="request-1")

@@ -544,7 +544,10 @@ class TaskService:
             result = self._list(project, arguments, principal=principal)
         elif operation == "task.get":
             self._require_exact(arguments, {"project_id", "task_id"}, operation)
-            result = self._run(project, ("show", self._task_id(arguments["task_id"])), readonly=True)
+            result = self._single_task_result(
+                self._run(project, ("show", self._task_id(arguments["task_id"])), readonly=True),
+                operation="task.get",
+            )
         elif operation == "task.reconcile":
             self._require_exact(arguments, {"project_id"}, operation)
             result = self._start_reconcile(project)
@@ -665,9 +668,9 @@ class TaskService:
                 readonly=True,
                 max_stdout_bytes=MAX_TASK_LIST_SOURCE_BYTES,
             )
-            if not isinstance(result, dict) or set(result) - {"issues"} or not isinstance(result.get("issues"), list):
+            if not isinstance(result, list):
                 raise TaskError(ErrorCode.RESULT_INVALID, "task backend returned an invalid list result")
-            rows = result["issues"]
+            rows = result
             if len(rows) > MAX_TASK_LIST_ROWS or any(not isinstance(row, dict) for row in rows):
                 raise TaskError(ErrorCode.RESULT_INVALID, "task backend returned invalid list rows")
             snapshot = self._create_task_list_snapshot(
@@ -1013,12 +1016,17 @@ class TaskService:
 
     @staticmethod
     def _created_task_id(result: Any) -> str:
-        if not isinstance(result, dict):
-            raise TaskError(ErrorCode.RESULT_INVALID, "task backend omitted the created task")
-        value = result.get("id")
+        task = TaskService._single_task_result(result, operation="task.create")
+        value = task.get("id")
         if not isinstance(value, str) or not _ID_RE.fullmatch(value):
             raise TaskError(ErrorCode.RESULT_INVALID, "task backend omitted the created task")
         return value
+
+    @staticmethod
+    def _single_task_result(result: Any, *, operation: str) -> dict[str, Any]:
+        if not isinstance(result, list) or len(result) != 1 or not isinstance(result[0], dict):
+            raise TaskError(ErrorCode.RESULT_INVALID, f"task backend returned an invalid {operation} result")
+        return result[0]
 
     @staticmethod
     def _task_ref(project_id: str, task_id: str) -> str:
