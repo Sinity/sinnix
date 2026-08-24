@@ -1,5 +1,5 @@
 {
-  "action_catalog_hash": "6eca67234126cb0ad3d069252ed5b049076015a7b02468115732e8cc8f9c43e5",
+  "action_catalog_hash": "55b2c04b720b6b3cabb13781ed02b29265ebde07399854982aa096e6f27b54ae",
   "examples": [
     {
       "action": "gateway.status",
@@ -612,6 +612,6 @@
       "verb": "query"
     }
   ],
-  "revision": "v2-operator-verbs",
+  "revision": "v2-g2.10-context-events",
   "schema": "sinnix.gateway-cli-fixtures.v1"
 }

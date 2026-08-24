@@ -4,8 +4,8 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 ---
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
-<!-- gateway-catalog-revision: v2-operator-verbs -->
-<!-- gateway-catalog-sha256: 6eca67234126cb0ad3d069252ed5b049076015a7b02468115732e8cc8f9c43e5 -->
+<!-- gateway-catalog-revision: v2-g2.10-context-events -->
+<!-- gateway-catalog-sha256: 55b2c04b720b6b3cabb13781ed02b29265ebde07399854982aa096e6f27b54ae -->
 # Agent Gateway V2
 
 Use `sinnix-agent-gateway` when a local agent needs the same principal-scoped routes and normalized envelopes as MCP. The complete action schemas and examples are in `docs/generated/agent-gateway-reference.md`.
@@ -32,4 +32,4 @@ The CLI invokes the matching MCP verb through the same server runtime and princi
 
 The gateway is the preferred route for typed, principal-scoped Beads work. The direct owner fallback is `bd 1.1.0-dev` against the project’s canonical standalone Dolt workspace, resolved through the project’s canonical worktree and `.beads/redirect`. Dolt is the authority for ordinary mutations. `issues.jsonl` is an optional JSONL export, not a write authority. Use the gateway `beads.operate` action with `snapshot.publish` when an explicit deterministic snapshot is required. Snapshot publication does not imply a Git commit or a Dolt push. Use `sync.push` or `sync.pull` explicitly for Dolt synchronization. Never hand-author `bd` argv when the gateway catalog exposes the needed action.
 
-Catalog revision: `v2-operator-verbs`. Catalog SHA-256: `6eca67234126cb0ad3d069252ed5b049076015a7b02468115732e8cc8f9c43e5`.
+Catalog revision: `v2-g2.10-context-events`. Catalog SHA-256: `55b2c04b720b6b3cabb13781ed02b29265ebde07399854982aa096e6f27b54ae`.

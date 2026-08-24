@@ -581,3 +581,5 @@ def test_query_context_and_events_contracts_bind_existing_read_owners() -> None:
     assert events["resource_kinds"] == ["receipt"]
     assert events["input_schema"]["additionalProperties"] is False
     assert events["input_schema"]["properties"]["limit"]["maximum"] == 1_000
+    assert events["input_schema"]["properties"]["cursor"]["maxLength"] == 4_096
+    assert events["input_schema"]["properties"]["project_ids"]["maxItems"] == 16

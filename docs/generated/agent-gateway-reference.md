@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
-<!-- gateway-catalog-revision: v2-operator-verbs -->
-<!-- gateway-catalog-sha256: 6eca67234126cb0ad3d069252ed5b049076015a7b02468115732e8cc8f9c43e5 -->
+<!-- gateway-catalog-revision: v2-g2.10-context-events -->
+<!-- gateway-catalog-sha256: 55b2c04b720b6b3cabb13781ed02b29265ebde07399854982aa096e6f27b54ae -->
 # Sinnix Agent Gateway V2 reference
 
 This reference is generated from `sinnix_agent_gateway.registry.REGISTRY`. The catalog hash changes when an action, resource, schema, route, principal, bound, or example changes.
 
-Revision: `v2-operator-verbs`. Catalog SHA-256: `6eca67234126cb0ad3d069252ed5b049076015a7b02468115732e8cc8f9c43e5`.
+Revision: `v2-g2.10-context-events`. Catalog SHA-256: `55b2c04b720b6b3cabb13781ed02b29265ebde07399854982aa096e6f27b54ae`.
 
 ## Ten CLI verbs
 
@@ -37,9 +37,9 @@ Each verb calls the matching MCP tool through the same runtime and principal. Re
 | `receipt` | `audit` | `sinnix://receipts/{receipt_id}` | `true` |
 | `result` | `results` | `sinnix://results/{result_id}` | `true` |
 | `machine_unit` | `machine` | `sinnix://machine/units/{manager}/{unit}` | `true` |
-| `process` | `machine` | `sinnix://processes/{pid}/{start_ticks}` | `true` |
 | `browser_page` | `browser` | `sinnix://browser/pages/{page_id}` | `true` |
 | `browser_workspace` | `browser` | `sinnix://browser/agent-workspace` | `false` |
+| `process` | `machine` | `sinnix://processes/{pid}/{start_ticks}` | `true` |
 | `terminal` | `terminals` | `sinnix://terminals/{terminal_id}` | `true` |
 | `desktop` | `desktop` | `sinnix://desktop/current` | `true` |
 | `host_file` | `files` | `sinnix://files/{file_token}` | `true` |
@@ -638,11 +638,15 @@ Input schema:
       "type": "string"
     },
     "intent": {
-      "default": "project",
+      "default": "project.orientation",
       "enum": [
         "project",
+        "project.orientation",
+        "project.triage",
         "bead.work",
-        "bead.review"
+        "bead.review",
+        "job.review",
+        "incident"
       ]
     },
     "job_ref": {
@@ -659,7 +663,7 @@ Input schema:
     "ref": {
       "maxLength": 2048,
       "minLength": 1,
-      "pattern": "^sinnix://projects/[^/]+(?:/beads/[^/]+)?$",
+      "pattern": "^sinnix://(?:projects/[^/]+(?:/beads/[^/]+)?|jobs/[^/]+)$",
       "type": "string"
     },
     "request_id": {
@@ -700,6 +704,11 @@ Input schema:
       "minLength": 1,
       "type": "string"
     },
+    "cursor": {
+      "maxLength": 4096,
+      "minLength": 1,
+      "type": "string"
+    },
     "deadline_at": {
       "type": "number"
     },
@@ -713,6 +722,15 @@ Input schema:
       "maximum": 1000,
       "minimum": 1,
       "type": "integer"
+    },
+    "project_ids": {
+      "items": {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 16,
+      "type": "array"
     },
     "reason": {
       "maxLength": 2000,
@@ -757,10 +775,20 @@ Input schema:
     "deadline_at": {
       "type": "number"
     },
+    "expected": {
+      "maxProperties": 8,
+      "type": "object"
+    },
     "idempotency_key": {
       "maxLength": 256,
       "minLength": 1,
       "type": "string"
+    },
+    "poll_seconds": {
+      "default": 0.25,
+      "maximum": 5,
+      "minimum": 0.01,
+      "type": "number"
     },
     "reason": {
       "maxLength": 2000,
@@ -777,6 +805,18 @@ Input schema:
       "maxLength": 128,
       "minLength": 1,
       "type": "string"
+    },
+    "target": {
+      "default": "job_terminal",
+      "enum": [
+        "job_terminal",
+        "bead_status",
+        "bead_revision",
+        "unit_state",
+        "file_hash",
+        "capture_freshness",
+        "receipt_appearance"
+      ]
     },
     "timeout_seconds": {
       "default": 30,
