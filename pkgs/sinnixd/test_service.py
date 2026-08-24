@@ -11,7 +11,7 @@ import threading
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -763,6 +763,106 @@ def test_service_lease_recovery_reconstructs_live_ownership_and_expires_missing_
     assert (orphan_store.leases_root / f"{orphan.lease_id}.json").exists()
     _ = GenericJobs(systemd, orphan_store, wait_poll_seconds=0.001)
     assert not (orphan_store.leases_root / f"{orphan.lease_id}.json").exists()
+
+
+def test_cancelled_outcome_unknown_restart_releases_lease_index_and_reuses_port(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real service path must reclaim a cancellation-unknown lease after restart."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+
+    class StopTimesOutThenCollects(FakeSystemdJobs):
+        def stop(self, unit: str) -> None:
+            self.stopped.append(unit)
+            self.properties = {
+                "LoadState": "not-found",
+                "ActiveState": "inactive",
+                "InvocationID": "",
+                "Result": "success",
+                "ExecMainStatus": "0",
+            }
+            raise SystemdJobError("fixture stop timeout")
+
+    systemd = StopTimesOutThenCollects()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    assert started.ok and started.payload is not None
+    job_id = started.payload.inline["job_id"]
+
+    cancelled = service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": job_id}))
+    assert cancelled.error is not None
+    record = jobs.store.load(job_id)
+    jobs.store.save(replace(record, cancel_requested_at="2000-01-01T00:00:00+00:00"))
+
+    restarted = GenericJobs(systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.001)
+    reconciled = restarted.get(job_id)
+    assert reconciled["state"]["phase"] == "outcome-unknown"
+    assert reconciled["state"]["terminal"]
+    assert reconciled["state"]["outcome_evidence"] == "unit-collected-after-cancellation-grace"
+    assert restarted.store.service_lease_records() == []
+    assert not (tmp_path / "state" / "leases" / f"{job_id}.json").exists()
+    assert (tmp_path / "state" / "leases" / f"{job_id}.released").exists()
+
+    replacement_service = SinnixdService(ProjectCatalog([tmp_path]), jobs=restarted)
+    repeated = replacement_service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": job_id}))
+    assert repeated.ok and repeated.payload is not None
+    assert repeated.payload.inline["already_terminal"]
+    assert systemd.stopped == [f"sinnixd-job-{job_id}.service"]
+    replacement = replacement_service.dispatch(
+        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"})
+    )
+    assert replacement.ok and replacement.payload is not None
+    assert replacement.payload.inline["lease"]["ports"][0]["port"] == 41000
+
+
+def test_loaded_outcome_unknown_restart_keeps_uncertain_lease_reserved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A loaded unit without terminal evidence must retain its lease and port."""
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "InvocationID": "fixture-invocation",
+            "Result": "success",
+            "ExecMainStatus": "0",
+        }
+    )
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    assert started.ok and started.payload is not None
+    job_id = started.payload.inline["job_id"]
+    record = jobs.store.load(job_id)
+    jobs.store.save(
+        replace(
+            jobs._with_state(
+                record,
+                {
+                    "phase": "outcome-unknown",
+                    "terminal": True,
+                    "systemd": dict(systemd.properties),
+                    "cancellation": {"requested_at": "2000-01-01T00:00:00+00:00", "invocation_id": "fixture-invocation"},
+                    "outcome_evidence": "unit-collected-after-cancellation-grace",
+                    "observed_at": "fixture",
+                },
+            ),
+            cancel_requested_at="2000-01-01T00:00:00+00:00",
+            cancel_requested_invocation_id="fixture-invocation",
+        )
+    )
+
+    _ = GenericJobs(systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.001)
+    assert (tmp_path / "state" / "leases" / f"{job_id}.json").exists()
+    assert not (tmp_path / "state" / "leases" / f"{job_id}.released").exists()
+    operation = ProjectCatalog([tmp_path]).get("fixture").operation("service")
+    assert operation.service is not None
+    replacement = jobs.store.allocate_service_lease(str(uuid4()), operation.service)
+    assert replacement.ports[0].port == 41001
 
 
 def test_restart_finalizes_admission_for_a_newly_terminal_active_record(tmp_path: Path) -> None:

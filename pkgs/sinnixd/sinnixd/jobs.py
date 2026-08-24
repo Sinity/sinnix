@@ -1002,7 +1002,10 @@ class GenericJobStore:
             if properties.get("LoadState") != "not-found":
                 protected[lease_id] = lease
             else:
-                self._service_lease_path(lease_id).unlink(missing_ok=True)
+                if record is None or record.spec.lease != lease:
+                    self._mark_service_lease_released(lease_id)
+                else:
+                    protected[lease_id] = lease
         occupied: set[int] = set()
         for lease in protected.values():
             ports = {port.port for port in lease.ports}
@@ -1036,6 +1039,7 @@ class GenericJobStore:
             return record.state.get("launch_evidence") == "not-started"
         load_state = properties.get("LoadState")
         if load_state == "not-found":
+            cancellation = record.state.get("cancellation")
             return (
                 phase in {"missing", "launch-failed"}
                 or (phase == "succeeded" and record.state.get("result_evidence") == "completed")
@@ -1043,6 +1047,13 @@ class GenericJobStore:
                     phase == "cancelled"
                     and record.cancel_stop_acknowledged_invocation_id == record.cancel_requested_invocation_id
                     and record.cancel_stop_acknowledged_invocation_id is not None
+                )
+                or (
+                    phase == "outcome-unknown"
+                    and record.state.get("outcome_evidence") == "unit-collected-after-cancellation-grace"
+                    and record.cancel_requested_at is not None
+                    and isinstance(cancellation, Mapping)
+                    and cancellation.get("requested_at") == record.cancel_requested_at
                 )
             )
         if load_state != "loaded":
@@ -2171,11 +2182,7 @@ class GenericJobs:
                 if not record.state.get("terminal"):
                     self._get_locked(job_id)
                     record = self.store.load(job_id)
-            return {
-                "job_id": job_id,
-                "kind": "exit-status",
-                "value": self._parse_exit_result(record.state),
-            }
+            return {"job_id": job_id, "kind": "exit-status", "value": self._parse_exit_result(record)}
         content = _read_private_artifact(record.result_path, MAX_RESULT_BYTES)
         if content is None:
             raise JobResultError("job result artifact is unavailable")
@@ -2209,16 +2216,31 @@ class GenericJobs:
             raise JobResultError("job JSON result must be an object")
         return value
 
-    @staticmethod
-    def _parse_exit_result(state: Mapping[str, Any]) -> dict[str, Any]:
+    def _parse_exit_result(self, record: GenericJobRecord) -> dict[str, Any]:
+        state = record.state
         properties = state.get("systemd")
-        if not isinstance(properties, Mapping):
-            raise JobResultError("job exit result is not yet observed")
-        status = properties.get("ExecMainStatus")
-        try:
-            return {"code": int(status), "result": str(properties.get("Result", "unknown"))}
-        except (TypeError, ValueError) as error:
-            raise JobResultError("job exit result is malformed") from error
+        phase = state.get("phase")
+        if isinstance(properties, Mapping) and properties.get("LoadState") == "loaded" and phase in {
+            "succeeded",
+            "failed",
+            "timed_out",
+            "cancelled",
+        }:
+            status = properties.get("ExecMainStatus")
+            result = properties.get("Result")
+            if not isinstance(result, str) or not result:
+                raise JobResultError("job exit result is unavailable")
+            try:
+                return {"code": int(status), "result": result}
+            except (TypeError, ValueError) as error:
+                raise JobResultError("job exit result is malformed") from error
+        if (
+            phase == "succeeded"
+            and state.get("result_evidence") == "completed"
+            and self._has_authoritative_result(record)
+        ):
+            return {"code": 0, "result": "success"}
+        raise JobResultError("job exit result is unavailable")
 
     def _get_locked(
         self,
