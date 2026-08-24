@@ -109,7 +109,7 @@ def test_project_context_reports_unavailable_task_owner_without_hiding_git(
     }
 
 
-def test_project_context_keeps_task_section_unavailable_without_task_capability(
+def test_project_context_exposes_task_section_to_agent_control(
     tmp_path: Path,
 ) -> None:
     projects = project_service(tmp_path, "agent-control")
@@ -118,6 +118,6 @@ def test_project_context_keeps_task_section_unavailable_without_task_capability(
 
     result = context.context("fixture")
 
-    assert result["tasks"]["availability"] == "unavailable"
-    assert result["tasks"]["reason"] == "task.read is not granted to this principal"
-    assert beads.calls == []
+    assert result["tasks"]["availability"] == "available"
+    assert result["tasks"] == {"availability": "available", "unexpected": True}
+    assert beads.calls == [(["fixture"], "ready", 20)]

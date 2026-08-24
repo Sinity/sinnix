@@ -59,8 +59,8 @@ def test_job_list_and_agent_launch_have_visible_v2_replacements() -> None:
 
     assert rows["job_list"]["v2_action"] == "jobs.query"
     assert rows["job_list"]["v2_route"] == "job.list"
-    assert rows["agent_launch"]["v2_action"] == "agents.run"
-    assert rows["agent_launch"]["required_principals"] == ("agent-control", "operator")
+    assert rows["agent_launch"]["v2_action"] == "agent.for_bead"
+    assert rows["agent_launch"]["required_principals"] == ("operator",)
 
 
 def test_shell_query_semantic_change_is_explicit() -> None:

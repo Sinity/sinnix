@@ -62,6 +62,7 @@ PRINCIPAL_CAPABILITIES: dict[str, frozenset[Capability]] = {
             Capability.MACHINE_READ,
             Capability.CAPABILITY_READ,
             Capability.CAPTURE_READ,
+            Capability.TASK_READ,
         }
     ),
     "operator": frozenset(Capability),
