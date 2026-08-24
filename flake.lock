@@ -582,11 +582,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1786976377,
-        "narHash": "sha256-8BSNw3Mdqt4ArHLdCi6v/Ccj8w4moY/v+2toIdc8DoE=",
+        "lastModified": 1787610381,
+        "narHash": "sha256-aJ/Zqos3hh4p/XcvgkkFkr0zn1rNTQDQOeCIg6/0yss=",
         "ref": "master",
-        "rev": "d45b53519c62ded52bcb277c435e94dbab6b0eb7",
-        "revCount": 226,
+        "rev": "606e0f541379e6e29fc6458eef0b87c5695bbfef",
+        "revCount": 355,
         "type": "git",
         "url": "file:///realm/project/sinity-lynchpin"
       },
@@ -1043,11 +1043,11 @@
         "nixpkgs": "nixpkgs_5"
       },
       "locked": {
-        "lastModified": 1785715253,
-        "narHash": "sha256-WJ50f7AxiD0i3FkGDdVHHV3YQoaTB1udfuzEemvc1wI=",
+        "lastModified": 1787610354,
+        "narHash": "sha256-Nxp+BpRjmQCjIMQWcYTqgnZe7TV/ZiJES8UQZPa12r0=",
         "ref": "master",
-        "rev": "c22d9610287acdc643bbf0a69af73f9eae34b303",
-        "revCount": 1899,
+        "rev": "315e5009ccec8f890c3a859030190d2dd3191fe3",
+        "revCount": 2429,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       },
