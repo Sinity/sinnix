@@ -9,11 +9,14 @@ import socketserver
 import subprocess
 import sys
 import threading
+from types import SimpleNamespace
 from pathlib import Path
 
 import anyio
 import pytest
 from mcp import ClientSession
+from mcp.server.mcpserver.context import Context
+from mcp.types import PaginatedRequestParams
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.server import _bounded_resource_json, _query_owner
@@ -151,6 +154,23 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 initialized = await session.initialize()
                 tools = await session.list_tools()
                 templates = await session.list_resource_templates()
+                assert templates.next_cursor
+                continued_templates = await session.list_resource_templates(
+                    params=PaginatedRequestParams(cursor=templates.next_cursor)
+                )
+                assert {
+                    template.uri_template for template in templates.resource_templates
+                }.isdisjoint({
+                    template.uri_template for template in continued_templates.resource_templates
+                })
+                all_templates = list(templates.resource_templates) + list(continued_templates.resource_templates)
+                template_cursor = continued_templates.next_cursor
+                while template_cursor:
+                    page = await session.list_resource_templates(
+                        params=PaginatedRequestParams(cursor=template_cursor)
+                    )
+                    all_templates.extend(page.resource_templates)
+                    template_cursor = page.next_cursor
                 names = {tool.name for tool in tools.tools}
                 assert initialized.server_info.name == "sinnix-agent-gateway"
                 assert names == {
@@ -161,7 +181,7 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "sinnix://gateway/v2/resources/{resource_kind}",
                     "sinnix://receipts/{receipt_id}",
                     "sinnix://results/{result_id}",
-                } <= {template.uri_template for template in templates.resource_templates}
+                } <= {template.uri_template for template in all_templates}
                 action_resource = await session.read_resource(
                     "sinnix://gateway/v2/actions/gateway.catalog"
                 )
@@ -285,14 +305,7 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     unavailable_catalog_result.content[0].text
                 )["data"]
                 assert unavailable_catalog["actions"] == []
-                assert {resource["kind"] for resource in unavailable_catalog["resources"]} == {
-                    "browser_workspace",
-                }
-                assert all(
-                    resource["availability_reason"]
-                    == "no migrated V2 action currently exposes this resource"
-                    for resource in unavailable_catalog["resources"]
-                )
+                assert unavailable_catalog["resources"] == []
                 get_result = await session.call_tool(
                     "get", {"ref": "sinnix://projects/fixture"}
                 )
@@ -344,12 +357,19 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert context["authority"]["canonical_checkout_ref"] == checkout["ref"]
                 assert len(context["authority"]["code_revision"]) == 64
                 assert context["authority"]["task_authority"]["availability"] == "unavailable"
+                assert all(
+                    component["status"] != "available"
+                    or isinstance(component.get("source_revision"), str)
+                    for component in context["components"]
+                )
+                assert all(component["status"] in {"available", "unavailable"} for component in context["components"])
                 events_result = await session.call_tool("events", {"limit": 100})
                 events_envelope = json.loads(events_result.content[0].text)
                 assert events_envelope["result"]["action"] == "audit.events"
                 assert events_envelope["data"]["events"]
                 assert all(
-                    event["ref"] == f"sinnix://receipts/{event['event_id']}"
+                    isinstance(event.get("event_id"), str)
+                    and isinstance(event.get("source_revision"), str)
                     for event in events_envelope["data"]["events"]
                 )
                 invalid_catalog_result = await session.call_tool(
@@ -369,6 +389,80 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert json.loads(mcp_catalog_result.content[0].text)["data"] == {"servers": []}
 
     anyio.run(probe)
+
+
+def test_production_wait_route_observes_mcp_request_cancellation(tmp_path: Path) -> None:
+    server = create_server(config(tmp_path), "observer")
+    cancelled = anyio.Event()
+    cancelled.set()
+    context = Context(mcp_server=server)
+    context._request_context = SimpleNamespace(
+        session=SimpleNamespace(
+            _request_outbound=SimpleNamespace(cancel_requested=cancelled)
+        )
+    )
+
+    async def invoke() -> dict[str, object]:
+        result = await server.call_tool(
+            "wait",
+            {
+                "ref": "sinnix://projects/fixture/beads/fixture-1",
+                "target": "bead_status",
+                "timeout_seconds": 30,
+                "expected": {"status": "open"},
+            },
+            context=context,
+        )
+        assert result.structured_content is not None
+        return result.structured_content
+
+    response = anyio.run(invoke)
+    assert response["data"]["outcome"] == "cancelled", response
+
+
+def test_production_job_wait_route_cancels_owner_wait(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    server = create_server(config(tmp_path), "observer")
+    runtime = server._sinnix_revision_publisher.runtime
+    owner_started = threading.Event()
+
+    def delayed_owner(operation: str, _arguments: dict[str, object]) -> dict[str, object]:
+        assert operation == "job.wait"
+        owner_started.set()
+        threading.Event().wait(0.5)
+        return {"job_id": "fixture-job", "state": {"phase": "running"}}
+
+    monkeypatch.setattr(runtime, "_sinnixd_job", delayed_owner)
+    cancelled = anyio.Event()
+    context = Context(mcp_server=server)
+    context._request_context = SimpleNamespace(
+        session=SimpleNamespace(
+            _request_outbound=SimpleNamespace(cancel_requested=cancelled)
+        )
+    )
+
+    async def invoke() -> dict[str, object]:
+        result_box: dict[str, object] = {}
+
+        async def call() -> None:
+            result_box["response"] = await server.call_tool(
+                "wait",
+                {
+                    "ref": "sinnix://jobs/fixture-job",
+                    "timeout_seconds": 30,
+                },
+                context=context,
+            )
+
+        async with anyio.create_task_group() as task_group:
+            task_group.start_soon(call)
+            await anyio.to_thread.run_sync(owner_started.wait)
+            cancelled.set()
+        response = result_box["response"]
+        assert response.structured_content is not None
+        return response.structured_content
+
+    response = anyio.run(invoke)
+    assert response["data"]["outcome"] == "cancelled", response
 
 
 def test_public_v2_mutation_verbs_preserve_owner_routes(

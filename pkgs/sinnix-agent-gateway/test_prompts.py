@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import pytest
 
 from sinnix_agent_gateway.prompts import PromptGenerator, PROMPT_SPECS
 
@@ -26,3 +27,15 @@ def test_prompt_rejects_noncanonical_or_unknown_inputs() -> None:
         assert "canonical" in str(exc)
     else:
         raise AssertionError("noncanonical prompt target was accepted")
+
+
+def test_prompt_registry_visibility_intent_kind_and_bounds_are_enforced() -> None:
+    generator = PromptGenerator(principal="observer", catalog=lambda _principal: {"actions": []})
+    with pytest.raises(ValueError, match="resource kind"):
+        generator.generate("orient-project", {"ref": "sinnix://jobs/job-1"})
+    with pytest.raises(ValueError, match="visible"):
+        generator.generate("orient-project", {"ref": "sinnix://browser/agent-workspace"})
+    with pytest.raises(ValueError, match="job_ref"):
+        generator.generate("work-bead", {"ref": "sinnix://projects/p/beads/b", "job_ref": "sinnix://projects/p"})
+    with pytest.raises(ValueError, match="input bound"):
+        generator.generate("orient-project", {"ref": "sinnix://projects/" + "x" * 2_100})
