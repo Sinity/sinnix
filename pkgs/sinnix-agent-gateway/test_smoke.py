@@ -286,7 +286,7 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 )["data"]
                 assert unavailable_catalog["actions"] == []
                 assert {resource["kind"] for resource in unavailable_catalog["resources"]} == {
-                    "context_snapshot",
+                    "browser_workspace",
                 }
                 assert all(
                     resource["availability_reason"]
@@ -1027,9 +1027,10 @@ def test_v2_events_are_principal_scoped_and_receipted(tmp_path: Path) -> None:
 
     events = response["data"]["events"]
     assert {event["principal"] for event in events} == {"observer"}
-    assert {event["operation"] for event in events} == {"observer_event"}
+    audit_events = [event for event in events if event["kind"] == "gateway_receipt"]
+    assert {event["operation"] for event in audit_events} == {"observer_event"}
     assert response["meta"]["resource_refs"] == [
-        f"sinnix://receipts/{events[0]['event_id']}"
+        f"sinnix://receipts/{audit_events[0]['event_id']}"
     ]
     assert response["receipt"]["ref"].startswith("sinnix://receipts/")
 

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import inspect
 from typing import Any, Mapping, cast
 
 from mcp.server import MCPServer
+from mcp.server.subscriptions import InMemorySubscriptionBus
+from mcp.shared.subscriptions import ResourceUpdated
 
 from .bindings import TargetToolBinding, TargetToolBindings
 from .config import GatewayConfig
@@ -21,6 +24,7 @@ from .runtime import (
 )
 from .parity import legacy_parity_contract
 from .mcp_broker import McpEnvironmentError
+from .prompts import PromptGenerator, PROMPT_SPECS
 from .schemas import V2ManifestEnvelope
 
 
@@ -256,6 +260,7 @@ async def _query_owner(
 
 def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     runtime = Runtime.create(config, principal_name)
+    subscription_bus = InMemorySubscriptionBus()
     mcp = MCPServer(
         name="sinnix-agent-gateway",
         title="Sinnix Agent Gateway",
@@ -265,6 +270,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             "All outputs are bounded; unavailable evidence is reported explicitly."
         ),
         version="0.2.0",
+        subscriptions=subscription_bus,
     )
 
     @mcp.resource("sinnix://gateway/instructions")
@@ -322,6 +328,95 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     def gateway_v2_receipt(receipt_id: str) -> str:
         """Return one principal-scoped audit receipt behind its canonical ref."""
         return _bounded_resource_json(runtime, runtime.audit.receipt(receipt_id), "receipt")
+
+    def register_canonical_templates() -> None:
+        """Register only principal-visible canonical owner templates."""
+        for resource in REGISTRY.resources:
+            if principal_name not in resource.principals or resource.kind in {"result", "receipt"}:
+                continue
+            variables = resource.ref_template.variables
+
+            async def read_template(_resource=resource, **values: str) -> str:
+                reference = str(_resource.ref_template.format(values))
+                if _resource.kind == "mcp_tool":
+                    catalog = await runtime.mcp_broker.catalog()
+                    match = next(
+                        (
+                            tool
+                            for server in catalog.get("servers", [])
+                            if server.get("name") == values["server"]
+                            for tool in server.get("tools", [])
+                            if tool.get("name") == values["tool"]
+                        ),
+                        None,
+                    )
+                    if match is None:
+                        raise ProtocolError("not_found", "MCP tool is not in the current admitted catalog")
+                    payload = {"ref": reference, "kind": "mcp_tool", "tool": match}
+                else:
+                    payload = runtime.v2_get(reference)
+                return _bounded_resource_json(runtime, payload, _resource.kind)
+
+            # MCPServer validates template parameters with inspect.signature.
+            # A kwargs closure keeps registration compact while exposing the
+            # exact URI variable names to the SDK.
+            read_template.__signature__ = inspect.Signature(
+                [
+                    inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                    for name in variables
+                ]
+            )
+            mcp.resource(
+                resource.ref_template.template,
+                name=f"{resource.kind}-resource",
+                description=f"Canonical {resource.kind} owner resource.",
+                mime_type="application/json",
+            )(read_template)
+
+    register_canonical_templates()
+
+    prompt_generator = PromptGenerator(
+        principal=principal_name,
+        catalog=lambda principal: REGISTRY.search(CatalogSearch(principal=principal)),
+    )
+    for prompt_spec in PROMPT_SPECS:
+        def make_prompt(name: str):
+            def generated_prompt(ref: str, job_ref: str | None = None) -> list[dict[str, Any]]:
+                return prompt_generator.generate(name, {"ref": ref, "job_ref": job_ref})
+
+            generated_prompt.__name__ = name
+            return generated_prompt
+
+        mcp.prompt(
+            name=prompt_spec.name,
+            description=prompt_spec.description,
+        )(make_prompt(prompt_spec.name))
+
+    published_revisions: dict[str, str] = {}
+
+    async def publish_revision_changes(payload: Any) -> None:
+        if not isinstance(payload, Mapping):
+            return
+        candidates: list[tuple[str, str]] = []
+
+        def collect(value: Any) -> None:
+            if isinstance(value, Mapping):
+                ref = value.get("ref")
+                revision = value.get("source_revision")
+                if isinstance(ref, str) and isinstance(revision, str):
+                    candidates.append((ref, revision))
+                for item in value.values():
+                    collect(item)
+            elif isinstance(value, list):
+                for item in value:
+                    collect(item)
+
+        collect(payload)
+        for ref, revision in candidates:
+            if published_revisions.get(ref) == revision:
+                continue
+            published_revisions[ref] = revision
+            await subscription_bus.publish(ResourceUpdated(uri=ref))
 
     target_bindings = TargetToolBindings(
         REGISTRY,
@@ -531,9 +626,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     if target_bindings.is_visible("context", principal_name):
 
         @mcp.tool(title="Get V2 project context", annotations=AUDITED_READ_TOOL)
-        def context(
+        async def context(
             ref: str,
-            intent: str = "project",
+            intent: str = "project.orientation",
             job_ref: str | None = None,
             request_id: str | None = None,
             actor: str | None = None,
@@ -544,9 +639,12 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         ) -> V2ManifestEnvelope:
             """Compose project, assigned Beads-task, or evidence-review context."""
             action = target_bindings.action_for_tool("context", principal=principal_name)
-            response = runtime.execute_v2(
+            async def callback() -> dict[str, Any]:
+                return runtime.v2_context(ref, intent, job_ref)
+
+            response = await runtime.execute_v2_async(
                 action,
-                lambda: runtime.v2_context(ref, intent, job_ref),
+                callback,
                 {
                     "ref": ref,
                     "intent": intent,
@@ -559,13 +657,16 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     "preconditions": preconditions,
                 },
             )
+            await publish_revision_changes(response.get("data"))
             return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("events", principal_name):
 
         @mcp.tool(title="Get V2 audit events", annotations=AUDITED_READ_TOOL)
-        def events(
+        async def events(
             limit: int = 100,
+            cursor: str | None = None,
+            project_ids: list[str] | None = None,
             request_id: str | None = None,
             actor: str | None = None,
             reason: str | None = None,
@@ -575,11 +676,16 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         ) -> V2ManifestEnvelope:
             """Read bounded audit events visible to the active principal."""
             action = target_bindings.action_for_tool("events", principal=principal_name)
-            response = runtime.execute_v2(
+            async def callback() -> dict[str, Any]:
+                return runtime.v2_events(limit, cursor, project_ids)
+
+            response = await runtime.execute_v2_async(
                 action,
-                lambda: runtime.v2_events(limit),
+                callback,
                 {
                     "limit": limit,
+                    "cursor": cursor,
+                    "project_ids": project_ids,
                     "request_id": request_id,
                     "actor": actor,
                     "reason": reason,
@@ -588,6 +694,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     "preconditions": preconditions,
                 },
             )
+            await publish_revision_changes(response.get("data"))
             return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("wait", principal_name):
@@ -596,6 +703,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         def wait(
             ref: str,
             timeout_seconds: int = 30,
+            target: str = "job_terminal",
+            expected: dict[str, Any] | None = None,
+            poll_seconds: float = 0.25,
             request_id: str | None = None,
             actor: str | None = None,
             reason: str | None = None,
@@ -607,10 +717,13 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             action = target_bindings.action_for_tool("wait", principal=principal_name)
             response = runtime.execute_v2(
                 action,
-                lambda: runtime.v2_wait(ref, timeout_seconds),
+                lambda: runtime.v2_wait(ref, timeout_seconds, target, expected, poll_seconds),
                 {
                     "ref": ref,
                     "timeout_seconds": timeout_seconds,
+                    "target": target,
+                    "expected": expected,
+                    "poll_seconds": poll_seconds,
                     "request_id": request_id,
                     "actor": actor,
                     "reason": reason,
