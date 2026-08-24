@@ -20,7 +20,7 @@ def response(value: dict) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_list_preserves_daemon_paging_for_an_exactly_bounded_page() -> None:
+def test_list_preserves_daemon_order_and_paging_for_an_exactly_bounded_page() -> None:
     calls: list[list[str]] = []
     jobs = [
         {
@@ -41,7 +41,27 @@ def test_list_preserves_daemon_paging_for_an_exactly_bounded_page() -> None:
     assert listed["truncated"] is True
     assert listed["next_cursor"] == "cursor-page-2"
     assert len(listed["jobs"]) == MAX_SNAPSHOT_JOBS
-    assert listed["jobs"][0]["job_id"] == f"job-{MAX_SNAPSHOT_JOBS - 1}"
+    assert listed["jobs"][0]["job_id"] == "job-0"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"jobs": [], "truncated": True, "next_cursor": None},
+        {"jobs": [], "truncated": False, "next_cursor": "unexpected"},
+        {"jobs": ["not-a-job"], "truncated": False, "next_cursor": None},
+        {
+            "jobs": [{}] * (MAX_SNAPSHOT_JOBS + 1),
+            "truncated": False,
+            "next_cursor": None,
+        },
+    ],
+)
+def test_list_rejects_contradictory_or_unbounded_pages(value: dict) -> None:
+    client = AgentCtlClient("fixture-agentctl", runner=lambda *_args, **_kwargs: response(value))
+
+    with pytest.raises(AgentCtlError):
+        client.list()
 
 
 def test_get_and_cancel_require_a_typed_inline_job_response() -> None:
