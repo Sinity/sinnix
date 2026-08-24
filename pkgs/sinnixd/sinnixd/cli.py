@@ -15,6 +15,13 @@ from .projects import ProjectCatalog
 from .service import SinnixdService
 
 
+def _dependency_argument(value: str) -> tuple[str, str]:
+    relation, separator, task_id = value.partition(":")
+    if not separator or not relation or not task_id:
+        raise argparse.ArgumentTypeError("--dependency must be relation:task-id")
+    return relation, task_id
+
+
 def default_socket_path() -> Path:
     return Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "sinnixd.sock"
 
@@ -135,6 +142,16 @@ def parser() -> argparse.ArgumentParser:
     task_get = task_subcommands.add_parser("get")
     task_get.add_argument("project_id")
     task_get.add_argument("task_id")
+    task_create = task_subcommands.add_parser("create")
+    task_create.add_argument("project_id")
+    task_create.add_argument("title")
+    task_create.add_argument("--description", required=True)
+    task_create.add_argument("--type", dest="issue_type", choices=("bug", "feature", "task", "epic", "chore", "decision", "spike", "story", "milestone"), required=True)
+    task_create.add_argument("--priority", type=int, choices=range(5), required=True)
+    task_create.add_argument("--label", action="append", default=[])
+    task_create.add_argument("--parent")
+    task_create.add_argument("--dependency", action="append", type=_dependency_argument, default=[])
+    task_create.add_argument("--request-id", required=True)
     for command in ("claim", "complete", "release"):
         command_parser = task_subcommands.add_parser(command)
         command_parser.add_argument("project_id")
@@ -407,6 +424,22 @@ def main() -> int:
             for name in ("include_closed", "ready"):
                 if getattr(arguments, name):
                     task_arguments[name] = True
+        elif arguments.task_command == "create":
+            task_arguments.update(
+                {
+                    "title": arguments.title,
+                    "description": arguments.description,
+                    "issue_type": arguments.issue_type,
+                    "priority": arguments.priority,
+                    "labels": arguments.label,
+                    "dependencies": [
+                        {"relation": relation, "task_id": task_id}
+                        for relation, task_id in arguments.dependency
+                    ],
+                }
+            )
+            if arguments.parent is not None:
+                task_arguments["parent_task_id"] = arguments.parent
         elif arguments.task_command in {"get", "claim", "complete", "release", "note", "relate"}:
             task_arguments["task_id"] = arguments.task_id
             if arguments.task_command == "note":

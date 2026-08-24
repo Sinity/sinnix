@@ -30,8 +30,8 @@ ceiling ("P1 only"). Empty = whole ready queue, priority then wave order.
 6. **Ship**: branch → PR (Summary/Problem/Solution/Verification) → merge
    per the standing merge authorization.
 7. **Complete**: the coordinator completes the AgentCTL task with the exact
-   verification commands and merge evidence; create linked AgentCTL tasks for
-   discovered follow-ups; record satisfied/deferred AC matrix if
+   verification commands and merge evidence; create discovered follow-ups with
+   `agentctl task create <project> 'Title' --description 'Description' --type task --priority 2 --request-id <uuid>` and add `--parent` or repeated `--dependency relation:task-id` when needed; record satisfied/deferred AC matrix if
    the PR did not close everything.
 8. **Loop**: go to 2. Do not stop between iterations to ask permission.
 

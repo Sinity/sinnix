@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
 
-from sinnix_mcp import ErrorCode
+from sinnix_mcp import ErrorCode, SinnixRef
 from sinnix_mcp.execution import ExecutionProfile, ExecutionResult, OwnerExecution, OwnerRoute
 from sinnix_lib.lock import flock
 
@@ -35,9 +35,12 @@ _MERGE_SHA_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _READ_PRINCIPALS = frozenset({"observer", "agent-control", "operator"})
 _WRITE_PRINCIPALS = frozenset({"agent-control", "operator"})
-_MUTATIONS = frozenset({"task.claim", "task.note", "task.relate", "task.complete", "task.release", "task.reconcile"})
-_IDEMPOTENT_MUTATIONS = frozenset({"task.claim", "task.note", "task.relate", "task.complete", "task.release"})
+_MUTATIONS = frozenset({"task.create", "task.claim", "task.note", "task.relate", "task.complete", "task.release", "task.reconcile"})
+_IDEMPOTENT_MUTATIONS = frozenset({"task.create", "task.claim", "task.note", "task.relate", "task.complete", "task.release"})
 _MUTATION_STATES = frozenset({"pending", "dispatching", "applied", "failed"})
+_ISSUE_TYPES = frozenset({"bug", "feature", "task", "epic", "chore", "decision", "spike", "story", "milestone"})
+_DEPENDENCY_RELATIONS = frozenset({"depends-on", "blocks", "tracks", "related", "discovered-from", "until", "caused-by", "validates", "relates-to", "supersedes"})
+_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,63}$")
 
 
 class TaskError(ValueError):
@@ -236,7 +239,7 @@ class TaskMutationJournal:
         if "sha256:" + hashlib.sha256(encoded).hexdigest() != record.intent_sha256:
             raise TaskError(ErrorCode.OPERATION_FAILED, "task mutation intent is malformed")
         command = value.get("command") if isinstance(value, dict) and value.get("schema") == 1 else None
-        if not isinstance(command, list) or not command or len(command) > 8 or any(not isinstance(item, str) or not item or len(item) > 32_000 for item in command):
+        if not isinstance(command, list) or not command or len(command) > 32 or any(not isinstance(item, str) or not item or len(item) > 32_000 for item in command):
             raise TaskError(ErrorCode.OPERATION_FAILED, "task mutation intent is malformed")
         return tuple(command)
 
@@ -250,12 +253,15 @@ class TaskMutationJournal:
         self.save(updated)
         return updated
 
-    def applied(self, record: TaskMutationRecord, result: Any) -> TaskMutationRecord:
+    def applied(self, record: TaskMutationRecord, result: Any, *, created_task_id: str | None = None) -> TaskMutationRecord:
         try:
             encoded = json.dumps(result, sort_keys=True, separators=(",", ":")).encode()
         except (TypeError, ValueError) as error:
             raise TaskError(ErrorCode.RESULT_INVALID, "task backend returned invalid JSON") from error
-        updated = replace(record, state="applied", result={"sha256": "sha256:" + hashlib.sha256(encoded).hexdigest(), "bytes": len(encoded)}, failure=None)
+        evidence: dict[str, Any] = {"sha256": "sha256:" + hashlib.sha256(encoded).hexdigest(), "bytes": len(encoded)}
+        if created_task_id is not None:
+            evidence["created_task_id"] = created_task_id
+        updated = replace(record, state="applied", result=evidence, failure=None)
         self.save(updated)
         try:
             self._intent_path(updated.identity).unlink(missing_ok=True)
@@ -311,13 +317,19 @@ class TaskMutationJournal:
             raise TaskError(ErrorCode.OPERATION_FAILED, "task mutation journal is malformed")
         if record.result is not None and (
             not isinstance(record.result, dict)
-            or set(record.result) != {"sha256", "bytes"}
+            or set(record.result) not in ({"sha256", "bytes"}, {"sha256", "bytes", "created_task_id"})
             or not isinstance(record.result["sha256"], str)
             or not _SHA256_RE.fullmatch(record.result["sha256"])
             or isinstance(record.result["bytes"], bool)
             or not isinstance(record.result["bytes"], int)
             or not 0 <= record.result["bytes"] <= MAX_TASK_OUTPUT_BYTES
         ):
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task mutation journal is malformed")
+        if "created_task_id" in (record.result or {}) and not _ID_RE.fullmatch(record.result["created_task_id"]):
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task mutation journal is malformed")
+        if record.identity.operation == "task.create" and record.state == "applied" and "created_task_id" not in (record.result or {}):
+            raise TaskError(ErrorCode.OPERATION_FAILED, "task mutation journal is malformed")
+        if record.identity.operation != "task.create" and "created_task_id" in (record.result or {}):
             raise TaskError(ErrorCode.OPERATION_FAILED, "task mutation journal is malformed")
         if record.failure is not None and (
             not isinstance(record.failure, dict) or set(record.failure) != {"code"} or record.failure["code"] not in {code.value for code in ErrorCode}
@@ -404,10 +416,11 @@ def reconcile_task_mutations(*, journal: TaskMutationJournal, authority: TaskAut
             record = journal.dispatching(record)
             try:
                 result = _run_task_command(boundary, authority, cwd, journal.intent(record), readonly=False)
+                created_task_id = TaskService._created_task_id(result) if record.identity.operation == "task.create" else None
             except TaskError as error:
                 record = journal.pending(record, error) if error.retryable else journal.failed(record, error)
             else:
-                record = journal.applied(record, result)
+                record = journal.applied(record, result, created_task_id=created_task_id)
         receipts.append(record.receipt())
     return tuple(receipts)
 
@@ -440,7 +453,7 @@ class TaskService:
 
     def _submit_mutation(self, project: ProjectAdapter, operation: str, arguments: dict[str, Any], request_id: str) -> dict[str, Any]:
         command = self._mutation_command(operation, arguments)
-        task_id = self._task_id(arguments["task_id"])
+        task_id = "create" if operation == "task.create" else self._task_id(arguments["task_id"])
         idempotency_key = self._merge_sha(arguments["merge_sha"]) if operation == "task.complete" else request_id
         identity = TaskMutationIdentity.create(project.project_id, operation, task_id, idempotency_key)
         arguments_sha256 = TaskMutationIdentity.digest(json.dumps(arguments, sort_keys=True, separators=(",", ":")))
@@ -453,11 +466,24 @@ class TaskService:
             record = journal.dispatching(record)
             try:
                 result = _run_task_command(self.boundary, authority, project.root, command, readonly=False)
+                created_task_id = self._created_task_id(result) if operation == "task.create" else None
             except TaskError as error:
                 record = journal.pending(record, error) if error.retryable else journal.failed(record, error)
             else:
-                record = journal.applied(record, result)
-        return {"project_id": project.project_id, "operation": operation, "result": record.receipt()}
+                record = journal.applied(record, result, created_task_id=created_task_id)
+        response = {"project_id": project.project_id, "operation": operation, "result": record.receipt()}
+        if operation == "task.create":
+            response["owner_evidence"] = {
+                "owner": "task-backend",
+                "state": record.state,
+                "attempts": record.attempts,
+                "result": record.result,
+                "failure": record.failure,
+            }
+            if record.state == "applied":
+                assert record.result is not None
+                response["task_ref"] = self._task_ref(project.project_id, record.result["created_task_id"])
+        return response
 
     def _execute(self, project: ProjectAdapter, operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if operation == "task.list":
@@ -476,6 +502,34 @@ class TaskService:
         return {"project_id": project.project_id, "operation": operation, "result": result}
 
     def _mutation_command(self, operation: str, arguments: dict[str, Any]) -> tuple[str, ...]:
+        if operation == "task.create":
+            self._require_allowed(arguments, {"project_id", "title", "description", "issue_type", "priority", "labels", "parent_task_id", "dependencies"}, {"project_id", "title", "description", "issue_type", "priority", "labels", "dependencies"}, operation)
+            issue_type = self._string(arguments["issue_type"], "issue_type", 32)
+            if issue_type not in _ISSUE_TYPES:
+                raise TaskError(ErrorCode.INVALID_ARGUMENT, "issue_type is unsupported")
+            priority = arguments["priority"]
+            if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 4:
+                raise TaskError(ErrorCode.INVALID_ARGUMENT, "priority must be an integer from 0 through 4")
+            command = [
+                "create",
+                "--title",
+                self._string(arguments["title"], "title", 512),
+                "--description",
+                self._string(arguments["description"], "description", 32_000),
+                "--type",
+                issue_type,
+                "--priority",
+                str(priority),
+            ]
+            labels = self._labels(arguments["labels"])
+            if labels:
+                command.extend(("--labels", ",".join(labels)))
+            if "parent_task_id" in arguments:
+                command.extend(("--parent", self._task_id(arguments["parent_task_id"], "parent_task_id")))
+            dependencies = self._dependencies(arguments["dependencies"])
+            if dependencies:
+                command.extend(("--deps", ",".join(f"{relation}:{task_id}" for relation, task_id in dependencies)))
+            return tuple(command)
         if operation == "task.claim":
             self._require_exact(arguments, {"project_id", "task_id"}, operation)
             return ("update", self._task_id(arguments["task_id"]), "--claim")
@@ -592,6 +646,41 @@ class TaskService:
         if not _ID_RE.fullmatch(value):
             raise TaskError(ErrorCode.INVALID_ARGUMENT, f"{name} is malformed")
         return value
+
+    def _labels(self, value: Any) -> tuple[str, ...]:
+        if not isinstance(value, list) or len(value) > 32:
+            raise TaskError(ErrorCode.INVALID_ARGUMENT, "labels must be a list of at most 32 labels")
+        if any(not isinstance(label, str) or not _LABEL_RE.fullmatch(label) for label in value) or len(set(value)) != len(value):
+            raise TaskError(ErrorCode.INVALID_ARGUMENT, "labels are malformed")
+        return tuple(value)
+
+    def _dependencies(self, value: Any) -> tuple[tuple[str, str], ...]:
+        if not isinstance(value, list) or len(value) > 32:
+            raise TaskError(ErrorCode.INVALID_ARGUMENT, "dependencies must be a list of at most 32 relations")
+        dependencies: list[tuple[str, str]] = []
+        for dependency in value:
+            if not isinstance(dependency, dict) or set(dependency) != {"relation", "task_id"}:
+                raise TaskError(ErrorCode.INVALID_ARGUMENT, "dependency is malformed")
+            relation = self._string(dependency["relation"], "dependency relation", 32)
+            if relation not in _DEPENDENCY_RELATIONS:
+                raise TaskError(ErrorCode.INVALID_ARGUMENT, "dependency relation is unsupported")
+            dependencies.append((relation, self._task_id(dependency["task_id"], "dependency task_id")))
+        if len(set(dependencies)) != len(dependencies):
+            raise TaskError(ErrorCode.INVALID_ARGUMENT, "dependencies must be unique")
+        return tuple(dependencies)
+
+    @staticmethod
+    def _created_task_id(result: Any) -> str:
+        if not isinstance(result, dict):
+            raise TaskError(ErrorCode.RESULT_INVALID, "task backend omitted the created task")
+        value = result.get("id")
+        if not isinstance(value, str) or not _ID_RE.fullmatch(value):
+            raise TaskError(ErrorCode.RESULT_INVALID, "task backend omitted the created task")
+        return value
+
+    @staticmethod
+    def _task_ref(project_id: str, task_id: str) -> str:
+        return str(SinnixRef.parse(f"sinnix://projects/{project_id}/beads/{task_id}"))
 
 
 def task_reconcile_main(argv: list[str] | None = None) -> int:

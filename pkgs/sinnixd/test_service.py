@@ -179,6 +179,7 @@ def test_canonical_client_redacts_unrecognized_json_rpc_errors(tmp_path: Path) -
     (
         (("agentctl", "task", "list", "fixture", "--status", "open"), "task.list", {"project_id": "fixture", "status": "open", "limit": 100}),
         (("agentctl", "task", "get", "fixture", "fixture-1"), "task.get", {"project_id": "fixture", "task_id": "fixture-1"}),
+        (("agentctl", "task", "create", "fixture", "typed title", "--description", "typed description", "--type", "task", "--priority", "2", "--label", "area:agentctl", "--parent", "fixture-parent", "--dependency", "depends-on:fixture-blocker", "--request-id", "request-1"), "task.create", {"project_id": "fixture", "title": "typed title", "description": "typed description", "issue_type": "task", "priority": 2, "labels": ["area:agentctl"], "parent_task_id": "fixture-parent", "dependencies": [{"relation": "depends-on", "task_id": "fixture-blocker"}]}),
         (("agentctl", "task", "claim", "fixture", "fixture-1", "--request-id", "request-1"), "task.claim", {"project_id": "fixture", "task_id": "fixture-1"}),
         (("agentctl", "task", "note", "fixture", "fixture-1", "note", "--request-id", "request-1"), "task.note", {"project_id": "fixture", "task_id": "fixture-1", "text": "note"}),
         (("agentctl", "task", "relate", "fixture", "fixture-1", "fixture-2", "--request-id", "request-1"), "task.relate", {"project_id": "fixture", "task_id": "fixture-1", "related_task_id": "fixture-2"}),
@@ -206,7 +207,7 @@ def test_agentctl_task_commands_map_to_task_envelopes(
     assert outbound.owner == "task-backend"
     assert outbound.principal == "operator"
     assert dict(outbound.arguments) == payload
-    expected_key = "request-1" if operation in {"task.claim", "task.note", "task.relate", "task.complete", "task.release"} else None
+    expected_key = "request-1" if operation in {"task.create", "task.claim", "task.note", "task.relate", "task.complete", "task.release"} else None
     assert outbound.idempotency_key == expected_key
 
 
@@ -215,6 +216,10 @@ def test_agentctl_task_mutations_require_a_stable_request_id() -> None:
         cli_module.parser().parse_args(["task", "claim", "fixture", "fixture-1"])
     with pytest.raises(SystemExit):
         cli_module.parser().parse_args(["task", "complete", "fixture", "fixture-1", "--request-id", "request-1"])
+    with pytest.raises(SystemExit):
+        cli_module.parser().parse_args(["task", "create", "fixture", "title", "--description", "body", "--type", "task", "--priority", "2"])
+    with pytest.raises(SystemExit):
+        cli_module.parser().parse_args(["task", "create", "fixture", "title", "--description", "body", "--type", "task", "--priority", "5", "--request-id", "request-1"])
 
 
 def test_agentctl_workspace_dispose_maps_to_a_typed_envelope(
@@ -1510,6 +1515,11 @@ def task_service(tmp_path: Path, boundary: FakeTaskBoundary | None = None) -> tu
     )
 
 
+def isolate_job_scratch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("SINNIXD_TMPFS_SCRATCH_ROOT", str(tmp_path / "tmpfs-scratch"))
+    monkeypatch.setenv("SINNIXD_NVME_SCRATCH_ROOT", str(tmp_path / "nvme-scratch"))
+
+
 def test_task_reads_resolve_catalog_projects_and_use_readonly_fixed_argv(tmp_path: Path) -> None:
     service, boundary = task_service(
         tmp_path,
@@ -1569,6 +1579,121 @@ def test_task_mutations_map_to_fixed_beads_argv(
     assert boundary.calls == [
         (("--json", *expected), tmp_path)
     ]
+
+
+def test_task_create_returns_a_replay_safe_canonical_ref_and_owner_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anti-vacuity: the replay reads the durable receipt, so a second backend create would fail this test."""
+    isolate_job_scratch(monkeypatch, tmp_path)
+    boundary = FakeTaskBoundary([task_result({"id": "fixture-new", "title": "backend-only"})])
+    service, _ = task_service(tmp_path, boundary)
+    arguments = {
+        "project_id": "fixture",
+        "title": "typed title",
+        "description": "private create description",
+        "issue_type": "feature",
+        "priority": 1,
+        "labels": ["area:agentctl", "lane:agents"],
+        "parent_task_id": "fixture-parent",
+        "dependencies": [
+            {"relation": "depends-on", "task_id": "fixture-blocker"},
+            {"relation": "relates-to", "task_id": "fixture-peer"},
+        ],
+    }
+
+    first = service.execute(operation="task.create", arguments=arguments, principal="agent-control", mutation_id="request-1")
+    replayed = service.execute(operation="task.create", arguments=arguments, principal="agent-control", mutation_id="request-1")
+
+    assert first == replayed
+    assert first["task_ref"] == "sinnix://projects/fixture/beads/fixture-new"
+    assert first["owner_evidence"] == {
+        "owner": "task-backend",
+        "state": "applied",
+        "attempts": 1,
+        "result": {"sha256": TaskMutationJournal(TaskAuthority.load(tmp_path / "task-state", "fixture").root / TASK_MUTATION_JOURNAL_DIRECTORY).records()[0].result["sha256"], "bytes": len(json.dumps({"id": "fixture-new", "title": "backend-only"}, sort_keys=True, separators=(",", ":")).encode()), "created_task_id": "fixture-new"},
+        "failure": None,
+    }
+    assert boundary.calls == [
+        (("--json", "create", "--title", "typed title", "--description", "private create description", "--type", "feature", "--priority", "1", "--labels", "area:agentctl,lane:agents", "--parent", "fixture-parent", "--deps", "depends-on:fixture-blocker,relates-to:fixture-peer"), tmp_path)
+    ]
+    journal = TaskMutationJournal(TaskAuthority.load(tmp_path / "task-state", "fixture").root / TASK_MUTATION_JOURNAL_DIRECTORY)
+    public_record = next(journal.records_root.glob("*.json"))
+    assert "private create description" not in public_record.read_text()
+
+
+def test_task_create_outage_replays_without_dirtying_the_registered_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anti-vacuity: creation stays pending across an outage, then replays once from the private intent."""
+    isolate_job_scratch(monkeypatch, tmp_path)
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    task_state_root = tmp_path.parent / f"task-state-{tmp_path.name}"
+    source_database = tmp_path.parent / f"legacy-task-source-{tmp_path.name}" / ".beads" / "dolt"
+    activate_task_authority(tmp_path, task_state_root, source_database=source_database)
+    arguments = {"project_id": "fixture", "title": "replayed task", "description": "private replay description", "issue_type": "task", "priority": 2, "labels": [], "dependencies": []}
+    unavailable = ExecutionResult(command=(), exit_status=None, stdout=b"", stderr=b"", failure_class="command_unavailable:FileNotFoundError")
+    first_boundary = FakeTaskBoundary([unavailable])
+    first = TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path.parent / f"first-jobs-{tmp_path.name}"), first_boundary, task_state_root=task_state_root)
+
+    pending = first.execute(operation="task.create", arguments=arguments, principal="agent-control", mutation_id="request-1")
+
+    assert pending["owner_evidence"] == {"owner": "task-backend", "state": "pending", "attempts": 1, "result": None, "failure": {"code": "OWNER_UNAVAILABLE"}}
+    assert "task_ref" not in pending
+    authority = TaskAuthority.load(task_state_root, "fixture")
+    journal = TaskMutationJournal(authority.root / TASK_MUTATION_JOURNAL_DIRECTORY)
+    assert "private replay description" not in next(journal.records_root.glob("*.json")).read_text()
+    assert subprocess.run(["git", "-C", str(tmp_path), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout == ""
+
+    second_boundary = FakeTaskBoundary([task_result({"id": "fixture-replayed"})])
+    receipts = reconcile_task_mutations(journal=journal, authority=authority, cwd=tmp_path, boundary=second_boundary)
+    restarted = TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path.parent / f"second-jobs-{tmp_path.name}"), second_boundary, task_state_root=task_state_root)
+    replayed = restarted.execute(operation="task.create", arguments=arguments, principal="agent-control", mutation_id="request-1")
+
+    assert receipts[0]["state"] == "applied"
+    assert replayed["task_ref"] == "sinnix://projects/fixture/beads/fixture-replayed"
+    assert len(first_boundary.calls) == 1
+    assert len(second_boundary.calls) == 1
+    assert subprocess.run(["git", "-C", str(tmp_path), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout == ""
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        {"project_id": "missing", "title": "title", "description": "body", "issue_type": "task", "priority": 2, "labels": [], "dependencies": []},
+        {"project_id": "fixture", "title": "title", "description": "body", "issue_type": "unknown", "priority": 2, "labels": [], "dependencies": []},
+        {"project_id": "fixture", "title": "title", "description": "body", "issue_type": "task", "priority": True, "labels": [], "dependencies": []},
+        {"project_id": "fixture", "title": "title", "description": "body", "issue_type": "task", "priority": 2, "labels": ["bad,label"], "dependencies": []},
+        {"project_id": "fixture", "title": "title", "description": "body", "issue_type": "task", "priority": 2, "labels": [], "parent_task_id": "--invalid", "dependencies": []},
+        {"project_id": "fixture", "title": "title", "description": "body", "issue_type": "task", "priority": 2, "labels": [], "dependencies": [{"relation": "not-a-relation", "task_id": "fixture-1"}]},
+    ),
+)
+def test_task_create_rejects_invalid_project_parent_and_typed_input(tmp_path: Path, arguments: dict[str, object], monkeypatch: pytest.MonkeyPatch) -> None:
+    isolate_job_scratch(monkeypatch, tmp_path)
+    service, boundary = task_service(tmp_path)
+
+    with pytest.raises(TaskError) as error:
+        service.execute(operation="task.create", arguments=arguments, principal="agent-control", mutation_id="request-1")
+
+    assert error.value.code == ErrorCode.INVALID_ARGUMENT
+    assert not boundary.calls
+
+
+def test_task_create_relation_failure_is_a_failed_journalled_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    isolate_job_scratch(monkeypatch, tmp_path)
+    service, boundary = task_service(tmp_path, FakeTaskBoundary([ExecutionResult(command=(), exit_status=1, stdout=b"", stderr=b"parent missing")]))
+    response = SinnixdService(ProjectCatalog([tmp_path]), tasks=service).dispatch(
+        request(
+            "task.create",
+            "task-backend",
+            {"project_id": "fixture", "title": "relation failure", "description": "body", "issue_type": "task", "priority": 2, "labels": [], "parent_task_id": "fixture-parent", "dependencies": [{"relation": "depends-on", "task_id": "fixture-blocker"}]},
+            "agent-control",
+            idempotency_key="request-1",
+        )
+    )
+
+    assert response.ok and response.payload is not None
+    payload = response.payload.inline
+    assert payload["owner_evidence"] == {"owner": "task-backend", "state": "failed", "attempts": 1, "result": None, "failure": {"code": "OPERATION_FAILED"}}
+    assert "task_ref" not in payload
+    assert boundary.calls == [(("--json", "create", "--title", "relation failure", "--description", "body", "--type", "task", "--priority", "2", "--parent", "fixture-parent", "--deps", "depends-on:fixture-blocker"), tmp_path)]
 
 
 def test_task_mutation_outage_survives_restart_and_reconciles_without_git_dirtying(tmp_path: Path) -> None:

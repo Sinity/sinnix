@@ -15,6 +15,7 @@ Use AgentCTL for task operations:
 agentctl task list <project>
 agentctl task get <project> <task>
 agentctl task claim <project> <task> --request-id <id>
+agentctl task create <project> 'Title' --description 'Description' --type task --priority 2 --label area:example --request-id <uuid>
 ```
 
 Use `bd where --json` only when investigating the backend authority itself:
@@ -27,6 +28,7 @@ bd where
 
 - Coding workers do not perform task bookkeeping. The coordinator owns AgentCTL task mutations and durable follow-up creation.
 - AgentCTL task mutations require their stable request ID. Read task state through AgentCTL rather than checkout JSONL.
+- Coordinators create follow-up work through `agentctl task create`; use `--parent` and repeated `--dependency relation:task-id` for typed graph links.
 - Repository instructions override this generic skill.
 
 ## Authority, worktrees, and exports
