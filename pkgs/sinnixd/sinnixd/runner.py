@@ -102,18 +102,24 @@ def _run_declared(state_root: Path, job_id: str, unit: str) -> None:
 
 def _exec_shell(value: Mapping[str, Any], checkout: Path) -> None:
     argv = value.get("argv")
+    environment_command = value.get("environment_command")
     cwd = value.get("cwd")
     if value.get("principal") != "operator" or not isinstance(argv, list) or not argv or any(
         not isinstance(item, str) or not item for item in argv
     ):
         raise RunnerError("operator shell contract is invalid")
+    if not isinstance(environment_command, list) or not environment_command or any(
+        not isinstance(item, str) or not item for item in environment_command
+    ):
+        raise RunnerError("operator shell project environment is invalid")
     if not isinstance(cwd, str):
         raise RunnerError("operator shell cwd is invalid")
     workdir = Path(cwd).resolve(strict=True)
     if not workdir.is_dir() or (workdir != checkout and checkout not in workdir.parents):
         raise RunnerError("operator shell cwd escaped the registered checkout")
+    command = [*environment_command, *argv]
     os.chdir(workdir)
-    os.execvpe(argv[0], argv, dict(os.environ))
+    os.execvpe(command[0], command, dict(os.environ))
 
 
 def _run_agent(
