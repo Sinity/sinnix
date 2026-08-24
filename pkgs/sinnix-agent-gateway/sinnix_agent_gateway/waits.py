@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+import anyio
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Callable, Mapping
@@ -115,3 +116,67 @@ class BoundedWaitService:
             self.sleeper(min(request.poll_seconds, remaining))
             polls += 1
             current = self.resolver(request)
+
+    async def wait_async(
+        self,
+        request: WaitRequest,
+        *,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
+        """Poll through the MCP request task and observe its cancellation event."""
+        deadline = self.clock() + request.timeout_seconds
+        polls = 0
+
+        async def resolve() -> WaitEvidence:
+            return await anyio.to_thread.run_sync(self.resolver, request, abandon_on_cancel=True)
+
+        if cancelled is not None and cancelled():
+            return {
+                "schema": "sinnix.gateway-wait.v1",
+                "outcome": "cancelled",
+                "target": request.target.value,
+                "ref": request.reference,
+                "polls": 0,
+                "evidence": {},
+                "source_revision": "cancelled",
+                "continuation": self._continuation(request, WaitEvidence(False, {}, "cancelled")),
+            }
+        current = await resolve()
+        while True:
+            if current.satisfied:
+                return {
+                    "schema": "sinnix.gateway-wait.v1",
+                    "outcome": "satisfied",
+                    "target": request.target.value,
+                    "ref": request.reference,
+                    "polls": polls,
+                    "evidence": dict(current.evidence),
+                    "source_revision": current.source_revision,
+                    "continuation": None,
+                }
+            if cancelled is not None and cancelled():
+                return {
+                    "schema": "sinnix.gateway-wait.v1",
+                    "outcome": "cancelled",
+                    "target": request.target.value,
+                    "ref": request.reference,
+                    "polls": polls,
+                    "evidence": dict(current.evidence),
+                    "source_revision": current.source_revision,
+                    "continuation": self._continuation(request, current),
+                }
+            remaining = deadline - self.clock()
+            if remaining <= 0:
+                return {
+                    "schema": "sinnix.gateway-wait.v1",
+                    "outcome": "timeout",
+                    "target": request.target.value,
+                    "ref": request.reference,
+                    "polls": polls,
+                    "evidence": dict(current.evidence),
+                    "source_revision": current.source_revision,
+                    "continuation": self._continuation(request, current),
+                }
+            await anyio.sleep(min(request.poll_seconds, remaining))
+            polls += 1
+            current = await resolve()

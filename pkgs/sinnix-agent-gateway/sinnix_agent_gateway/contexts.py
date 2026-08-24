@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 
@@ -29,15 +30,14 @@ class ComponentResult:
     data: Any = None
     reason: str | None = None
     source_ref: str | None = None
-    stale_since: str | None = None
 
     def __post_init__(self) -> None:
-        if self.status not in {"available", "unavailable", "stale"}:
+        if self.status not in {"available", "unavailable"}:
             raise ValueError(f"unknown context component status: {self.status}")
         if self.status == "available" and not isinstance(self.source_revision, str):
             raise ValueError("available context components require a source revision")
         if self.status != "available" and not self.reason:
-            raise ValueError("unavailable and stale components require a reason")
+            raise ValueError("unavailable components require a reason")
 
     @classmethod
     def available(
@@ -73,25 +73,6 @@ class ComponentResult:
             source_ref=source_ref,
         )
 
-    @classmethod
-    def stale(
-        cls,
-        name: str,
-        reason: str,
-        *,
-        revision: str | None = None,
-        stale_since: str | None = None,
-        source_ref: str | None = None,
-    ) -> "ComponentResult":
-        return cls(
-            name=name,
-            status="stale",
-            source_revision=revision,
-            reason=reason,
-            stale_since=stale_since,
-            source_ref=source_ref,
-        )
-
     def as_dict(self, snapshot_ref: str) -> dict[str, Any]:
         row: dict[str, Any] = {
             "name": self.name,
@@ -105,8 +86,6 @@ class ComponentResult:
             row["data"] = self.data
         else:
             row["reason"] = self.reason
-            if self.stale_since is not None:
-                row["stale_since"] = self.stale_since
         return row
 
 
@@ -159,20 +138,46 @@ CONTEXT_INTENTS: dict[str, ContextIntentSpec] = {
 class RevisionReuseCache:
     """Ephemeral cache whose key always includes the owner source revision."""
 
-    def __init__(self) -> None:
-        self._values: dict[tuple[str, str], ComponentResult] = {}
+    def __init__(self, *, max_entries: int = 256, max_bytes: int = 2_000_000) -> None:
+        if max_entries < 1 or max_bytes < 1:
+            raise ValueError("context cache bounds must be positive")
+        self.max_entries = max_entries
+        self.max_bytes = max_bytes
+        self._values: OrderedDict[tuple[str, str], tuple[ComponentResult, int]] = OrderedDict()
+        self._bytes = 0
+
+    @staticmethod
+    def _size(result: ComponentResult) -> int:
+        return len(_canonical(result.as_dict("sinnix://context/cache")))
 
     def get(self, component: str, revision: str) -> ComponentResult | None:
-        value = self._values.get((component, revision))
-        return value
+        key = (component, revision)
+        value = self._values.get(key)
+        if value is None:
+            return None
+        self._values.move_to_end(key)
+        return value[0]
 
     def put(self, result: ComponentResult) -> ComponentResult:
         if result.status == "available" and result.source_revision is not None:
-            self._values[(result.name, result.source_revision)] = result
+            key = (result.name, result.source_revision)
+            size = self._size(result)
+            if size > self.max_bytes:
+                return result
+            previous = self._values.pop(key, None)
+            if previous is not None:
+                self._bytes -= previous[1]
+            self._values[key] = (result, size)
+            self._bytes += size
+            while len(self._values) > self.max_entries or self._bytes > self.max_bytes:
+                _, (_, evicted_size) = self._values.popitem(last=False)
+                self._bytes -= evicted_size
         return result
 
     def clear_revision(self, component: str, revision: str) -> None:
-        self._values.pop((component, revision), None)
+        value = self._values.pop((component, revision), None)
+        if value is not None:
+            self._bytes -= value[1]
 
 
 class ContextComposer:
