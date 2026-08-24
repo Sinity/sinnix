@@ -32,6 +32,14 @@ set -euo pipefail
 CDP_HOST="${CDP_HOST:-127.0.0.1}"
 CDP_PORT="${CDP_PORT:-9222}"
 CDP_BASE="http://${CDP_HOST}:${CDP_PORT}"
+# Every command gets a bounded CDP request/response exchange. Bash's native
+# `read -t` supplies the deadline, so no separate timeout program is needed.
+CDP_RESPONSE_TIMEOUT_SEC="${SINNIX_CDP_TIMEOUT_SEC:-5}"
+[[ $CDP_RESPONSE_TIMEOUT_SEC =~ ^[1-9][0-9]*$ ]] || {
+  echo "SINNIX_CDP_TIMEOUT_SEC must be a positive integer: ${CDP_RESPONSE_TIMEOUT_SEC}" >&2
+  exit 2
+}
+cdp_request_seq=0
 
 # The inactive named workspace agent windows are parked on, and the key that
 # switches to it. A special workspace is an overlay and therefore cannot be
@@ -145,35 +153,110 @@ target_status() {
 # ── CDP WebSocket helpers ──────────────────────────────────────────────
 
 cdp_send() {
-  local ws_url method params_json
+  local ws_url method params_json request_id request read_fd write_fd cdp_pid response status
   ws_url="$1"
   method="$2"
   params_json="${3:-}"
   [[ -n $params_json ]] || params_json='{}'
-  echo "{\"id\":1,\"method\":\"$method\",\"params\":$params_json}" |
-    websocat -B 2097152 -n1 "$ws_url" 2>/dev/null
+
+  # A cdp_send invocation uses one WebSocket request. The process-derived
+  # prefix keeps IDs distinct when command substitutions run in subshells,
+  # while the sequence keeps direct calls in the same shell distinct.
+  ((cdp_request_seq += 1))
+  request_id=$((BASHPID * 1000000 + cdp_request_seq))
+  request=$(jq -nc --argjson id "$request_id" --arg method "$method" --argjson params "$params_json" \
+    '{id: $id, method: $method, params: $params}')
+
+  # exec makes the coprocess PID the transport PID. A timeout can then reap
+  # the actual websocket process and its inherited agent-window lock.
+  coproc SINNIX_CDP_COMMAND { exec websocat -B 2097152 "$ws_url"; }
+  read_fd="${SINNIX_CDP_COMMAND[0]}"
+  write_fd="${SINNIX_CDP_COMMAND[1]}"
+  cdp_pid="$SINNIX_CDP_COMMAND_PID"
+
+  if ! printf '%s\n' "$request" >&"$write_fd"; then
+    echo "failed to send CDP request ${request_id} (${method})" >&2
+    exec {write_fd}>&-
+    exec {read_fd}<&-
+    kill "$cdp_pid" 2>/dev/null || true
+    wait "$cdp_pid" 2>/dev/null || true
+    return 1
+  fi
+
+  if response=$(cdp_read_response "$read_fd" "$request_id" "$method" "$CDP_RESPONSE_TIMEOUT_SEC"); then
+    :
+  else
+    status=$?
+    exec {write_fd}>&-
+    exec {read_fd}<&-
+    kill "$cdp_pid" 2>/dev/null || true
+    wait "$cdp_pid" 2>/dev/null || true
+    return "$status"
+  fi
+
+  exec {write_fd}>&-
+  exec {read_fd}<&-
+  kill "$cdp_pid" 2>/dev/null || true
+  wait "$cdp_pid" 2>/dev/null || true
+  printf '%s\n' "$response"
 }
 
 cdp_send_with_result() {
-  local ws_url method params_json
+  local ws_url method params_json response
   ws_url="$1"
   method="$2"
   params_json="${3:-}"
   [[ -n $params_json ]] || params_json='{}'
-  cdp_send "$ws_url" "$method" "$params_json" | jq -r '.result // empty'
+  response=$(cdp_send "$ws_url" "$method" "$params_json") || return $?
+  if jq -e '.error' >/dev/null 2>&1 <<<"$response"; then
+    jq . >&2 <<<"$response"
+    return 1
+  fi
+  jq -r '.result // empty' <<<"$response"
 }
 
 cdp_read_response() {
-  local fd expected_id line
+  local fd expected_id method timeout_sec line deadline_us now_us remaining_us remaining_sec
   fd="$1"
   expected_id="$2"
-  while IFS= read -r line <&"$fd"; do
+  method="$3"
+  timeout_sec="$4"
+  now_us=$(cdp_now_us)
+  deadline_us=$((now_us + timeout_sec * 1000000))
+  while :; do
+    now_us=$(cdp_now_us)
+    remaining_us=$((deadline_us - now_us))
+    if ((remaining_us <= 0)); then
+      printf 'timed out waiting for CDP response id %s (%s) after %ss\n' \
+        "$expected_id" "$method" "$timeout_sec" >&2
+      return 124
+    fi
+    printf -v remaining_sec '%d.%06d' $((remaining_us / 1000000)) $((remaining_us % 1000000))
+    if ! IFS= read -r -t "$remaining_sec" line <&"$fd"; then
+      if (( $(cdp_now_us) >= deadline_us )); then
+        printf 'timed out waiting for CDP response id %s (%s) after %ss\n' \
+          "$expected_id" "$method" "$timeout_sec" >&2
+        return 124
+      fi
+      printf 'CDP connection closed while waiting for response id %s (%s)\n' \
+        "$expected_id" "$method" >&2
+      return 1
+    fi
     if jq -e --argjson id "$expected_id" '.id == $id' >/dev/null 2>&1 <<<"$line"; then
       printf '%s\n' "$line"
       return 0
     fi
+    printf 'CDP message without matching id while waiting for %s (%s): %s\n' \
+      "$expected_id" "$method" "$line" >&2
   done
-  return 1
+}
+
+cdp_now_us() {
+  local seconds fraction
+  seconds="${EPOCHREALTIME%%.*}"
+  fraction="${EPOCHREALTIME#*.}000000"
+  fraction="${fraction:0:6}"
+  printf '%s\n' "$((10#$seconds * 1000000 + 10#$fraction))"
 }
 
 print_cdp_http_response() {
@@ -190,11 +273,22 @@ print_cdp_http_response() {
 
 get_ws_url() {
   local page_id="$1"
-  curl -s "${CDP_BASE}/json" | jq -r --arg id "$page_id" '.[] | select(.id == $id) | .webSocketDebuggerUrl'
+  curl -fsS --max-time 2 "${CDP_BASE}/json" | jq -r --arg id "$page_id" '.[] | select(.id == $id) | .webSocketDebuggerUrl'
 }
 
 get_browser_ws_url() {
   curl -fsS --max-time 2 "${CDP_BASE}/json/version" | jq -r '.webSocketDebuggerUrl // empty'
+}
+
+find_target_by_marker() {
+  local marker="$1"
+  curl -fsS --max-time 2 "${CDP_BASE}/json" | jq -r --arg marker "$marker" '
+    [ .[]
+      | select((.title // "" | contains($marker)) or (.url // "" | contains($marker)))
+      | .id
+    ]
+    | unique
+    | if length == 1 then .[0] else empty end'
 }
 
 get_hyprctl_bin() {
@@ -290,6 +384,7 @@ agent-window)
   }
 
   hyprland_available="false"
+  focus_before=""
   hyprctl_bin=$(get_hyprctl_bin || true)
   if [[ -n $hyprctl_bin ]]; then
     hyprland_instances=$(hyprctl_call instances -j 2>/dev/null || printf '[]')
@@ -300,6 +395,7 @@ agent-window)
     fi
     if [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && hyprctl_call clients -j >/dev/null 2>&1; then
       hyprland_available="true"
+      focus_before=$(hyprctl_call activewindow -j 2>/dev/null | jq -r '.address // empty')
     fi
   fi
 
@@ -309,9 +405,13 @@ agent-window)
   page_id=""
   retain_created_target="false"
   close_created_target() {
+    if [[ -z $page_id ]]; then
+      page_id=$(find_target_by_marker "$marker" || true)
+    fi
     [[ -n $page_id ]] || return 0
     close_params=$(jq -nc --arg target_id "$page_id" '{targetId: $target_id}')
-    cdp_send "$ws_url" "Target.closeTarget" "$close_params" >/dev/null 2>&1 || true
+    cdp_send "$ws_url" "Target.closeTarget" "$close_params" >/dev/null ||
+      printf 'failed to close created agent target: %s\n' "$page_id" >&2
   }
   cleanup_failed_agent_window() {
     [[ $retain_created_target == "true" ]] || close_created_target
@@ -319,15 +419,27 @@ agent-window)
   trap cleanup_failed_agent_window EXIT
 
   params=$(jq -nc --arg url "$marker_url" '{url: $url, newWindow: true, background: true}')
-  response=$(cdp_send "$ws_url" "Target.createTarget" "$params")
+  if response=$(cdp_send "$ws_url" "Target.createTarget" "$params"); then
+    :
+  else
+    status=$?
+    printf 'failed to create agent browser target (status %s)\n' "$status" >&2
+    exit "$status"
+  fi
   if jq -e '.error' >/dev/null 2>&1 <<<"$response"; then
     jq . <<<"$response" >&2
     exit 1
   fi
-  page_id=$(jq -r '.result.targetId' <<<"$response")
+  page_id=$(jq -r '.result.targetId // empty' <<<"$response")
+  [[ -n $page_id ]] || {
+    echo "CDP created no target ID for agent window" >&2
+    jq . >&2 <<<"$response"
+    exit 1
+  }
 
   parked="false"
   addr=""
+  focus_after=""
   if [[ $hyprland_available == "true" ]]; then
     for _ in {1..40}; do
       sleep 0.1
@@ -368,26 +480,44 @@ agent-window)
   fi
 
   if [[ $parked == "true" ]]; then
+    focus_after=$(hyprctl_call activewindow -j 2>/dev/null | jq -r '.address // empty')
+    if [[ -z $focus_before || $focus_after != "$focus_before" ]]; then
+      printf 'focused compositor client changed while parking agent window: before=%s after=%s\n' \
+        "${focus_before:-unavailable}" "${focus_after:-unavailable}" >&2
+      exit 1
+    fi
     page_ws_url=$(get_ws_url "$page_id")
     if [[ -z $page_ws_url ]]; then
       echo "parked agent target disappeared before navigation" >&2
       exit 1
     fi
     navigate_params=$(jq -nc --arg url "$url" '{url: $url}')
-    navigate_response=$(cdp_send "$page_ws_url" "Page.navigate" "$navigate_params")
+    if navigate_response=$(cdp_send "$page_ws_url" "Page.navigate" "$navigate_params"); then
+      :
+    else
+      status=$?
+      printf 'failed to navigate parked agent target %s (status %s)\n' "$page_id" "$status" >&2
+      exit "$status"
+    fi
     if jq -e '.error' >/dev/null 2>&1 <<<"$navigate_response"; then
       jq . <<<"$navigate_response" >&2
       exit 1
     fi
+    focus_after=$(hyprctl_call activewindow -j 2>/dev/null | jq -r '.address // empty')
+    if [[ $focus_after != "$focus_before" ]]; then
+      printf 'focused compositor client changed while navigating agent window: before=%s after=%s\n' \
+        "$focus_before" "${focus_after:-unavailable}" >&2
+      exit 1
+    fi
   fi
 
+  if [[ $parked != "true" ]]; then
+    echo "window ${page_id} opened but was not verified on ${AGENT_WORKSPACE}; last compositor state: ${client_state:-unavailable}; visible=${visible:-unknown}; stable_checks=${stable_checks:-0}; focus_before=${focus_before:-unavailable}; focus_after=${focus_after:-unavailable}; hyprctl=${hyprctl_bin:-unavailable}; instances=${hyprland_instance_count:-unknown}; signature=$([[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && printf set || printf missing)" >&2
+    exit 1
+  fi
   jq -nc --arg id "$page_id" --arg url "$url" --argjson parked "$parked" \
     --arg ws "$AGENT_WORKSPACE" --arg key "$SUMMON_BINDING" \
     '{id: $id, url: $url, parked: $parked, workspace: $ws, show_with: $key}'
-  if [[ $parked != "true" ]]; then
-    echo "window ${page_id} opened but was not verified on ${AGENT_WORKSPACE}; last compositor state: ${client_state:-unavailable}; visible=${visible:-unknown}; stable_checks=${stable_checks:-0}; hyprctl=${hyprctl_bin:-unavailable}; instances=${hyprland_instance_count:-unknown}; signature=$([[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && printf set || printf missing)" >&2
-    exit 1
-  fi
   retain_created_target="true"
   trap - EXIT
   ;;
@@ -672,8 +802,8 @@ network-log)
   # Stream CDP Network-domain events for a bounded window. Page-level fetch
   # hooking misses anything the app issued before the hook installed, anything
   # on another origin, and non-fetch transports; the Network domain sees all of
-  # it. cdp_send uses `websocat -n1`, which closes after one message and cannot
-  # observe events, so this opens its own connection and holds it open by
+  # it. cdp_send is a bounded request/response exchange, so this opens its own
+  # connection and holds it open by
   # keeping stdin alive for the duration.
   page_id=""
   duration=15
@@ -1066,11 +1196,13 @@ upload-files)
   read_fd="${SINNIX_CDP_UPLOAD[0]}"
   write_fd="${SINNIX_CDP_UPLOAD[1]}"
 
-  request=$(jq -nc --arg selector "$selector" \
-    '{id: 1, method: "Runtime.evaluate", params: {expression: ("document.querySelector(" + ($selector | tojson) + ")")}}')
+  ((cdp_request_seq += 1))
+  upload_resolve_id=$((BASHPID * 1000000 + cdp_request_seq))
+  request=$(jq -nc --argjson id "$upload_resolve_id" --arg selector "$selector" \
+    '{id: $id, method: "Runtime.evaluate", params: {expression: ("document.querySelector(" + ($selector | tojson) + ")")}}')
   printf '%s\n' "$request" >&"$write_fd"
-  response=$(cdp_read_response "$read_fd" 1) || {
-    echo "CDP connection closed while resolving file input" >&2
+  response=$(cdp_read_response "$read_fd" "$upload_resolve_id" "Runtime.evaluate" "$CDP_RESPONSE_TIMEOUT_SEC") || {
+    echo "CDP failed while resolving file input" >&2
     exit 1
   }
   object_id=$(jq -r '.result.result.objectId // empty' <<<"$response")
@@ -1079,11 +1211,13 @@ upload-files)
     exit 1
   }
 
-  request=$(jq -nc --arg objectId "$object_id" --argjson files "$files_json" \
-    '{id: 2, method: "DOM.setFileInputFiles", params: {objectId: $objectId, files: $files}}')
+  ((cdp_request_seq += 1))
+  upload_attach_id=$((BASHPID * 1000000 + cdp_request_seq))
+  request=$(jq -nc --argjson id "$upload_attach_id" --arg objectId "$object_id" --argjson files "$files_json" \
+    '{id: $id, method: "DOM.setFileInputFiles", params: {objectId: $objectId, files: $files}}')
   printf '%s\n' "$request" >&"$write_fd"
-  response=$(cdp_read_response "$read_fd" 2) || {
-    echo "CDP connection closed while attaching files" >&2
+  response=$(cdp_read_response "$read_fd" "$upload_attach_id" "DOM.setFileInputFiles" "$CDP_RESPONSE_TIMEOUT_SEC") || {
+    echo "CDP failed while attaching files" >&2
     exit 1
   }
   if jq -e '.error' >/dev/null 2>&1 <<<"$response"; then
@@ -1091,11 +1225,13 @@ upload-files)
     exit 1
   fi
 
-  request=$(jq -nc --arg objectId "$object_id" \
-    '{id: 3, method: "Runtime.callFunctionOn", params: {objectId: $objectId, functionDeclaration: "function(){this.dispatchEvent(new Event(\"input\",{bubbles:true}));this.dispatchEvent(new Event(\"change\",{bubbles:true}));return this.files.length}", returnByValue: true}}')
+  ((cdp_request_seq += 1))
+  upload_dispatch_id=$((BASHPID * 1000000 + cdp_request_seq))
+  request=$(jq -nc --argjson id "$upload_dispatch_id" --arg objectId "$object_id" \
+    '{id: $id, method: "Runtime.callFunctionOn", params: {objectId: $objectId, functionDeclaration: "function(){this.dispatchEvent(new Event(\"input\",{bubbles:true}));this.dispatchEvent(new Event(\"change\",{bubbles:true}));return this.files.length}", returnByValue: true}}')
   printf '%s\n' "$request" >&"$write_fd"
-  response=$(cdp_read_response "$read_fd" 3) || {
-    echo "CDP connection closed while dispatching file events" >&2
+  response=$(cdp_read_response "$read_fd" "$upload_dispatch_id" "Runtime.callFunctionOn" "$CDP_RESPONSE_TIMEOUT_SEC") || {
+    echo "CDP failed while dispatching file events" >&2
     exit 1
   }
   attached=$(jq -r '.result.result.value // 0' <<<"$response")

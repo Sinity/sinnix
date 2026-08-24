@@ -26,6 +26,7 @@ in
       file = ./tests.nix;
     })
     ./tests/agent-tools.nix
+    ./tests/chrome-agent-window.nix
     ./tests/terminal-capture.nix
     ./tests/capture-clipboard.nix
     ./tests/capture-primary.nix
