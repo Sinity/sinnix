@@ -110,6 +110,8 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("--parameters-json", default="{}")
     get = job_subcommands.add_parser("get")
     get.add_argument("job_id")
+    status = job_subcommands.add_parser("status")
+    status.add_argument("job_id")
     job_list = job_subcommands.add_parser("list")
     job_list.add_argument("--limit", type=int, choices=range(1, 1001), default=100)
     job_list.add_argument("--cursor")
@@ -397,7 +399,7 @@ def main() -> int:
                 "parameters": parameters,
             },
         )
-    elif arguments.command == "job" and arguments.job_command == "get":
+    elif arguments.command == "job" and arguments.job_command in {"get", "status"}:
         request = _request("job.get", "systemd-jobs", {"job_id": arguments.job_id})
     elif arguments.command == "job" and arguments.job_command == "list":
         request = _request(

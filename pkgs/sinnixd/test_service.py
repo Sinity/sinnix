@@ -212,6 +212,24 @@ def test_agentctl_task_commands_map_to_task_envelopes(
     assert outbound.idempotency_key == expected_key
 
 
+@pytest.mark.parametrize("command", ("get", "status"))
+def test_agentctl_job_status_aliases_job_get(
+    command: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, RequestEnvelope] = {}
+
+    def fake_call(socket_path, request_value):
+        captured["request"] = request_value
+        return {"schema": 1, "ok": True}
+
+    monkeypatch.setattr(sys, "argv", ["agentctl", "job", command, "job-1"])
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    assert captured["request"].operation == "job.get"
+    assert captured["request"].arguments == {"job_id": "job-1"}
+
+
 def test_agentctl_task_mutations_require_a_stable_request_id() -> None:
     with pytest.raises(SystemExit):
         cli_module.parser().parse_args(["task", "claim", "fixture", "fixture-1"])
