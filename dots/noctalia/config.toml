@@ -95,7 +95,13 @@ enable_daemon = true
 blacklist = []
 blacklist_allow_critical = true
 collapse_on_dismiss = true
-layer = "overlay"
+# The native v5 renderer keeps one full-height toast surface alive while a
+# notification is visible. On Hyprland's overlay level that transparent
+# surface darkens its entire 576 px column even though card blur is scoped and
+# compositor blur is disabled. The top level preserves toast visibility above
+# ordinary windows without the full-height overlay artifact (live A/B capture,
+# 2026-08-24).
+layer = "top"
 monitors = []
 position = "top-right"
 scale = 1.0
