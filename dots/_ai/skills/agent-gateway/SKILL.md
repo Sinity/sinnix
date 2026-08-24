@@ -1,3 +1,8 @@
+---
+name: agent-gateway
+description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway V2 resources and actions through its ten-verb CLI or MCP contract.
+---
+
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v2-operator-verbs -->
 <!-- gateway-catalog-sha256: 6eca67234126cb0ad3d069252ed5b049076015a7b02468115732e8cc8f9c43e5 -->

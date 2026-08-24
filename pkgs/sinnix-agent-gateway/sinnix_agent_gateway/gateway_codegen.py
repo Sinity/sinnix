@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from typing import Any
@@ -125,7 +126,12 @@ def render_skill() -> str:
     machine = _action_name(catalog["actions"], "machine.query", "gateway.catalog")
     browser = _action_name(catalog["actions"], "browser.operate", "gateway.catalog")
     desktop = _action_name(catalog["actions"], "desktop.operate", "gateway.catalog")
-    return f'''<!-- GENERATED FILE. DO NOT EDIT. -->
+    return f'''---
+name: agent-gateway
+description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway V2 resources and actions through its ten-verb CLI or MCP contract.
+---
+
+<!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: {catalog['revision']} -->
 <!-- gateway-catalog-sha256: {catalog['action_catalog_hash']} -->
 # Agent Gateway V2
@@ -244,3 +250,23 @@ def check_artifacts(root: Path) -> list[str]:
         elif path.read_text() != expected:
             mismatches.append(f"stale or corrupt generated artifact: {path.relative_to(root)}")
     return mismatches
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Generate gateway V2 docs, skill, and fixtures")
+    parser.add_argument("--root", type=Path, required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--write", action="store_true")
+    mode.add_argument("--check", action="store_true")
+    args = parser.parse_args()
+    root = args.root.resolve()
+    if args.write:
+        write_artifacts(root)
+        return 0
+    mismatches = check_artifacts(root)
+    if mismatches:
+        for mismatch in mismatches:
+            print(mismatch)
+        return 1
+    print("gateway artifacts are current")
+    return 0

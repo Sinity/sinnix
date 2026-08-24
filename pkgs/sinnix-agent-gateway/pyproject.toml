@@ -11,6 +11,7 @@ dependencies = ["mcp==2.0.0", "sinnixd==0.1.0"]
 
 [project.scripts]
 sinnix-agent-gateway = "sinnix_agent_gateway.cli:main"
+sinnix-agent-gateway-generate = "sinnix_agent_gateway.gateway_codegen:main"
 
 [tool.setuptools.packages.find]
 include = ["sinnix_agent_gateway*"]

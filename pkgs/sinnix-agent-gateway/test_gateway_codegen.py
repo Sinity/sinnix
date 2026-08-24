@@ -29,6 +29,9 @@ def test_generated_artifacts_are_current_and_deterministic() -> None:
         assert check_artifacts(ROOT) == []
     assert render_reference() == render_reference()
     assert render_skill() == render_skill()
+    assert render_skill().startswith(
+        "---\nname: agent-gateway\ndescription: Use when invoking, inspecting, or documenting "
+    )
     assert render_fixtures() == render_fixtures()
     assert json.loads(FIXTURE_FILE.read_text())["action_catalog_hash"] == catalog_payload()["action_catalog_hash"]
 
