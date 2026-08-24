@@ -60,7 +60,7 @@ let
 in
 mkServiceModule {
   name = "agent-gateway";
-  description = "principal-scoped MCP gateway over one attested agent-job substrate";
+  description = "principal-scoped MCP gateway over attested agent-job endpoints";
   extraOptions = {
     stateDir = lib.mkOption {
       type = lib.types.str;
@@ -72,110 +72,208 @@ mkServiceModule {
       default = 262144;
       description = "Maximum bytes returned by bounded project, observe, and artifact operations.";
     };
-    tunnel = {
-      enable = lib.mkEnableOption "OpenAI Secure MCP Tunnel";
-      principal = lib.mkOption {
-        type = lib.types.enum [
-          "observer"
-          "operator"
-        ];
-        default = "observer";
-        description = "Gateway principal selected explicitly for this tunnel.";
-      };
-      autoStart = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = "Start the supervised tunnel at user login.";
-      };
-      tunnelId = lib.mkOption {
-        type = lib.types.str;
-        default = "";
-        description = "Non-secret OpenAI tunnel identifier.";
-      };
-      runtimeKeyFile = lib.mkOption {
-        type = lib.types.str;
-        default = config.sinnix.secrets.paths."openai-tunnel-runtime-key";
-        description = "Agenix runtime key with tunnel Read and Use permissions.";
-      };
-      healthPort = lib.mkOption {
-        type = lib.types.port;
-        default = 3088;
-        description = "Loopback health, readiness, metrics, and operator UI port.";
-      };
-      approvedManifestHash = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        description = "Frozen ChatGPT connector manifest SHA-256 after publication.";
-      };
-      approvedActionCatalogHash = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        description = "Frozen principal-scoped V2 action catalog SHA-256 after review.";
-      };
+    endpoints = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule (
+          { name, ... }:
+          {
+            options = {
+              enable = lib.mkEnableOption "this OpenAI Secure MCP endpoint";
+              principal = lib.mkOption {
+                type = lib.types.enum [
+                  "observer"
+                  "operator"
+                ];
+                default = "observer";
+                description = "Gateway principal selected explicitly for this endpoint.";
+              };
+              label = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "Optional human-readable endpoint label.";
+              };
+              autoStart = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Start this supervised endpoint at user login.";
+              };
+              stateDir = lib.mkOption {
+                type = lib.types.str;
+                default = "/home/${userName}/.local/state/sinnix/agent-gateway/${name}";
+                description = "Private persisted state for this endpoint.";
+              };
+              scope = {
+                projects = lib.mkOption {
+                  type = lib.types.listOf lib.types.str;
+                  default = [ ];
+                  description = "Canonical project IDs visible to this endpoint.";
+                };
+                captures = lib.mkOption {
+                  type = lib.types.listOf lib.types.str;
+                  default = [ ];
+                  description = "Capture lane or subject scopes visible to this endpoint.";
+                };
+              };
+              tunnelId = lib.mkOption {
+                type = lib.types.str;
+                default = "";
+                description = "Non-secret OpenAI tunnel identifier for this endpoint.";
+              };
+              runtimeKeyFile = lib.mkOption {
+                type = lib.types.str;
+                default = "/run/agenix/openai-tunnel-runtime-key-${name}";
+                description = "Agenix runtime key dedicated to this endpoint.";
+              };
+              healthPort = lib.mkOption {
+                type = lib.types.port;
+                default = 3088;
+                description = "Loopback health, readiness, metrics, and UI port.";
+              };
+              approvedManifestHash = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "Frozen endpoint tool manifest SHA-256 after publication.";
+              };
+              approvedActionCatalogHash = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                description = "Frozen endpoint action catalog SHA-256 after review.";
+              };
+            };
+          }
+        )
+      );
+      default = { };
+      description = "Independently supervised principal-scoped gateway endpoints.";
     };
   };
   configFn =
     { cfg, ... }:
     let
-      configFile = jsonFormat.generate "sinnix-agent-gateway.json" {
-        inherit (cfg) stateDir maxResultBytes;
-        approvedManifestHash = cfg.tunnel.approvedManifestHash;
-        approvedActionCatalogHash = cfg.tunnel.approvedActionCatalogHash;
-        approvedManifestPrincipal = cfg.tunnel.principal;
-        runtimeInventory = "/etc/sinnix/runtime-inventory.json";
-        capabilityIndex = "/etc/sinnix/capability-index.json";
-        systemdRunCommand = "${pkgs.systemd}/bin/systemd-run";
-        systemctlCommand = "${pkgs.systemd}/bin/systemctl";
-        observeCommand = "${scriptPkgs.sinnix-observe}/bin/sinnix-observe";
-        hyprControlCommand = "/home/${userName}/.local/bin/sinnix-hypr-control";
-        screenshotControlCommand = "/home/${userName}/.local/bin/sinnix-screenshot-control";
-        kittyControlCommand = "/home/${userName}/.local/bin/sinnix-kitty-control";
-        chromeControlCommand = "/home/${userName}/.local/bin/sinnix-chrome-control";
-        beadsCommand = "${scriptPkgs.beads}/bin/bd";
-        captureCommand = "${scriptPkgs.sinnix-capture}/bin/sinnix-capture";
-        mcpBrokerServers = mcpBrokerServers;
-        projects = config.sinnix.projects.entries;
-      };
-      mcpWrapper = pkgs.writeShellScriptBin "sinnix-agent-gateway-mcp" ''
-        set -euo pipefail
-        principal="observer"
-        if [[ ''${1:-} == --principal ]]; then
-          principal="''${2:?--principal requires a value}"
-          shift 2
-        fi
-        exec ${gatewayBin} --config ${configFile} --principal "$principal" serve "$@"
-      '';
-      manifestCheck = pkgs.writeShellScriptBin "sinnix-agent-gateway-schema" ''
-        set -euo pipefail
-        principal="''${1:-observer}"
-        exec ${gatewayBin} --config ${configFile} --principal "$principal" manifest
-      '';
-      approvalGate = pkgs.writeShellScript "sinnix-agent-gateway-approval-gate" ''
-        set -euo pipefail
-        exec ${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg cfg.tunnel.principal} approval-check
-      '';
+      enabledEndpoints = lib.filterAttrs (_: endpoint: endpoint.enable) cfg.endpoints;
+      endpointProjects =
+        endpoint:
+        lib.filterAttrs (
+          projectId: _: endpoint.scope.projects == [ ] || builtins.elem projectId endpoint.scope.projects
+        ) config.sinnix.projects.entries;
+      endpointConfigs = lib.mapAttrs (
+        name: endpoint:
+        jsonFormat.generate "sinnix-agent-gateway-${name}.json" {
+          stateDir = endpoint.stateDir;
+          inherit (cfg) maxResultBytes;
+          endpoint = {
+            inherit name;
+            label = endpoint.label;
+            principal = endpoint.principal;
+            scope = endpoint.scope;
+          };
+          approvedManifestHash = endpoint.approvedManifestHash;
+          approvedActionCatalogHash = endpoint.approvedActionCatalogHash;
+          approvedManifestPrincipal = endpoint.principal;
+          runtimeInventory = "/etc/sinnix/runtime-inventory.json";
+          capabilityIndex = "/etc/sinnix/capability-index.json";
+          systemdRunCommand = "${pkgs.systemd}/bin/systemd-run";
+          systemctlCommand = "${pkgs.systemd}/bin/systemctl";
+          observeCommand = "${scriptPkgs.sinnix-observe}/bin/sinnix-observe";
+          hyprControlCommand = "/home/${userName}/.local/bin/sinnix-hypr-control";
+          screenshotControlCommand = "/home/${userName}/.local/bin/sinnix-screenshot-control";
+          kittyControlCommand = "/home/${userName}/.local/bin/sinnix-kitty-control";
+          chromeControlCommand = "/home/${userName}/.local/bin/sinnix-chrome-control";
+          beadsCommand = "${scriptPkgs.beads}/bin/bd";
+          captureCommand = "${scriptPkgs.sinnix-capture}/bin/sinnix-capture";
+          mcpBrokerServers = mcpBrokerServers;
+          projects = endpointProjects endpoint;
+        }
+      ) enabledEndpoints;
+      endpointArtifacts = lib.mapAttrs (
+        name: endpoint:
+        let
+          configFile = endpointConfigs.${name};
+        in
+        {
+          mcpWrapper = pkgs.writeShellScriptBin "sinnix-agent-gateway-${name}-mcp" ''
+            set -euo pipefail
+            exec ${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg endpoint.principal} serve "$@"
+          '';
+          manifestCheck = pkgs.writeShellScriptBin "sinnix-agent-gateway-${name}-schema" ''
+            set -euo pipefail
+            exec ${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg endpoint.principal} manifest
+          '';
+          approvalGate = pkgs.writeShellScript "sinnix-agent-gateway-${name}-approval-gate" ''
+            set -euo pipefail
+            exec ${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg endpoint.principal} approval-check
+          '';
+        }
+      ) enabledEndpoints;
+      endpointValues = lib.mapAttrsToList (_: endpoint: endpoint) enabledEndpoints;
+      duplicateValues =
+        field:
+        let
+          values = map (endpoint: toString endpoint.${field}) endpointValues;
+        in
+        lib.filter (value: builtins.length (builtins.filter (candidate: candidate == value) values) > 1) (
+          lib.unique values
+        );
+      invalidProjects = lib.concatLists (
+        lib.mapAttrsToList (
+          name: endpoint:
+          map (projectId: "${name}:${projectId}") (
+            lib.filter (
+              projectId: !(builtins.hasAttr projectId config.sinnix.projects.entries)
+            ) endpoint.scope.projects
+          )
+        ) enabledEndpoints
+      );
     in
     {
       assertions = [
         {
-          assertion = !cfg.tunnel.enable || cfg.tunnel.tunnelId != "";
-          message = "sinnix.services.agent-gateway.tunnel.tunnelId must be set when the tunnel is enabled";
+          assertion = invalidProjects == [ ];
+          message = "agent-gateway endpoint scopes name unknown projects: ${lib.concatStringsSep ", " invalidProjects}";
         }
         {
-          assertion =
-            (cfg.tunnel.approvedManifestHash == null) == (cfg.tunnel.approvedActionCatalogHash == null);
-          message = "sinnix.services.agent-gateway.tunnel approvals must include both the tool manifest and action catalog hashes";
+          assertion = duplicateValues "tunnelId" == [ ];
+          message = "agent-gateway endpoints must use distinct tunnel IDs";
         }
-      ];
+        {
+          assertion = duplicateValues "runtimeKeyFile" == [ ];
+          message = "agent-gateway endpoints must use distinct runtime credentials";
+        }
+        {
+          assertion = duplicateValues "healthPort" == [ ];
+          message = "agent-gateway endpoints must use distinct health ports";
+        }
+      ]
+      ++ lib.concatLists (
+        lib.mapAttrsToList (name: endpoint: [
+          {
+            assertion = endpoint.tunnelId != "";
+            message = "sinnix.services.agent-gateway.endpoints.${name}.tunnelId must be set when the endpoint is enabled";
+          }
+          {
+            assertion = endpoint.approvedManifestHash != null && endpoint.approvedActionCatalogHash != null;
+            message = "sinnix.services.agent-gateway.endpoints.${name} requires both manifest and action catalog approvals";
+          }
+        ]) enabledEndpoints
+      );
 
       environment.systemPackages = [
         scriptPkgs.sinnix-agent-gateway
         tunnelClient
-        mcpWrapper
-        manifestCheck
-      ];
+      ]
+      ++ lib.concatLists (
+        lib.mapAttrsToList (name: _: [
+          endpointArtifacts.${name}.mcpWrapper
+          endpointArtifacts.${name}.manifestCheck
+        ]) enabledEndpoints
+      );
 
-      environment.etc."sinnix/agent-gateway.json".source = configFile;
+      environment.etc = lib.mapAttrs' (
+        name: _:
+        lib.nameValuePair "sinnix/agent-gateway-${name}.json" {
+          source = endpointConfigs.${name};
+        }
+      ) enabledEndpoints;
 
       sinnix.persistence.home.directories = [
         {
@@ -184,9 +282,10 @@ mkServiceModule {
         }
       ];
 
-      sinnix.runtime.surfaces = lib.optionalAttrs cfg.tunnel.enable {
-        agent-gateway-tunnel = {
-          unit = "sinnix-agent-gateway-tunnel.service";
+      sinnix.runtime.surfaces = lib.mapAttrs' (
+        name: endpoint:
+        lib.nameValuePair "agent-gateway-${name}" {
+          unit = "sinnix-agent-gateway-${name}.service";
           manager = "user";
           resourceClass = "interactive-agent";
           observe = {
@@ -195,55 +294,60 @@ mkServiceModule {
           };
           workload = {
             class = "protected";
-            rationale = "Outbound operator control path; bounded and restartable.";
+            rationale = "Outbound ${endpoint.principal} control path for endpoint ${name}; independently bounded and restartable.";
             processMatchers = [ "tunnel-client" ];
           };
-        };
-      };
+          activation = {
+            mode = "direct";
+            publicEndpoint = "127.0.0.1:${toString endpoint.healthPort}";
+          };
+        }
+      ) enabledEndpoints;
 
       home-manager.users.${userName} = {
-        systemd.user.services.sinnix-agent-gateway-tunnel = lib.mkIf cfg.tunnel.enable {
-          Unit = {
-            Description = "OpenAI Secure MCP Tunnel to Sinnix ${cfg.tunnel.principal} gateway";
-            After = [
-              "network-online.target"
-              "sinnixd.service"
-            ];
-            Wants = [ "network-online.target" ];
-            Requires = [ "sinnixd.service" ];
-            ConditionPathExists = cfg.tunnel.runtimeKeyFile;
-            StartLimitIntervalSec = 300;
-            StartLimitBurst = 8;
-          };
-          Service = {
-            Type = "simple";
-            ExecStartPre = lib.optionals (cfg.tunnel.approvedManifestHash != null) [
-              approvalGate
-            ];
-            ExecStart = ''
-              ${tunnelClient}/bin/tunnel-client run \
-                --control-plane.tunnel-id ${lib.escapeShellArg cfg.tunnel.tunnelId} \
-                --control-plane.api-key file:%d/runtime-key \
-                --mcp.command ${lib.escapeShellArg "command=${mcpWrapper}/bin/sinnix-agent-gateway-mcp --principal ${cfg.tunnel.principal},channel=main"} \
-                --health.listen-addr 127.0.0.1:${toString cfg.tunnel.healthPort} \
-                --log.format json
-            '';
-            LoadCredential = "runtime-key:${cfg.tunnel.runtimeKeyFile}";
-            Restart = "on-failure";
-            RestartSec = "5s";
-            ProtectHome = false;
-            ReadWritePaths = [
-              cfg.stateDir
-            ];
-            UMask = "0077";
+        systemd.user.services = lib.mapAttrs' (
+          name: endpoint:
+          lib.nameValuePair "sinnix-agent-gateway-${name}" {
+            Unit = {
+              Description = "OpenAI Secure MCP endpoint ${name} for Sinnix ${endpoint.principal} gateway";
+              After = [
+                "network-online.target"
+                "sinnixd.service"
+              ];
+              Wants = [ "network-online.target" ];
+              Requires = [ "sinnixd.service" ];
+              ConditionPathExists = endpoint.runtimeKeyFile;
+              StartLimitIntervalSec = 300;
+              StartLimitBurst = 8;
+            };
+            Service = {
+              Type = "simple";
+              ExecStartPre = [ endpointArtifacts.${name}.approvalGate ];
+              ExecStart = ''
+                ${tunnelClient}/bin/tunnel-client run \
+                  --control-plane.tunnel-id ${lib.escapeShellArg endpoint.tunnelId} \
+                  --control-plane.api-key file:%d/runtime-key \
+                  --mcp.command ${lib.escapeShellArg "command=${endpointArtifacts.${name}.mcpWrapper}/bin/sinnix-agent-gateway-${name}-mcp,channel=main"} \
+                  --health.listen-addr 127.0.0.1:${toString endpoint.healthPort} \
+                  --log.format json
+              '';
+              LoadCredential = "runtime-key:${endpoint.runtimeKeyFile}";
+              Restart = "on-failure";
+              RestartSec = "5s";
+              ProtectHome = false;
+              ReadWritePaths = [
+                endpoint.stateDir
+              ];
+              UMask = "0077";
+            }
+            // lib.optionalAttrs (endpoint.principal == "observer") {
+              NoNewPrivileges = true;
+              PrivateTmp = true;
+              ProtectSystem = "strict";
+            };
+            Install.WantedBy = lib.optionals endpoint.autoStart [ "default.target" ];
           }
-          // lib.optionalAttrs (cfg.tunnel.principal == "observer") {
-            NoNewPrivileges = true;
-            PrivateTmp = true;
-            ProtectSystem = "strict";
-          };
-          Install.WantedBy = lib.optionals cfg.tunnel.autoStart [ "default.target" ];
-        };
+        ) enabledEndpoints;
       };
     };
 } args

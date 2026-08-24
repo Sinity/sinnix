@@ -37,15 +37,63 @@
     sinnixd.enable = true;
     agent-gateway = {
       enable = true;
-      tunnel = {
-        enable = true;
-        # Review checkpoint on what reaches remote ChatGPT. This V2 observer
-        # manifest was regenerated from the packaged gateway on 2026-08-23.
-        # It exposes seven principal-filtered read tools: status, catalog,
-        # context, canonical get, query, events, and bounded job wait.
-        approvedManifestHash = "56e983a04fa2a99672e3b2abca3858fa79779119336c410b615a8f4ebc2324f1";
-        approvedActionCatalogHash = "d7bfa479335b5c8429cf3828bebcd49305820b98285014ee4c7fb5efe6462732";
-        tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
+      endpoints = {
+        observer = {
+          enable = true;
+          label = "ChatGPT observer";
+          principal = "observer";
+          tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
+          runtimeKeyFile = "/run/agenix/openai-tunnel-runtime-key";
+          healthPort = 3088;
+          scope = {
+            projects = [
+              "sinnix"
+              "sinex"
+              "polylogue"
+              "lynchpin"
+            ];
+            captures = [
+              "ai"
+              "machine"
+            ];
+          };
+          # Review checkpoint on the observer connector. It exposes the seven
+          # principal-filtered read verbs: status, catalog, query, get,
+          # context, events, and bounded job wait.
+          approvedManifestHash = "56e983a04fa2a99672e3b2abca3858fa79779119336c410b615a8f4ebc2324f1";
+          approvedActionCatalogHash = "d7bfa479335b5c8429cf3828bebcd49305820b98285014ee4c7fb5efe6462732";
+        };
+        operator = {
+          enable = true;
+          label = "Private ChatGPT operator";
+          principal = "operator";
+          # This is a separately provisioned tunnel. It is intentionally not
+          # shared with the observer connector or its credential.
+          tunnelId = "tunnel_3f0d5d6c4f1b2a9e8d7c6b5a4f3e2d1c";
+          runtimeKeyFile = "/run/agenix/openai-tunnel-runtime-key-operator";
+          healthPort = 3089;
+          scope = {
+            projects = [
+              "sinnix"
+              "sinex"
+              "polylogue"
+              "lynchpin"
+            ];
+            captures = [
+              "activity"
+              "ai"
+              "comms"
+              "health"
+              "machine"
+              "self"
+            ];
+          };
+          # The pins are for the packaged operator principal. The endpoint
+          # remains fail-closed until its dedicated tunnel and agenix key are
+          # provisioned on the host.
+          approvedManifestHash = "d2278a247c2903ed790159ade049d1705a2e62ba0ecb788324c80879affca556";
+          approvedActionCatalogHash = "ff270089560aebdb5d23c467f9417ebf853dd65775739dd5d4d8696ba8674466";
+        };
       };
     };
     ops-reducer.enable = true;

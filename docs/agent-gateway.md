@@ -130,12 +130,12 @@ The runtime key is the agenix secret `openai-tunnel-runtime-key`. Tunnel-managem
 
 ## Deployment and proof
 
-1. Run `switch` so the pinned SDK, tunnel client, generated configuration, runtime inventory, and user units are one generation.
-2. Compare `sinnix-agent-gateway-schema observer` with a direct stdio `tools/list` call.
-3. Enable a tunnel only after its ID and dedicated runtime credential exist.
-4. Verify `http://127.0.0.1:3088/healthz` and `/readyz`, then inspect the tunnel logs through systemd.
-5. Create or refresh the ChatGPT connector from the tunnel, approve its exact tool snapshot, and invoke `status`, `catalog`, and a bounded project read from ChatGPT.
-6. Record the observed connector tool names and manifest hash separately from the Nix-approved manifest. The observation is required before claiming connector parity.
+1. Provision each enabled tunnel ID and its dedicated runtime credential. Keep the operator credential limited to the authenticated private tunnel.
+2. Run `switch` so the pinned SDK, tunnel client, endpoint configs, runtime inventory, and user units are one generation.
+3. Compare each endpoint schema command with a direct stdio `tools/list` call. Both manifests retain the stable ten verb names; principal-filtered catalogs and runtime authorization exclude observer mutation authority.
+4. Verify `http://127.0.0.1:3088/healthz`, `http://127.0.0.1:3088/readyz`, `http://127.0.0.1:3089/healthz`, and `http://127.0.0.1:3089/readyz`, then inspect both tunnel logs through systemd.
+5. Create or refresh the two ChatGPT connectors from their separate tunnels, approve each exact tool snapshot, and invoke `status`, `catalog`, and a bounded project read from each connector.
+6. Record observed connector tool names and manifest hashes separately for observer and operator. Each observation is required before claiming connector parity.
 
 The old prototype state may be retained under the canonical state root's `legacy/` directory for forensic inspection. It must not be loaded as active jobs, artifacts, repositories, tasks, or audit data.
 <!-- BEGIN GENERATED GATEWAY V2 REFERENCE -->
