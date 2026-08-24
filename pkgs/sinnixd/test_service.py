@@ -592,6 +592,41 @@ def test_project_operation_parameter_schema_is_closed_and_bounded(tmp_path: Path
         ProjectCatalog([tmp_path])
 
 
+def test_project_operation_parameter_count_supports_broad_typed_clis(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    parameters = "".join(
+        f'\n[operations.broad.parameters.option_{index}]\ntype = "bool"\nflag = "--option-{index}"\n'
+        for index in range(17)
+    )
+    descriptor.write_text(
+        descriptor.read_text()
+        + '\n[operations.broad]\ndescription = "Expose a broad typed CLI"\nexec = ["fixture-check"]\npool = "normal"\nresult = "exit"\ncache = "none"\n'
+        + parameters
+    )
+
+    project = ProjectCatalog([tmp_path]).get("fixture")
+
+    assert len(project.operation("broad").parameters) == 17
+
+
+def test_project_operation_parameter_count_remains_bounded(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    parameters = "".join(
+        f'\n[operations.too_broad.parameters.option_{index}]\ntype = "bool"\nflag = "--option-{index}"\n'
+        for index in range(33)
+    )
+    descriptor.write_text(
+        descriptor.read_text()
+        + '\n[operations.too_broad]\ndescription = "Exceed the typed CLI bound"\nexec = ["fixture-check"]\npool = "normal"\nresult = "exit"\ncache = "none"\n'
+        + parameters
+    )
+
+    with pytest.raises(ProjectConfigError, match="must be a bounded table"):
+        ProjectCatalog([tmp_path])
+
+
 def test_operation_dependencies_reject_required_parameter_targets(tmp_path: Path) -> None:
     """Anti-vacuity: dependencies have no parameter payload to satisfy required inputs."""
     write_adapter(tmp_path)
