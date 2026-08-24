@@ -36,7 +36,6 @@ mkServiceModule {
       publicEndpoint = "127.0.0.1:${toString helpers.data.ports.litellm.public}";
       backendEndpoint = "127.0.0.1:${toString helpers.data.ports.litellm.backend}";
       idleTimeout = "30s";
-      dependsOn = [ "ollama-proxy" ];
     };
     observe = {
       enable = true;
@@ -80,10 +79,10 @@ mkServiceModule {
         };
       };
 
-      # Gateway is useless without the backend; order startup after it.
+      # Backends are socket-activated independently by their own public
+      # endpoints. Requiring Ollama here would start its GPU occupant whenever
+      # LiteLLM starts and evict direct backends such as Muse Glimmer.
       systemd.services.litellm = {
-        after = [ "ollama.service" ];
-        requires = [ "ollama-proxy.service" ];
         partOf = [ "litellm-proxy.service" ];
         wantedBy = lib.mkIf (!cfg.autoStart) (lib.mkForce [ ]);
       };
