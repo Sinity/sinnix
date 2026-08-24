@@ -1839,9 +1839,16 @@ class GenericJobs:
 
     @staticmethod
     def _estimate(spec: GenericJobSpec, state: Mapping[str, Any]) -> int:
-        if spec.estimate_memory_bytes is not None:
-            return spec.estimate_memory_bytes
-        return POOL_POLICIES[spec.pool]["default_estimate"]
+        estimate = (
+            spec.estimate_memory_bytes
+            if spec.estimate_memory_bytes is not None
+            else POOL_POLICIES[spec.pool]["default_estimate"]
+        )
+        # A pool budget governs concurrent accounting, not whether a lone job
+        # may ever run. Historical peaks can exceed that budget (the process is
+        # still contained by its systemd slice); without this cap such a job is
+        # permanently unadmittable even when the pool is empty.
+        return min(estimate, POOL_POLICIES[spec.pool]["memory_budget"])
 
     def _admit_locked(self) -> None:
         state = self._admission_state()

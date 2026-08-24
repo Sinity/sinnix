@@ -116,6 +116,25 @@ def test_mixed_workload_injects_light_workers_and_queues_bulk(tmp_path: Path) ->
     assert first["state"]["phase"] == "submitted"
 
 
+def test_lone_job_larger_than_pool_budget_is_not_permanently_starved(tmp_path: Path) -> None:
+    adapter = project(tmp_path / "project", (
+        operation("oversized", pool="bulk", estimate_memory_bytes=24 * 1024 * 1024 * 1024),
+    ))
+    systemd = FakeSystemd()
+    subject = jobs(tmp_path, systemd)
+
+    started = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("oversized"),
+        correlation_id="oversized",
+        parameters={},
+    )
+
+    assert started["state"]["phase"] == "submitted"
+    assert started["state"]["admission"]["estimate_memory_bytes"] == 18 * 1024 * 1024 * 1024
+    assert [entry["command"] for entry in systemd.started] == [("env", "oversized")]
+
+
 def test_cache_and_coalescing_are_principal_isolated(tmp_path: Path) -> None:
     adapter = project(tmp_path / "project", (operation("check", cache="tree+environment"),))
     systemd = FakeSystemd()
