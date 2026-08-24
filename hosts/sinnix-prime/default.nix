@@ -405,4 +405,20 @@
   # this tmpfs is sized for routine small-file churn, not build output.
   boot.tmp.useTmpfs = true;
   boot.tmp.tmpfsSize = "6G";
+
+  # Polylogue's managed verifier owns and promptly reclaims per-run trees.
+  # Keep its high-churn fixtures off NVMe while bounding the lane independently
+  # from the shared /tmp mount; failure evidence is copied into its receipts.
+  fileSystems."/realm/tmp/polylogue-pytest" = {
+    device = "tmpfs";
+    fsType = "tmpfs";
+    options = [
+      "mode=0700"
+      "uid=1000"
+      "gid=100"
+      "size=2G"
+      "nosuid"
+      "nodev"
+    ];
+  };
 }
