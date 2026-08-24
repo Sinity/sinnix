@@ -1,6 +1,6 @@
 ---
 name: chatgpt-conversations
-description: Read complete, structured ChatGPT conversations already open in the operator's Chrome. Use when the user asks to inspect, summarize, continue work from, compare, or act on currently open ChatGPT chats or tabs. Supports full transcripts and optional bounded reads, and never navigates, activates, submits, edits, or closes a tab.
+description: Read, compare, summarize, or continue complete ChatGPT conversations already open in the operator's Chrome without navigating, activating, editing, submitting, or closing tabs.
 ---
 
 # ChatGPT conversations

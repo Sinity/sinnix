@@ -1,6 +1,6 @@
 ---
 name: claude-sessions
-description: Extract readable prose from raw Claude Code session JSONL — list sessions and render a session's user/assistant text (optionally thinking and tool one-liners) without the tool-result bulk. Use when a session's accumulated understanding must be preserved, re-read, summarized, or handed to another agent, and Polylogue ingestion is unavailable or too indirect. Stopgap: prefer Polylogue search/read for archived history once it is operational.
+description: Extract readable prose from raw Claude Code session JSONL when Polylogue is unavailable, including bounded user and assistant text, optional thinking, and tool summaries.
 ---
 
 # Claude sessions (raw JSONL stopgap)

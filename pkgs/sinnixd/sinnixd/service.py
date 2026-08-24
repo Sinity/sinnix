@@ -47,7 +47,7 @@ class SinnixdService:
         default_factory=lambda: DeclaredOwnerAdapters(OwnerExecution())
     )
     version: str = "0.2.0"
-    native_runner: Path = Path("/home/sinity/.config/hermes/skills/agent-orchestration/scripts/run_agent_prompt.sh")
+    native_runner: Path = Path("/home/sinity/.config/hermes/skills/agent-runtime/scripts/run_agent_prompt.sh")
     workspaces: GitWorkspaces | None = None
     delivery: GitHubDelivery | None = None
     tasks: TaskService | None = None

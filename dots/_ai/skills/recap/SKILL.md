@@ -1,6 +1,6 @@
 ---
 name: recap
-description: Refresh stale session context and prepare a concise handoff. Use after context compaction, when resuming interrupted work, or when the current task, decisions, blockers, and next action are unclear. Do not use for durable project history or ordinary task planning.
+description: Refresh stale session context or prepare a concise handoff after compaction or interruption when current work, decisions, evidence, blockers, and the next action are unclear.
 ---
 
 # Session Recap
@@ -45,6 +45,11 @@ Prepare for session end:
 - Unfinished work
 - Suggested next steps
 - Worth remembering (for CLAUDE.md or scratch)
+
+Before compaction or interruption, include active AgentCTL job and workspace
+IDs, Beads IDs and claims, exact Git state, changed files, verification already
+run, and the single next action. On re-entry, verify those carriers before
+continuing instead of reconstructing state from prose alone.
 
 ---
 

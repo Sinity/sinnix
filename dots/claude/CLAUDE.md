@@ -1,534 +1,148 @@
-# Sinity Environment Memory
-
-> **This file is your persistent environment memory** — compressed
-> understanding of the ecosystem, NixOS config, and project constellation.
-> One flat file, no transclusion; Codex/Gemini read it via symlinks from the
-> sinnix repo, so edits propagate to every agent instantly.
-
-## Operating Contract
-
-### Stance
-
-- Be a finisher, not a planner. Carry work to a verified done-state unless a
-  concrete blocker remains.
-- No fake-temporal deferral. "Long session" / "it's getting late" framing is
-  not a risk assessment; session length does not correlate with capability.
-  Context budget does, and it is directly checkable. To defer or scope down,
-  name the concrete blocker and what would change it — otherwise proceed.
-- A concerning discovery is the next work item, not a stopping point. When
-  investigation surfaces something real — a migration that left data behind,
-  a crash-looping service, an anomaly near a planned deletion — the default
-  is to keep going: find the root cause, fix it, verify the load-bearing
-  fact directly, and finish the original task. "This needs its own
-  investigation" names the next step, not a blocker; you are the
-  investigator.
-- Before halting or escalating, check the fact that actually decides the
-  question, not a proxy for it. "Is the data byte-identical at the new
-  location" is directly checkable even while "is the service healthy" is
-  red; a failing proxy never justifies stopping when the direct check is
-  available. Preconditions inherited from notes or earlier passes are
-  re-verified, not obeyed — confirm the underlying reason still applies
-  before propagating a halt.
-- Escalate with reasoning attached: mark the judgment as your inference, and
-  state the specific blocker, what you verified directly, and what evidence
-  or decision would unblock it. Legitimate blockers are narrow: an
-  irreversible step whose safety direct verification cannot establish,
-  authority or consent the operator has not granted, or evidence that does
-  not exist on this machine. None of this loosens destructive-action
-  caution — verify-then-delete is part of finishing, and the stopping line
-  stays at genuinely irreversible-and-ambiguous or consent-shaped
-  questions, never at "I found something concerning."
-- Preserve intent. Implement the requested outcome; do not substitute a safer,
-  smaller, or more familiar product decision.
-- Prefer surgical renewal. Remove obsolete paths, flags, wrappers, aliases, and
-  stale docs in the same change that replaces them. No deprecation theater.
-- Unfinished is not obsolete. When you find half-built work (a wired-but-unused
-  parser, a dead-looking function with tests, a partially-connected pipeline),
-  the presumption is to COMPLETE it, not delete it. Deletion needs positive
-  evidence the capability is unwanted: superseded by a shipped replacement,
-  contradicted by a recorded decision, or explicitly retired by the operator.
-  "No production callers yet" is what half-done work looks like, not proof of
-  abandonment; check git history, tracker items, and design docs for the
-  intent before choosing removal over completion. When completion is too large
-  for the current task, file a tracking item and leave the code; do not
-  "clean it up" into a capability regression.
-- Respect the local architecture. Use established modules, helpers, data flows,
-  and typed interfaces before adding machinery.
-- Work evidence-first. When uncertain, inspect the live config/source/history
-  instead of relying on memory.
-
-### Execution
-
-- On ambiguous or multi-step requests, first state the understood scope and any
-  exclusions. Then proceed.
-- Batch related edits: gather context, decide the coherent change, apply it, and
-  verify once with the narrow command that exercises the changed surface.
-- When a check fails, diagnose the whole failure shape and batch the fixes.
-  Avoid fix-one-error-at-a-time loops.
-- Do not expand scope opportunistically. If adjacent cleanup is valuable but not
-  implied, ask or record it as follow-up.
-- Use the right substrate: `rg` and structured parsers for exact search,
-  semantic tools near code edits, Context7 for current third-party APIs, and
-  Polylogue/Lynchpin for historical reconstruction.
-- Cross-reference related functions/modules before declaring a pattern fixed.
-  A single call site is not proof of consistency.
-- Keep communication concise but concrete: state assumptions, tactics, changed
-  files, verification, and residual risk.
-- Do not pipe command output into `tail`/`head`/`grep -c` truncating filters
-  as a default habit — the transcript loses failures and stack traces behind
-  a blind line count. Let commands print naturally; for genuinely voluminous
-  output, redirect to a file and read it deliberately, or use the tool's own
-  narrowing flags. Truncate only with a specific, stated reason.
-- When `bd where` succeeds in the current repository, use Beads (`bd`) for
-  durable task state: ready work, claims, blockers, dependencies, discovered
-  follow-ups, and persistent project memory. Use local plans only for the
-  current turn's execution checklist; do not make markdown TODOs the shared
-  source of truth.
-
-### Safety And Git
-
-- Preserve user work. Dirty trees are normal; never revert or overwrite changes
-  you did not make unless explicitly asked.
-- Treat destructive operations as explicit acts. State what will be deleted,
-  reset, force-pushed, rebased, killed, or history-rewritten before doing it.
-- Commit locally when a coherent change is verified. Push proactively when the
-  repository workflow allows it; for product repos this means pushing feature
-  branches and opening/updating PRs, not direct pushes to protected default
-  branches. Do not push when the user, repo, or active workflow says to hold.
-- Stage by path, not broad sweeps, when secrets or unrelated work could be
-  captured.
-- Don't leave transient work-in-progress artifacts (git stashes, scratch merge
-  files, temp branches) sitting around once they're confirmed superseded or
-  redundant — clean them up as part of finishing the task, not as a separate
-  ask. This applies to things you created yourself this session for your own
-  bookkeeping (e.g. a stash you popped and merged, a scratch file used to
-  resolve a conflict): once you've verified its content is fully captured
-  elsewhere (committed, merged, or superseded by a newer state), remove it
-  rather than leaving it as clutter for the user to notice and ask about
-  later. This is distinct from destructive-operation caution around content
-  you did NOT create or haven't verified is redundant — verify first, then
-  clean up without waiting to be asked.
-
-### Verification
-
-- Tests should protect behavior, contracts, invariants, reproduced bugs,
-  security boundaries, parser semantics, or cross-module contracts.
-- Do not add tests, static scans, policy gates, allowlists, or deny lists that
-  merely memorialize a refactoring diff: a renamed variable/type/module,
-  deleted spelling, moved command, removed list entry, changed literal, or
-  import path. A refactoring is verified through independently valuable
-  behavior, type, build, and architecture checks—not by forbidding the old
-  textual shape or requiring the new one. If such fossilized-diff checks
-  already exist in the touched surface, remove them instead of updating them
-  to encode the latest spelling. For ordinary cleanup, rely on source review,
-  evaluation, and focused behavior checks.
-- Never enforce a process or invariant by pattern-matching natural language
-  (grepping commit messages, close reasons, or notes for magic phrases). If
-  an invariant matters enough to enforce mechanically, give it a structured
-  carrier (typed field, id reference, exit code) and enforce that; otherwise
-  it is enforced by judgment at review time — or not enforced. The reverse
-  too: never write prose in a stilted register so a tool can grep it later.
-- If baseline checks are already failing, classify whether the failure is
-  related before claiming completion. Do not hide inherited failure state.
-- Before declaring completion, cite the changed files, report exact verification
-  commands, and say what was not run.
-
-### Runtime Discipline
-
-- **Every dispatch of long-running work carries a time contract.** Before
-  launching anything expected to outlive a minute (background command, gated
-  merge, full test run, build, subagent), state the expected duration WITH its
-  evidence (historical median, receipt, prior run — never a guess presented as
-  fact), and set a deadline watchdog at ~2x that expectation via
-  `ScheduleWakeup` (this is the legitimate wall-clock-deadline use; it is not
-  polling). At the deadline, if no completion notification has arrived:
-  inspect progress evidence (receipts, progress/heartbeat files, process
-  state), then decide — kill, fix, or extend WITH a stated reason. Never sit
-  past a deadline silently, and never wait on work whose expected duration
-  you cannot name. When actual duration exceeds expectation by >50%, that is
-  a finding to report and file, not noise to absorb: either the expectation
-  was wrong (update the evidence base) or the work regressed (investigate).
-  2026-08-18 lesson: a 42-minute terminal verify was watched to completion
-  with zero output, no stated expectation, and no deadline — and its own
-  45-minute cap then killed a run that was minutes from green.
-- For long-running commands, do not busy-wait or spawn duplicates against the
-  same resource. Redirect to a known log or let the harness report completion.
-- Do not run multiple heavy builds/tests against the same checkout, database,
-  lockfile, or output path. If restarting, stop the old run first.
-- Reuse one output artifact per purpose and clean stale processes when they are
-  part of the task.
-- Do not turn transient live-host pressure into permanent project policy:
-  handle resource incidents with one-shot overrides, stopping unrelated
-  workloads, or the containment layer — never by permanently reducing build
-  parallelism, cache behavior, retention, or coverage for a momentary spike.
-- Before changing build policy for resource reasons, identify the pressure
-  source in live evidence (process RSS/PSS, swap, PSI, cgroups, journal OOM
-  events, active timers, disk IO state). A high `used` in `free` is not a
-  leak; separate anon memory, tmpfs/zram, page cache, and D-state backlog.
-
-## Writing Style
-
-Load the shared `writing-style` skill when writing or editing human-facing prose. Its trigger and full rules cover GitHub content, commit messages, chat replies, and documentation.
-
-## Ambient Control Model
-
-Browser, desktop, and terminal control are normal local capabilities on this
-machine. Interpret user language directly:
-
-- **There is ONE browser** — the user's own Chrome, on `127.0.0.1:9222`, driven
-  by `sinnix-chrome-control`. Agents share his profile deliberately: wherever
-  he is authenticated, so are they, with nothing to seed and nothing that goes
-  stale. The former agent-private profile is deleted, along with headless mode
-  (headless announces itself in the User-Agent and loses to bot checks that a
-  real window passes).
-- **"your browser" / "an agent browser"** → `sinnix-chrome-control agent-window
-[--url ...]`. Opens a NEW WINDOW and parks it on the hidden
-  inactive named `agentbrowser` workspace, so it takes no focus and touches none of
-  his tabs. Isolation is per-window now, not per-profile. Hidden windows still
-  run JS and still screenshot — verified — because CDP goes through the
-  renderer, not the compositor. **F7** shows or hides it; do not activate it
-  for him, just say it is there.
-- **"my browser" / "the real browser" / "my tabs"** → the same Chrome, but act
-  on his EXISTING pages (`list-tabs`, then operate on a specific page id).
-  High-authority: authenticated pages, cookies, non-active tabs. Never
-  navigate or close a page he is using unless he asked for exactly that.
-- **"desktop" / "window" / "screen"** → use Hyprland and screenshot helpers:
-  `sinnix-hypr-control`, `sinnix-keyboard-control`, and
-  `sinnix-screenshot-control`.
-- **"terminal" / "that terminal window" / "Codex pane"** → use Kitty remote
-  control first: `sinnix-kitty-control list`, then capture/send/wait against a
-  matching title/window. Prefer this over global keyboard injection for
-  terminals.
-
-Prefer the `sinnix-*` helpers for browser/desktop/window/terminal perception and
-control. Use `claude-browser`/`codex-browser` only when Chrome DevTools MCP
-capabilities are specifically needed. Load the `desktop-control-plane` skill
-when a task needs recipes, screenshots, HDR handling, or careful GUI
-interaction. Run `sinnix-observe` when you need a live, correlated probe of
-runtime and control surfaces.
-
-### Agent Runtime Control
-
-AgentCTL and its `agent-control` MCP routes are the lifecycle authority for registered workspaces and unattended jobs. Use their typed launch, status, wait, result, cancel, workspace, and task operations. Set backend, model, and effort explicitly. Polylogue preserves session orientation; do not recreate state from transcripts or terminal scraping. The Claude/Codex hook boundary is in `docs/agent-hook-parity.md`. Kitty is visible UI only and never changes job lifecycle state.
-
-### Claude Code Dispatch Doctrine
-
-Load `claude-self-knowledge` for harness details. Every fresh Claude Agent dispatch names its model; only forks inherit. The PreToolUse guard enforces that policy and confirms allowed launches. Use AgentCTL for durable work, including its returned job IDs for observation and cancellation. Agent teams remain read-only research/synthesis only; write-capable work follows the AgentCTL workspace contract.
-
-### Evidence and Telemetry
-
-Use the control plane for live action; use the evidence plane to reconstruct
-what happened. Do not infer history from the current screen/browser state when
-Polylogue, Lynchpin, or Sinnix captures can answer directly.
-
-- **AI session history** → Polylogue. `polylogued` tails Claude/Codex sessions;
-  use Polylogue MCP/search for "what did agents do/say/change?" questions.
-  Raw session JSONL also lives under `~/.claude/projects/<project>/*.jsonl`
-  when you need to grep something Polylogue has not ingested yet.
-- **Cross-source personal/system history** → Lynchpin. It materializes chats,
-  git, ActivityWatch, shell, health, and machine telemetry into queryable
-  analysis products. Use it for timelines, correlations, and "what happened
-  around X?" questions.
-- **Host/runtime evidence** → Sinnix observability. `/etc/sinnix/runtime-inventory.json`,
-  `sinnix-observe`, and `/realm/data/{activity,machine}/**` are the raw/runtime truth for
-  services, captures, pressure, screenshots, terminal recordings, and machine
-  telemetry.
-- **Live browser/desktop/terminal state** → DevTools and `sinnix-*` helpers.
-  Capture screenshots or terminal scrollback into the capture lake when the
-  observation should survive the session.
-
-Look up history proactively when the user references past work ("remember
-when…", "like before"), after context compaction, or when an error pattern
-feels previously solved. When history access yields durable insight, write it
-down (scratch note, `bd remember`, or the owning CLAUDE.md) instead of
-re-discovering it next session.
-
-Raw-log lives at `/realm/data/knowledgebase/logs.raw-log.md`. It is the
-append-only, low-friction operator stream used by `rawlog`, `rawlog-capture`,
-and `oracle`; read it when the user references raw-log/rawlog, recent subjective
-context, or "what have I been saying/thinking lately?"
-
-## System Context
-
-### Hardware
-
-- **Host**: `sinnix-prime` (desktop workstation)
-- **CPU**: Intel i7-13700K (16 cores, 24 threads); **GPU**: RTX 3080; 32 GB RAM
-- **OS**: NixOS, unstable channel
-- Storage: MX500 1TB SATA = root/system (wear-limited — avoid gratuitous
-  writes); Crucial P3 4TB NVMe = `/realm`; 6TB HDD = `/outer-realm` (backup
-  target); 14TB HDD = `/neo-outer-realm` (bulk media, automount).
-
-### NixOS Environment
-
-```
-# NEVER use nix profile commands - all packages via modules
-# Use nix shell/nix develop for temporary tools
-
-direnv allow           # Activate project devshell
-nix develop            # Enter flake devshell manually
-nix build .#<output>   # Build specific flake output
-```
-
-**Sinnix rebuild** — ALWAYS use the devshell commands (they wrap `nh` with idle
-CPU/IO scheduling and a shared rebuild lock):
-
-```
-# From inside the devshell (direnv allow or nix develop):
-test-vm                     # Test risky changes in QEMU VM first
-switch                      # Apply to live system (resource-scoped nh os switch)
-boot                        # Safer alternative: set boot default without immediate activation
-
-# From outside the devshell (e.g. Claude Code, non-devshell shell):
-cd /realm/project/sinnix && nix develop --command switch
-# NEVER: nix shell nixpkgs#nh --command nh os switch ...
-# NEVER: nh os switch ... (bypasses idle-scheduling wrapper)
-```
-
-> **Why**: only the nix-build.slice placement caps build memory; bypassing
-> the wrapper lets Rust builds consume all 32 GB. Do not insert
-> `check --no-build` before `switch` as hygiene — `switch` already
-> evaluates/builds; repeating eval only loads the recovery path.
-
-Agent CLIs self-update via npm bootstrap (`~/.local/state/<agent>/npm`,
-persisted) — no Nix rebuild needed.
-
-## Filesystem Structure
-
-### /realm - The Data Kingdom
-
-```
-/realm/
-├── project/           # All active project repositories
-├── data/              # Canonical PERSONAL data lake (see below)
-├── library/           # Re-acquirable consumption media + datasets + model weights (backup-excluded)
-├── state/             # Always-on service state (journal, polylogue, machine-telemetry, containers; nodatacow subvols)
-├── backup/            # Explicit backup landings
-├── cache/             # Rebuildable caches
-├── worktrees/         # Agent/compile-heavy git worktrees (not aged)
-├── inbox/             # Intake: download/ bundle/ sweep/ capture/
-├── code-snapshots     # Convenience door -> data/derived/lynchpin/code-snapshots
-└── tmp/               # Throwaway analysis output, aged shell TMPDIR
-```
-
-`scripts/lake-lint` (sinnix) asserts these node sets exactly, in both
-directions — a taxonomy change updates data, INVENTORY, and the lint
-manifest in one commit.
-
-User home is `/home/sinity`. It is intentionally not under `/realm`: the live
-home directory is recreated on each boot and populated from `/persist` via the
-impermanence module plus Home Manager activation. Persistent home state such as
-SSH keys lives at `/persist/home/sinity/.ssh` and appears at runtime as
-`/home/sinity/.ssh`.
-
-### Orientation Rules
-
-- Do not assume freedesktop directories live under `/home/sinity`. Query them
-  with `xdg-user-dir <NAME>` when the user says Downloads, Documents, Desktop,
-  etc.
-- The configured downloads directory is `/realm/inbox/download`; `~/Downloads`
-  may not exist. Incoming bundles, patches, browser downloads, and cleanup
-  artifacts usually land there or under `/realm/inbox/download/misc`.
-- Use `/realm/tmp/` for throwaway analysis output that may be large or useful
-  across a short session. Avoid `/tmp` for heavy repo work; it is a small
-  tmpfs and heavy churn belongs on NVMe. Put ad-hoc output FILES in
-  `/realm/tmp/work/` (auto-aged 30d), never at the `/realm/tmp` root — the
-  root is deliberately unaged and root litter requires manual sweeps.
-- Use `/realm/worktrees/` for agent worktrees or any compile-heavy checkout.
-  This keeps build output on NVMe and avoids root-disk wear.
-- Treat `/realm/data/` as canonical user data, not scratch. Read from it for
-  evidence; only write there through the owning tool or workflow. Read
-  `/realm/data/INVENTORY.md` before reorganizing anything in the lake.
-
-### /realm/data - Data Lake Structure
-
-```
-/realm/data/    # cut by GENESIS: how did these bytes come to exist?
-├── activity/          # This machine observed the OPERATOR: activitywatch,
-│                      #   webhistory, asciinema, keylog, shell (atuin), audio,
-│                      #   screenshot, irc, mail, calendar, transcripts, ...
-├── machine/           # This machine observed the HOST: telemetry, syslog,
-│                      #   netflow, router, peripherals, phone lane
-├── health/            # Physiology: Samsung Health, sleep, air quality
-├── accounts/          # Bounded third-party pulls: google, reddit, spotify,
-│                      #   raindrop, facebook-messenger, teams, outlook, ...
-├── ai/                # AI dialogue archives (incl. live polylogue lane)
-├── derived/           # Tool-computed products; reports live ONLY in
-│                      #   derived/reports/ (flat, date-suffixed)
-├── self/              # Irreplaceable personal artifacts (genome, photos, finance)
-├── knowledgebase/     # Raw-log repo (load-bearing path; not a vault any more)
-├── records/ code/     # Bounded personal/document datasets
-├── notes/             # FROZEN pending prose-merge ruling — do not add here
-└── secrets/           # agenix ciphertext
-```
-
-Retired generations (never write to these): `data/captures`, `data/exports`,
-`data/comms`, `data/reports`, `data/decisions`, `/realm/media`,
-`/realm/staging`, `data/libraries`.
-
-## Project Constellation
-
-### Core Infrastructure
-
-| Project             | Path                             | Purpose                                                        |
-| ------------------- | -------------------------------- | -------------------------------------------------------------- |
-| **sinnix**          | `/realm/project/sinnix`          | NixOS system configuration (flake-parts, home-manager, agenix) |
-| **sinex**           | `/realm/project/sinex`           | Event-driven data capture platform (Rust, NATS, PostgreSQL)    |
-| **sinity-lynchpin** | `/realm/project/sinity-lynchpin` | Analysis coordination hub (Python, DuckDB, HPI-style modules)  |
-
-### Capture & Integration Tools
-
-| Project              | Path                              | Purpose                                                     |
-| -------------------- | --------------------------------- | ----------------------------------------------------------- |
-| **polylogue**        | `/realm/project/polylogue`        | AI chat export archiver (Claude, ChatGPT, Codex → Markdown) |
-| **scribe-tap**       | `/realm/project/scribe-tap`       | Wayland keystroke mirror for Hyprland                       |
-| **intercept-bounce** | `/realm/project/intercept-bounce` | Keyboard debouncing filter (Rust)                           |
-
-### Knowledge & Analysis
-
-| Project           | Path                        | Purpose                            |
-| ----------------- | --------------------------- | ---------------------------------- |
-| **knowledgebase** | `/realm/data/knowledgebase` | Raw-log repo (vault dissolved; path load-bearing) |
-| **stashbox**      | `/realm/project/stashbox`   | Media library tooling              |
-
-Third-party checkouts (snix, tvix, codex) are not Sinity projects.
-
-### Project Relationships
-
-Flow: sinnix enables the service stack → sinex captures events
-(scribe-tap, polylogue) → lynchpin aggregates everything (ActivityWatch,
-Atuin, git, health, chats) into calendar views, baselines, narratives.
-
-### Environment Variables (set by sinnix)
-
-```
-SINEX_ROOT=/realm/project/sinex
-LYNCHPIN_REPO_ROOT=/realm/project/sinity-lynchpin
-POLYLOGUE_ROOT=/realm/project/polylogue
-KNOWLEDGEBASE_ROOT=/realm/data/knowledgebase
-```
-
-### Documentation Map
-
-Sinnix grok notes: `sinnix/.agent/scratch/` (architecture + machine map);
-lynchpin data sources: `sinity-lynchpin/docs/reference/data-sources.md`;
-data inventory: `/realm/data/INVENTORY.md`. Project detail (structure,
-patterns, workflows) lives in each project's `CLAUDE.md`.
-
-## Agent Context Conventions
-
-- **`CLAUDE.md` is the canonical instruction file everywhere** — one flat file
-  per repo, no `@`-transclusion. `AGENTS.md` in each repo is a committed
-  symlink to `CLAUDE.md`, so Claude, Codex, and Gemini always read identical,
-  current content.
-- **MCP profiles**: registry source of truth is `flake/data/mcp-registry.nix`
-  in sinnix; wiring in `modules/features/dev/agents/`. Plain `claude`/`codex`
-  = lean profile; `claude-full`/`codex-full` = full (GitHub, Context7,
-  Polylogue, Lynchpin); `*-browser` adds Chrome DevTools MCP. The
-  bare `~/.local/bin/claude` is deliberately unmanaged (the installer
-  clobbers it); `claude` aliases the managed lean wrapper.
-- **Alternate backends**: `claude-deepseek`/`codex-deepseek` (agenix
-  `deepseek-api-key`); `claude-local`/`codex-local`/`hermes-local` (local
-  Ollama hub via LiteLLM `127.0.0.1:4000`; model names live once in
-  `litellm.nix`); `claude-clodex` (the local Clodex proxy, using the
-  operator's ChatGPT/Codex subscription OAuth and preserving native Claude
-  routing for Anthropic models). LiteLLM stays local-models-only; remote
-  backends are wired per-wrapper with agenix keys. Clodex operations are in
-  `docs/clodex.md`.
-- **Shared skills** live in `dots/_ai/skills/` (sinnix repo) and are linked
-  into `~/.config/claude/skills`, `~/.codex/skills`, `~/.gemini/skills`.
-- **Desktop environment**: Hyprland (Wayland) + Noctalia shell; terminals
-  kitty; browser qutebrowser + Chrome (CDP on :9222).
-- **Dotfile pattern**: everything in sinnix `dots/` reaches `$HOME` via Home
-  Manager out-of-store symlinks — edits propagate instantly without rebuild.
-- **Context7**: documentation discovery via `resolve-library-id` →
-  `query-docs`. Cheap, prevents stale-API mistakes; use it for unfamiliar or
-  fast-moving third-party APIs.
-
-## Common Workflows
-
-### Workspace Inventory
-
-For a fast read-only snapshot across many repos, don't hand-roll `find`/`git
-status` loops: `python3 dots/_ai/tools/workspace_recon_scan.py --root
-/realm/project` (sinnix repo; `--changed-only --with-size --json` variants).
-
-### Heavy Agent Work
-
-Project dev environments provide setup only. Ordinary commands such as
-`xtask`, `cargo`, `pytest`, `uv`, `polylogue`, and `nix` execute directly.
-Use a project's declared AgentCTL operation for scheduled or heavy work so
-Sinnixd owns its transient service, cgroup, lifecycle, and result.
-
-Resource containment is not a verification contract: in Sinex use `xtask`,
-which owns the schema/SQLx/feature/formatting assumptions. Resource pressure
-during heavy work is a scheduling problem handled by the named operation's
-admission contract, never a transparent wrapper or a durable project default.
-
-**Worktree placement (wear policy):** heavy-compile worktrees go under
-`/realm/worktrees/` (NVMe), never `/tmp` — a Rust `CARGO_TARGET_DIR` writes
-multiple GB per build.
-
-**Sinex tests from a worktree** need the live dev-DB `DATABASE_URL` (and so
-does `git push` past the drift guard) — recipe in sinex's CLAUDE.md.
-
-### Data Analysis (lynchpin)
-
-`cd /realm/project/sinity-lynchpin && just` lists all recipes;
-`python -m lynchpin.cli.materialize --all` runs the DAG-orchestrated
-substrate materialization; `...cli.current_state --start/--end` for windows.
-
-### Agent Orchestration (Multi-Agent Work)
-
-Read `agent-orchestration` before dispatch. State the isolation model and file ownership, use an AgentCTL workspace for each worker, and commit every verified chunk in that workspace. Workers run foreground checks and report an anti-vacuity statement. Coordinators use AgentCTL IDs and own Beads changes; do not create batch manifests, terminal ledgers, or checkout-local task state.
-
-### Daily oracle digest
-
-`scripts/oracle` (sinnix) builds a daily reverse-prompting digest from the
-rawlog tail, project activity, and lynchpin state via `claude -p`
-(subscription auth). Run `oracle`; flags via `--help`.
-
-## Git Protocol
-
-Load the shared `git-protocol` skill for detailed Git, GitHub, commit, branch, pull request, staging, merge, conflict, and publication procedure. The operating contract above remains authoritative for safety, repository policy, and direct-master exceptions.
-
-## Codebase Analysis
-
-### Survey → Narrate → Synthesize
-
-For thorough code review or bug hunting, use the `analyze` or `swarm` skill:
-
-1. **Survey** (BFS): List all items at the current level, note concerns without deep-diving
-2. **Narrate** (DFS): For the highest-concern item, verbalize line-by-line what each piece does
-3. **Synthesize**: Return to the broad view, cross-reference findings across related code
-
-Empirically validated techniques: line-by-line narration (forces attention),
-cross-referencing related functions (e.g. `register()` vs `list()` key-format
-mismatches), checking get→modify→put patterns for races in distributed code.
-
-## Thinking in Markdown
-
-Externalize reasoning to scratch files. Context is expensive, files are cheap.
-
-**When:** non-trivial analysis, multi-step debugging, architectural decisions;
-anything that took >1 tool call to discover; cross-session work.
-
-**Where:** global → `~/.claude/scratch/NNN-<topic>.md`; project-specific →
-`.agent/scratch/<date-or-NNN>-<topic>.md` (create early, ensure `.gitignore`
-covers it). **Never `.claude/` for per-project content** — Claude Code
-treats it as protected and prompts on every write. YAML frontmatter
-(`created`, `purpose`, `status`, `project`), then Context/Findings/Outcome.
-When referring the user to a scratch file, summarize the key points in your
-reply — don't just point. Projects may pin notes in CLAUDE.md via a "Pinned
-Notes" section of bare `@path` lines (Claude-only transclusion).
-
-## Session Recall (hooks)
-
-SessionStart hooks (`dots/claude/hooks/sessionstart-{polylogue,sinex}-recall.sh`
-in the sinnix repo, referenced dots-direct from managed-settings.json; Codex
-runs the
-same commands) print recent matching sessions and a Sinex
-machine-context block; both exit silently when data is unavailable. For deeper
-history use Polylogue MCP/search rather than guessing from memory;
-`polylogued.service` is the live ingestion daemon — verify freshness with
-`polylogued status` when it matters.
+# Sinity Environment Contract
+
+Stable cross-project operating rules. Machine inventory, project status, job
+state, and task queues are queryable (`agentctl`, project MCPs); do not
+duplicate them here. Project semantics live in each repository's `CLAUDE.md`.
+
+## Working stance
+
+- Be a finisher. Carry work to a verified done-state unless a concrete blocker
+  remains; name the blocker and what would change it, or proceed. Session
+  length is never a reason to defer — context budget is, and it is checkable.
+- A concerning discovery is the next work item, not a stopping point. Check the
+  fact that decides the question, not a proxy for it. Escalate only for
+  genuinely irreversible-and-ambiguous steps, missing authority/consent, or
+  evidence that does not exist on this machine.
+- Preserve intent; never substitute a smaller, safer, or more familiar product
+  decision. Prefer one canonical route: when a replacement is established,
+  remove the retired route's commands, wrappers, docs, and tests in the same
+  change.
+- Unfinished is not obsolete. Deleting an apparently unused path needs positive
+  evidence of abandonment (shipped replacement, recorded decision, explicit
+  retirement) — inspect history, tasks, and design docs first; otherwise
+  complete it or file the completion.
+- Work evidence-first: inspect source, live state, history, and recorded
+  results rather than extending an assumption. Separate observed fact from
+  inference; name what would change an uncertain conclusion.
+
+## Scope, batching, communication
+
+- On multi-step requests, state the understood scope and exclusions, then
+  proceed. Batch related edits; diagnose the whole failure shape before fixing
+  one error at a time. Don't expand scope opportunistically — record follow-ups.
+- Report changed files, exact verification commands, and residual risk. Never
+  claim a broad invariant from a narrow check.
+- Don't truncate command output by default (`| tail`, `| grep -c`); let it
+  print, or capture to a file and read deliberately, with a stated reason.
+- Load the `writing-style` skill for human-facing prose (issues, PRs, commits,
+  docs, chat).
+
+## Machine and filesystem orientation
+
+Host `sinnix-prime`: i7-13700K, RTX 3080, 32 GB, NixOS unstable. Root SATA SSD
+is wear-limited — no gratuitous writes; NVMe is `/realm`.
+
+- `/realm/project/` — active repos (sinnix, polylogue, sinex, sinity-lynchpin…)
+- `/realm/data/` — canonical personal data lake (read for evidence; write only
+  through owning tools; see `/realm/data/INVENTORY.md`)
+- `/realm/state/` — live service state (polylogue archive, external task DBs
+  under `/realm/state/tasks/<project>`)
+- `/realm/tmp/work/` — throwaway analysis output (aged 30d); never heavy work
+  in `/tmp` (small tmpfs). `/realm/worktrees/` — compile-heavy checkouts.
+- Downloads land in `/realm/inbox/download`; query freedesktop dirs with
+  `xdg-user-dir`, don't assume `~/Downloads`.
+- Home is impermanent (rebuilt each boot from `/persist` + Home Manager).
+
+Rebuild sinnix ONLY via its devshell wrappers (`switch` / `boot` / `test-vm`,
+or `cd /realm/project/sinnix && nix develop --command switch`) — never bare
+`nh os switch`; the wrapper owns idle scheduling and the build slice.
+
+## Runtime and workspaces
+
+`agentctl` (CLI verbs: status, shell, agent, project, workspace, job, owner,
+task) is the one interface for durable machine work, workspaces, coding-agent
+jobs, and task backends. Load the `agent-runtime` skill before nontrivial
+runtime/workspace operations and `orchestrate` before multi-agent work.
+
+- Ordinary short foreground commands run directly. Detached, queued,
+  resource-heavy, or shared work goes through declared project operations:
+  `agentctl job start <project> <operation>`.
+- Never hand-construct `systemd-run`, cgroup placement, memory envelopes, or
+  background reapers; never infer ownership from process names — act on
+  returned job/workspace/session IDs and preserve them in reports.
+- Don't duplicate a heavy job; attach to the identical active operation.
+- Every agent dispatch names backend, model, and effort explicitly.
+- Checkpoint a workspace before risky integration, compaction, or recovery.
+- Authority map: Git = commits/worktrees; systemd = live processes; GitHub =
+  PR/review/merge; the external task backend (`agentctl task …`, Beads per
+  project under `/realm/state/tasks/`) = task state. Reconcile disagreements;
+  never invent a second truth. Feature branches never carry task state.
+- Long-running dispatches carry a time contract: state expected duration with
+  evidence and act at ~2x with a decision, never silent waiting. Completion
+  notifications are authoritative; do not poll.
+
+## Ambient control (browser, desktop, terminal)
+
+One browser — the operator's Chrome, CDP on `127.0.0.1:9222`, shared profile.
+"Your/agent browser" → `sinnix-chrome-control agent-window` (hidden workspace,
+F7 toggles). "My browser/tabs" → act on his existing pages, high authority,
+never navigate/close what he is using. Desktop → `sinnix-hypr-control`,
+`sinnix-keyboard-control`, `sinnix-screenshot-control`; terminals →
+`sinnix-kitty-control` first. Load `desktop-control-plane` for recipes.
+`sinnix-observe` gives a live correlated probe.
+
+## Evidence planes
+
+Control plane for action; evidence plane for history — never reconstruct
+history from the current screen when a store answers directly:
+
+- AI-session history → Polylogue (MCP/CLI; raw JSONL under
+  `~/.claude/projects/` as fallback).
+- Cross-source personal/system history → Lynchpin.
+- Host/runtime truth → `/etc/sinnix/runtime-inventory.json`, `sinnix-observe`,
+  `/realm/data/captures/**`.
+- Operator stream → `/realm/data/knowledgebase/logs.raw-log.md` (rawlog).
+
+Look history up proactively on "remember when…", after compaction, or when an
+error feels previously solved; write durable insights down (scratch note,
+memory, or the owning CLAUDE.md) instead of re-deriving next session.
+
+## Git and publication
+
+- Feature branches unless the repo explicitly publishes from its default
+  branch. Stage by path; inspect `git diff --cached`; never `git add -A` on
+  significant changes; never `--no-verify` unasked.
+- Treat tracked files, commits, task exports, CI logs, and PR text as public.
+  Never commit secrets, captures, transcripts, personal datasets, or generated
+  personal analyses; review the complete staged diff as public content.
+- Preserve user work: dirty trees are normal; state destructive intent before
+  any delete/reset/force-push/rewrite/kill. Clean up your own transient
+  artifacts (stashes, scratch branches) once verified captured elsewhere.
+- Publish/land through `agentctl workspace publish|land` where the project
+  adapter provides them; never bypass hosted checks or protected-branch policy.
+  Load `review-land` for adversarial review + publication procedure.
+
+## Verification
+
+- Tests protect behavior, contracts, invariants, reproduced bugs, and security
+  boundaries — never textual fossils of a refactoring diff, and never
+  pattern-matching of natural language as enforcement.
+- Selected/affected verification proves only its selected scope; a full corpus
+  is a deliberate batch/master checkpoint. Never launder selected greens into
+  whole-suite claims.
+- Classify inherited failures before claiming completion; state exactly what
+  ran and what did not.
+
+## Investigation and recovery
+
+Freeze volatile evidence before mutation; reproduce the user-visible route;
+for recovery inspect live state → Git/checkpoints → task/history stores →
+backups, verifying restored content before deleting sources. Load
+`investigate` for incidents and ambiguous recovery.
+
+## Memory
+
+Persistent memory lives per-project under `~/.claude/projects/<p>/memory/`
+(one fact per file, indexed one line each in `MEMORY.md`; superseded material
+goes to `archive/`). Update or delete stale memories on contact; verify a
+recalled mechanism still exists before recommending it.

@@ -1,11 +1,6 @@
 ---
 name: enrichment-pass
-description: >
-  Process a state bundle (runtime inventory, steering export, atuin tail,
-  polylogue hook-spool deltas, session JSONL deltas, lynchpin products,
-  journald highlights) into a versioned narrative + structured state delta.
-  Invoked headlessly by sinnix-enrich-dump (sinnix-jfiy.2) via `claude -p`;
-  not interactive.
+description: Process a Sinnix runtime, shell, session, Lynchpin, and journal state bundle into a versioned narrative and structured state delta for headless enrichment.
 metadata:
   short-description: Enrichment-loop bundle -> narrative + state-delta
 ---

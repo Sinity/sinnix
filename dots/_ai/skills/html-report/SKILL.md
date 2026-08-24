@@ -1,6 +1,6 @@
 ---
 name: html-report
-description: Produce agent output for human reading as self-contained interactive HTML instead of markdown — templates, layout system, and interactivity patterns. Use for reports, reviews, censuses, dashboards, plans, incident timelines, comparisons, and BEFORE publishing any Claude Artifact (this is the "workshop skill" the Artifact tool's own built-in instructions refer to by that name — load this skill instead of the generic artifact-design skill whenever the deliverable is a report/dashboard/census/review rather than a one-off app or landing page).
+description: Produce self-contained interactive HTML reports, reviews, censuses, dashboards, plans, incident timelines, or comparisons for human reading, including workshop-style Claude Artifacts.
 ---
 
 # HTML output ("the unreasonable effectiveness of HTML")

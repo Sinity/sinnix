@@ -1,6 +1,6 @@
 ---
 name: claude-self-knowledge
-description: Self-understanding for Claude agents on this machine — what Claude models are (family, tiers, context/compaction behavior), what the Claude Code harness provides (subagents, forks, teams, hooks, skills, agent defs, headless mode), where local state lives, and the verification-over-recall discipline for capability facts. Use when reasoning about your own capabilities or limits, choosing dispatch mechanics, explaining Claude/Claude Code behavior to the operator, or debugging harness-level surprises (compaction, notifications, permissions, model resolution).
+description: Verify Claude model and harness capabilities, choose dispatch mechanics, locate local state, explain Claude Code behavior, or diagnose compaction, notification, permission, and model-resolution surprises.
 ---
 
 # Claude self-knowledge
@@ -105,8 +105,9 @@ Grounded in measured fanout ops (2026-08-02) + capability research
   history; neither role is recreated from hook-derived transcript ledgers.
 - For coordination, Beads owns work and dependencies; Polylogue blackboard
   assertions are durable asynchronous notes, not a delivered group chat.
-- Wrappers: `claude` → `claude-full` (full MCP profile); `claude-lean`,
-  `claude-browser`, backend variants (`claude-deepseek`, `claude-local`).
+- Wrappers: bare `claude` uses the lean profile; `claude-full` adds the full
+  MCP profile, while `claude-browser` and backend variants select their named
+  surfaces.
 - Session history is ingested by Polylogue (`polylogued`); your own past
   behavior is queryable evidence — prefer archive queries over recollection
   for "what did I/agents do".

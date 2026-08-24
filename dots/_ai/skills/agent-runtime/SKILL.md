@@ -1,0 +1,70 @@
+---
+name: agent-runtime
+description: Operate or recover AgentCTL workspaces and jobs, including checkpoints, exact-head execution, logs, results, cancellation, cleanup, and checkpoint-based redispatch.
+---
+
+# Agent runtime
+
+AgentCTL is the lifecycle authority for registered work. Systemd owns process
+state and cgroups, Git owns workspace state, hosted Git owns review state,
+Beads owns tasks, and Sinnixd schedules work and records bounded results. Do
+not add a parallel ledger for any of them.
+
+## Workspaces
+
+- Inspect with `agentctl workspace list` and `workspace get` before mutation.
+- Create or adopt linked worktrees only beneath the project's declared
+  workspace root. Git remains authoritative for HEAD, branch, membership, and
+  dirty state on every read.
+- `workspace checkpoint <id>` stores digest-verified staged and unstaged
+  patches plus a bounded untracked archive when project policy permits it. It
+  does not create a stash or commit.
+- `workspace restore <id> <checkpoint>` requires the same branch and HEAD and
+  a clean existing workspace. `workspace recover` recreates a missing
+  AgentCTL-created workspace whose branch still matches the checkpoint, then
+  restores it. Adopted workspaces cannot be recovered this way.
+- Publish only after an exact-head declared verifier succeeds. Use
+  `workspace publish`, `review-status`, `land`, and `finish` for hosted review;
+  use `finish-integrated` for an already-integrated branch.
+- `dispose` is only for clean, base-contained, no-review work with empty
+  checkpoints. `reap` removes an eligible managed worktree but retains its
+  branch. Never clean an adopted, dirty, divergent, or identity-changed tree.
+
+## Jobs
+
+- Discover declared operations with `agentctl project get <project>`.
+- Start with `agentctl job start <project> <operation> [--workspace <id>]`.
+  Parameters, when declared, enter through `--parameters-json` and are retained
+  publicly only as a digest.
+- Observe with `job get`, `job logs`, and bounded `job wait`; consume the typed
+  artifact with `job result`. Cancel by job ID, then verify terminal state.
+- The operation descriptor owns environment, resources, dependencies, result
+  contract, and timeout. Declared operations may run for up to eight hours;
+  typed agent jobs remain capped at one hour.
+- Every long launch carries an evidence-based duration expectation and a
+  deadline around twice that expectation. At the deadline, inspect progress
+  evidence and choose to cancel, repair, or extend for a stated reason.
+
+## Agent continuation
+
+`agentctl agent` is a single-shot launch. There is no resume verb. For work
+that cannot finish within its one-hour contract, checkpoint repository state,
+record load-bearing task facts in Beads, prepare a fresh prompt that names the
+checkpoint and next action, and dispatch another exact-workspace agent. Do not
+pretend this is session resume.
+
+Before context compaction, record current objective, completed evidence,
+active job/workspace/task IDs, changed files, blockers, and the exact next
+action. Resume by verifying those IDs and current Git state, then use `recap`
+to restore orientation without replaying the whole transcript.
+
+## Failures
+
+- Missing workspace: inspect Git membership and checkpoint authority before
+  `recover`; preserve evidence before any repair.
+- Wedged job: inspect `job get` and logs, cancel once, and confirm the unit and
+  record are terminal before restarting.
+- Dead worker: checkpoint its workspace, record the result and residuals on
+  the task, then release or reassign the claim.
+- Environment mismatch: use the registered operation. Do not duplicate its
+  devshell, secret, port, or service contract in ad hoc shell wrappers.

@@ -1,16 +1,6 @@
 ---
 name: grok
-description: >
-  Run a large, systematic codebase audit campaign — measure the codebase,
-  partition it into regions sized for genuine coverage, dispatch a fleet of
-  agents across model tiers (including cheap/fast/tiny-context models), triage
-  findings against a recurring bug-pattern taxonomy, and file them into the
-  project tracker with consistent blocking criteria. Use for "audit the whole
-  codebase", "find bugs before we ship/wipe/migrate", "exhaustively review
-  this", or when a single agent's context can't hold the target. Not for a
-  quick one-file review (use a single review agent) or an interactive,
-  user-steered exploration (use `analyze`) or a routed one-shot dev task (use
-  `swarm`).
+description: Audit an entire codebase systematically by measuring and partitioning it, dispatching tiered review lanes, triaging recurring defect patterns, and filing concrete findings when one context cannot cover the target.
 metadata:
   short-description: Large-scale systematic codebase audit campaigns
 ---
@@ -32,7 +22,7 @@ theorized.
 ```
 IF you need ONE file/module reviewed                → dispatch a single `review` agent directly, skip this skill
 IF the user wants to steer phase-by-phase             → use `analyze` (survey→narrate→synthesize, interactive)
-IF it's a routed one-shot dev task (implement/fix/PR)  → use `swarm`
+IF it's a routed one-shot dev task (implement/fix/PR)  → use `orchestrate`
 IF you need broad, systematic coverage of a real
    codebase, sized past what one agent's context holds → this skill
 ```
@@ -41,7 +31,7 @@ Grok is the campaign layer: it owns measurement-driven partitioning,
 multi-tier model dispatch (including non-Claude fast/cheap models), a bug
 taxonomy to triage against, and coordinator discipline for filing hundreds of
 findings without duplicating or losing them. It does not reinvent
-`agent-orchestration`'s launch mechanics or `analyze`'s narrate technique —
+`orchestrate`'s launch mechanics or `analyze`'s narrate technique —
 it cites both and adds what large campaigns need on top.
 
 ## Workflow
