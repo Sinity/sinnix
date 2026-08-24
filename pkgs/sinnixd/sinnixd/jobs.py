@@ -1246,6 +1246,25 @@ class GenericJobStore:
             raise JobRecordError("job scratch artifact escapes owned root")
         self._cleanup_scratch_path(root, path)
 
+    def prepare_scratch(self, record: GenericJobRecord) -> Path | None:
+        if record.scratch_path is None:
+            return None
+        root = self.tmpfs_scratch_root if record.spec.scratch == "tmpfs" else self.nvme_scratch_root
+        _ensure_durable_directory(root)
+        root = root.resolve()
+        path = record.scratch_path
+        if path.parent != root or path.name != record.job_id:
+            raise JobRecordError("job scratch artifact escapes owned root")
+        try:
+            path.mkdir(mode=0o700)
+        except FileExistsError:
+            artifact = path.lstat()
+            if artifact.st_uid != os.getuid() or artifact.st_mode & 0o077 or not stat.S_ISDIR(artifact.st_mode):
+                raise JobRecordError("job scratch artifact is not a private directory")
+        else:
+            _fsync_directory(root)
+        return path
+
     def cleanup_inactive_scratch(self, records: Sequence[GenericJobRecord]) -> None:
         active = {record.job_id for record in records if not record.state.get("terminal")}
         for root in (self.tmpfs_scratch_root, self.nvme_scratch_root):
@@ -1970,8 +1989,8 @@ class GenericJobs:
                     if not self.store.service_lease_ports_available(current.spec.lease):
                         raise SystemdJobError("leased loopback port became unavailable before launch")
                     command, environment = self.store.declared_launch(current.job_id)
-                    if current.scratch_path is not None:
-                        environment["TMPDIR"] = str(current.scratch_path)
+                    if scratch_path := self.store.prepare_scratch(current):
+                        environment["TMPDIR"] = str(scratch_path)
                     if current.spec.checkout is not None:
                         revalidate_registered_checkout(current.spec.checkout)
                         # The contract runner repeats this proof in the unit
