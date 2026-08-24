@@ -474,6 +474,9 @@ in
           glimmerEntry = lib.findFirst (
             entry: entry.model_name == "local-glimmer"
           ) null localModels.litellmModelList;
+          gemma26AbliteratedEntry = lib.findFirst (
+            entry: entry.model_name == "local-gemma4-26b-abliterated"
+          ) null localModels.litellmModelList;
           glimmerEndpoint =
             aiActivationEvaluated.config.sinnix.runtime.inventory.surfaces.muse-glimmer-proxy.activation.publicEndpoint;
         in
@@ -487,6 +490,11 @@ in
           "LiteLLM's local-glimmer api_base must be the muse-glimmer-proxy endpoint the runtime inventory advertises";
         assert lib.assertMsg (glimmerEntry.litellm_params.api_key == "sk-local")
           "LiteLLM's local-glimmer entry must carry the loopback backend credential required by the OpenAI provider";
+        assert lib.assertMsg (
+          gemma26AbliteratedEntry != null
+            && gemma26AbliteratedEntry.litellm_params.model == "ollama_chat/hf.co/TrevorJS/gemma-4-26B-A4B-it-uncensored-GGUF:Q4_K_M"
+            && lib.elem "hf.co/TrevorJS/gemma-4-26B-A4B-it-uncensored-GGUF:Q4_K_M" localModels.ollamaLoadModels
+        ) "The Gemma 4 26B abliterated model must be both pulled by Ollama and exposed through LiteLLM";
         pkgs.runCommand "local-model-roster-check" { } ''
           cat > "$out" <<'EOF_ROSTER'
           ${localModelRosterJson}

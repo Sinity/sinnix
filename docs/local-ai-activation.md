@@ -8,7 +8,7 @@ This host keeps local AI services on demand. The public loopback port is a stabl
 | ---------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- | ---------------------------------------------------- |
 | Ollama text and vision | `127.0.0.1:11434` | `local-chat`, `local-vision`, `local-coder`, `local-coder-moe`, `local-reasoner`, `local-thinker`, `local-multimodal-moe`, `local-reader` | on demand                        | CUDA, one GPU inference occupant                     |
 | LiteLLM gateway        | `127.0.0.1:4000`  | OpenAI `/v1/chat/completions` and Anthropic `/v1/messages`                                                                                | on demand                        | translates agent clients to local backends           |
-| Muse Glimmer           | `127.0.0.1:8083`  | direct llama.cpp model `muse-glimmer`                                                                                                     | on demand, 15 minute idle window | CUDA plus CPU/RAM hybrid, one GPU inference occupant |
+| Muse Glimmer           | `127.0.0.1:8083`  | direct llama.cpp model `muse-glimmer` (abliterated Q4_K_M)                                                                            | on demand, 15 minute idle window | CUDA plus CPU/RAM hybrid, one GPU inference occupant |
 | KoboldCpp              | `127.0.0.1:5001`  | configured GGUF, KoboldAI Lite UI, text/image APIs                                                                                        | on demand                        | CUDA, one GPU inference occupant                     |
 | Open WebUI             | `127.0.0.1:8080`  | browser chat over Ollama                                                                                                                  | configured startup policy        | frontend only; currently targets Ollama              |
 | llama.cpp reranker     | `127.0.0.1:8081`  | `/v1/rerank`                                                                                                                              | on demand                        | CPU resident by policy, outside GPU admission        |
@@ -41,7 +41,7 @@ The GPU services share an exclusive `gpu-inference` resource. Ollama, Glimmer, K
 
 ## Muse Glimmer
 
-Glimmer is served directly by llama.cpp because the packaged Ollama build does not load its architecture. The CUDA package is pinned to upstream llama.cpp `b10353` until nixpkgs-ai carries the support. The service loads the official 17 GB Q4 GGUF from `/realm/library/models/gguf/muse-glimmer-30B-kquant-17gb.gguf` with these fixed runtime settings:
+Glimmer is served directly by llama.cpp because the packaged Ollama build does not load its architecture. The CUDA package is pinned to upstream llama.cpp `b10353` until nixpkgs-ai carries the support. The service loads the abliterated 30B Q4_K_M GGUF from `/realm/library/models/gguf/Muse-Glimmer-30B-Abliterated-Q4_K_M.gguf` with these fixed runtime settings:
 
 - `--n-gpu-layers auto` and `--fit on` place as many layers as fit in the RTX 3080 and keep the rest in system RAM.
 - `--fit-target 1536` leaves approximately 1.5 GiB of VRAM for the desktop and transient buffers.
@@ -115,6 +115,7 @@ The model name is the stable LiteLLM name. The Ollama tag is the storage and pul
 | `local-reasoner`       | `gpt-oss:20b`                       | general reasoning and agent jobs            |
 | `local-thinker`        | `qwen3:30b`                         | reasoning-heavy general work                |
 | `local-multimodal-moe` | `gemma4:26b`                        | larger multimodal generalist                |
+| `local-gemma4-26b-abliterated` | `hf.co/TrevorJS/gemma-4-26B-A4B-it-uncensored-GGUF:Q4_K_M` | abliterated larger multimodal MoE |
 | `local-reader`         | `hf.co/rbehzadan/ReaderLM-v2.gguf`  | HTML to Markdown or JSON                    |
 | `local-glimmer`        | direct llama.cpp                    | dense reasoning with CPU/RAM hybrid offload |
 

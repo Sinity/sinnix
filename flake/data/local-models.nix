@@ -98,6 +98,18 @@ let
       '';
     }
     {
+      ollamaTag = "hf.co/TrevorJS/gemma-4-26B-A4B-it-uncensored-GGUF:Q4_K_M";
+      litellmName = "local-gemma4-26b-abliterated";
+      role = "uncensored-multimodal-moe";
+      expectedBytes = null;
+      notes = ''
+        Abliterated Gemma 4 26B-A4B Q4_K_M GGUF (about 16.8 GB), the
+        refusal-removed counterpart to gemma4:26b. It is a MoE model with
+        about 4B active parameters per token and uses Ollama's HF GGUF
+        importer.
+      '';
+    }
+    {
       ollamaTag = null;
       litellmName = "local-glimmer";
       role = "general-reasoning-hybrid-dense";
@@ -106,11 +118,11 @@ let
       litellmApiBase = "http://127.0.0.1:8083/v1";
       litellmApiKey = "sk-local";
       notes = ''
-        Official Muse Glimmer 30B Q4 deployment (about 17 GB), served by the
-        dedicated llama.cpp endpoint. Its fit policy places as many layers as
-        possible on the RTX 3080 and keeps the remainder in system RAM.
-        Reasoning tier for local agent jobs and batch work; use local-glimmer
-        through LiteLLM.
+        Abliterated Muse Glimmer 30B Q4_K_M deployment (about 16.9 GB), served
+        by the dedicated llama.cpp endpoint. Its fit policy places as many
+        layers as possible on the RTX 3080 and keeps the remainder in system
+        RAM. Reasoning tier for local agent jobs and batch work; use
+        local-glimmer through LiteLLM.
       '';
     }
     # Experimental embedding pulls (HF GGUF, community/official builds) —
@@ -173,6 +185,7 @@ let
     "local-glimmer"
     "local-reader"
     "local-multimodal-moe"
+    "local-gemma4-26b-abliterated"
   ];
 
   byLitellmName = lib.listToAttrs (
@@ -228,6 +241,11 @@ rec {
       file = "muse-glimmer-30B-kquant-17gb.gguf";
       url = "https://huggingface.co/meta-models/Muse-Glimmer-30B-GGUF/resolve/main/muse-glimmer-30B-kquant-17gb.gguf";
       expectedBytes = 16756681056;
+    }
+    {
+      file = "Muse-Glimmer-30B-Abliterated-Q4_K_M.gguf";
+      url = "https://huggingface.co/Blackfrost-AI/Muse-Glimmer-30B-Abliterated-GGUF/resolve/main/Muse-Glimmer-30B-Abliterated-Q4_K_M.gguf";
+      expectedBytes = 16935296896;
     }
   ];
 }
