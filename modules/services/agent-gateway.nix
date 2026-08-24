@@ -203,6 +203,10 @@ mkServiceModule {
             set -euo pipefail
             exec ${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg endpoint.principal} approval-check
           '';
+          stateScaffold = pkgs.writeShellScript "sinnix-agent-gateway-${name}-state-scaffold" ''
+            set -euo pipefail
+            exec ${pkgs.coreutils}/bin/install -d -m 0700 ${lib.escapeShellArg endpoint.stateDir}
+          '';
         }
       ) enabledEndpoints;
       endpointValues = lib.mapAttrsToList (_: endpoint: endpoint) enabledEndpoints;
@@ -322,7 +326,10 @@ mkServiceModule {
             };
             Service = {
               Type = "simple";
-              ExecStartPre = [ endpointArtifacts.${name}.approvalGate ];
+              ExecStartPre = [
+                endpointArtifacts.${name}.stateScaffold
+                endpointArtifacts.${name}.approvalGate
+              ];
               ExecStart = ''
                 ${tunnelClient}/bin/tunnel-client run \
                   --control-plane.tunnel-id ${lib.escapeShellArg endpoint.tunnelId} \
@@ -336,7 +343,7 @@ mkServiceModule {
               RestartSec = "5s";
               ProtectHome = false;
               ReadWritePaths = [
-                endpoint.stateDir
+                "-${endpoint.stateDir}"
               ];
               UMask = "0077";
             }
