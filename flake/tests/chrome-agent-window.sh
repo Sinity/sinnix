@@ -73,6 +73,21 @@ case "$method" in
 Target.createTarget)
   touch "$state/agent-target"
   jq -r '.params.url' <<<"$request" >"$state/marker-url"
+  if [[ ${FAKE_ACTIVATION_BEFORE_PARK:-false} == true && ! -e "$state/pre-map-rules" ]]; then
+    printf '%s\n' activation-before-park >>"$state/focus-workspace-actions"
+    printf '%s\n' agentbrowser >"$state/active-workspace"
+    printf '%s\n' 0xagent >"$state/active-window"
+    touch "$state/activation-stolen"
+  fi
+  if [[ ${FAKE_CDP_SCENARIO:?} == operator-disappears ]]; then
+    rm -f "$state/operator-window" "$state/active-window"
+  fi
+  if [[ ${FAKE_FOCUS_CHANGE:-false} == true ]]; then
+    printf '%s\n' 0xother >"$state/active-window"
+  fi
+  if [[ -e "$state/pre-map-rules" ]]; then
+    printf '%s\n' agentbrowser >"$state/workspace"
+  fi
   ;;
 Target.closeTarget)
   target_id="$(jq -r '.params.targetId // empty' <<<"$request")"
@@ -85,7 +100,7 @@ Page.navigate)
 esac
 
 case "${FAKE_CDP_SCENARIO:?}" in
-match)
+match|activation-before-park|operator-disappears)
   respond
   ;;
 event-first)
@@ -119,41 +134,56 @@ case "$1 $2" in
 'instances -j')
   printf '%s\n' '[{"instance":"fake-hyprland"}]'
   ;;
+eval\ *)
+  if [[ $* == *hl.window_rule* ]]; then
+    touch "$state/pre-map-rules"
+  fi
+  if [[ $* == *set_enabled* ]]; then
+    touch "$state/rules-disabled"
+    rm -f "$state/pre-map-rules"
+  fi
+  printf '%s\n' ok
+  ;;
 'clients -j')
   if [[ -e "$state/agent-target" && ${FAKE_COMPOSITOR_MAP:-true} == true ]]; then
     marker="$(sed -n 's/.*<title>\(.*\)<\/title>.*/\1/p' "$state/marker-url")"
     workspace="$(cat "$state/workspace" 2>/dev/null || printf operator)"
-    jq -nc --arg marker "$marker" --arg workspace "$workspace" \
+    operator_window='[]'
+    if [[ -e "$state/operator-window" ]]; then
+      operator_window='[{"address":"0xoperator","class":"kitty","title":"operator","workspace":{"name":"operator"},"floating":false,"pinned":false,"fullscreen":0}]'
+    fi
+    jq -nc --arg marker "$marker" --arg workspace "$workspace" --argjson operator "$operator_window" \
       --argjson floating "${FAKE_FLOATING:-false}" \
       --argjson pinned "${FAKE_PINNED:-false}" \
       --argjson fullscreen "${FAKE_FULLSCREEN:-0}" '
-      [{address: "0xoperator", class: "kitty", title: "operator", workspace: {name: "operator"}, floating: false, pinned: false, fullscreen: 0},
-       {address: "0xagent", class: "google-chrome", title: $marker, workspace: {name: $workspace}, floating: $floating, pinned: $pinned, fullscreen: $fullscreen}]'
+      $operator +
+      [{address: "0xagent", class: "google-chrome", title: $marker, workspace: {name: $workspace}, floating: $floating, pinned: $pinned, fullscreen: $fullscreen}]'
   else
-    printf '%s\n' '[{"address":"0xoperator","class":"kitty","title":"operator","workspace":{"name":"operator"},"floating":false,"pinned":false,"fullscreen":0}]'
+    if [[ -e "$state/operator-window" ]]; then
+      printf '%s\n' '[{"address":"0xoperator","class":"kitty","title":"operator","workspace":{"name":"operator"},"floating":false,"pinned":false,"fullscreen":0}]'
+    else
+      printf '%s\n' '[]'
+    fi
   fi
   ;;
 'monitors -j')
   if [[ ${FAKE_VISIBLE:-false} == true ]]; then
     printf '%s\n' '[{"activeWorkspace":{"name":"agentbrowser"}}]'
   else
-    printf '%s\n' '[{"activeWorkspace":{"name":"operator"}}]'
+    workspace="$(cat "$state/active-workspace" 2>/dev/null || printf operator)"
+    jq -nc --arg workspace "$workspace" '[{activeWorkspace: {name: $workspace}}]'
   fi
   ;;
 'activewindow -j')
-  if [[ ${FAKE_FOCUS_CHANGE:-false} == true && -e "$state/dispatched" ]]; then
-    printf '%s\n' '{"address":"0xother"}'
+  if [[ -e "$state/active-window" ]]; then
+    jq -nc --arg address "$(cat "$state/active-window")" '{address: $address}'
   else
-    printf '%s\n' '{"address":"0xoperator"}'
+    printf '%s\n' '{"address":null}'
   fi
   ;;
-'dispatch movetoworkspacesilent')
-  [[ ${3:-} == name:agentbrowser,address:0xagent ]] || {
-    printf 'agent-window moved a non-owned compositor client: %s\n' "${3:-}" >&2
-    exit 1
-  }
-  touch "$state/dispatched"
-  printf '%s\n' agentbrowser >"$state/workspace"
+dispatch\ *)
+  printf 'agent-window issued an unexpected compositor dispatch: %s\n' "$*" >&2
+  exit 1
   ;;
 *)
   printf 'unexpected hyprctl call: %s\n' "$*" >&2
@@ -175,6 +205,10 @@ run_with_deadline() {
   : >"$state/request-ids"
   : >"$state/closed-targets"
   : >"$state/hyprctl-calls"
+  : >"$state/focus-workspace-actions"
+  : >"$state/operator-window"
+  printf '%s\n' operator >"$state/active-workspace"
+  printf '%s\n' 0xoperator >"$state/active-window"
   start_ns="$(date +%s%N)"
   deadline_at=$((SECONDS + deadline_sec))
   env \
@@ -182,6 +216,7 @@ run_with_deadline() {
     XDG_RUNTIME_DIR="$state/runtime" \
     FAKE_STATE="$state" \
     FAKE_CDP_SCENARIO="$scenario" \
+    FAKE_ACTIVATION_BEFORE_PARK=true \
     SINNIX_CDP_TIMEOUT_SEC=2 \
     setsid "$helper" agent-window --url https://example.test >"$state/stdout" 2>"$state/stderr" &
   pid=$!
@@ -236,29 +271,50 @@ assert_positive_accepted_request_ids() {
   done <"$requests"
 }
 
+assert_rules_cleaned() {
+  local state="$1"
+  test -e "$state/rules-disabled"
+  test ! -e "$state/pre-map-rules"
+}
+
+assert_activation_before_park_reproduced() {
+  local state="$fixture_root/activation-before-park-reproduction"
+  mkdir -p "$state"
+  : >"$state/focus-workspace-actions"
+  printf '%s\n' operator >"$state/active-workspace"
+  printf '%s\n' 0xoperator >"$state/active-window"
+  printf '%s\n' 0xoperator >"$state/operator-window"
+  env \
+    PATH="$fixture_root/bin:$PATH" \
+    FAKE_STATE="$state" \
+    FAKE_CDP_SCENARIO=activation-before-park \
+    FAKE_ACTIVATION_BEFORE_PARK=true \
+    "$fixture_root/bin/websocat" \
+    <<< '{"id":1,"method":"Target.createTarget","params":{"url":"data:text/html,<title>unprotected</title>","newWindow":true,"background":true}}' \
+    >"$state/response"
+  test -e "$state/activation-stolen"
+  test "$(cat "$state/active-workspace")" = agentbrowser
+  test "$(cat "$state/active-window")" = 0xagent
+  test "$(cat "$state/focus-workspace-actions")" = activation-before-park
+}
+
 mode="${1:-final}"
 case "$mode" in
-baseline)
-  run_with_deadline matching match 8
-  if run_with_deadline unsolicited event-first 8; then
-    printf 'pre-fix accepted an unsolicited CDP event\n' >&2
-    exit 1
-  fi
-  if run_with_deadline missing missing 3; then
-    printf 'pre-fix unexpectedly completed without a CDP response\n' >&2
-    exit 1
-  fi
-  run_with_deadline delayed delayed 8
+reproduce)
+  assert_activation_before_park_reproduced
   ;;
 final)
   assert_fake_wire_rejects_out_of_range_id
+  assert_activation_before_park_reproduced
 
   run_with_deadline matching match 8
   state="$fixture_root/matching"
   jq -e '.parked == true and .workspace == "agentbrowser" and .url == "https://example.test"' "$state/stdout" >/dev/null
   test "$(cat "$state/navigated-url")" = https://example.test
-  ! grep -Fq 'dispatch workspace' "$state/hyprctl-calls"
-  ! grep -Fq 'address:0xoperator' "$state/hyprctl-calls"
+  test ! -e "$state/activation-stolen"
+  test ! -s "$state/focus-workspace-actions"
+  ! grep -Fq 'dispatch' "$state/hyprctl-calls"
+  assert_rules_cleaned "$state"
   assert_positive_accepted_request_ids "$state"
 
   run_with_deadline unsolicited event-first 8
@@ -274,6 +330,7 @@ final)
   test ! -e "$state/agent-target"
   test "$(cat "$state/closed-targets")" = agent-target
   grep -Fq 'timed out waiting for CDP response' "$state/stderr"
+  assert_rules_cleaned "$state"
   assert_positive_accepted_request_ids "$state"
 
   run_with_deadline delayed delayed 8
@@ -285,6 +342,19 @@ final)
   state="$fixture_root/compositor-map-failure"
   test ! -e "$state/agent-target"
   test "$(cat "$state/closed-targets")" = agent-target
+  assert_rules_cleaned "$state"
+
+  if run_with_deadline operator-disappearance operator-disappears 8; then
+    printf 'operator disappearance during creation unexpectedly succeeded\n' >&2
+    exit 1
+  fi
+  state="$fixture_root/operator-disappearance"
+  test ! -e "$state/agent-target"
+  test "$(cat "$state/closed-targets")" = agent-target
+  test ! -e "$state/navigated-url"
+  grep -Fq 'compositor state changed after CDP target creation' "$state/stderr" ||
+    grep -Fq 'focused compositor client disappeared after CDP target creation' "$state/stderr"
+  assert_rules_cleaned "$state"
 
   for layout in floating pinned fullscreen visible; do
     case "$layout" in
@@ -296,16 +366,18 @@ final)
     state="$fixture_root/${layout}-agent-window"
     test ! -e "$state/agent-target"
     test "$(cat "$state/closed-targets")" = agent-target
+    assert_rules_cleaned "$state"
   done
 
   FAKE_FOCUS_CHANGE=true run_with_deadline focus-change match 8 || true
   state="$fixture_root/focus-change"
   test ! -e "$state/agent-target"
   test "$(cat "$state/closed-targets")" = agent-target
-  grep -Fq 'focused compositor client changed' "$state/stderr"
+  grep -Fq 'compositor state changed after CDP target creation' "$state/stderr"
+  assert_rules_cleaned "$state"
   ;;
 *)
-  printf 'usage: %s [baseline|final]\n' "$0" >&2
+  printf 'usage: %s [reproduce|final]\n' "$0" >&2
   exit 2
   ;;
 esac
