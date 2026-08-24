@@ -2286,7 +2286,12 @@ class Runtime:
         )
 
     def _v2_failure(
-        self, action: ActionSpec, exc: Exception, context: RequestContext
+        self,
+        action: ActionSpec,
+        exc: Exception,
+        context: RequestContext,
+        *,
+        enforce_action_failure_codes: bool = True,
     ) -> dict[str, Any]:
         if isinstance(exc, OwnerDiagnosticError):
             details = self._diagnostic_payload(exc.response)
@@ -2336,7 +2341,11 @@ class Runtime:
                 "details": {},
                 "diagnostic_refs": [],
             }
-        if action.failure_codes is not None and error["code"] not in action.typed_failures:
+        if (
+            enforce_action_failure_codes
+            and action.failure_codes is not None
+            and error["code"] not in action.typed_failures
+        ):
             error = {
                 "code": "owner_failed",
                 "message": "gateway owner route failed",
@@ -2399,11 +2408,15 @@ class Runtime:
         action: ActionSpec,
         callback: Callable[[], Any],
         request: Mapping[str, Any],
+        *,
+        selector_error: Exception | None = None,
     ) -> dict[str, Any]:
         context = RequestContext.create(hashlib.sha256(b"{}").hexdigest())
         reserved = False
         try:
             context = self._request_context(request)
+            if selector_error is not None:
+                raise selector_error
             if self.principal_name not in action.principals:
                 raise PolicyError(
                     f"principal {self.principal_name!r} cannot invoke action {action.name!r}"
@@ -2418,7 +2431,12 @@ class Runtime:
             reserved = action.effect is not EffectMode.READ
             response = self._v2_success(action, callback(), context)
         except Exception as exc:
-            response = self._v2_failure(action, exc, context)
+            response = self._v2_failure(
+                action,
+                exc,
+                context,
+                enforce_action_failure_codes=selector_error is None,
+            )
         if reserved:
             self._complete_v2_idempotency(action, context, response)
         return response
@@ -2428,11 +2446,15 @@ class Runtime:
         action: ActionSpec,
         callback: Callable[[], Awaitable[Any]],
         request: Mapping[str, Any],
+        *,
+        selector_error: Exception | None = None,
     ) -> dict[str, Any]:
         context = RequestContext.create(hashlib.sha256(b"{}").hexdigest())
         reserved = False
         try:
             context = self._request_context(request)
+            if selector_error is not None:
+                raise selector_error
             if self.principal_name not in action.principals:
                 raise PolicyError(
                     f"principal {self.principal_name!r} cannot invoke action {action.name!r}"
@@ -2447,7 +2469,12 @@ class Runtime:
             reserved = action.effect is not EffectMode.READ
             response = self._v2_success(action, await callback(), context)
         except Exception as exc:
-            response = self._v2_failure(action, exc, context)
+            response = self._v2_failure(
+                action,
+                exc,
+                context,
+                enforce_action_failure_codes=selector_error is None,
+            )
         if reserved:
             self._complete_v2_idempotency(action, context, response)
         return response

@@ -657,6 +657,18 @@ def test_public_v2_mutation_verbs_preserve_owner_routes(
             "idempotency_key": "public-undeclared-change",
         },
     )
+    wrong_verb_with_preconditions = anyio.run(
+        invoke,
+        "operate",
+        {
+            "action_name": "beads.change",
+            "ref": "sinnix://projects/fixture",
+            "operation": "comment",
+            "parameters": {"id": "fixture-1", "text": "must not dispatch"},
+            "preconditions": {"expected_status": "open"},
+            "idempotency_key": "public-wrong-verb-precondition",
+        },
+    )
 
     assert target.read_text() == "public route\n"
     assert calls["beads"] == ("fixture", "comment", {"id": "fixture-1", "text": "public route"})
@@ -683,6 +695,7 @@ def test_public_v2_mutation_verbs_preserve_owner_routes(
     assert browser_result["data"]["ref"] == "sinnix://browser/pages/agent-target"
     assert unsupported["error"]["code"] == "unsupported_capability"
     assert undeclared["error"]["code"] == "unsupported_capability"
+    assert wrong_verb_with_preconditions["error"]["code"] == "unsupported_capability"
 
 
 def test_mcp_dispatches_v2_change_and_operate_through_real_owners(tmp_path: Path) -> None:

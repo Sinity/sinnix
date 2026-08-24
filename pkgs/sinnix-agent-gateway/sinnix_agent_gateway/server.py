@@ -663,11 +663,13 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             principal-visible project.  Other actions describe their required
             arguments in the catalog and action-schema resource.
             """
+            selector_error: ProtocolError | None = None
             try:
                 action = target_bindings.action_for_tool("query", action_name, principal_name)
             except RegistryError as error:
                 action = target_bindings.fallback_for_tool("query", principal_name)
                 failure = selector_failure("query", error)
+                selector_error = failure
 
                 async def callback() -> dict[str, Any]:
                     raise failure
@@ -695,6 +697,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     "deadline_at": deadline_at,
                     "preconditions": preconditions,
                 },
+                selector_error=selector_error,
             )
             return cast(V2ManifestEnvelope, v2_tool_result(response))
 
@@ -871,6 +874,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 "deadline_at": deadline_at,
                 "preconditions": preconditions,
             }
+            selector_error: ProtocolError | None = None
             try:
                 action = target_bindings.action_for_tool(
                     "run", action_name, principal=principal_name
@@ -878,6 +882,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             except RegistryError as error:
                 action = target_bindings.fallback_for_tool("run", principal_name)
                 failure = selector_failure("run", error)
+                selector_error = failure
 
                 def callback() -> dict[str, Any]:
                     raise failure
@@ -932,7 +937,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                         )
                 else:
                     raise RegistryError(f"run action {action.name!r} is not implemented")
-            response = runtime.execute_v2(action, callback, request)
+            response = runtime.execute_v2(
+                action, callback, request, selector_error=selector_error
+            )
             return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("change", principal_name):
@@ -963,6 +970,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 "deadline_at": deadline_at,
                 "preconditions": preconditions,
             }
+            selector_error: ProtocolError | None = None
             try:
                 action = target_bindings.action_for_tool(
                     "change", action_name, principal=principal_name
@@ -970,6 +978,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             except RegistryError as error:
                 action = target_bindings.fallback_for_tool("change", principal_name)
                 failure = selector_failure("change", error)
+                selector_error = failure
 
                 async def callback() -> dict[str, Any]:
                     raise failure
@@ -1013,7 +1022,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                         )
                     raise RegistryError(f"change action {action.name!r} is not implemented")
 
-            response = await runtime.execute_v2_async(action, callback, request)
+            response = await runtime.execute_v2_async(
+                action, callback, request, selector_error=selector_error
+            )
             return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("operate", principal_name):
@@ -1044,6 +1055,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                 "deadline_at": deadline_at,
                 "preconditions": preconditions,
             }
+            selector_error: ProtocolError | None = None
             try:
                 contract = target_bindings.action_for_tool(
                     "operate", action_name, principal=principal_name
@@ -1051,6 +1063,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             except RegistryError as error:
                 contract = target_bindings.fallback_for_tool("operate", principal_name)
                 failure = selector_failure("operate", error)
+                selector_error = failure
 
                 def callback() -> dict[str, Any]:
                     raise failure
@@ -1088,7 +1101,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     )
                 else:
                     raise RegistryError(f"operate action {contract.name!r} is not implemented")
-            response = runtime.execute_v2(contract, callback, request)
+            response = runtime.execute_v2(
+                contract, callback, request, selector_error=selector_error
+            )
             return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     return mcp
