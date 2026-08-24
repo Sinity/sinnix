@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+DESCRIPTION_WORD_LIMIT = 35
 
 
 def frontmatter(path: Path) -> tuple[dict[str, str], list[str]]:
@@ -22,14 +23,19 @@ def frontmatter(path: Path) -> tuple[dict[str, str], list[str]]:
     except ValueError:
         return {}, ["missing closing frontmatter delimiter"]
     values: dict[str, str] = {}
+    current_key: str | None = None
     for line in lines[1:end]:
         if not line.strip() or line[0].isspace():
+            if current_key and line.strip():
+                values[current_key] = f"{values[current_key]} {line.strip()}".strip()
             continue
         if ":" not in line:
             errors.append("malformed frontmatter line")
             continue
         key, value = line.split(":", 1)
-        values[key.strip()] = value.strip().strip('"')
+        current_key = key.strip()
+        parsed = value.strip().strip('"')
+        values[current_key] = "" if parsed in {">", "|"} else parsed
     for key in ("name", "description"):
         if not values.get(key):
             errors.append(f"missing frontmatter field: {key}")
@@ -51,6 +57,17 @@ def validate(root: Path) -> list[dict[str, str]]:
         for error in errors:
             findings.append({"path": str(skill_file), "error": error})
         name = values.get("name", "")
+        description_words = len(values.get("description", "").split())
+        if description_words > DESCRIPTION_WORD_LIMIT:
+            findings.append(
+                {
+                    "path": str(skill_file),
+                    "error": (
+                        f"description has {description_words} words; "
+                        f"limit is {DESCRIPTION_WORD_LIMIT}"
+                    ),
+                }
+            )
         if name in names and name:
             findings.append(
                 {

@@ -1,6 +1,6 @@
 ---
 name: prompting
-description: Prompt-craft reference for authoring prompts aimed at LLMs — subagent dispatches, external-model handoffs, workflow stages, headless judgment calls, MCP/skill instructions. Use when writing or reviewing any nontrivial prompt another model will execute, when a prompt underperforms and needs diagnosis, or when designing reusable prompt templates/agent definitions. Distinct from /enhance (which rewrites a user request into a prompt); this is the underlying craft.
+description: Write, review, or diagnose nontrivial prompts for subagents, external models, workflow stages, headless judgment, MCP or skill instructions, reusable templates, and agent definitions.
 ---
 
 # Prompting craft

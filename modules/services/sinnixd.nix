@@ -39,7 +39,7 @@ mkServiceModule {
   };
   extraOptions.agentRunner = lib.mkOption {
     type = lib.types.str;
-    default = "${config.sinnix.paths.dotsRoot}/_ai/skills/agent-orchestration/scripts/run_agent_prompt.sh";
+    default = "${config.sinnix.paths.dotsRoot}/_ai/skills/agent-runtime/scripts/run_agent_prompt.sh";
     description = "Native attested-agent execution backend; Sinnixd retains systemd lifecycle authority.";
   };
   surface = {

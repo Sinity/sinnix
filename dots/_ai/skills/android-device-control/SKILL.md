@@ -1,6 +1,6 @@
 ---
 name: android-device-control
-description: "Drive an unrooted Android phone as a first-class estate peer: adb over the tailnet, Termux shell, UI automation that survives dialogs, MIUI/HyperOS install and power-management traps, and the settings levers that actually matter. Use when configuring, debloating, capturing from, or remotely controlling a phone — especially a Xiaomi/MIUI device."
+description: Control, configure, debloat, or capture from an unrooted Android phone through adb, Termux, tailnet access, and resilient UI automation, including Xiaomi power-management traps.
 metadata:
   short-description: Unrooted Android as a controllable peer
 ---

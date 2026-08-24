@@ -1,4 +1,0 @@
-interface:
-  display_name: "Incident Evidence Freeze"
-  short_description: "Preserve incident evidence before mutation"
-  default_prompt: "Freeze the exact incident repository and named conflict files before any recovery mutation, then report the evidence directory and authorization boundary."

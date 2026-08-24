@@ -4,7 +4,7 @@ Real campaigns mix Claude Code's own subagent dispatch (via `Agent`/`fork`)
 with directly-launched non-Claude backends for cheap, high-volume narrow
 passes. This reference covers picking the tier and the concrete mechanics
 that worked. For the generic runtime-mode decision (local/background/cloud/
-Kitty) and the shared launch helpers, defer to `agent-orchestration` — this
+Kitty) and the shared launch helpers, defer to `orchestrate`; this
 file only adds what audit campaigns specifically need on top.
 
 ## Picking a tier

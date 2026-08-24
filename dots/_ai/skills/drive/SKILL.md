@@ -1,6 +1,6 @@
 ---
 name: drive
-description: Self-driving iterative execution - enhance a goal into the best next move, stress-test it, execute, externalize results, then forge the next self-prompt and continue. Use when the user says "drive", "keep going", "iterate on this", "take it further", wants to nod along while the agent picks directions, or asks for N autonomous iterations. Composes enhance (prompt forging) and grilling (adversarial stress) into a recurrence loop with optional auto-iteration.
+description: Drive autonomous iterative work when the user says keep going, iterate, or take it further: choose the best next move, stress-test it, execute, externalize results, and continue.
 ---
 
 # Drive: recurrent self-directed execution

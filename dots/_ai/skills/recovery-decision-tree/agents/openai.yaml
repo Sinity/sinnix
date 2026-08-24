@@ -1,4 +1,0 @@
-interface:
-  display_name: "Recovery Decision Tree"
-  short_description: "Find the authoritative recovery source safely"
-  default_prompt: "Probe recovery authorities in order, report candidates and hashes, and stop before any mutation until the exact action is authorized."

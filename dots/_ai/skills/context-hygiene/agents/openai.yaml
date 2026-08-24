@@ -1,4 +1,0 @@
-interface:
-  display_name: "Context Hygiene"
-  short_description: "Externalize state before compaction and resume from evidence"
-  default_prompt: "Use the context-hygiene workflow to record load-bearing task state and produce a cold-resume handoff."

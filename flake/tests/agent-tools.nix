@@ -985,8 +985,8 @@ in
           ''
             freeze="$TMPDIR/freeze.sh"
             recover="$TMPDIR/recover-probe.sh"
-            cp ${../../dots/_ai/skills/incident-evidence-freeze/scripts/freeze.sh} "$freeze"
-            cp ${../../dots/_ai/skills/recovery-decision-tree/scripts/recover-probe.sh} "$recover"
+            cp ${../../dots/_ai/skills/investigate/scripts/freeze.sh} "$freeze"
+            cp ${../../dots/_ai/skills/investigate/scripts/recover-probe.sh} "$recover"
             chmod +x "$freeze" "$recover"
             patchShebangs "$freeze" "$recover"
             ${pkgs.bash}/bin/bash ${../../flake/tests/recovery-skills.sh} "$freeze" "$recover"
