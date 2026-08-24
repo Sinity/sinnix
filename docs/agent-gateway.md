@@ -8,7 +8,7 @@ The Sinnix agent gateway is one official-SDK MCP implementation with three expli
 ChatGPT observer connector
     -> OpenAI Secure MCP Tunnel
     -> tunnel-client user service
-    -> stdio: sinnix-agent-gateway-mcp --principal observer
+    -> stdio: sinnix-agent-gateway-observer-mcp
     -> shared project, job, artifact, audit, and observe services
 
 Local coordinators
@@ -20,7 +20,7 @@ Local coordinators
 ChatGPT operator connector
     -> separate OpenAI Secure MCP Tunnel
     -> tunnel-client user service
-    -> stdio: sinnix-agent-gateway-mcp --principal operator
+    -> stdio: sinnix-agent-gateway-operator-mcp
     -> explicit operator-authorized tools and attested receipts
 ```
 
@@ -34,9 +34,9 @@ The gateway owns no HTTP server and no listening port. The official OpenAI tunne
 | `agent-control` | Trusted local coordinators | Yes | Yes | No |
 | `operator` | Local testing and a write-capable remote workspace | Yes | Yes | Yes |
 
-Tool registration follows the principal. A denied capability is absent from `tools/list`, and the underlying service enforces the same capability again. `observer` therefore cannot obtain a write path by calling an unlisted function directly.
+The ten protocol verb names remain stable in `tools/list` for every principal. The principal-filtered catalog omits unauthorized actions, and direct calls to an effectful verb fail with `policy_denied` before any owner callback is dispatched. The underlying service enforces the same capability again. `observer` therefore cannot obtain a write path through `change`, `operate`, or `run`.
 
-Authority and transport are independent. A tunnel selects its principal explicitly through `sinnix.services.agent-gateway.tunnel.principal`; a remote connection does not narrow or expand the selected authority. The observer transport remains sandboxed. The operator transport must not impose a sandbox policy that contradicts the selected operator authority.
+Authority and transport are independent. Each `sinnix.services.agent-gateway.endpoints.<name>` entry selects its principal explicitly; a remote connection does not narrow or expand the selected authority. The observer transport remains sandboxed. The operator transport must not impose a sandbox policy that contradicts the selected operator authority.
 
 Ordinary full and browser agent profiles do not receive `agent-control`. Explicit orchestration profiles do. This keeps process mutation out of broad always-on tool surfaces.
 
@@ -45,13 +45,13 @@ Ordinary full and browser agent profiles do not receive `agent-control`. Explici
 The configured commands are:
 
 ```bash
-sinnix-agent-gateway-mcp --principal observer
+sinnix-agent-gateway-observer-mcp
 sinnix-agent-control-mcp
-sinnix-agent-gateway-schema observer
-sinnix-agent-gateway --config /etc/sinnix/agent-gateway.json --principal observer info
+sinnix-agent-gateway-observer-schema
+sinnix-agent-gateway --config /etc/sinnix/agent-gateway-observer.json --principal observer info
 ```
 
-`sinnix-agent-gateway-schema` emits a canonical, sorted tool manifest and SHA-256. The selected tunnel principal's manifest is compared with its Nix-approved hash before startup. A local server manifest, an approved Nix manifest, and an externally observed ChatGPT connector snapshot are distinct facts. The private state file `connector-snapshot.json` records an external snapshot with schema `sinnix.gateway-connector-snapshot.v1`, principal, and manifest SHA-256. The gateway reports every comparison as `match`, `mismatch`, or `unobserved`; it does not claim connector parity until an actual product-level observation has been recorded. `status` also exposes the principal contract hash and the principal-filtered action catalog hash separately, so a stable MCP tool manifest cannot conceal a widened action contract.
+Each endpoint-specific schema command emits a canonical, sorted tool manifest and SHA-256. The endpoint's selected principal manifest is compared with its Nix-approved hash before startup. A local server manifest, an approved Nix manifest, and an externally observed ChatGPT connector snapshot are distinct facts. The private state file `connector-snapshot.json` records an external snapshot with schema `sinnix.gateway-connector-snapshot.v1`, principal, and manifest SHA-256. The gateway reports every comparison as `match`, `mismatch`, or `unobserved`; it does not claim connector parity until an actual product-level observation has been recorded. `status` also exposes the principal contract hash and the principal-filtered action catalog hash separately, so a stable MCP tool manifest cannot conceal a widened action contract.
 
 ### V2 contract foundation
 
@@ -87,7 +87,7 @@ The read actions retain each owner’s existing bounds and authority checks. `ma
 
 ## Project and path authority
 
-`sinnix.projects.entries` is the only project registry. It is derived from the existing project paths in `modules/foundation.nix` and rendered into `/etc/sinnix/agent-gateway.json`. `observerRead` controls observer project visibility. It does not govern operator write authority: `operator` receives its project-write capability from its selected principal.
+`sinnix.projects.entries` is the only project registry. It is derived from the existing project paths in `modules/foundation.nix` and filtered into each `/etc/sinnix/agent-gateway-<endpoint>.json` according to that endpoint's project scope. `observerRead` controls observer project visibility. It does not govern operator write authority: `operator` receives its project-write capability from its selected principal.
 
 `context` composes a project’s native Git status and latest-commit facts with its native bounded Beads ready-work query. A project without a Beads workspace still returns its Git context and labels the task section unavailable with the next route. It does not parse `.beads/issues.jsonl` or keep a gateway task mirror. `query` accepts only canonical project or checkout refs, so the selected source is explicit in the receipt and result metadata.
 
@@ -103,7 +103,7 @@ Gateway-owned opaque artifacts remain available for non-job owners and are scope
 
 ## Audit and observe
 
-Audit events live in a private SQLite WAL ledger. Appends use an immediate transaction and chain each canonical event to the previous hash. Concurrent MCP calls therefore serialize the ledger head without rereading the complete history. Every V2 call, including logical reads, appends an audit receipt and persists an immutable result snapshot. This bounded observability persistence is declared in each action contract, so the seven logical read tools are not annotated `readOnlyHint=true`; their owner effect remains read-only while the MCP call truthfully has a local audit/result side effect. `events` is principal-scoped and binds every returned row to `sinnix://receipts/{receipt_id}`. The `audit.verify` action checks the full chain. The historic hash-chain field is named `profile` for compatibility, but its values are current principal names and returned events expose `principal`.
+Audit events live in a private SQLite WAL ledger. Appends use an immediate transaction and chain each canonical event to the previous hash. Concurrent MCP calls therefore serialize the ledger head without rereading the complete history. Every V2 call, including logical reads, appends an audit receipt and persists an immutable result snapshot. This bounded observability persistence is declared in each action contract, so logical read verbs are not annotated `readOnlyHint=true`; their owner effect remains read-only while the MCP call truthfully has a local audit/result side effect. `events` is principal-scoped and binds every returned row to `sinnix://receipts/{receipt_id}`. The `audit.verify` action checks the full chain. The historic hash-chain field is named `profile` for compatibility, but its values are current principal names and returned events expose `principal`.
 
 The tunnel is registered in `/etc/sinnix/runtime-inventory.json` when enabled. Its workload classification, restartability, and process matcher are part of the same runtime-surface declaration consumed by `sinnix-observe` and machine telemetry. `machine.query` delegates to `sinnix-observe` and bounds the selected JSON section.
 
@@ -118,24 +118,26 @@ sinnix.services.agent-gateway.enable = true;
 After creating a tunnel and a dedicated runtime key with the required permissions:
 
 ```nix
-sinnix.services.agent-gateway.tunnel = {
+sinnix.services.agent-gateway.endpoints.observer = {
   enable = true;
   principal = "observer";
   tunnelId = "tunnel_...";
+  runtimeKeyFile = "/run/agenix/openai-tunnel-runtime-key";
   approvedManifestHash = "...";
+  approvedActionCatalogHash = "...";
 };
 ```
 
-The runtime key is the agenix secret `openai-tunnel-runtime-key`. Tunnel-management credentials are not installed in the steady-state service. The pinned `tunnel-client` runs in foreground mode under one systemd user service. Its health, readiness, metrics, and UI endpoint listens on loopback port 3088 by default.
+The observer runtime key is the agenix secret `openai-tunnel-runtime-key`. Tunnel-management credentials are not installed in the steady-state service. Every enabled endpoint receives its own generated config, MCP wrapper, approval gate, state directory, runtime credential, health port, systemd user service, and runtime surface. The prime host currently enables only the provisioned observer endpoint on loopback port 3088. The operator definition remains disabled until its real private tunnel and dedicated runtime key exist.
 
 ## Deployment and proof
 
-1. Provision each enabled tunnel ID and its dedicated runtime credential. Keep the operator credential limited to the authenticated private tunnel.
+1. Provision the endpoint's tunnel ID and dedicated runtime credential. Keep an operator credential limited to its authenticated private tunnel.
 2. Run `switch` so the pinned SDK, tunnel client, endpoint configs, runtime inventory, and user units are one generation.
-3. Compare each endpoint schema command with a direct stdio `tools/list` call. Both manifests retain the stable ten verb names; principal-filtered catalogs and runtime authorization exclude observer mutation authority.
-4. Verify `http://127.0.0.1:3088/healthz`, `http://127.0.0.1:3088/readyz`, `http://127.0.0.1:3089/healthz`, and `http://127.0.0.1:3089/readyz`, then inspect both tunnel logs through systemd.
-5. Create or refresh the two ChatGPT connectors from their separate tunnels, approve each exact tool snapshot, and invoke `status`, `catalog`, and a bounded project read from each connector.
-6. Record observed connector tool names and manifest hashes separately for observer and operator. Each observation is required before claiming connector parity.
+3. Compare each enabled endpoint's schema command with a direct stdio `tools/list` call. Every manifest retains the stable ten verb names; principal-filtered catalogs and runtime authorization exclude observer mutation authority.
+4. Verify the enabled endpoint's `/healthz` and `/readyz` paths on its configured loopback health port, then inspect that endpoint's tunnel log through systemd.
+5. Create or refresh the ChatGPT connector from that endpoint's tunnel, approve its exact tool snapshot, and invoke `status`, `catalog`, and a bounded project read.
+6. Record observed connector tool names and manifest hash for each enabled endpoint. This observation is required before claiming connector parity. Repeat the proof independently when the operator endpoint is provisioned and enabled.
 
 The old prototype state may be retained under the canonical state root's `legacy/` directory for forensic inspection. It must not be loaded as active jobs, artifacts, repositories, tasks, or audit data.
 <!-- BEGIN GENERATED GATEWAY V2 REFERENCE -->

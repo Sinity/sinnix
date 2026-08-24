@@ -58,13 +58,8 @@ def test_official_sdk_principals_expose_only_protocol_verbs(tmp_path: Path) -> N
         "status", "catalog", "query", "get", "context", "events", "wait",
         "change", "operate", "run",
     }
-    assert {row["name"] for row in observer["tools"]} == {
-        "status", "catalog", "query", "get", "context", "events", "wait",
-    }
-    assert {row["name"] for row in agent_control["tools"]} == {
-        "status", "catalog", "query", "get", "context", "events", "wait",
-        "operate", "run",
-    }
+    assert {row["name"] for row in observer["tools"]} == names
+    assert {row["name"] for row in agent_control["tools"]} == names
     assert {
         row["name"]
         for row in operator["tools"]
@@ -85,15 +80,13 @@ def test_official_sdk_principals_expose_only_protocol_verbs(tmp_path: Path) -> N
         "readOnlyHint": False, "destructiveHint": False, "idempotentHint": True,
         "openWorldHint": True,
     }
-    assert all(
-        row["annotations"] == {
-            "readOnlyHint": True, "destructiveHint": False, "idempotentHint": True,
-            "openWorldHint": False,
-        }
-        for row in observer["tools"]
-    )
+    assert {
+        row["name"]: row["annotations"] for row in observer["tools"]
+    } == {
+        row["name"]: row["annotations"] for row in operator["tools"]
+    }
     assert all("inputSchema" in row and "outputSchema" in row for row in operator["tools"])
-    assert observer["sha256"] != agent_control["sha256"] != operator["sha256"]
+    assert observer["sha256"] == agent_control["sha256"] == operator["sha256"]
     assert operator["measurement"] == {
         "schema": "sinnix.gateway-schema-measurement.v1",
         "canonical_bytes": operator["measurement"]["canonical_bytes"],
@@ -175,7 +168,35 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert initialized.server_info.name == "sinnix-agent-gateway"
                 assert names == {
                     "status", "catalog", "query", "get", "context", "events", "wait",
+                    "change", "operate", "run",
                 }
+                denied_change = await session.call_tool(
+                    "change",
+                    {
+                        "action_name": "projects.change",
+                        "ref": "sinnix://projects/fixture/checkouts/default",
+                        "operation": "write",
+                        "idempotency_key": "observer-denied-change",
+                    },
+                )
+                denied_operate = await session.call_tool(
+                    "operate",
+                    {
+                        "action_name": "machine.operate",
+                        "ref": "sinnix://machine/units/user/example.service",
+                        "idempotency_key": "observer-denied-operate",
+                    },
+                )
+                denied_run = await session.call_tool(
+                    "run",
+                    {
+                        "action_name": "shell.run",
+                        "idempotency_key": "observer-denied-run",
+                    },
+                )
+                for denied in (denied_change, denied_operate, denied_run):
+                    assert denied.is_error is True
+                    assert json.loads(denied.content[0].text)["error"]["code"] == "policy_denied"
                 assert {
                     "sinnix://gateway/v2/actions/{action_name}",
                     "sinnix://gateway/v2/resources/{resource_kind}",

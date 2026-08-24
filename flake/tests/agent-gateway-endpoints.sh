@@ -19,62 +19,108 @@ eval_json() {
 endpoints_json="$(eval_json 'sinnix.services.agent-gateway.endpoints')"
 jq -e '
   keys == ["observer", "operator"] and
-  .observer.enable and .operator.enable and
+  .observer.enable and (.operator.enable | not) and
   .observer.principal == "observer" and
   .operator.principal == "operator" and
-  .observer.tunnelId != .operator.tunnelId and
-  .observer.runtimeKeyFile != .operator.runtimeKeyFile and
   .observer.healthPort != .operator.healthPort and
   (.observer.scope.projects | length) > 0 and
   (.operator.scope.projects | length) > 0 and
   .observer.scope.captures != .operator.scope.captures and
   (.observer.approvedManifestHash | type) == "string" and
-  (.observer.approvedActionCatalogHash | type) == "string" and
-  (.operator.approvedManifestHash | type) == "string" and
-  (.operator.approvedActionCatalogHash | type) == "string"
+  (.observer.approvedActionCatalogHash | type) == "string"
 ' <<<"$endpoints_json" >/dev/null
+
+dual_endpoints_json="$(nix eval --impure --json --expr "
+  let
+    flake = builtins.getFlake \"$flake_root\";
+    base = flake.nixosConfigurations.sinnix-prime;
+    dual = base.extendModules { modules = [ ({ lib, ... }: {
+      sinnix.services.agent-gateway.endpoints.operator = {
+        enable = lib.mkForce true;
+        tunnelId = \"tunnel-test-operator\";
+        runtimeKeyFile = \"/run/test/operator-runtime-key\";
+        approvedManifestHash = \"test-operator-manifest\";
+        approvedActionCatalogHash = \"test-operator-catalog\";
+      };
+    }) ]; };
+    observerConfig = dual.config.environment.etc.\"sinnix/agent-gateway-observer.json\".source;
+    operatorConfig = dual.config.environment.etc.\"sinnix/agent-gateway-operator.json\".source;
+  in {
+    services = dual.config.home-manager.users.sinity.systemd.user.services;
+    surfaces = dual.config.sinnix.runtime.surfaces;
+    configs = {
+      observer = { output = toString observerConfig; derivation = observerConfig.drvPath; };
+      operator = { output = toString operatorConfig; derivation = operatorConfig.drvPath; };
+    };
+  }
+")"
+jq -e '
+  .services | has("sinnix-agent-gateway-observer") and
+  has("sinnix-agent-gateway-operator") and
+  ."sinnix-agent-gateway-observer".Service.ExecStart !=
+    ."sinnix-agent-gateway-operator".Service.ExecStart
+' <<<"$dual_endpoints_json" >/dev/null
+jq -e '
+  .surfaces."agent-gateway-observer".unit == "sinnix-agent-gateway-observer.service" and
+  .surfaces."agent-gateway-operator".unit == "sinnix-agent-gateway-operator.service" and
+  .surfaces."agent-gateway-observer".activation.publicEndpoint !=
+    .surfaces."agent-gateway-operator".activation.publicEndpoint
+' <<<"$dual_endpoints_json" >/dev/null
 
 service_json="$(eval_json 'sinnix.services.agent-gateway')"
 jq -e 'has("tunnel") | not' <<<"$service_json" >/dev/null
 
 etc_json="$(eval_json 'environment.etc')"
 observer_config="$(jq -r '."sinnix/agent-gateway-observer.json".source' <<<"$etc_json")"
-operator_config="$(jq -r '."sinnix/agent-gateway-operator.json".source' <<<"$etc_json")"
 case "$observer_config" in
   *sinnix-agent-gateway-observer.json) ;;
   *) exit 1 ;;
 esac
-case "$operator_config" in
+test "$(jq 'has("sinnix/agent-gateway-operator.json")' <<<"$etc_json")" = false
+
+dual_observer_config="$(jq -r '.configs.observer.output' <<<"$dual_endpoints_json")"
+dual_operator_config="$(jq -r '.configs.operator.output' <<<"$dual_endpoints_json")"
+case "$dual_observer_config" in
+  *sinnix-agent-gateway-observer.json) ;;
+  *) exit 1 ;;
+esac
+case "$dual_operator_config" in
   *sinnix-agent-gateway-operator.json) ;;
   *) exit 1 ;;
 esac
-test "$observer_config" != "$operator_config"
+test "$dual_observer_config" != "$dual_operator_config"
+nix-store --realise \
+  "$(jq -r '.configs.observer.derivation' <<<"$dual_endpoints_json")" \
+  "$(jq -r '.configs.operator.derivation' <<<"$dual_endpoints_json")" >/dev/null
+jq -e '
+  .approvedManifestPrincipal == "observer" and
+  .endpoint.principal == "observer" and
+  (.endpoint.scope.projects | length) > 0
+' "$dual_observer_config" >/dev/null
+jq -e '
+  .approvedManifestPrincipal == "operator" and
+  .endpoint.principal == "operator" and
+  (.endpoint.scope.projects | length) > 0
+' "$dual_operator_config" >/dev/null
 
 units_json="$(eval_json 'home-manager.users.sinity.systemd.user.services')"
 jq -e '
   (has("sinnix-agent-gateway-tunnel") | not) and
   ."sinnix-agent-gateway-observer".Unit.ConditionPathExists == "/run/agenix/openai-tunnel-runtime-key" and
-  ."sinnix-agent-gateway-operator".Unit.ConditionPathExists == "/run/agenix/openai-tunnel-runtime-key-operator" and
   (."sinnix-agent-gateway-observer".Service.ExecStartPre | length) == 1 and
-  (."sinnix-agent-gateway-operator".Service.ExecStartPre | length) == 1 and
   (."sinnix-agent-gateway-observer".Service.ExecStartPre[0] | contains("observer-approval-gate")) and
-  (."sinnix-agent-gateway-operator".Service.ExecStartPre[0] | contains("operator-approval-gate")) and
   (."sinnix-agent-gateway-observer".Service.ExecStart | join(" ") | contains("127.0.0.1:3088")) and
-  (."sinnix-agent-gateway-operator".Service.ExecStart | join(" ") | contains("127.0.0.1:3089")) and
   (."sinnix-agent-gateway-observer".Service.ExecStart | join(" ") | contains("tunnel_6a2eb972c3bc8191be437670f455ebd9")) and
-  (."sinnix-agent-gateway-operator".Service.ExecStart | join(" ") | contains("tunnel_3f0d5d6c4f1b2a9e8d7c6b5a4f3e2d1c")) and
   ."sinnix-agent-gateway-observer".Service.ProtectSystem == "strict" and
-  (."sinnix-agent-gateway-operator".Service.ProtectSystem // null) == null
+  (has("sinnix-agent-gateway-operator") | not)
 ' <<<"$units_json" >/dev/null
 
 surfaces_json="$(eval_json 'sinnix.runtime.surfaces')"
 jq -e '
   (has("agent-gateway-tunnel") | not) and
   ."agent-gateway-observer".unit == "sinnix-agent-gateway-observer.service" and
-  ."agent-gateway-operator".unit == "sinnix-agent-gateway-operator.service" and
   ."agent-gateway-observer".activation.publicEndpoint == "127.0.0.1:3088" and
-  ."agent-gateway-operator".activation.publicEndpoint == "127.0.0.1:3089" and
-  ."agent-gateway-observer".unit != ."agent-gateway-operator".unit
+  (has("agent-gateway-operator") | not)
 ' <<<"$surfaces_json" >/dev/null
 
 gateway_observer="$tmp_root/observer-manifest.json"
@@ -92,14 +138,10 @@ HOME="$tmp_root/home" XDG_STATE_HOME="$tmp_root/state" \
   nix run "$flake_root#sinnix-agent-gateway" -- --principal operator catalog-hash >"$catalog_operator"
 
 test "$(jq -r '.observer.approvedManifestHash' <<<"$endpoints_json")" = "$(jq -r '.sha256' "$gateway_observer")"
-test "$(jq -r '.operator.approvedManifestHash' <<<"$endpoints_json")" = "$(jq -r '.sha256' "$gateway_operator")"
 test "$(jq -r '.observer.approvedActionCatalogHash' <<<"$endpoints_json")" = "$(jq -r '.sha256' "$catalog_observer")"
-test "$(jq -r '.operator.approvedActionCatalogHash' <<<"$endpoints_json")" = "$(jq -r '.sha256' "$catalog_operator")"
 
 jq -e '
-  ([.tools[].name] | sort) as $names |
-  ($names | all(. as $name | ["catalog", "context", "events", "get", "query", "status", "wait"] | index($name))) and
-  ($names | all(. as $name | ["change", "operate", "run"] | index($name) | not))
+  ([.tools[].name] | sort) == ["catalog", "change", "context", "events", "get", "operate", "query", "run", "status", "wait"]
 ' "$gateway_observer" >/dev/null
 jq -e '
   ([.tools[].name] | sort) == ["catalog", "change", "context", "events", "get", "operate", "query", "run", "status", "wait"]
