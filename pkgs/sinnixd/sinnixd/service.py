@@ -403,16 +403,40 @@ class SinnixdService:
                 )
             )
         if operation == "job.list":
-            if set(arguments) - {"limit", "cursor"}:
-                raise ValueError("job.list accepts optional limit and cursor")
+            if set(arguments) - {
+                "limit",
+                "cursor",
+                "project_id",
+                "phases",
+                "active_only",
+            }:
+                raise ValueError("job.list accepts only pagination and filter arguments")
             limit = arguments.get("limit", 100)
             if not isinstance(limit, int) or isinstance(limit, bool):
                 raise ValueError("job.list limit must be an integer")
             cursor = arguments.get("cursor")
             if cursor is not None and not isinstance(cursor, str):
                 raise ValueError("job.list cursor must be a string")
+            project_id = arguments.get("project_id")
+            if project_id is not None and not isinstance(project_id, str):
+                raise ValueError("job.list project_id must be a string")
+            phases = arguments.get("phases", [])
+            if not isinstance(phases, list) or any(
+                not isinstance(phase, str) for phase in phases
+            ):
+                raise ValueError("job.list phases must be a list of strings")
+            active_only = arguments.get("active_only", False)
+            if not isinstance(active_only, bool):
+                raise ValueError("job.list active_only must be a boolean")
             return self._cleanup_terminal(
-                self.jobs.list(principal=principal, limit=limit, cursor=cursor)
+                self.jobs.list(
+                    principal=principal,
+                    limit=limit,
+                    cursor=cursor,
+                    project_id=project_id,
+                    phases=tuple(phases),
+                    active_only=active_only,
+                )
             )
         if operation == "job.wait":
             job_id = self._authorize_job(principal, self._job_argument(arguments, "job_id"))

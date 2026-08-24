@@ -88,11 +88,16 @@ def _job_order_key(record: "GenericJobRecord") -> tuple[str, str]:
 
 
 def _encode_job_list_cursor(
-    *, principal: str, snapshot: tuple[str, str], after: tuple[str, str]
+    *,
+    principal: str,
+    query: Mapping[str, Any],
+    snapshot: tuple[str, str],
+    after: tuple[str, str],
 ) -> str:
     payload = {
         "schema": JOB_LIST_CURSOR_SCHEMA_VERSION,
         "principal": principal,
+        "query": dict(query),
         "snapshot": list(snapshot),
         "after": list(after),
     }
@@ -101,7 +106,7 @@ def _encode_job_list_cursor(
 
 
 def _decode_job_list_cursor(
-    cursor: str, *, principal: str
+    cursor: str, *, principal: str, query: Mapping[str, Any]
 ) -> tuple[tuple[str, str], tuple[str, str]]:
     if (
         not isinstance(cursor, str)
@@ -116,9 +121,10 @@ def _decode_job_list_cursor(
         raise JobPageCursorError("job list cursor is invalid") from error
     if (
         not isinstance(value, Mapping)
-        or set(value) != {"schema", "principal", "snapshot", "after"}
+        or set(value) != {"schema", "principal", "query", "snapshot", "after"}
         or value["schema"] != JOB_LIST_CURSOR_SCHEMA_VERSION
         or value["principal"] != principal
+        or value["query"] != dict(query)
     ):
         raise JobPageCursorError("job list cursor does not belong to this principal")
 
@@ -2120,9 +2126,21 @@ class GenericJobs:
         principal: str = "operator",
         limit: int = 100,
         cursor: str | None = None,
+        project_id: str | None = None,
+        phases: tuple[str, ...] = (),
+        active_only: bool = False,
     ) -> dict[str, Any]:
         if not 1 <= limit <= 1_000:
             raise ValueError("job list limit must be between 1 and 1000")
+        if project_id is not None and (not isinstance(project_id, str) or not project_id):
+            raise ValueError("job list project_id must be a non-empty string")
+        if any(not isinstance(phase, str) or not phase for phase in phases):
+            raise ValueError("job list phases must be non-empty strings")
+        query = {
+            "active_only": active_only,
+            "phases": sorted(set(phases)),
+            "project_id": project_id,
+        }
         with self._admission_lock:
             self._admit_locked()
         records = sorted(
@@ -2130,6 +2148,9 @@ class GenericJobs:
                 record
                 for record in self.store.list()
                 if principal == "operator" or record.spec.principal == principal
+                if project_id is None or record.spec.project_id == project_id
+                if not query["phases"] or record.state.get("phase") in query["phases"]
+                if not active_only or not record.state.get("terminal", False)
             ),
             key=_job_order_key,
             reverse=True,
@@ -2138,7 +2159,9 @@ class GenericJobs:
             snapshot = _job_order_key(records[0]) if records else ("", "")
             after: tuple[str, str] | None = None
         else:
-            snapshot, after = _decode_job_list_cursor(cursor, principal=principal)
+            snapshot, after = _decode_job_list_cursor(
+                cursor, principal=principal, query=query
+            )
         snapshot_records = [
             record for record in records if _job_order_key(record) <= snapshot
         ]
@@ -2154,6 +2177,7 @@ class GenericJobs:
         next_cursor = (
             _encode_job_list_cursor(
                 principal=principal,
+                query=query,
                 snapshot=snapshot,
                 after=_job_order_key(records[-1]),
             )
@@ -2166,6 +2190,7 @@ class GenericJobs:
                 for record in records
             ],
             "limit": limit,
+            "query": query,
             "total": len(snapshot_records) if after is None else None,
             "truncated": has_more,
             "next_cursor": next_cursor,
