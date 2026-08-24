@@ -60,14 +60,6 @@ let
     }
   ) scratchpadSpecs;
   applications = [
-    (mkRule "agent-browser-window" {
-      initialTitle = "^sinnix-agent-window-.*$";
-      workspace = "name:agentbrowser silent";
-      tile = true;
-      noInitialFocus = true;
-      focusOnActivate = false;
-      suppressEvent = "activate activatefocus";
-    })
     (mkRule "kitty-focus-opacity" {
       class = "^(kitty)$";
       noBlur = true;
