@@ -502,6 +502,27 @@ def test_project_operation_parameter_schema_is_closed_and_bounded(tmp_path: Path
         ProjectCatalog([tmp_path])
 
 
+def test_operation_dependencies_reject_required_parameter_targets(tmp_path: Path) -> None:
+    """Anti-vacuity: dependencies have no parameter payload to satisfy required inputs."""
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + """
+[operations.depends_on_required]
+description = "Depend on a parameterized operation"
+exec = ["fixture-check"]
+pool = "normal"
+result = "exit"
+cache = "none"
+dependencies = ["verify_closure"]
+"""
+    )
+
+    with pytest.raises(ProjectConfigError, match="required parameters.*verify_closure"):
+        ProjectCatalog([tmp_path])
+
+
 @pytest.mark.parametrize(
     "value",
     ("true", '"3600"', "0", "-1", str(MAX_DECLARED_OPERATION_TIMEOUT_SECONDS + 1)),
