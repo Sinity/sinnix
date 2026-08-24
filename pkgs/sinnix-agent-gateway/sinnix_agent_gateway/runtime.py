@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import json
 import time
+import anyio
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, TypeVar, cast
@@ -205,7 +206,7 @@ class Runtime:
         )
         runtime.normalized_events = NormalizedEventService(
             principal=principal_name,
-            state_dir=config.state_dir,
+            cursor_key=runtime.results.cursor_key,
             projects=runtime.projects,
             beads=runtime.beads,
             audit=runtime.audit,
@@ -216,6 +217,27 @@ class Runtime:
         )
         runtime.waits = BoundedWaitService(runtime._resolve_wait)
         return runtime
+
+    def owner_revision_observations(self) -> dict[str, str]:
+        """Read real owner revisions used by the subscription publisher."""
+        observations: dict[str, str] = {}
+        for project_id in self.config.projects:
+            try:
+                summary = self.projects.summary(project_id)
+                latest = summary.get("latest_commit") if isinstance(summary, Mapping) else None
+                revision = latest.get("id") if isinstance(latest, Mapping) else None
+                if isinstance(revision, str) and revision:
+                    observations[REGISTRY.reference("project", {"project_id": project_id})] = revision
+            except Exception:
+                continue
+            try:
+                authority = self.beads.task_authority_status(project_id)
+                revision = authority.get("revision") if isinstance(authority, Mapping) else None
+                if isinstance(revision, str) and revision:
+                    observations[f"sinnix://projects/{project_id}/task-authority"] = revision
+            except Exception:
+                continue
+        return observations
 
     async def gateway_status(
         self,
@@ -491,8 +513,34 @@ class Runtime:
             return ComponentSpec(name, declared[name], probe)
 
         project_ref = REGISTRY.reference("project", {"project_id": project_id}) if project_id else None
-        if intent == "bead.work" and self.principal.name == "agent-control":
+        assigned_bead: Mapping[str, Any] | None = None
+        review_job_observation: dict[str, Any] | None = None
+        if intent == "bead.review" and self.principal.name != "agent-control":
+            if not isinstance(job_ref, str):
+                raise ProtocolError("invalid_request", "bead.review requires job_ref")
+            _job_resource, job_values, _canonical_job_ref = self._resource_reference(
+                job_ref, {"job"}, "bead.review requires a canonical job reference"
+            )
+            review_job_observation = self._sinnixd_job("job.get", {"job_id": job_values["job_id"]})
+            binding = review_job_observation.get("contract", {}).get("bead_binding")
+            if (
+                not isinstance(binding, Mapping)
+                or binding.get("bead_ref") != target_ref
+                or binding.get("project_ref") != project_ref
+            ):
+                raise ProtocolError("precondition_failed", "job is not the requested Beads assignment")
+        if intent in {"bead.work", "bead.review"} and self.principal.name == "agent-control":
             self._assigned_bead_job(target_ref, project_id, None, job_ref)
+            assigned_bead = self.beads.get(
+                project_id,
+                values["bead_id"],
+                includes=(
+                    ["blockers", "dependencies", "dependents", "children", "refs"]
+                    if intent == "bead.work"
+                    else ["history", "events", "dependencies", "dependents", "refs"]
+                ),
+            )
+            self._assigned_bead_job(target_ref, project_id, assigned_bead, job_ref)
         components: list[ComponentSpec] = []
         if intent == "project.orientation":
             assert project_id is not None
@@ -514,7 +562,7 @@ class Runtime:
             bead_ref = target_ref
             bead_id = values["bead_id"]
             components = [
-                component("bead", lambda: self.beads.get(project_id, bead_id, includes=["blockers", "dependencies", "dependents", "children", "refs"]), bead_ref),
+                component("bead", lambda: assigned_bead if assigned_bead is not None else self.beads.get(project_id, bead_id, includes=["blockers", "dependencies", "dependents", "children", "refs"]), bead_ref),
                 component("project", lambda: self.projects.summary(project_id), project_ref),
                 component("checkout", lambda: self.projects.checkout(project_id, "default"), REGISTRY.reference("checkout", {"project_id": project_id, "checkout_id": "default"})),
                 component("assignment", lambda: self._context_assignment(bead_ref, project_id, job_ref), job_ref),
@@ -524,8 +572,9 @@ class Runtime:
             if not isinstance(job_ref, str):
                 raise ProtocolError("invalid_request", "bead.review requires job_ref")
             _job_resource, job_values, canonical_job_ref = self._resource_reference(job_ref, {"job"}, "bead.review requires a canonical job reference")
+            review_bead = assigned_bead
             bead_id = values["bead_id"]
-            job_observation: dict[str, Any] | None = None
+            job_observation: dict[str, Any] | None = review_job_observation
 
             def job() -> dict[str, Any]:
                 nonlocal job_observation
@@ -534,7 +583,7 @@ class Runtime:
                 return job_observation
 
             components = [
-                component("bead", lambda: self.beads.get(project_id, bead_id, includes=["history", "events", "dependencies", "dependents", "refs"]), target_ref),
+                component("bead", lambda: review_bead if review_bead is not None else self.beads.get(project_id, bead_id, includes=["history", "events", "dependencies", "dependents", "refs"]), target_ref),
                 component("job", job, canonical_job_ref),
                 component("checkout", lambda: self.projects.checkout(project_id, "default"), REGISTRY.reference("checkout", {"project_id": project_id, "checkout_id": "default"})),
                 component("diff", lambda: self.projects.diff(project_id, None, None), project_ref),
@@ -1810,6 +1859,75 @@ class Runtime:
                 poll_seconds=float(poll_seconds),
             )
             return self.waits.wait(request)
+        except ValueError as exc:
+            raise ProtocolError("invalid_request", str(exc)) from exc
+
+    async def v2_wait_async(
+        self,
+        reference: str,
+        timeout_seconds: int,
+        target: str = "job_terminal",
+        expected: Mapping[str, Any] | None = None,
+        poll_seconds: float = 0.25,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(reference, str) or not 1 <= len(reference) <= 2_048:
+            raise ProtocolError("invalid_request", "wait ref is malformed")
+        try:
+            resource, values = REGISTRY.resolve(reference)
+            wait_target = WaitTarget(target)
+        except (RegistryError, ValueError) as exc:
+            raise ProtocolError("invalid_request", "wait target or reference is not recognized") from exc
+        if wait_target is WaitTarget.JOB_TERMINAL:
+            if resource.kind != "job":
+                raise ProtocolError("invalid_request", "job_terminal requires a canonical job reference")
+            self.principal.require(Capability.JOB_READ)
+            if cancelled is not None and cancelled():
+                return {"schema": "sinnix.gateway-wait.v1", "outcome": "cancelled", "target": wait_target.value, "ref": reference, "polls": 0, "evidence": {}, "source_revision": "cancelled", "continuation": source_revision({"ref": reference})}
+            if cancelled is None:
+                result = await anyio.to_thread.run_sync(
+                    self._sinnixd_job,
+                    "job.wait",
+                    {"job_id": values["job_id"], "timeout_seconds": timeout_seconds},
+                    abandon_on_cancel=True,
+                )
+            else:
+                result_box: dict[str, Any] = {}
+                request_cancelled = False
+
+                async def wait_for_owner() -> None:
+                    result_box["result"] = await anyio.to_thread.run_sync(
+                        self._sinnixd_job,
+                        "job.wait",
+                        {"job_id": values["job_id"], "timeout_seconds": timeout_seconds},
+                        abandon_on_cancel=True,
+                    )
+                    task_group.cancel_scope.cancel()
+
+                async def watch_request() -> None:
+                    nonlocal request_cancelled
+                    while not cancelled():
+                        await anyio.sleep(0.05)
+                    request_cancelled = True
+                    task_group.cancel_scope.cancel()
+
+                async with anyio.create_task_group() as task_group:
+                    task_group.start_soon(wait_for_owner)
+                    task_group.start_soon(watch_request)
+                if request_cancelled:
+                    return {"schema": "sinnix.gateway-wait.v1", "outcome": "cancelled", "target": wait_target.value, "ref": reference, "polls": 0, "evidence": {}, "source_revision": "cancelled", "continuation": source_revision({"ref": reference})}
+                result = result_box["result"]
+            if cancelled is not None and cancelled():
+                evidence = result.get("state", result)
+                return {"schema": "sinnix.gateway-wait.v1", "outcome": "cancelled", "target": wait_target.value, "ref": reference, "polls": 0, "evidence": evidence if isinstance(evidence, Mapping) else {"value": evidence}, "source_revision": source_revision(evidence), "continuation": source_revision({"ref": reference, "evidence": evidence})}
+            if result.get("job_id") != values["job_id"]:
+                raise ProtocolError("owner_failed", "sinnixd wait response does not match the requested job")
+            return {**result, "ref": REGISTRY.reference("job", {"job_id": values["job_id"]}), "target": wait_target.value}
+        if self.waits is None:
+            raise ProtocolError("unavailable", "wait owner is unavailable")
+        try:
+            request = WaitRequest(target=wait_target, reference=reference, expected=expected or {}, timeout_seconds=timeout_seconds, poll_seconds=float(poll_seconds))
+            return await self.waits.wait_async(request, cancelled=cancelled)
         except ValueError as exc:
             raise ProtocolError("invalid_request", str(exc)) from exc
 

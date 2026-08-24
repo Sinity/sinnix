@@ -17,6 +17,7 @@ from .contracts import (
     VerbFamily,
 )
 from .schemas import V2ToolEnvelope
+from .results import derive_cursor_key
 from sinnix_mcp.refs import RefTemplate, SinnixRef
 
 
@@ -130,7 +131,7 @@ class CatalogRegistry:
         }
 
     def template_page(
-        self, *, principal: str, limit: int = 100, cursor: str | None = None
+        self, *, principal: str, cursor_key: bytes, limit: int = 100, cursor: str | None = None
     ) -> dict[str, Any]:
         """Return principal-filtered resource templates with an opaque cursor."""
         if principal not in {"observer", "agent-control", "operator"}:
@@ -142,11 +143,14 @@ class CatalogRegistry:
             for resource in self.resources
             if principal in resource.principals
         ]
+        key = derive_cursor_key(cursor_key, "resource-templates", principal)
         offset = 0
         if cursor is not None:
             try:
+                if len(cursor.encode()) > 4_096:
+                    raise ValueError
                 encoded, mac = cursor.rsplit(".", 1)
-                expected = hashlib.sha256((self.revision + "|" + encoded).encode()).hexdigest()
+                expected = hmac.new(key, encoded.encode(), hashlib.sha256).hexdigest()
                 if not hmac.compare_digest(mac, expected):
                     raise ValueError
                 payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode())
@@ -159,7 +163,7 @@ class CatalogRegistry:
         next_cursor = None
         if offset + limit < len(rows):
             encoded = base64.urlsafe_b64encode(_canonical_json({"revision": self.revision, "principal": principal, "offset": offset + limit}).encode()).decode().rstrip("=")
-            next_cursor = encoded + "." + hashlib.sha256((self.revision + "|" + encoded).encode()).hexdigest()
+            next_cursor = encoded + "." + hmac.new(key, encoded.encode(), hashlib.sha256).hexdigest()
         return {"templates": page, "limit": limit, "next_cursor": next_cursor, "total": len(rows)}
 
     def _resource_rows(

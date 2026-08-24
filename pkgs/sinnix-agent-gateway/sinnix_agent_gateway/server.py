@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import inspect
 import json
-from typing import Any, Mapping, cast
+from contextlib import asynccontextmanager
+from typing import Any, Callable, Mapping, cast
+
+import anyio
 
 from mcp.server import MCPServer
+from mcp.server.mcpserver.context import Context
 from mcp.server.subscriptions import InMemorySubscriptionBus
-from mcp.shared.subscriptions import ResourceUpdated
 from mcp.types import ListResourceTemplatesResult, PaginatedRequestParams, ResourceTemplate
 
 from .bindings import TargetToolBinding, TargetToolBindings
@@ -17,6 +21,7 @@ from .config import GatewayConfig
 from .contracts import ActionSpec, EffectMode, OwnerRoute, VerbFamily
 from .registry import CatalogSearch, REGISTRY, RegistryError
 from .results import ProtocolError
+from .results import derive_cursor_key
 from .runtime import (
     AUDITED_READ_TOOL,
     IDEMPOTENT_MUTATION_TOOL,
@@ -30,6 +35,7 @@ from .parity import legacy_parity_contract
 from .mcp_broker import McpEnvironmentError
 from .prompts import PromptGenerator, PROMPT_SPECS
 from .schemas import V2ManifestEnvelope
+from .subscriptions import OwnerRevisionPublisher
 
 
 def _bounded_resource_json(runtime: Runtime, payload: Any, kind: str) -> str:
@@ -57,6 +63,18 @@ def _bounded_resource_json(runtime: Runtime, payload: Any, kind: str) -> str:
             separators=(",", ":"),
         )
     return encoded_envelope.decode()
+
+
+def _request_cancelled(ctx: Context | None) -> Callable[[], bool] | None:
+    """Read the pinned MCP SDK's request cancellation event from the injected context."""
+    if ctx is None:
+        return None
+    try:
+        outbound = ctx.request_context.session._request_outbound
+        event = outbound.cancel_requested
+    except AttributeError:
+        return None
+    return event.is_set
 
 
 async def _query_owner(
@@ -265,6 +283,15 @@ async def _query_owner(
 def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     runtime = Runtime.create(config, principal_name)
     subscription_bus = InMemorySubscriptionBus()
+    revision_publisher = OwnerRevisionPublisher(runtime, subscription_bus)
+
+    @asynccontextmanager
+    async def gateway_lifespan(_server: MCPServer):
+        async with anyio.create_task_group() as task_group:
+            task_group.start_soon(revision_publisher.run, 1.0)
+            yield {}
+            task_group.cancel_scope.cancel()
+
     mcp = MCPServer(
         name="sinnix-agent-gateway",
         title="Sinnix Agent Gateway",
@@ -275,7 +302,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         ),
         version="0.2.0",
         subscriptions=subscription_bus,
+        lifespan=gateway_lifespan,
     )
+    mcp._sinnix_revision_publisher = revision_publisher
 
     @mcp.resource("sinnix://gateway/instructions")
     def gateway_instructions() -> str:
@@ -379,9 +408,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
 
     register_canonical_templates()
 
-    template_cursor_key = hashlib.sha256(
-        f"sinnix-template-list:{config.state_dir.resolve()}".encode()
-    ).digest()
+    template_cursor_key = derive_cursor_key(
+        runtime.results.cursor_key, "resource-templates", principal_name
+    )
 
     def template_cursor(offset: int) -> str:
         body = json.dumps(
@@ -391,12 +420,17 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         ).encode()
         encoded = base64.urlsafe_b64encode(body).decode().rstrip("=")
         mac = hmac.new(template_cursor_key, encoded.encode(), hashlib.sha256).hexdigest()
-        return f"{encoded}.{mac}"
+        cursor = f"{encoded}.{mac}"
+        if len(cursor.encode()) > 4_096:
+            raise ProtocolError("response_bound", "resource template cursor exceeds its size bound")
+        return cursor
 
     def template_offset(cursor: str | None) -> int:
         if cursor is None:
             return 0
         try:
+            if len(cursor.encode()) > 4_096:
+                raise ValueError
             encoded, mac = cursor.rsplit(".", 1)
             expected = hmac.new(template_cursor_key, encoded.encode(), hashlib.sha256).hexdigest()
             if not hmac.compare_digest(mac, expected):
@@ -410,7 +444,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
                 raise ValueError
             return offset
-        except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError, binascii.Error) as exc:
             raise ProtocolError("stale_cursor", "resource template cursor is stale or out of scope") from exc
 
     async def list_resource_templates(_ctx: Any, params: PaginatedRequestParams) -> ListResourceTemplatesResult:
@@ -458,32 +492,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             name=prompt_spec.name,
             description=prompt_spec.description,
         )(make_prompt(prompt_spec.name))
-
-    published_revisions: dict[str, str] = {}
-
-    async def publish_revision_changes(payload: Any) -> None:
-        if not isinstance(payload, Mapping):
-            return
-        candidates: list[tuple[str, str]] = []
-
-        def collect(value: Any) -> None:
-            if isinstance(value, Mapping):
-                ref = value.get("ref")
-                revision = value.get("source_revision")
-                if isinstance(ref, str) and isinstance(revision, str):
-                    candidates.append((ref, revision))
-                for item in value.values():
-                    collect(item)
-            elif isinstance(value, list):
-                for item in value:
-                    collect(item)
-
-        collect(payload)
-        for ref, revision in candidates:
-            if published_revisions.get(ref) == revision:
-                continue
-            published_revisions[ref] = revision
-            await subscription_bus.publish(ResourceUpdated(uri=ref))
 
     target_bindings = TargetToolBindings(
         REGISTRY,
@@ -724,7 +732,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     "preconditions": preconditions,
                 },
             )
-            await publish_revision_changes(response.get("data"))
             return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("events", principal_name):
@@ -761,13 +768,12 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     "preconditions": preconditions,
                 },
             )
-            await publish_revision_changes(response.get("data"))
             return cast(V2ManifestEnvelope, v2_tool_result(response))
 
     if target_bindings.is_visible("wait", principal_name):
 
         @mcp.tool(title="Wait for V2 job", annotations=AUDITED_READ_TOOL)
-        def wait(
+        async def wait(
             ref: str,
             timeout_seconds: int = 30,
             target: str = "job_terminal",
@@ -779,12 +785,20 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             idempotency_key: str | None = None,
             deadline_at: float | None = None,
             preconditions: dict[str, Any] | None = None,
+            ctx: Context | None = None,
         ) -> V2ManifestEnvelope:
             """Wait for a bounded interval on one daemon-owned job reference."""
             action = target_bindings.action_for_tool("wait", principal=principal_name)
-            response = runtime.execute_v2(
+            response = await runtime.execute_v2_async(
                 action,
-                lambda: runtime.v2_wait(ref, timeout_seconds, target, expected, poll_seconds),
+                lambda: runtime.v2_wait_async(
+                    ref,
+                    timeout_seconds,
+                    target,
+                    expected,
+                    poll_seconds,
+                    cancelled=_request_cancelled(ctx),
+                ),
                 {
                     "ref": ref,
                     "timeout_seconds": timeout_seconds,

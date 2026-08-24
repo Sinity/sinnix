@@ -65,6 +65,16 @@ class ResultError(ValueError):
         super().__init__(message)
 
 
+def derive_cursor_key(master_key: bytes, purpose: str, principal: str) -> bytes:
+    """Derive a purpose and principal bound cursor key from the private key."""
+    if not isinstance(master_key, bytes) or len(master_key) < 32:
+        raise ResultError("cursor key is malformed", "unavailable")
+    if not isinstance(purpose, str) or not purpose or not isinstance(principal, str) or not principal:
+        raise ResultError("cursor key derivation scope is malformed", "unavailable")
+    message = b"sinnix-gateway-cursor-v1\0" + purpose.encode() + b"\0" + principal.encode()
+    return hmac.new(master_key, message, hashlib.sha256).digest()
+
+
 @dataclass(frozen=True)
 class RequestContext:
     """Caller attribution and transaction controls shared by every V2 action."""
