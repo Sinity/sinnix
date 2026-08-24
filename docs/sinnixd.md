@@ -80,7 +80,7 @@ The longer maximum applies only to `declared-operation` jobs. `agentctl shell`, 
 
 Operation parameters are descriptor-owned. The server accepts only parameter names and types declared under that operation, converts them to a fixed argument vector without a shell, and rejects unknown fields, malformed values, missing bounds, and values beyond those bounds. There is no caller-controlled argv, environment, working directory, or timeout on this route.
 
-The closed type set has no positional parameters. Every parameter owns one long flag, so omission always emits nothing and static or positional command arguments remain in the descriptor's `exec` vector. The descriptor's parameter-table order controls argv order, regardless of JSON object ordering. The server never invokes a shell.
+Each parameter declares exactly one mapping: a long `flag`, or a required `position`. Positional parameters are scalar `string`, `enum`, or `integer` values. They must set `required = true`; optional, list, and boolean positional declarations are invalid. Positions are positive, unique, and contiguous from `1`, so descriptor table order can never choose a positional argv order. Flag parameters retain the existing optional behavior and their descriptor-table order controls only their flag order, regardless of JSON object ordering. The server never invokes a shell.
 
 ```toml
 [operations.sinex_all_sources]
@@ -109,11 +109,33 @@ grammar = "safe-token"
 [operations.sinex_all_sources.parameters.include_default_excluded]
 type = "bool"
 flag = "--include-default-excluded"
+
+[operations.verify_closure]
+description = "Verify closure work for one Bead"
+exec = ["xtask", "verify", "closure"]
+pool = "normal"
+result = "exit"
+cache = "tree+environment"
+
+[operations.verify_closure.parameters.bead_id]
+type = "string"
+position = 1
+required = true
+max_length = 128
+grammar = "safe-token"
+
+[operations.verify_closure.parameters.json]
+type = "bool"
+flag = "--json"
+
+[operations.verify_closure.parameters.dry_run]
+type = "bool"
+flag = "--dry-run"
 ```
 
-`bool` emits its flag only when true. `string`, `enum`, and `integer` emit one flag-value pair. `string-list` and `enum-list` require non-empty arrays, deduplicate and sort their values, then repeat the fixed flag once per canonical value. False booleans and absent parameters emit nothing. Scalar strings require `max_length`; the optional `grammar` selects one safe grammar, with `safe-token` as the default. The supported grammars are `safe-token` (`[A-Za-z0-9][A-Za-z0-9._:+@=-]*`), `identifier` (`[A-Za-z_][A-Za-z0-9_]*`), `package-name` (`[A-Za-z0-9][A-Za-z0-9_-]*`), and `duration` (`[1-9][0-9]{0,8}(ms|s|m|h)`). Arbitrary descriptor regexes are not accepted. Enum values must be a non-empty, unique safe-token set. Integers require inclusive `min` and `max` within signed 32-bit range. Lists require `max_items` from 1 through 32; strings and enum values are limited to 128 characters, and declared `max_length` must be from 1 through 128. An operation has at most 16 parameters and an enum has at most 64 values. Unknown descriptor fields, malformed definitions, duplicate flags or enum values, booleans supplied as integers, unsafe strings, empty lists, and out-of-range values are rejected before launch.
+`bool` emits its flag only when true. Flag-mapped `string`, `enum`, and `integer` values emit one flag-value pair. `string-list` and `enum-list` require non-empty arrays, deduplicate and sort their values, then repeat the fixed flag once per canonical value. False booleans and absent flag parameters emit nothing. A required positional scalar emits exactly one argv item. Derived argv is always `exec`, then positional values in ascending `position`, then present flags in descriptor-table order. Scalar strings require `max_length`; the optional `grammar` selects one safe grammar, with `safe-token` as the default. The supported grammars are `safe-token` (`[A-Za-z0-9][A-Za-z0-9._:+@=-]*`), `identifier` (`[A-Za-z_][A-Za-z0-9_]*`), `package-name` (`[A-Za-z0-9][A-Za-z0-9_-]*`), and `duration` (`[1-9][0-9]{0,8}(ms|s|m|h)`). Arbitrary descriptor regexes are not accepted. Enum values must be a non-empty, unique safe-token set. Integers require inclusive `min` and `max` within signed 32-bit range. Lists require `max_items` from 1 through 32; strings and enum values are limited to 128 characters, and declared `max_length` must be from 1 through 128. An operation has at most 16 parameters and an enum has at most 64 values. Unknown descriptor fields, malformed definitions, duplicate flags or positional positions, gapped positions, booleans supplied as integers, unsafe strings, empty lists, and out-of-range values are rejected before launch.
 
-For the example above, `{"instance_id":"operator-source-driver-browser.history-3","reconcile":true,"service_name":"source-driver-browser.history-3","include_default_excluded":true}` produces `xtask run all-sources --instance-id operator-source-driver-browser.history-3 --reconcile --service-name source-driver-browser.history-3 --include-default-excluded` before the declared environment prefix. These names match Sinex's source-binding identities, whose defaults are `source-driver-<source_id>-<instance_idx>`. The normalized non-default object is encoded as sorted compact JSON and SHA-256 hashed. Each declared job record and `job start`, `job get`, and `job list` response exposes only `parameters.digest`, a lowercase 64-hex digest. Raw parameter values are not persisted. Operations with no `[operations.<name>.parameters]` table remain fixed and reject every non-empty parameters object.
+For the all-sources example, `{"instance_id":"operator-source-driver-browser.history-3","reconcile":true,"service_name":"source-driver-browser.history-3","include_default_excluded":true}` produces `xtask run all-sources --instance-id operator-source-driver-browser.history-3 --reconcile --service-name source-driver-browser.history-3 --include-default-excluded` before the declared environment prefix. These names match Sinex's source-binding identities, whose defaults are `source-driver-<source_id>-<instance_idx>`. For the closure example, `{"bead_id":"sinex-a1b2","json":true,"dry_run":true}` produces `xtask verify closure sinex-a1b2 --json --dry-run`. The normalized non-default object, including required positional values, is encoded as sorted compact JSON and SHA-256 hashed. Each declared job record and `job start`, `job get`, and `job list` response exposes only `parameters.digest`, a lowercase 64-hex digest. Raw parameter values are not persisted. Operations with no `[operations.<name>.parameters]` table remain fixed and reject every non-empty parameters object.
 
 Descriptor `result` is executable contract data. `exit` remains log-only. `json` and `pytest` allocate a bounded result artifact, capture stdout separately from the combined log, and require one UTF-8 JSON object. `agentctl job result` returns that object as typed `value`; malformed, injected trailing output, arrays, and overflowed artifacts are rejected. The record persists `result_kind`, and the result artifact metadata exposes its kind and bound. Polylogue currently declares `verify_affected` and `verify_all` as `pytest`, so their JSON receipts are consumable through this route. Its `verify_quick` still declares `exit`; its descriptor must change to `json` or `pytest` before its receipt is consumable, and this repository does not make that cross-repository declaration change.
 

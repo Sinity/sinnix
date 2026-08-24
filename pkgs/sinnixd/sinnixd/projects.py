@@ -239,7 +239,9 @@ class OperationParameter:
 
     name: str
     kind: str
-    flag: str
+    flag: str | None = None
+    position: int | None = None
+    required: bool = False
     max_items: int | None = None
     max_length: int | None = None
     grammar: str | None = None
@@ -248,7 +250,12 @@ class OperationParameter:
     maximum: int | None = None
 
     def catalog_row(self) -> dict[str, Any]:
-        row: dict[str, Any] = {"name": self.name, "type": self.kind, "flag": self.flag}
+        row: dict[str, Any] = {"name": self.name, "type": self.kind}
+        if self.flag is not None:
+            row["flag"] = self.flag
+        else:
+            assert self.position is not None and self.required
+            row.update({"position": self.position, "required": True})
         if self.kind in {"string", "string-list"}:
             row.update({"max_length": self.max_length, "grammar": self.grammar})
         if self.kind in {"string-list", "enum-list"}:
@@ -325,25 +332,37 @@ class ProjectOperation:
         if unknown:
             raise ValueError("declared job parameters contain unknown field(s): " + ", ".join(sorted(unknown)))
         canonical: dict[str, Any] = {}
-        argv = list(self.command)
+        positional_argv: list[tuple[int, str]] = []
+        flag_argv: list[str] = []
         for parameter in self.parameters:
             if parameter.name not in raw_parameters:
+                if parameter.required:
+                    raise ValueError(f"declared job parameters omit required field: {parameter.name}")
                 continue
             value = parameter.canonicalize(raw_parameters[parameter.name])
+            if parameter.position is not None:
+                assert isinstance(value, (int, str))
+                canonical[parameter.name] = value
+                positional_argv.append((parameter.position, str(value)))
+                continue
+            assert parameter.flag is not None
             if parameter.kind == "bool":
                 if value:
                     canonical[parameter.name] = True
-                    argv.append(parameter.flag)
+                    flag_argv.append(parameter.flag)
                 continue
             if parameter.kind in {"string-list", "enum-list"}:
                 assert isinstance(value, tuple)
                 canonical[parameter.name] = list(value)
                 for item in value:
-                    argv.extend((parameter.flag, item))
+                    flag_argv.extend((parameter.flag, item))
                 continue
             assert isinstance(value, (int, str))
             canonical[parameter.name] = value
-            argv.extend((parameter.flag, str(value)))
+            flag_argv.extend((parameter.flag, str(value)))
+        argv = [*self.command]
+        argv.extend(value for _, value in sorted(positional_argv))
+        argv.extend(flag_argv)
         return tuple(argv), _parameter_digest(canonical)
 
     def catalog_row(self) -> dict[str, Any]:
@@ -438,16 +457,38 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
         if not isinstance(name, str) or not name.isidentifier() or not isinstance(definition, Mapping):
             raise ProjectConfigError(f"{field} contains an invalid parameter declaration")
         kind = definition.get("type")
-        flag = definition.get("flag")
-        if kind not in {"bool", "string", "enum", "integer", "string-list", "enum-list"} or not isinstance(flag, str) or _PARAMETER_FLAG.fullmatch(flag) is None:
-            raise ProjectConfigError(f"{field}.{name} has an invalid type or flag")
+        if kind not in {"bool", "string", "enum", "integer", "string-list", "enum-list"}:
+            raise ProjectConfigError(f"{field}.{name} has an invalid type")
+        has_flag = "flag" in definition
+        has_position = "position" in definition
+        if has_flag == has_position:
+            raise ProjectConfigError(f"{field}.{name} must declare exactly one flag or position")
+        flag: str | None = None
+        position: int | None = None
+        required = False
+        if has_flag:
+            flag = definition.get("flag")
+            if not isinstance(flag, str) or _PARAMETER_FLAG.fullmatch(flag) is None:
+                raise ProjectConfigError(f"{field}.{name} has an invalid flag")
+        else:
+            position = definition.get("position")
+            required = definition.get("required")
+            if (
+                kind not in {"string", "enum", "integer"}
+                or not isinstance(position, int)
+                or isinstance(position, bool)
+                or not 1 <= position <= MAX_OPERATION_PARAMETERS
+                or required is not True
+            ):
+                raise ProjectConfigError(f"{field}.{name} has an invalid required positional declaration")
+        mapping_fields = {"flag"} if flag is not None else {"position", "required"}
         if kind == "bool":
-            if set(definition) != {"type", "flag"}:
+            if set(definition) != {"type", *mapping_fields}:
                 raise ProjectConfigError(f"{field}.{name} bool parameters only accept type and flag")
             parameters.append(OperationParameter(name=name, kind=kind, flag=flag))
             continue
         if kind == "integer":
-            if set(definition) != {"type", "flag", "min", "max"}:
+            if set(definition) != {"type", *mapping_fields, "min", "max"}:
                 raise ProjectConfigError(f"{field}.{name} integer parameters require min and max")
             minimum = definition.get("min")
             maximum = definition.get("max")
@@ -460,11 +501,14 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
             ):
                 raise ProjectConfigError(f"{field}.{name} has invalid integer bounds")
             parameters.append(
-                OperationParameter(name=name, kind=kind, flag=flag, minimum=minimum, maximum=maximum)
+                OperationParameter(
+                    name=name, kind=kind, flag=flag, position=position, required=required,
+                    minimum=minimum, maximum=maximum,
+                )
             )
             continue
         if kind in {"enum", "enum-list"}:
-            allowed = {"type", "flag", "values"}
+            allowed = {"type", *mapping_fields, "values"}
             if kind == "enum-list":
                 allowed.add("max_items")
             if set(definition) != allowed:
@@ -490,6 +534,8 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
                     name=name,
                     kind=kind,
                     flag=flag,
+                    position=position,
+                    required=required,
                     max_items=max_items,
                     max_length=MAX_PARAMETER_STRING_LENGTH,
                     grammar=DEFAULT_PARAMETER_GRAMMAR,
@@ -497,7 +543,7 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
                 )
             )
             continue
-        allowed = {"type", "flag", "max_length", "grammar"}
+        allowed = {"type", *mapping_fields, "max_length", "grammar"}
         if kind == "string-list":
             allowed.add("max_items")
         if set(definition) != allowed - {"grammar"} and set(definition) != allowed:
@@ -520,13 +566,21 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
                 name=name,
                 kind=kind,
                 flag=flag,
+                position=position,
+                required=required,
                 max_items=max_items,
                 max_length=max_length,
                 grammar=grammar,
             )
         )
-    if len({parameter.flag for parameter in parameters}) != len(parameters):
+    flags = [parameter.flag for parameter in parameters if parameter.flag is not None]
+    if len(set(flags)) != len(flags):
         raise ProjectConfigError(f"{field} parameter flags must be unique")
+    positions = [parameter.position for parameter in parameters if parameter.position is not None]
+    if len(set(positions)) != len(positions):
+        raise ProjectConfigError(f"{field} positional parameter positions must be unique")
+    if positions and set(positions) != set(range(1, len(positions) + 1)):
+        raise ProjectConfigError(f"{field} positional parameter positions must be contiguous from 1")
     return tuple(parameters)
 
 

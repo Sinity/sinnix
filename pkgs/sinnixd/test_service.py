@@ -422,6 +422,28 @@ grammar = "safe-token"
 type = "bool"
 flag = "--include-default-excluded"
 
+[operations.verify_closure]
+description = "Verify a fixture closure for one required bead"
+exec = ["xtask", "verify", "closure"]
+pool = "normal"
+result = "exit"
+cache = "tree+environment"
+
+[operations.verify_closure.parameters.bead_id]
+type = "string"
+position = 1
+required = true
+max_length = 128
+grammar = "safe-token"
+
+[operations.verify_closure.parameters.json]
+type = "bool"
+flag = "--json"
+
+[operations.verify_closure.parameters.dry_run]
+type = "bool"
+flag = "--dry-run"
+
 [operations.pytest_receipt]
 description = "Run fixture pytest receipt"
 exec = ["fixture-pytest"]
@@ -463,6 +485,12 @@ documentation = "Bounded Polylogue archive status."
         "[operations.parameterized.parameters.empty_enum]\ntype = \"enum\"\nflag = \"--enum\"\nvalues = []\n",
         "[operations.parameterized.parameters.duplicate_enum]\ntype = \"enum\"\nflag = \"--enum\"\nvalues = [\"same\", \"same\"]\n",
         "[operations.parameterized.parameters.unbounded_enum_list]\ntype = \"enum-list\"\nflag = \"--enum-list\"\nvalues = [\"one\"]\n",
+        "[operations.parameterized.parameters.duplicate_flag]\ntype = \"string\"\nflag = \"--full\"\nmax_length = 4\n",
+        "[operations.verify_closure.parameters.ambiguous]\ntype = \"string\"\nflag = \"--ambiguous\"\nposition = 2\nrequired = true\nmax_length = 4\n",
+        "[operations.verify_closure.parameters.optional]\ntype = \"string\"\nposition = 2\nrequired = false\nmax_length = 4\n",
+        "[operations.verify_closure.parameters.duplicate_position]\ntype = \"string\"\nposition = 1\nrequired = true\nmax_length = 4\n",
+        "[operations.verify_closure.parameters.gapped_position]\ntype = \"string\"\nposition = 3\nrequired = true\nmax_length = 4\n",
+        "[operations.verify_closure.parameters.list_position]\ntype = \"string-list\"\nposition = 2\nrequired = true\nmax_items = 1\nmax_length = 4\n",
     ),
 )
 def test_project_operation_parameter_schema_is_closed_and_bounded(tmp_path: Path, fragment: str) -> None:
@@ -2194,6 +2222,18 @@ def test_project_catalog_is_explicit_and_operation_catalog_is_bounded(tmp_path: 
             "flag": "--include-default-excluded",
         },
     ]
+    assert operations["verify_closure"]["parameters"] == [
+        {
+            "name": "bead_id",
+            "type": "string",
+            "position": 1,
+            "required": True,
+            "max_length": 128,
+            "grammar": "safe-token",
+        },
+        {"name": "json", "type": "bool", "flag": "--json"},
+        {"name": "dry_run", "type": "bool", "flag": "--dry-run"},
+    ]
     assert operations["parameterized"]["result"] == "json"
     assert operations["pytest_receipt"]["result"] == "pytest"
 
@@ -2638,6 +2678,65 @@ def test_sinex_all_sources_fixture_derives_exact_argv_and_digest(tmp_path: Path)
             json.dumps(expected_canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
         ).hexdigest()
     }
+
+
+def test_required_positional_parameter_derives_before_optional_flags_and_contributes_to_digest(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: a typed bead ID must occupy argv position one, never a synthetic flag."""
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "operation": "verify_closure",
+                "parameters": {"bead_id": "sinex-a1b2", "json": True, "dry_run": True},
+            },
+        )
+    )
+
+    assert started.ok and started.payload is not None
+    assert systemd.started[0]["command"] == (
+        "fixture-env", "--command", "xtask", "verify", "closure", "sinex-a1b2", "--json", "--dry-run",
+    )
+    assert started.payload.inline["parameters"] == {
+        "digest": hashlib.sha256(b'{"bead_id":"sinex-a1b2","dry_run":true,"json":true}').hexdigest()
+    }
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    (
+        {},
+        {"bead_id": "x" * 129},
+        {"bead_id": "../unsafe"},
+    ),
+)
+def test_required_positional_parameter_rejects_missing_or_invalid_values_before_launch(
+    tmp_path: Path, parameters: dict[str, object]
+) -> None:
+    """Anti-vacuity: rejected required positionals must not create a systemd job."""
+    write_adapter(tmp_path)
+    systemd = FakeSystemdJobs()
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+
+    response = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "verify_closure", "parameters": parameters},
+        )
+    )
+
+    assert response.error is not None
+    assert response.error.code.value == "INVALID_ARGUMENT"
+    assert systemd.started == []
 
 
 def test_fixed_operation_rejects_parameters_and_retains_its_declared_argv(tmp_path: Path) -> None:
