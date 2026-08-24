@@ -19,8 +19,8 @@
 }@args:
 let
   username = config.sinnix.user.name;
-  capturesRoot = config.sinnix.paths.machineRoot;
-  laneDir = "${capturesRoot}/monitor";
+  lakeRoot = config.sinnix.paths.machineRoot;
+  laneDir = "${lakeRoot}/monitor";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   cfg = config.sinnix.services.capture-monitor;
 
@@ -94,7 +94,7 @@ mkServiceModule (mkCaptureLane {
   execStart = lib.concatStringsSep " " [
     "${poller}/bin/capture-monitor-poll"
     "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
-    capturesRoot
+    lakeRoot
   ];
   # /dev/i2c-* is group-owned (i2c) and the service inherits the operator's
   # supplementary groups via systemd --user, so no DeviceAllow is needed as

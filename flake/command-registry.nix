@@ -360,7 +360,7 @@ let
   '';
   hostSmokeAllScript = ''
     ${resolveFlakeDir}
-    artifact_root="''${SINNIX_HOST_SMOKE_ROOT:-/realm/data/captures/host-smoke}"
+    artifact_root="''${SINNIX_HOST_SMOKE_ROOT:-/realm/data/machine/host-smoke}"
     run_id="$(${pkgs.coreutils}/bin/date -u +%Y%m%dT%H%M%SZ)-$$"
     run_dir="$artifact_root/$run_id"
     mkdir -p "$run_dir"

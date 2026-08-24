@@ -21,7 +21,6 @@ def collect_storage(offline: bool) -> dict[str, Any]:
         "/persist",
         "/cache",
         "/realm",
-        "/realm/data/captures/sinex",
         "/var/lib/postgresql",
         "/var/lib/sinex",
         str(Path.home() / ".local/share/polylogue"),

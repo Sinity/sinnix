@@ -33,8 +33,8 @@
 }@args:
 let
   username = config.sinnix.user.name;
-  capturesRoot = config.sinnix.paths.machineRoot;
-  routerRoot = "${capturesRoot}/router";
+  lakeRoot = config.sinnix.paths.machineRoot;
+  routerRoot = "${lakeRoot}/router";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   cfg = config.sinnix.services.capture-router;
 

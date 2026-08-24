@@ -47,7 +47,7 @@ from pathlib import Path
 
 STATE_DIR = Path.home() / ".local/state/sinnix"
 STATE_FILE = STATE_DIR / "reading-stack.json"
-CAPTURE_ROOT = "/realm/data/captures"
+CAPTURE_ROOT = "/realm/data/activity"
 SOFT_CAP = 20
 
 

@@ -39,15 +39,10 @@ in
               type = types.str;
               default = "${config.realmRoot}/data";
             };
-            capturesRoot = mkOption {
-              type = types.str;
-              default = "${config.dataRoot}/captures";
-              description = "Undifferentiated ambient capture lanes not yet given a subject home. Most former capturesRoot lanes moved to activityRoot/machineRoot/healthRoot/commsRoot/aiRoot in the 2026-08-17 subject recut -- new lanes land here first, then get a subject once one is clear.";
-            };
             activityRoot = mkOption {
               type = types.str;
               default = "${config.dataRoot}/activity";
-              description = "Ambient personal-activity capture: input devices, window/app focus, terminal, media playback, notifications, URL visits. The system charter's largest capturesRoot absorber.";
+              description = "Ambient personal-activity capture: input devices, window/app focus, terminal, media playback, notifications, URL visits, IRC, mail, calendar, transcripts, ranking sessions. Sole home for capture lanes about the operator (captures/ and comms/ retired 2026-08-24; a new lane lands here or in machineRoot/healthRoot by subject).";
             };
             machineRoot = mkOption {
               type = types.str;
@@ -58,11 +53,6 @@ in
               type = types.str;
               default = "${config.dataRoot}/health";
               description = "Body/environment physiology: Awair air quality (as health/environment), Xiaomi cloud health witness, phone health/battery/thermal.";
-            };
-            commsRoot = mkOption {
-              type = types.str;
-              default = "${config.dataRoot}/comms";
-              description = "Communications capture (IRC logs, etc).";
             };
             aiRoot = mkOption {
               type = types.str;
@@ -155,10 +145,6 @@ in
             interceptBounce = mkOption {
               type = types.str;
               default = "${config.root}/intercept-bounce";
-            };
-            knowledgeExtract = mkOption {
-              type = types.str;
-              default = "${config.root}/knowledge-extract";
             };
             knowledgebase = mkOption {
               type = types.str;
@@ -266,15 +252,6 @@ in
                 };
               };
               description = "Canonical project metadata consumed by agent and evidence surfaces.";
-            };
-            lynchpinExported = mkOption {
-              type = types.str;
-              default = "${config.root}/__lynchpin_exported";
-              description = "Lynchpin's derived artifacts (ledgers, dashboards, repo-artefacts), separate from knowledgebase.";
-            };
-            pwrank = mkOption {
-              type = types.str;
-              default = "${config.root}/pwrank";
             };
           };
         }

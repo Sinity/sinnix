@@ -38,8 +38,8 @@ let
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   a11yDaemon = scriptPkgs.sinnix-capture-a11y;
-  capturesRoot = config.sinnix.paths.activityRoot;
-  laneDir = "${capturesRoot}/a11y";
+  lakeRoot = config.sinnix.paths.activityRoot;
+  laneDir = "${lakeRoot}/a11y";
   cfg = config.sinnix.services.capture-a11y;
 in
 mkServiceModule (mkCaptureLane {
@@ -88,7 +88,7 @@ mkServiceModule (mkCaptureLane {
   umask = "0077";
   execStart = lib.concatStringsSep " " [
     "${a11yDaemon}/bin/sinnix-capture-a11y"
-    "--capture-root ${capturesRoot}"
+    "--capture-root ${lakeRoot}"
     "--subtree-interval-seconds ${toString cfg.subtreeIntervalSeconds}"
     "--text-debounce-seconds ${toString cfg.textDebounceSeconds}"
     "--max-depth ${toString cfg.maxDepth}"

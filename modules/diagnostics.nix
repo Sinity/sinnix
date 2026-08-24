@@ -12,11 +12,11 @@
 }:
 let
   inherit (config.sinnix.machine) isDesktop;
-  capturesRoot = config.sinnix.paths.machineRoot;
+  telemetryRoot = config.sinnix.paths.machineRoot;
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 
-  journaldBaseDir = "${capturesRoot}/syslog";
+  journaldBaseDir = "${telemetryRoot}/syslog";
   bootMetricsDir = "${journaldBaseDir}/boot-metrics";
 
   coreDiagnostics = with pkgs; [

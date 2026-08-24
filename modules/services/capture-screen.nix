@@ -29,8 +29,8 @@ let
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   screenDaemon = scriptPkgs.sinnix-capture-screen;
-  capturesRoot = config.sinnix.paths.activityRoot;
-  laneDir = "${capturesRoot}/screen-frames";
+  lakeRoot = config.sinnix.paths.activityRoot;
+  laneDir = "${lakeRoot}/screen-frames";
   cfg = config.sinnix.services.capture-screen;
 in
 mkServiceModule (mkCaptureLane {
@@ -98,7 +98,7 @@ mkServiceModule (mkCaptureLane {
   execStart = lib.escapeShellArgs [
     "${screenDaemon}/bin/sinnix-capture-screen"
     "--capture-root"
-    capturesRoot
+    lakeRoot
     "--lane"
     "screen-frames"
     "--grim-bin"

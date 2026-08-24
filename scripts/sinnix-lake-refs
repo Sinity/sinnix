@@ -10,7 +10,7 @@ those paths does not exist on disk.
 Why this exists: a filesystem reorganisation this size (measured 2026-08-17:
 roughly 80 indirected reference sites against ~131 hardcoded literals across
 three repos) is precisely the scale at which "we updated every reference" is
-a hope, not a fact. sinnix.paths.capturesRoot and lynchpin's config.py handle
+a hope, not a fact. sinnix.paths.activityRoot and lynchpin's config.py handle
 the indirected half automatically; this tool is for the half that bypasses
 them -- scripts/*, lynchpin/sources/*.py, and the two files
 (materialization.py, source_contracts.py) that independently duplicate the
@@ -31,7 +31,7 @@ Two subcommands:
 
 Deliberately narrow: this is not a general dead-code or refactoring tool. It
 only looks for the one shape that has actually hurt this system --
-/realm/data, /realm/media, /realm/inbox path literals -- because that is the
+/realm/data, /realm/library (formerly /realm/media), /realm/inbox path literals -- because that is the
 scope of the reorganisation this was built for.
 """
 

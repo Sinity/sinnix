@@ -230,7 +230,7 @@ Polylogue, Lynchpin, or Sinnix captures can answer directly.
   analysis products. Use it for timelines, correlations, and "what happened
   around X?" questions.
 - **Host/runtime evidence** → Sinnix observability. `/etc/sinnix/runtime-inventory.json`,
-  `sinnix-observe`, and `/realm/data/captures/**` are the raw/runtime truth for
+  `sinnix-observe`, and `/realm/data/{activity,machine}/**` are the raw/runtime truth for
   services, captures, pressure, screenshots, terminal recordings, and machine
   telemetry.
 - **Live browser/desktop/terminal state** → DevTools and `sinnix-*` helpers.
@@ -301,13 +301,19 @@ persisted) — no Nix rebuild needed.
 /realm/
 ├── project/           # All active project repositories
 ├── data/              # Canonical PERSONAL data lake (see below)
-├── media/             # Consumption/media collections (Steam, books, model weights, stashbox)
+├── library/           # Re-acquirable consumption media + datasets + model weights (backup-excluded)
 ├── state/             # Always-on service state (journal, polylogue, machine-telemetry, containers; nodatacow subvols)
-├── staging/           # Backup staging (drained to /outer-realm by borg jobs)
+├── backup/            # Explicit backup landings
+├── cache/             # Rebuildable caches
 ├── worktrees/         # Agent/compile-heavy git worktrees (not aged)
-├── inbox/             # Staging area for retired/incoming data + downloads
+├── inbox/             # Intake: download/ bundle/ sweep/ capture/
+├── code-snapshots     # Convenience door -> data/derived/lynchpin/code-snapshots
 └── tmp/               # Throwaway analysis output, aged shell TMPDIR
 ```
+
+`scripts/lake-lint` (sinnix) asserts these node sets exactly, in both
+directions — a taxonomy change updates data, INVENTORY, and the lint
+manifest in one commit.
 
 User home is `/home/sinity`. It is intentionally not under `/realm`: the live
 home directory is recreated on each boot and populated from `/persist` via the
@@ -337,29 +343,28 @@ SSH keys lives at `/persist/home/sinity/.ssh` and appears at runtime as
 ### /realm/data - Data Lake Structure
 
 ```
-/realm/data/
-├── captures/          # Continuous local telemetry
-│   ├── activitywatch/ # Window/AFK/browser tracking
-│   ├── webhistory/    # Browser history exports
-│   ├── asciinema/     # Terminal recordings
-│   ├── keylog/        # Keystroke captures (scribe-tap)
-│   ├── audio/         # Audio captures
-│   ├── comms/         # Communication captures
-│   ├── screenshot/    # Screenshots
-│   ├── shell/         # Shell history (Atuin)
-│   ├── syslog/        # System log exports
-│   ├── machine/       # Canonical host machine telemetry
-│   ├── polylogue/     # Polylogue archive root
-│   └── kitty-scrollback/ # Terminal scrollback
-├── exports/           # GDPR/Takeout provider exports
-│   ├── chatlog/       # AI chat archives (Claude, ChatGPT, Codex)
-│   ├── health/        # Samsung Health, Sleep As Android
-│   ├── google/        # Takeout archives
-│   └── ...            # reddit, spotify, raindrop, goodreads, wykop, ...
-├── libraries/         # Curated collections (finance, doc, books, model, ...)
-├── derived/           # Derived analysis products
-└── knowledgebase/     # PKM vault (Obsidian-friendly MOCs, raw-log)
+/realm/data/    # cut by GENESIS: how did these bytes come to exist?
+├── activity/          # This machine observed the OPERATOR: activitywatch,
+│                      #   webhistory, asciinema, keylog, shell (atuin), audio,
+│                      #   screenshot, irc, mail, calendar, transcripts, ...
+├── machine/           # This machine observed the HOST: telemetry, syslog,
+│                      #   netflow, router, peripherals, phone lane
+├── health/            # Physiology: Samsung Health, sleep, air quality
+├── accounts/          # Bounded third-party pulls: google, reddit, spotify,
+│                      #   raindrop, facebook-messenger, teams, outlook, ...
+├── ai/                # AI dialogue archives (incl. live polylogue lane)
+├── derived/           # Tool-computed products; reports live ONLY in
+│                      #   derived/reports/ (flat, date-suffixed)
+├── self/              # Irreplaceable personal artifacts (genome, photos, finance)
+├── knowledgebase/     # Raw-log repo (load-bearing path; not a vault any more)
+├── records/ code/     # Bounded personal/document datasets
+├── notes/             # FROZEN pending prose-merge ruling — do not add here
+└── secrets/           # agenix ciphertext
 ```
+
+Retired generations (never write to these): `data/captures`, `data/exports`,
+`data/comms`, `data/reports`, `data/decisions`, `/realm/media`,
+`/realm/staging`, `data/libraries`.
 
 ## Project Constellation
 
@@ -383,12 +388,10 @@ SSH keys lives at `/persist/home/sinity/.ssh` and appears at runtime as
 
 | Project           | Path                        | Purpose                            |
 | ----------------- | --------------------------- | ---------------------------------- |
-| **knowledgebase** | `/realm/data/knowledgebase` | PKM vault (Obsidian-friendly MOCs) |
+| **knowledgebase** | `/realm/data/knowledgebase` | Raw-log repo (vault dissolved; path load-bearing) |
 | **stashbox**      | `/realm/project/stashbox`   | Media library tooling              |
 
-Inactive/archived work lives under `/realm/project/_inactive/` and
-`/realm/project/archives/`; third-party checkouts (snix, tvix, codex) are not
-Sinity projects.
+Third-party checkouts (snix, tvix, codex) are not Sinity projects.
 
 ### Project Relationships
 

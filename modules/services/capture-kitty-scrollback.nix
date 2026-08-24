@@ -15,8 +15,8 @@
 let
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-  capturesRoot = config.sinnix.paths.activityRoot;
-  scrollbackDir = "${capturesRoot}/kitty-scrollback";
+  lakeRoot = config.sinnix.paths.activityRoot;
+  scrollbackDir = "${lakeRoot}/kitty-scrollback";
   cfg = config.sinnix.services.capture-kitty-scrollback;
 in
 mkServiceModule (mkCaptureLane {

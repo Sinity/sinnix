@@ -39,11 +39,11 @@ let
   # Kept whole under activityRoot per the charter's dominant-container rule
   # (2026-08-17 subject recut) -- audio-devices/audio-topology would
   # otherwise sit in machineRoot per the charter's literal table.
-  capturesRoot = config.sinnix.paths.activityRoot;
-  audioDir = "${capturesRoot}/audio";
-  devicesDir = "${capturesRoot}/audio-devices";
-  topologyDir = "${capturesRoot}/audio-topology";
-  indexDir = "${capturesRoot}/audio-index";
+  lakeRoot = config.sinnix.paths.activityRoot;
+  audioDir = "${lakeRoot}/audio";
+  devicesDir = "${lakeRoot}/audio-devices";
+  topologyDir = "${lakeRoot}/audio-topology";
+  indexDir = "${lakeRoot}/audio-index";
 
   cfg = config.sinnix.services.capture-audio;
   mkExcludeArgs =
@@ -144,7 +144,7 @@ mkServiceModule {
         {
           manager = "user";
           resourceClass = "capture-runtime";
-          execStart = "${audioPkg}/bin/sinnix-audio-capture index --capture-root ${capturesRoot} --ffmpeg-bin ${ffmpegBin}";
+          execStart = "${audioPkg}/bin/sinnix-audio-capture index --capture-root ${lakeRoot} --ffmpeg-bin ${ffmpegBin}";
           serviceConfig = {
             ReadWritePaths = [
               audioDir
@@ -193,7 +193,7 @@ mkServiceModule {
                 # Staleness cannot see the failure this lane exists to prevent:
                 # a device that is present in the graph and recorded by nobody.
                 livenessProbe = {
-                  command = "${audioPkg}/bin/sinnix-audio-capture devices-probe --capture-root ${capturesRoot} --pw-dump-bin ${pwDumpBin} ${excludeArgs}";
+                  command = "${audioPkg}/bin/sinnix-audio-capture devices-probe --capture-root ${lakeRoot} --pw-dump-bin ${pwDumpBin} ${excludeArgs}";
                   timeoutSeconds = 15;
                 };
               }
@@ -265,7 +265,7 @@ mkServiceModule {
                       [
                         "${audioPkg}/bin/sinnix-audio-capture"
                         "record-devices"
-                        "--capture-root ${capturesRoot}"
+                        "--capture-root ${lakeRoot}"
                         "--pw-record-bin ${pwRecordBin}"
                         "--pw-dump-bin ${pwDumpBin}"
                         "--opusenc-bin ${opusencBin}"
@@ -310,7 +310,7 @@ mkServiceModule {
                   unit = "sinnix-audio-topology.service";
                   overrides = {
                     Type = "simple";
-                    ExecStart = "${audioPkg}/bin/sinnix-audio-capture topology --capture-root ${capturesRoot} --pw-mon-bin ${pwMonBin}";
+                    ExecStart = "${audioPkg}/bin/sinnix-audio-capture topology --capture-root ${lakeRoot} --pw-mon-bin ${pwMonBin}";
                     Restart = "on-failure";
                     RestartSec = "5s";
                     ReadWritePaths = [ topologyDir ];

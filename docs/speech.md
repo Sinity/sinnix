@@ -207,7 +207,7 @@ the Nix store; sinnix already keeps model files under `/realm/library/models`.
 | `silero_vad.onnx`                            | 2 MB   | voice activity       |
 
 An earlier attempt at Parakeet went through a NeMo pip venv and left 5.5 GB of
-torch and CUDA wheels under `/realm/media/model/parakeet` with no model weights
+torch and CUDA wheels under `/realm/library/media/model/parakeet` with no model weights
 in it and no service ever built. That is what the packaged route replaced, and
 the venv is gone.
 
