@@ -885,6 +885,22 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         raise ProjectConfigError(
             f"{descriptor} operation dependency/dependencies are undeclared: " + ", ".join(sorted(unknown_dependencies))
         )
+    required_parameter_operations = {
+        operation.name
+        for operation in operations
+        if any(parameter.required for parameter in operation.parameters)
+    }
+    invalid_parameter_dependencies = {
+        dependency
+        for operation in operations
+        for dependency in operation.dependencies
+        if dependency in required_parameter_operations
+    }
+    if invalid_parameter_dependencies:
+        raise ProjectConfigError(
+            f"{descriptor} operation dependencies cannot target operations with required parameters: "
+            + ", ".join(sorted(invalid_parameter_dependencies))
+        )
     if workspace is not None:
         unknown_verifiers = set(workspace.verification_operations) - operation_names
         if unknown_verifiers:
