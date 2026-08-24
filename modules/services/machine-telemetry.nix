@@ -1,7 +1,7 @@
 # machine-telemetry: canonical host sensor and pressure capture
 #
 # Sinnix owns capture mechanics; Lynchpin owns interpretation. This service
-# writes a typed SQLite stream under /realm/data/captures/machine/ that
+# writes a typed SQLite stream under /realm/data/machine/ that
 # Lynchpin can promote into its substrate without scraping mixed-schema CSV.
 # Captures CPU RAPL package/core watts, thermal state, PSI, service placement,
 # scheduler latency samples, and periodic network-link probes.

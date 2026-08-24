@@ -17,8 +17,8 @@
 }@args:
 let
   username = config.sinnix.user.name;
-  capturesRoot = config.sinnix.paths.machineRoot;
-  laneDir = "${capturesRoot}/netflow";
+  lakeRoot = config.sinnix.paths.machineRoot;
+  laneDir = "${lakeRoot}/netflow";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 
   # A lane that cannot record its counters must fail, not run quietly and
@@ -188,7 +188,7 @@ mkServiceModule {
             ExecStart = lib.concatStringsSep " " [
               "${streamer}/bin/capture-netflow-stream"
               "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
-              capturesRoot
+              lakeRoot
             ];
             Restart = "on-failure";
             RestartSec = "10s";

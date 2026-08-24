@@ -12,7 +12,7 @@ intention.
 
 Store convention (design doc section 2): raw comparisons/items are
 behavioral capture, kept forever under
-/realm/data/captures/ranking/<domain>/; derived fits are never written back
+/realm/data/activity/ranking/<domain>/; derived fits are never written back
 into that directory, so a full refit from raw comparisons stays reproducible
 at any time -- `status`/`spin` always refit in memory rather than trusting a
 cached theta file.
@@ -29,7 +29,7 @@ from pathlib import Path
 from rank_core import Item, Selector, Store, draw, fit, top_k_stability
 from rank_core.draw import POLICIES
 
-CAPTURE_ROOT = Path("/realm/data/captures/ranking")
+CAPTURE_ROOT = Path("/realm/data/activity/ranking")
 BACKLOG_ACTIVITY_NAME = "backlog session"
 
 

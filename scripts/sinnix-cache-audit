@@ -55,7 +55,7 @@ threshold_kb=$((THRESHOLD_GB * 1024 * 1024))
 
 # Unreadable directories are counted as zero by du, so an unprivileged run
 # silently under-reports exactly the large root-owned trees this is meant to
-# find -- /realm/media/model measured 35G as the user and 120G as root. The
+# find -- the model store (now /realm/library/models) measured 35G as the user and 120G as root. The
 # errors are surfaced rather than discarded, and a short count of them is a
 # warning that the totals below are floors, not measurements.
 du_errors="$(mktemp)"

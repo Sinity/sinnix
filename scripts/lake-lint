@@ -1,30 +1,48 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Assert the level-1 node sets of /realm and /outer-realm match the taxonomy
+# description: Assert the level-1 node sets of /realm, /realm/data and /outer-realm match the taxonomy exactly, in both directions
 # runtimeInputs: bash coreutils
 #
 # Taxonomy source of truth: /realm/INVENTORY.md and /outer-realm/INVENTORY.md.
-# Main nodes only at level 1 — anything unexpected at a root is
-# either debris to triage or a taxonomy change that must update the INVENTORY
-# and this manifest in the same commit.
+# The check is BIDIRECTIONAL: a node on disk that the manifest does not name
+# is debris or an unratified taxonomy change, and a REQUIRED manifest node
+# missing from disk is a half-finished rename. Both fail. This is the ratchet
+# that stops a rename from leaving two coexisting naming generations behind
+# (media->library, captures->activity, exports->accounts, comms->accounts/
+# activity, reports->derived/reports all survived for weeks because the old
+# allow-list permitted both halves of every pair).
+#
+# A taxonomy change therefore updates the INVENTORY and this manifest in the
+# same commit that moves the data - never before, never after.
 set -euo pipefail
 
 status=0
 
+# check_root <root> -- <required nodes...> -- <optional nodes...>
+# Required: must exist on disk and be named here. Optional: allowed if
+# present (markers, trash, mount scaffolding), never required.
 check_root() {
   local root="$1"
   shift
-  local -a allowed=("$@")
-  local entry base ok
+  local -a required=() optional=()
+  local mode=required
+  for a in "$@"; do
+    if [ "$a" = "--" ]; then
+      mode=optional
+      continue
+    fi
+    if [ "$mode" = required ]; then required+=("$a"); else optional+=("$a"); fi
+  done
   [ -d "$root" ] || {
     echo "lake-lint: SKIP $root (not present)" >&2
     return 0
   }
+  local entry base ok
   for entry in "$root"/* "$root"/.[!.]*; do
     [ -e "$entry" ] || continue
     base="$(basename "$entry")"
     ok=1
-    for a in "${allowed[@]}"; do
+    for a in "${required[@]}" "${optional[@]}"; do
       if [ "$base" = "$a" ]; then
         ok=0
         break
@@ -35,31 +53,42 @@ check_root() {
       status=1
     fi
   done
+  for a in "${required[@]}"; do
+    if [ ! -e "$root/$a" ]; then
+      echo "lake-lint: MISSING required node: $root/$a"
+      status=1
+    fi
+  done
 }
 
 # /realm level-1 manifest. backup/ holds explicit backup landings (the
-# polylogue consolidation and its live-store snapshot, 2026-08-16); staging/
-# and db/ were dissolved into state/{db-dumps,cursors} and removed outright
-# respectively -- their absence here is deliberate, not an omission.
+# polylogue consolidation and its live-store snapshot, 2026-08-16);
+# code-snapshots is a deliberate convenience door onto
+# data/derived/lynchpin/code-snapshots (D3, 2026-08-24). staging/ and db/
+# were dissolved 2026-08; captures/ comms/ reports/ decisions/ were
+# dissolved 2026-08-24.
 check_root /realm \
   project data library state backup swap cache worktrees tmp inbox \
-  code-snapshots \
-  INVENTORY.md .btrfs .Trash-1000
+  code-snapshots INVENTORY.md \
+  -- .btrfs .Trash-1000
 
 check_root /outer-realm \
   backup archive inbox INVENTORY.md \
-  archive-staged \
-  .Trash-1000
+  -- .Trash-1000
 
-# /realm/data level-1 manifest (personal lake only). accounts/ is the one
-# place ownership-as-directory bends to loss profile: other people's
-# personal exports (e.g. twitter-archives) are not re-acquirable the way a
-# public dataset is, so they sit here rather than in library/, despite the
-# owner not being the operator (system charter Section 3).
+# /realm/data level-1 manifest (personal lake only), post the 2026-08-24
+# collapse. Cut is by GENESIS: activity/ (machine observed the operator),
+# machine/ (about the host), health/ (physiology), accounts/ (bounded
+# third-party pulls, incl. platform comms archives), ai/ (AI dialogue
+# archives), derived/ (tool-computed, incl. derived/reports and
+# derived/comms), knowledgebase/ (raw-log repo, load-bearing path),
+# self/ (irreplaceable personal artifacts), secrets/ (agenix ciphertext),
+# records/ + code/ (bounded personal/document datasets). notes/ persists
+# only until the operator-subject prose merge (D2-b) is ratified; do NOT
+# add new content there.
 check_root /realm/data \
-  captures self knowledgebase derived secrets accounts \
-  activity ai code decisions comms health machine records notes reports \
-  INVENTORY.md
+  accounts activity ai code derived health knowledgebase machine \
+  notes records secrets self INVENTORY.md
 
 if [ "$status" -eq 0 ]; then
   echo "lake-lint: all roots match taxonomy"

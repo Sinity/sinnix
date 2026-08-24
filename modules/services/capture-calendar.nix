@@ -5,11 +5,10 @@
 # 2026-08-12 rigor pass): calendars land as plain .ics files under one
 # directory tree, not sinnix-capture envelopes.
 #
-# Landed under capturesRoot (the undifferentiated root), not a named subject
-# root -- none of activityRoot/machineRoot/healthRoot/commsRoot/aiRoot/
-# selfRoot fits a personal calendar cleanly, and foundation.nix's own
-# capturesRoot description says exactly this case gets a subject once one is
-# clear.
+# Lives under activityRoot/calendar: the calendar mirror is an ambient
+# record of the operator's own scheduled activity, which is activityRoot's
+# subject (capturesRoot, the old undifferentiated root, was retired
+# 2026-08-24).
 #
 # Sync shape: a single continuously-updated mirror (vdirsyncer's own
 # status_path incremental sync state), not dated snapshot directories -- a
@@ -44,7 +43,7 @@
 }@args:
 let
   username = config.sinnix.user.name;
-  laneDir = "${config.sinnix.paths.capturesRoot}/calendar";
+  laneDir = "${config.sinnix.paths.activityRoot}/calendar";
   stateDir = "/realm/state/capture-calendar";
   secretPaths = config.sinnix.secrets.paths;
   cfg = config.sinnix.services.capture-calendar;

@@ -54,7 +54,7 @@ mkFeatureModule {
     let
       nixosConfig = config;
       sinnixCfg = nixosConfig.sinnix;
-      capturesRoot = sinnixCfg.paths.activityRoot;
+      lakeRoot = sinnixCfg.paths.activityRoot;
       cliCoreEnabled = nixosConfig.sinnix.features.cli.core.enable;
 
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
@@ -77,7 +77,7 @@ mkFeatureModule {
               autosuggestion.enable = true;
               syntaxHighlighting.enable = true;
               history = {
-                path = "${capturesRoot}/shell/zsh/history";
+                path = "${lakeRoot}/shell/zsh/history";
                 save = 9999999;
                 size = 9999999;
                 append = true;

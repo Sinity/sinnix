@@ -5,7 +5,7 @@
 # aw-rollup lesson on sinnix-olm2's close): a Maildir is already the durable
 # store IMAP clients understand, so this lane does NOT go through the
 # sinnix-capture envelope writer -- mbsync writes the Maildir directly under
-# commsRoot/mail, and that directory tree IS the capture.
+# activityRoot/mail, and that directory tree IS the capture.
 #
 # `Expunge None` in the generated mbsync config is deliberate, not an
 # oversight: this lane exists to survive server-side and client-side
@@ -41,7 +41,7 @@
 }@args:
 let
   username = config.sinnix.user.name;
-  maildirDir = "${config.sinnix.paths.commsRoot}/mail";
+  maildirDir = "${config.sinnix.paths.activityRoot}/mail";
   secretPaths = config.sinnix.secrets.paths;
   cfg = config.sinnix.services.capture-mail;
 

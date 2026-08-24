@@ -24,8 +24,8 @@
 }@args:
 let
   username = config.sinnix.user.name;
-  capturesRoot = config.sinnix.paths.activityRoot;
-  replayDir = "${capturesRoot}/replay";
+  lakeRoot = config.sinnix.paths.activityRoot;
+  replayDir = "${lakeRoot}/replay";
   unit = "sinnix-capture-replay.service";
 
   replaySave = pkgs.writeShellApplication {

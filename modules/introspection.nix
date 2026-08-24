@@ -9,7 +9,7 @@
 }:
 let
   cfg = config.sinnix;
-  inherit (cfg.paths) activityRoot machineRoot commsRoot;
+  inherit (cfg.paths) activityRoot machineRoot;
 
   # ── Collect enabled features ────────────────────────────────────────
   collectEnabled =
@@ -101,7 +101,6 @@ let
         machine = machineRoot;
         activitywatch = "${activityRoot}/activitywatch/activitywatch";
         shell = "${activityRoot}/shell";
-        comms = commsRoot;
         webhistory = "${activityRoot}/webhistory";
         kitty-scrollback = "${activityRoot}/kitty-scrollback";
       };

@@ -180,7 +180,7 @@ def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_ev
             # an error row to its ancestors, has_error never propagates, and
             # subtree_complete reads true for a subtree that was never fully
             # seen. Found by testing against a real permission wall
-            # (/realm/media/model/ollama/blobs, root:root 0700): the flag came
+            # (/realm/library/models/ollama/blobs -- then /realm/media/model -- root:root 0700): the flag came
             # back true until this was added.
             parent = os.path.dirname(path) if depth else None
             try:
@@ -300,7 +300,7 @@ CREATE TABLE nodes AS SELECT * FROM read_json_auto('{jsonl}', ignore_errors=true
 -- total_bytes used to be silently a FLOOR wherever a permission-denied leaf
 -- sat in the subtree: the leaf's own direct_bytes is 0 (its contents were
 -- never seen), that 0 gets summed like any other, and nothing on the parent
--- row said the number was incomplete. Measured live: /realm/media/model
+-- row said the number was incomplete. Measured live: the model store (now /realm/library/models, then /realm/media/model)
 -- reported 35G that way while the true size (readable only as root) is 120G
 -- -- a 3.4x undercount with no marker distinguishing it from a directory that
 -- actually is 35G. subtree_complete/incomplete_reason close that gap: any
@@ -419,7 +419,7 @@ CONTENT_EXCLUDE_PREFIXES = (
     # and 203 GB of 263 GB. It also produces phantom findings — a stray-file
     # search over the polluted index reported 821 hits where 8 were real.
     "/realm/.btrfs/",
-    "/realm/data/captures/",
+    "/realm/data/activity/",
     "/realm/library/media/",
     "/realm/library/models/",
     "/realm/library/datasets/",

@@ -36,8 +36,8 @@
 }@args:
 let
   username = config.sinnix.user.name;
-  capturesRoot = config.sinnix.paths.machineRoot;
-  peripheralsRoot = "${capturesRoot}/peripherals";
+  lakeRoot = config.sinnix.paths.machineRoot;
+  peripheralsRoot = "${lakeRoot}/peripherals";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   cfg = config.sinnix.services.capture-peripherals;
 

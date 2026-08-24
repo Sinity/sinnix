@@ -8,7 +8,7 @@ set -euo pipefail
 target="DP-3"
 resolution="3840x2160"
 fps="120"
-output_dir="/realm/inbox"
+output_dir="/realm/inbox/capture"
 
 usage() {
   cat >&2 <<'EOF'

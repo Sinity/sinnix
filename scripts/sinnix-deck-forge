@@ -44,11 +44,12 @@ SCHEMA = "sinnix.phone.deck/1"
 STATE_DIR = Path(os.environ.get("SINNIX_PHONE_STATE_DIR", "/realm/state/sinnix-phone"))
 DECKS_DIR = STATE_DIR / "inbox" / "decks"
 
-LAKE = Path(os.environ.get("SINNIX_CAPTURES_ROOT", "/realm/data/captures"))
+ACTIVITY = Path(os.environ.get("SINNIX_ACTIVITY_ROOT", "/realm/data/activity"))
+MACHINE = Path(os.environ.get("SINNIX_MACHINE_ROOT", "/realm/data/machine"))
 DERIVED = Path(os.environ.get("SINNIX_DERIVED_ROOT", "/realm/data/derived"))
 
 ATUIN_DB = Path(os.environ.get("ATUIN_DB", Path.home() / ".local/share/atuin/history.db"))
-KEYLOG = LAKE / "keylog" / "logs"
+KEYLOG = ACTIVITY / "keylog" / "logs"
 
 
 def now_iso() -> str:
@@ -283,19 +284,19 @@ def lake_facts() -> list[tuple[str, float, str]]:
         distinct = len(set(cmds))
         facts.append(("distinct shell command lines you have run", distinct, "commands"))
 
-    ambient = LAKE / "phone" / "ambient"
+    ambient = MACHINE / "phone" / "ambient"
     if ambient.is_dir():
         n = sum(1 for p in ambient.iterdir() if p.suffix == ".m4a")
         if n:
             facts.append(("five-minute ambient audio chunks on the phone right now", n, "chunks"))
 
-    levels = LAKE / "phone" / "ambient-levels.jsonl"
+    levels = MACHINE / "phone" / "ambient-levels.jsonl"
     if levels.is_file():
         n = _count_lines(levels)
         if n:
             facts.append(("ambient chunks measured into the levels ledger", n, "records"))
 
-    transcripts = LAKE / "transcripts"
+    transcripts = ACTIVITY / "transcripts"
     if transcripts.is_dir():
         n = sum(_count_lines(p) for p in transcripts.glob("2*.jsonl"))
         if n:

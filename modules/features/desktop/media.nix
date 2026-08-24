@@ -47,7 +47,7 @@ mkFeatureModule {
       ...
     }:
     let
-      capturesRoot = config.sinnix.paths.activityRoot;
+      lakeRoot = config.sinnix.paths.activityRoot;
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
     in
     lib.mkMerge [
@@ -62,7 +62,7 @@ mkFeatureModule {
           }:
           {
             home.sessionVariables = {
-              MPV_SCREENSHOT_DIR = "${capturesRoot}/screenshot/mpv";
+              MPV_SCREENSHOT_DIR = "${lakeRoot}/screenshot/mpv";
             };
 
             home.packages = with pkgs; [
@@ -89,7 +89,7 @@ mkFeatureModule {
                 osd-duration = 2000;
                 screenshot-format = "png";
                 screenshot-png-compression = 9;
-                screenshot-template = "${capturesRoot}/screenshot/mpv/%F-%P-%n";
+                screenshot-template = "${lakeRoot}/screenshot/mpv/%F-%P-%n";
                 save-position-on-quit = true;
                 resume-playback = "yes";
                 hdr-compute-peak = false;

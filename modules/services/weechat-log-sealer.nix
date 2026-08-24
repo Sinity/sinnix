@@ -3,7 +3,7 @@
 # Daily user timer that hashes "old enough" per-day IRC logs in the
 # captures archive and renames them to ``YYYY-MM-DD.b2-<12hex>.log``.
 # The script lives next to the rest of the IRC pipeline at
-# ``${capturesRoot}/comms/irc/scripts/seal_logs.py`` so the user can
+# ``${activityRoot}/irc/scripts/seal_logs.py`` so the user can
 # edit it inplace; this module just schedules it.
 #
 # See the seal_logs.py header for the 2-day buffer rationale (avoids
@@ -45,7 +45,7 @@ mkServiceModule {
       captures = [
         {
           name = "comms-irc";
-          path = "${config.sinnix.paths.commsRoot}/irc";
+          path = "${config.sinnix.paths.activityRoot}/irc";
           eventDriven = true;
           staleAfterSeconds = 3600;
         }
@@ -54,7 +54,7 @@ mkServiceModule {
   job =
     { cfg, config, ... }:
     let
-      ircRoot = "${config.sinnix.paths.commsRoot}/irc";
+      ircRoot = "${config.sinnix.paths.activityRoot}/irc";
     in
     {
       # Unit predates the sinnix- prefix; keep its name.

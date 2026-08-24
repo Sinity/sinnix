@@ -24,12 +24,12 @@
 }@args:
 let
   username = config.sinnix.user.name;
-  capturesRoot = config.sinnix.paths.activityRoot;
+  lakeRoot = config.sinnix.paths.activityRoot;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   steer = scriptPkgs.sinnix-steer;
   cockpit = scriptPkgs.sinnix-cockpit;
   stateDir = "/realm/project/steering";
-  exportDir = "${capturesRoot}/steering";
+  exportDir = "${lakeRoot}/steering";
 in
 mkServiceModule {
   name = "steering";

@@ -21,8 +21,8 @@
 let
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-  capturesRoot = config.sinnix.paths.activityRoot;
-  mprisDir = "${capturesRoot}/mpris";
+  lakeRoot = config.sinnix.paths.activityRoot;
+  mprisDir = "${lakeRoot}/mpris";
   cfg = config.sinnix.services.capture-mpris;
 
   monitor = pkgs.writeTextFile {
@@ -57,6 +57,6 @@ mkServiceModule (mkCaptureLane {
   # Media listening is optional and intermittent: a fully quiet week is a
   # legitimate "nothing was played" outcome, not a broken daemon.
   staleAfterSeconds = 604800;
-  execStart = "${monitor}/bin/capture-mpris-monitor --capture-root ${capturesRoot} --lane mpris --playerctl-bin ${pkgs.playerctl}/bin/playerctl --sinnix-capture-bin ${scriptPkgs.sinnix-capture}/bin/sinnix-capture --heartbeat-interval ${toString cfg.heartbeatIntervalSec}";
+  execStart = "${monitor}/bin/capture-mpris-monitor --capture-root ${lakeRoot} --lane mpris --playerctl-bin ${pkgs.playerctl}/bin/playerctl --sinnix-capture-bin ${scriptPkgs.sinnix-capture}/bin/sinnix-capture --heartbeat-interval ${toString cfg.heartbeatIntervalSec}";
   unitDescription = "MPRIS media-player track/status capture with playback heartbeat";
 }) args
