@@ -441,6 +441,32 @@ def test_production_wait_route_observes_mcp_request_cancellation(tmp_path: Path)
     assert response["data"]["outcome"] == "cancelled", response
 
 
+def test_production_wait_route_runs_without_mcp_request_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    server = create_server(config(tmp_path), "observer")
+    runtime = server._sinnix_revision_publisher.runtime
+    monkeypatch.setattr(
+        runtime,
+        "_sinnixd_job",
+        lambda operation, arguments: {
+            "job_id": arguments["job_id"],
+            "state": {"phase": "succeeded", "terminal": True},
+        },
+    )
+
+    async def invoke() -> dict[str, object]:
+        result = await server.call_tool(
+            "wait",
+            {"ref": "sinnix://jobs/fixture-job", "timeout_seconds": 1},
+        )
+        assert result.structured_content is not None
+        return result.structured_content
+
+    response = anyio.run(invoke)
+    assert response["result"]["outcome"] == "ok", response
+    assert response["data"]["job_id"] == "fixture-job", response
+    assert response["data"]["state"] == {"phase": "succeeded", "terminal": True}, response
+
+
 def test_production_job_wait_route_cancels_owner_wait(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     server = create_server(config(tmp_path), "observer")
     runtime = server._sinnix_revision_publisher.runtime

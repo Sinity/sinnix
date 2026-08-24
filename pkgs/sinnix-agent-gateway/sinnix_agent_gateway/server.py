@@ -72,7 +72,7 @@ def _request_cancelled(ctx: Context | None) -> Callable[[], bool] | None:
     try:
         outbound = ctx.request_context.session._request_outbound
         event = outbound.cancel_requested
-    except AttributeError:
+    except (AttributeError, ValueError):
         return None
     return event.is_set
 
