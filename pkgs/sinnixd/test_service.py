@@ -684,6 +684,46 @@ def test_service_lease_is_bounded_public_metadata_and_injects_only_declared_port
     assert rejected.error.code.value == "INVALID_ARGUMENT"
 
 
+def test_declared_service_dependency_supplies_lease_and_unblocks_when_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dependent operation receives its service lease and starts only after the port is bound."""
+    port_available = True
+    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: port_available)
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'exclusive_keys = ["fixture:check"]',
+            'exclusive_keys = ["fixture:check"]\ndependencies = ["service"]',
+        )
+    )
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+
+    started = service.dispatch(
+        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"})
+    )
+
+    assert started.ok and started.payload is not None
+    check_id = started.payload.inline["job_id"]
+    check_record = jobs.store.load(check_id)
+    _, launch_environment = jobs.store.declared_launch(check_id)
+    assert launch_environment["FIXTURE_HTTP_PORT"] == "41000"
+    assert check_record.state["phase"] == "waiting-dependencies"
+    dependency_id = check_record.spec.dependency_job_ids[0]
+    dependency_command, _ = jobs.store.declared_launch(dependency_id)
+    assert dependency_command == ("fixture-env", "--command", "fixture-service")
+    assert len(systemd.started) == 1
+
+    port_available = False
+    jobs.get(check_id)
+    check_command, _ = jobs.store.declared_launch(check_id)
+    assert check_command == ("fixture-env", "--command", "fixture-check")
+    assert len(systemd.started) == 2
+
+
 def test_live_service_leases_never_share_a_port(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Anti-vacuity: two live declared jobs must allocate different port slots from one range."""
     monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
