@@ -140,10 +140,6 @@ class ObserveService:
             "reason": "selected machine response exceeded response bound",
         }
 
-    def machine_report(self) -> dict[str, Any]:
-        """Return the bounded overview retained for callers of the old route."""
-        return self.machine_query("overview")
-
     def machine_query(
         self, operation: str, cursor: int = 0, limit: int = 100
     ) -> dict[str, Any]:

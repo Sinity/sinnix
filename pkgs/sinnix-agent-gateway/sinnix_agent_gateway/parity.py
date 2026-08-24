@@ -9,7 +9,7 @@ from .contracts import OBSERVABILITY_PERSISTENCE, ActionSpec
 from .legacy_manifest import LEGACY_MANIFEST, LEGACY_MANIFEST_SCHEMA
 from .registry import CatalogRegistry
 
-PARITY_SCHEMA = "sinnix.gateway-legacy-parity.v1"
+PARITY_SCHEMA = "sinnix.gateway-legacy-parity.v2"
 
 PreconditionSemantics = Literal["not_applicable", "supported"]
 IdempotencySemantics = Literal["not_applicable", "required"]
@@ -18,7 +18,8 @@ IdempotencySemantics = Literal["not_applicable", "required"]
 @dataclass(frozen=True)
 class LegacyMigration:
     legacy_route: str
-    v2_action: str
+    v2_action: str | None = None
+    deletion_verdict: str | None = None
     semantic_change: str | None = None
 
 
@@ -28,28 +29,39 @@ class LegacyParityRow:
 
     legacy_tool: str
     legacy_route: str
-    v2_action: str
-    v2_route: str
-    required_principals: tuple[str, ...]
-    bound: Literal["owner_limit_and_result_snapshot"]
-    typed_failures: tuple[str, ...]
-    preconditions: PreconditionSemantics
-    idempotency: IdempotencySemantics
-    receipt_policy: Literal["audit", "owner"]
+    disposition: Literal["migrated", "deleted"]
+    v2_action: str | None
+    v2_route: str | None
+    required_principals: tuple[str, ...] = ()
+    bound: Literal["owner_limit_and_result_snapshot"] | None = None
+    typed_failures: tuple[str, ...] = ()
+    preconditions: PreconditionSemantics | None = None
+    idempotency: IdempotencySemantics | None = None
+    receipt_policy: Literal["audit", "owner"] | None = None
+    deletion_verdict: str | None = None
     semantic_change: str | None = None
 
 
 def _migration(
-    route: str, action: str, *, semantic_change: str | None = None
+    route: str, action: str | None = None, *, deletion_verdict: str | None = None,
+    semantic_change: str | None = None,
 ) -> LegacyMigration:
-    return LegacyMigration(route, action, semantic_change)
+    if (action is None) == (deletion_verdict is None):
+        raise ValueError("legacy capability requires exactly one migration or deletion verdict")
+    return LegacyMigration(route, action, deletion_verdict, semantic_change)
 
 
 # This is deliberately a migration mapping, not a second legacy manifest. The
 # pinned manifest is extracted from the historical app by the adjacent tool.
 V2_MIGRATIONS = {
     "gateway_status": _migration("observe.gateway_status", "gateway.status"),
-    "machine_report": _migration("observe.machine_report", "machine.query"),
+    "machine_report": _migration(
+        "observe.machine_report",
+        deletion_verdict=(
+            "Deleted: the whole-machine overview constructed an unpageable response. "
+            "machine.query exposes owner-selected overview and entity sections with cursor continuation."
+        ),
+    ),
     "machine_query": _migration("observe.machine_query", "machine.query"),
     "capability_search": _migration("capability_index.search", "capabilities.query"),
     "capability_describe": _migration("capability_index.describe", "capabilities.query"),
@@ -111,10 +123,22 @@ V2_MIGRATIONS = {
 }
 
 
-def _row(legacy_tool: str, migration: LegacyMigration, action: ActionSpec) -> LegacyParityRow:
+def _row(legacy_tool: str, migration: LegacyMigration, action: ActionSpec | None) -> LegacyParityRow:
+    if action is None:
+        assert migration.deletion_verdict is not None
+        return LegacyParityRow(
+            legacy_tool=legacy_tool,
+            legacy_route=migration.legacy_route,
+            disposition="deleted",
+            v2_action=None,
+            v2_route=None,
+            deletion_verdict=migration.deletion_verdict,
+            semantic_change=migration.semantic_change,
+        )
     return LegacyParityRow(
         legacy_tool=legacy_tool,
         legacy_route=migration.legacy_route,
+        disposition="migrated",
         v2_action=action.name,
         v2_route=action.route,
         required_principals=tuple(sorted(action.principals)),
@@ -128,6 +152,12 @@ def _row(legacy_tool: str, migration: LegacyMigration, action: ActionSpec) -> Le
 
 
 def _validate_row(row: LegacyParityRow, registry: CatalogRegistry) -> None:
+    if row.disposition == "deleted":
+        if row.v2_action is not None or row.v2_route is not None or not row.deletion_verdict:
+            raise ValueError(f"{row.legacy_tool} has an unexplained deletion")
+        return
+    if row.v2_action is None or row.v2_route is None:
+        raise ValueError(f"{row.legacy_tool} has an unexplained migration")
     action = registry.action(row.v2_action)
     if action.route != row.v2_route:
         raise ValueError(f"{row.legacy_tool} maps to an unexpected V2 route")
@@ -158,7 +188,9 @@ def legacy_parity_contract(registry: CatalogRegistry) -> dict[str, Any]:
         _row(
             legacy_tool,
             V2_MIGRATIONS[legacy_tool],
-            registry.action(V2_MIGRATIONS[legacy_tool].v2_action),
+            registry.action(V2_MIGRATIONS[legacy_tool].v2_action)
+            if V2_MIGRATIONS[legacy_tool].v2_action is not None
+            else None,
         )
         for legacy_tool in legacy_tools
     )
@@ -172,4 +204,13 @@ def legacy_parity_contract(registry: CatalogRegistry) -> dict[str, Any]:
             "canonical_bytes": manifest["canonical_bytes"],
         },
         "rows": [asdict(row) for row in rows],
+        "summary": {
+            "migrated": sum(row.disposition == "migrated" for row in rows),
+            "deleted": sum(row.disposition == "deleted" for row in rows),
+            "unexplained": sum(
+                row.disposition == "migrated" and row.v2_action is None
+                or row.disposition == "deleted" and not row.deletion_verdict
+                for row in rows
+            ),
+        },
     }

@@ -949,9 +949,14 @@ def build_registry() -> CatalogRegistry:
             principals=frozenset({"observer", "agent-control", "operator"}),
             input_schema=RESOURCE_GET_SCHEMA,
             output_schema=V2_ENVELOPE_SCHEMA,
-            resource_kinds=("project", "checkout", "bead", "task_authority", "job"),
+            resource_kinds=(
+                "project", "checkout", "bead", "task_authority", "job",
+                "artifact", "receipt", "result", "machine_unit", "browser_page",
+                "browser_workspace", "terminal", "desktop", "host_file",
+                "capture_lane", "capability", "session",
+            ),
             examples=({"input": {"ref": "sinnix://projects/sinnix"}},),
-            documentation="Resolve one canonical project, checkout, Beads task, or task-authority reference.",
+            documentation="Resolve one canonical owner-backed resource through its registered source of truth.",
         ),
         ActionSpec(
             name="projects.query",

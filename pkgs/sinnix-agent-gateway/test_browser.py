@@ -68,6 +68,18 @@ def test_operator_actions_require_gateway_created_agent_target(tmp_path: Path) -
     ]
 
 
+def test_canonical_browser_target_read_requires_registered_agent_window(tmp_path: Path) -> None:
+    browser, captured = browser_service(tmp_path, "operator")
+
+    browser.action("agent_window", {})
+    result = browser.describe_target("agent-target")
+
+    assert result == {"operation": "info", "page_id": "agent-target", "result": {"ok": True}}
+    assert commands(captured) == [["agent-window"], ["info", "agent-target"]]
+    with pytest.raises(BrowserError, match="gateway-created agent window"):
+        browser.describe_target("operator-page")
+
+
 def test_agent_window_rejects_visible_target_after_wrapper_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

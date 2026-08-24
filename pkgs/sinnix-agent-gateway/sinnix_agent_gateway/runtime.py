@@ -864,6 +864,74 @@ class Runtime:
                 "projection": projection,
                 "job": result,
             }
+        if resource.kind == "artifact":
+            return {
+                "ref": canonical_ref,
+                "kind": resource.kind,
+                "artifact": self.artifacts.read(values["artifact_id"], offset, max_bytes),
+            }
+        if resource.kind == "receipt":
+            return {
+                "ref": canonical_ref,
+                "kind": resource.kind,
+                "receipt": self.audit.receipt(values["receipt_id"]),
+            }
+        if resource.kind == "result":
+            return {
+                "ref": canonical_ref,
+                "kind": resource.kind,
+                "result": self.results.read(values["result_id"]),
+            }
+        if resource.kind == "machine_unit":
+            page = self.observe.machine_query("units", limit=500)
+            rows = page.get("rows") if isinstance(page, Mapping) else None
+            if not isinstance(rows, list):
+                raise ProtocolError("unavailable", "machine unit owner is unavailable")
+            unit = next(
+                (
+                    row for row in rows
+                    if isinstance(row, Mapping)
+                    and row.get("unit") == values["unit"]
+                    and row.get("manager", values["manager"]) == values["manager"]
+                ),
+                None,
+            )
+            if unit is None:
+                raise ProtocolError("not_found", "machine unit is not in the current bounded owner page")
+            return {"ref": canonical_ref, "kind": resource.kind, "unit": dict(unit), "source": page.get("source")}
+        if resource.kind == "browser_page":
+            return {"ref": canonical_ref, "kind": resource.kind, "page": self.browser.describe_target(values["page_id"])}
+        if resource.kind == "browser_workspace":
+            return {"ref": canonical_ref, "kind": resource.kind, "workspace": self.browser.read("status")}
+        if resource.kind == "terminal":
+            return {
+                "ref": canonical_ref,
+                "kind": resource.kind,
+                "terminal": self.terminals.read("capture", {"match": f"id:{values['terminal_id']}", "extent": "last_non_empty_output"}),
+            }
+        if resource.kind == "desktop":
+            return {"ref": canonical_ref, "kind": resource.kind, "desktop": self.desktop.read("status")}
+        if resource.kind == "host_file":
+            return {
+                "ref": canonical_ref,
+                "kind": resource.kind,
+                "file": self.files.read("stat", self._decode_file_token(values["file_token"])),
+            }
+        if resource.kind == "mcp_tool":
+            raise ProtocolError(
+                "unsupported_capability",
+                "MCP tool schemas are resolved by the asynchronous mcp.query catalog owner",
+            )
+        if resource.kind == "capture_lane":
+            return {"ref": canonical_ref, "kind": resource.kind, "lane": self.captures.lane(values["lane"])}
+        if resource.kind == "capability":
+            return {"ref": canonical_ref, "kind": resource.kind, "capability": self.capability_index.describe(values["name"])}
+        if resource.kind == "session":
+            return {
+                "ref": canonical_ref,
+                "kind": resource.kind,
+                "session": self.sessions.read(f"{values['provider']}:{values['session_id']}", offset, max_bytes),
+            }
         raise ValueError(f"V2 get does not support resource kind {resource.kind!r}")
 
     def v2_run_shell(

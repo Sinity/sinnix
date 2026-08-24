@@ -92,6 +92,12 @@ class BrowserService:
             )
         return page_id
 
+    def describe_target(self, page_id: str) -> dict[str, Any]:
+        """Read one registered agent target without widening to operator tabs."""
+        self.principal.require(Capability.BROWSER_READ)
+        page_id = self._require_owned_target(page_id)
+        return self.read("info", page_id)
+
     def capture(
         self,
         page_id: str,

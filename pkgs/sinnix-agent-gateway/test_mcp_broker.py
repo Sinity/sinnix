@@ -71,6 +71,8 @@ class FakeSession:
             tools=[
                 SimpleNamespace(
                     name="lookup",
+                    description="Fixture lookup",
+                    inputSchema={"type": "object", "properties": {"query": {"type": "string"}}},
                     annotations=SimpleNamespace(read_only_hint=True),
                 )
             ]
@@ -180,6 +182,7 @@ def test_catalog_probes_admitted_servers_and_keeps_exclusions_static(
                 "availability": "available",
                 "tool_count": 1,
                 "read_only_tool_count": 1,
+                "tools": [{"name": "lookup", "ref": "sinnix://mcp/fixture/tools/lookup", "description": "Fixture lookup", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}}, "effect": "read"}],
             },
         ]
     }
@@ -235,6 +238,7 @@ for line in sys.stdin:
         "availability": "available",
         "tool_count": 1,
         "read_only_tool_count": 1,
+        "tools": [{"name": "fixture_read", "ref": "sinnix://mcp/fixture/tools/fixture_read", "description": "Fixture read tool", "input_schema": {"type": "object", "properties": {}}, "effect": "read"}],
     }
 
 
