@@ -4442,12 +4442,13 @@ def test_declared_job_binds_workspace_and_exact_head(tmp_path: Path) -> None:
     workspace = service.workspaces.create(
         project_id="fixture", name="verify-lane", branch="feature/verify-lane", base="HEAD"
     )
+    assert service.workspaces.resolve_checkout("fixture", workspace["checkout_id"]).path == Path(workspace["path"])
 
     started = service.dispatch(
         request(
             "job.start",
             "systemd-jobs",
-            {"project_id": "fixture", "operation": "check", "workspace_id": workspace["workspace_id"]},
+            {"project_id": "fixture", "operation": "check", "workspace_id": "verify-lane"},
         )
     )
 

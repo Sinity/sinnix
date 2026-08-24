@@ -348,7 +348,7 @@ class SinnixdService:
                 raise ValueError("job.start workspace_id must be null or non-empty")
             assert self.workspaces is not None
             checkout = (
-                self.workspaces.checkout(workspace_id)
+                self.workspaces.resolve_checkout(project_id, workspace_id)
                 if workspace_id is not None
                 else self.projects.checkout(project_id, "default")
             )

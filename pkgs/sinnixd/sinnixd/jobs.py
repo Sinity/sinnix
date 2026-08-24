@@ -2083,7 +2083,7 @@ class GenericJobs:
             state["cache"][record.spec.cache_key] = {"job_id": record.job_id, "touched_at": _timestamp()}
             state["cache"] = self._bounded(state["cache"], MAX_ADMISSION_CACHE_ENTRIES)
         peak = self._memory_peak(record.state.get("systemd", {}))
-        if peak is not None and record.spec.estimate_key is not None:
+        if record.state.get("phase") == "succeeded" and peak is not None and record.spec.estimate_key is not None:
             state["estimates"][record.spec.estimate_key] = {"bytes": peak, "touched_at": _timestamp()}
             state["estimates"] = self._bounded(state["estimates"], MAX_ADMISSION_ESTIMATES)
         self._save_admission_state(state)

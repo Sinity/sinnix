@@ -342,6 +342,24 @@ class GitWorkspaces:
         checkout, _project = self._available(record)
         return checkout
 
+    def resolve_checkout(self, project_id: str, reference: str) -> RegisteredCheckout:
+        self._project(project_id)
+        records = tuple(record for record in self.store.records() if record.project_id == project_id)
+        matches = [record for record in records if reference in {record.workspace_id, record.name}]
+        if not matches:
+            for record in records:
+                try:
+                    checkout, _project = self._available(record)
+                except (FileNotFoundError, KeyError, WorkspaceError):
+                    continue
+                if checkout.checkout_id == reference:
+                    matches.append(record)
+        if len(matches) != 1:
+            qualifier = "ambiguous" if matches else "unknown"
+            raise KeyError(f"{qualifier} workspace: {project_id}.{reference}")
+        checkout, _project = self._available(matches[0])
+        return checkout
+
     def finish_merged(self, workspace_id: str, expected_head: str) -> dict[str, Any]:
         """Remove an exact GitHub-merged workspace without ancestry inference."""
         with flock(self.mutation_lock):
