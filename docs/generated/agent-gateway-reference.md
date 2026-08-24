@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v2-g2.10-context-events -->
-<!-- gateway-catalog-sha256: 55b2c04b720b6b3cabb13781ed02b29265ebde07399854982aa096e6f27b54ae -->
+<!-- gateway-catalog-sha256: e397d251c8fe961b76d414c244fc283fc03da2840b3382a13ea0cb84f456a267 -->
 # Sinnix Agent Gateway V2 reference
 
 This reference is generated from `sinnix_agent_gateway.registry.REGISTRY`. The catalog hash changes when an action, resource, schema, route, principal, bound, or example changes.
 
-Revision: `v2-g2.10-context-events`. Catalog SHA-256: `55b2c04b720b6b3cabb13781ed02b29265ebde07399854982aa096e6f27b54ae`.
+Revision: `v2-g2.10-context-events`. Catalog SHA-256: `e397d251c8fe961b76d414c244fc283fc03da2840b3382a13ea0cb84f456a267`.
 
 ## Ten CLI verbs
 
@@ -1027,7 +1027,7 @@ Examples:
 
 Perform one structured, attested Beads mutation for a canonical project.
 
-Owner route: `beads.write`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, policy_denied, response_bound, unavailable`.
+Owner route: `beads.write`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, invalid_request, not_found, owner_failed, policy_denied, precondition_failed, response_bound, unavailable`.
 
 Input schema:
 
@@ -1238,6 +1238,31 @@ Input schema:
             "rejected",
             "partial"
           ]
+        }
+      },
+      "type": "object"
+    },
+    "preconditions": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_assignee": {
+          "maxLength": 256,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expected_etag": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "expected_status": {
+          "maxLength": 64,
+          "type": "string"
+        },
+        "expected_task_revision": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
         }
       },
       "type": "object"

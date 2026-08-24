@@ -1157,6 +1157,7 @@ def build_registry() -> CatalogRegistry:
             output_schema=V2_ENVELOPE_SCHEMA,
             resource_kinds=("project", "bead", "task_authority"),
             supports_idempotency=True,
+            supports_precondition=True,
             receipt_policy="audit",
             examples=({"input": {"ref": "sinnix://projects/sinnix", "operation": "comment", "parameters": {"id": "sinnix-example", "text": "recorded by the operator"}, "idempotency_key": "bead-comment-example"}},),
             documentation="Perform one structured, attested Beads mutation for a canonical project.",

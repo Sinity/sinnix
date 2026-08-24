@@ -561,7 +561,15 @@ def test_query_context_and_events_contracts_bind_existing_read_owners() -> None:
     with pytest.raises(RegistryError, match="cannot read action"):
         REGISTRY.action_schema("beads.query", "agent-control")
     assert beads["input_schema"]["properties"]["parameters"]["properties"]["cursor"]["maxLength"] == 256
-    assert "preview_digest" in REGISTRY.action_schema("beads.change", "operator")["action"]["input_schema"]["properties"]["parameters"]["properties"]
+    bead_change = REGISTRY.action_schema("beads.change", "operator")["action"]
+    assert bead_change["supports_precondition"] is True
+    assert bead_change["input_schema"]["properties"]["preconditions"]["properties"] == {
+        "expected_task_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "expected_status": {"type": "string", "maxLength": 64},
+        "expected_assignee": {"type": ["string", "null"], "maxLength": 256},
+        "expected_etag": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    }
+    assert "preview_digest" in bead_change["input_schema"]["properties"]["parameters"]["properties"]
     changeset = REGISTRY.action_schema("beads.changeset", "operator")["action"]
     assert changeset["route"] == "beads.changeset"
     assert changeset["input_schema"]["properties"]["operation"]["enum"] == ["apply", "preview"]
