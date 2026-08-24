@@ -120,15 +120,12 @@ class TargetToolBindings:
             action = self.registry.action(binding.action_name)
             if principal in action.principals:
                 return action
-        raise RegistryError(
-            f"principal {principal!r} has no visible action for target tool {tool_name!r}"
-        )
+        # Stable protocol verbs remain present even when a principal has no
+        # action in that family. The first declared contract is used only to
+        # carry the typed policy-denied envelope; selector resolution has
+        # already failed and no owner callback is dispatched.
+        return self.registry.action(bindings[0].action_name)
 
     def is_visible(self, tool_name: str, principal: str) -> bool:
-        try:
-            return any(
-                principal in self.registry.action(binding.action_name).principals
-                for binding in self._bindings_by_tool[tool_name]
-            )
-        except KeyError:
-            return False
+        del principal
+        return tool_name in self._bindings_by_tool

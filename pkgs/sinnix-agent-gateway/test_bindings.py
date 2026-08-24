@@ -60,12 +60,13 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
     assert bindings.is_visible("wait", "observer")
     assert bindings.is_visible("run", "operator")
     assert bindings.is_visible("run", "agent-control")
-    assert bindings.is_visible("run", "observer") is False
+    assert bindings.is_visible("run", "observer")
     assert bindings.is_visible("change", "operator")
     assert bindings.is_visible("operate", "operator")
     assert bindings.is_visible("operate", "agent-control")
-    assert bindings.is_visible("change", "observer") is False
-    assert bindings.is_visible("operate", "observer") is False
+    assert bindings.is_visible("change", "observer")
+    assert bindings.is_visible("operate", "observer")
+    assert bindings.fallback_for_tool("change", "observer").name == "projects.change"
     with pytest.raises(RegistryError, match="cannot invoke"):
         bindings.action_for_tool("run", "agent.for_bead", "observer")
 
