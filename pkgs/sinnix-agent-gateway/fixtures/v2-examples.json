@@ -1,0 +1,617 @@
+{
+  "action_catalog_hash": "6eca67234126cb0ad3d069252ed5b049076015a7b02468115732e8cc8f9c43e5",
+  "examples": [
+    {
+      "action": "gateway.status",
+      "cli_input": {},
+      "input": {},
+      "verb": "status"
+    },
+    {
+      "action": "gateway.catalog",
+      "cli_input": {
+        "availability": "available",
+        "resource_kind": "bead"
+      },
+      "input": {
+        "availability": "available",
+        "resource_kind": "bead"
+      },
+      "verb": "catalog"
+    },
+    {
+      "action": "resources.get",
+      "cli_input": {
+        "ref": "sinnix://projects/sinnix"
+      },
+      "input": {
+        "ref": "sinnix://projects/sinnix"
+      },
+      "verb": "get"
+    },
+    {
+      "action": "projects.query",
+      "cli_input": {
+        "action_name": "projects.query",
+        "max_matches": 20,
+        "query": "mkServiceModule",
+        "ref": "sinnix://projects/sinnix"
+      },
+      "input": {
+        "max_matches": 20,
+        "query": "mkServiceModule",
+        "ref": "sinnix://projects/sinnix"
+      },
+      "verb": "query"
+    },
+    {
+      "action": "beads.query",
+      "cli_input": {
+        "action_name": "beads.query",
+        "parameters": {
+          "filters": {
+            "priority": {
+              "op": "<=",
+              "value": 1
+            },
+            "status": "open"
+          },
+          "includes": [
+            "dependencies"
+          ],
+          "limit": 50,
+          "project_ids": [
+            "polylogue"
+          ],
+          "view": "query"
+        }
+      },
+      "input": {
+        "action_name": "beads.query",
+        "parameters": {
+          "filters": {
+            "priority": {
+              "op": "<=",
+              "value": 1
+            },
+            "status": "open"
+          },
+          "includes": [
+            "dependencies"
+          ],
+          "limit": 50,
+          "project_ids": [
+            "polylogue"
+          ],
+          "view": "query"
+        }
+      },
+      "verb": "query"
+    },
+    {
+      "action": "projects.context",
+      "cli_input": {
+        "ref": "sinnix://projects/sinnix"
+      },
+      "input": {
+        "ref": "sinnix://projects/sinnix"
+      },
+      "verb": "context"
+    },
+    {
+      "action": "audit.events",
+      "cli_input": {
+        "limit": 100
+      },
+      "input": {
+        "limit": 100
+      },
+      "verb": "events"
+    },
+    {
+      "action": "jobs.wait",
+      "cli_input": {
+        "ref": "sinnix://jobs/3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c",
+        "timeout_seconds": 30
+      },
+      "input": {
+        "ref": "sinnix://jobs/3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c",
+        "timeout_seconds": 30
+      },
+      "verb": "wait"
+    },
+    {
+      "action": "projects.change",
+      "cli_input": {
+        "action_name": "projects.change",
+        "idempotency_key": "project-write-example",
+        "operation": "write",
+        "parameters": {
+          "content": "updated content\\n",
+          "path": "README.md"
+        },
+        "preconditions": {
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "ref": "sinnix://projects/sinnix/checkouts/default"
+      },
+      "input": {
+        "idempotency_key": "project-write-example",
+        "operation": "write",
+        "parameters": {
+          "content": "updated content\\n",
+          "path": "README.md"
+        },
+        "preconditions": {
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "ref": "sinnix://projects/sinnix/checkouts/default"
+      },
+      "verb": "change"
+    },
+    {
+      "action": "files.change",
+      "cli_input": {
+        "action_name": "files.change",
+        "idempotency_key": "file-replace-example",
+        "operation": "replace",
+        "parameters": {
+          "content": "updated content\\n"
+        },
+        "ref": "sinnix://files/L3JlYWxtL3RtcC9maWxl"
+      },
+      "input": {
+        "idempotency_key": "file-replace-example",
+        "operation": "replace",
+        "parameters": {
+          "content": "updated content\\n"
+        },
+        "ref": "sinnix://files/L3JlYWxtL3RtcC9maWxl"
+      },
+      "verb": "change"
+    },
+    {
+      "action": "beads.change",
+      "cli_input": {
+        "action_name": "beads.change",
+        "idempotency_key": "bead-comment-example",
+        "operation": "comment",
+        "parameters": {
+          "id": "sinnix-example",
+          "text": "recorded by the operator"
+        },
+        "ref": "sinnix://projects/sinnix"
+      },
+      "input": {
+        "idempotency_key": "bead-comment-example",
+        "operation": "comment",
+        "parameters": {
+          "id": "sinnix-example",
+          "text": "recorded by the operator"
+        },
+        "ref": "sinnix://projects/sinnix"
+      },
+      "verb": "change"
+    },
+    {
+      "action": "beads.changeset",
+      "cli_input": {
+        "action_name": "beads.changeset",
+        "idempotency_key": "beads-changeset-example",
+        "operation": "preview",
+        "parameters": {
+          "actions": [
+            {
+              "bind": "parent",
+              "operation": "create",
+              "parameters": {
+                "title": "parent"
+              },
+              "ref": "sinnix://projects/sinnix"
+            },
+            {
+              "operation": "create",
+              "parameters": {
+                "parent": "$parent",
+                "title": "child"
+              },
+              "ref": "sinnix://projects/sinnix"
+            }
+          ]
+        },
+        "ref": "sinnix://projects/sinnix"
+      },
+      "input": {
+        "idempotency_key": "beads-changeset-example",
+        "operation": "preview",
+        "parameters": {
+          "actions": [
+            {
+              "bind": "parent",
+              "operation": "create",
+              "parameters": {
+                "title": "parent"
+              },
+              "ref": "sinnix://projects/sinnix"
+            },
+            {
+              "operation": "create",
+              "parameters": {
+                "parent": "$parent",
+                "title": "child"
+              },
+              "ref": "sinnix://projects/sinnix"
+            }
+          ]
+        },
+        "ref": "sinnix://projects/sinnix"
+      },
+      "verb": "change"
+    },
+    {
+      "action": "beads.operate",
+      "cli_input": {
+        "action_name": "beads.operate",
+        "idempotency_key": "beads-publish-example",
+        "operation": "snapshot.publish",
+        "parameters": {},
+        "ref": "sinnix://projects/sinnix"
+      },
+      "input": {
+        "idempotency_key": "beads-publish-example",
+        "operation": "snapshot.publish",
+        "parameters": {},
+        "ref": "sinnix://projects/sinnix"
+      },
+      "verb": "operate"
+    },
+    {
+      "action": "mcp.change",
+      "cli_input": {
+        "action_name": "mcp.change",
+        "idempotency_key": "mcp-refresh-example",
+        "operation": "call",
+        "parameters": {},
+        "ref": "sinnix://mcp/lynchpin/tools/refresh"
+      },
+      "input": {
+        "idempotency_key": "mcp-refresh-example",
+        "operation": "call",
+        "parameters": {},
+        "ref": "sinnix://mcp/lynchpin/tools/refresh"
+      },
+      "verb": "change"
+    },
+    {
+      "action": "machine.operate",
+      "cli_input": {
+        "action_name": "machine.operate",
+        "idempotency_key": "restart-example",
+        "operation": "restart",
+        "parameters": {},
+        "preconditions": {
+          "expected_revision": 42
+        },
+        "reason": "apply the approved restart",
+        "ref": "sinnix://machine/units/user/example.service"
+      },
+      "input": {
+        "action": "restart",
+        "idempotency_key": "restart-example",
+        "parameters": {},
+        "preconditions": {
+          "expected_revision": 42
+        },
+        "reason": "apply the approved restart",
+        "ref": "sinnix://machine/units/user/example.service"
+      },
+      "verb": "operate"
+    },
+    {
+      "action": "operations.run",
+      "cli_input": {
+        "action_name": "operations.run",
+        "idempotency_key": "declared-check-example",
+        "operation": "check",
+        "parameters": {},
+        "project_id": "sinnix"
+      },
+      "input": {
+        "idempotency_key": "declared-check-example",
+        "operation": "check",
+        "parameters": {},
+        "project_id": "sinnix"
+      },
+      "verb": "run"
+    },
+    {
+      "action": "agent.for_bead",
+      "cli_input": {
+        "action_name": "agent.for_bead",
+        "backend": "codex",
+        "checkout_id": "default",
+        "idempotency_key": "bead-agent-example",
+        "model": "gpt-5.6-terra",
+        "reasoning_effort": "high",
+        "ref": "sinnix://projects/sinnix/beads/sinnix-example",
+        "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b"
+      },
+      "input": {
+        "backend": "codex",
+        "checkout_id": "default",
+        "idempotency_key": "bead-agent-example",
+        "model": "gpt-5.6-terra",
+        "reasoning_effort": "high",
+        "ref": "sinnix://projects/sinnix/beads/sinnix-example",
+        "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b"
+      },
+      "verb": "run"
+    },
+    {
+      "action": "jobs.cancel",
+      "cli_input": {
+        "action_name": "jobs.cancel",
+        "idempotency_key": "cancel-example",
+        "preconditions": {
+          "expected_phase": "running"
+        },
+        "ref": "sinnix://jobs/3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
+      },
+      "input": {
+        "idempotency_key": "cancel-example",
+        "preconditions": {
+          "expected_phase": "running"
+        },
+        "ref": "sinnix://jobs/3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
+      },
+      "verb": "operate"
+    },
+    {
+      "action": "desktop.operate",
+      "cli_input": {
+        "action_name": "desktop.operate",
+        "idempotency_key": "desktop-focus-example",
+        "operation": "focus_window",
+        "parameters": {
+          "window": "address:0xfixture"
+        },
+        "ref": "sinnix://desktop/current"
+      },
+      "input": {
+        "idempotency_key": "desktop-focus-example",
+        "operation": "focus_window",
+        "parameters": {
+          "window": "address:0xfixture"
+        },
+        "ref": "sinnix://desktop/current"
+      },
+      "verb": "operate"
+    },
+    {
+      "action": "terminals.operate",
+      "cli_input": {
+        "action_name": "terminals.operate",
+        "idempotency_key": "terminal-send-example",
+        "operation": "send",
+        "parameters": {
+          "enter": true,
+          "text": "printf fixture"
+        },
+        "ref": "sinnix://terminals/7"
+      },
+      "input": {
+        "idempotency_key": "terminal-send-example",
+        "operation": "send",
+        "parameters": {
+          "enter": true,
+          "text": "printf fixture"
+        },
+        "ref": "sinnix://terminals/7"
+      },
+      "verb": "operate"
+    },
+    {
+      "action": "browser.operate",
+      "cli_input": {
+        "action_name": "browser.operate",
+        "idempotency_key": "browser-window-example",
+        "operation": "agent_window",
+        "parameters": {
+          "url": "https://example.test"
+        },
+        "ref": "sinnix://browser/agent-workspace"
+      },
+      "input": {
+        "idempotency_key": "browser-window-example",
+        "operation": "agent_window",
+        "parameters": {
+          "url": "https://example.test"
+        },
+        "ref": "sinnix://browser/agent-workspace"
+      },
+      "verb": "operate"
+    },
+    {
+      "action": "shell.run",
+      "cli_input": {
+        "action_name": "shell.run",
+        "argv": [
+          "git",
+          "status",
+          "--short"
+        ],
+        "checkout_id": "default",
+        "cwd": ".",
+        "idempotency_key": "shell-status-example",
+        "project_id": "sinnix",
+        "timeout_seconds": 300
+      },
+      "input": {
+        "argv": [
+          "git",
+          "status",
+          "--short"
+        ],
+        "checkout_id": "default",
+        "cwd": ".",
+        "idempotency_key": "shell-status-example",
+        "project_id": "sinnix",
+        "timeout_seconds": 300
+      },
+      "verb": "run"
+    },
+    {
+      "action": "projects.list",
+      "cli_input": {
+        "action_name": "projects.list"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "projects.tree",
+      "cli_input": {
+        "action_name": "projects.tree"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "projects.read",
+      "cli_input": {
+        "action_name": "projects.read"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "projects.diff",
+      "cli_input": {
+        "action_name": "projects.diff"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "machine.query",
+      "cli_input": {
+        "action_name": "machine.query"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "capabilities.query",
+      "cli_input": {
+        "action_name": "capabilities.query"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "mcp.query",
+      "cli_input": {
+        "action_name": "mcp.query"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "desktop.query",
+      "cli_input": {
+        "action_name": "desktop.query"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "terminals.query",
+      "cli_input": {
+        "action_name": "terminals.query"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "browser.query",
+      "cli_input": {
+        "action_name": "browser.query"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "files.query",
+      "cli_input": {
+        "action_name": "files.query"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "sessions.query",
+      "cli_input": {
+        "action_name": "sessions.query"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "memory.query",
+      "cli_input": {
+        "action_name": "memory.query"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "timeline.query",
+      "cli_input": {
+        "action_name": "timeline.query"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "artifacts.query",
+      "cli_input": {
+        "action_name": "artifacts.query"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "audit.verify",
+      "cli_input": {
+        "action_name": "audit.verify"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "captures.query",
+      "cli_input": {
+        "action_name": "captures.query"
+      },
+      "input": {},
+      "verb": "query"
+    },
+    {
+      "action": "jobs.query",
+      "cli_input": {
+        "action_name": "jobs.query",
+        "parameters": {
+          "limit": 100
+        }
+      },
+      "input": {
+        "parameters": {
+          "limit": 100
+        }
+      },
+      "verb": "query"
+    }
+  ],
+  "revision": "v2-operator-verbs",
+  "schema": "sinnix.gateway-cli-fixtures.v1"
+}
