@@ -10,11 +10,21 @@ from typing import Any
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from sinnix_mcp.execution import ExecutionProfile, OwnerExecution, OwnerRoute
+from sinnix_mcp.execution import (
+    ExecutionProfile,
+    OwnerDiagnosticError,
+    OwnerExecution,
+    OwnerRoute,
+)
 
 
 class BrowserError(ValueError):
     pass
+
+
+class BrowserDiagnosticError(BrowserError, OwnerDiagnosticError):
+    def __init__(self, response: dict[str, object]):
+        OwnerDiagnosticError.__init__(self, response)
 
 
 class BrowserService:
@@ -39,16 +49,9 @@ class BrowserService:
                 max_stdout_bytes=self.config.max_result_bytes,
             ),
         )
-        if result.failure_class == "command_unavailable:FileNotFoundError":
-            raise BrowserError("Chrome control unavailable: FileNotFoundError")
-        if result.failure_class == "command_timeout":
-            raise BrowserError("Chrome control unavailable: TimeoutExpired")
-        if result.failure_class == "command_output_bound":
-            raise BrowserError("Chrome control response exceeded response bound")
         if result.failure_class is not None:
-            detail = result.stderr_excerpt()
-            raise BrowserError(
-                f"Chrome control command failed: {detail}" if detail else "Chrome control command failed"
+            raise BrowserDiagnosticError(
+                self.artifacts.record_owner_diagnostic("browser-chrome", result)
             )
         return {"result": result.decode_json_or_text()}
 
@@ -183,7 +186,7 @@ class BrowserService:
                 "unknown browser read operation; available: "
                 "['get_html', 'get_text', 'info', 'list', 'list_tabs', 'status']"
             )
-        page_id = self._string(page_id, "page_id", 256)
+        page_id = self._require_owned_target(page_id)
         command = {"info": "info", "get_text": "get-text", "get_html": "get-html"}[operation]
         arguments = [command, page_id]
         if selector is not None:

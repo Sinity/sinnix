@@ -134,22 +134,55 @@ def test_broker_stop_uses_the_shared_execution_kernel(tmp_path: Path) -> None:
     assert profile.timeout_seconds == 5
 
 
-def test_observer_catalog_allows_a_broker_without_user_bus_access(
+def test_observer_catalog_reports_missing_user_bus_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
     broker = broker_service(tmp_path, "observer")
+    catalog = anyio.run(broker.catalog)
+
+    fixture = next(server for server in catalog["servers"] if server["name"] == "fixture")
+    assert fixture["availability"] == "unavailable"
+    assert fixture["failure_class"] == "environment_unavailable"
+
+
+class LargeSchemaSession(FakeSession):
+    async def list_tools(self) -> object:
+        return SimpleNamespace(
+            tools=[
+                SimpleNamespace(
+                    name="lookup",
+                    description="Fixture lookup",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {"query": {"type": "string", "description": "x" * 8_000}},
+                    },
+                    annotations=SimpleNamespace(read_only_hint=True),
+                )
+            ]
+        )
+
+
+def test_catalog_artifactizes_an_oversized_tool_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "observer", max_bytes=4_096)
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
     monkeypatch.setattr(
         "sinnix_agent_gateway.mcp_broker.stdio_client",
         lambda _params, **_kwargs: FakeTransport(),
     )
-    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", LargeSchemaSession)
 
     catalog = anyio.run(broker.catalog)
-
+    assert len(json.dumps(catalog, separators=(",", ":")).encode()) <= broker.config.max_result_bytes
     fixture = next(server for server in catalog["servers"] if server["name"] == "fixture")
-    assert fixture["availability"] == "available"
+    tool = fixture["tools"][0]
+    assert tool["input_schema"]["x-sinnix-schema-truncated"] is True
+    assert tool["input_schema_artifact"]["ref"].startswith("sinnix://artifacts/")
+    assert tool["input_schema_bytes"] > broker.config.max_result_bytes
 
 
 def test_catalog_probes_admitted_servers_and_keeps_exclusions_static(
@@ -323,6 +356,8 @@ def test_observer_broker_stops_failed_read_only_unit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     broker = broker_service(tmp_path, "observer")
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
     stopped = []
     monkeypatch.setattr(
         "sinnix_agent_gateway.mcp_broker.stdio_client", lambda _params, **_kwargs: FakeTransport()
@@ -362,6 +397,8 @@ def test_broker_artifactizes_large_upstream_response(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     broker = broker_service(tmp_path, "observer", max_bytes=10)
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
     monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.stdio_client", lambda _params, **_kwargs: FakeTransport())
     monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
 

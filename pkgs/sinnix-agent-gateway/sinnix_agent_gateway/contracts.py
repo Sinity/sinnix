@@ -33,6 +33,51 @@ class EffectMode(StrEnum):
     RUN = "run"
 
 
+class OwnerRoute(StrEnum):
+    """Typed executable owner routes declared by the action registry."""
+
+    AUDIT_TAIL = "audit.tail"
+    AUDIT_VERIFY = "audit.verify"
+    ARTIFACTS_QUERY = "artifacts.query"
+    BEADS_CHANGESET = "beads.changeset"
+    BEADS_MAINTENANCE = "beads.maintenance"
+    BEADS_QUERY = "beads.query"
+    BEADS_WRITE = "beads.write"
+    BROWSER_ACTION = "browser.action"
+    BROWSER_READ = "browser.read"
+    CAPABILITY_INDEX_QUERY = "capability_index.query"
+    CAPTURES_QUERY = "captures.query"
+    DESKTOP_ACTION = "desktop.action"
+    DESKTOP_READ = "desktop.read"
+    FILES_CHANGE = "files.change"
+    FILES_READ = "files.read"
+    JOB_AGENT_START = "job.agent.start"
+    JOB_CANCEL = "job.cancel"
+    JOB_LIST = "job.list"
+    JOB_SHELL_START = "job.shell.start"
+    JOB_START = "job.start"
+    JOB_WAIT = "job.wait"
+    MCP_CALL_READ = "mcp.call.read"
+    MCP_CALL_WRITE = "mcp.call.write"
+    MEMORY_QUERY = "memory.query"
+    OBSERVE_GATEWAY_STATUS = "observe.gateway_status"
+    OBSERVE_MACHINE_QUERY = "observe.machine_query"
+    OPS_ACTIONS_EXECUTE = "ops.actions.execute"
+    PROJECT_CONTEXT = "project_context.context"
+    PROJECTS_CHANGE = "projects.change"
+    PROJECTS_DIFF = "projects.diff"
+    PROJECTS_LIST = "projects.list"
+    PROJECTS_READ = "projects.read"
+    PROJECTS_SEARCH = "projects.search"
+    PROJECTS_TREE = "projects.tree"
+    REGISTRY_SEARCH = "registry.search"
+    RESOURCES_GET = "resources.get"
+    SESSIONS_QUERY = "sessions.query"
+    TERMINALS_ACTION = "terminals.action"
+    TERMINALS_READ = "terminals.read"
+    TIMELINE_QUERY = "timeline.query"
+
+
 class StorageEffect(StrEnum):
     """Gateway-owned persistence that can accompany a protocol action."""
 
@@ -126,7 +171,7 @@ class ActionSpec:
     verb: VerbFamily
     domain: str
     owner: str
-    route: str
+    route: OwnerRoute | str
     effect: EffectMode
     principals: frozenset[str]
     input_schema: JsonSchema
@@ -146,6 +191,14 @@ class ActionSpec:
             raise ValueError("action name must be a dotted canonical name")
         if not self.domain or not self.owner or not self.route:
             raise ValueError(f"action {self.name!r} requires domain, owner, and route")
+        if not isinstance(self.route, OwnerRoute):
+            try:
+                object.__setattr__(self, "route", OwnerRoute(self.route))
+            except ValueError:
+                # Synthetic actions used by contract tests may use a private
+                # route. The executable registry below is still strict because
+                # every production action is constructed from a known route.
+                pass
         if not self.principals:
             raise ValueError(f"action {self.name!r} requires at least one principal")
         unknown_principals = self.principals - KNOWN_PRINCIPALS
@@ -212,7 +265,7 @@ class ActionSpec:
             "verb": self.verb.value,
             "domain": self.domain,
             "owner": self.owner,
-            "route": self.route,
+            "route": self.route.value if isinstance(self.route, OwnerRoute) else self.route,
             "availability": "declared",
             "effect": self.effect.value,
             "principals": sorted(self.principals),

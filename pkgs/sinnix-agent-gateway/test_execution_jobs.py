@@ -750,7 +750,9 @@ def test_v2_job_routes_preserve_principal_policy(tmp_path: Path) -> None:
     )
 
     assert denied["error"]["code"] == "policy_denied"
-    assert waited["error"]["code"] == "response_bound"
+    assert waited["result"]["outcome"] == "ok"
+    assert waited["data"]["truncated"] is True
+    assert waited["data"]["artifact"]["ref"].startswith("sinnix://artifacts/")
     assert [request.operation for request in daemon.calls] == ["job.wait"]
 
 

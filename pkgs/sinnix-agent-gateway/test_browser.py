@@ -7,9 +7,10 @@ from pathlib import Path
 import pytest
 
 from sinnix_agent_gateway.artifacts import ArtifactService
-from sinnix_agent_gateway.browser import BrowserError, BrowserService
+from sinnix_agent_gateway.browser import BrowserDiagnosticError, BrowserError, BrowserService
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
+from sinnix_mcp.execution import ExecutionResult
 
 
 def browser_service(tmp_path: Path, principal_name: str) -> tuple[BrowserService, Path]:
@@ -78,6 +79,39 @@ def test_canonical_browser_target_read_requires_registered_agent_window(tmp_path
     assert commands(captured) == [["agent-window"], ["info", "agent-target"]]
     with pytest.raises(BrowserError, match="gateway-created agent window"):
         browser.describe_target("operator-page")
+
+
+@pytest.mark.parametrize("operation", ["info", "get_text", "get_html"])
+def test_direct_browser_target_reads_require_registered_agent_window(
+    tmp_path: Path, operation: str
+) -> None:
+    browser, captured = browser_service(tmp_path, "observer")
+
+    with pytest.raises(BrowserError, match="gateway-created agent window"):
+        browser.read(operation, "operator-page")
+
+    assert not captured.exists()
+
+
+def test_browser_owner_failure_is_attested_as_a_diagnostic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    browser, _ = browser_service(tmp_path, "observer")
+    monkeypatch.setattr(
+        browser.execution,
+        "run",
+        lambda command, profile: ExecutionResult(
+            tuple(command), None, b"", b"chrome missing", failure_class="command_unavailable:FileNotFoundError"
+        ),
+    )
+
+    with pytest.raises(BrowserDiagnosticError) as error:
+        browser.read("status")
+
+    diagnostic_id = error.value.response["diagnostic_artifact_id"]
+    assert isinstance(diagnostic_id, str)
+    diagnostic = browser.artifacts.read(diagnostic_id)
+    assert diagnostic["kind"] == "owner-diagnostic"
 
 
 def test_agent_window_rejects_visible_target_after_wrapper_warning(

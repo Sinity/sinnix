@@ -14,13 +14,15 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from sinnix_agent_gateway.app import Runtime, create_server
-from sinnix_agent_gateway.server import _query_owner
+from sinnix_agent_gateway.server import _bounded_resource_json, _query_owner
 from sinnix_mcp.execution import ExecutionResult, OwnerDiagnosticError
+from sinnix_agent_gateway.artifacts import ArtifactError
 from sinnix_agent_gateway.capabilities import PolicyError
 from sinnix_agent_gateway.cli import build_manifest, parser, verify_approval
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.projects import ProjectError
 from sinnix_agent_gateway.registry import REGISTRY
+from sinnix_agent_gateway.results import ProtocolError
 
 
 def config(tmp_path: Path, *, observer_read: bool = True) -> GatewayConfig:
@@ -586,13 +588,109 @@ def test_mcp_query_derives_server_and_tool_from_a_canonical_ref(
         {"operation": "call", "arguments": {"query": "fixture"}},
     )
 
-    assert result == {"response": {"ok": True}}
+    assert result == {"ref": "sinnix://mcp/fixture/tools/lookup", "response": {"ok": True}}
     assert captured == {
         "server": "fixture",
         "tool": "lookup",
         "arguments": {"query": "fixture"},
         "write": False,
     }
+
+
+def test_target_query_adapters_round_trip_canonical_refs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = Runtime.create(config(tmp_path), "observer")
+    calls: dict[str, object] = {}
+    monkeypatch.setattr(runtime.desktop, "read", lambda operation: calls.update(desktop=operation) or {"ok": True})
+    monkeypatch.setattr(runtime.terminals, "read", lambda operation, arguments=None: calls.update(terminal=(operation, arguments)) or {"ok": True})
+    monkeypatch.setattr(runtime.browser, "read", lambda operation, page_id=None, selector=None: calls.update(browser=(operation, page_id, selector)) or {"ok": True})
+    monkeypatch.setattr(runtime.files, "read", lambda operation, path, **kwargs: calls.update(files=(operation, path, kwargs)) or {"ok": True})
+
+    file_token = base64.urlsafe_b64encode(b"/realm/fixture.txt").decode().rstrip("=")
+    desktop = anyio.run(_query_owner, runtime, "desktop.query", "sinnix://desktop/current", None, 200, {"operation": "status"})
+    terminal = anyio.run(_query_owner, runtime, "terminals.query", "sinnix://terminals/7", None, 200, {"operation": "capture", "arguments": {"extent": "screen"}})
+    browser = anyio.run(_query_owner, runtime, "browser.query", "sinnix://browser/pages/agent-target", None, 200, {"operation": "info"})
+    host_file = anyio.run(_query_owner, runtime, "files.query", f"sinnix://files/{file_token}", None, 200, {"operation": "stat"})
+
+    assert desktop["ref"] == "sinnix://desktop/current"
+    assert terminal["ref"] == "sinnix://terminals/7"
+    assert browser["ref"] == "sinnix://browser/pages/agent-target"
+    assert host_file["ref"] == f"sinnix://files/{file_token}"
+    assert calls == {
+        "desktop": "status",
+        "terminal": ("capture", {"match": "id:7", "extent": "screen"}),
+        "browser": ("info", "agent-target", None),
+        "files": ("stat", "/realm/fixture.txt", {"offset": 0, "max_bytes": 64_000, "max_entries": 200}),
+    }
+    with pytest.raises(ProtocolError, match="canonical terminal ref"):
+        anyio.run(_query_owner, runtime, "terminals.query", None, None, 200, {"operation": "capture", "arguments": {"match": "id:7"}})
+
+
+def test_missing_observer_mcp_environment_is_a_typed_unavailable_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = Runtime.create(config(tmp_path), "observer")
+    runtime.config.mcp_broker_servers["fixture"] = {
+        "description": "Fixture server",
+        "transport": "stdio",
+        "tier": "evidence",
+        "brokered": True,
+        "command": "fixture-mcp",
+        "args": [],
+        "env": {},
+    }
+    monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+
+    with pytest.raises(ProtocolError) as error:
+        anyio.run(
+            _query_owner,
+            runtime,
+            "mcp.query",
+            "sinnix://mcp/fixture/tools/lookup",
+            None,
+            200,
+            {"operation": "call", "arguments": {}},
+        )
+
+    assert error.value.code == "unavailable"
+
+
+def test_browser_owner_failure_keeps_exact_diagnostic_ref_in_v2_envelope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = Runtime.create(config(tmp_path), "observer")
+    monkeypatch.setattr(
+        runtime.browser.execution,
+        "run",
+        lambda command, profile: ExecutionResult(
+            tuple(command), None, b"", b"chrome missing", failure_class="command_unavailable:FileNotFoundError"
+        ),
+    )
+
+    response = runtime.execute_v2(
+        REGISTRY.action("browser.query"),
+        lambda: runtime.browser.read("status"),
+        {"action_name": "browser.query", "parameters": {"operation": "status"}},
+    )
+
+    diagnostic_refs = response["error"]["diagnostic_refs"]
+    assert len(diagnostic_refs) == 1
+    artifact_id = diagnostic_refs[0].rsplit("/", 1)[-1]
+    assert runtime.artifacts.read(artifact_id)["kind"] == "owner-diagnostic"
+
+
+def test_gateway_resource_bounds_fall_back_to_an_attested_artifact(tmp_path: Path) -> None:
+    runtime = Runtime.create(dataclasses.replace(config(tmp_path), max_result_bytes=2_048), "observer")
+
+    encoded = _bounded_resource_json(runtime, {"payload": "x" * 4_000}, "fixture")
+    envelope = json.loads(encoded)
+
+    assert len(encoded.encode()) <= runtime.config.max_result_bytes
+    assert envelope["truncated"] is True
+    assert envelope["artifact"]["ref"].startswith("sinnix://artifacts/")
+    assert runtime.artifacts.list()["artifacts"][0]["kind"] == "gateway-fixture"
 
 
 def test_readonly_policy_is_checked_inside_write_operation(tmp_path: Path) -> None:
@@ -1124,6 +1222,34 @@ def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:
     assert "source" not in chunk
 
 
+def test_artifacts_are_scoped_to_the_creating_principal(tmp_path: Path) -> None:
+    cfg = config(tmp_path)
+    operator = Runtime.create(cfg, "operator")
+    observer = Runtime.create(cfg, "observer")
+
+    operator_artifact = operator.artifacts.register_json(
+        {"secret": "operator-only"},
+        kind="operator-fixture",
+        owner_id="operator-test",
+        source="test.operator",
+        target={"id": "operator"},
+    )
+
+    assert observer.artifacts.list()["artifacts"] == []
+    with pytest.raises(ArtifactError, match="unavailable to this principal"):
+        observer.artifacts.read(operator_artifact["artifact_id"])
+
+    observer_artifact = observer.artifacts.register_json(
+        {"visible": True},
+        kind="observer-fixture",
+        owner_id="observer-test",
+        source="test.observer",
+        target={"id": "observer"},
+    )
+    assert observer.artifacts.read(observer_artifact["artifact_id"])["kind"] == "observer-fixture"
+    assert operator.artifacts.read(observer_artifact["artifact_id"])["kind"] == "observer-fixture"
+
+
 def test_unknown_principal_is_rejected_before_server_creation(tmp_path: Path) -> None:
     with pytest.raises(PolicyError):
         create_server(config(tmp_path), "unknown")
@@ -1281,6 +1407,25 @@ print(json.dumps(report))
         "fixture-21.service",
         "fixture-22.service",
     ]
+
+
+def test_machine_section_overflow_is_retained_as_an_attested_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = Runtime.create(dataclasses.replace(config(tmp_path), max_result_bytes=1_024), "observer")
+    report = {
+        "schema": "sinnix.observe.v1",
+        "generated_at": "2026-08-21T00:00:00Z",
+        "window": {},
+        "live_pressure": {"detail": "x" * 4_000},
+    }
+    monkeypatch.setattr(runtime.observe, "_collect_report", lambda operation, cursor=0, page_limit=None: {"available": True, "report": report})
+
+    result = runtime.observe.machine_query("pressure")
+
+    assert result["available"] is True
+    assert result["truncated"] is True
+    assert result["artifact"]["ref"].startswith("sinnix://artifacts/")
 
 
 def test_machine_query_requests_owner_selected_section(

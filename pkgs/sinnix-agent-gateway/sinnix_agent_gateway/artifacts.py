@@ -143,6 +143,7 @@ class ArtifactService:
             "artifact_id": artifact_id,
             "kind": kind,
             "owner_id": owner_id,
+            "principal": self.principal.name,
             "source": str(source),
             "bytes": source.stat().st_size,
             "content_type": mimetypes.guess_type(source.name)[0]
@@ -152,6 +153,37 @@ class ArtifactService:
         metadata_path.write_text(json.dumps(metadata, sort_keys=True) + "\n")
         metadata_path.chmod(0o600)
         return artifact_id
+
+    def register_json(
+        self,
+        payload: Any,
+        *,
+        kind: str,
+        owner_id: str,
+        source: str,
+        target: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Persist bounded metadata about an oversized JSON response as an artifact."""
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        directory = self.config.state_dir / "captures" / uuid.uuid4().hex
+        directory.mkdir(mode=0o700, parents=True)
+        source_path = directory / f"{kind}.json"
+        source_path.write_bytes(encoded)
+        receipt = self.attest_capture(
+            directory, source=source, target=target, files=[source_path]
+        )
+        artifact_id = self.register(source_path, kind=kind, owner_id=owner_id)
+        return {
+            "artifact_id": artifact_id,
+            "ref": f"sinnix://artifacts/{artifact_id}",
+            "bytes": len(encoded),
+            "content_type": "application/json",
+            "receipt": {
+                "capture_id": receipt["capture_id"],
+                "source": receipt["source"],
+                "target": receipt["target"],
+            },
+        }
 
     def _metadata(self, artifact_id: str) -> dict[str, Any]:
         try:
@@ -163,6 +195,8 @@ class ArtifactService:
             metadata = json.loads(path.read_text())
         except (FileNotFoundError, json.JSONDecodeError) as exc:
             raise ArtifactError("unknown or malformed artifact") from exc
+        if self.principal.name != "operator" and metadata.get("principal") != self.principal.name:
+            raise ArtifactError("artifact is unavailable to this principal")
         source = Path(metadata["source"]).resolve(strict=True)
         if not source.is_file() or not self._source_is_attested(source):
             raise ArtifactError("artifact source is no longer valid")
@@ -178,7 +212,10 @@ class ArtifactService:
             try:
                 row = json.loads(path.read_text())
             except json.JSONDecodeError:
-                rows.append({"artifact_id": path.parent.name, "malformed": True})
+                if self.principal.name == "operator":
+                    rows.append({"artifact_id": path.parent.name, "malformed": True})
+                continue
+            if self.principal.name != "operator" and row.get("principal") != self.principal.name:
                 continue
             row.pop("source", None)
             rows.append(row)
