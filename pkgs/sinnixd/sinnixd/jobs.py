@@ -1710,7 +1710,7 @@ class GenericJobs:
         environment = project.environment.values()
         tree = self._cache_tree(workdir)
         cache_key = self._cache_key(
-            project, operation, parameter_digest, principal, environment, tree
+            project, operation, parameter_digest, principal, environment, tree, checkout
         )
         state = self._admission_state()
         if cache_key is not None:
@@ -1818,6 +1818,7 @@ class GenericJobs:
         principal: str,
         environment: Mapping[str, str],
         tree: str | None,
+        checkout: RegisteredCheckout | None,
     ) -> str | None:
         if operation.cache != "tree+environment" or tree is None:
             return None
@@ -1829,6 +1830,11 @@ class GenericJobs:
             "tree": tree,
             "environment": dict(sorted(environment.items())),
         }
+        if operation.service is not None:
+            payload["service_scope"] = {
+                "project_root": str(project.root.resolve()),
+                "checkout": checkout.to_dict() if checkout is not None else None,
+            }
         return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
     @staticmethod
@@ -1966,6 +1972,7 @@ class GenericJobs:
             state["active"].pop(record.spec.cache_key, None)
         if (
             record.state.get("phase") == "succeeded"
+            and record.spec.lease is None
             and record.spec.cache_key is not None
             and (record.spec.result_kind == "exit-status" or self._has_authoritative_result(record))
         ):

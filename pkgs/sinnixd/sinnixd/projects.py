@@ -853,8 +853,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         if scratch not in {"none", "tmpfs", "nvme"}:
             raise ProjectConfigError(f"operations.{name}.scratch is invalid")
         service = _operation_service(definition.get("service"), f"operations.{name}.service")
-        if service is not None and cache != "none":
-            raise ProjectConfigError(f"operations.{name}.service requires cache = \"none\"")
         operations.append(
             ProjectOperation(
                 name=name,
