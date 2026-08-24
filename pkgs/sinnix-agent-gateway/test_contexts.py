@@ -13,6 +13,33 @@ from sinnix_agent_gateway.contexts import (
     ContextSnapshotStore,
     RevisionReuseCache,
 )
+from sinnix_agent_gateway.runtime import _orientation_task_summary
+
+
+def test_orientation_task_summary_retains_routing_and_drops_large_bodies() -> None:
+    result = _orientation_task_summary({
+        "items": [{
+            "id": "fixture-1",
+            "ref": "sinnix://projects/fixture/beads/fixture-1",
+            "title": "Do the work",
+            "priority": 1,
+            "task_revision": "a" * 64,
+            "description": "x" * 100_000,
+            "acceptance_criteria": "y" * 100_000,
+        }],
+        "page": {"total": 1},
+        "coverage": {"fixture": {"state": "complete"}},
+    })
+
+    assert result["items"] == [{
+        "id": "fixture-1",
+        "ref": "sinnix://projects/fixture/beads/fixture-1",
+        "title": "Do the work",
+        "priority": 1,
+        "task_revision": "a" * 64,
+    }]
+    assert result["page"] == {"total": 1}
+    assert len(json.dumps(result)) < 1_000
 
 
 def test_context_snapshot_survives_store_recreation_and_rejects_tampering(tmp_path: Path) -> None:
