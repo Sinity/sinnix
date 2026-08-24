@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import anyio
 import pytest
 
-from sinnix_agent_gateway import cli_support
+from sinnix_agent_gateway import cli, cli_support
 from sinnix_agent_gateway.cli_support import CliInputError, build_request, load_json_input
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.gateway_codegen import FIXTURE_PATH
@@ -15,6 +15,29 @@ from sinnix_agent_gateway.gateway_codegen import FIXTURE_PATH
 
 def _config(tmp_path: Path) -> GatewayConfig:
     return GatewayConfig(state_dir=tmp_path / "state", projects={})
+
+
+def test_cli_defaults_to_the_deployed_local_estate_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    local_config = tmp_path / "agent-gateway.json"
+    local_config.write_text("{}", encoding="utf-8")
+    monkeypatch.delenv("SINNIX_AGENT_GATEWAY_CONFIG", raising=False)
+    monkeypatch.setattr(cli, "LOCAL_CONFIG_PATH", local_config)
+
+    assert cli.parser().parse_args(["status"]).config == local_config
+
+    explicit = tmp_path / "explicit.json"
+    assert cli.parser().parse_args(["--config", str(explicit), "status"]).config == explicit
+
+
+def test_cli_config_environment_overrides_the_deployed_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configured = tmp_path / "configured.json"
+    monkeypatch.setenv("SINNIX_AGENT_GATEWAY_CONFIG", str(configured))
+
+    assert cli.parser().parse_args(["status"]).config == configured
 
 
 class FakeServer:

@@ -20,6 +20,17 @@ from .capabilities import PRINCIPAL_CAPABILITIES
 from .config import GatewayConfig
 from .registry import REGISTRY
 
+LOCAL_CONFIG_PATH = Path("/etc/sinnix/agent-gateway.json")
+
+
+def _default_config_path() -> Path | None:
+    """Use the deployed local estate contract unless the caller overrides it."""
+    configured = os.environ.get("SINNIX_AGENT_GATEWAY_CONFIG")
+    if configured:
+        return Path(configured)
+    return LOCAL_CONFIG_PATH if LOCAL_CONFIG_PATH.is_file() else None
+
+
 async def build_manifest(config: GatewayConfig, principal_name: str) -> dict[str, Any]:
     manifest = canonical_manifest(await create_server(config, principal_name).list_tools())
     return {**manifest, "measurement": manifest_measurement(manifest)}
@@ -62,9 +73,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--config",
         type=Path,
-        default=Path(os.environ["SINNIX_AGENT_GATEWAY_CONFIG"])
-        if "SINNIX_AGENT_GATEWAY_CONFIG" in os.environ
-        else None,
+        default=_default_config_path(),
     )
     result.add_argument(
         "--principal", choices=sorted(PRINCIPAL_CAPABILITIES), default="observer"
