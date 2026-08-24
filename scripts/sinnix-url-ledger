@@ -69,9 +69,9 @@ SCHEMA = "sinnix-url-ledger-v1"
 USER_AGENT = "sinnix-url-ledger/1 (personal archival-coverage research; contact ezo.dev@gmail.com)"
 REQUEST_TIMEOUT_SECONDS = 20
 
-DEFAULT_CAPTURES_ROOT = Path("/realm/data/captures")
+DEFAULT_ACTIVITY_ROOT = Path("/realm/data/activity")
 DEFAULT_DERIVED_ROOT = Path("/realm/data/derived")
-DEFAULT_HISTORY_PATH = DEFAULT_CAPTURES_ROOT / "webhistory" / "gestalt" / "derived" / "full_history.ndjson"
+DEFAULT_HISTORY_PATH = DEFAULT_ACTIVITY_ROOT / "webhistory" / "gestalt" / "derived" / "full_history.ndjson"
 
 # ---------------------------------------------------------------------------
 # Conservative URL normalization: strip fragment + tracking params only,
