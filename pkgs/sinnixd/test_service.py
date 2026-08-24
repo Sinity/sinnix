@@ -3810,7 +3810,7 @@ def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: P
         request(
             "job.agent.start",
             "systemd-jobs",
-            {"project_id": "fixture", "checkout_id": "default", "prompt": "private prompt", "backend": "codex", "model": "fixture", "effort": "high", "credential_profile": "subscription", "timeout_seconds": 60, "result": "last-message"},
+            {"project_id": "fixture", "checkout_id": "default", "prompt": "private prompt", "backend": "codex", "model": "fixture", "effort": "high", "credential_profile": "subscription", "timeout_seconds": 60, "result": "last-message", "bead_binding": {"bead_ref": "sinnix://projects/fixture/beads/fixture-1", "project_ref": "sinnix://projects/fixture", "checkout_ref": "sinnix://projects/fixture/checkouts/default", "task_revision": "a" * 64, "task_etag": "b" * 64, "claim_ref": f"sinnix://projects/fixture/beads/fixture-1/claims/{'b' * 64}", "claim_receipt": {"ref": f"sinnix://projects/fixture/beads/fixture-1/claims/{'b' * 64}", "owner_route": "beads.cli"}, "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b", "work_item": "display only"}},
             "agent-control",
         )
     )
@@ -3833,6 +3833,8 @@ def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: P
     assert agent_job["kind"] == "attested-agent"
     assert agent_job["principal"] == "agent-control"
     assert agent_job["contract"]["backend"] == "codex"
+    assert agent_job["contract"]["bead_binding"]["bead_ref"] == "sinnix://projects/fixture/beads/fixture-1"
+    assert agent_job["contract"]["bead_binding"]["request_id"] == "2e46daf5-e9b1-4c6e-b99d-bcd46631730b"
     assert agent_job["artifacts"]["result"]["max_bytes"] == 64_000
     persisted = (tmp_path / "state" / "jobs" / f"{agent_job['job_id']}.json").read_text()
     assert "private prompt" not in persisted
@@ -3863,10 +3865,11 @@ def test_typed_contracts_refuse_spoofed_principals_checkout_backend_environment_
     invalid_principal = service.dispatch(request("job.shell.start", "systemd-jobs", shell_arguments, "observer"))
     invalid_checkout = service.dispatch(request("job.shell.start", "systemd-jobs", {**shell_arguments, "checkout_id": "absent"}, "operator"))
     invalid_backend = service.dispatch(request("job.agent.start", "systemd-jobs", {**agent_arguments, "backend": "unknown"}, "agent-control"))
+    invalid_bead_binding = service.dispatch(request("job.agent.start", "systemd-jobs", {**agent_arguments, "bead_binding": {"bead_ref": "sinnix://projects/fixture/beads/fixture-1", "project_ref": "sinnix://projects/fixture", "checkout_ref": "sinnix://projects/fixture/checkouts/default", "task_revision": "a" * 64, "task_etag": "b" * 64, "claim_ref": "sinnix://projects/fixture/beads/other/claims/receipt", "claim_receipt": {"ref": "sinnix://projects/fixture/beads/other/claims/receipt"}, "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b", "work_item": None}}, "agent-control"))
     invalid_environment = service.dispatch(request("job.shell.start", "systemd-jobs", {**shell_arguments, "environment": {"SINNIXD_JOB_ID": "spoof"}}, "operator"))
     invalid_result = service.dispatch(request("job.agent.start", "systemd-jobs", {**agent_arguments, "result": "exit-status"}, "agent-control"))
 
-    for response in (invalid_principal, invalid_checkout, invalid_backend, invalid_environment, invalid_result):
+    for response in (invalid_principal, invalid_checkout, invalid_backend, invalid_bead_binding, invalid_environment, invalid_result):
         assert response.error is not None
         assert response.error.code.value == "INVALID_ARGUMENT"
 

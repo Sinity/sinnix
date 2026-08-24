@@ -375,7 +375,7 @@ class SinnixdService:
             required = {
                 "project_id", "checkout_id", "prompt", "backend", "model", "effort", "credential_profile", "timeout_seconds", "result"
             }
-            if set(arguments) != required:
+            if not required <= set(arguments) or set(arguments) - (required | {"bead_binding"}):
                 raise ValueError("job.agent.start requires the complete typed agent contract")
             return self._cleanup_terminal(self.job_contracts.start_agent(
                 principal=principal,
@@ -388,6 +388,7 @@ class SinnixdService:
                 credential_profile=self._job_argument(arguments, "credential_profile"),
                 timeout_seconds=self._integer_argument(arguments, "timeout_seconds"),
                 result=self._job_argument(arguments, "result"),
+                bead_binding=arguments.get("bead_binding"),
             ))
         if operation == "job.get":
             return self._cleanup_terminal(
