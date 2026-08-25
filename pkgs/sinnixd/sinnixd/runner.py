@@ -186,7 +186,7 @@ def _seal_packet_result(value: Mapping[str, Any], checkout: Path, result_path: P
         raise RunnerError("packet result is unreadable") from error
     try:
         delivery = json.loads(raw)
-    except json.JSONDecodeError as error:
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise RunnerError("packet result is not valid JSON") from error
     observed = subprocess.run(
         ["git", "-C", str(checkout), "rev-parse", "HEAD"],

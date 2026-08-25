@@ -4745,6 +4745,22 @@ def test_packet_runner_seals_worker_report_to_runtime_observed_head(tmp_path: Pa
     }
 
 
+def test_packet_runner_rejects_invalid_utf8_as_typed_json_failure(tmp_path: Path) -> None:
+    initialize_git_checkout(tmp_path)
+    start_head = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    result_path = tmp_path / "packet.result"
+    result_path.write_bytes(b"\xff")
+
+    with pytest.raises(RunnerError, match="packet result is not valid JSON") as caught:
+        _seal_packet_result(
+            {"job_id": "packet-job", "checkout": {"head": start_head}}, tmp_path, result_path
+        )
+
+    assert isinstance(caught.value.__cause__, UnicodeDecodeError)
+
+
 def test_seal_output_composes_through_exact_head_into_delivery_validation(tmp_path: Path) -> None:
     """Composed: real runner seal output flows through exact-head evidence into delivery acceptance and tamper rejection."""
     write_adapter(tmp_path)
