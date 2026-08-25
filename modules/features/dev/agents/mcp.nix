@@ -60,6 +60,16 @@ mkFeatureModule {
       internal = true;
       description = "Path to the generated Codex hooks derivation (for tests)";
     };
+    polylogueHookSource = lib.mkOption {
+      type = lib.types.path;
+      internal = true;
+      description = "Path to the configured Polylogue hook wrapper (for tests)";
+    };
+    mcpPolylogueSource = lib.mkOption {
+      type = lib.types.path;
+      internal = true;
+      description = "Path to the configured Polylogue MCP wrapper (for tests)";
+    };
     antigravityMcpConfigSource = lib.mkOption {
       type = lib.types.path;
       internal = true;
@@ -119,7 +129,11 @@ mkFeatureModule {
       codexHooksFile = import ./hooks.nix {
         inherit pkgs;
         dotsRoot = config.sinnix.paths.dotsRoot;
+      };
+      polylogueHookBin = import ./polylogue-hook.nix {
+        inherit lib pkgs;
         dataDir = config.sinnix.services.polylogue.dataDir;
+        polylogueHook = scriptPkgs.polylogue-cli;
       };
       inherit (browser)
         mcpChromeDevtoolsBin
@@ -183,6 +197,8 @@ mkFeatureModule {
         sinnix.features.dev.mcp-servers.codexDeepseekConfigSource = codexDeepseekConfigFile;
         sinnix.features.dev.mcp-servers.codexLocalConfigSource = codexLocalConfigFile;
         sinnix.features.dev.mcp-servers.codexHooksSource = codexHooksFile;
+        sinnix.features.dev.mcp-servers.polylogueHookSource = polylogueHookBin;
+        sinnix.features.dev.mcp-servers.mcpPolylogueSource = mcpTools.mcpPolylogueBin;
         sinnix.features.dev.mcp-servers.antigravityMcpConfigSource = antigravityMcpConfigFile;
         sinnix.persistence.home.directories = [
           ".local/state/sinnix/settings-env-lint"
@@ -318,6 +334,10 @@ mkFeatureModule {
                 executable = true;
                 force = true;
                 text = mcpPolylogueText;
+              };
+              ".local/bin/sinnix-polylogue-hook" = {
+                source = "${polylogueHookBin}/bin/sinnix-polylogue-hook";
+                force = true;
               };
               ".local/bin/mcp-sinex" = {
                 source = "${scriptPkgs.sinnix-mcp-sinex}/bin/sinnix-mcp-sinex";
