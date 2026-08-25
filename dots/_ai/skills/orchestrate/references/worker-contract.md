@@ -80,6 +80,15 @@ The structural cure each time: move the mechanism into the substrate (typed
 readiness, completion events, validators), keep judgment above it, and spend
 tokens on merged outcomes.
 
+One more smell with its cure (2026-08-26, from three finished-unprocessed
+jobs): **orphan obligations** — anything async created without a delivery
+path back to the decider AT CREATION (a dispatch without a watcher, a
+watcher writing a log nobody is prompted to read). Cure: one event stream
+(everything terminal appends — jobs via the daemon, scripts via the append
+convention), one persistent consumer, and an acknowledgment cursor making
+"unprocessed backlog" a queryable fact (SessionStart prints it; the
+dispatch breaker refuses past a threshold) instead of a session memory.
+
 ## Packet/bead authoring rules (from the 2026-08-25 quality audit of 44 beads)
 
 - **No dated note scrolls.** Consolidate on contact: one current-state note;
