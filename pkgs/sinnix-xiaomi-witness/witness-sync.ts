@@ -240,6 +240,24 @@ for (const key of RAW_KEYS) {
 
 // -- Flush ------------------------------------------------------------------
 
+// A quiet successful pass otherwise writes nothing, leaving readers unable to
+// distinguish healthy write-on-change behavior from a stream whose newest
+// records are only failures. Keep one small status receipt per scheduled pass.
+pending.push(
+  JSON.stringify({
+    kind: "vendor_sync_pass",
+    day: null,
+    fetched_at: fetchedAt,
+    base: BASE,
+    window_days: WINDOW_DAYS,
+    parser_version: PARSER_VERSION,
+    appended,
+    unchanged,
+    failures,
+    band_sids: [...bandSids],
+  }),
+);
+
 if (pending.length > 0) {
   const { appendFileSync, mkdirSync } = await import("node:fs");
   mkdirSync(LANE_DIR, { recursive: true });

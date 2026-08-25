@@ -34,6 +34,11 @@ stdenvNoCC.mkDerivation {
     mkdir -p $out/share/sinnix-xiaomi-witness $out/bin
     cp witness-sync.ts witness-login.ts $out/share/sinnix-xiaomi-witness/
     cp -r $upstream $out/share/sinnix-xiaomi-witness/upstream
+    chmod -R u+w $out/share/sinnix-xiaomi-witness/upstream
+    substituteInPlace $out/share/sinnix-xiaomi-witness/upstream/src/xiaomi/client.ts \
+      --replace-fail \
+        'const XIAOMI_REQUEST_TIMEOUT_MS = 30_000;' \
+        'const XIAOMI_REQUEST_TIMEOUT_MS = 120_000;'
     makeWrapper ${lib.getExe bun} $out/bin/sinnix-xiaomi-witness \
       --add-flags "run $out/share/sinnix-xiaomi-witness/witness-sync.ts"
     makeWrapper ${lib.getExe bun} $out/bin/sinnix-xiaomi-witness-login \
