@@ -37,7 +37,7 @@ not add a parallel ledger for any of them.
   Parameters, when declared, enter through `--parameters-json` and are retained
   publicly only as a digest.
 - Observe with `job get`, `job logs`, `job list --kind <kind>`, and `job wait
-  <id...> --any`; consume the typed artifact with `job result`. Cancel by job
+<id...> --any`; consume the typed artifact with `job result`. Cancel by job
   ID, then verify terminal state. `agentctl agent list|status|wait|result`
   are sugar over jobs of kind `attested-agent`.
 - **Never poll.** Terminal transitions append to

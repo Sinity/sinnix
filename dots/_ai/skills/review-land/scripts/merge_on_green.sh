@@ -27,4 +27,4 @@ EV=/realm/state/agentctl/events.jsonl
 mkdir -p "$(dirname "$EV")" 2>/dev/null
 printf '{"kind":"merge_watch","repo":"%s","pr":%s,"gate":"%s","state":"%s","at":"%s"}\n' \
   "$REPO" "$PR" "$s" "$(gh pr view "$PR" --repo "$REPO" --json state --jq .state 2>/dev/null)" \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$EV" 2>/dev/null || true
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$EV" 2>/dev/null || true
