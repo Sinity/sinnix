@@ -209,6 +209,7 @@ def test_lone_job_larger_than_pool_budget_is_not_permanently_starved(
     )
 
     assert started["state"]["phase"] == "submitted"
+    assert started["state"]["admitted_at"]
     assert (
         started["state"]["admission"]["estimate_memory_bytes"]
         == 18 * 1024 * 1024 * 1024
