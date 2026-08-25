@@ -27,7 +27,18 @@ Luna-first is quota-driven (separate Codex pool) AND review-driven
 (cross-family review has uncorrelated failure modes). When a lane is stuck,
 LOWER effort or switch model — never crank effort upward (spinning-in-
 circles failure mode). Escalate luna → terra on the first flounder; don't
-retry luna against the same failure.
+retry luna against the same failure. Multi-model redundancy runs only on a
+predeclared trigger — irreversible action, destructive-data risk, no
+executable oracle, or concrete disagreement after a first analysis; otherwise
+one accountable decision-maker decides (broad "run 2-3 models on anything
+that matters" recreates the review spiral). External evidence, current pricing, and supervision
+economics: `references/model-landscape-2026-08.md`. The standard dispatch
+contract (self-verifying workers, no review chains, report-or-it-didn't-happen)
+and the measured process smells that killed the 2026-08 coordinator:
+`references/worker-contract.md`. Experiment registry rules (stopping rules,
+expiry, piggyback-first): `references/experiment-protocol.md`. Hunt target
+ranking: `scripts/defect_priors.py` (bandit priors over module × lens; run
+it before any hunt wave — never pick targets by intuition).
 
 ## Dispatch mechanics (real verbs only)
 
@@ -46,9 +57,11 @@ retry luna against the same failure.
 
 ## Lane contract
 
-- A lane = one worker + one workspace + a **cluster of 3–5 related beads**
-  (same region/theme; see [[bead-authoring]]). One integration branch per
-  cluster; no per-lane PRs — one PR per coherent batch.
+- A lane = one worker + one workspace + **one independently verifiable
+  change**, bounded by ownership, conflict keys, and expected runtime — its
+  bead count may be one or many (bead count is tracker shape, not work
+  size; see [[bead-authoring]]). One integration branch per lane; one PR
+  per coherent batch.
 - The dispatch prompt carries task content only (bead ids, files, scope,
   verification selector); the standing lane rules live in the agent
   definition, not pasted per prompt. Communicate by **pointer** (bead ids,
