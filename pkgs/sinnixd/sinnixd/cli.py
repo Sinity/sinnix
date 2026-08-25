@@ -179,7 +179,9 @@ def parser() -> argparse.ArgumentParser:
     job_list.add_argument("--project")
     job_list.add_argument("--phase", action="append", default=[])
     job_list.add_argument("--kind", action="append", default=[])
-    job_list.add_argument("--active", "--active-only", dest="active", action="store_true")
+    job_list.add_argument(
+        "--active", "--active-only", dest="active", action="store_true"
+    )
     wait = job_subcommands.add_parser("wait")
     wait.add_argument("job_ids", nargs="+", metavar="job_id")
     wait.add_argument(

@@ -8,7 +8,6 @@ from uuid import uuid4
 
 import pytest
 from sinnix_mcp import RequestEnvelope
-
 from sinnixd.jobs import GenericJobs, GenericJobStore, _completion_marker_path
 from sinnixd.project_plans import PlanStore, ProjectPlanError, ProjectPlanExecutor
 from sinnixd.projects import ProjectCatalog
@@ -274,7 +273,7 @@ def test_node_operation_payloads_and_aggregate_results_are_bounded(
     )
     first_job = result["nodes"][0]["job_id"]
     systemd.finish(first_job, jobs)
-    progressed = plans.get(result["plan_id"])
+    plans.get(result["plan_id"])
     assert len(systemd.started) == 2
     second_job = next(
         node["job_id"] for node in result["nodes"] if node["job_id"] != first_job

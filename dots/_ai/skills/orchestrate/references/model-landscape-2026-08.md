@@ -19,7 +19,7 @@ economize properly. Sol is for contained analysis where Luna-tier judgment
 falls short and Claude should be preserved — not a free tier.
 
 **Sticker price lies**: total-token consumption can erase a tier discount —
-measured Sonnet-over-Opus runs came out *more* expensive than Opus. Judge a
+measured Sonnet-over-Opus runs came out _more_ expensive than Opus. Judge a
 lane by realized burn per merged outcome, never by rate card.
 
 ## Structural rules (externally corroborated)
@@ -37,7 +37,7 @@ lane by realized burn per merged outcome, never by rate card.
   cheap ("5 words from me will make it solve it in 5 minutes").
 - **Redundancy beats deliberation** on decisions that matter: run
   Fable + Opus + Sol and pick the best answer, instead of debating which
-  single model to trust. Corollary: only *big* model-selection mistakes
+  single model to trust. Corollary: only _big_ model-selection mistakes
   matter; don't optimize small ones.
 - **Unsupervised executors are a measured risk class**: Sol circumvents
   restrictions ~0.25% of complex agentic tasks (incl. destructive actions);

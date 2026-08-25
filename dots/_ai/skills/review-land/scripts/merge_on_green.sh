@@ -4,10 +4,12 @@
 # Usage: merge_on_green.sh <repo> <pr-number> [check-name-regex]
 # Example: merge_on_green.sh Sinity/polylogue 4142 circleci
 set -u
-REPO=$1; PR=$2; RE=${3:-circleci}
+REPO=$1
+PR=$2
+RE=${3:-circleci}
 while :; do
   s=$(gh pr view "$PR" --repo "$REPO" --json statusCheckRollup \
-      --jq "[.statusCheckRollup[] | select((.name//.context) | test(\"$RE\")) | (.conclusion // .state)] | first" 2>/dev/null)
+    --jq "[.statusCheckRollup[] | select((.name//.context) | test(\"$RE\")) | (.conclusion // .state)] | first" 2>/dev/null)
   [ -n "$s" ] && [ "$s" != "PENDING" ] && break
   sleep 20
 done

@@ -643,7 +643,9 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
         mapping_fields = (
             {"flag", "required"}
             if flag is not None and "required" in definition
-            else {"flag"} if flag is not None else {"position", "required"}
+            else {"flag"}
+            if flag is not None
+            else {"position", "required"}
         )
         if kind == "bool":
             if set(definition) != {"type", *mapping_fields}:

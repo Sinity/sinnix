@@ -15,7 +15,7 @@ Every implementation dispatch carries, verbatim in the prompt:
    has an atlas (`docs/atlas/`), the prompt names the relevant area sheet —
    orientation comes from the atlas, not from the worker re-deriving it.
 2. **Self-verification loop**: the worker fixes → tests → iterates until
-   green *within its own run*. It owns its defects. It never spawns review
+   green _within its own run_. It owns its defects. It never spawns review
    subagents, and no dispatcher builds review→fix→review chains around it —
    hosted PR review (Codex/CodeRabbit) plus the test oracle are the
    structural check.

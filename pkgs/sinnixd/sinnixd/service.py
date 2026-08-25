@@ -35,8 +35,8 @@ from .jobs import (
     default_state_dir,
 )
 from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
-from .projects import ProjectCatalog
 from .project_plans import PlanStore, ProjectPlanExecutor
+from .projects import ProjectCatalog
 from .tasks import TaskError, TaskService
 from .workspaces import GitWorkspaces, WorkspaceError, WorkspaceStore
 

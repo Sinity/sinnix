@@ -10,6 +10,7 @@ Sweep ledger (optional): .agent/scratch/sweep-ledger.jsonl in the repo,
 rows {"module": "polylogue/foo.py", "lens": "...", "commit": "...",
 "date": "..."} - a module swept at a commit is penalized until it churns.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,7 +24,9 @@ from pathlib import Path
 
 
 def sh(args: list[str], cwd: Path) -> str:
-    return subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=300).stdout
+    return subprocess.run(
+        args, cwd=cwd, capture_output=True, text=True, timeout=300
+    ).stdout
 
 
 def main() -> int:
@@ -59,7 +62,7 @@ def main() -> int:
             import sqlite3
 
             conn = sqlite3.connect(f"file:{testmon}?mode=ro&immutable=1", uri=True)
-            for (fname, cnt) in conn.execute(
+            for fname, cnt in conn.execute(
                 "SELECT ff.filename, COUNT(DISTINCT n.name) FROM node_fingerprint nf "
                 "JOIN node n ON n.id = nf.node_id "
                 "JOIN fingerprint fp ON fp.id = nf.fingerprint_id "
@@ -71,7 +74,9 @@ def main() -> int:
         except Exception:
             covered.clear()
     if not covered:
-        grep = sh(["grep", "-rl", "-E", "from polylogue|import polylogue", "tests/"], repo)
+        grep = sh(
+            ["grep", "-rl", "-E", "from polylogue|import polylogue", "tests/"], repo
+        )
         test_files = [t for t in grep.splitlines() if t.endswith(".py")]
         for t in test_files:
             body = (repo / t).read_text(errors="replace")
@@ -84,7 +89,11 @@ def main() -> int:
     defects: dict[str, int] = defaultdict(int)
     try:
         beads = subprocess.run(
-            ["bd", "list", "--json", "--all"], cwd=repo, capture_output=True, text=True, timeout=120
+            ["bd", "list", "--json", "--all"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=120,
         ).stdout
         blob = beads if beads else "[]"
         for rel in loc:
@@ -114,12 +123,16 @@ def main() -> int:
         dd = 1.0 + 0.5 * defects.get(rel, 0)
         penalty = 0.25 if swept.get(rel) == head else 1.0
         score = n * thin * ch * dd * penalty
-        rows.append((score, rel, n, cov, churn.get(rel, 0), defects.get(rel, 0), rel in swept))
+        rows.append(
+            (score, rel, n, cov, churn.get(rel, 0), defects.get(rel, 0), rel in swept)
+        )
 
     rows.sort(reverse=True)
     print(f"{'score':>10}  {'LOC':>5} {'cov':>4} {'chn':>3} {'bd':>3} swept  module")
     for score, rel, n, cov, ch, dd, sw in rows[: args.top]:
-        print(f"{score:10.0f}  {n:5d} {cov:4d} {ch:3d} {dd:3d} {'y' if sw else '-':>5}  {rel}")
+        print(
+            f"{score:10.0f}  {n:5d} {cov:4d} {ch:3d} {dd:3d} {'y' if sw else '-':>5}  {rel}"
+        )
     return 0
 
 
