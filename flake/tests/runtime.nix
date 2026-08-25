@@ -408,6 +408,42 @@ in
           ];
       };
       sinexCachePrebuildEvaluated = evalTestSpec system sinexCachePrebuildSpec;
+      lynchpinConvergenceSpec = mkFeatureTest {
+        name = "lynchpin-convergence-agentctl";
+        feature = "sinnix.features.cli.polylogue.enable";
+        extraModules = [
+          ({ ... }: {
+            sinnix.services.lynchpin = {
+              enable = true;
+              materializationTimer.enable = true;
+            };
+          })
+        ];
+        assertions =
+          config:
+          let
+            service = config.systemd.services.lynchpin-materialize.serviceConfig;
+            surface = config.sinnix.runtime.inventory.surfaces.lynchpin-materialize;
+          in
+          [
+            {
+              assertion =
+                lib.hasInfix "/bin/agentctl job start lynchpin schedule_convergence" service.ExecStart
+                && service.TimeoutStartSec == 60
+                && surface.resourceClass == "system";
+              message = "the Lynchpin timer must only submit its typed convergence plan without static bulk placement";
+            }
+            {
+              assertion =
+                !(service ? WorkingDirectory)
+                && !(service ? Environment)
+                && !(lib.hasInfix "materialize --all" service.ExecStart)
+                && !(lib.hasInfix "--promote" service.ExecStart);
+              message = "the retired monolithic Lynchpin materialization shell must not survive in the rendered unit";
+            }
+          ];
+      };
+      lynchpinConvergenceEvaluated = evalTestSpec system lynchpinConvergenceSpec;
       groupSpec = mkFeatureTest {
         name = "hyprland-groups";
         feature = "sinnix.features.desktop.hyprland.enable";
@@ -460,6 +496,16 @@ in
             builtins.toJSON {
               execStart =
                 sinexCachePrebuildEvaluated.config.systemd.user.services.sinex-cache-prebuild.serviceConfig.ExecStart;
+            }
+          )
+        } > "$out"
+      '';
+      checks.lynchpin-convergence-agentctl = pkgs.runCommand "lynchpin-convergence-agentctl-check" { } ''
+        printf '%s\n' ${
+          lib.escapeShellArg (
+            builtins.toJSON {
+              execStart =
+                lynchpinConvergenceEvaluated.config.systemd.services.lynchpin-materialize.serviceConfig.ExecStart;
             }
           )
         } > "$out"
