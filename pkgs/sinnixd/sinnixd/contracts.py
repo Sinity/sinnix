@@ -255,7 +255,7 @@ class TypedJobContracts:
             raise ContractError("agent bead binding is malformed")
         binding = dict(value)
         scope = binding.get("write_scope")
-        if scope is not None and (
+        if "write_scope" in binding and (
             not isinstance(scope, list)
             or not scope
             or len(scope) > 128

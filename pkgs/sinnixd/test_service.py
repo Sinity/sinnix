@@ -4745,6 +4745,133 @@ def test_packet_runner_seals_worker_report_to_runtime_observed_head(tmp_path: Pa
     }
 
 
+def test_seal_output_composes_through_exact_head_into_delivery_validation(tmp_path: Path) -> None:
+    """Composed: real runner seal output flows through exact-head evidence into delivery acceptance and tamper rejection."""
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    native = tmp_path / "native-runner"
+    native_runner(native)
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs, native_runner=native)
+    workspace = service.workspaces.create(
+        project_id="fixture", name="seal-compose", branch="feature/seal-compose", base="HEAD"
+    )
+    checkout_id = workspace["checkout_id"]
+    path = Path(workspace["path"])
+
+    # Seed a file that will be deleted during the packet range.
+    (path / "seed.txt").write_text("to be removed\n")
+    subprocess.run(["git", "-C", str(path), "add", "seed.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+         "commit", "--quiet", "-m", "seed deletion target"],
+        check=True,
+    )
+
+    binding = {
+        "bead_ref": "sinnix://projects/fixture/beads/seal-test-1",
+        "project_ref": "sinnix://projects/fixture",
+        "checkout_ref": f"sinnix://projects/fixture/checkouts/{checkout_id}",
+        "task_revision": "a" * 64,
+        "task_etag": "b" * 64,
+        "claim_ref": f"sinnix://projects/fixture/beads/seal-test-1/claims/{'c' * 64}",
+        "claim_receipt": {
+            "ref": f"sinnix://projects/fixture/beads/seal-test-1/claims/{'c' * 64}",
+            "owner_route": "beads.cli",
+        },
+        "request_id": "9f1a2b3c-0000-4d5e-8f6a-7b8c9d0e1f2a",
+        "assignment_ref": None,
+        "write_scope": ["added.txt", "seed.txt"],
+    }
+
+    packet_response = service.dispatch(request(
+        "job.agent.start", "systemd-jobs",
+        {
+            "project_id": "fixture", "checkout_id": checkout_id,
+            "prompt": "return structured delivery for seal composition test",
+            "backend": "codex", "model": "fixture", "effort": "high",
+            "credential_profile": "subscription", "timeout_seconds": 60,
+            "result": "last-message", "bead_binding": binding,
+        },
+        "agent-control",
+    ))
+    assert packet_response.ok and packet_response.payload is not None
+    packet_id = packet_response.payload.inline["job_id"]
+    packet_record = jobs.store.load(packet_id)
+    start_head = packet_record.spec.checkout["head"]
+
+    # Produce the packet range: one add, one delete.
+    (path / "added.txt").write_text("new content\n")
+    (path / "seed.txt").unlink()
+    subprocess.run(["git", "-C", str(path), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+         "commit", "--quiet", "-m", "packet range: add+delete"],
+        check=True,
+    )
+
+    # Use the real runner seal on a valid worker delivery report.
+    assert packet_record.result_path is not None
+    packet_record.result_path.parent.mkdir(parents=True, exist_ok=True)
+    packet_record.result_path.touch(mode=0o600)
+    worker_delivery = {
+        "anti_vacuity": True,
+        "unresolved_work": [],
+        "delegation": {"visibility": "unsupported", "pending": None},
+        "deletion_evidence": ["seed.txt"],
+        "evidence_only": False,
+    }
+    packet_record.result_path.write_text(json.dumps(worker_delivery))
+    _seal_packet_result(
+        {"job_id": packet_id, "checkout": {"head": start_head}}, path, packet_record.result_path
+    )
+    sealed = json.loads(packet_record.result_path.read_text())
+    final_head = sealed["final_head"]
+
+    # Worker result was sealed by the real runner; mark the job succeeded.
+    jobs_module._write_private_marker(jobs_module._completion_marker_path(packet_record.log_path))
+    systemd.properties = {
+        "LoadState": "loaded", "ActiveState": "inactive", "Result": "success",
+        "ExecMainStatus": "0", "InvocationID": "seal-compose-invocation",
+    }
+    assert jobs.get(packet_id)["state"]["phase"] == "succeeded"
+
+    # Verifier job runs at final_head with the same binding.
+    verifier_response = service.dispatch(request(
+        "job.start", "systemd-jobs",
+        {
+            "project_id": "fixture", "operation": "check",
+            "workspace_id": workspace["workspace_id"], "bead_binding": binding,
+        },
+    ))
+    assert verifier_response.ok and verifier_response.payload is not None
+    verifier_id = verifier_response.payload.inline["job_id"]
+    assert jobs.get(verifier_id)["state"]["phase"] == "succeeded"
+
+    delivery_gate = GitHubDelivery(service.projects, service.workspaces, jobs)
+
+    # Accepting path: real seal output + correct deletion evidence + verifier at final_head.
+    _workspace, _project, receipt = delivery_gate._verified_workspace(
+        workspace["workspace_id"], verifier_id, packet_id
+    )
+    assert receipt["head"] == final_head
+    assert receipt["bead_ref"] == binding["bead_ref"]
+
+    # Tamper: mutate the sealed envelope's final_head to a synthetic value.
+    tampered = {**sealed, "final_head": "b" * 40}
+    packet_record.result_path.write_text(json.dumps(tampered))
+    with pytest.raises(DeliveryError):
+        delivery_gate._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
+
+    # Restore and verify deletion overclaim is now rejected.
+    packet_record.result_path.write_text(json.dumps(sealed))
+    overclaim = {**worker_delivery, "deletion_evidence": ["seed.txt", "unrelated.txt"]}
+    packet_record.result_path.write_text(json.dumps({**sealed, "delivery": overclaim}))
+    with pytest.raises(DeliveryError, match="deletion evidence"):
+        delivery_gate._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
+
+
 def test_admission_revalidates_queued_declared_workspace_before_systemd_launch(tmp_path: Path) -> None:
     """A queued declared service whose checkout HEAD moved must terminalize before it reaches systemd."""
     write_adapter(tmp_path)
