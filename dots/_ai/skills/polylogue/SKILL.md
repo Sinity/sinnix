@@ -7,7 +7,10 @@ description: Query or develop Polylogue session archives, ingestion, storage tie
 
 Polylogue archives AI sessions and exposes them through a query-first CLI, MCP,
 Python API, and daemon. Use it for past-session reconstruction instead of
-guessing. Read the repository `CLAUDE.md` for product invariants.
+guessing. Read the repository `CLAUDE.md` for product invariants, and the
+area sheets under `docs/atlas/` (storage, daemon, mcp — code-verified
+anchors) before exploring an area; report an ATLAS-DELTA in your summary if
+reality disagrees with a sheet.
 
 ## Reading history
 
@@ -39,10 +42,12 @@ devtools why
 devtools render all --check
 ```
 
-Plain verification uses a compatible testmon graph or refuses. Only `--all`
-proves the full corpus. Per-PR CI runs the quick gate, so local verification is
-still required. Do not scrape `.cache/verify` as an inter-project contract;
-publish stable evidence through an explicit export surface.
+Plain verification uses a compatible testmon graph or refuses. Lanes run
+selected verification from the seed inherited off the main checkout — false
+negatives there are accepted; only `--all` proves the full corpus, at
+merge/master boundaries. Per-PR CI runs the quick gate, so local verification
+is still required. Do not scrape `.cache/verify` as an inter-project
+contract; publish stable evidence through an explicit export surface.
 
 Product work uses feature branches and squash-merged PRs. Generic workspace,
 job, and task lifecycle belongs to AgentCTL and the shared runtime skills, not
