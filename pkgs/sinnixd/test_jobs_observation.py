@@ -61,8 +61,11 @@ def test_observation_timeout_remains_retryable_until_systemd_recovers(
     clock = [0.0]
     monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
     monkeypatch.setattr(
-        "sinnixd.jobs.time.sleep",
-        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+        "sinnixd.jobs.TerminalEvents.wait_terminal",
+        lambda self, job_ids, seconds: (
+            clock.__setitem__(0, clock[0] + seconds),
+            False,
+        )[1],
     )
     systemd = FakeSystemdJobs(show_unavailable=True)
     jobs = generic_jobs(tmp_path, systemd)
@@ -695,3 +698,245 @@ def test_log_reader_passes_the_requested_bounded_range_to_the_safe_artifact_read
 
     assert observed == [(4096, 5)]
     assert log["content"] == "range"
+
+
+def test_notify_exit_wakes_a_blocked_wait_before_its_fallback_poll(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: without the event plane this wait sleeps its full fallback slice."""
+    import threading
+    import time as real_time
+
+    systemd = FakeSystemdJobs()
+    jobs = GenericJobs(
+        systemd, GenericJobStore(tmp_path / "state"), wait_poll_seconds=30.0
+    )
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
+    results: dict[str, object] = {}
+
+    def wait() -> None:
+        results["status"] = jobs.wait(started["job_id"], timeout_seconds=30)
+
+    waiter = threading.Thread(target=wait)
+    waiter.start()
+    real_time.sleep(0.2)
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+    }
+    before = real_time.monotonic()
+    jobs.notify_exit(started["job_id"])
+    waiter.join(timeout=5)
+    elapsed = real_time.monotonic() - before
+
+    assert not waiter.is_alive()
+    status = results["status"]
+    assert status["state"]["phase"] == "succeeded"
+    assert status["state"]["terminal"]
+    assert elapsed < 5
+
+
+def test_notify_exit_requires_a_known_job(tmp_path: Path) -> None:
+    from uuid import uuid4
+
+    from sinnixd.jobs import JobRecordError
+
+    jobs = GenericJobs(FakeSystemdJobs(), GenericJobStore(tmp_path / "state"))
+
+    with pytest.raises(ValueError, match="job_id must be a UUID"):
+        jobs.notify_exit("not-a-job")
+    with pytest.raises(JobRecordError, match="unknown job"):
+        jobs.notify_exit(str(uuid4()))
+
+
+def test_wait_any_returns_the_first_terminal_job(tmp_path: Path) -> None:
+    """Anti-vacuity: returning the still-running sibling would misreport completion."""
+
+    terminal_properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+    }
+
+    @dataclass
+    class PerUnitSystemd(FakeSystemdJobs):
+        terminal_units: set[str] = field(default_factory=set)
+
+        def show(
+            self,
+            unit: str,
+            *,
+            timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+        ) -> dict[str, str]:
+            if unit in self.terminal_units:
+                return dict(terminal_properties)
+            return super().show(unit, timeout_seconds=timeout_seconds)
+
+    systemd = PerUnitSystemd()
+    jobs = GenericJobs(systemd, GenericJobStore(tmp_path / "state"))
+    running = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
+    finished = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
+    systemd.terminal_units.add(finished["unit"])
+
+    completed = jobs.wait_any(
+        (running["job_id"], finished["job_id"]), timeout_seconds=5
+    )
+
+    assert completed["completed_job_id"] == finished["job_id"]
+    assert completed["job_id"] == finished["job_id"]
+    assert completed["state"]["terminal"]
+
+
+def test_wait_any_times_out_with_a_bounded_phase_summary(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    clock = [0.0]
+    monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        "sinnixd.jobs.TerminalEvents.wait_terminal",
+        lambda self, job_ids, seconds: (
+            clock.__setitem__(0, clock[0] + seconds),
+            False,
+        )[1],
+    )
+    jobs = GenericJobs(FakeSystemdJobs(), GenericJobStore(tmp_path / "state"))
+    first = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
+    second = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
+
+    timed_out = jobs.wait_any((first["job_id"], second["job_id"]), timeout_seconds=1)
+
+    assert timed_out["wait_timed_out"]
+    assert timed_out["jobs"] == {
+        first["job_id"]: "running",
+        second["job_id"]: "running",
+    }
+
+
+def test_wait_any_rejects_duplicate_and_oversized_id_sets(tmp_path: Path) -> None:
+    from uuid import uuid4
+
+    jobs = GenericJobs(FakeSystemdJobs(), GenericJobStore(tmp_path / "state"))
+    duplicate = str(uuid4())
+
+    with pytest.raises(ValueError, match="distinct job ids"):
+        jobs.wait_any((duplicate, duplicate), timeout_seconds=1)
+    with pytest.raises(ValueError, match="distinct job ids"):
+        jobs.wait_any(tuple(str(uuid4()) for _ in range(33)), timeout_seconds=1)
+    with pytest.raises(ValueError, match="distinct job ids"):
+        jobs.wait_any((), timeout_seconds=1)
+
+
+def test_running_reobservation_skips_the_durable_rewrite(tmp_path: Path) -> None:
+    """Anti-vacuity: rewriting an unchanged running state fsyncs per poll for nothing."""
+    jobs = GenericJobs(FakeSystemdJobs(), GenericJobStore(tmp_path / "state"))
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
+    record_path = tmp_path / "state" / "jobs" / f"{started['job_id']}.json"
+
+    first = jobs.get(started["job_id"])
+    stable = record_path.read_bytes()
+    stat_before = record_path.stat().st_mtime_ns
+    second = jobs.get(started["job_id"])
+
+    assert first["state"]["phase"] == "running"
+    assert second["state"]["phase"] == "running"
+    assert record_path.read_bytes() == stable
+    assert record_path.stat().st_mtime_ns == stat_before
+
+
+def test_capture_notifies_the_daemon_socket_for_every_exit_code(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: a failed command must wake waiters too, not only successes."""
+    import socket as socket_module
+    import struct
+    import threading
+
+    received: list[dict[str, object]] = []
+    socket_path = tmp_path / "sinnixd.sock"
+    listener = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+    listener.bind(str(socket_path))
+    listener.listen()
+
+    def accept_frames() -> None:
+        for _ in range(2):
+            connection, _address = listener.accept()
+            with connection:
+                length = struct.unpack("!I", connection.recv(4))[0]
+                received.append(json.loads(connection.recv(length)))
+
+    thread = threading.Thread(target=accept_frames)
+    thread.start()
+    for exit_code in (0, 7):
+        log_path = tmp_path / f"capture-notify-{exit_code}.log"
+        log_path.touch(mode=0o600)
+        returned = capture_main(
+            (
+                "--log-path",
+                str(log_path),
+                "--overflow-path",
+                str(log_path.with_suffix(".overflow")),
+                "--max-bytes",
+                "64",
+                "--notify-socket",
+                str(socket_path),
+                "--notify-job-id",
+                "74e64cb4-282e-4b27-b4b1-af052b268161",
+                "--",
+                "/bin/sh",
+                "-c",
+                f"exit {exit_code}",
+            )
+        )
+        assert returned == exit_code
+    thread.join(timeout=5)
+    listener.close()
+
+    assert not thread.is_alive()
+    operations = [frame["params"]["operation"] for frame in received]
+    exit_codes = [frame["params"]["arguments"]["exit_code"] for frame in received]
+    assert operations == ["job.notify-exit", "job.notify-exit"]
+    assert exit_codes == [0, 7]
+
+
+def test_capture_exit_code_survives_an_unreachable_notify_socket(
+    tmp_path: Path,
+) -> None:
+    log_path = tmp_path / "capture-unreachable.log"
+    log_path.touch(mode=0o600)
+
+    returned = capture_main(
+        (
+            "--log-path",
+            str(log_path),
+            "--overflow-path",
+            str(log_path.with_suffix(".overflow")),
+            "--max-bytes",
+            "64",
+            "--notify-socket",
+            str(tmp_path / "absent.sock"),
+            "--notify-job-id",
+            "74e64cb4-282e-4b27-b4b1-af052b268161",
+            "--",
+            "/bin/sh",
+            "-c",
+            "exit 0",
+        )
+    )
+
+    assert returned == 0
+    assert log_path.with_suffix(".complete").exists()

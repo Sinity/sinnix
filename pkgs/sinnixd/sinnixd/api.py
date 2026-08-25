@@ -166,7 +166,10 @@ class UnixSocketServer:
     socket_path: Path
     service: SinnixdService
     connection_timeout_seconds: float = CONNECTION_TIMEOUT_SECONDS
-    max_workers: int = 8
+    # Wait connections block a dedicated thread each; with event-driven waits
+    # those threads are parked on a condition, so a wide pool is cheap and
+    # long waits no longer exhaust the slots that polling once did.
+    max_workers: int = 18
     ready_event: Event | None = None
 
     @property

@@ -144,7 +144,13 @@ def parser() -> argparse.ArgumentParser:
     job_list.add_argument("--phase", action="append", default=[])
     job_list.add_argument("--active", action="store_true")
     wait = job_subcommands.add_parser("wait")
-    wait.add_argument("job_id")
+    wait.add_argument("job_ids", nargs="+", metavar="job_id")
+    wait.add_argument(
+        "--any",
+        dest="wait_any",
+        action="store_true",
+        help="With multiple job ids, return when the first reaches a terminal state.",
+    )
     wait.add_argument("--timeout-seconds", type=int, default=30)
     logs = job_subcommands.add_parser("logs")
     logs.add_argument("job_id")
@@ -545,10 +551,19 @@ def main() -> int:
             },
         )
     elif arguments.command == "job" and arguments.job_command == "wait":
+        if len(arguments.job_ids) > 1 and not arguments.wait_any:
+            parser().error("waiting on multiple job ids requires --any")
         request = _request(
             "job.wait",
             "systemd-jobs",
-            {"job_id": arguments.job_id, "timeout_seconds": arguments.timeout_seconds},
+            {
+                **(
+                    {"job_ids": arguments.job_ids}
+                    if arguments.wait_any
+                    else {"job_id": arguments.job_ids[0]}
+                ),
+                "timeout_seconds": arguments.timeout_seconds,
+            },
         )
     elif arguments.command == "job" and arguments.job_command == "logs":
         request = _request(
@@ -670,7 +685,11 @@ def daemon_main() -> None:
     arguments = daemon_parser().parse_args()
     service = SinnixdService(
         ProjectCatalog(arguments.project_root),
-        jobs=GenericJobs(UserSystemdJobs(), GenericJobStore(arguments.state_dir)),
+        jobs=GenericJobs(
+            UserSystemdJobs(),
+            GenericJobStore(arguments.state_dir),
+            notify_socket=arguments.socket,
+        ),
         native_runner=arguments.native_runner,
     )
     UnixSocketServer(arguments.socket, service).serve_forever()
