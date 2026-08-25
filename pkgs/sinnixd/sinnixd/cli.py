@@ -394,7 +394,8 @@ def main() -> int:
         ]
         if missing:
             parser().error(
-                "agent dispatch requires " + ", ".join(missing)
+                "agent dispatch requires "
+                + ", ".join(missing)
                 + " (or use: agent launch|list|status|wait|result)"
             )
         try:
