@@ -73,6 +73,39 @@
             test "$(grep -c '^### full' $out)" = 1
             if grep -Eq '/(home|persist|realm/cache|realm/data|nix/store)/' $out; then exit 1; fi
           '';
+      nativeRunnerContract =
+        pkgs.runCommand "agent-native-runner-contract"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.gawk
+            ];
+          }
+          ''
+            mkdir -p "$TMPDIR/bin" "$TMPDIR/worktree"
+            cat > "$TMPDIR/bin/codex" <<EOF
+            #!${pkgs.bash}/bin/bash
+            printf '%s\\n' "\$@" > "\$CODEX_ARGS"
+            EOF
+            chmod +x "$TMPDIR/bin/codex"
+            printf 'fixture prompt' > "$TMPDIR/prompt"
+            export CODEX_ARGS="$TMPDIR/codex-args"
+            export PATH="$TMPDIR/bin:$PATH"
+            ${pkgs.bash}/bin/bash ${../../dots/_ai/skills/agent-runtime/scripts/run_agent_prompt.sh} \
+              --agent codex \
+              --workdir "$TMPDIR/worktree" \
+              --prompt-file "$TMPDIR/prompt" \
+              --last-file "$TMPDIR/result" \
+              --model fixture-model \
+              --reasoning-effort medium
+            awk '
+              previous == "-c" && $0 == "shell_environment_policy.inherit=all" { found = 1 }
+              { previous = $0 }
+              END { exit !found }
+            ' "$CODEX_ARGS"
+            touch "$out"
+          '';
     in
     {
       checks.agent-environment-doc =
@@ -84,5 +117,6 @@
             test -s $rendered
             touch $out
           '';
+      checks.agent-native-runner-contract = nativeRunnerContract;
     };
 }

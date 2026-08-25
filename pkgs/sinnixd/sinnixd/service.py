@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
+from uuid import uuid4
 
 from sinnix_mcp import (
     Authority,
@@ -19,8 +21,10 @@ from sinnix_mcp.execution import OwnerExecution
 
 from .contracts import TypedJobContracts
 from .delivery import DeliveryError, GitHubDelivery
+from .delivery_runner import DELIVERY_INPUT_SCHEMA_VERSION, delivery_runner_executable
 from .jobs import (
     GenericJobs,
+    GenericJobSpec,
     GenericJobStore,
     JobPageCursorError,
     JobRecordError,
@@ -38,6 +42,12 @@ from .workspaces import GitWorkspaces, WorkspaceError, WorkspaceStore
 
 class JobAuthorizationError(PermissionError):
     """The caller does not own this job and is not the operator."""
+
+
+# Delivery runs bounded Git/GitHub commands; these ceilings cover the command
+# deadlines in delivery.py. They bound the background job, not a control
+# worker: workspace.publish/land return a job id immediately.
+DELIVERY_TIMEOUT_SECONDS = {"publish": 790, "land": 185}
 
 
 @dataclass(frozen=True)
@@ -398,21 +408,24 @@ class SinnixdService:
                 raise ValueError(
                     "workspace.publish requires workspace_id, job_id, title, and body"
                 )
-            assert self.delivery is not None
-            publish_arguments = (
-                self._job_argument(arguments, "workspace_id"),
-                self._job_argument(arguments, "job_id"),
-                self._job_argument(arguments, "title"),
-                arguments.get("body") if isinstance(arguments.get("body"), str) else "",
-            )
             packet_job_id = arguments.get("packet_job_id")
-            return self.delivery.publish(
-                *publish_arguments,
-                **(
-                    {"packet_job_id": packet_job_id}
-                    if isinstance(packet_job_id, str)
-                    else {}
-                ),
+            return self._start_delivery(
+                "publish",
+                principal,
+                self._job_argument(arguments, "workspace_id"),
+                {
+                    "workspace_id": self._job_argument(arguments, "workspace_id"),
+                    "job_id": self._job_argument(arguments, "job_id"),
+                    "title": self._job_argument(arguments, "title"),
+                    "body": arguments.get("body")
+                    if isinstance(arguments.get("body"), str)
+                    else "",
+                    **(
+                        {"packet_job_id": packet_job_id}
+                        if isinstance(packet_job_id, str)
+                        else {}
+                    ),
+                },
             )
         if operation == "workspace.review-status":
             assert self.delivery is not None
@@ -428,16 +441,20 @@ class SinnixdService:
                 raise ValueError(
                     "workspace.land requires agent-control or operator plus workspace_id and job_id"
                 )
-            assert self.delivery is not None
             packet_job_id = arguments.get("packet_job_id")
-            return self.delivery.land(
+            return self._start_delivery(
+                "land",
+                principal,
                 self._job_argument(arguments, "workspace_id"),
-                self._job_argument(arguments, "job_id"),
-                **(
-                    {"packet_job_id": packet_job_id}
-                    if isinstance(packet_job_id, str)
-                    else {}
-                ),
+                {
+                    "workspace_id": self._job_argument(arguments, "workspace_id"),
+                    "job_id": self._job_argument(arguments, "job_id"),
+                    **(
+                        {"packet_job_id": packet_job_id}
+                        if isinstance(packet_job_id, str)
+                        else {}
+                    ),
+                },
             )
         if operation == "workspace.finish":
             if principal not in {"agent-control", "operator"}:
@@ -597,6 +614,7 @@ class SinnixdService:
                 "cursor",
                 "project_id",
                 "phases",
+                "kinds",
                 "active_only",
             }:
                 raise ValueError(
@@ -616,6 +634,11 @@ class SinnixdService:
                 not isinstance(phase, str) for phase in phases
             ):
                 raise ValueError("job.list phases must be a list of strings")
+            kinds = arguments.get("kinds", [])
+            if not isinstance(kinds, list) or any(
+                not isinstance(kind, str) for kind in kinds
+            ):
+                raise ValueError("job.list kinds must be a list of strings")
             active_only = arguments.get("active_only", False)
             if not isinstance(active_only, bool):
                 raise ValueError("job.list active_only must be a boolean")
@@ -626,21 +649,42 @@ class SinnixdService:
                     cursor=cursor,
                     project_id=project_id,
                     phases=tuple(phases),
+                    kinds=tuple(kinds),
                     active_only=active_only,
                 )
             )
         if operation == "job.wait":
-            job_id = self._authorize_job(
-                principal, self._job_argument(arguments, "job_id")
-            )
             timeout_seconds = arguments.get("timeout_seconds", 30)
-            if set(arguments) - {"job_id", "timeout_seconds"}:
-                raise ValueError("job.wait accepts job_id and optional timeout_seconds")
             if not isinstance(timeout_seconds, int) or isinstance(
                 timeout_seconds, bool
             ):
                 raise ValueError("job.wait timeout_seconds must be an integer")
+            if "job_ids" in arguments:
+                if set(arguments) - {"job_ids", "timeout_seconds"}:
+                    raise ValueError(
+                        "job.wait accepts job_ids and optional timeout_seconds"
+                    )
+                job_ids = arguments.get("job_ids")
+                if not isinstance(job_ids, list) or any(
+                    not isinstance(job_id, str) or not job_id for job_id in job_ids
+                ):
+                    raise ValueError("job.wait job_ids must be non-empty strings")
+                authorized = tuple(
+                    self._authorize_job(principal, job_id) for job_id in job_ids
+                )
+                return self._cleanup_terminal(
+                    self.jobs.wait_any(authorized, timeout_seconds)
+                )
+            job_id = self._authorize_job(
+                principal, self._job_argument(arguments, "job_id")
+            )
+            if set(arguments) - {"job_id", "timeout_seconds"}:
+                raise ValueError("job.wait accepts job_id and optional timeout_seconds")
             return self._cleanup_terminal(self.jobs.wait(job_id, timeout_seconds))
+        if operation == "job.notify-exit":
+            if set(arguments) - {"job_id", "exit_code"}:
+                raise ValueError("job.notify-exit accepts job_id and exit_code")
+            return self.jobs.notify_exit(self._job_argument(arguments, "job_id"))
         if operation == "job.logs":
             job_id = self._authorize_job(
                 principal, self._job_argument(arguments, "job_id")
@@ -693,6 +737,62 @@ class SinnixdService:
             environment=environment,
             timeout_seconds=timeout_seconds,
         )
+
+    def _start_delivery(
+        self,
+        operation: str,
+        principal: str,
+        workspace_id: str,
+        call_arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Launch publish/land as a bounded background job and return its id.
+
+        Delivery preconditions are re-verified inside the runner against the
+        durable stores; holding a control worker for the full Git/GitHub
+        conversation starved every other caller of the daemon.
+        """
+        assert self.workspaces is not None
+        workspace = self.workspaces.get(workspace_id)
+        project = self.projects.get(workspace["project_id"])
+        job_id = str(uuid4())
+        input_path = self.jobs.store.root / "inputs" / f"{job_id}.json"
+        private = {
+            "schema_version": DELIVERY_INPUT_SCHEMA_VERSION,
+            "operation": operation,
+            "project_root": str(project.root),
+            "state_dir": str(self.jobs.store.root),
+            "arguments": dict(call_arguments),
+        }
+        self.job_contracts.write_private(
+            input_path,
+            json.dumps(private, sort_keys=True, separators=(",", ":")).encode(),
+        )
+        try:
+            return self.jobs.start(
+                GenericJobSpec(
+                    kind="delivery-operation",
+                    command=(
+                        str(delivery_runner_executable()),
+                        "--input",
+                        str(input_path),
+                    ),
+                    working_directory=str(project.root),
+                    environment=project.environment.values(),
+                    timeout_seconds=DELIVERY_TIMEOUT_SECONDS[operation],
+                    project_id=project.project_id,
+                    operation=f"workspace.{operation}",
+                    principal=principal,
+                    contract={
+                        "operation": f"workspace.{operation}",
+                        "workspace_id": workspace_id,
+                    },
+                    result_kind="json",
+                ),
+                job_id,
+            )
+        except BaseException:
+            input_path.unlink(missing_ok=True)
+            raise
 
     def _cleanup_terminal(self, response: Mapping[str, Any]) -> dict[str, Any]:
         return self.job_contracts.cleanup_terminal(response)

@@ -223,6 +223,11 @@ class TypedJobContracts:
             json.dumps(private, sort_keys=True, separators=(",", ":")).encode(),
         )
         environment = self._environment(checkout, job_id, principal, timeout_seconds)
+        if kind == "attested-agent":
+            # Task-authority writes from an agent job must not default to the
+            # operator's identity; a descriptor [environment.values] entry
+            # still overrides this per-job attribution.
+            environment.setdefault("BEADS_ACTOR", f"agent-{job_id}")
         command = (
             str(contract_runner_executable()),
             "--input",
@@ -405,6 +410,10 @@ class TypedJobContracts:
             )
         return resolved
 
+    def write_private(self, path: Path, content: bytes) -> None:
+        """Persist a private launch input for a daemon-composed job."""
+        self._write_private(path, content)
+
     def _write_private(self, path: Path, content: bytes) -> None:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         descriptor, temporary = tempfile.mkstemp(
@@ -425,7 +434,8 @@ class TypedJobContracts:
         state = response.get("state")
         job_id = response.get("job_id")
         if (
-            response.get("kind") not in {"operator-shell", "attested-agent"}
+            response.get("kind")
+            not in {"operator-shell", "attested-agent", "delivery-operation"}
             or not isinstance(state, Mapping)
             or not state.get("terminal")
             or not isinstance(job_id, str)

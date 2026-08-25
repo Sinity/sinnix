@@ -29,6 +29,19 @@ def _metadata_argument(value: str) -> tuple[str, str]:
     return key, metadata_value
 
 
+def _add_agent_launch_arguments(
+    target: argparse.ArgumentParser, *, required: bool
+) -> None:
+    target.add_argument("--project", required=required)
+    target.add_argument("--checkout", required=required)
+    target.add_argument("--prompt-file", type=Path, required=required)
+    target.add_argument("--backend", required=required)
+    target.add_argument("--model", required=required)
+    target.add_argument("--effort", required=required)
+    target.add_argument("--credential-profile", default="subscription")
+    target.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+
+
 def default_socket_path() -> Path:
     return (
         Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
@@ -48,14 +61,27 @@ def parser() -> argparse.ArgumentParser:
     shell.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     shell.add_argument("argv", nargs=argparse.REMAINDER)
     agent = subcommands.add_parser("agent")
-    agent.add_argument("--project", required=True)
-    agent.add_argument("--checkout", required=True)
-    agent.add_argument("--prompt-file", type=Path, required=True)
-    agent.add_argument("--backend", required=True)
-    agent.add_argument("--model", required=True)
-    agent.add_argument("--effort", required=True)
-    agent.add_argument("--credential-profile", default="subscription")
-    agent.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    _add_agent_launch_arguments(agent, required=False)
+    agent_subcommands = agent.add_subparsers(dest="agent_command", required=False)
+    launch = agent_subcommands.add_parser(
+        "launch", help="Dispatch an attested agent job (same as bare `agent`)."
+    )
+    _add_agent_launch_arguments(launch, required=True)
+    agent_list = agent_subcommands.add_parser("list")
+    agent_list.add_argument("--limit", type=int, choices=range(1, 1001), default=100)
+    agent_list.add_argument("--cursor")
+    agent_list.add_argument("--project")
+    agent_list.add_argument("--phase", action="append", default=[])
+    agent_list.add_argument("--active", action="store_true")
+    agent_status = agent_subcommands.add_parser("status")
+    agent_status.add_argument("job_id")
+    agent_wait = agent_subcommands.add_parser("wait")
+    agent_wait.add_argument("job_ids", nargs="+", metavar="job_id")
+    agent_wait.add_argument("--any", dest="wait_any", action="store_true")
+    agent_wait.add_argument("--timeout-seconds", type=int, default=30)
+    agent_result = agent_subcommands.add_parser("result")
+    agent_result.add_argument("job_id")
+    agent_result.add_argument("--max-bytes", type=int, default=64_000)
     project = subcommands.add_parser("project")
     project_subcommands = project.add_subparsers(dest="project_command", required=True)
     project_subcommands.add_parser("list")
@@ -104,12 +130,22 @@ def parser() -> argparse.ArgumentParser:
     workspace_publish.add_argument("--packet-job")
     workspace_publish.add_argument("--title", required=True)
     workspace_publish.add_argument("--body", default="")
+    workspace_publish.add_argument(
+        "--wait",
+        action="store_true",
+        help="Block on the delivery job and print its receipt instead of the job id.",
+    )
     workspace_review = workspace_subcommands.add_parser("review-status")
     workspace_review.add_argument("workspace_id")
     workspace_land = workspace_subcommands.add_parser("land")
     workspace_land.add_argument("workspace_id")
     workspace_land.add_argument("--job", required=True)
     workspace_land.add_argument("--packet-job")
+    workspace_land.add_argument(
+        "--wait",
+        action="store_true",
+        help="Block on the delivery job and print its receipt instead of the job id.",
+    )
     workspace_finish = workspace_subcommands.add_parser("finish")
     workspace_finish.add_argument("workspace_id")
     workspace_finish_integrated = workspace_subcommands.add_parser("finish-integrated")
@@ -142,9 +178,16 @@ def parser() -> argparse.ArgumentParser:
     job_list.add_argument("--cursor")
     job_list.add_argument("--project")
     job_list.add_argument("--phase", action="append", default=[])
+    job_list.add_argument("--kind", action="append", default=[])
     job_list.add_argument("--active", action="store_true")
     wait = job_subcommands.add_parser("wait")
-    wait.add_argument("job_id")
+    wait.add_argument("job_ids", nargs="+", metavar="job_id")
+    wait.add_argument(
+        "--any",
+        dest="wait_any",
+        action="store_true",
+        help="With multiple job ids, return when the first reaches a terminal state.",
+    )
     wait.add_argument("--timeout-seconds", type=int, default=30)
     logs = job_subcommands.add_parser("logs")
     logs.add_argument("job_id")
@@ -163,35 +206,9 @@ def parser() -> argparse.ArgumentParser:
     call_owner.add_argument("--arguments-json", default="{}")
     task = subcommands.add_parser("task")
     task_subcommands = task.add_subparsers(dest="task_command", required=True)
-    task_list = task_subcommands.add_parser("list")
-    task_list.add_argument("project_id")
-    task_list.add_argument("--status")
-    task_list.add_argument("--assignee")
-    task_list.add_argument("--label")
-    task_list.add_argument("--limit", type=int, default=100)
-    task_list.add_argument("--cursor")
-    task_list.add_argument(
-        "--sort",
-        choices=(
-            "priority",
-            "created",
-            "updated",
-            "closed",
-            "status",
-            "id",
-            "title",
-            "type",
-            "assignee",
-        ),
-    )
-    task_list.add_argument("--reverse", action="store_true")
-    task_list.add_argument("--include-closed", action="store_true")
-    task_list.add_argument("--ready", action="store_true")
-    task_list.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
-    for command in ("get", "show"):
-        task_get = task_subcommands.add_parser(command)
-        task_get.add_argument("project_id")
-        task_get.add_argument("task_id")
+    # task list/get were deliberately removed: read task state through the
+    # task backend CLI (bd) directly; agentctl owns only journalled mutations,
+    # reconcile, and the authority-bound snapshot.
     task_create = task_subcommands.add_parser("create")
     task_create.add_argument("project_id")
     task_create.add_argument("title")
@@ -264,6 +281,12 @@ def daemon_parser() -> argparse.ArgumentParser:
     result.add_argument("--state-dir", type=Path, default=default_state_dir())
     result.add_argument("--project-root", type=Path, action="append", required=True)
     result.add_argument("--native-runner", type=Path, required=True)
+    result.add_argument(
+        "--event-spool",
+        type=Path,
+        default=Path("/realm/state/agentctl/events.jsonl"),
+        help="Append-only JSONL of terminal job events (the zero-polling watch point).",
+    )
     return result
 
 
@@ -320,7 +343,61 @@ def main() -> int:
             },
             "operator",
         )
+    elif arguments.command == "agent" and arguments.agent_command == "list":
+        request = _request(
+            "job.list",
+            "systemd-jobs",
+            {
+                "limit": arguments.limit,
+                "cursor": arguments.cursor,
+                "project_id": arguments.project,
+                "phases": arguments.phase,
+                "kinds": ["attested-agent"],
+                "active_only": arguments.active,
+            },
+        )
+    elif arguments.command == "agent" and arguments.agent_command == "status":
+        request = _request("job.get", "systemd-jobs", {"job_id": arguments.job_id})
+    elif arguments.command == "agent" and arguments.agent_command == "wait":
+        if len(arguments.job_ids) > 1 and not arguments.wait_any:
+            parser().error("waiting on multiple job ids requires --any")
+        request = _request(
+            "job.wait",
+            "systemd-jobs",
+            {
+                **(
+                    {"job_ids": arguments.job_ids}
+                    if arguments.wait_any
+                    else {"job_id": arguments.job_ids[0]}
+                ),
+                "timeout_seconds": arguments.timeout_seconds,
+            },
+        )
+    elif arguments.command == "agent" and arguments.agent_command == "result":
+        request = _request(
+            "job.result",
+            "systemd-jobs",
+            {"job_id": arguments.job_id, "max_bytes": arguments.max_bytes},
+        )
     elif arguments.command == "agent":
+        missing = [
+            f"--{name.replace('_', '-')}"
+            for name in (
+                "project",
+                "checkout",
+                "prompt_file",
+                "backend",
+                "model",
+                "effort",
+            )
+            if getattr(arguments, name) is None
+        ]
+        if missing:
+            parser().error(
+                "agent dispatch requires "
+                + ", ".join(missing)
+                + " (or use: agent launch|list|status|wait|result)"
+            )
         try:
             prompt = arguments.prompt_file.read_text()
         except OSError as error:
@@ -541,14 +618,24 @@ def main() -> int:
                 "cursor": arguments.cursor,
                 "project_id": arguments.project,
                 "phases": arguments.phase,
+                "kinds": arguments.kind,
                 "active_only": arguments.active,
             },
         )
     elif arguments.command == "job" and arguments.job_command == "wait":
+        if len(arguments.job_ids) > 1 and not arguments.wait_any:
+            parser().error("waiting on multiple job ids requires --any")
         request = _request(
             "job.wait",
             "systemd-jobs",
-            {"job_id": arguments.job_id, "timeout_seconds": arguments.timeout_seconds},
+            {
+                **(
+                    {"job_ids": arguments.job_ids}
+                    if arguments.wait_any
+                    else {"job_id": arguments.job_ids[0]}
+                ),
+                "timeout_seconds": arguments.timeout_seconds,
+            },
         )
     elif arguments.command == "job" and arguments.job_command == "logs":
         request = _request(
@@ -570,25 +657,7 @@ def main() -> int:
         request = _request("job.cancel", "systemd-jobs", {"job_id": arguments.job_id})
     elif arguments.command == "task":
         task_arguments: dict[str, object] = {"project_id": arguments.project_id}
-        if arguments.task_command == "list":
-            task_arguments["limit"] = arguments.limit
-            if arguments.cursor is not None:
-                task_arguments["cursor"] = arguments.cursor
-            for name in ("status", "assignee", "label"):
-                value = getattr(arguments, name)
-                if value is not None:
-                    task_arguments[name] = value
-            if arguments.sort is not None:
-                task_arguments["order"] = {
-                    "field": arguments.sort,
-                    "reverse": arguments.reverse,
-                }
-            elif arguments.reverse:
-                parser().error("--reverse requires --sort")
-            for name in ("include_closed", "ready"):
-                if getattr(arguments, name):
-                    task_arguments[name] = True
-        elif arguments.task_command == "create":
+        if arguments.task_command == "create":
             task_arguments.update(
                 {
                     "title": arguments.title,
@@ -605,8 +674,6 @@ def main() -> int:
             if arguments.parent is not None:
                 task_arguments["parent_task_id"] = arguments.parent
         elif arguments.task_command in {
-            "get",
-            "show",
             "claim",
             "complete",
             "release",
@@ -640,11 +707,8 @@ def main() -> int:
                 ):
                     task_arguments["if_assignee"] = arguments.if_assignee
         mutation_id = getattr(arguments, "request_id", None)
-        task_operation = (
-            "get" if arguments.task_command == "show" else arguments.task_command
-        )
         request = _request(
-            f"task.{task_operation}",
+            f"task.{arguments.task_command}",
             "task-backend",
             task_arguments,
             "operator",
@@ -660,17 +724,63 @@ def main() -> int:
         request = _request(arguments.operation, arguments.owner, owner_arguments)
     try:
         response = call(arguments.socket, request)
+        if (
+            getattr(arguments, "wait", False)
+            and arguments.command == "workspace"
+            and response.get("ok") is True
+        ):
+            response = _wait_for_delivery(arguments.socket, response)
     except (OSError, ProtocolError, SinnixdClientError):
         response = _unavailable_response(request)
     print(json.dumps(response, indent=2, sort_keys=True))
     return 0 if response.get("ok") is True else 1
 
 
+def _wait_for_delivery(
+    socket_path: Path, started: dict[str, object]
+) -> dict[str, object]:
+    """Follow a delivery job to its receipt for the --wait convenience."""
+    payload = started.get("payload")
+    value = payload.get("value") if isinstance(payload, dict) else None
+    job_id = value.get("job_id") if isinstance(value, dict) else None
+    timeout_seconds = value.get("timeout_seconds") if isinstance(value, dict) else None
+    if not isinstance(job_id, str):
+        return started
+    wait_request = _request(
+        "job.wait",
+        "systemd-jobs",
+        {
+            "job_id": job_id,
+            "timeout_seconds": timeout_seconds + 10
+            if isinstance(timeout_seconds, int)
+            else 800,
+        },
+    )
+    waited = call(socket_path, wait_request)
+    waited_value = (
+        waited.get("payload", {}).get("value")
+        if isinstance(waited.get("payload"), dict)
+        else None
+    )
+    state = waited_value.get("state") if isinstance(waited_value, dict) else None
+    if not isinstance(state, dict) or state.get("phase") != "succeeded":
+        return waited
+    return call(
+        socket_path,
+        _request("job.result", "systemd-jobs", {"job_id": job_id}),
+    )
+
+
 def daemon_main() -> None:
     arguments = daemon_parser().parse_args()
     service = SinnixdService(
         ProjectCatalog(arguments.project_root),
-        jobs=GenericJobs(UserSystemdJobs(), GenericJobStore(arguments.state_dir)),
+        jobs=GenericJobs(
+            UserSystemdJobs(),
+            GenericJobStore(arguments.state_dir),
+            notify_socket=arguments.socket,
+            event_spool_path=arguments.event_spool,
+        ),
         native_runner=arguments.native_runner,
     )
     UnixSocketServer(arguments.socket, service).serve_forever()
