@@ -394,6 +394,7 @@ class ProjectOperation:
     scratch: str = "none"
     parameters: tuple[OperationParameter, ...] = ()
     service: OperationService | None = None
+    plan_node: bool = False
 
     def derive_argv(
         self, raw_parameters: Mapping[str, Any]
@@ -458,6 +459,7 @@ class ProjectOperation:
             "scratch": self.scratch,
             "parameters": [parameter.catalog_row() for parameter in self.parameters],
             "service": self.service.catalog_row() if self.service is not None else None,
+            "plan_node": self.plan_node,
         }
 
 
@@ -1077,6 +1079,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             "parameters",
             "timeout_seconds",
             "service",
+            "plan_node",
         }
         if set(definition) - allowed_operation:
             raise ProjectConfigError(
@@ -1125,6 +1128,9 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         service = _operation_service(
             definition.get("service"), f"operations.{name}.service"
         )
+        plan_node = definition.get("plan_node", False)
+        if not isinstance(plan_node, bool):
+            raise ProjectConfigError(f"operations.{name}.plan_node is invalid")
         operations.append(
             ProjectOperation(
                 name=name,
@@ -1145,6 +1151,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                     definition.get("parameters"), f"operations.{name}.parameters"
                 ),
                 service=service,
+                plan_node=plan_node,
             )
         )
     operation_names = {operation.name for operation in operations}
