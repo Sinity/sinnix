@@ -6839,7 +6839,7 @@ def test_beads_bound_packet_and_exact_head_verifier_compose_into_delivery(
         )
     )
 
-    for scope in (["../outside"], [f"entry-{index}" for index in range(129)]):
+    for scope in (None, ["../outside"], [f"entry-{index}" for index in range(129)]):
         rejected = service.dispatch(
             request(
                 "job.start",
@@ -6944,6 +6944,15 @@ def test_packet_runner_seals_worker_report_to_runtime_observed_head(
             tmp_path,
             result_path,
         )
+
+    result_path.write_bytes(b"\xff")
+    with pytest.raises(RunnerError, match="worker result") as caught:
+        _seal_packet_result(
+            {"job_id": "packet-job", "checkout": {"head": start_head}},
+            tmp_path,
+            result_path,
+        )
+    assert isinstance(caught.value.__cause__, UnicodeDecodeError)
 
 
 def test_seal_output_composes_through_exact_head_into_delivery_validation(

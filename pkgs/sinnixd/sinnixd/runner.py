@@ -31,7 +31,7 @@ def _require_strings(value: Mapping[str, Any], fields: Sequence[str]) -> None:
 def _load(path: Path, job_id: str) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise RunnerError("private typed-job input is unavailable") from error
     if (
         not isinstance(value, dict)
@@ -221,7 +221,7 @@ def _seal_packet_result(
             raise RunnerError("packet result exceeds the artifact limit")
         raw = result_path.read_bytes()
         delivery = json.loads(raw)
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise RunnerError("packet worker result is unavailable or malformed") from error
     observed = subprocess.run(
         ["git", "-C", str(checkout), "rev-parse", "HEAD"],
