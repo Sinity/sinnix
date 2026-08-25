@@ -911,6 +911,47 @@ def test_live_service_leases_never_share_a_port(tmp_path: Path, monkeypatch: pyt
     assert second.payload.inline["lease"]["ports"][0]["port"] == 41001
 
 
+def test_non_cacheable_operation_coalesces_only_while_active(tmp_path: Path) -> None:
+    """Repeated timers share one active refresh without reusing its completed result."""
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + '\n[operations.refresh]\ndescription = "Refresh a derived cache"\nexec = ["fixture-refresh"]\n'
+        'pool = "bulk"\nresult = "exit"\ncache = "none"\nexclusive_keys = ["fixture:refresh"]\n'
+    )
+    initialize_git_checkout(tmp_path)
+    systemd = FakeSystemdJobs()
+    jobs = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path.parent / f"{tmp_path.name}-runtime-state"),
+        wait_poll_seconds=0.001,
+    )
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    arguments = {"project_id": "fixture", "operation": "refresh"}
+
+    first = service.dispatch(request("job.start", "systemd-jobs", arguments))
+    duplicate = service.dispatch(request("job.start", "systemd-jobs", arguments))
+
+    assert first.ok and duplicate.ok and first.payload is not None and duplicate.payload is not None
+    assert duplicate.payload.inline["job_id"] == first.payload.inline["job_id"]
+    assert duplicate.payload.inline["coalesced"] is True
+    assert duplicate.payload.inline["state"]["subscribers"] == 2
+    assert len(systemd.started) == 1
+
+    systemd.properties = {
+        "LoadState": "loaded", "ActiveState": "inactive", "Result": "success",
+        "ExecMainStatus": "0", "InvocationID": "fixture-invocation",
+    }
+    service.dispatch(request("job.get", "systemd-jobs", {"job_id": first.payload.inline["job_id"]}))
+    replacement = service.dispatch(request("job.start", "systemd-jobs", arguments))
+
+    assert replacement.ok and replacement.payload is not None
+    assert replacement.payload.inline["job_id"] != first.payload.inline["job_id"]
+    assert "reused" not in replacement.payload.inline
+    assert len(systemd.started) == 2
+
+
 def test_tree_cached_service_coalesces_within_scope_and_retires_terminal_entries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
