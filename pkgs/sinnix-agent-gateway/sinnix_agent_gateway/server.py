@@ -118,6 +118,10 @@ async def _query_owner(
         operation = values.get("operation")
         if not isinstance(operation, str):
             raise ProtocolError("invalid_request", "machine.query requires parameters.operation")
+        if operation == "actions":
+            if int(values.get("cursor", 0)) != 0:
+                raise ProtocolError("invalid_request", "machine actions snapshot does not support a cursor")
+            return runtime.machine_actions.snapshot()
         return runtime.observe.machine_query(operation, int(values.get("cursor", 0)), int(values.get("limit", 100)))
     if route is OwnerRoute.CAPABILITY_INDEX_QUERY:
         if values.get("operation", "search") == "describe":

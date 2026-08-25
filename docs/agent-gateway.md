@@ -72,6 +72,8 @@ The existing `context`, `events`, `wait`, `get`, and `run` verbs carry the g2.10
 
 The catalog publishes canonical templates for project, checkout, bead, job, artifact, receipt, result, machine unit, process, browser page, browser workspace, terminal, desktop, host file, brokered MCP tool, capture lane, capability, session, and context snapshot resources.
 
+For machine effectors, `machine.query` with `operation=actions` reads the ops reducer's bounded authoritative revision endpoint. A cold client combines that revision with a canonical target from the ordinary machine query/get routes when calling `machine.operate`; it does not need direct reducer-socket access, the reducer's potentially large full snapshot, or a guessed precondition.
+
 `beads.changeset` is an operator-only `change` action. It previews or applies a bounded ordered list of existing typed Beads mutations. Each action carries its canonical project or bead reference and may bind a newly created bead with `bind`. A later action refers to that bead as `$bind`. Bindings cannot cross project partitions, and canonical cross-project Beads references are rejected before any mutation. The preview contains the source revision for every project, a digest, partitions, planned compensation hints, and its truthful atomicity: `owner_atomic` only for one owner-validated `bd create --graph` action, `per_step_commits` for ordinary work in one project, or `cross_project_partitioned` for work spanning projects. Apply reports every action as `applied`, `failed`, or `skipped`; `on_error` is explicitly `stop` or `continue`. A changeset never calls a shared-server batch API, rolls back a prior step, claims unrelated writer changes, or creates hidden cross-project edges.
 
 Ordinary Beads mutations remain Dolt-only. They do not export `issues.jsonl` and do not create Git bookkeeping commits. `beads.operate` is the separate operator-only route for `snapshot.publish`, `sync.push`, `sync.pull`, `backup.create`, `backup.list`, and `backup.restore`. Snapshot publication writes a deterministic gateway-owned export, returns before and after SHA-256 values plus a bounded unified diff, and still performs no Git commit. Sync uses the owner-native Dolt push or pull command. Backup commands are limited to the pinned owner's declared backup operations.
@@ -146,7 +148,7 @@ The old prototype state may be retained under the canonical state root's `legacy
 <!-- BEGIN GENERATED GATEWAY V2 REFERENCE -->
 ## Generated V2 reference
 
-This section is generated from the canonical gateway registry. Revision `v2-g2.10-context-events`, catalog SHA-256 `4fd6f1e385f1b6747354dfa003d42cef761a629f8ddab79a2f0a6311b5b4acd3`.
+This section is generated from the canonical gateway registry. Revision `v2-g2.10-context-events`, catalog SHA-256 `65c2cba708186a4858fca7f3750ea9366782f3072272410a99e6b7dac61100d2`.
 
 The full schemas and executable examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 

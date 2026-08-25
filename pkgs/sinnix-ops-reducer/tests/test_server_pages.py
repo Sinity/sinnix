@@ -83,6 +83,19 @@ def test_the_json_api_is_untouched_by_the_page_routes(hub_server: str) -> None:
     assert json.loads(body)["schema"] == "sinnix-ops-v1"
 
 
+def test_revision_route_is_a_bounded_projection_of_snapshot(hub_server: str) -> None:
+    snapshot = json.loads(get(hub_server + "/v1/snapshot")[2])
+    status, content_type, body = get(hub_server + "/v1/revision")
+
+    assert status == 200
+    assert content_type == "application/json"
+    assert json.loads(body) == {
+        key: snapshot.get(key)
+        for key in ("schema", "sequence", "observed_at", "degradation", "sources")
+    }
+    assert "state" not in body
+
+
 def test_an_unknown_path_answers_a_browser_in_html(hub_server: str) -> None:
     status, content_type, _ = get(hub_server + "/nope")
     assert status == 404

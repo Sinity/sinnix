@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v2-g2.10-context-events -->
-<!-- gateway-catalog-sha256: 4fd6f1e385f1b6747354dfa003d42cef761a629f8ddab79a2f0a6311b5b4acd3 -->
+<!-- gateway-catalog-sha256: 65c2cba708186a4858fca7f3750ea9366782f3072272410a99e6b7dac61100d2 -->
 # Sinnix Agent Gateway V2 reference
 
 This reference is generated from `sinnix_agent_gateway.registry.REGISTRY`. The catalog hash changes when an action, resource, schema, route, principal, bound, or example changes.
 
-Revision: `v2-g2.10-context-events`. Catalog SHA-256: `4fd6f1e385f1b6747354dfa003d42cef761a629f8ddab79a2f0a6311b5b4acd3`.
+Revision: `v2-g2.10-context-events`. Catalog SHA-256: `65c2cba708186a4858fca7f3750ea9366782f3072272410a99e6b7dac61100d2`.
 
 ## Ten CLI verbs
 
@@ -2580,7 +2580,7 @@ No example is declared. Discover the live schema before invoking this action.
 
 ### `machine.query`
 
-Read one bounded, provenance-carrying machine section; overview replaces the retired whole-machine report.
+Read one bounded, provenance-carrying machine section; operation=actions returns the authoritative revision required by machine.operate.
 
 Owner route: `observe.machine_query`. Principals: `agent-control, observer, operator`. Typed failures: `deadline, invalid_request, not_found, owner_failed, policy_denied, response_bound, unavailable`.
 

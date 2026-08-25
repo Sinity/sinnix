@@ -728,6 +728,26 @@ def test_mcp_dispatches_v2_change_and_operate_through_real_owners(tmp_path: Path
         def handle(self) -> None:
             try:
                 request = self.rfile.readline().decode()
+                if request.startswith("GET /v1/revision HTTP/"):
+                    while self.rfile.readline().rstrip(b"\r\n"):
+                        pass
+                    payload = json.dumps(
+                        {
+                            "schema": "sinnix-ops-v1",
+                            "sequence": 17,
+                            "observed_at": "2026-08-25T00:00:00Z",
+                            "degradation": None,
+                            "sources": {"fixture": {"status": "healthy"}},
+                            "state": {},
+                        },
+                        separators=(",", ":"),
+                    ).encode()
+                    self.wfile.write(
+                        b"HTTP/1.1 200 OK\r\n"
+                        + f"Content-Length: {len(payload)}\r\nContent-Type: application/json\r\n\r\n".encode()
+                        + payload
+                    )
+                    return
                 if not request.startswith("POST /v1/actions HTTP/"):
                     raise AssertionError("unexpected owner request line")
                 headers: dict[str, str] = {}
@@ -792,6 +812,14 @@ def test_mcp_dispatches_v2_change_and_operate_through_real_owners(tmp_path: Path
                 "idempotency_key": "integration-project-change",
             },
         )
+        action_snapshot = anyio.run(
+            gateway.call_tool,
+            "query",
+            {
+                "action_name": "machine.query",
+                "parameters": {"operation": "actions"},
+            },
+        )
         operate = anyio.run(
             gateway.call_tool,
             "operate",
@@ -815,6 +843,16 @@ def test_mcp_dispatches_v2_change_and_operate_through_real_owners(tmp_path: Path
         "sinnix://projects/fixture/checkouts/default"
     )
     assert target.read_text() == "after\n"
+    assert action_snapshot.structured_content["data"] == {
+        "available": True,
+        "operation": "actions",
+        "owner": "ops-reducer",
+        "schema": "sinnix-ops-v1",
+        "observed_at": "2026-08-25T00:00:00Z",
+        "revision": 17,
+        "degradation": None,
+        "sources": {"fixture": {"status": "healthy"}},
+    }
     assert operate.structured_content["result"]["outcome"] == "ok"
     assert owner_failures == []
     assert owner_requests == [expected_owner_request]

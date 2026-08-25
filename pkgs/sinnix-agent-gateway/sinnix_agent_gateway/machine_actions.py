@@ -36,6 +36,58 @@ class MachineActionService:
         self.principal = principal
         self.connection_factory = connection_factory
 
+    def _request(self, method: str, path: str, body: bytes | None = None) -> dict[str, Any]:
+        headers = {"Content-Type": "application/json"} if body is not None else {}
+        try:
+            connection = self.connection_factory(str(self.config.ops_socket_path))
+            connection.request(method, path, body, headers)
+            response = connection.getresponse()
+            payload_bytes = response.read(self.config.max_result_bytes + 1)
+        except (OSError, http.client.HTTPException) as exc:
+            raise MachineActionError("ops reducer endpoint is unavailable") from exc
+        finally:
+            try:
+                connection.close()
+            except (OSError, UnboundLocalError):
+                pass
+        if len(payload_bytes) > self.config.max_result_bytes:
+            raise MachineActionError("ops reducer response exceeded response bound")
+        try:
+            payload = json.loads(payload_bytes)
+        except json.JSONDecodeError as exc:
+            raise MachineActionError("ops reducer returned a malformed response") from exc
+        if response.status >= 400:
+            message = payload.get("error") if isinstance(payload, dict) else None
+            if isinstance(message, str):
+                raise MachineActionError(f"ops reducer rejected request: {message}")
+            raise MachineActionError("ops reducer rejected request")
+        if not isinstance(payload, dict):
+            raise MachineActionError("ops reducer returned a malformed response")
+        return payload
+
+    def snapshot(self) -> dict[str, Any]:
+        """Read the authority revision required by a subsequent machine action."""
+        self.principal.require(Capability.MACHINE_READ)
+        payload = self._request("GET", "/v1/revision")
+        if (
+            payload.get("schema") != "sinnix-ops-v1"
+            or isinstance(payload.get("sequence"), bool)
+            or not isinstance(payload.get("sequence"), int)
+            or payload["sequence"] < 0
+            or not isinstance(payload.get("observed_at"), str)
+        ):
+            raise MachineActionError("ops reducer returned a malformed snapshot")
+        return {
+            "available": True,
+            "operation": "actions",
+            "owner": "ops-reducer",
+            "schema": payload["schema"],
+            "observed_at": payload["observed_at"],
+            "revision": payload["sequence"],
+            "degradation": payload.get("degradation"),
+            "sources": payload.get("sources", {}),
+        }
+
     def execute(
         self,
         action: str,
@@ -54,34 +106,6 @@ class MachineActionService:
             "operator_reason": operator_reason,
             "parameters": parameters or {},
         }
-        try:
-            connection = self.connection_factory(str(self.config.ops_socket_path))
-            connection.request(
-                "POST",
-                "/v1/actions",
-                json.dumps(request, separators=(",", ":")),
-                {"Content-Type": "application/json"},
-            )
-            response = connection.getresponse()
-            body = response.read(self.config.max_result_bytes + 1)
-        except (OSError, http.client.HTTPException) as exc:
-            raise MachineActionError("ops reducer action endpoint is unavailable") from exc
-        finally:
-            try:
-                connection.close()
-            except (OSError, UnboundLocalError):
-                pass
-        if len(body) > self.config.max_result_bytes:
-            raise MachineActionError("ops reducer receipt exceeded response bound")
-        try:
-            payload = json.loads(body)
-        except json.JSONDecodeError as exc:
-            raise MachineActionError("ops reducer returned malformed action response") from exc
-        if response.status >= 400:
-            message = payload.get("error") if isinstance(payload, dict) else None
-            if isinstance(message, str):
-                raise MachineActionError(f"ops reducer rejected action: {message}")
-            raise MachineActionError("ops reducer rejected action")
-        if not isinstance(payload, dict):
-            raise MachineActionError("ops reducer returned malformed action receipt")
-        return payload
+        return self._request(
+            "POST", "/v1/actions", json.dumps(request, separators=(",", ":")).encode()
+        )

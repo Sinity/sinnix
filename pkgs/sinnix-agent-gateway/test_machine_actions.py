@@ -87,6 +87,51 @@ def test_machine_action_forwards_exact_owner_request(tmp_path: Path) -> None:
     }
 
 
+def test_machine_action_snapshot_exposes_bounded_authority_revision(tmp_path: Path) -> None:
+    actions, connection = service(
+        tmp_path,
+        "operator",
+        FakeResponse(
+            200,
+            {
+                "schema": "sinnix-ops-v1",
+                "sequence": 41,
+                "observed_at": "2026-08-25T00:00:00Z",
+                "degradation": None,
+                "sources": {"sinnix-observe": {"status": "healthy"}},
+                "state": {"intentionally": "not forwarded"},
+            },
+        ),
+    )
+
+    assert actions.snapshot() == {
+        "available": True,
+        "operation": "actions",
+        "owner": "ops-reducer",
+        "schema": "sinnix-ops-v1",
+        "observed_at": "2026-08-25T00:00:00Z",
+        "revision": 41,
+        "degradation": None,
+        "sources": {"sinnix-observe": {"status": "healthy"}},
+    }
+    assert connection.request_args == ("GET", "/v1/revision", None, {})
+    assert connection.closed is True
+
+
+def test_machine_action_snapshot_rejects_malformed_revision(tmp_path: Path) -> None:
+    actions, _ = service(
+        tmp_path,
+        "operator",
+        FakeResponse(
+            200,
+            {"schema": "sinnix-ops-v1", "sequence": True, "observed_at": "now"},
+        ),
+    )
+
+    with pytest.raises(MachineActionError, match="malformed snapshot"):
+        actions.snapshot()
+
+
 def test_machine_action_returns_owner_rejection(tmp_path: Path) -> None:
     actions, _ = service(
         tmp_path,
