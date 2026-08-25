@@ -1,8 +1,6 @@
 name: CI
 
 on:
-  push:
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -14,9 +12,8 @@ concurrency:
 
 jobs:
   checks:
-    # Automatic runs begin when the repository becomes public. A private
-    # workflow_dispatch remains available for deliberate pre-publication runs.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.repository_visibility == 'public' }}
+    # Hosted runs are deliberate-only for now: trigger via workflow_dispatch.
+    # Local `nix flake check` and the devshell gates remain the working authority.
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
