@@ -20,6 +20,16 @@ identity_check = ["git", "diff", "--quiet", "--", "flake.nix"]
 checkpoint_untracked = true
 verification_operations = ["check", "lint"]
 
+[packets]
+template = "dots/_ai/skills/orchestrate/references/worker-contract.md"
+atlas_dir = "docs/atlas"
+branch_prefix = "feature/packet"
+
+[packets.defaults]
+backend = "codex"
+model = "gpt-5.6-luna"
+effort = "medium"
+
 [operations.check]
 description = "Run default Sinnix checks"
 exec = ["check"]
