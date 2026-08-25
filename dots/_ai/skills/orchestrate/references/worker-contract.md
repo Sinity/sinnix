@@ -82,3 +82,10 @@ tokens on merged outcomes.
   and its owning surface, not a doomed path.
 - Bead state updates mechanically where possible: completion events →
   task-note automation beats manual reconciliation.
+- **Co-execution via dispatch groups, never merges**: beads sharing a file,
+  area, fix pattern, or required context get `dispatch_group=<leader-id>`
+  metadata; the leader's notes list members; one lane executes the group
+  (packet-launch compiles it). Merging beads is NOT the mechanism — each
+  instance keeps its own verifiability and typed close. Utility-plus-adopters
+  is the canonical shape (kernel lands, batch adopts, ratchet closes behind),
+  but any shared-context cluster qualifies, related or not.
