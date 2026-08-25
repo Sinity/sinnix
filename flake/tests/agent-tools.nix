@@ -153,8 +153,9 @@ in
                 ".local/bin/sinnix-keyboard-control"
                 ".local/bin/sinnix-kitty-control"
                 ".local/bin/sinnix-screenshot-control"
+                ".local/bin/lane"
               ];
-              message = "Desktop control helpers must be installed through Home Manager.";
+              message = "Agent control helpers must be installed through Home Manager.";
             }
           ];
       };
@@ -213,6 +214,11 @@ in
           {
             target = ".local/bin/sinnix-screenshot-control";
             source = ../../dots/_ai/skills/desktop-control-plane/scripts/screenshot-color-lab.sh;
+            executable = true;
+          }
+          {
+            target = ".local/bin/lane";
+            source = ../../dots/_ai/skills/agent-runtime/scripts/lane;
             executable = true;
           }
         ];
@@ -432,6 +438,8 @@ in
             test -L "$HOME/.gemini/config/AGENTS.md"
             test -L "$HOME/.config/claude/mcp.json"
             test -L "$HOME/.config/hermes/skills"
+            test -x "$HOME/.local/bin/lane"
+            bash -n "$HOME/.local/bin/lane"
             python3 - "$HOME/.hermes/config.yaml" <<'PYCODE'
             import pathlib, re, sys
             config = pathlib.Path(sys.argv[1]).read_text()

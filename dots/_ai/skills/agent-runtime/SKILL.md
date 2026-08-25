@@ -58,6 +58,22 @@ active job/workspace/task IDs, changed files, blockers, and the exact next
 action. Resume by verifying those IDs and current Git state, then use `recap`
 to restore orientation without replaying the whole transcript.
 
+## Worker toolbelt
+
+Attested workers have `lane` on PATH:
+
+- `lane task` prints the exact dispatch snapshot while the private prompt input
+  is alive.
+- `lane verify` runs the first declared `verify_quick`/focused operation (or
+  the workspace verification operation) through AgentCTL.
+- `lane done report.md` requires a clean tree, pushes the current branch, and
+  emits the report as the final stdout/last-message result. Use
+  `lane done --incomplete report.md` for an honest partial handoff; it pushes
+  committed WIP and marks the emitted report.
+
+The last-message capture wrapper stores worker stdout as the result artifact;
+`lane done` deliberately does not write the private result path itself.
+
 ## Failures
 
 - Missing workspace: inspect Git membership and checkpoint authority before
