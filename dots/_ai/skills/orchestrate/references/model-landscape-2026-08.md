@@ -9,9 +9,7 @@ any cost-sensitive decision.
 ## Pricing ($/M in/out, 2026-08)
 
 Fable 10/50 · Opus 5 5/25 · Sonnet 5 3/15 · Sol 5/30 · Terra 2.5/15 ·
-Luna 1/6 · Gemini 3.7 Flash = current cost floor. (Sol's famous 750 TPS is
-Cerebras-hosted — irrelevant to our dispatch path; don't count speed as a
-Sol argument.)
+Luna 1/6 · Gemini 3.7 Flash = current cost floor.
 
 **Quota framing (operator, 2026-08-25)**: "Codex quota is plentiful" is a
 NEAR-TERM preservation ordering (Claude is currently the more precious
