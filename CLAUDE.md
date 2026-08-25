@@ -158,6 +158,13 @@ launch. Do not maintain shell-parsed dispatch ledgers or subagent stop ledgers.
 
 ## Development workflow
 
+This repository publishes from `master` directly: verify locally, commit on
+master (or land a short-lived branch with a plain merge/fast-forward), push.
+Do not open GitHub PRs for sinnix work — hosted CI does not run automatically
+here and PR ceremony adds review latency with no gate behind it. Worktrees
+and branches remain fine as isolation for in-flight work; they end in a
+direct push, not a PR.
+
 Short foreground work may use ordinary commands from the devshell. Durable or
 heavy operations use project operations:
 
