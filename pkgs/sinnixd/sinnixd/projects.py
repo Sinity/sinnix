@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import re
@@ -251,6 +252,14 @@ class ProjectEnvironment:
         if self.kind == "nix-develop":
             return (*self.command, "env", *assignments, *payload)
         return ("env", *assignments, *self.command, *payload)
+
+    def catalog_row(self, *, agent_capable: bool) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "command": list(self.command),
+            "preflight": list(self.preflight),
+            "agent_capable": agent_capable,
+        }
 
 
 @dataclass(frozen=True)
@@ -509,6 +518,9 @@ class ProjectAdapter:
             "descriptor": str(self.descriptor),
             "digest": self.digest,
             "descriptor_status": self.descriptor_status(),
+            "environment": self.environment.catalog_row(
+                agent_capable=self.workspace is not None
+            ),
             "workspace": self.workspace.catalog_row()
             if self.workspace is not None
             else None,
@@ -1308,3 +1320,46 @@ class ProjectCatalog:
                 if adapter.spec == spec:
                     return project, adapter
         raise KeyError(f"no project owner adapter for {operation!r}")
+
+
+def validate_agent_environment_descriptors(roots: Iterable[Path]) -> None:
+    """Require a declared command and preflight for every checkout-capable project."""
+    diagnostics: list[str] = []
+    for root in roots:
+        descriptor = root / ".agentctl" / "project.toml"
+        project_name = str(root)
+        try:
+            raw = tomllib.loads(descriptor.read_text())
+            project = raw.get("project")
+            if isinstance(project, Mapping) and isinstance(project.get("id"), str):
+                project_name = project["id"]
+            adapter = load_project_adapter(root)
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, ProjectConfigError) as error:
+            diagnostics.append(f"{project_name}: invalid descriptor {descriptor}: {error}")
+            continue
+        if adapter.workspace is None:
+            continue
+        if not adapter.environment.command:
+            diagnostics.append(
+                f"{adapter.project_id}: {descriptor} must declare a non-empty environment.command"
+            )
+        if not adapter.environment.preflight:
+            diagnostics.append(
+                f"{adapter.project_id}: {descriptor} must declare a non-empty environment.preflight"
+            )
+    if diagnostics:
+        raise ProjectConfigError(
+            "agent-capable project environment contract failed:\n"
+            + "\n".join(f"- {diagnostic}" for diagnostic in diagnostics)
+        )
+
+
+def project_environment_check_main(arguments: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="sinnixd-project-environment-check")
+    parser.add_argument("--project-root", type=Path, action="append", required=True)
+    args = parser.parse_args(arguments)
+    try:
+        validate_agent_environment_descriptors(args.project_root)
+    except ProjectConfigError as error:
+        parser.error(str(error))
+    return 0

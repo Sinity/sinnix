@@ -16,6 +16,8 @@ from .jobs import (
 from .limits import valid_timeout_seconds
 from .projects import ProjectConfigError, revalidate_registered_checkout
 
+AGENT_PREFLIGHT_TIMEOUT_SECONDS = 30
+
 
 class RunnerError(ValueError):
     pass
@@ -28,19 +30,28 @@ def _require_strings(value: Mapping[str, Any], fields: Sequence[str]) -> None:
         raise RunnerError("private typed-job input is invalid")
 
 
+def _non_empty_argv(value: Any) -> bool:
+    return isinstance(value, list) and bool(value) and all(
+        isinstance(item, str) and item for item in value
+    )
+
+
 def _load(path: Path, job_id: str) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text())
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise RunnerError("private typed-job input is unavailable") from error
-    if (
-        not isinstance(value, dict)
-        or value.get("schema_version") != 1
-        or value.get("job_id") != job_id
-    ):
+    if not isinstance(value, dict) or value.get("job_id") != job_id:
         raise RunnerError("private typed-job identity is invalid")
-    if value.get("kind") not in {"operator-shell", "attested-agent"}:
+    kind = value.get("kind")
+    if kind not in {"operator-shell", "attested-agent"}:
         raise RunnerError("private typed-job kind is invalid")
+    if kind == "attested-agent" and value.get("schema_version") != 2:
+        raise RunnerError(
+            "stale attested-agent private input schema; retry the agent launch after the environment contract upgrade"
+        )
+    if kind == "operator-shell" and value.get("schema_version") != 1:
+        raise RunnerError("private typed-job schema is invalid")
     checkout = value.get("checkout")
     if not isinstance(checkout, dict) or set(checkout) != {
         "project_id",
@@ -123,18 +134,9 @@ def _exec_shell(value: Mapping[str, Any], checkout: Path) -> None:
     argv = value.get("argv")
     environment_command = value.get("environment_command")
     cwd = value.get("cwd")
-    if (
-        value.get("principal") != "operator"
-        or not isinstance(argv, list)
-        or not argv
-        or any(not isinstance(item, str) or not item for item in argv)
-    ):
+    if value.get("principal") != "operator" or not _non_empty_argv(argv):
         raise RunnerError("operator shell contract is invalid")
-    if (
-        not isinstance(environment_command, list)
-        or not environment_command
-        or any(not isinstance(item, str) or not item for item in environment_command)
-    ):
+    if not _non_empty_argv(environment_command):
         raise RunnerError("operator shell project environment is invalid")
     if not isinstance(cwd, str):
         raise RunnerError("operator shell cwd is invalid")
@@ -185,21 +187,28 @@ def _run_agent(
         raise RunnerError("native agent runner is unavailable")
     environment_command = value.get("environment_command")
     environment_preflight = value.get("environment_preflight")
-    if not isinstance(environment_command, list) or not environment_command or any(
-        not isinstance(item, str) or not item for item in environment_command
-    ):
+    if not _non_empty_argv(environment_command):
         raise RunnerError(
             "typed agent project environment is missing; declare a non-empty environment.command"
         )
-    if not isinstance(environment_preflight, list) or not environment_preflight or any(
-        not isinstance(item, str) or not item for item in environment_preflight
-    ):
+    if not _non_empty_argv(environment_preflight):
         raise RunnerError(
             "typed agent project environment is missing; declare a non-empty environment.preflight"
         )
     preflight_command = [*environment_command, *environment_preflight]
     try:
-        preflight = subprocess.run(preflight_command, cwd=checkout, check=False)
+        preflight = subprocess.run(
+            preflight_command,
+            cwd=checkout,
+            check=False,
+            timeout=AGENT_PREFLIGHT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RunnerError(
+            "agent-preflight-timeout: project environment preflight exceeded "
+            f"{AGENT_PREFLIGHT_TIMEOUT_SECONDS} seconds before agent implementation; "
+            "inspect the declared preflight and retry"
+        ) from error
     except OSError as error:
         raise RunnerError(
             "project environment preflight is unavailable; repair environment.command and retry"

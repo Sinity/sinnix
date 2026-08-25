@@ -170,7 +170,7 @@ class TypedJobContracts:
             **({"bead_binding": binding} if binding is not None else {}),
         }
         private = {
-            "schema_version": 1,
+            "schema_version": 2,
             "job_id": job_id,
             "kind": "attested-agent",
             "principal": principal,
