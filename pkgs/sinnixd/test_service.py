@@ -9107,9 +9107,7 @@ def test_agentctl_wait_returns_a_timed_out_envelope_past_control_timeout(
 def test_delivery_operations_have_truthful_bounded_response_timeouts() -> None:
     """Remote effects must not outlive the client's success/failure response."""
     expected = {
-        "workspace.publish": 790.0,
         "workspace.review-status": 65.0,
-        "workspace.land": 185.0,
         "workspace.finish": 185.0,
     }
     assert CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS == expected
@@ -9127,51 +9125,49 @@ def test_delivery_operations_have_truthful_bounded_response_timeouts() -> None:
     )
 
 
-def test_slow_delivery_response_outlives_the_ordinary_control_deadline(
+def test_publish_returns_a_delivery_job_immediately(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A remote effect that is still running must not be reported as daemon loss."""
+    """A long Git/GitHub conversation must not hold a daemon control worker."""
     write_adapter(tmp_path)
-    service = SinnixdService(
-        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, FakeSystemdJobs())
+    initialize_git_checkout(tmp_path)
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    assert service.workspaces is not None
+    created = service.workspaces.create(
+        project_id="fixture",
+        name="delivery-fixture",
+        branch="feature/delivery-fixture",
+        base=None,
     )
-    assert service.delivery is not None
 
-    def slow_publish(
-        _workspace_id: str, _job_id: str, _title: str, _body: str
-    ) -> dict[str, object]:
-        time.sleep(0.1)
-        return {"published": True, "publication_output": "https://github.test/pull/17"}
-
-    monkeypatch.setattr(service.delivery, "publish", slow_publish)
-    monkeypatch.setattr(api_module, "CONNECTION_TIMEOUT_SECONDS", 0.05)
-    socket_path = tmp_path / "sinnixd.sock"
-    stop_event = threading.Event()
-    server = UnixSocketServer(socket_path, service, connection_timeout_seconds=0.05)
-    thread = start_server(server, stop_event=stop_event)
-    publication = request(
-        "workspace.publish",
-        "git-workspaces",
-        {
-            "workspace_id": "fixture",
-            "job_id": "verified",
-            "title": "Fixture",
-            "body": "body",
-        },
-        "agent-control",
+    response = service.dispatch(
+        request(
+            "workspace.publish",
+            "git-workspaces",
+            {
+                "workspace_id": created["workspace_id"],
+                "job_id": "74e64cb4-282e-4b27-b4b1-af052b268161",
+                "title": "Fixture",
+                "body": "body",
+            },
+            "agent-control",
+        )
     )
-    try:
-        response = call(socket_path, publication)
-    finally:
-        stop_event.set()
-        thread.join(timeout=2)
 
-    assert not thread.is_alive()
-    assert response["ok"] is True
-    assert response["payload"]["value"] == {
-        "published": True,
-        "publication_output": "https://github.test/pull/17",
-    }
+    assert response.ok, response.error
+    started = response.payload.inline
+    assert started["kind"] == "delivery-operation"
+    assert started["contract"]["operation"] == "workspace.publish"
+    assert started["contract"]["workspace_id"] == created["workspace_id"]
+    launch = jobs.systemd.started[-1]
+    assert "sinnixd-delivery-runner" in str(launch["command"][0])
+    input_path = Path(str(launch["command"][2]))
+    payload = json.loads(input_path.read_text())
+    assert payload["operation"] == "publish"
+    assert payload["arguments"]["workspace_id"] == created["workspace_id"]
+    assert payload["state_dir"] == str(jobs.store.root)
 
 
 def test_agentctl_wait_reports_capacity_exhaustion_while_all_wait_workers_are_occupied(
@@ -10183,3 +10179,156 @@ def test_descriptor_declared_actor_overrides_the_per_job_attribution(
     }
     agent_unit = f"sinnixd-job-{agent.payload.inline['job_id']}.service"
     assert launched[agent_unit]["BEADS_ACTOR"] == "fixture-fleet"
+
+
+def test_delivery_runner_executes_the_frozen_input_and_prints_a_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Anti-vacuity: the runner re-derives everything from the frozen private input."""
+    import sinnixd.delivery_runner as delivery_runner_module
+
+    write_adapter(tmp_path)
+    calls: dict[str, object] = {}
+
+    class FakeDelivery:
+        def publish(self, workspace_id, job_id, title, body, packet_job_id=None):
+            calls["publish"] = (workspace_id, job_id, title, body, packet_job_id)
+            return {"published": True, "publication_output": "https://github.test/1"}
+
+        def land(self, workspace_id, job_id, packet_job_id=None):
+            calls["land"] = (workspace_id, job_id, packet_job_id)
+            return {"landed": True}
+
+    monkeypatch.setattr(
+        delivery_runner_module, "_delivery", lambda payload: FakeDelivery()
+    )
+    input_path = tmp_path / "delivery.json"
+    input_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation": "publish",
+                "project_root": str(tmp_path),
+                "state_dir": str(tmp_path / "state"),
+                "arguments": {
+                    "workspace_id": "fixture-workspace",
+                    "job_id": "fixture-job",
+                    "title": "Fixture",
+                    "body": "body",
+                },
+            }
+        )
+    )
+
+    exit_code = delivery_runner_module.main(["--input", str(input_path)])
+    output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert output["ok"] is True
+    assert output["receipt"]["published"] is True
+    assert calls["publish"] == (
+        "fixture-workspace",
+        "fixture-job",
+        "Fixture",
+        "body",
+        None,
+    )
+
+
+def test_delivery_runner_reports_precondition_failures_as_bounded_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import sinnixd.delivery_runner as delivery_runner_module
+
+    class RefusingDelivery:
+        def land(self, workspace_id, job_id, packet_job_id=None):
+            raise DeliveryError("review is not in a landable GitHub state")
+
+    monkeypatch.setattr(
+        delivery_runner_module, "_delivery", lambda payload: RefusingDelivery()
+    )
+    input_path = tmp_path / "delivery.json"
+    input_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation": "land",
+                "project_root": str(tmp_path),
+                "state_dir": str(tmp_path / "state"),
+                "arguments": {"workspace_id": "w", "job_id": "j"},
+            }
+        )
+    )
+
+    exit_code = delivery_runner_module.main(["--input", str(input_path)])
+    output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert output["ok"] is False
+    assert "landable" in output["error"]
+
+
+def test_workspace_publish_wait_follows_the_delivery_job_to_its_receipt(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    requests: list[RequestEnvelope] = []
+    responses = [
+        {
+            "schema": 1,
+            "ok": True,
+            "payload": {
+                "kind": "inline",
+                "value": {"job_id": "fixture-job", "timeout_seconds": 790},
+            },
+        },
+        {
+            "schema": 1,
+            "ok": True,
+            "payload": {
+                "kind": "inline",
+                "value": {
+                    "job_id": "fixture-job",
+                    "state": {"phase": "succeeded", "terminal": True},
+                },
+            },
+        },
+        {
+            "schema": 1,
+            "ok": True,
+            "payload": {
+                "kind": "inline",
+                "value": {"kind": "json", "value": {"ok": True, "receipt": {}}},
+            },
+        },
+    ]
+
+    def fake_call(socket_path, request_value):
+        requests.append(request_value)
+        return responses[len(requests) - 1]
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "agentctl",
+            "workspace",
+            "publish",
+            "fixture-workspace",
+            "--job",
+            "verified",
+            "--title",
+            "Fixture",
+            "--wait",
+        ],
+    )
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    assert [outbound.operation for outbound in requests] == [
+        "workspace.publish",
+        "job.wait",
+        "job.result",
+    ]
+    assert requests[1].arguments["timeout_seconds"] == 800
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["payload"]["value"]["value"] == {"ok": True, "receipt": {}}

@@ -410,6 +410,10 @@ class TypedJobContracts:
             )
         return resolved
 
+    def write_private(self, path: Path, content: bytes) -> None:
+        """Persist a private launch input for a daemon-composed job."""
+        self._write_private(path, content)
+
     def _write_private(self, path: Path, content: bytes) -> None:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         descriptor, temporary = tempfile.mkstemp(
@@ -430,7 +434,8 @@ class TypedJobContracts:
         state = response.get("state")
         job_id = response.get("job_id")
         if (
-            response.get("kind") not in {"operator-shell", "attested-agent"}
+            response.get("kind")
+            not in {"operator-shell", "attested-agent", "delivery-operation"}
             or not isinstance(state, Mapping)
             or not state.get("terminal")
             or not isinstance(job_id, str)

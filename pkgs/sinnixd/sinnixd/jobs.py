@@ -680,6 +680,7 @@ class GenericJobSpec:
             "foreground-command",
             "operator-shell",
             "attested-agent",
+            "delivery-operation",
         }:
             raise ValueError("job kind is invalid")
         if not self.command and not self.command_digest:
@@ -1966,6 +1967,7 @@ class GenericJobs:
     notify_socket: Path | None = None
     record_retention_days: int = 14
     event_spool_path: Path | None = None
+    recover_on_init: bool = True
     events: TerminalEvents = field(default_factory=TerminalEvents, repr=False)
     _admission_lock: RLock = field(default_factory=RLock, init=False, repr=False)
     _spooled: set[str] = field(default_factory=set, init=False, repr=False)
@@ -1974,7 +1976,11 @@ class GenericJobs:
         # Recovery observes only the durable nonterminal set. Terminal lease
         # artifacts carry their own bounded reconciliation path, so a daemon
         # restart cannot serialize systemd calls or per-job locks across the
-        # historical corpus.
+        # historical corpus. Auxiliary processes (the delivery runner) open
+        # the store read-mostly with recover_on_init=False so they never race
+        # the daemon's recovery, scratch cleanup, or retention.
+        if not self.recover_on_init:
+            return
         if self.store.records_root.exists() or self.store.leases_root.exists():
             records = self.store.recover_service_leases(self.systemd.show)
         else:

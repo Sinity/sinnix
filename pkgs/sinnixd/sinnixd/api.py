@@ -23,14 +23,11 @@ from .service import SinnixdService
 MAX_FRAME_BYTES = 1_048_576
 CONNECTION_TIMEOUT_SECONDS = 5.0
 WAIT_TRANSPORT_MARGIN_SECONDS = 5.0
-# Delivery is deliberately synchronous today, but its implementation runs
-# bounded Git/GitHub commands before returning.  The client must not report the
-# daemon unavailable while those commands continue and create remote effects.
-# Values cover the command deadlines in delivery.py plus a transport margin.
+# workspace.publish and workspace.land run on the job substrate and return a
+# job id immediately; only the remaining synchronous delivery reads keep a
+# longer control-response window covering their command deadlines.
 CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS = {
-    "workspace.publish": 790.0,
     "workspace.review-status": 65.0,
-    "workspace.land": 185.0,
     "workspace.finish": 185.0,
 }
 ACCEPT_POLL_SECONDS = 0.1
