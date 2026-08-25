@@ -244,6 +244,14 @@ def test_agentctl_task_mutations_require_a_stable_request_id() -> None:
         cli_module.parser().parse_args(["task", "create", "fixture", "title", "--description", "body", "--type", "task", "--priority", "5", "--request-id", "request-1"])
 
 
+def test_agentctl_job_start_accepts_checkout_as_workspace_alias() -> None:
+    arguments = cli_module.parser().parse_args(
+        ["job", "start", "fixture", "check", "--checkout", "workspace-1"]
+    )
+
+    assert arguments.workspace == "workspace-1"
+
+
 def test_agentctl_job_list_exposes_service_pagination(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

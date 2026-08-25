@@ -106,7 +106,12 @@ def parser() -> argparse.ArgumentParser:
     start = job_subcommands.add_parser("start")
     start.add_argument("project_id")
     start.add_argument("operation")
-    start.add_argument("--workspace")
+    start.add_argument(
+        "--workspace",
+        "--checkout",
+        dest="workspace",
+        help="Managed workspace ID (the --checkout spelling is an equivalent convenience alias).",
+    )
     start.add_argument("--parameters-json", default="{}")
     get = job_subcommands.add_parser("get")
     get.add_argument("job_id")
