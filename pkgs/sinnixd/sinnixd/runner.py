@@ -183,8 +183,8 @@ def _seal_packet_result(value: Mapping[str, Any], checkout: Path, result_path: P
             raise RunnerError("packet result exceeds the artifact limit")
         raw = result_path.read_bytes()
         delivery = json.loads(raw)
-    except (OSError, json.JSONDecodeError):
-        delivery = None
+    except (OSError, json.JSONDecodeError) as error:
+        raise RunnerError("packet worker result is unavailable or malformed") from error
     observed = subprocess.run(
         ["git", "-C", str(checkout), "rev-parse", "HEAD"],
         capture_output=True,

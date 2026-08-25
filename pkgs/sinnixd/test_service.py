@@ -4675,11 +4675,12 @@ def test_beads_bound_packet_and_exact_head_verifier_compose_into_delivery(tmp_pa
         },
         "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b",
         "assignment_ref": None,
-        "write_scope": ["delivery.txt", "obsolete.txt"],
+        "write_scope": ["delivery.txt", "obsolete.txt", "prior.txt"],
     }
     path = Path(workspace["path"])
     (path / "obsolete.txt").write_text("remove me\n")
-    subprocess.run(["git", "-C", str(path), "add", "obsolete.txt"], check=True)
+    (path / "prior.txt").write_text("already on the packet branch\n")
+    subprocess.run(["git", "-C", str(path), "add", "obsolete.txt", "prior.txt"], check=True)
     subprocess.run(
         ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "seed deletion"],
         check=True,
@@ -4752,7 +4753,10 @@ def test_beads_bound_packet_and_exact_head_verifier_compose_into_delivery(tmp_pa
         delivery._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
     (path / "dirty.txt").unlink()
 
-    bad_binding = {**binding, "write_scope": ["other.txt"]}
+    # Packet-local changes remain in scope, but prior.txt was already on the
+    # branch at packet dispatch. The complete publication diff must still
+    # prevent the packet from laundering it into the PR.
+    bad_binding = {**binding, "write_scope": ["delivery.txt", "obsolete.txt"]}
     jobs.store.save(replace(
         packet_record,
         spec=replace(packet_record.spec, contract={**packet_record.spec.contract, "bead_binding": bad_binding}),
@@ -4767,7 +4771,7 @@ def test_beads_bound_packet_and_exact_head_verifier_compose_into_delivery(tmp_pa
     jobs.store.save(packet_record)
     jobs.store.save(verifier_record)
 
-    for evidence in ([], ["unrelated.txt"]):
+    for evidence in ([], ["unrelated.txt"], ["obsolete.txt", "unrelated.txt"]):
         packet_record.result_path.write_text(json.dumps({
             "schema_version": 1, "job_id": packet_id, "start_head": start_head,
             "final_head": final_head,
@@ -4855,6 +4859,12 @@ def test_packet_runner_seals_worker_report_to_runtime_observed_head(tmp_path: Pa
         "final_head": final_head,
         "delivery": delivery,
     }
+
+    result_path.write_text("not-json")
+    with pytest.raises(RunnerError, match="worker result"):
+        _seal_packet_result(
+            {"job_id": "packet-job", "checkout": {"head": start_head}}, tmp_path, result_path
+        )
 
 
 def test_admission_revalidates_queued_declared_workspace_before_systemd_launch(tmp_path: Path) -> None:

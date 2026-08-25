@@ -135,14 +135,23 @@ class GitHubDelivery:
             packet = self._packet(packet_job_id, workspace, binding) if packet_job_id is not None else None
             start_head = packet["start_head"] if packet is not None else checkout["head"]
             scope = packet["scope"] if packet is not None else ()
-            snapshot = self.workspaces.delivery_snapshot(workspace_id, start_head, scope=scope)
+            snapshot = self.workspaces.delivery_snapshot(workspace_id, start_head)
+            publication_snapshot = (
+                self.workspaces.delivery_snapshot(
+                    workspace_id, project.workspace.default_base, scope=scope, merge_base=True
+                )
+                if packet is not None
+                else snapshot
+            )
         except DeliveryError:
             raise
         except (ValueError, WorkspaceError) as error:
             raise DeliveryError("workspace lacks an authoritative exact-head completion receipt") from error
         if snapshot["head"] != checkout["head"] or not snapshot["descendant"] or snapshot["dirty"]:
             raise DeliveryError("workspace lacks successful declared verification at its exact HEAD")
-        if packet is not None and (packet["final_head"] != snapshot["head"] or not snapshot["in_scope"]):
+        if packet is not None and (
+            packet["final_head"] != snapshot["head"] or not publication_snapshot["in_scope"]
+        ):
             raise DeliveryError("packet delivery is outside its Beads-owned write scope")
         if packet is not None:
             self._validate_delivery_result(packet["delivery"], snapshot)
@@ -243,8 +252,12 @@ class GitHubDelivery:
             for path in change.get("paths", [])
             if isinstance(path, str)
         }
-        if deleted and (any(not isinstance(path, str) for path in deletions) or not deleted <= set(deletions)):
-            raise DeliveryError("project delivery result omits deletion evidence")
+        if (
+            any(not isinstance(path, str) for path in deletions)
+            or len(deletions) != len(set(deletions))
+            or deleted != set(deletions)
+        ):
+            raise DeliveryError("project delivery result does not exactly match deletion evidence")
         if not changes and not delivery["evidence_only"]:
             raise DeliveryError("no-change delivery lacks the evidence-only exception")
         if changes and delivery["evidence_only"]:
