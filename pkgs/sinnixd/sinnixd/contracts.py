@@ -117,6 +117,7 @@ class TypedJobContracts:
         timeout_seconds: int,
         result: str,
         bead_binding: Mapping[str, Any] | None = None,
+        parameters: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if principal not in {"agent-control", "operator"}:
             raise ContractError(
@@ -155,6 +156,7 @@ class TypedJobContracts:
                 f"project {project_id} does not declare an agent environment preflight"
             )
         binding = self.bead_binding(bead_binding, checkout)
+        launch_parameters = self._agent_parameters(parameters)
         job_id = str(uuid4())
         prompt_path = self.inputs_root / f"{job_id}.prompt"
         public_contract = {
@@ -168,6 +170,11 @@ class TypedJobContracts:
             },
             "result": result,
             **({"bead_binding": binding} if binding is not None else {}),
+            **(
+                {"parameters": launch_parameters}
+                if launch_parameters is not None
+                else {}
+            ),
         }
         private = {
             "schema_version": 2,
@@ -183,6 +190,11 @@ class TypedJobContracts:
             "credential_profile": credential_profile,
             "prompt_path": str(prompt_path),
             **({"bead_binding": binding} if binding is not None else {}),
+            **(
+                {"parameters": launch_parameters}
+                if launch_parameters is not None
+                else {}
+            ),
         }
         self._write_private(prompt_path, prompt.encode())
         try:
@@ -276,6 +288,20 @@ class TypedJobContracts:
             if isinstance(prompt_path, str):
                 Path(prompt_path).unlink(missing_ok=True)
         return response
+
+    @staticmethod
+    def _agent_parameters(value: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if not isinstance(value, Mapping):
+            raise ContractError("agent parameters must be an object")
+        try:
+            encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError) as error:
+            raise ContractError("agent parameters must be JSON serializable") from error
+        if not encoded or len(encoded.encode()) > 64_000:
+            raise ContractError("agent parameters exceed the packet bound")
+        return json.loads(encoded)
 
     @staticmethod
     def bead_binding(

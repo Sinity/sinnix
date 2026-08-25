@@ -11,6 +11,17 @@ from sinnix_mcp import ErrorCode, ErrorEnvelope, RequestEnvelope, ResponseEnvelo
 from .api import ProtocolError, SinnixdClientError, UnixSocketServer, call
 from .jobs import GenericJobs, GenericJobStore, UserSystemdJobs, default_state_dir
 from .limits import DEFAULT_TIMEOUT_SECONDS
+from .packets import (
+    PacketConfig,
+    PacketError,
+    SubprocessBdReader,
+    checkout_id_from_workspace_response,
+    compile_launch_snapshot,
+    derived_workspace,
+    plan_table,
+    project_id_from_descriptor,
+    resolve_project_root,
+)
 from .projects import ProjectCatalog
 from .service import SinnixdService
 
@@ -151,6 +162,18 @@ def parser() -> argparse.ArgumentParser:
     workspace_finish_integrated = workspace_subcommands.add_parser("finish-integrated")
     workspace_finish_integrated.add_argument("workspace_id")
     workspace_finish_integrated.add_argument("--target", required=True)
+    packet = subcommands.add_parser("packet")
+    packet_subcommands = packet.add_subparsers(dest="packet_command", required=True)
+    packet_launch = packet_subcommands.add_parser(
+        "launch", help="Compile a Beads carrier group and dispatch one agent lane."
+    )
+    packet_launch.add_argument("bead_id")
+    packet_launch.add_argument("--project")
+    packet_launch.add_argument("--plan", action="store_true")
+    packet_launch.add_argument("--credential-profile", default="subscription")
+    packet_launch.add_argument(
+        "--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS
+    )
     job = subcommands.add_parser("job")
     job_subcommands = job.add_subparsers(dest="job_command", required=True)
     start = job_subcommands.add_parser("start")
@@ -602,6 +625,96 @@ def main() -> int:
             {"workspace_id": arguments.workspace_id},
             "agent-control",
         )
+    elif arguments.command == "packet" and arguments.packet_command == "launch":
+        try:
+            project_root = resolve_project_root(arguments.project)
+            project_id = project_id_from_descriptor(project_root)
+            packet_config = PacketConfig.load(project_root)
+            snapshot = compile_launch_snapshot(
+                arguments.bead_id,
+                project_root=project_root,
+                project_id=project_id,
+                reader=SubprocessBdReader(project_root),
+                config=packet_config,
+            )
+        except PacketError as error:
+            parser().error(str(error))
+        if arguments.plan:
+            print(plan_table(snapshot, packet_config))
+            return 0
+        workspace_name, branch = derived_workspace(snapshot, packet_config)
+        create_request = _request(
+            "workspace.create",
+            "git-workspaces",
+            {
+                "project_id": project_id,
+                "name": workspace_name,
+                "branch": branch,
+                "base": None,
+            },
+            "agent-control",
+        )
+        try:
+            created = call(arguments.socket, create_request)
+        except (OSError, ProtocolError, SinnixdClientError):
+            created = _unavailable_response(create_request)
+        if created.get("ok") is not True:
+            response = created
+        else:
+            response: dict[str, object] | None = None
+            try:
+                checkout_id = checkout_id_from_workspace_response(created)
+            except PacketError:
+                payload = created.get("payload")
+                value = payload.get("value") if isinstance(payload, dict) else None
+                workspace_id = (
+                    value.get("workspace_id") if isinstance(value, dict) else None
+                )
+                if not isinstance(workspace_id, str) or not workspace_id:
+                    parser().error(
+                        "workspace.create did not return a workspace identity"
+                    )
+                get_request = _request(
+                    "workspace.get",
+                    "git-workspaces",
+                    {"workspace_id": workspace_id},
+                    "agent-control",
+                )
+                try:
+                    status = call(arguments.socket, get_request)
+                except (OSError, ProtocolError, SinnixdClientError):
+                    status = _unavailable_response(get_request)
+                if status.get("ok") is not True:
+                    response = status
+                    checkout_id = ""
+                else:
+                    checkout_id = checkout_id_from_workspace_response(status)
+            if response is None:
+                dimensions = snapshot.dimensions.to_dict()
+                agent_request = _request(
+                    "job.agent.start",
+                    "systemd-jobs",
+                    {
+                        "project_id": project_id,
+                        "checkout_id": checkout_id,
+                        "prompt": snapshot.prompt,
+                        "backend": snapshot.dimensions.backend,
+                        "model": snapshot.dimensions.model,
+                        "effort": snapshot.dimensions.effort,
+                        "credential_profile": arguments.credential_profile,
+                        "timeout_seconds": arguments.timeout_seconds,
+                        "result": "last-message",
+                        "parameters": {
+                            "template_version": packet_config.template_version,
+                            "dimensions": dimensions,
+                        },
+                    },
+                    "agent-control",
+                )
+                try:
+                    response = call(arguments.socket, agent_request)
+                except (OSError, ProtocolError, SinnixdClientError):
+                    response = _unavailable_response(agent_request)
     elif arguments.command == "job" and arguments.job_command == "start":
         try:
             parameters = json.loads(arguments.parameters_json)
@@ -793,16 +906,17 @@ def main() -> int:
         if not isinstance(owner_arguments, dict):
             parser().error("--arguments-json must be a JSON object")
         request = _request(arguments.operation, arguments.owner, owner_arguments)
-    try:
-        response = call(arguments.socket, request)
-        if (
-            getattr(arguments, "wait", False)
-            and arguments.command == "workspace"
-            and response.get("ok") is True
-        ):
-            response = _wait_for_delivery(arguments.socket, response)
-    except (OSError, ProtocolError, SinnixdClientError):
-        response = _unavailable_response(request)
+    if arguments.command != "packet":
+        try:
+            response = call(arguments.socket, request)
+            if (
+                getattr(arguments, "wait", False)
+                and arguments.command == "workspace"
+                and response.get("ok") is True
+            ):
+                response = _wait_for_delivery(arguments.socket, response)
+        except (OSError, ProtocolError, SinnixdClientError):
+            response = _unavailable_response(request)
     print(json.dumps(response, indent=2, sort_keys=True))
     return 0 if response.get("ok") is True else 1
 
