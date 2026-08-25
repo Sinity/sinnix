@@ -21,6 +21,15 @@ from .jobs import GenericJobStore, GenericJobs, JobPageCursorError, JobRecordErr
 from .contracts import TypedJobContracts
 from .delivery import DeliveryError, GitHubDelivery
 from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
+from .packet_completion import (
+    DelegationCapability,
+    EvidenceReceipt,
+    IndependentReviewReceipt,
+    PacketCompletionInspector,
+    PacketContract,
+    VerificationReceipt,
+    WorkerDeliveryRecord,
+)
 from .projects import ProjectCatalog
 from .tasks import TaskError, TaskService
 from .workspaces import GitWorkspaces, WorkspaceError, WorkspaceStore
@@ -51,6 +60,7 @@ class SinnixdService:
     workspaces: GitWorkspaces | None = None
     delivery: GitHubDelivery | None = None
     tasks: TaskService | None = None
+    packet_completion: PacketCompletionInspector = field(default_factory=PacketCompletionInspector)
 
     def __post_init__(self) -> None:
         if self.workspaces is None:
@@ -464,6 +474,45 @@ class SinnixdService:
             if not isinstance(max_bytes, int) or isinstance(max_bytes, bool):
                 raise ValueError("job.result max_bytes must be an integer")
             return self.jobs.result(job_id, max_bytes=max_bytes)
+        if operation == "job.packet-completion":
+            if principal not in {"agent-control", "operator"}:
+                raise ValueError("job.packet-completion requires agent-control or operator")
+            required = {
+                "job_id", "workspace_id", "contract", "worker_result", "verification_receipts",
+                "delegation", "evidence_receipts", "review",
+            }
+            if set(arguments) != required:
+                raise ValueError(
+                    "job.packet-completion requires job_id, workspace_id, contract, worker_result, "
+                    "verification_receipts, delegation, evidence_receipts, and review"
+                )
+            job_id = self._authorize_job(principal, self._job_argument(arguments, "job_id"))
+            workspace_id = self._job_argument(arguments, "workspace_id")
+            contract = PacketContract.from_mapping(arguments["contract"])
+            if contract.job_id != job_id or contract.workspace_id != workspace_id:
+                raise ValueError("job.packet-completion contract binding does not match arguments")
+            raw_worker = arguments["worker_result"]
+            worker = None if raw_worker is None else WorkerDeliveryRecord.from_mapping(raw_worker)
+            raw_verifications = arguments["verification_receipts"]
+            raw_evidence = arguments["evidence_receipts"]
+            if not isinstance(raw_verifications, list) or not isinstance(raw_evidence, list):
+                raise ValueError("job.packet-completion receipts must be lists")
+            verifications = tuple(VerificationReceipt.from_mapping(item) for item in raw_verifications)
+            evidence = tuple(EvidenceReceipt.from_mapping(item) for item in raw_evidence)
+            raw_review = arguments["review"]
+            review = None if raw_review is None else IndependentReviewReceipt.from_mapping(raw_review)
+            delegation = DelegationCapability.from_mapping(arguments["delegation"])
+            assert self.workspaces is not None
+            return self.packet_completion.inspect(
+                job=self.jobs.get(job_id),
+                workspace=self.workspaces.get(workspace_id),
+                contract=contract,
+                worker_result=worker,
+                verification_receipts=verifications,
+                evidence_receipts=evidence,
+                delegation=delegation,
+                review=review,
+            ).to_dict()
         if operation == "job.cancel":
             return self._cleanup_terminal(
                 self.jobs.cancel(

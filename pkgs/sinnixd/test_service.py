@@ -4463,6 +4463,51 @@ def test_declared_job_binds_workspace_and_exact_head(tmp_path: Path) -> None:
     assert record.spec.checkout["head"] == workspace["head"]
 
 
+def test_packet_completion_dispatch_composes_job_and_workspace_bindings(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    jobs = generic_jobs(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    workspace = service.workspaces.create(
+        project_id="fixture", name="packet-lane", branch="feature/packet-lane", base="HEAD"
+    )
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "check", "workspace_id": workspace["workspace_id"]},
+        )
+    )
+    assert started.ok and started.payload is not None
+    job_id = started.payload.inline["job_id"]
+
+    response = service.dispatch(
+        request(
+            "job.packet-completion",
+            "systemd-jobs",
+            {
+                "job_id": job_id,
+                "workspace_id": workspace["workspace_id"],
+                "contract": {
+                    "job_id": job_id,
+                    "workspace_id": workspace["workspace_id"],
+                    "write_scope": ["src/"],
+                    "required_verification_refs": [],
+                },
+                "worker_result": None,
+                "verification_receipts": [],
+                "delegation": {"visibility": "unsupported", "pending": None},
+                "evidence_receipts": [],
+                "review": None,
+            },
+        )
+    )
+
+    assert response.ok and response.payload is not None
+    assert not response.payload.inline["complete"]
+    assert "worker_result_missing" in response.payload.inline["reasons"]
+
+
 def test_admission_revalidates_queued_declared_workspace_before_systemd_launch(tmp_path: Path) -> None:
     """A queued declared service whose checkout HEAD moved must terminalize before it reaches systemd."""
     write_adapter(tmp_path)
