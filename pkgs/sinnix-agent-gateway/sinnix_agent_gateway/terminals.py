@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from .artifacts import ArtifactService
-from .capabilities import Capability, Principal
-from .config import GatewayConfig
 from sinnix_mcp.execution import (
     EnvironmentProfile,
     ExecutionProfile,
@@ -12,6 +9,10 @@ from sinnix_mcp.execution import (
     OwnerExecution,
     OwnerRoute,
 )
+
+from .artifacts import ArtifactService
+from .capabilities import Capability, Principal
+from .config import GatewayConfig
 
 
 class TerminalError(ValueError):
@@ -66,7 +67,9 @@ class TerminalService:
             raise TerminalError(f"{name} must be a non-empty string")
         return value
 
-    def read(self, operation: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+    def read(
+        self, operation: str, arguments: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         self.principal.require(Capability.TERMINAL_READ)
         if arguments is None:
             arguments = {}
@@ -79,7 +82,9 @@ class TerminalService:
         if operation == "capture":
             allowed = {"match", "extent", "ansi"}
             if "match" not in arguments or set(arguments) - allowed:
-                raise TerminalError("capture requires match and optional extent or ansi")
+                raise TerminalError(
+                    "capture requires match and optional extent or ansi"
+                )
             extent = arguments.get("extent", "last_cmd_output")
             if extent not in self._CAPTURE_EXTENTS:
                 raise TerminalError(f"unsupported capture extent: {extent!r}")
@@ -95,7 +100,9 @@ class TerminalService:
             elif "ansi" in arguments and not isinstance(arguments["ansi"], bool):
                 raise TerminalError("ansi must be boolean")
             return {"operation": operation, **self._run(command)}
-        raise TerminalError("unknown terminal read operation; available: ['capture', 'list']")
+        raise TerminalError(
+            "unknown terminal read operation; available: ['capture', 'list']"
+        )
 
     def action(self, operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
         self.principal.require(Capability.TERMINAL_ACTION)
@@ -105,7 +112,11 @@ class TerminalService:
             if set(arguments) != {"match"}:
                 raise TerminalError("focus requires only match")
             match = self._string(arguments["match"], "match", 512)
-            return {"operation": operation, "target": match, **self._run(["focus", "--match", match])}
+            return {
+                "operation": operation,
+                "target": match,
+                **self._run(["focus", "--match", match]),
+            }
         if operation == "send":
             allowed = {"match", "text", "enter", "bracketed_paste"}
             if not {"match", "text"} <= set(arguments) or set(arguments) - allowed:
@@ -119,7 +130,10 @@ class TerminalService:
                 "--text",
                 self._string(arguments["text"], "text"),
             ]
-            for key, flag in (("enter", "--enter"), ("bracketed_paste", "--bracketed-paste")):
+            for key, flag in (
+                ("enter", "--enter"),
+                ("bracketed_paste", "--bracketed-paste"),
+            ):
                 if arguments.get(key) is True:
                     command.append(flag)
                 elif key in arguments and not isinstance(arguments[key], bool):
@@ -133,7 +147,10 @@ class TerminalService:
                 not isinstance(keys, list)
                 or not keys
                 or len(keys) > 16
-                or any(not isinstance(key, str) or not key or len(key) > 128 for key in keys)
+                or any(
+                    not isinstance(key, str) or not key or len(key) > 128
+                    for key in keys
+                )
             ):
                 raise TerminalError("keys must contain 1-16 non-empty strings")
             return {

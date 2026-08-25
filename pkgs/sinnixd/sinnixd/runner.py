@@ -8,12 +8,12 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .jobs import (
+    MAX_RESULT_BYTES,
     GenericJobStore,
     JobRecordError,
-    MAX_RESULT_BYTES,
     _open_preallocated_private_artifact,
 )
-from .limits import maximum_timeout_seconds, valid_timeout_seconds
+from .limits import valid_timeout_seconds
 from .projects import ProjectConfigError, revalidate_registered_checkout
 
 
@@ -22,7 +22,9 @@ class RunnerError(ValueError):
 
 
 def _require_strings(value: Mapping[str, Any], fields: Sequence[str]) -> None:
-    if any(not isinstance(value.get(field), str) or not value[field] for field in fields):
+    if any(
+        not isinstance(value.get(field), str) or not value[field] for field in fields
+    ):
         raise RunnerError("private typed-job input is invalid")
 
 
@@ -31,7 +33,11 @@ def _load(path: Path, job_id: str) -> dict[str, Any]:
         value = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as error:
         raise RunnerError("private typed-job input is unavailable") from error
-    if not isinstance(value, dict) or value.get("schema_version") != 1 or value.get("job_id") != job_id:
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version") != 1
+        or value.get("job_id") != job_id
+    ):
         raise RunnerError("private typed-job identity is invalid")
     if value.get("kind") not in {"operator-shell", "attested-agent"}:
         raise RunnerError("private typed-job kind is invalid")
@@ -65,9 +71,14 @@ def _require_environment(job_id: str, unit: str, value: Mapping[str, Any]) -> No
         "SINNIXD_TIMEOUT_SECONDS": os.environ.get("SINNIXD_TIMEOUT_SECONDS", ""),
     }
     timeout_seconds = expected["SINNIXD_TIMEOUT_SECONDS"]
-    if not timeout_seconds.isdecimal() or not valid_timeout_seconds(int(timeout_seconds), kind=value["kind"]):
+    if not timeout_seconds.isdecimal() or not valid_timeout_seconds(
+        int(timeout_seconds), kind=value["kind"]
+    ):
         raise RunnerError("typed-job timeout identity is invalid")
-    if any(os.environ.get(key) != expected_value for key, expected_value in expected.items()):
+    if any(
+        os.environ.get(key) != expected_value
+        for key, expected_value in expected.items()
+    ):
         raise RunnerError("typed-job environment identity is invalid")
     if any(key.startswith("SINNIX") and key not in expected for key in os.environ):
         raise RunnerError("typed-job environment contains an untrusted SINNIX identity")
@@ -98,7 +109,10 @@ def _run_declared(state_root: Path, job_id: str, unit: str) -> None:
         "SINNIXD_CHECKOUT_ID": checkout.get("checkout_id"),
         "SINNIXD_CHECKOUT_HEAD": checkout.get("head"),
     }
-    if any(not isinstance(value, str) or os.environ.get(key) != value for key, value in expected.items()):
+    if any(
+        not isinstance(value, str) or os.environ.get(key) != value
+        for key, value in expected.items()
+    ):
         raise RunnerError("declared-job environment identity is invalid")
     checkout_path = _revalidate_checkout(checkout)
     os.chdir(checkout_path)
@@ -109,18 +123,25 @@ def _exec_shell(value: Mapping[str, Any], checkout: Path) -> None:
     argv = value.get("argv")
     environment_command = value.get("environment_command")
     cwd = value.get("cwd")
-    if value.get("principal") != "operator" or not isinstance(argv, list) or not argv or any(
-        not isinstance(item, str) or not item for item in argv
+    if (
+        value.get("principal") != "operator"
+        or not isinstance(argv, list)
+        or not argv
+        or any(not isinstance(item, str) or not item for item in argv)
     ):
         raise RunnerError("operator shell contract is invalid")
-    if not isinstance(environment_command, list) or not environment_command or any(
-        not isinstance(item, str) or not item for item in environment_command
+    if (
+        not isinstance(environment_command, list)
+        or not environment_command
+        or any(not isinstance(item, str) or not item for item in environment_command)
     ):
         raise RunnerError("operator shell project environment is invalid")
     if not isinstance(cwd, str):
         raise RunnerError("operator shell cwd is invalid")
     workdir = Path(cwd).resolve(strict=True)
-    if not workdir.is_dir() or (workdir != checkout and checkout not in workdir.parents):
+    if not workdir.is_dir() or (
+        workdir != checkout and checkout not in workdir.parents
+    ):
         raise RunnerError("operator shell cwd escaped the registered checkout")
     command = [*environment_command, *argv]
     os.chdir(workdir)
@@ -134,14 +155,29 @@ def _run_agent(
     native_runner: Path,
     state_root: Path,
 ) -> int:
-    _require_strings(value, ("backend", "model", "effort", "credential_profile", "prompt_path", "result_path"))
-    if value.get("principal") not in {"agent-control", "operator"} or value["backend"] not in {"claude", "codex", "gemini", "grok", "antigravity"}:
+    _require_strings(
+        value,
+        (
+            "backend",
+            "model",
+            "effort",
+            "credential_profile",
+            "prompt_path",
+            "result_path",
+        ),
+    )
+    if value.get("principal") not in {"agent-control", "operator"} or value[
+        "backend"
+    ] not in {"claude", "codex", "gemini", "grok", "antigravity"}:
         raise RunnerError("attested agent contract is invalid")
     if value["credential_profile"] not in {"subscription", "api"}:
         raise RunnerError("attested agent credential profile is invalid")
     prompt_path = Path(value["prompt_path"]).resolve(strict=True)
     result_path = Path(value["result_path"]).resolve()
-    if not prompt_path.is_file() or (state_root / "inputs").resolve() not in prompt_path.parents:
+    if (
+        not prompt_path.is_file()
+        or (state_root / "inputs").resolve() not in prompt_path.parents
+    ):
         raise RunnerError("attested agent prompt input is invalid")
     if (state_root / "results").resolve() not in result_path.parents:
         raise RunnerError("attested agent result artifact is invalid")
@@ -176,7 +212,9 @@ def _run_agent(
         prompt_path.unlink(missing_ok=True)
 
 
-def _seal_packet_result(value: Mapping[str, Any], checkout: Path, result_path: Path) -> None:
+def _seal_packet_result(
+    value: Mapping[str, Any], checkout: Path, result_path: Path
+) -> None:
     """Bind a structured worker report to the runtime-observed terminal Git head."""
     try:
         if result_path.stat().st_size > MAX_RESULT_BYTES:
@@ -193,7 +231,11 @@ def _seal_packet_result(value: Mapping[str, Any], checkout: Path, result_path: P
         check=False,
     )
     final_head = observed.stdout.strip()
-    if observed.returncode != 0 or len(final_head) != 40 or any(value not in "0123456789abcdef" for value in final_head):
+    if (
+        observed.returncode != 0
+        or len(final_head) != 40
+        or any(value not in "0123456789abcdef" for value in final_head)
+    ):
         raise RunnerError("packet final Git head is unavailable")
     envelope = json.dumps(
         {

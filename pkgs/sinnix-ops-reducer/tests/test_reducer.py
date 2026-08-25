@@ -66,7 +66,9 @@ def test_agentctl_failure_degrades_only_the_job_source(tmp_path: Path) -> None:
         tmp_path / "status.json",
         tmp_path / "token",
         lambda: {"report": 1},
-        agent_jobs_source=lambda: (_ for _ in ()).throw(RuntimeError("socket unavailable")),
+        agent_jobs_source=lambda: (_ for _ in ()).throw(
+            RuntimeError("socket unavailable")
+        ),
     )
     snapshot = reducer.refresh()
     assert snapshot["sources"]["sinnix-observe"]["status"] == "healthy"

@@ -13,7 +13,7 @@ git init --quiet "$test_root/repo"
 
 git -C "$test_root/repo" config user.name fixture
 git -C "$test_root/repo" config user.email fixture@example.invalid
-printf 'fixture\n' > "$test_root/repo/README.md"
+printf 'fixture\n' >"$test_root/repo/README.md"
 git -C "$test_root/repo" add README.md
 git -C "$test_root/repo" commit --quiet -m fixture
 (
@@ -38,7 +38,7 @@ git -C "$test_root/repo" commit --quiet -m fixture
   test "$(realpath "$linked_database")" = "$(realpath "$database")"
 
   jq --arg issue_id "$issue_id" 'if .id == $issue_id then .title = "forged JSONL export" else . end' \
-    .beads/issues.jsonl > .beads/issues.jsonl.tmp
+    .beads/issues.jsonl >.beads/issues.jsonl.tmp
   mv .beads/issues.jsonl.tmp .beads/issues.jsonl
 
   after="$("$bd" --readonly --json show "$issue_id" | jq -c "$normalize_issue")"

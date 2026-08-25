@@ -9,7 +9,6 @@ import json
 import subprocess
 from pathlib import Path
 
-
 LEGACY_COMMIT = "e5980a67eae343f954f695c46a8fadda83961a03"
 LEGACY_APP_PATH = "pkgs/sinnix-agent-gateway/sinnix_agent_gateway/app.py"
 
@@ -65,7 +64,10 @@ def migration_tool_names(parity_module: Path) -> list[str]:
     for node in module.body:
         if not (
             isinstance(node, ast.Assign)
-            and any(isinstance(target, ast.Name) and target.id == "V2_MIGRATIONS" for target in node.targets)
+            and any(
+                isinstance(target, ast.Name) and target.id == "V2_MIGRATIONS"
+                for target in node.targets
+            )
             and isinstance(node.value, ast.Dict)
         ):
             continue
@@ -82,7 +84,9 @@ def canonical_manifest_bytes(manifest: object) -> int:
     if not isinstance(manifest, dict):
         raise ValueError("legacy operator manifest must be an object")
     tools = manifest.get("tools")
-    if manifest.get("schema") != "sinnix.gateway-tools.v1" or not isinstance(tools, list):
+    if manifest.get("schema") != "sinnix.gateway-tools.v1" or not isinstance(
+        tools, list
+    ):
         raise ValueError("legacy operator manifest must contain schema and tools")
     payload = json.dumps(
         {"schema": manifest["schema"], "tools": tools},
@@ -126,11 +130,15 @@ def main() -> None:
     if arguments.verify is not None:
         expected = json.loads(arguments.verify.read_text())
         if manifest != expected:
-            raise SystemExit("checked-in legacy manifest does not match the pinned source")
+            raise SystemExit(
+                "checked-in legacy manifest does not match the pinned source"
+            )
         migration_tools = migration_tool_names(arguments.verify.parent / "parity.py")
         historical_tools = manifest["tools"]
         if migration_tools != historical_tools:
-            raise SystemExit("checked-in parity map does not match the pinned source in order")
+            raise SystemExit(
+                "checked-in parity map does not match the pinned source in order"
+            )
         print(f"verified {measured_bytes} canonical legacy manifest bytes")
         print(f"verified {len(manifest['tools'])} legacy Gateway V1 tools")
         print("verified parity map names and order against the pinned source")

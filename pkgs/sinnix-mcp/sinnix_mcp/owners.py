@@ -42,13 +42,19 @@ class OwnerSpec:
     def __post_init__(self) -> None:
         parts = self.namespace.split(".")
         if not parts or any(not part.isidentifier() for part in parts):
-            raise ValueError(f"namespace must be dotted identifiers: {self.namespace!r}")
+            raise ValueError(
+                f"namespace must be dotted identifiers: {self.namespace!r}"
+            )
         if not self.owner:
             raise ValueError("owner registration requires an owner")
         if not self.versions or any(version < 1 for version in self.versions):
-            raise ValueError("owner registration requires one or more positive protocol versions")
+            raise ValueError(
+                "owner registration requires one or more positive protocol versions"
+            )
         if self.source_scoped and self.authority is not Authority.OWNER:
-            raise ValueError("source-scoped owners must retain their own source authority")
+            raise ValueError(
+                "source-scoped owners must retain their own source authority"
+            )
 
     def supports(self, operation: str, version: int) -> bool:
         return (
@@ -80,7 +86,9 @@ class OwnerRegistry:
         if owner.namespace in self._owners:
             raise ValueError(f"duplicate owner namespace: {owner.namespace}")
         for existing in self._owners.values():
-            if owner.namespace.startswith(existing.namespace + ".") or existing.namespace.startswith(owner.namespace + "."):
+            if owner.namespace.startswith(
+                existing.namespace + "."
+            ) or existing.namespace.startswith(owner.namespace + "."):
                 raise ValueError(
                     "owner namespaces cannot overlap: "
                     f"{owner.namespace!r} and {existing.namespace!r}"
@@ -88,9 +96,15 @@ class OwnerRegistry:
         self._owners[owner.namespace] = owner
 
     def resolve(self, operation: str, version: int = 1) -> OwnerSpec:
-        matches = [owner for owner in self._owners.values() if owner.supports(operation, version)]
+        matches = [
+            owner
+            for owner in self._owners.values()
+            if owner.supports(operation, version)
+        ]
         if not matches:
-            raise KeyError(f"no owner supports {operation!r} at protocol version {version}")
+            raise KeyError(
+                f"no owner supports {operation!r} at protocol version {version}"
+            )
         if len(matches) != 1:
             raise ValueError(f"ambiguous owner registration for {operation!r}")
         return matches[0]

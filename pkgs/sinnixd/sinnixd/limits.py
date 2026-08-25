@@ -6,7 +6,11 @@ MAX_DECLARED_OPERATION_TIMEOUT_SECONDS = 28_800
 
 def maximum_timeout_seconds(kind: str) -> int:
     """Return the one timeout ceiling for a durable job kind."""
-    return MAX_DECLARED_OPERATION_TIMEOUT_SECONDS if kind == "declared-operation" else DEFAULT_TIMEOUT_SECONDS
+    return (
+        MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
+        if kind == "declared-operation"
+        else DEFAULT_TIMEOUT_SECONDS
+    )
 
 
 def valid_timeout_seconds(value: object, *, kind: str) -> bool:

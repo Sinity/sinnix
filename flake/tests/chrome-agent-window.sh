@@ -239,11 +239,11 @@ run_with_deadline() {
     setsid "$helper" agent-window --url https://example.test >"$state/stdout" 2>"$state/stderr" &
   pid=$!
   while kill -0 "$pid" 2>/dev/null; do
-    if (( SECONDS >= deadline_at )); then
+    if ((SECONDS >= deadline_at)); then
       kill -- "-$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
       status=124
-      elapsed_ms=$(( ($(date +%s%N) - start_ns) / 1000000 ))
+      elapsed_ms=$((($(date +%s%N) - start_ns) / 1000000))
       printf 'case=%s status=%s elapsed_ms=%s target=%s closed=%s navigated=%s\n' \
         "$name" "$status" "$elapsed_ms" "$(test -e "$state/agent-target" && printf present || printf absent)" \
         "$(wc -l <"$state/closed-targets")" "$(test -e "$state/navigated-url" && printf yes || printf no)"
@@ -253,7 +253,7 @@ run_with_deadline() {
   done
   wait "$pid" || status=$?
   status="${status:-0}"
-  elapsed_ms=$(( ($(date +%s%N) - start_ns) / 1000000 ))
+  elapsed_ms=$((($(date +%s%N) - start_ns) / 1000000))
   printf 'case=%s status=%s elapsed_ms=%s target=%s closed=%s navigated=%s\n' \
     "$name" "$status" "$elapsed_ms" "$(test -e "$state/agent-target" && printf present || printf absent)" \
     "$(wc -l <"$state/closed-targets")" "$(test -e "$state/navigated-url" && printf yes || printf no)"
@@ -269,7 +269,7 @@ assert_fake_wire_rejects_out_of_range_id() {
     FAKE_STATE="$state" \
     FAKE_CDP_SCENARIO=match \
     "$fixture_root/bin/websocat" \
-    <<< '{"id":2147483648,"method":"Target.createTarget","params":{}}' \
+    <<<'{"id":2147483648,"method":"Target.createTarget","params":{}}' \
     >"$state/response" 2>"$state/stderr"; then
     printf 'fake CDP wire accepted an out-of-range request ID\n' >&2
     return 1
@@ -308,7 +308,7 @@ assert_activation_before_park_reproduced() {
     FAKE_CDP_SCENARIO=activation-before-park \
     FAKE_ACTIVATION_BEFORE_PARK=true \
     "$fixture_root/bin/websocat" \
-    <<< '{"id":1,"method":"Target.createTarget","params":{"url":"data:text/html,<title>unprotected</title>","newWindow":true,"background":true}}' \
+    <<<'{"id":1,"method":"Target.createTarget","params":{"url":"data:text/html,<title>unprotected</title>","newWindow":true,"background":true}}' \
     >"$state/response"
   test -e "$state/activation-stolen"
   test "$(cat "$state/active-workspace")" = agentbrowser

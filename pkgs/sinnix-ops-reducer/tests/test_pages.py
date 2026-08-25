@@ -132,7 +132,11 @@ def test_work_page_uses_agentctl_lifecycle_and_keeps_live_job_interrupts() -> No
                         "project_id": "sinnix",
                         "created_at": "2026-08-23T10:00:00Z",
                         "checkout": {"path": "/realm/project/sinnix"},
-                        "contract": {"backend": "codex", "model": "fixture", "effort": "high"},
+                        "contract": {
+                            "backend": "codex",
+                            "model": "fixture",
+                            "effort": "high",
+                        },
                         "state": {"phase": "running", "terminal": False},
                     },
                     {

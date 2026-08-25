@@ -5,7 +5,6 @@ import subprocess
 from collections.abc import Callable, Sequence
 from typing import Any
 
-
 MAX_AGENTCTL_RESPONSE_BYTES = 1_048_576
 MAX_SNAPSHOT_JOBS = 100
 DEFAULT_TIMEOUT_SECONDS = 5.0
@@ -75,7 +74,9 @@ class AgentCtlClient:
                 check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as error:
-            raise AgentCtlError(f"AgentCTL is unavailable: {type(error).__name__}") from error
+            raise AgentCtlError(
+                f"AgentCTL is unavailable: {type(error).__name__}"
+            ) from error
         if result.returncode != 0:
             raise AgentCtlError("AgentCTL rejected the job request")
         output = result.stdout

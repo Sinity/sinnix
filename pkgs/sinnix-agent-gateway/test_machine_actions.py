@@ -4,10 +4,12 @@ import json
 from pathlib import Path
 
 import pytest
-
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_agent_gateway.machine_actions import MachineActionError, MachineActionService
+from sinnix_agent_gateway.machine_actions import (
+    MachineActionError,
+    MachineActionService,
+)
 
 
 class FakeResponse:
@@ -87,7 +89,9 @@ def test_machine_action_forwards_exact_owner_request(tmp_path: Path) -> None:
     }
 
 
-def test_machine_action_snapshot_exposes_bounded_authority_revision(tmp_path: Path) -> None:
+def test_machine_action_snapshot_exposes_bounded_authority_revision(
+    tmp_path: Path,
+) -> None:
     actions, connection = service(
         tmp_path,
         "operator",

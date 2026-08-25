@@ -14,10 +14,10 @@ beads-in-git snapshots are immutable evidence, never live state.
 ## Reading work
 
 - `bd ready` / `bd list --status ...` / `bd show <id>` / `bd graph --open
-  <epic>` — the graph is the authority; epic child-counts are not closure
+<epic>` — the graph is the authority; epic child-counts are not closure
   evidence (membership is dependency-based).
 - Through AgentCTL (cross-project, typed): `agentctl task list <project>
-  [--ready]`, `agentctl task get`.
+[--ready]`, `agentctl task get`.
 - "Ready" means dependency-ready, not necessarily executable now: live-proof
   and operator-window items are ready-for-a-window, not ready-for-a-lane.
   Check the bead's design for window/consent requirements before claiming.
@@ -38,7 +38,7 @@ beads-in-git snapshots are immutable evidence, never live state.
 
 - Complete only with verification evidence: the exact commands run, the PR
   and merge SHA where applicable (`agentctl task complete <id> --pr N
-  --merge-sha SHA`). Completion is idempotent after merge and retryable
+--merge-sha SHA`). Completion is idempotent after merge and retryable
   after a backend outage — code merge never embeds tracker transactions.
 - **Close discipline**: a bead closes when its acceptance criteria are met,
   not when a harness exists or a mechanism is "structurally tested". Address

@@ -5,9 +5,12 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from sinnix_agent_gateway.artifacts import ArtifactService
-from sinnix_agent_gateway.browser import BrowserDiagnosticError, BrowserError, BrowserService
+from sinnix_agent_gateway.browser import (
+    BrowserDiagnosticError,
+    BrowserError,
+    BrowserService,
+)
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_mcp.execution import ExecutionResult
@@ -36,14 +39,18 @@ def browser_service(tmp_path: Path, principal_name: str) -> tuple[BrowserService
         chrome_control_command=str(runner),
     )
     principal = Principal.for_name(principal_name)
-    return BrowserService(config, principal, ArtifactService(config, principal)), captured
+    return BrowserService(
+        config, principal, ArtifactService(config, principal)
+    ), captured
 
 
 def commands(path: Path) -> list[list[str]]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-def test_observer_can_read_browser_tabs_without_action_registration(tmp_path: Path) -> None:
+def test_observer_can_read_browser_tabs_without_action_registration(
+    tmp_path: Path,
+) -> None:
     browser, captured = browser_service(tmp_path, "observer")
 
     result = browser.read("list_tabs")
@@ -69,13 +76,19 @@ def test_operator_actions_require_gateway_created_agent_target(tmp_path: Path) -
     ]
 
 
-def test_canonical_browser_target_read_requires_registered_agent_window(tmp_path: Path) -> None:
+def test_canonical_browser_target_read_requires_registered_agent_window(
+    tmp_path: Path,
+) -> None:
     browser, captured = browser_service(tmp_path, "operator")
 
     browser.action("agent_window", {})
     result = browser.describe_target("agent-target")
 
-    assert result == {"operation": "info", "page_id": "agent-target", "result": {"ok": True}}
+    assert result == {
+        "operation": "info",
+        "page_id": "agent-target",
+        "result": {"ok": True},
+    }
     assert commands(captured) == [["agent-window"], ["info", "agent-target"]]
     with pytest.raises(BrowserError, match="gateway-created agent window"):
         browser.describe_target("operator-page")
@@ -101,7 +114,11 @@ def test_browser_owner_failure_is_attested_as_a_diagnostic(
         browser.execution,
         "run",
         lambda command, profile: ExecutionResult(
-            tuple(command), None, b"", b"chrome missing", failure_class="command_unavailable:FileNotFoundError"
+            tuple(command),
+            None,
+            b"",
+            b"chrome missing",
+            failure_class="command_unavailable:FileNotFoundError",
         ),
     )
 
@@ -122,9 +139,7 @@ def test_agent_window_rejects_visible_target_after_wrapper_warning(
 
     def run(arguments: list[str]) -> dict[str, object]:
         commands.append(arguments)
-        return {
-            "result": '{"id":"agent-target","parked":false}\nnote: visible window'
-        }
+        return {"result": '{"id":"agent-target","parked":false}\nnote: visible window'}
 
     monkeypatch.setattr(browser, "_run", run)
 
@@ -151,7 +166,9 @@ def test_observer_cannot_create_or_operate_browser_window(tmp_path: Path) -> Non
         browser.action("agent_window", {})
 
 
-def test_browser_capture_registers_only_owned_target_as_artifact(tmp_path: Path) -> None:
+def test_browser_capture_registers_only_owned_target_as_artifact(
+    tmp_path: Path,
+) -> None:
     browser, captured = browser_service(tmp_path, "operator")
 
     browser.action("agent_window", {})
@@ -174,9 +191,7 @@ def test_browser_capture_registers_only_owned_target_as_artifact(tmp_path: Path)
             "--format",
             "png",
             "--out",
-            str(
-                next((tmp_path / "state" / "captures").glob("*/browser.png"))
-            ),
+            str(next((tmp_path / "state" / "captures").glob("*/browser.png"))),
             "--full-page",
         ],
     ]

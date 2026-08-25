@@ -81,16 +81,35 @@ def test_commit_range_uses_immutable_two_commit_relation(tmp_path: Path) -> None
     projects = project_service(tmp_path, "operator")
     project = projects.config.projects["fixture"].path
     base = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=project, check=True, capture_output=True, text=True
+        ["git", "rev-parse", "HEAD"],
+        cwd=project,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     (project / "tracked.txt").write_text("committed change\n")
     subprocess.run(["git", "add", "tracked.txt"], cwd=project, check=True)
     subprocess.run(
-        ["git", "-c", "user.name=Gateway Fixture", "-c", "user.email=gateway@example.invalid", "commit", "-m", "second gateway fixture"],
-        cwd=project, check=True, stdout=subprocess.DEVNULL,
+        [
+            "git",
+            "-c",
+            "user.name=Gateway Fixture",
+            "-c",
+            "user.email=gateway@example.invalid",
+            "commit",
+            "-m",
+            "second gateway fixture",
+        ],
+        cwd=project,
+        check=True,
+        stdout=subprocess.DEVNULL,
     )
     head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=project, check=True, capture_output=True, text=True
+        ["git", "rev-parse", "HEAD"],
+        cwd=project,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
 
     result = projects.commit_range("fixture", "default", base, head)
@@ -141,7 +160,9 @@ def test_project_context_does_not_expose_ready_tasks_to_agent_control(
 ) -> None:
     projects = project_service(tmp_path, "agent-control")
     beads = FakeBeads({"unexpected": True})
-    context = ProjectContextService(Principal.for_name("agent-control"), projects, beads)  # type: ignore[arg-type]
+    context = ProjectContextService(
+        Principal.for_name("agent-control"), projects, beads
+    )  # type: ignore[arg-type]
 
     result = context.context("fixture")
 

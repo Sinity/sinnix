@@ -9,8 +9,8 @@ import sys
 from pathlib import Path
 
 from . import capabilities, feedback, health, pages
-from .agent_jobs import AgentCtlClient
 from .actions import ActionService
+from .agent_jobs import AgentCtlClient
 from .ambient import product_source
 from .feedback import CoalescingTrigger, FeedbackSpool
 from .reducer import Reducer, observe_source

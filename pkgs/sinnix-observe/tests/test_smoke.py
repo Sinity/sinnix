@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sqlite3
 
 import pytest
@@ -389,9 +388,7 @@ def test_cli_collect_report_offline() -> None:
     assert "gaps_summary" in report
 
 
-def test_agent_gateway_reads_canonical_agentctl_records(
-    tmp_path, monkeypatch
-) -> None:
+def test_agent_gateway_reads_canonical_agentctl_records(tmp_path, monkeypatch) -> None:
     root = tmp_path / "sinnixd"
     jobs = root / "jobs"
     jobs.mkdir(parents=True)
@@ -408,9 +405,17 @@ def test_agent_gateway_reads_canonical_agentctl_records(
                     "project_id": "sinnix",
                     "timeout_seconds": 60,
                     "checkout": {"path": "/realm/worktrees/fixture"},
-                    "contract": {"backend": "codex", "model": "fixture", "effort": "high"},
+                    "contract": {
+                        "backend": "codex",
+                        "model": "fixture",
+                        "effort": "high",
+                    },
                 },
-                "state": {"phase": "succeeded", "terminal": True, "systemd": {"ControlGroup": "/agent.slice/x"}},
+                "state": {
+                    "phase": "succeeded",
+                    "terminal": True,
+                    "systemd": {"ControlGroup": "/agent.slice/x"},
+                },
             }
         )
     )
@@ -471,7 +476,10 @@ def test_gateway_rows_use_agentctl_record_fields() -> None:
                     "effort": "high",
                     "checkout": {"path": "/realm/worktrees/j"},
                     "contract": {"backend": "codex"},
-                    "state": {"phase": "running", "systemd": {"ControlGroup": "/agent.slice/j"}},
+                    "state": {
+                        "phase": "running",
+                        "systemd": {"ControlGroup": "/agent.slice/j"},
+                    },
                 }
             ],
         },

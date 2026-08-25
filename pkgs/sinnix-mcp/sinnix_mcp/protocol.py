@@ -29,7 +29,9 @@ class ErrorCode(StrEnum):
 
 
 def _canonical_json(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode()
 
 
 def _validate_uuid(name: str, value: str) -> None:
@@ -72,7 +74,9 @@ class OpaquePayload:
     digest: str | None = None
     media_type: str | None = None
     size_bytes: int | None = None
-    inline_limit: int = field(default=DEFAULT_INLINE_PAYLOAD_BYTES, repr=False, compare=False)
+    inline_limit: int = field(
+        default=DEFAULT_INLINE_PAYLOAD_BYTES, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         inline_present = self.inline is not None
@@ -82,10 +86,17 @@ class OpaquePayload:
         if inline_present:
             if len(_canonical_json(self.inline)) > self.inline_limit:
                 raise ValueError("inline payload exceeds its configured bound")
-            if any(value is not None for value in (self.digest, self.media_type, self.size_bytes)):
+            if any(
+                value is not None
+                for value in (self.digest, self.media_type, self.size_bytes)
+            ):
                 raise ValueError("inline payload cannot carry opaque artifact metadata")
         else:
-            if self.digest is None or not self.digest.startswith("sha256:") or len(self.digest) != 71:
+            if (
+                self.digest is None
+                or not self.digest.startswith("sha256:")
+                or len(self.digest) != 71
+            ):
                 raise ValueError("opaque payload requires a sha256: digest")
             if not self.media_type:
                 raise ValueError("opaque payload requires a media_type")
@@ -93,7 +104,9 @@ class OpaquePayload:
                 raise ValueError("opaque payload requires a non-negative size_bytes")
 
     @classmethod
-    def bounded(cls, value: Any, *, limit: int = DEFAULT_INLINE_PAYLOAD_BYTES) -> "OpaquePayload":
+    def bounded(
+        cls, value: Any, *, limit: int = DEFAULT_INLINE_PAYLOAD_BYTES
+    ) -> "OpaquePayload":
         return cls(inline=value, inline_limit=limit)
 
     def to_dict(self) -> dict[str, Any]:
@@ -126,7 +139,11 @@ class RequestEnvelope:
             raise ValueError(f"unsupported request schema: {self.schema}")
         _validate_uuid("request_id", self.request_id)
         _validate_uuid("correlation_id", self.correlation_id)
-        if not isinstance(self.operation, str) or not self.operation or "." not in self.operation:
+        if (
+            not isinstance(self.operation, str)
+            or not self.operation
+            or "." not in self.operation
+        ):
             raise ValueError("operation must be a dotted canonical name")
         if not isinstance(self.owner, str) or not isinstance(self.principal, str):
             raise ValueError("request requires owner and principal")
@@ -240,7 +257,11 @@ def _opaque_payload_from_dict(value: Any) -> OpaquePayload:
         digest = value["digest"]
         media_type = value["media_type"]
         size_bytes = value["size_bytes"]
-        if not isinstance(ref, str) or not isinstance(digest, str) or not isinstance(media_type, str):
+        if (
+            not isinstance(ref, str)
+            or not isinstance(digest, str)
+            or not isinstance(media_type, str)
+        ):
             raise ValueError("opaque payload fields must be strings")
         if not isinstance(size_bytes, int) or isinstance(size_bytes, bool):
             raise ValueError("opaque payload size_bytes must be an integer")
@@ -272,9 +293,9 @@ def response_envelope_from_dict(value: Any) -> ResponseEnvelope:
     schema = value["schema"]
     if not isinstance(schema, int) or isinstance(schema, bool):
         raise ValueError("response schema must be an integer")
-    for field in ("request_id", "correlation_id", "owner"):
-        if not isinstance(value[field], str):
-            raise ValueError(f"response {field} must be a string")
+    for field_name in ("request_id", "correlation_id", "owner"):
+        if not isinstance(value[field_name], str):
+            raise ValueError(f"response {field_name} must be a string")
     ok = value["ok"]
     if not isinstance(ok, bool):
         raise ValueError("response ok must be a boolean")
@@ -289,12 +310,18 @@ def response_envelope_from_dict(value: Any) -> ResponseEnvelope:
         raise ValueError("response source_bindings must be a list")
     source_bindings: list[SourceBinding] = []
     for binding in source_values:
-        if not isinstance(binding, Mapping) or set(binding) != {"source_ref", "generation", "root_digest"}:
+        if not isinstance(binding, Mapping) or set(binding) != {
+            "source_ref",
+            "generation",
+            "root_digest",
+        }:
             raise ValueError("response source binding has invalid fields")
         source_ref = binding["source_ref"]
         generation = binding["generation"]
         root_digest = binding["root_digest"]
-        if not all(isinstance(item, str) for item in (source_ref, generation, root_digest)):
+        if not all(
+            isinstance(item, str) for item in (source_ref, generation, root_digest)
+        ):
             raise ValueError("response source binding fields must be strings")
         source_bindings.append(
             SourceBinding(
@@ -318,7 +345,12 @@ def response_envelope_from_dict(value: Any) -> ResponseEnvelope:
             schema=value["schema"],
         )
     error_value = value["error"]
-    if not isinstance(error_value, Mapping) or set(error_value) != {"schema", "code", "message", "details"}:
+    if not isinstance(error_value, Mapping) or set(error_value) != {
+        "schema",
+        "code",
+        "message",
+        "details",
+    }:
         raise ValueError("response error has invalid fields")
     error_schema = error_value["schema"]
     if not isinstance(error_schema, int) or isinstance(error_schema, bool):

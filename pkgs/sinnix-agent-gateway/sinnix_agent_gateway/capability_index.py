@@ -109,9 +109,7 @@ class CapabilityIndexService:
                 "reason": "capability index is unavailable",
             }
         rows = [
-            row
-            for row in index["rows"]
-            if self._matches(row, terms, kind, enabled)
+            row for row in index["rows"] if self._matches(row, terms, kind, enabled)
         ]
         if cursor >= len(rows) and cursor != 0:
             raise CapabilityIndexError("cursor is beyond matching capability rows")

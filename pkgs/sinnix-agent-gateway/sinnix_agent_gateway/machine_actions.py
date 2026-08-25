@@ -3,7 +3,6 @@ from __future__ import annotations
 import http.client
 import json
 import socket
-from pathlib import Path
 from typing import Any, Callable
 
 from .capabilities import Capability, Principal
@@ -30,13 +29,17 @@ class MachineActionService:
         self,
         config: GatewayConfig,
         principal: Principal,
-        connection_factory: Callable[[str], http.client.HTTPConnection] = UnixConnection,
+        connection_factory: Callable[
+            [str], http.client.HTTPConnection
+        ] = UnixConnection,
     ) -> None:
         self.config = config
         self.principal = principal
         self.connection_factory = connection_factory
 
-    def _request(self, method: str, path: str, body: bytes | None = None) -> dict[str, Any]:
+    def _request(
+        self, method: str, path: str, body: bytes | None = None
+    ) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"} if body is not None else {}
         try:
             connection = self.connection_factory(str(self.config.ops_socket_path))
@@ -55,7 +58,9 @@ class MachineActionService:
         try:
             payload = json.loads(payload_bytes)
         except json.JSONDecodeError as exc:
-            raise MachineActionError("ops reducer returned a malformed response") from exc
+            raise MachineActionError(
+                "ops reducer returned a malformed response"
+            ) from exc
         if response.status >= 400:
             message = payload.get("error") if isinstance(payload, dict) else None
             if isinstance(message, str):

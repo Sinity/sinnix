@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from sinnix_agent_gateway.contracts import (
     BASE_TYPED_FAILURES,
     ActionSpec,
@@ -10,9 +9,13 @@ from sinnix_agent_gateway.contracts import (
     ResourceSpec,
     VerbFamily,
 )
-from sinnix_mcp.refs import RefTemplate, ReferenceError, SinnixRef
-from sinnix_agent_gateway.registry import CatalogRegistry, CatalogSearch, RegistryError, REGISTRY
-
+from sinnix_agent_gateway.registry import (
+    REGISTRY,
+    CatalogRegistry,
+    CatalogSearch,
+    RegistryError,
+)
+from sinnix_mcp.refs import ReferenceError, RefTemplate, SinnixRef
 
 RETAINED_OWNER_ACTIONS = {
     "project inspection": "projects.read",
@@ -106,8 +109,8 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
         "shell.run",
         "projects.change",
         "files.change",
-            "beads.change",
-            "beads.changeset",
+        "beads.change",
+        "beads.changeset",
         "agent.for_bead",
         "mcp.change",
         "machine.operate",
@@ -122,7 +125,10 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
     } <= operator_actions
     assert "shell.run" not in observer_actions
     assert "projects.change" not in observer_actions
-    assert observer_catalog["action_catalog_hash"] != operator_catalog["action_catalog_hash"]
+    assert (
+        observer_catalog["action_catalog_hash"]
+        != operator_catalog["action_catalog_hash"]
+    )
     assert {row["kind"] for row in observer_catalog["resources"]} >= {
         "project",
         "checkout",
@@ -144,7 +150,9 @@ def test_catalog_is_principal_filtered_and_hashes_actions() -> None:
     }
 
 
-def test_action_failure_contracts_follow_public_controls_and_owner_capabilities() -> None:
+def test_action_failure_contracts_follow_public_controls_and_owner_capabilities() -> (
+    None
+):
     read_failures = BASE_TYPED_FAILURES | {"deadline"}
 
     assert REGISTRY.action("jobs.query").typed_failures == read_failures
@@ -176,13 +184,28 @@ def test_resource_template_pages_are_principal_scoped_and_cursor_bound() -> None
     assert {row["kind"] for row in first["templates"]}.isdisjoint(
         {row["kind"] for row in second["templates"]}
     )
-    assert all("browser_workspace" != row["kind"] for row in first["templates"] + second["templates"])
+    assert all(
+        "browser_workspace" != row["kind"]
+        for row in first["templates"] + second["templates"]
+    )
     with pytest.raises(RegistryError, match="principal"):
-        REGISTRY.template_page(principal="operator", cursor_key=key, limit=2, cursor=first["next_cursor"])
+        REGISTRY.template_page(
+            principal="operator", cursor_key=key, limit=2, cursor=first["next_cursor"]
+        )
     with pytest.raises(RegistryError, match="principal"):
-        REGISTRY.template_page(principal="operator", cursor_key=b"o" * 32, limit=2, cursor=first["next_cursor"])
+        REGISTRY.template_page(
+            principal="operator",
+            cursor_key=b"o" * 32,
+            limit=2,
+            cursor=first["next_cursor"],
+        )
     with pytest.raises(RegistryError, match="stale"):
-        REGISTRY.template_page(principal="observer", cursor_key=b"r" * 32, limit=2, cursor=first["next_cursor"])
+        REGISTRY.template_page(
+            principal="observer",
+            cursor_key=b"r" * 32,
+            limit=2,
+            cursor=first["next_cursor"],
+        )
 
 
 def test_every_retained_owner_capability_has_a_read_action_and_resource_route() -> None:
@@ -191,7 +214,9 @@ def test_every_retained_owner_capability_has_a_read_action_and_resource_route() 
         assert action.effect is EffectMode.READ, capability
         assert action.verb is VerbFamily.QUERY, capability
         assert action.resource_kinds, capability
-        assert all(REGISTRY.resource(kind) for kind in action.resource_kinds), capability
+        assert all(REGISTRY.resource(kind) for kind in action.resource_kinds), (
+            capability
+        )
 
 
 def test_resource_contracts_and_discovery_are_principal_filtered() -> None:
@@ -218,9 +243,10 @@ def test_resource_contracts_and_discovery_are_principal_filtered() -> None:
     assert [row["kind"] for row in observer_documentation["resources"]] == ["shared"]
     with pytest.raises(RegistryError, match="cannot read resource"):
         registry.resource_contract("operator_only", "observer")
-    assert registry.resource_contract("operator_only", "operator")["resource"][
-        "kind"
-    ] == "operator_only"
+    assert (
+        registry.resource_contract("operator_only", "operator")["resource"]["kind"]
+        == "operator_only"
+    )
 
 
 def test_action_catalog_hash_changes_when_authority_changes() -> None:
@@ -247,9 +273,10 @@ def test_action_catalog_hash_changes_when_authority_changes() -> None:
         output_schema={"type": "object"},
     )
 
-    assert CatalogRegistry((), (base,)).action_catalog_hash() != CatalogRegistry(
-        (), (widened,)
-    ).action_catalog_hash()
+    assert (
+        CatalogRegistry((), (base,)).action_catalog_hash()
+        != CatalogRegistry((), (widened,)).action_catalog_hash()
+    )
 
 
 def test_catalog_contract_resources_preserve_generated_schema_metadata() -> None:
@@ -322,9 +349,26 @@ def test_resource_get_contract_formats_canonical_project_relationships() -> None
 
     assert action["verb"] == "get"
     assert action["resource_kinds"] == [
-        "project", "checkout", "bead", "task_authority", "job", "artifact",
-        "receipt", "result", "machine_unit", "browser_page", "browser_workspace",
-        "process", "terminal", "desktop", "host_file", "mcp_tool", "capture_lane", "capability", "session", "context_snapshot",
+        "project",
+        "checkout",
+        "bead",
+        "task_authority",
+        "job",
+        "artifact",
+        "receipt",
+        "result",
+        "machine_unit",
+        "browser_page",
+        "browser_workspace",
+        "process",
+        "terminal",
+        "desktop",
+        "host_file",
+        "mcp_tool",
+        "capture_lane",
+        "capability",
+        "session",
+        "context_snapshot",
     ]
     assert action["input_schema"]["required"] == ["ref"]
     assert action["input_schema"]["properties"]["projection"]["enum"] == [
@@ -332,9 +376,12 @@ def test_resource_get_contract_formats_canonical_project_relationships() -> None
         "log",
         "result",
     ]
-    assert REGISTRY.reference(
-        "checkout", {"project_id": "sinnix main", "checkout_id": "default"}
-    ) == "sinnix://projects/sinnix%20main/checkouts/default"
+    assert (
+        REGISTRY.reference(
+            "checkout", {"project_id": "sinnix main", "checkout_id": "default"}
+        )
+        == "sinnix://projects/sinnix%20main/checkouts/default"
+    )
 
 
 def test_catalog_search_filters_resource_kind_and_text() -> None:
@@ -345,10 +392,10 @@ def test_catalog_search_filters_resource_kind_and_text() -> None:
         "resources.get",
         "beads.query",
         "projects.context",
-            "beads.change",
-            "beads.changeset",
-            "agent.for_bead",
-        ]
+        "beads.change",
+        "beads.changeset",
+        "agent.for_bead",
+    ]
     assert result["resources"] == [
         {
             "kind": "bead",
@@ -445,7 +492,9 @@ def test_run_and_wait_contracts_are_closed_and_authority_scoped() -> None:
     assert wait["input_schema"]["properties"]["timeout_seconds"]["maximum"] == 300
     with pytest.raises(RegistryError, match="cannot read action"):
         REGISTRY.action_schema("shell.run", "observer")
-    assert REGISTRY.action_schema("agent.for_bead", "agent-control")["action"]["principals"] == ["agent-control", "operator"]
+    assert REGISTRY.action_schema("agent.for_bead", "agent-control")["action"][
+        "principals"
+    ] == ["agent-control", "operator"]
 
 
 def test_catalog_exposes_bead_workflow_without_a_legacy_agent_selector() -> None:
@@ -478,7 +527,10 @@ def test_change_and_operate_contracts_bind_closed_canonical_owner_targets() -> N
     assert change["input_schema"]["properties"]["operation"] == {
         "enum": ["apply_patch", "write"]
     }
-    assert change["input_schema"]["properties"]["preconditions"]["additionalProperties"] is False
+    assert (
+        change["input_schema"]["properties"]["preconditions"]["additionalProperties"]
+        is False
+    )
 
     assert operate["verb"] == "operate"
     assert operate["effect"] == "operate"
@@ -517,18 +569,42 @@ def test_change_and_operate_contracts_bind_closed_canonical_owner_targets() -> N
 def test_collapsed_mutation_contracts_are_operator_only_and_canonical() -> None:
     expected = {
         "files.change": ("change", "files", "files.change", ["host_file"]),
-        "beads.change": ("change", "beads", "beads.write", ["project", "bead", "task_authority"]),
-        "beads.changeset": ("change", "beads", "beads.changeset", ["project", "bead", "task_authority"]),
+        "beads.change": (
+            "change",
+            "beads",
+            "beads.write",
+            ["project", "bead", "task_authority"],
+        ),
+        "beads.changeset": (
+            "change",
+            "beads",
+            "beads.changeset",
+            ["project", "bead", "task_authority"],
+        ),
         "mcp.change": ("change", "mcp-broker", "mcp.call.write", ["mcp_tool"]),
-        "beads.operate": ("operate", "beads", "beads.maintenance", ["project", "task_authority"]),
+        "beads.operate": (
+            "operate",
+            "beads",
+            "beads.maintenance",
+            ["project", "task_authority"],
+        ),
         "desktop.operate": ("operate", "desktop", "desktop.action", ["desktop"]),
         "terminals.operate": ("operate", "terminals", "terminals.action", ["terminal"]),
-        "browser.operate": ("operate", "browser", "browser.action", ["browser_workspace", "browser_page"]),
+        "browser.operate": (
+            "operate",
+            "browser",
+            "browser.action",
+            ["browser_workspace", "browser_page"],
+        ),
     }
 
     for action_name, (verb, owner, route, resources) in expected.items():
         action = REGISTRY.action_schema(action_name, "operator")["action"]
-        assert (action["verb"], action["owner"], action["route"]) == (verb, owner, route)
+        assert (action["verb"], action["owner"], action["route"]) == (
+            verb,
+            owner,
+            route,
+        )
         assert action["resource_kinds"] == resources
         assert action["supports_idempotency"] is True
         assert action["input_schema"]["required"] == [
@@ -560,7 +636,12 @@ def test_query_context_and_events_contracts_bind_existing_read_owners() -> None:
     assert beads["route"] == "beads.query"
     with pytest.raises(RegistryError, match="cannot read action"):
         REGISTRY.action_schema("beads.query", "agent-control")
-    assert beads["input_schema"]["properties"]["parameters"]["properties"]["cursor"]["maxLength"] == 256
+    assert (
+        beads["input_schema"]["properties"]["parameters"]["properties"]["cursor"][
+            "maxLength"
+        ]
+        == 256
+    )
     bead_change = REGISTRY.action_schema("beads.change", "operator")["action"]
     assert bead_change["supports_precondition"] is True
     assert bead_change["input_schema"]["properties"]["preconditions"]["properties"] == {
@@ -569,15 +650,35 @@ def test_query_context_and_events_contracts_bind_existing_read_owners() -> None:
         "expected_assignee": {"type": ["string", "null"], "maxLength": 256},
         "expected_etag": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     }
-    assert "preview_digest" in bead_change["input_schema"]["properties"]["parameters"]["properties"]
+    assert (
+        "preview_digest"
+        in bead_change["input_schema"]["properties"]["parameters"]["properties"]
+    )
     changeset = REGISTRY.action_schema("beads.changeset", "operator")["action"]
     assert changeset["route"] == "beads.changeset"
-    assert changeset["input_schema"]["properties"]["operation"]["enum"] == ["apply", "preview"]
-    assert changeset["input_schema"]["properties"]["parameters"]["properties"]["actions"]["maxItems"] == 128
-    assert changeset["input_schema"]["properties"]["parameters"]["properties"]["on_error"]["enum"] == ["stop", "continue"]
+    assert changeset["input_schema"]["properties"]["operation"]["enum"] == [
+        "apply",
+        "preview",
+    ]
+    assert (
+        changeset["input_schema"]["properties"]["parameters"]["properties"]["actions"][
+            "maxItems"
+        ]
+        == 128
+    )
+    assert changeset["input_schema"]["properties"]["parameters"]["properties"][
+        "on_error"
+    ]["enum"] == ["stop", "continue"]
     maintenance = REGISTRY.action_schema("beads.operate", "operator")["action"]
     assert maintenance["route"] == "beads.maintenance"
-    assert maintenance["input_schema"]["properties"]["operation"]["enum"] == ["backup.create", "backup.list", "backup.restore", "snapshot.publish", "sync.pull", "sync.push"]
+    assert maintenance["input_schema"]["properties"]["operation"]["enum"] == [
+        "backup.create",
+        "backup.list",
+        "backup.restore",
+        "snapshot.publish",
+        "sync.pull",
+        "sync.push",
+    ]
     assert context["verb"] == "context"
     assert context["owner"] == "project-context"
     assert context["route"] == "project_context.context"

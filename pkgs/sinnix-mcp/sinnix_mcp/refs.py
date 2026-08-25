@@ -26,8 +26,16 @@ class SinnixRef:
         parsed = urlsplit(value)
         if parsed.scheme != cls.scheme:
             raise ReferenceError(f"reference must use {cls.scheme}://")
-        if parsed.query or parsed.fragment or parsed.username or parsed.password or parsed.port:
-            raise ReferenceError("resource references cannot contain authority details, query, or fragment")
+        if (
+            parsed.query
+            or parsed.fragment
+            or parsed.username
+            or parsed.password
+            or parsed.port
+        ):
+            raise ReferenceError(
+                "resource references cannot contain authority details, query, or fragment"
+            )
         if parsed.netloc:
             raw_segments = [parsed.netloc, *parsed.path.split("/")]
         else:
@@ -36,9 +44,16 @@ class SinnixRef:
         if not segments:
             raise ReferenceError("resource reference must name a resource")
         if any(segment in {".", ".."} for segment in segments):
-            raise ReferenceError("resource reference cannot contain relative path segments")
-        if any("/" in segment or "\\" in segment or "\x00" in segment for segment in segments):
-            raise ReferenceError("resource reference segments cannot contain path separators or NUL")
+            raise ReferenceError(
+                "resource reference cannot contain relative path segments"
+            )
+        if any(
+            "/" in segment or "\\" in segment or "\x00" in segment
+            for segment in segments
+        ):
+            raise ReferenceError(
+                "resource reference segments cannot contain path separators or NUL"
+            )
         return cls(segments)
 
     def __str__(self) -> str:
@@ -57,7 +72,9 @@ class RefTemplate:
     template: str
 
     def __post_init__(self) -> None:
-        parsed = SinnixRef.parse(self.template.replace("{", "template-").replace("}", ""))
+        parsed = SinnixRef.parse(
+            self.template.replace("{", "template-").replace("}", "")
+        )
         if not self.kind:
             raise ReferenceError("resource kind cannot be empty")
         if not parsed.segments:
@@ -66,7 +83,11 @@ class RefTemplate:
 
     @property
     def segments(self) -> tuple[str, ...]:
-        return tuple(segment for segment in self.template.removeprefix("sinnix://").split("/") if segment)
+        return tuple(
+            segment
+            for segment in self.template.removeprefix("sinnix://").split("/")
+            if segment
+        )
 
     @property
     def variables(self) -> tuple[str, ...]:
@@ -78,7 +99,9 @@ class RefTemplate:
                     raise ReferenceError(f"invalid template variable: {name!r}")
                 variables.append(name)
             elif "{" in segment or "}" in segment:
-                raise ReferenceError(f"template variables must occupy a full segment: {segment!r}")
+                raise ReferenceError(
+                    f"template variables must occupy a full segment: {segment!r}"
+                )
         if len(set(variables)) != len(variables):
             raise ReferenceError(f"template repeats variable(s): {self.template}")
         return tuple(variables)
@@ -103,7 +126,9 @@ class RefTemplate:
         )
         if any(not segment for segment in segments):
             raise ReferenceError(f"cannot format {self.kind}: empty resource segment")
-        return SinnixRef.parse(f"sinnix://{'/'.join(quote(segment, safe='') for segment in segments)}")
+        return SinnixRef.parse(
+            f"sinnix://{'/'.join(quote(segment, safe='') for segment in segments)}"
+        )
 
     def match(self, reference: SinnixRef) -> dict[str, str] | None:
         if len(reference.segments) != len(self.segments):

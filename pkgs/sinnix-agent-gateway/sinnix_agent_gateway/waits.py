@@ -3,10 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-import anyio
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Callable, Mapping
+
+import anyio
 
 
 class WaitTarget(StrEnum):
@@ -32,7 +33,11 @@ class WaitRequest:
             raise ValueError("wait reference is required")
         if not isinstance(self.expected, Mapping):
             raise ValueError("wait expected state must be an object")
-        if not isinstance(self.timeout_seconds, int) or isinstance(self.timeout_seconds, bool) or not 1 <= self.timeout_seconds <= 300:
+        if (
+            not isinstance(self.timeout_seconds, int)
+            or isinstance(self.timeout_seconds, bool)
+            or not 1 <= self.timeout_seconds <= 300
+        ):
             raise ValueError("wait timeout_seconds must be 1-300")
         if (
             not isinstance(self.poll_seconds, (int, float))
@@ -71,7 +76,11 @@ class BoundedWaitService:
             "expected": dict(request.expected),
             "source_revision": evidence.source_revision,
         }
-        return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+        return hashlib.sha256(
+            json.dumps(
+                payload, sort_keys=True, separators=(",", ":"), default=str
+            ).encode()
+        ).hexdigest()
 
     def wait(
         self,
@@ -132,7 +141,9 @@ class BoundedWaitService:
         polls = 0
 
         async def resolve() -> WaitEvidence:
-            return await anyio.to_thread.run_sync(self.resolver, request, abandon_on_cancel=True)
+            return await anyio.to_thread.run_sync(
+                self.resolver, request, abandon_on_cancel=True
+            )
 
         if cancelled is not None and cancelled():
             return {
@@ -143,7 +154,9 @@ class BoundedWaitService:
                 "polls": 0,
                 "evidence": {},
                 "source_revision": "cancelled",
-                "continuation": self._continuation(request, WaitEvidence(False, {}, "cancelled")),
+                "continuation": self._continuation(
+                    request, WaitEvidence(False, {}, "cancelled")
+                ),
             }
         current = await resolve()
         while True:

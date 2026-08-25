@@ -56,13 +56,9 @@
             },
             "status": "open"
           },
-          "includes": [
-            "dependencies"
-          ],
+          "includes": ["dependencies"],
           "limit": 50,
-          "project_ids": [
-            "polylogue"
-          ],
+          "project_ids": ["polylogue"],
           "view": "query"
         }
       },
@@ -76,13 +72,9 @@
             },
             "status": "open"
           },
-          "includes": [
-            "dependencies"
-          ],
+          "includes": ["dependencies"],
           "limit": 50,
-          "project_ids": [
-            "polylogue"
-          ],
+          "project_ids": ["polylogue"],
           "view": "query"
         }
       },
@@ -435,11 +427,7 @@
       "action": "shell.run",
       "cli_input": {
         "action_name": "shell.run",
-        "argv": [
-          "git",
-          "status",
-          "--short"
-        ],
+        "argv": ["git", "status", "--short"],
         "checkout_id": "default",
         "cwd": ".",
         "idempotency_key": "shell-status-example",
@@ -447,11 +435,7 @@
         "timeout_seconds": 300
       },
       "input": {
-        "argv": [
-          "git",
-          "status",
-          "--short"
-        ],
+        "argv": ["git", "status", "--short"],
         "checkout_id": "default",
         "cwd": ".",
         "idempotency_key": "shell-status-example",
