@@ -73,6 +73,10 @@ tokens on merged outcomes.
 - **Readiness lives only in typed dependency edges.** Free-form
   "blocked-on-X" strings in metadata went stale the day the graph changed
   (13 of 42 audited beads). If the validator owns it, prose must not.
+- **Spec weight tracks work size, not completion speed** (corpus-measured,
+  n=956 closed): small bounded fixes close in days with light AC; heavy
+  AC/design marks big work, not dysfunction. Don't impose ceremony on small
+  fixes, and never read a heavy spec as a stalled one.
 - **Oracles must survive their neighbors.** An acceptance criterion binding
   to a file another bead deletes manufactures false reds; name the invariant
   and its owning surface, not a doomed path.
