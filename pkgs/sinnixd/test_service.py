@@ -4440,8 +4440,10 @@ def test_user_systemd_calls_use_finite_timeouts_and_redact_timeout_details(
 ) -> None:
     """Anti-vacuity: omitting subprocess timeouts leaves a control worker held by a stuck user manager."""
     calls: list[dict[str, object]] = []
+    commands: list[list[str]] = []
 
     def fake_run(args, **kwargs):
+        commands.append(list(args))
         calls.append(kwargs)
         return SimpleNamespace(stdout="LoadState=loaded\nActiveState=active\n")
 
@@ -4463,6 +4465,11 @@ def test_user_systemd_calls_use_finite_timeouts_and_redact_timeout_details(
         SYSTEMD_COMMAND_TIMEOUT_SECONDS,
         SYSTEMD_COMMAND_TIMEOUT_SECONDS,
     ]
+    assert {
+        "--property=CPUUsageNSec",
+        "--property=IOReadBytes",
+        "--property=IOWriteBytes",
+    }.issubset(set(commands[1]))
 
     secret = "timeout-command-detail-must-not-escape"
 

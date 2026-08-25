@@ -5,6 +5,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
+import sinnixd.jobs as jobs_module
 from sinnixd.jobs import (
     SYSTEMD_COMMAND_TIMEOUT_SECONDS,
     GenericJobs,
@@ -468,6 +469,42 @@ def test_collected_exit_status_job_uses_capture_completion_marker(
     assert terminal["state"]["phase"] == "succeeded"
     assert terminal["state"]["terminal"]
     assert terminal["state"]["result_evidence"] == "completed"
+
+
+def test_terminal_capture_records_resources_at_the_observed_cgroup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Anti-vacuity: terminal state retains cgroup counters and memory pressure, not only phase."""
+    cgroup = tmp_path / "user.slice" / "job.scope"
+    cgroup.mkdir(parents=True)
+    (cgroup / "memory.pressure").write_text("some avg10=1.00 avg60=2.00\n")
+    monkeypatch.setattr(jobs_module, "CGROUP_ROOT", tmp_path)
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "Result": "exit-code",
+            "ExecMainStatus": "1",
+            "ControlGroup": "/user.slice/job.scope",
+            "CPUUsageNSec": "1234",
+            "IOReadBytes": "5678",
+            "IOWriteBytes": "9012",
+        }
+    )
+    jobs = generic_jobs(tmp_path, systemd)
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
+
+    terminal = jobs.get(started["job_id"])
+
+    assert terminal["state"]["systemd"]["CPUUsageNSec"] == "1234"
+    assert terminal["state"]["resources"] == {
+        "cpu_usage_nsec": 1234,
+        "io_read_bytes": 5678,
+        "io_write_bytes": 9012,
+        "memory_pressure": "some avg10=1.00 avg60=2.00\n",
+    }
 
 
 @pytest.mark.parametrize(

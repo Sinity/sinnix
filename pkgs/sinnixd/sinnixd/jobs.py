@@ -44,6 +44,7 @@ MAX_TERMINAL_EVENT_ENTRIES = 4096
 NOTIFY_TIMEOUT_SECONDS = 2.0
 MAX_EVENT_SPOOL_BYTES = 64 * 1024 * 1024
 SYSTEMD_COMMAND_TIMEOUT_SECONDS = 0.25
+CGROUP_ROOT = Path("/sys/fs/cgroup")
 CANCEL_OUTCOME_RECONCILIATION_GRACE_SECONDS = 300
 MAX_LOG_BYTES = 64_000
 MAX_LOG_ARTIFACT_BYTES = 1_048_576
@@ -404,6 +405,9 @@ class UserSystemdJobs:
                 "--property=ControlGroup",
                 "--property=InvocationID",
                 "--property=MemoryPeak",
+                "--property=CPUUsageNSec",
+                "--property=IOReadBytes",
+                "--property=IOWriteBytes",
             ],
             timeout_seconds=timeout_seconds,
         )
@@ -540,6 +544,33 @@ def _host_pressure() -> Mapping[str, float]:
     except (OSError, ValueError):
         values["memory_full_avg10"] = 1.0
     return values
+
+
+def _terminal_resources(properties: Mapping[str, str]) -> dict[str, Any]:
+    """Capture bounded terminal resource evidence without making it authoritative."""
+    pressure: str | None = None
+    control_group = properties.get("ControlGroup")
+    if isinstance(control_group, str) and control_group.startswith("/"):
+        relative = Path(control_group.lstrip("/"))
+        if ".." not in relative.parts:
+            try:
+                pressure = (CGROUP_ROOT / relative / "memory.pressure").read_text()
+            except OSError:
+                pass
+
+    def integer(name: str) -> int | None:
+        try:
+            value = int(properties.get(name, ""))
+        except (TypeError, ValueError):
+            return None
+        return value if value >= 0 else None
+
+    return {
+        "cpu_usage_nsec": integer("CPUUsageNSec"),
+        "io_read_bytes": integer("IOReadBytes"),
+        "io_write_bytes": integer("IOWriteBytes"),
+        "memory_pressure": pressure,
+    }
 
 
 def _loopback_port_available(port: int) -> bool:
@@ -2637,6 +2668,7 @@ class GenericJobs:
                             **current.state,
                             "phase": "submitted",
                             "terminal": False,
+                            "admitted_at": _timestamp(),
                             "observed_at": _timestamp(),
                         },
                     )
@@ -3334,7 +3366,7 @@ class GenericJobs:
                     "observed_at": _timestamp(),
                 }
         if self._has_schema_v3_native_success(record, properties):
-            return self._with_service_lease_invocation(
+            state = self._with_service_lease_invocation(
                 record,
                 properties,
                 {
@@ -3345,6 +3377,8 @@ class GenericJobs:
                     "observed_at": _timestamp(),
                 },
             )
+            state["resources"] = _terminal_resources(properties)
+            return state
         active = properties.get("ActiveState", "unknown")
         if active in {"active", "activating", "reloading"}:
             phase = "running"
@@ -3369,7 +3403,7 @@ class GenericJobs:
         else:
             phase = "failed"
             terminal = True
-        return self._with_service_lease_invocation(
+        state = self._with_service_lease_invocation(
             record,
             properties,
             {
@@ -3379,6 +3413,9 @@ class GenericJobs:
                 "observed_at": _timestamp(),
             },
         )
+        if state.get("terminal"):
+            state["resources"] = _terminal_resources(properties)
+        return state
 
     @staticmethod
     def _with_service_lease_invocation(
