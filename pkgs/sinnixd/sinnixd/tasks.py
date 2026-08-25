@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
-import hmac
 import json
 import os
 import re
-import secrets
 import threading
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -35,11 +32,6 @@ from .projects import ProjectAdapter, ProjectCatalog
 
 MAX_TASK_OUTPUT_BYTES = 200_000
 MAX_TASK_STDERR_BYTES = 8_192
-MAX_TASK_LIST_SOURCE_BYTES = 8_000_000
-MAX_TASK_LIST_ROWS = 100_000
-MAX_TASK_LIST_CURSOR_BYTES = 512
-MAX_TASK_LIST_SNAPSHOT_BYTES = MAX_TASK_LIST_SOURCE_BYTES
-MAX_TASK_LIST_SNAPSHOTS = 128
 MAX_TASK_MUTATION_INTENT_BYTES = 64_000
 MAX_TASK_MUTATION_RECORD_BYTES = 8_192
 MAX_TASK_MUTATION_RECORDS = 1_024
@@ -49,8 +41,6 @@ FLOCK_EXECUTABLE = "/run/current-system/sw/bin/flock"
 DEFAULT_TASK_STATE_ROOT = Path("/realm/state/tasks")
 TASK_AUTHORITY_RECEIPT = "authority.json"
 TASK_MUTATION_JOURNAL_DIRECTORY = "sinnixd-task-mutations"
-TASK_LIST_SNAPSHOT_DIRECTORY = "sinnixd-task-list-snapshots"
-TASK_LIST_CURSOR_KEY = "sinnixd-task-list-cursor.key"
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _MERGE_SHA_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -117,15 +107,6 @@ class TaskError(ValueError):
         self.code = code
         self.retryable = retryable
         super().__init__(message)
-
-
-class TaskListCursorError(TaskError):
-    """A task-list cursor was malformed, mismatched, or no longer usable."""
-
-    def __init__(self, message: str, *, stale: bool = False):
-        super().__init__(
-            ErrorCode.STALE_CURSOR if stale else ErrorCode.INVALID_ARGUMENT, message
-        )
 
 
 def _canonical_digest(value: Any) -> str:
@@ -915,19 +896,10 @@ class TaskService:
         *,
         principal: str,
     ) -> dict[str, Any]:
-        if operation == "task.list":
-            result = self._list(project, arguments, principal=principal)
-        elif operation == "task.get":
-            self._require_exact(arguments, {"project_id", "task_id"}, operation)
-            result = self._single_task_result(
-                self._run(
-                    project,
-                    ("show", self._task_id(arguments["task_id"])),
-                    readonly=True,
-                ),
-                operation="task.get",
-            )
-        elif operation == "task.reconcile":
+        # task.list and task.get were deliberately removed: reads go through
+        # the task backend CLI (bd) directly; the daemon owns only mutation
+        # identity, journaling, reconcile, and the authority-bound snapshot.
+        if operation == "task.reconcile":
             self._require_exact(arguments, {"project_id"}, operation)
             result = self._start_reconcile(project)
         elif operation == "task.snapshot":
@@ -1146,472 +1118,6 @@ class TaskService:
             job_id,
         )
 
-    def _list(
-        self, project: ProjectAdapter, arguments: dict[str, Any], *, principal: str
-    ) -> dict[str, Any]:
-        limit, order, query = self._list_query(arguments)
-        query_sha256 = _canonical_digest(query)
-        cursor = arguments.get("cursor")
-        if cursor is not None:
-            snapshot_id, offset, source_revision = self._decode_task_list_cursor(
-                project, principal=principal, query_sha256=query_sha256, cursor=cursor
-            )
-            snapshot = self._load_task_list_snapshot(
-                project,
-                snapshot_id,
-                principal=principal,
-                query_sha256=query_sha256,
-                source_revision=source_revision,
-            )
-        else:
-            result = self._run(
-                project,
-                self._list_command(arguments),
-                readonly=True,
-                max_stdout_bytes=MAX_TASK_LIST_SOURCE_BYTES,
-            )
-            if not isinstance(result, list):
-                raise TaskError(
-                    ErrorCode.RESULT_INVALID,
-                    "task backend returned an invalid list result",
-                )
-            rows = result
-            if len(rows) > MAX_TASK_LIST_ROWS or any(
-                not isinstance(row, dict) for row in rows
-            ):
-                raise TaskError(
-                    ErrorCode.RESULT_INVALID, "task backend returned invalid list rows"
-                )
-            snapshot = self._create_task_list_snapshot(
-                project, principal=principal, query_sha256=query_sha256, rows=rows
-            )
-            offset = 0
-
-        rows = snapshot["rows"]
-        if offset > len(rows):
-            raise TaskListCursorError(
-                "task list cursor is beyond its snapshot", stale=True
-            )
-        page_rows = rows[offset : offset + limit]
-        next_offset = offset + len(page_rows)
-        next_cursor = (
-            self._encode_task_list_cursor(
-                project,
-                snapshot,
-                principal=principal,
-                query_sha256=query_sha256,
-                offset=next_offset,
-            )
-            if next_offset < len(rows)
-            else None
-        )
-        page = {
-            "issues": page_rows,
-            "limit": limit,
-            "total": len(rows),
-            "truncated": next_cursor is not None,
-            "next_cursor": next_cursor,
-            "source_revision": snapshot["source_revision"],
-            "coverage": {
-                "state": "complete",
-                "kind": "result_snapshot",
-                "returned": len(rows),
-                "total": len(rows),
-                "total_exact": True,
-                "source_revision": snapshot["source_revision"],
-            },
-            "page": {
-                "kind": "snapshot",
-                "offset": offset,
-                "next_offset": next_offset if next_cursor is not None else None,
-                "complete": next_cursor is None,
-            },
-        }
-        if (
-            len(
-                json.dumps(
-                    page, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-                ).encode()
-            )
-            > MAX_TASK_OUTPUT_BYTES
-        ):
-            raise TaskError(
-                ErrorCode.RESOURCE_EXHAUSTED,
-                "task list page exceeds the response bound",
-            )
-        return page
-
-    def _list_query(
-        self, arguments: dict[str, Any]
-    ) -> tuple[int, dict[str, Any] | None, dict[str, Any]]:
-        self._require_allowed(
-            arguments,
-            {
-                "project_id",
-                "status",
-                "assignee",
-                "label",
-                "limit",
-                "include_closed",
-                "ready",
-                "order",
-                "cursor",
-            },
-            {"project_id"},
-            "task.list",
-        )
-        limit = arguments.get("limit", 100)
-        if (
-            isinstance(limit, bool)
-            or not isinstance(limit, int)
-            or not 1 <= limit <= 1_000
-        ):
-            raise TaskError(
-                ErrorCode.INVALID_ARGUMENT,
-                "limit must be an integer from 1 through 1000",
-            )
-        filters: dict[str, Any] = {}
-        for name in ("status", "assignee", "label"):
-            if name in arguments:
-                filters[name] = self._string(arguments[name], name, 256)
-        for name in ("include_closed", "ready"):
-            value = arguments.get(name, False)
-            if not isinstance(value, bool):
-                raise TaskError(ErrorCode.INVALID_ARGUMENT, f"{name} must be boolean")
-            if value:
-                filters[name] = True
-        order = arguments.get("order")
-        if order is not None:
-            if (
-                not isinstance(order, Mapping)
-                or set(order) - {"field", "reverse"}
-                or "field" not in order
-            ):
-                raise TaskError(
-                    ErrorCode.INVALID_ARGUMENT,
-                    "order must contain a supported field and optional reverse",
-                )
-            field_name = order["field"]
-            if not isinstance(field_name, str) or field_name not in {
-                "priority",
-                "created",
-                "updated",
-                "closed",
-                "status",
-                "id",
-                "title",
-                "type",
-                "assignee",
-            }:
-                raise TaskError(
-                    ErrorCode.INVALID_ARGUMENT, "order field is unsupported"
-                )
-            reverse = order.get("reverse", False)
-            if not isinstance(reverse, bool):
-                raise TaskError(ErrorCode.INVALID_ARGUMENT, "order is malformed")
-            order = {"field": field_name, "reverse": reverse}
-        if "cursor" in arguments:
-            cursor = arguments["cursor"]
-            if not isinstance(cursor, str) or not cursor:
-                raise TaskError(
-                    ErrorCode.INVALID_ARGUMENT, "task list cursor must be a string"
-                )
-            if len(cursor.encode()) > MAX_TASK_LIST_CURSOR_BYTES:
-                raise TaskError(
-                    ErrorCode.INVALID_ARGUMENT, "task list cursor exceeds its bound"
-                )
-        query = {
-            "project_id": arguments["project_id"],
-            "filters": filters,
-            "limit": limit,
-            "order": order,
-        }
-        return limit, order, query
-
-    def _list_command(self, arguments: dict[str, Any]) -> tuple[str, ...]:
-        _, order, _ = self._list_query(arguments)
-        command = ["list", "--flat"]
-        for name, flag in (("include_closed", "--all"), ("ready", "--ready")):
-            if arguments.get(name, False):
-                command.append(flag)
-        for name, flag in (
-            ("status", "--status"),
-            ("assignee", "--assignee"),
-            ("label", "--label"),
-        ):
-            if name in arguments:
-                command.extend((flag, self._string(arguments[name], name, 256)))
-        if order is not None:
-            command.extend(("--sort", order["field"]))
-            if order["reverse"]:
-                command.append("--reverse")
-        command.extend(("--limit", "0", "--max-rows", str(MAX_TASK_LIST_ROWS)))
-        return tuple(command)
-
-    def _task_list_cursor_key(self, project: ProjectAdapter) -> bytes:
-        path = self._authority(project).root / TASK_LIST_CURSOR_KEY
-        try:
-            key = path.read_bytes()
-        except FileNotFoundError:
-            key = secrets.token_bytes(32)
-            self._write_bounded(path, key)
-        if key.endswith(b"\n"):
-            key = key[:-1]
-        if len(key) != 32:
-            raise TaskError(
-                ErrorCode.OPERATION_FAILED, "task list cursor key is malformed"
-            )
-        return key
-
-    def _encode_task_list_cursor(
-        self,
-        project: ProjectAdapter,
-        snapshot: Mapping[str, Any],
-        *,
-        principal: str,
-        query_sha256: str,
-        offset: int,
-    ) -> str:
-        payload = json.dumps(
-            {
-                "schema": 1,
-                "snapshot_id": snapshot["snapshot_id"],
-                "offset": offset,
-                "principal": principal,
-                "query_sha256": query_sha256,
-                "source_revision": snapshot["source_revision"],
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-        encoded = base64.urlsafe_b64encode(payload).decode().rstrip("=")
-        signature = hmac.new(
-            self._task_list_cursor_key(project), encoded.encode(), hashlib.sha256
-        ).digest()
-        cursor = (
-            encoded + "." + base64.urlsafe_b64encode(signature).decode().rstrip("=")
-        )
-        if len(cursor.encode()) > MAX_TASK_LIST_CURSOR_BYTES:
-            raise TaskError(
-                ErrorCode.RESOURCE_EXHAUSTED, "task list cursor exceeds its bound"
-            )
-        return cursor
-
-    def _decode_task_list_cursor(
-        self,
-        project: ProjectAdapter,
-        *,
-        principal: str,
-        query_sha256: str,
-        cursor: Any,
-    ) -> tuple[str, int, str]:
-        if (
-            not isinstance(cursor, str)
-            or not cursor
-            or len(cursor.encode()) > MAX_TASK_LIST_CURSOR_BYTES
-        ):
-            raise TaskListCursorError("task list cursor is malformed")
-        encoded, separator, supplied_signature = cursor.partition(".")
-        if not separator or not encoded or not supplied_signature:
-            raise TaskListCursorError("task list cursor is malformed")
-        expected_signature = (
-            base64.urlsafe_b64encode(
-                hmac.new(
-                    self._task_list_cursor_key(project),
-                    encoded.encode(),
-                    hashlib.sha256,
-                ).digest()
-            )
-            .decode()
-            .rstrip("=")
-        )
-        if not hmac.compare_digest(supplied_signature, expected_signature):
-            raise TaskListCursorError("task list cursor signature is invalid")
-        try:
-            payload = json.loads(
-                base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
-            )
-        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise TaskListCursorError("task list cursor is malformed") from error
-        if (
-            not isinstance(payload, dict)
-            or set(payload)
-            != {
-                "schema",
-                "snapshot_id",
-                "offset",
-                "principal",
-                "query_sha256",
-                "source_revision",
-            }
-            or payload["schema"] != 1
-        ):
-            raise TaskListCursorError("task list cursor is malformed")
-        snapshot_id = payload["snapshot_id"]
-        offset = payload["offset"]
-        cursor_principal = payload["principal"]
-        cursor_query_sha256 = payload["query_sha256"]
-        source_revision = payload["source_revision"]
-        if (
-            not isinstance(snapshot_id, str)
-            or not re.fullmatch(r"[0-9a-f]{32}", snapshot_id)
-            or isinstance(offset, bool)
-            or not isinstance(offset, int)
-            or offset < 0
-            or not isinstance(cursor_principal, str)
-            or not cursor_principal
-            or not isinstance(cursor_query_sha256, str)
-            or not _SHA256_RE.fullmatch(cursor_query_sha256)
-            or not isinstance(source_revision, str)
-            or not _SHA256_RE.fullmatch(source_revision)
-        ):
-            raise TaskListCursorError("task list cursor is malformed")
-        if cursor_principal != principal:
-            raise TaskListCursorError(
-                "task list cursor does not belong to this principal"
-            )
-        if cursor_query_sha256 != query_sha256:
-            raise TaskListCursorError("task list cursor does not match this query")
-        return snapshot_id, offset, source_revision
-
-    def _create_task_list_snapshot(
-        self,
-        project: ProjectAdapter,
-        *,
-        principal: str,
-        query_sha256: str,
-        rows: list[Any],
-    ) -> dict[str, Any]:
-        source_revision = _canonical_digest(rows)
-        snapshot_id = secrets.token_hex(16)
-        snapshot = {
-            "schema": 1,
-            "snapshot_id": snapshot_id,
-            "principal": principal,
-            "project_id": project.project_id,
-            "query_sha256": query_sha256,
-            "source_revision": source_revision,
-            "rows": rows,
-        }
-        encoded = json.dumps(
-            snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-        ).encode()
-        if len(encoded) + 1 > MAX_TASK_LIST_SNAPSHOT_BYTES:
-            raise TaskError(
-                ErrorCode.RESOURCE_EXHAUSTED, "task list snapshot exceeds its bound"
-            )
-        root = self._authority(project).root / TASK_LIST_SNAPSHOT_DIRECTORY
-        _ensure_durable_directory(root)
-        snapshots = sorted(
-            root.glob("*.json"), key=lambda path: path.stat().st_mtime_ns
-        )
-        for old in snapshots[: max(0, len(snapshots) - MAX_TASK_LIST_SNAPSHOTS + 1)]:
-            old.unlink(missing_ok=True)
-        self._write_bounded(
-            self._task_list_snapshot_path(project, snapshot_id), encoded
-        )
-        return snapshot
-
-    def _load_task_list_snapshot(
-        self,
-        project: ProjectAdapter,
-        snapshot_id: str,
-        *,
-        principal: str,
-        query_sha256: str,
-        source_revision: str,
-    ) -> dict[str, Any]:
-        snapshot = self._read_task_list_snapshot(
-            self._task_list_snapshot_path(project, snapshot_id)
-        )
-        if snapshot["principal"] != principal:
-            raise TaskListCursorError(
-                "task list cursor does not belong to this principal"
-            )
-        if snapshot["project_id"] != project.project_id:
-            raise TaskListCursorError(
-                "task list cursor does not belong to this project"
-            )
-        if snapshot["query_sha256"] != query_sha256:
-            raise TaskListCursorError("task list cursor does not match this query")
-        if snapshot["source_revision"] != source_revision:
-            raise TaskListCursorError(
-                "task list cursor source revision is stale", stale=True
-            )
-        return snapshot
-
-    def _read_task_list_snapshot(self, path: Path) -> dict[str, Any]:
-        try:
-            encoded = path.read_bytes()
-            if len(encoded) > MAX_TASK_LIST_SNAPSHOT_BYTES:
-                raise ValueError
-            snapshot = json.loads(encoded)
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
-            raise TaskListCursorError(
-                "task list cursor snapshot is unavailable", stale=True
-            ) from error
-        if (
-            not isinstance(snapshot, dict)
-            or set(snapshot)
-            != {
-                "schema",
-                "snapshot_id",
-                "principal",
-                "project_id",
-                "query_sha256",
-                "source_revision",
-                "rows",
-            }
-            or snapshot["schema"] != 1
-        ):
-            raise TaskListCursorError(
-                "task list cursor snapshot is malformed", stale=True
-            )
-        if not isinstance(snapshot["snapshot_id"], str) or not re.fullmatch(
-            r"[0-9a-f]{32}", snapshot["snapshot_id"]
-        ):
-            raise TaskListCursorError(
-                "task list cursor snapshot is malformed", stale=True
-            )
-        if (
-            not isinstance(snapshot["principal"], str)
-            or not isinstance(snapshot["project_id"], str)
-            or not isinstance(snapshot["query_sha256"], str)
-            or not isinstance(snapshot["source_revision"], str)
-            or not _SHA256_RE.fullmatch(snapshot["query_sha256"])
-            or not _SHA256_RE.fullmatch(snapshot["source_revision"])
-            or not isinstance(snapshot["rows"], list)
-            or len(snapshot["rows"]) > MAX_TASK_LIST_ROWS
-            or any(not isinstance(row, dict) for row in snapshot["rows"])
-        ):
-            raise TaskListCursorError(
-                "task list cursor snapshot is malformed", stale=True
-            )
-        if _canonical_digest(snapshot["rows"]) != snapshot["source_revision"]:
-            raise TaskListCursorError(
-                "task list cursor snapshot content is stale", stale=True
-            )
-        return snapshot
-
-    def _task_list_snapshot_path(
-        self, project: ProjectAdapter, snapshot_id: str
-    ) -> Path:
-        if not re.fullmatch(r"[0-9a-f]{32}", snapshot_id):
-            raise TaskListCursorError("task list cursor snapshot is malformed")
-        return (
-            self._authority(project).root
-            / TASK_LIST_SNAPSHOT_DIRECTORY
-            / f"{snapshot_id}.json"
-        )
-
-    @staticmethod
-    def _write_bounded(path: Path, encoded: bytes) -> None:
-        if len(encoded) > MAX_TASK_LIST_SNAPSHOT_BYTES:
-            raise TaskError(
-                ErrorCode.RESOURCE_EXHAUSTED, "task list state exceeds its bound"
-            )
-        TaskMutationJournal._write(path, encoded)
-
     def _project(self, arguments: dict[str, Any]) -> ProjectAdapter:
         project_id = self._string(arguments.get("project_id"), "project_id", 128)
         try:
@@ -1736,19 +1242,6 @@ class TaskService:
                 ErrorCode.RESULT_INVALID, "task backend omitted the created task"
             )
         return value
-
-    @staticmethod
-    def _single_task_result(result: Any, *, operation: str) -> dict[str, Any]:
-        if (
-            not isinstance(result, list)
-            or len(result) != 1
-            or not isinstance(result[0], dict)
-        ):
-            raise TaskError(
-                ErrorCode.RESULT_INVALID,
-                f"task backend returned an invalid {operation} result",
-            )
-        return result[0]
 
     @staticmethod
     def _task_ref(project_id: str, task_id: str) -> str:
