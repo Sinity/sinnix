@@ -250,9 +250,23 @@ class TypedJobContracts:
             "bead_ref", "project_ref", "checkout_ref", "task_revision",
             "task_etag", "claim_ref", "claim_receipt", "request_id", "assignment_ref",
         }
-        if not isinstance(value, Mapping) or set(value) != expected:
+        allowed = expected | {"write_scope"}
+        if not isinstance(value, Mapping) or (set(value) != expected and set(value) != allowed):
             raise ContractError("agent bead binding is malformed")
         binding = dict(value)
+        scope = binding.get("write_scope")
+        if scope is not None and (
+            not isinstance(scope, list)
+            or not scope
+            or any(
+                not isinstance(path, str)
+                or not path
+                or path.startswith("/")
+                or ".." in Path(path).parts
+                for path in scope
+            )
+        ):
+            raise ContractError("agent Beads write scope is malformed")
         project_ref = f"sinnix://projects/{checkout.project_id}"
         checkout_ref = f"{project_ref}/checkouts/{checkout.checkout_id}"
         bead_prefix = f"{project_ref}/beads/"
