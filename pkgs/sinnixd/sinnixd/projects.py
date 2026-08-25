@@ -1333,6 +1333,39 @@ def validate_agent_environment_descriptors(roots: Iterable[Path]) -> None:
             project = raw.get("project")
             if isinstance(project, Mapping) and isinstance(project.get("id"), str):
                 project_name = project["id"]
+            if isinstance(raw.get("workspace"), Mapping):
+                environment = raw.get("environment")
+                command = (
+                    environment.get("command")
+                    if isinstance(environment, Mapping)
+                    else None
+                )
+                preflight = (
+                    environment.get("preflight")
+                    if isinstance(environment, Mapping)
+                    else None
+                )
+                invalid_environment = False
+                if not (
+                    isinstance(command, list)
+                    and command
+                    and all(isinstance(value, str) and value for value in command)
+                ):
+                    diagnostics.append(
+                        f"{project_name}: {descriptor} must declare a non-empty environment.command"
+                    )
+                    invalid_environment = True
+                if not (
+                    isinstance(preflight, list)
+                    and preflight
+                    and all(isinstance(value, str) and value for value in preflight)
+                ):
+                    diagnostics.append(
+                        f"{project_name}: {descriptor} must declare a non-empty environment.preflight"
+                    )
+                    invalid_environment = True
+                if invalid_environment:
+                    continue
             adapter = load_project_adapter(root)
         except (
             OSError,
@@ -1346,14 +1379,6 @@ def validate_agent_environment_descriptors(roots: Iterable[Path]) -> None:
             continue
         if adapter.workspace is None:
             continue
-        if not adapter.environment.command:
-            diagnostics.append(
-                f"{adapter.project_id}: {descriptor} must declare a non-empty environment.command"
-            )
-        if not adapter.environment.preflight:
-            diagnostics.append(
-                f"{adapter.project_id}: {descriptor} must declare a non-empty environment.preflight"
-            )
     if diagnostics:
         raise ProjectConfigError(
             "agent-capable project environment contract failed:\n"

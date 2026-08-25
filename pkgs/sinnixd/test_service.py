@@ -7845,12 +7845,16 @@ def test_agent_environment_preflight_timeout_is_distinct_and_prevents_native_run
         "result_path": str(results / "fixture.result"),
     }
 
-    def timeout(*_args: object, **_kwargs: object) -> None:
+    observed: dict[str, object] = {}
+
+    def timeout(*_args: object, **kwargs: object) -> None:
+        observed.update(kwargs)
         raise subprocess.TimeoutExpired("fixture-environment", 30)
 
     monkeypatch.setattr(runner_module.subprocess, "run", timeout)
     with pytest.raises(RunnerError, match="agent-preflight-timeout.*30 seconds"):
         _run_agent(payload, tmp_path, native_runner=runner, state_root=state)
+    assert observed["timeout"] == 30
     assert not (results / "fixture.result").exists()
 
 
