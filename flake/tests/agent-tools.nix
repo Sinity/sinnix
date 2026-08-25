@@ -762,9 +762,14 @@ in
                     parameters={},
                 )
                 record = jobs.store.load(started["job_id"])
-                expected = (*project.environment.command, *operation.command)
+                expected = project.environment.command_for(
+                    operation.command,
+                    overrides={"TMPDIR": str(jobs.store.scratch_path_for(operation.scratch, record.job_id))},
+                )
+                declared_command, _ = jobs.store.declared_launch(record.job_id)
                 assert started["kind"] == "declared-operation"
                 assert record.spec.timeout_seconds == 7200
+                assert declared_command == expected
                 assert systemd.started[0]["command"] == expected
                 assert systemd.started[0]["timeout_seconds"] == 7200
             PY
