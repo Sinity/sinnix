@@ -142,7 +142,34 @@ def _run_agent(
         raise RunnerError("attested agent result artifact is invalid")
     if not native_runner.is_file() or not os.access(native_runner, os.X_OK):
         raise RunnerError("native agent runner is unavailable")
+    environment_command = value.get("environment_command")
+    environment_preflight = value.get("environment_preflight")
+    if not isinstance(environment_command, list) or not environment_command or any(
+        not isinstance(item, str) or not item for item in environment_command
+    ):
+        raise RunnerError(
+            "typed agent project environment is missing; declare a non-empty environment.command"
+        )
+    if not isinstance(environment_preflight, list) or not environment_preflight or any(
+        not isinstance(item, str) or not item for item in environment_preflight
+    ):
+        raise RunnerError(
+            "typed agent project environment is missing; declare a non-empty environment.preflight"
+        )
+    preflight_command = [*environment_command, *environment_preflight]
+    try:
+        preflight = subprocess.run(preflight_command, cwd=checkout, check=False)
+    except OSError as error:
+        raise RunnerError(
+            "project environment preflight is unavailable; repair environment.command and retry"
+        ) from error
+    if preflight.returncode != 0:
+        raise RunnerError(
+            "project environment preflight failed before agent implementation "
+            f"(exit status {preflight.returncode}); repair the declared environment and retry"
+        )
     command = [
+        *environment_command,
         str(native_runner),
         "--agent",
         value["backend"],
