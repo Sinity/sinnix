@@ -1747,6 +1747,7 @@ class GenericJobs:
         parameters: Mapping[str, Any],
         checkout: RegisteredCheckout | None = None,
         principal: str = "operator",
+        contract: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if principal not in {"agent-control", "operator"}:
             raise ValueError("declared operations require agent-control or operator principal")
@@ -1754,7 +1755,7 @@ class GenericJobs:
             raise ValueError("declared job checkout belongs to another project")
         with self._admission_lock:
             return self._start_declared_locked(
-                project, operation, correlation_id, principal, parameters, checkout, ()
+                project, operation, correlation_id, principal, parameters, checkout, (), contract or {}
             )
 
     def _start_declared_locked(
@@ -1766,6 +1767,7 @@ class GenericJobs:
         parameters: Mapping[str, Any],
         checkout: RegisteredCheckout | None,
         lineage: tuple[str, ...],
+        contract: Mapping[str, Any],
     ) -> dict[str, Any]:
         if operation.name in lineage:
             raise ValueError("declared operation dependency cycle")
@@ -1778,6 +1780,7 @@ class GenericJobs:
                 {},
                 checkout,
                 (*lineage, operation.name),
+                {},
             )
             for name in operation.dependencies
         )
@@ -1870,6 +1873,7 @@ class GenericJobs:
                 principal=principal,
                 timeout_seconds=operation.timeout_seconds,
                 checkout=checkout.to_dict() if checkout is not None else None,
+                contract=dict(contract),
                 result_kind={"exit": "exit-status", "json": "json", "pytest": "pytest"}[operation.result],
                 pool=operation.pool, exclusive_keys=operation.exclusive_keys, dependency_job_ids=dependency_ids,
                 coalesce_key=coalesce_key, cache_key=cache_key, estimate_key=estimate_key, estimate_memory_bytes=estimate,
