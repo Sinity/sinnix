@@ -647,7 +647,7 @@ class SinnixdService:
                 "result",
             }
             if not required <= set(arguments) or set(arguments) - (
-                required | {"bead_binding"}
+                required | {"bead_binding", "parameters"}
             ):
                 raise ValueError(
                     "job.agent.start requires the complete typed agent contract"
@@ -669,6 +669,7 @@ class SinnixdService:
                     ),
                     result=self._job_argument(arguments, "result"),
                     bead_binding=arguments.get("bead_binding"),
+                    parameters=arguments.get("parameters"),
                 )
             )
         if operation == "job.get":
