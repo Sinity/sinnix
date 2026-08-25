@@ -228,6 +228,7 @@ class ProjectEnvironment:
     command: tuple[str, ...]
     inherit: tuple[str, ...]
     unset: tuple[str, ...]
+    preflight: tuple[str, ...] = ()
 
     def values(self) -> dict[str, str]:
         return build_environment(inherit=self.inherit, unset=self.unset)
@@ -943,6 +944,11 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             environment.get("inherit"), "environment.inherit"
         ),
         unset=_optional_string_list(environment.get("unset"), "environment.unset"),
+        preflight=(
+            _string_list(environment["preflight"], "environment.preflight")
+            if "preflight" in environment
+            else ()
+        ),
     )
 
     raw_workspace = raw.get("workspace")
