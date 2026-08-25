@@ -1051,7 +1051,7 @@ class ProjectCatalog:
 
 
 def validate_agent_environment_descriptors(roots: Iterable[Path]) -> None:
-    """Require a declared command and preflight for every checkout-capable project."""
+    """Require a declared preflight for every checkout-capable project."""
     diagnostics: list[str] = []
     for root in roots:
         descriptor = root / ".agentctl" / "project.toml"

@@ -534,7 +534,7 @@ in
     };
 
     test-system = {
-      description = "Test configuration without applying it to the system (nh os test)";
+      description = "Build and activate a temporary host configuration (nh os test)";
       script = ''
         ${resolveFlakeDir}
         ${rebuildLock "test-system"}
@@ -558,7 +558,7 @@ in
     };
 
     boot = {
-      description = "Build + set boot default, activate on next reboot (nh os boot)";
+      description = "Build and set the boot default for activation on the next reboot (nh os boot)";
       script = ''
         ${resolveFlakeDir}
         ${rebuildLock "boot"}
