@@ -65,7 +65,7 @@
             ];
           };
           approvedManifestHash = "78d04f9a59828ec9c5283058b5b4f39f9fbdf4bc6ee2b2db22861221e51fc87e";
-          approvedActionCatalogHash = "738942447310f3d10a9c09046c1572e1bc408f0f620bba88d4ee37de9182c06e";
+          approvedActionCatalogHash = "1290616ae8088b94b609af056d1b7314989b216bdaad678423204b6bc47ff93e";
         };
       };
     };
