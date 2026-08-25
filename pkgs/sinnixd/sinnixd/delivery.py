@@ -151,6 +151,16 @@ class GitHubDelivery:
         self._verified_workspace(workspace_id, job_id, packet_job_id)
         status = self.review_status(workspace_id)
         review = status["review"]
+        if review["state"] == "MERGED":
+            _workspace, _project, receipt = self._verified_workspace(
+                workspace_id, job_id, packet_job_id
+            )
+            return {
+                **status,
+                "landed": True,
+                "already_landed": True,
+                "completion": receipt,
+            }
         if (
             review["state"] != "OPEN"
             or review["isDraft"]
