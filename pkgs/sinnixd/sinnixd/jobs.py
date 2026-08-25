@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import selectors
 import shutil
 import socket
@@ -14,7 +15,6 @@ import struct
 import subprocess
 import sys
 import time
-import re
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -2051,7 +2051,9 @@ class GenericJobStore:
         if record.state.get("terminal"):
             self._set_active_record(record.job_id, active=False)
 
-    def write_handoff(self, record: GenericJobRecord, payload: Mapping[str, Any]) -> None:
+    def write_handoff(
+        self, record: GenericJobRecord, payload: Mapping[str, Any]
+    ) -> None:
         if record.handoff_path is None:
             raise JobRecordError("job handoff artifact is unavailable")
         if record.handoff_path.parent != self.handoffs_root.resolve():
@@ -2987,9 +2989,7 @@ class GenericJobs:
                         check=False,
                     )
                     if committed.returncode != 0:
-                        raise OSError(
-                            committed.stderr.strip() or "git commit failed"
-                        )
+                        raise OSError(committed.stderr.strip() or "git commit failed")
                     head = subprocess.run(
                         ["git", "rev-parse", "HEAD"],
                         cwd=checkout_path,

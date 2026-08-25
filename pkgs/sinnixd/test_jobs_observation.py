@@ -587,7 +587,9 @@ def test_timeout_preserves_dirty_agent_work_and_writes_handoff(
     subprocess.run(
         ["git", "-C", str(checkout), "commit", "--quiet", "-m", "base"], check=True
     )
-    monkeypatch.setattr(jobs_module, "revalidate_registered_checkout", lambda _: checkout)
+    monkeypatch.setattr(
+        jobs_module, "revalidate_registered_checkout", lambda _: checkout
+    )
     systemd = FakeSystemdJobs(
         properties={
             "LoadState": "loaded",
