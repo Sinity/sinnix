@@ -98,7 +98,7 @@ def send_frame(connection: socket.socket, value: dict[str, Any]) -> None:
 
 
 def _response_timeout_seconds(request: RequestEnvelope) -> float:
-    if request.operation != "job.wait":
+    if request.operation not in {"job.wait", "plan.wait"}:
         return CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS.get(
             request.operation, CONNECTION_TIMEOUT_SECONDS
         )
