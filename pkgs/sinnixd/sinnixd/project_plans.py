@@ -548,45 +548,52 @@ class ProjectPlanExecutor:
         principal: str,
     ) -> None:
         manifest_by_id = {node["node_id"]: node for node in record["nodes"]}
-        for node in nodes:
-            manifest = manifest_by_id[node["node_id"]]
-            if manifest["job_id"] is not None:
-                continue
-            reusable = self._reusable_job(record, manifest)
-            if reusable is not None:
-                manifest["job_id"] = reusable
-                manifest["reused"] = True
-                self.store.save(record)
-                continue
-            dependency_ids = tuple(
-                manifest_by_id[dependency]["job_id"]
-                for dependency in node["dependencies"]
-            )
-            if any(not isinstance(job_id, str) for job_id in dependency_ids):
-                raise ProjectPlanError(
-                    "plan node dependencies were not materialized in topological order"
+        pending = {node["node_id"]: node for node in nodes}
+        while pending:
+            ready = [
+                node
+                for node in pending.values()
+                if all(
+                    isinstance(manifest_by_id[dependency]["job_id"], str)
+                    for dependency in node["dependencies"]
                 )
-            response = self.jobs.start_declared(
-                project=project,
-                operation=project.operation(node["operation"]),
-                correlation_id=correlation_id,
-                parameters=node["payload"],
-                checkout=checkout,
-                principal=principal,
-                contract={
-                    "plan": {
-                        "plan_id": record["plan_id"],
-                        "node_id": node["node_id"],
-                        "input_generation": node["input_generation"],
-                        "project_digest": project.digest,
-                    }
-                },
-                dependency_job_ids=dependency_ids,
-                input_generation=node["input_generation"],
-                plan_node=True,
-            )
-            manifest["job_id"] = response["job_id"]
-            self.store.save(record)
+            ]
+            if not ready:
+                raise ProjectPlanError("validated plan has no materializable node")
+            for node in sorted(ready, key=lambda item: item["node_id"]):
+                manifest = manifest_by_id[node["node_id"]]
+                if manifest["job_id"] is None:
+                    reusable = self._reusable_job(record, manifest)
+                    if reusable is not None:
+                        manifest["job_id"] = reusable
+                        manifest["reused"] = True
+                    else:
+                        dependency_ids = tuple(
+                            manifest_by_id[dependency]["job_id"]
+                            for dependency in node["dependencies"]
+                        )
+                        response = self.jobs.start_declared(
+                            project=project,
+                            operation=project.operation(node["operation"]),
+                            correlation_id=correlation_id,
+                            parameters=node["payload"],
+                            checkout=checkout,
+                            principal=principal,
+                            contract={
+                                "plan": {
+                                    "plan_id": record["plan_id"],
+                                    "node_id": node["node_id"],
+                                    "input_generation": node["input_generation"],
+                                    "project_digest": project.digest,
+                                }
+                            },
+                            dependency_job_ids=dependency_ids,
+                            input_generation=node["input_generation"],
+                            plan_node=True,
+                        )
+                        manifest["job_id"] = response["job_id"]
+                    self.store.save(record)
+                pending.pop(node["node_id"])
         self._reconcile(record)
 
     def _reconcile(self, record: dict[str, Any]) -> None:
@@ -669,10 +676,7 @@ class ProjectPlanExecutor:
                 or prior["project_digest"] != record["project_digest"]
             ):
                 continue
-            if (
-                prior["checkout"] != record["checkout"]
-                or prior["input_generation"] != record["input_generation"]
-            ):
+            if prior["checkout"] != record["checkout"]:
                 continue
             for prior_node in prior["nodes"]:
                 if (

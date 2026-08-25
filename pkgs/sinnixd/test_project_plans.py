@@ -174,6 +174,21 @@ def test_ready_nodes_run_concurrently_and_keep_dependency_job_ids(
     assert child.spec.exclusive_keys == ()
 
 
+def test_plan_accepts_nodes_before_their_dependencies(tmp_path: Path) -> None:
+    plans, systemd, jobs = plan_fixture(tmp_path)
+    result = submit(
+        plans,
+        [
+            {"id": "child", "operation": "prepare", "depends_on": ["parent"]},
+            {"id": "parent", "operation": "prepare"},
+        ],
+    )
+    nodes = {node["node_id"]: node for node in result["nodes"]}
+    child = jobs.store.load(nodes["child"]["job_id"])
+    assert child.spec.dependency_job_ids == (nodes["parent"]["job_id"],)
+    assert [item["unit"] for item in systemd.started]
+
+
 def test_dependency_failure_blocks_downstream_node(tmp_path: Path) -> None:
     plans, systemd, jobs = plan_fixture(tmp_path)
     result = submit(
@@ -214,6 +229,14 @@ def test_exact_completed_nodes_are_reused_and_mismatches_are_rejected(
         [{"id": "n", "operation": "node", "parameters": {"value": "two"}}],
     )
     assert changed_payload["nodes"][0]["job_id"] != node["job_id"]
+
+    aggregate_changed_input = dict(nodes[0])
+    aggregate_changed_input["input_generation"] = "gen-1"
+    aggregate_changed = submit(
+        plans, [aggregate_changed_input], generation="aggregate-gen-2"
+    )
+    assert aggregate_changed["nodes"][0]["job_id"] == node["job_id"]
+    assert aggregate_changed["nodes"][0]["reused"] is True
 
 
 def test_interrupted_manifest_reconciles_to_existing_node_job(tmp_path: Path) -> None:
