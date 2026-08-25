@@ -37,6 +37,7 @@
         rebuildServicePath
         localInputOverrideArgs
         resolveFlakeDir
+        agentEnvironmentContract
         avoidRepoCwdForActivation
         switchFallback
         ;
@@ -49,6 +50,7 @@
           ${avoidRepoCwdForActivation}
           ${localInputOverrideArgs}
           ${commandRegistry.rebuildDefaultArgs}
+          ${agentEnvironmentContract}
           ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
 
           _rebuild_status=0
@@ -124,6 +126,7 @@
           ${localInputOverrideArgs}
           ${commandRegistry.rebuildDefaultArgs}
 
+          # build-vm builds a separate guest and does not activate the live host.
           # Not `exec`: sudo may close inherited fds (incl. the lock fd held
           # above), so the lock must stay held by this shell until the build
           # actually completes rather than being handed off across the hop.

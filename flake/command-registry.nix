@@ -112,6 +112,22 @@ let
       done < <(sinnix-rebuild-override consume)
     fi
   '';
+  agentEnvironmentContract = ''
+    mapfile -t agentctl_project_roots < <(
+      ${pkgs.nix}/bin/nix eval \
+        "$_flake_dir#nixosConfigurations.sinnix-prime.config.sinnix.services.sinnixd.projectRoots" \
+        --json \
+        --impure \
+        "''${nix_override_args[@]}" \
+        | ${pkgs.jq}/bin/jq -r '.[]'
+    )
+    agentctl_environment_arguments=()
+    for agentctl_project_root in "''${agentctl_project_roots[@]}"; do
+      agentctl_environment_arguments+=(--project-root "$agentctl_project_root")
+    done
+    ${scriptPkgs.sinnixd}/bin/sinnixd-project-environment-check \
+      "''${agentctl_environment_arguments[@]}"
+  '';
   # Single source of truth for rebuild concurrency + resource containment, so
   # `nix run .#switch` (this file's appCommands) and the devshell `switch`
   # binary (flake/dev-shell.nix's mkNhCommand) can't drift apart: both must
@@ -403,6 +419,7 @@ in
     rebuildLock
     rebuildContainmentFlags
     rebuildDefaultArgs
+    agentEnvironmentContract
     rebuildServicePath
     localInputOverrideArgs
     avoidRepoCwdForActivation
@@ -498,6 +515,7 @@ in
         ${rebuildLock "test-vm"}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
+        # build-vm builds a separate guest and does not activate the live host.
         sudo ${pkgs.systemd}/bin/systemd-run \
           --quiet \
           --collect \
@@ -516,13 +534,14 @@ in
     };
 
     test-system = {
-      description = "Test configuration without applying it to the system (nh os test)";
+      description = "Build and activate a temporary host configuration (nh os test)";
       script = ''
         ${resolveFlakeDir}
         ${rebuildLock "test-system"}
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
+        ${agentEnvironmentContract}
         ${pkgs.systemd}/bin/systemd-run \
           --user \
           --quiet --collect --pipe --service-type=exec --wait \
@@ -539,13 +558,14 @@ in
     };
 
     boot = {
-      description = "Build + set boot default, activate on next reboot (nh os boot)";
+      description = "Build and set the boot default for activation on the next reboot (nh os boot)";
       script = ''
         ${resolveFlakeDir}
         ${rebuildLock "boot"}
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
+        ${agentEnvironmentContract}
         ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
         _rebuild_status=0
         ${pkgs.systemd}/bin/systemd-run \
@@ -572,6 +592,7 @@ in
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
+        ${agentEnvironmentContract}
         ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
         _rebuild_status=0
         ${pkgs.systemd}/bin/systemd-run \
@@ -653,12 +674,12 @@ in
     {
       name = "boot";
       category = "Core";
-      description = "Build + set boot default — safer, reboot to activate (nh os boot)";
+      description = "Build and set the boot default for activation on the next reboot (nh os boot)";
     }
     {
       name = "test-system";
       category = "Core";
-      description = "Test host config without persisting (nh os test)";
+      description = "Build and activate a temporary host configuration with nh os test";
     }
     {
       name = "test-vm";
