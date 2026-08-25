@@ -196,6 +196,7 @@ class WorkspacePolicy:
     identity_check: tuple[str, ...]
     checkpoint_untracked: bool
     verification_operations: tuple[str, ...]
+    provision_copy: tuple[str, ...] = ()
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -205,6 +206,7 @@ class WorkspacePolicy:
             "identity_check": list(self.identity_check),
             "checkpoint_untracked": self.checkpoint_untracked,
             "verification_operations": list(self.verification_operations),
+            "provision": {"copy": list(self.provision_copy)},
         }
 
 
@@ -1040,6 +1042,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             "identity_check",
             "checkpoint_untracked",
             "verification_operations",
+            "provision",
         }
         if set(raw_workspace) - allowed_workspace:
             raise ProjectConfigError(
@@ -1068,6 +1071,24 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             raise ProjectConfigError(
                 f"{descriptor} workspace.checkpoint_untracked must be boolean"
             )
+        raw_provision = raw_workspace.get("provision")
+        if raw_provision is None:
+            provision_copy = ()
+        elif not isinstance(raw_provision, Mapping) or set(raw_provision) != {"copy"}:
+            raise ProjectConfigError(
+                f"{descriptor} [workspace.provision] must contain only copy"
+            )
+        else:
+            provision_copy = _optional_string_list(
+                raw_provision.get("copy"), "workspace.provision.copy"
+            )
+            if any(
+                Path(path).is_absolute() or not path or ".." in Path(path).parts
+                for path in provision_copy
+            ):
+                raise ProjectConfigError(
+                    f"{descriptor} workspace.provision.copy paths must be relative and safe"
+                )
         workspace = WorkspacePolicy(
             provider=provider,
             root=Path(workspace_root),
@@ -1080,6 +1101,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 raw_workspace.get("verification_operations"),
                 "workspace.verification_operations",
             ),
+            provision_copy=provision_copy,
         )
 
     raw_conflicts = raw.get("conflicts", {})
