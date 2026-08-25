@@ -134,6 +134,11 @@ class TypedJobContracts:
         if not self.native_runner.is_file() or not os.access(self.native_runner, os.X_OK):
             raise ContractError("native agent runner is unavailable")
         checkout = self.projects.checkout(project_id, checkout_id)
+        project = self.projects.get(project_id)
+        if not project.environment.preflight:
+            raise ContractError(
+                f"project {project_id} does not declare an agent environment preflight"
+            )
         binding = self._bead_binding(bead_binding, checkout)
         job_id = str(uuid4())
         prompt_path = self.inputs_root / f"{job_id}.prompt"
@@ -152,6 +157,8 @@ class TypedJobContracts:
             "kind": "attested-agent",
             "principal": principal,
             "checkout": checkout.to_dict(),
+            "environment_command": list(project.environment.command),
+            "environment_preflight": list(project.environment.preflight),
             "backend": backend,
             "model": model,
             "effort": effort,
