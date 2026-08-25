@@ -16,7 +16,7 @@ filings; tokens from the run record.
 | Crash-timeline walk | every durable-effect sequence's crash windows | 12 filings + 25 healed-windows negative ledger (Opus) | strongest per-run yield to date; needs recovery-path checking to avoid filing healed windows |
 | Differential-twin | near-duplicate code / parallel vocabularies, diffed on real inputs | 2 filings, live-DB measured (Opus) | live-data denominators make these filings unusually strong |
 | Caller-contract audit | each public fn: callers' beliefs vs actual contract (flags, formats, destinations, exceptions) | 9 verified (6 P1) on 2,503-LOC CLI surface, probe-backed, first run | strongest per-LOC P1 yield measured; pairs naturally with dynamic probing |
-| Error-path-only read | ONLY except/fallback/else branches | untested | unhappy paths get a fraction of normal reading attention |
+| Error-path-only read | ONLY except/fallback/else branches | 6 verified on 1,638-LOC webui (Sol, injection-probed) + census: 257 branch sites, 5 dead handlers | unhappy paths get a fraction of normal reading attention; census doubles as dead-code detector |
 | State-machine extraction | implicit states; absorbing/unreachable/illegal transitions | untested | would have caught poison-record re-read loops |
 | Docstring-vs-code diff | stated claims vs implementation | 1 (found via sweep) | cheap; pairs well with any lens |
 | Resource lifecycle | every acquire's release on every path | 1 (found via narration) | systematize: connections, fds, locks, tmp files |
