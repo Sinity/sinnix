@@ -36,6 +36,13 @@ Every implementation dispatch carries, verbatim in the prompt:
 6. **No scope expansion**: discoveries become bd filings or report notes,
    never inline extra work.
 
+Verification economics in lanes (operator ruling, 2026-08-26): lanes run
+SELECTED verification from the seed inherited off the main checkout — never
+the corpus, and never bootstrap-from-scratch; selected-run false negatives
+are acceptable risk, caught by the full corpus at merge/master boundaries.
+A lane that finds no compatible seed refuses-and-reports rather than
+silently running broad.
+
 Escalation: a stuck lane gets a hint, a respecified bead, or a model switch —
 never an effort bump (see model-landscape reference). One flounder → escalate
 tier; never retry the same model against the same failure.
