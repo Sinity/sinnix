@@ -997,8 +997,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         for name in required_names
     ):
         raise ProjectConfigError(
-            f"{descriptor} environment.require must name uppercase non-SINNIX"
-            " variables"
+            f"{descriptor} environment.require must name uppercase non-SINNIX variables"
         )
     execution_environment = ProjectEnvironment(
         kind=environment_kind,

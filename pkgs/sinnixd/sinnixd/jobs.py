@@ -3172,8 +3172,12 @@ class GenericJobs:
         Skipping the durable save then spares an fsync pair per poll on the
         wear-limited state volume without dropping any state transition.
         """
-        before = {key: value for key, value in record.state.items() if key != "observed_at"}
-        after = {key: value for key, value in updated.state.items() if key != "observed_at"}
+        before = {
+            key: value for key, value in record.state.items() if key != "observed_at"
+        }
+        after = {
+            key: value for key, value in updated.state.items() if key != "observed_at"
+        }
         return before == after
 
     def _reconcile_launch_error(self, record: GenericJobRecord) -> dict[str, Any]:

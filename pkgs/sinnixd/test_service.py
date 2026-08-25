@@ -17,7 +17,6 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-import sinnixd.api as api_module
 import sinnixd.cli as cli_module
 import sinnixd.jobs as jobs_module
 import sinnixd.runner as runner_module
@@ -9651,11 +9650,11 @@ def test_environment_missing_required_variable_fails_job_build_loudly(
 @pytest.mark.parametrize(
     "fragment",
     (
-        "[environment.values]\nSINNIXD_JOB_ID = \"forged\"\n",
-        "[environment.values]\nlowercase = \"rejected\"\n",
+        '[environment.values]\nSINNIXD_JOB_ID = "forged"\n',
+        '[environment.values]\nlowercase = "rejected"\n',
         "[environment.values]\nFIXTURE_NUMBER = 7\n",
-        "require = [\"SINNIXD_JOB_ID\"]\n",
-        "require = [\"lowercase\"]\n",
+        'require = ["SINNIXD_JOB_ID"]\n',
+        'require = ["lowercase"]\n',
     ),
 )
 def test_environment_declarations_reject_forged_or_malformed_names(
