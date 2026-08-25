@@ -540,6 +540,7 @@ in
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
+        ${agentEnvironmentContract}
         ${pkgs.systemd}/bin/systemd-run \
           --user \
           --quiet --collect --pipe --service-type=exec --wait \
