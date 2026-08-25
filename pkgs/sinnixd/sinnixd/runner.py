@@ -7,7 +7,12 @@ import subprocess
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from .jobs import GenericJobStore, JobRecordError, MAX_RESULT_BYTES
+from .jobs import (
+    GenericJobStore,
+    JobRecordError,
+    MAX_RESULT_BYTES,
+    _open_preallocated_private_artifact,
+)
 from .limits import maximum_timeout_seconds, valid_timeout_seconds
 from .projects import ProjectConfigError, revalidate_registered_checkout
 
@@ -161,11 +166,53 @@ def _run_agent(
     ]
     try:
         completed = subprocess.run(command, cwd=checkout, check=False)
+        binding = value.get("bead_binding")
+        if isinstance(binding, Mapping) and "write_scope" in binding:
+            _seal_packet_result(value, checkout, result_path)
         if result_path.exists() and result_path.stat().st_size > MAX_RESULT_BYTES:
             result_path.write_bytes(result_path.read_bytes()[:MAX_RESULT_BYTES])
         return completed.returncode
     finally:
         prompt_path.unlink(missing_ok=True)
+
+
+def _seal_packet_result(value: Mapping[str, Any], checkout: Path, result_path: Path) -> None:
+    """Bind a structured worker report to the runtime-observed terminal Git head."""
+    try:
+        if result_path.stat().st_size > MAX_RESULT_BYTES:
+            raise RunnerError("packet result exceeds the artifact limit")
+        raw = result_path.read_bytes()
+        delivery = json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        delivery = None
+    observed = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    final_head = observed.stdout.strip()
+    if observed.returncode != 0 or len(final_head) != 40 or any(value not in "0123456789abcdef" for value in final_head):
+        raise RunnerError("packet final Git head is unavailable")
+    envelope = json.dumps(
+        {
+            "schema_version": 1,
+            "job_id": value["job_id"],
+            "start_head": value["checkout"]["head"],
+            "final_head": final_head,
+            "delivery": delivery,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    if len(envelope) > MAX_RESULT_BYTES:
+        raise RunnerError("packet result exceeds the artifact limit")
+    with _open_preallocated_private_artifact(result_path) as result_file:
+        os.ftruncate(result_file.fileno(), 0)
+        result_file.write(envelope)
+        result_file.flush()
+        os.fsync(result_file.fileno())
 
 
 def main(arguments: Sequence[str] | None = None) -> int:

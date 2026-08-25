@@ -610,7 +610,7 @@ def test_agent_control_bead_scope_requires_matching_current_assignment(
     runtime, daemon = runtime_with_daemon(tmp_path, "agent-control")
     assignment_id = "3b0237a0-32a9-4f6b-a014-2a0ecfd2f75c"
     assignment_ref = f"sinnix://jobs/{assignment_id}"
-    bead = {"ref": "sinnix://projects/fixture/beads/fixture-1", "task_revision": "a" * 64, "etag": "b" * 64, "fields": {"title": "assigned"}}
+    bead = {"ref": "sinnix://projects/fixture/beads/fixture-1", "task_revision": "a" * 64, "etag": "b" * 64, "fields": {"title": "assigned"}, "metadata": {"write_scope": '["pkgs/sinnixd/"]'}}
     binding = {"bead_ref": bead["ref"], "project_ref": "sinnix://projects/fixture", "checkout_ref": "sinnix://projects/fixture/checkouts/default", "task_revision": "a" * 64, "task_etag": "b" * 64, "claim_ref": None, "claim_receipt": None, "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b", "assignment_ref": None}
     daemon.responses["job.get"] = {"job_id": assignment_id, "principal": "agent-control", "state": {"phase": "running"}, "checkout": {"checkout_id": "default", "head": "c" * 40}, "contract": {"bead_binding": binding}, "artifacts": {"result": None}}
     daemon.responses["job.agent.start"] = {"job_id": "4a42f848-9057-4cef-9d27-80a022c0e16f", "state": {"phase": "running"}}
@@ -630,6 +630,7 @@ def test_agent_control_bead_scope_requires_matching_current_assignment(
     assert started["assignment_ref"] == assignment_ref
     assert daemon.calls[-1].principal == "agent-control"
     assert daemon.calls[-1].arguments["bead_binding"]["assignment_ref"] == assignment_ref
+    assert daemon.calls[-1].arguments["bead_binding"]["write_scope"] == ["pkgs/sinnixd/"]
     assert "private launch instruction" not in daemon.calls[-1].arguments["bead_binding"].values()
 
     foreign = {**binding, "bead_ref": "sinnix://projects/fixture/beads/fixture-2"}

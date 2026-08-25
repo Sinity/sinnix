@@ -298,24 +298,35 @@ class SinnixdService:
         if operation == "workspace.publish":
             if principal not in {"agent-control", "operator"}:
                 raise ValueError("workspace publication requires agent-control or operator principal")
-            if set(arguments) != {"workspace_id", "job_id", "title", "body"}:
+            if set(arguments) - {"workspace_id", "job_id", "packet_job_id", "title", "body"} or not {
+                "workspace_id", "job_id", "title", "body"
+            } <= set(arguments):
                 raise ValueError("workspace.publish requires workspace_id, job_id, title, and body")
             assert self.delivery is not None
-            return self.delivery.publish(
+            publish_arguments = (
                 self._job_argument(arguments, "workspace_id"),
                 self._job_argument(arguments, "job_id"),
                 self._job_argument(arguments, "title"),
                 arguments.get("body") if isinstance(arguments.get("body"), str) else "",
             )
+            packet_job_id = arguments.get("packet_job_id")
+            return self.delivery.publish(
+                *publish_arguments,
+                **({"packet_job_id": packet_job_id} if isinstance(packet_job_id, str) else {}),
+            )
         if operation == "workspace.review-status":
             assert self.delivery is not None
             return self.delivery.review_status(self._single_workspace_id(arguments, "workspace.review-status"))
         if operation == "workspace.land":
-            if principal not in {"agent-control", "operator"} or set(arguments) != {"workspace_id", "job_id"}:
+            if principal not in {"agent-control", "operator"} or set(arguments) - {
+                "workspace_id", "job_id", "packet_job_id"
+            } or not {"workspace_id", "job_id"} <= set(arguments):
                 raise ValueError("workspace.land requires agent-control or operator plus workspace_id and job_id")
             assert self.delivery is not None
+            packet_job_id = arguments.get("packet_job_id")
             return self.delivery.land(
-                self._job_argument(arguments, "workspace_id"), self._job_argument(arguments, "job_id")
+                self._job_argument(arguments, "workspace_id"), self._job_argument(arguments, "job_id"),
+                **({"packet_job_id": packet_job_id} if isinstance(packet_job_id, str) else {}),
             )
         if operation == "workspace.finish":
             if principal not in {"agent-control", "operator"}:
@@ -337,8 +348,8 @@ class SinnixdService:
                 )
             project_id = self._job_argument(arguments, "project_id")
             operation_name = self._job_argument(arguments, "operation")
-            if set(arguments) - {"project_id", "operation", "workspace_id", "parameters"}:
-                raise ValueError("job.start accepts project_id, operation, optional workspace_id, and optional parameters")
+            if set(arguments) - {"project_id", "operation", "workspace_id", "parameters", "bead_binding"}:
+                raise ValueError("job.start accepts project_id, operation, optional workspace_id, optional parameters, and optional bead_binding")
             parameters = arguments.get("parameters", {})
             if not isinstance(parameters, Mapping):
                 raise ValueError("job.start parameters must be an object")
@@ -352,6 +363,14 @@ class SinnixdService:
                 if workspace_id is not None
                 else self.projects.checkout(project_id, "default")
             )
+            binding = arguments.get("bead_binding")
+            if binding is not None and operation_name not in project.workspace.verification_operations:
+                raise ValueError("a Beads packet binding requires a declared verification operation")
+            packet_contract = (
+                {"bead_binding": self.job_contracts.bead_binding(binding, checkout)}
+                if binding is not None
+                else {}
+            )
             return self._cleanup_terminal(self.jobs.start_declared(
                 project=project,
                 operation=project.operation(operation_name),
@@ -359,6 +378,7 @@ class SinnixdService:
                 principal=principal,
                 parameters=parameters,
                 checkout=checkout,
+                contract=packet_contract,
             ))
         if operation == "job.shell.start":
             required = {"project_id", "checkout_id", "argv", "cwd", "timeout_seconds", "result"}
