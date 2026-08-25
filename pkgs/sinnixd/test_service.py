@@ -8910,6 +8910,15 @@ def test_delivery_operations_have_truthful_bounded_response_timeouts() -> None:
     )
 
 
+def test_wait_operations_cover_the_requested_wait_deadline() -> None:
+    for operation, owner in (
+        ("job.wait", "systemd-jobs"),
+        ("plan.wait", "project-plans"),
+    ):
+        wait_request = request(operation, owner, {"timeout_seconds": 55})
+        assert _response_timeout_seconds(wait_request) == 60
+
+
 def test_publish_returns_a_delivery_job_immediately(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
