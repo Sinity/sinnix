@@ -106,9 +106,21 @@ def test_mixed_workload_injects_light_workers_and_queues_bulk(tmp_path: Path) ->
     subject = jobs(tmp_path, systemd)
 
     first = subject.start_declared(project=adapter, operation=adapter.operation("heavy"), correlation_id="one", parameters={})
-    second = subject.start_declared(project=adapter, operation=adapter.operation("heavy"), correlation_id="two", parameters={})
+    second = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("heavy"),
+        correlation_id="two",
+        principal="agent-control",
+        parameters={},
+    )
     light_a = subject.start_declared(project=adapter, operation=adapter.operation("light"), correlation_id="three", parameters={})
-    light_b = subject.start_declared(project=adapter, operation=adapter.operation("light"), correlation_id="four", parameters={})
+    light_b = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("light"),
+        correlation_id="four",
+        principal="agent-control",
+        parameters={},
+    )
 
     assert [entry["command"] for entry in systemd.started] == [("env", "heavy"), ("env", "light"), ("env", "light")]
     assert subject.get(second["job_id"])["state"]["phase"] == "queued"
@@ -322,7 +334,13 @@ def test_queued_job_recreates_aged_scratch_before_launch(tmp_path: Path, monkeyp
     systemd = FakeSystemd()
     subject = jobs(tmp_path, systemd)
     first = subject.start_declared(project=adapter, operation=adapter.operation("heavy"), correlation_id="one", parameters={})
-    queued = subject.start_declared(project=adapter, operation=adapter.operation("heavy"), correlation_id="two", parameters={})
+    queued = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("heavy"),
+        correlation_id="two",
+        principal="agent-control",
+        parameters={},
+    )
     queued_record = subject.store.load(queued["job_id"])
     assert queued["state"]["phase"] == "queued"
     assert queued_record.scratch_path is not None
