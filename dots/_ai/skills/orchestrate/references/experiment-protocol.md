@@ -13,7 +13,7 @@ Every experiment row must name:
   Blocked/expired experiments close as _inconclusive_, never linger.
 - Its **status**: designed | running | complete | superseded | inconclusive.
 
-Discipline (adopted 2026-08-25 after the Sol process critique):
+Discipline:
 
 - Prefer **piggybacking on product work** that would be dispatched anyway
   over dedicated experiment arms; dedicated arms need the decision to be

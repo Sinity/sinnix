@@ -7,13 +7,10 @@ metadata:
 
 # Grok — Systematic Codebase Audit
 
-Deep, evidence-grounded understanding of a codebase at scale, produced by
-measuring it, partitioning it into regions a single agent can actually hold,
-fanning out a mixed fleet of models against those regions, and running a
-disciplined triage/filing loop on what comes back. This is the campaign
-playbook distilled from real large audits (hundreds of agent-dispatches,
-hundreds of findings) — every technique and pitfall here was hit for real, not
-theorized.
+Deep, evidence-grounded understanding of a codebase at scale: measure it,
+partition it into regions a single agent can actually hold, fan out a mixed
+fleet of models against those regions, and run a disciplined triage/filing
+loop on what comes back.
 
 **Target**: $ARGUMENTS
 
@@ -133,7 +130,7 @@ Real failure modes hit running these campaigns — shell escaping, launcher
 concurrency races, a background-detach mistake that silently breaks `wait`,
 agent turn-budget exhaustion, and more — are logged in
 [`references/pitfalls.md`](references/pitfalls.md). Read it before a first
-run; it will save you from re-discovering each one the expensive way.
+run.
 
 ## Begin
 
