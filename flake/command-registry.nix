@@ -112,6 +112,22 @@ let
       done < <(sinnix-rebuild-override consume)
     fi
   '';
+  agentEnvironmentContract = ''
+    mapfile -t agentctl_project_roots < <(
+      ${pkgs.nix}/bin/nix eval \
+        "$_flake_dir#nixosConfigurations.sinnix-prime.config.sinnix.services.sinnixd.projectRoots" \
+        --json \
+        --impure \
+        "''${nix_override_args[@]}" \
+        | ${pkgs.jq}/bin/jq -r '.[]'
+    )
+    agentctl_environment_arguments=()
+    for agentctl_project_root in "''${agentctl_project_roots[@]}"; do
+      agentctl_environment_arguments+=(--project-root "$agentctl_project_root")
+    done
+    ${scriptPkgs.sinnixd}/bin/sinnixd-project-environment-check \
+      "''${agentctl_environment_arguments[@]}"
+  '';
   # Single source of truth for rebuild concurrency + resource containment, so
   # `nix run .#switch` (this file's appCommands) and the devshell `switch`
   # binary (flake/dev-shell.nix's mkNhCommand) can't drift apart: both must
@@ -403,6 +419,7 @@ in
     rebuildLock
     rebuildContainmentFlags
     rebuildDefaultArgs
+    agentEnvironmentContract
     rebuildServicePath
     localInputOverrideArgs
     avoidRepoCwdForActivation
@@ -546,6 +563,7 @@ in
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
+        ${agentEnvironmentContract}
         ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
         _rebuild_status=0
         ${pkgs.systemd}/bin/systemd-run \
@@ -572,6 +590,7 @@ in
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
+        ${agentEnvironmentContract}
         ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
         _rebuild_status=0
         ${pkgs.systemd}/bin/systemd-run \
