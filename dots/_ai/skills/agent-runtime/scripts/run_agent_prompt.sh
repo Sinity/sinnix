@@ -74,6 +74,11 @@ done
   exit 2
 }
 mkdir -p "$(dirname "$last_file")"
+# The contract runner keeps the private prompt input alive for the duration of
+# this native backend. Expose the exact snapshot path to worker-side tools;
+# lane task can therefore print it without copying prompt content into public
+# job metadata.
+export SINNIXD_JOB_PROMPT_FILE="$prompt_file"
 
 resolve_agent_bin() {
   case "$1" in
