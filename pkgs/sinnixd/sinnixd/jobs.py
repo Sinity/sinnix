@@ -2731,8 +2731,7 @@ class GenericJobs:
                             "leased loopback port became unavailable before launch"
                         )
                     command, environment = self.store.declared_launch(current.job_id)
-                    if scratch_path := self.store.prepare_scratch(current):
-                        environment["TMPDIR"] = str(scratch_path)
+                    self.store.prepare_scratch(current)
                     if current.spec.checkout is not None:
                         revalidate_registered_checkout(current.spec.checkout)
                         # The contract runner repeats this proof in the unit
