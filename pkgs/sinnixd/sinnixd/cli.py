@@ -29,6 +29,19 @@ def _metadata_argument(value: str) -> tuple[str, str]:
     return key, metadata_value
 
 
+def _add_agent_launch_arguments(
+    target: argparse.ArgumentParser, *, required: bool
+) -> None:
+    target.add_argument("--project", required=required)
+    target.add_argument("--checkout", required=required)
+    target.add_argument("--prompt-file", type=Path, required=required)
+    target.add_argument("--backend", required=required)
+    target.add_argument("--model", required=required)
+    target.add_argument("--effort", required=required)
+    target.add_argument("--credential-profile", default="subscription")
+    target.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+
+
 def default_socket_path() -> Path:
     return (
         Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
@@ -48,14 +61,27 @@ def parser() -> argparse.ArgumentParser:
     shell.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     shell.add_argument("argv", nargs=argparse.REMAINDER)
     agent = subcommands.add_parser("agent")
-    agent.add_argument("--project", required=True)
-    agent.add_argument("--checkout", required=True)
-    agent.add_argument("--prompt-file", type=Path, required=True)
-    agent.add_argument("--backend", required=True)
-    agent.add_argument("--model", required=True)
-    agent.add_argument("--effort", required=True)
-    agent.add_argument("--credential-profile", default="subscription")
-    agent.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    _add_agent_launch_arguments(agent, required=False)
+    agent_subcommands = agent.add_subparsers(dest="agent_command", required=False)
+    launch = agent_subcommands.add_parser(
+        "launch", help="Dispatch an attested agent job (same as bare `agent`)."
+    )
+    _add_agent_launch_arguments(launch, required=True)
+    agent_list = agent_subcommands.add_parser("list")
+    agent_list.add_argument("--limit", type=int, choices=range(1, 1001), default=100)
+    agent_list.add_argument("--cursor")
+    agent_list.add_argument("--project")
+    agent_list.add_argument("--phase", action="append", default=[])
+    agent_list.add_argument("--active", action="store_true")
+    agent_status = agent_subcommands.add_parser("status")
+    agent_status.add_argument("job_id")
+    agent_wait = agent_subcommands.add_parser("wait")
+    agent_wait.add_argument("job_ids", nargs="+", metavar="job_id")
+    agent_wait.add_argument("--any", dest="wait_any", action="store_true")
+    agent_wait.add_argument("--timeout-seconds", type=int, default=30)
+    agent_result = agent_subcommands.add_parser("result")
+    agent_result.add_argument("job_id")
+    agent_result.add_argument("--max-bytes", type=int, default=64_000)
     project = subcommands.add_parser("project")
     project_subcommands = project.add_subparsers(dest="project_command", required=True)
     project_subcommands.add_parser("list")
@@ -142,6 +168,7 @@ def parser() -> argparse.ArgumentParser:
     job_list.add_argument("--cursor")
     job_list.add_argument("--project")
     job_list.add_argument("--phase", action="append", default=[])
+    job_list.add_argument("--kind", action="append", default=[])
     job_list.add_argument("--active", action="store_true")
     wait = job_subcommands.add_parser("wait")
     wait.add_argument("job_ids", nargs="+", metavar="job_id")
@@ -326,7 +353,60 @@ def main() -> int:
             },
             "operator",
         )
+    elif arguments.command == "agent" and arguments.agent_command == "list":
+        request = _request(
+            "job.list",
+            "systemd-jobs",
+            {
+                "limit": arguments.limit,
+                "cursor": arguments.cursor,
+                "project_id": arguments.project,
+                "phases": arguments.phase,
+                "kinds": ["attested-agent"],
+                "active_only": arguments.active,
+            },
+        )
+    elif arguments.command == "agent" and arguments.agent_command == "status":
+        request = _request("job.get", "systemd-jobs", {"job_id": arguments.job_id})
+    elif arguments.command == "agent" and arguments.agent_command == "wait":
+        if len(arguments.job_ids) > 1 and not arguments.wait_any:
+            parser().error("waiting on multiple job ids requires --any")
+        request = _request(
+            "job.wait",
+            "systemd-jobs",
+            {
+                **(
+                    {"job_ids": arguments.job_ids}
+                    if arguments.wait_any
+                    else {"job_id": arguments.job_ids[0]}
+                ),
+                "timeout_seconds": arguments.timeout_seconds,
+            },
+        )
+    elif arguments.command == "agent" and arguments.agent_command == "result":
+        request = _request(
+            "job.result",
+            "systemd-jobs",
+            {"job_id": arguments.job_id, "max_bytes": arguments.max_bytes},
+        )
     elif arguments.command == "agent":
+        missing = [
+            f"--{name.replace('_', '-')}"
+            for name in (
+                "project",
+                "checkout",
+                "prompt_file",
+                "backend",
+                "model",
+                "effort",
+            )
+            if getattr(arguments, name) is None
+        ]
+        if missing:
+            parser().error(
+                "agent dispatch requires " + ", ".join(missing)
+                + " (or use: agent launch|list|status|wait|result)"
+            )
         try:
             prompt = arguments.prompt_file.read_text()
         except OSError as error:
@@ -547,6 +627,7 @@ def main() -> int:
                 "cursor": arguments.cursor,
                 "project_id": arguments.project,
                 "phases": arguments.phase,
+                "kinds": arguments.kind,
                 "active_only": arguments.active,
             },
         )
