@@ -130,12 +130,22 @@ def parser() -> argparse.ArgumentParser:
     workspace_publish.add_argument("--packet-job")
     workspace_publish.add_argument("--title", required=True)
     workspace_publish.add_argument("--body", default="")
+    workspace_publish.add_argument(
+        "--wait",
+        action="store_true",
+        help="Block on the delivery job and print its receipt instead of the job id.",
+    )
     workspace_review = workspace_subcommands.add_parser("review-status")
     workspace_review.add_argument("workspace_id")
     workspace_land = workspace_subcommands.add_parser("land")
     workspace_land.add_argument("workspace_id")
     workspace_land.add_argument("--job", required=True)
     workspace_land.add_argument("--packet-job")
+    workspace_land.add_argument(
+        "--wait",
+        action="store_true",
+        help="Block on the delivery job and print its receipt instead of the job id.",
+    )
     workspace_finish = workspace_subcommands.add_parser("finish")
     workspace_finish.add_argument("workspace_id")
     workspace_finish_integrated = workspace_subcommands.add_parser("finish-integrated")
@@ -762,10 +772,51 @@ def main() -> int:
         request = _request(arguments.operation, arguments.owner, owner_arguments)
     try:
         response = call(arguments.socket, request)
+        if (
+            getattr(arguments, "wait", False)
+            and arguments.command == "workspace"
+            and response.get("ok") is True
+        ):
+            response = _wait_for_delivery(arguments.socket, response)
     except (OSError, ProtocolError, SinnixdClientError):
         response = _unavailable_response(request)
     print(json.dumps(response, indent=2, sort_keys=True))
     return 0 if response.get("ok") is True else 1
+
+
+def _wait_for_delivery(
+    socket_path: Path, started: dict[str, object]
+) -> dict[str, object]:
+    """Follow a delivery job to its receipt for the --wait convenience."""
+    payload = started.get("payload")
+    value = payload.get("value") if isinstance(payload, dict) else None
+    job_id = value.get("job_id") if isinstance(value, dict) else None
+    timeout_seconds = value.get("timeout_seconds") if isinstance(value, dict) else None
+    if not isinstance(job_id, str):
+        return started
+    wait_request = _request(
+        "job.wait",
+        "systemd-jobs",
+        {
+            "job_id": job_id,
+            "timeout_seconds": timeout_seconds + 10
+            if isinstance(timeout_seconds, int)
+            else 800,
+        },
+    )
+    waited = call(socket_path, wait_request)
+    waited_value = (
+        waited.get("payload", {}).get("value")
+        if isinstance(waited.get("payload"), dict)
+        else None
+    )
+    state = waited_value.get("state") if isinstance(waited_value, dict) else None
+    if not isinstance(state, dict) or state.get("phase") != "succeeded":
+        return waited
+    return call(
+        socket_path,
+        _request("job.result", "systemd-jobs", {"job_id": job_id}),
+    )
 
 
 def daemon_main() -> None:
