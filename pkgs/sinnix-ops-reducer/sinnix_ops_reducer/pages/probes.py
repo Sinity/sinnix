@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Iterable
 
+
 def load_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -79,6 +80,7 @@ def show_units(
 
 
 UNIT_PROPERTIES = ("ActiveState", "SubState", "UnitFileState", "LoadState")
+
 
 def unit_states(units: list[tuple[str, str]]) -> dict[str, dict[str, str]]:
     states: dict[str, dict[str, str]] = {}

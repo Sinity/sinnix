@@ -26,6 +26,7 @@ Run via the systemd user timer (weechat-log-sealer.nix) or by hand:
 
     python3 seal_logs.py <irc-root>
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -70,7 +71,10 @@ def seal_file(path: Path) -> Path | None:
     target = path.with_name(f"{path.stem}.b2-{digest}.log")
     if target.exists():
         # Different fd already produced this; leave both alone for inspection.
-        print(f"  conflict: {target.name} already exists, leaving {path.name}", file=sys.stderr)
+        print(
+            f"  conflict: {target.name} already exists, leaving {path.name}",
+            file=sys.stderr,
+        )
         return None
     path.rename(target)
     return target
@@ -98,7 +102,9 @@ def seal_all(root: Path, buffer_days: int = SEAL_BUFFER_DAYS) -> tuple[int, int]
                 continue
             if seal_file(log) is not None:
                 sealed_count += 1
-    print(f"sealed {sealed_count} files (skipped {skipped_recent} within {buffer_days}-day buffer)")
+    print(
+        f"sealed {sealed_count} files (skipped {skipped_recent} within {buffer_days}-day buffer)"
+    )
     return (sealed_count, skipped_recent)
 
 

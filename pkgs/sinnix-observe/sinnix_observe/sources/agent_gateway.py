@@ -24,8 +24,12 @@ def _json(path: Path, bound: int = 262_144) -> dict[str, Any] | None:
         return None
 
 
-def _polylogue_sessions(job_ids: list[str]) -> tuple[dict[str, dict[str, Any]], str | None]:
-    db = Path(os.environ.get("SINNIX_POLYLOGUE_INDEX_DB", "/realm/data/ai/polylogue/index.db"))
+def _polylogue_sessions(
+    job_ids: list[str],
+) -> tuple[dict[str, dict[str, Any]], str | None]:
+    db = Path(
+        os.environ.get("SINNIX_POLYLOGUE_INDEX_DB", "/realm/data/ai/polylogue/index.db")
+    )
     if not db.is_file():
         return {}, "polylogue_archive_unavailable"
     found: dict[str, dict[str, Any]] = {}
@@ -33,14 +37,19 @@ def _polylogue_sessions(job_ids: list[str]) -> tuple[dict[str, dict[str, Any]], 
     try:
         connection = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=0.25)
         connection.execute("pragma query_only=on")
-        connection.set_progress_handler(lambda: 1 if time.monotonic() - started > 0.5 else 0, 1000)
+        connection.set_progress_handler(
+            lambda: 1 if time.monotonic() - started > 0.5 else 0, 1000
+        )
         for job_id in job_ids:
             row = connection.execute(
                 "select session_id from messages_fts where messages_fts match ? limit 1",
                 ('"' + job_id.replace('"', '""') + '"',),
             ).fetchone()
             if row:
-                found[job_id] = {"session_id": row[0], "source": "polylogue:index.db/messages_fts"}
+                found[job_id] = {
+                    "session_id": row[0],
+                    "source": "polylogue:index.db/messages_fts",
+                }
         connection.close()
     except sqlite3.Error:
         return found, "polylogue_index_unreadable"
@@ -87,16 +96,24 @@ def _is_canonical_job_record(value: dict[str, Any]) -> bool:
     )
 
 
-def collect_agent_gateway(limit: int = 20, below: dict[str, Any] | None = None) -> dict[str, Any]:
+def collect_agent_gateway(
+    limit: int = 20, below: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Read daemon-owned job records. `below` remains a caller-compatible input."""
 
     _ = below
-    root = Path(os.environ.get("SINNIXD_STATE_DIR", str(Path.home() / ".local/state/sinnixd")))
+    root = Path(
+        os.environ.get("SINNIXD_STATE_DIR", str(Path.home() / ".local/state/sinnixd"))
+    )
     records_root = root / "jobs"
     malformed: list[str] = []
     jobs: list[dict[str, Any]] = []
     try:
-        paths = sorted(records_root.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)[: max(1, min(limit, 100))]
+        paths = sorted(
+            records_root.glob("*.json"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )[: max(1, min(limit, 100))]
     except OSError:
         paths = []
     for path in paths:

@@ -3,7 +3,6 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-
 from sinnix_mcp import (
     Authority,
     ErrorCode,

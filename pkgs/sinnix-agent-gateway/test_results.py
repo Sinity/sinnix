@@ -11,13 +11,11 @@ import time
 from pathlib import Path
 
 import pytest
-
 from sinnix_agent_gateway.app import Runtime
 from sinnix_agent_gateway.audit import AuditService
 from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.contracts import ActionSpec, EffectMode, VerbFamily
-from sinnix_mcp.execution import ExecutionProfile, OwnerRoute
 from sinnix_agent_gateway.registry import REGISTRY
 from sinnix_agent_gateway.results import (
     EXPECTED_ERROR_CODES,
@@ -25,6 +23,7 @@ from sinnix_agent_gateway.results import (
     ResultError,
     ResultService,
 )
+from sinnix_mcp.execution import ExecutionProfile, OwnerRoute
 
 
 def config(tmp_path, *, max_result_bytes: int = 262_144):
@@ -124,12 +123,19 @@ def test_runtime_v2_envelopes_success_and_public_error(tmp_path) -> None:
         "diagnostic_refs": [],
     }
     assert runtime.audit.receipt(failure["receipt"]["receipt_id"])["outcome"] == "error"
-    assert failure["result"]["request_sha256"] == hashlib.sha256(
-        json.dumps({"verb": "invalid"}, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    assert (
+        failure["result"]["request_sha256"]
+        == hashlib.sha256(
+            json.dumps(
+                {"verb": "invalid"}, sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+    )
 
 
-def test_runtime_v2_replaces_an_oversized_owner_payload_with_an_artifact(tmp_path) -> None:
+def test_runtime_v2_replaces_an_oversized_owner_payload_with_an_artifact(
+    tmp_path,
+) -> None:
     runtime = Runtime.create(config(tmp_path, max_result_bytes=1_024), "observer")
     action = REGISTRY.action("gateway.catalog")
 
@@ -170,10 +176,15 @@ def test_runtime_v2_keeps_each_expected_failure_in_a_typed_envelope(tmp_path) ->
         assert response["result"]["outcome"] == "error"
         assert response["error"]["code"] == code
         assert response["error"]["message"] == f"safe {code} failure"
-        assert runtime.audit.receipt(response["receipt"]["receipt_id"])["outcome"] == "error"
+        assert (
+            runtime.audit.receipt(response["receipt"]["receipt_id"])["outcome"]
+            == "error"
+        )
 
 
-def test_jsonl_snapshot_pages_a_million_rows_without_logical_result_buffering(tmp_path) -> None:
+def test_jsonl_snapshot_pages_a_million_rows_without_logical_result_buffering(
+    tmp_path,
+) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
     action = REGISTRY.action("gateway.catalog")
     command = [
@@ -215,7 +226,9 @@ def test_jsonl_snapshot_pages_a_million_rows_without_logical_result_buffering(tm
             source_revision="fixture-revision-2",
         )
     with pytest.raises(ResultError, match="does not match"):
-        ResultService(config(tmp_path), Principal.for_name("operator")).continue_snapshot(
+        ResultService(
+            config(tmp_path), Principal.for_name("operator")
+        ).continue_snapshot(
             response["page"]["next_cursor"],
             query_sha256=response["result"]["request_sha256"],
         )
@@ -266,7 +279,9 @@ def test_jsonl_stream_failure_cancels_child_and_removes_temp_writer(tmp_path) ->
     assert list(runtime.results.snapshots_root.glob(".*.writing")) == []
 
 
-def test_mutation_idempotency_replays_receipt_without_second_owner_write(tmp_path) -> None:
+def test_mutation_idempotency_replays_receipt_without_second_owner_write(
+    tmp_path,
+) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
     action = ActionSpec(
         name="fixture.change",
@@ -299,7 +314,9 @@ def test_mutation_idempotency_replays_receipt_without_second_owner_write(tmp_pat
     assert conflict["error"]["code"] == "idempotency_conflict"
 
 
-def test_declared_deadline_and_idempotency_failures_persist_bounded_envelopes(tmp_path) -> None:
+def test_declared_deadline_and_idempotency_failures_persist_bounded_envelopes(
+    tmp_path,
+) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
     action = REGISTRY.action("agent.for_bead")
     request = {
@@ -341,27 +358,44 @@ def test_declared_deadline_and_idempotency_failures_persist_bounded_envelopes(tm
         assert runtime.results.read(response["result"]["result_id"]) == response
 
 
-def test_concurrent_matching_idempotency_returns_conflict_then_replays(tmp_path) -> None:
+def test_concurrent_matching_idempotency_returns_conflict_then_replays(
+    tmp_path,
+) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
     action = ActionSpec(
-        name="fixture.concurrent-change", verb=VerbFamily.CHANGE, domain="fixture",
-        owner="fixture", route="fixture.write", effect=EffectMode.CHANGE,
-        principals=frozenset({"operator"}), input_schema={"type": "object"}, output_schema={"type": "object"},
-        supports_idempotency=True, receipt_policy="audit",
+        name="fixture.concurrent-change",
+        verb=VerbFamily.CHANGE,
+        domain="fixture",
+        owner="fixture",
+        route="fixture.write",
+        effect=EffectMode.CHANGE,
+        principals=frozenset({"operator"}),
+        input_schema={"type": "object"},
+        output_schema={"type": "object"},
+        supports_idempotency=True,
+        receipt_policy="audit",
     )
     started, release = threading.Event(), threading.Event()
     writes: list[str] = []
 
     def write() -> dict[str, str]:
-        writes.append("write"); started.set(); assert release.wait(5)
+        writes.append("write")
+        started.set()
+        assert release.wait(5)
         return {"ref": "sinnix://projects/fixture", "created": True}
 
     first_result: dict[str, object] = {}
-    thread = threading.Thread(target=lambda: first_result.setdefault("value", runtime.execute_v2(action, write, {"idempotency_key": "same"})))
-    thread.start(); assert started.wait(5)
+    thread = threading.Thread(
+        target=lambda: first_result.setdefault(
+            "value", runtime.execute_v2(action, write, {"idempotency_key": "same"})
+        )
+    )
+    thread.start()
+    assert started.wait(5)
     concurrent = runtime.execute_v2(action, write, {"idempotency_key": "same"})
     assert concurrent["error"]["code"] == "conflict"
-    release.set(); thread.join(5)
+    release.set()
+    thread.join(5)
     replay = runtime.execute_v2(action, write, {"idempotency_key": "same"})
     assert replay == first_result["value"]
     assert writes == ["write"]
@@ -414,7 +448,9 @@ def _project_runtime(tmp_path: Path) -> Runtime:
     project = tmp_path / "project"
     project.mkdir()
     subprocess.run(["git", "init", "--quiet", project], check=True)
-    subprocess.run(["git", "config", "user.name", "Gateway Test"], cwd=project, check=True)
+    subprocess.run(
+        ["git", "config", "user.name", "Gateway Test"], cwd=project, check=True
+    )
     subprocess.run(
         ["git", "config", "user.email", "gateway-test@example.invalid"],
         cwd=project,
@@ -437,7 +473,9 @@ def _checkout_preconditions(runtime: Runtime) -> dict[str, str]:
     return {"head": checkout["head"], "dirty_sha256": checkout["dirty_sha256"]}
 
 
-def test_v2_change_uses_canonical_checkout_preconditions_and_idempotency(tmp_path) -> None:
+def test_v2_change_uses_canonical_checkout_preconditions_and_idempotency(
+    tmp_path,
+) -> None:
     runtime = _project_runtime(tmp_path)
     action = REGISTRY.action("projects.change")
     reference = "sinnix://projects/fixture/checkouts/default"
@@ -493,7 +531,9 @@ def test_v2_change_uses_canonical_checkout_preconditions_and_idempotency(tmp_pat
     assert (tmp_path / "project" / "tracked.txt").read_text() == "after\n"
 
 
-def test_v2_change_project_root_selects_default_checkout_with_worktrees(tmp_path) -> None:
+def test_v2_change_project_root_selects_default_checkout_with_worktrees(
+    tmp_path,
+) -> None:
     runtime = _project_runtime(tmp_path)
     project = tmp_path / "project"
     linked = tmp_path / "linked"
@@ -531,7 +571,9 @@ def test_v2_change_project_root_selects_default_checkout_with_worktrees(tmp_path
     assert (linked / "tracked.txt").read_text() == "before\n"
 
 
-def test_v2_change_rechecks_preconditions_atomically_for_concurrent_mutations(tmp_path) -> None:
+def test_v2_change_rechecks_preconditions_atomically_for_concurrent_mutations(
+    tmp_path,
+) -> None:
     runtime = _project_runtime(tmp_path)
     action = REGISTRY.action("projects.change")
     reference = "sinnix://projects/fixture/checkouts/default"
@@ -610,7 +652,10 @@ def test_v2_change_preserves_project_patch_owner_contract(tmp_path) -> None:
         },
     )
 
-    assert response["data"]["owner_result"] == {"project_id": "fixture", "applied": True}
+    assert response["data"]["owner_result"] == {
+        "project_id": "fixture",
+        "applied": True,
+    }
     assert (tmp_path / "project" / "tracked.txt").read_text() == "patched\n"
 
 
@@ -674,7 +719,10 @@ def test_v2_operate_maps_canonical_targets_and_validates_owner_receipts(
     assert calls == [{"target": target}]
     assert response["data"]["ref"] == reference
     assert response["data"]["owner_receipt"]["target"] == target
-    assert response["data"]["owner_receipt"]["operator_reason"] == "exercise typed operation"
+    assert (
+        response["data"]["owner_receipt"]["operator_reason"]
+        == "exercise typed operation"
+    )
     receipt = runtime.audit.receipt(response["receipt"]["receipt_id"])
     assert receipt["payload"]["owner_receipt_id"] == "owner-receipt"
 

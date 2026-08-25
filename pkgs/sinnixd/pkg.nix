@@ -13,7 +13,10 @@ python3Packages.buildPythonApplication {
   src = ./.;
 
   build-system = [ python3Packages.setuptools ];
-  dependencies = [ sinnix-mcp sinnix-lib ];
+  dependencies = [
+    sinnix-mcp
+    sinnix-lib
+  ];
   nativeCheckInputs = [
     python3Packages.pytest
     git

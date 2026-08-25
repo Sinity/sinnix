@@ -74,12 +74,20 @@ class TimelineService:
         end_ns = self._timestamp(end, "end")
         if start_ns is not None and end_ns is not None and start_ns > end_ns:
             raise TimelineError("start must not be after end")
-        if query is not None and (not isinstance(query, str) or not query or len(query) > 1_000):
+        if query is not None and (
+            not isinstance(query, str) or not query or len(query) > 1_000
+        ):
             raise TimelineError("query must contain 1-1000 characters")
-        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 500
+        ):
             raise TimelineError("limit must be 1-500")
         requested = self._providers(providers)
-        raw_requested = [provider for provider in requested if provider in _RAW_PROVIDERS]
+        raw_requested = [
+            provider for provider in requested if provider in _RAW_PROVIDERS
+        ]
         per_source_limit = max(1, -(-limit // max(1, len(raw_requested))))
         sources = []
         entries = []
@@ -151,7 +159,9 @@ class TimelineService:
                 "entries": entries,
                 "truncated": truncated,
             }
-            encoded = json.dumps(response, sort_keys=True, separators=(",", ":")).encode()
+            encoded = json.dumps(
+                response, sort_keys=True, separators=(",", ":")
+            ).encode()
             if len(encoded) <= self.sessions.config.max_result_bytes:
                 return response
             if not entries:

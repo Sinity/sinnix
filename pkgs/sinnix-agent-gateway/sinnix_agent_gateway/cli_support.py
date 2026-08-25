@@ -15,7 +15,6 @@ from .config import GatewayConfig
 from .contracts import VerbFamily
 from .registry import REGISTRY, RegistryError
 
-
 MAX_INPUT_BYTES = 262_144
 VERB_TO_TOOL = {verb.value: verb.value for verb in VerbFamily}
 
@@ -25,7 +24,11 @@ class CliInputError(ValueError):
 
 
 def _read_bounded(stream: Any, limit: int, source: str) -> bytes:
-    raw = stream.buffer.read(limit + 1) if hasattr(stream, "buffer") else stream.read(limit + 1)
+    raw = (
+        stream.buffer.read(limit + 1)
+        if hasattr(stream, "buffer")
+        else stream.read(limit + 1)
+    )
     if isinstance(raw, str):
         raw = raw.encode()
     if len(raw) > limit:
@@ -47,13 +50,17 @@ def load_json_input(
     if inline is not None:
         raw = inline.encode()
         if len(raw) > max_bytes:
-            raise CliInputError(f"--input exceeds the {max_bytes}-byte JSON input bound")
+            raise CliInputError(
+                f"--input exceeds the {max_bytes}-byte JSON input bound"
+            )
     elif input_file is not None:
         try:
             with input_file.open("rb") as handle:
                 raw = handle.read(max_bytes + 1)
         except OSError as exc:
-            raise CliInputError(f"cannot read --input-file {input_file}: {exc}") from exc
+            raise CliInputError(
+                f"cannot read --input-file {input_file}: {exc}"
+            ) from exc
         if len(raw) > max_bytes:
             raise CliInputError(
                 f"--input-file {input_file} exceeds the {max_bytes}-byte JSON input bound"
@@ -75,7 +82,9 @@ def _set_value(payload: dict[str, Any], key: str, value: Any) -> None:
     if value is None:
         return
     if key in payload and payload[key] != value:
-        raise CliInputError(f"request contains a different value for --{key.replace('_', '-')}")
+        raise CliInputError(
+            f"request contains a different value for --{key.replace('_', '-')}"
+        )
     payload[key] = value
 
 
@@ -157,7 +166,9 @@ def build_request(
             catalog_search_text(query) if command == "catalog" else query,
         )
     if preconditions is not None:
-        _set_value(payload, "preconditions", _json_object(preconditions, "--preconditions"))
+        _set_value(
+            payload, "preconditions", _json_object(preconditions, "--preconditions")
+        )
     if preview and apply:
         raise CliInputError("--preview and --apply are mutually exclusive")
     if command == "change" and (preview or apply):
@@ -175,7 +186,9 @@ def build_request(
     except (TypeError, ValueError) as exc:
         raise CliInputError("request input must be JSON serializable") from exc
     if len(encoded) > MAX_INPUT_BYTES:
-        raise CliInputError(f"request exceeds the {MAX_INPUT_BYTES}-byte JSON input bound")
+        raise CliInputError(
+            f"request exceeds the {MAX_INPUT_BYTES}-byte JSON input bound"
+        )
     return payload
 
 
@@ -216,7 +229,9 @@ def validate_request(command: str, payload: Mapping[str, Any], principal: str) -
         return
     candidate = _schema_payload(command, payload)
     validator = Draft202012Validator(action.input_schema)
-    errors = sorted(validator.iter_errors(candidate), key=lambda error: list(error.path))
+    errors = sorted(
+        validator.iter_errors(candidate), key=lambda error: list(error.path)
+    )
     if errors:
         error = errors[0]
         location = ".".join(str(part) for part in error.path) or "request"
@@ -271,7 +286,11 @@ def catalog_display(
     if action_name is not None and (schema or example or explain):
         row = _action_row(action_name, principal)
         if schema:
-            return {"revision": REGISTRY.revision, "action": row, "schema": row["input_schema"]}
+            return {
+                "revision": REGISTRY.revision,
+                "action": row,
+                "schema": row["input_schema"],
+            }
         if example:
             return {
                 "revision": REGISTRY.revision,
@@ -298,4 +317,6 @@ def catalog_display(
                 if row["schema_ref"].casefold().startswith(prefix)
             ],
         }
-    raise CliInputError("catalog display requires --schema, --example, --explain, or --complete")
+    raise CliInputError(
+        "catalog display requires --schema, --example, --explain, or --complete"
+    )

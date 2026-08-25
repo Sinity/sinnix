@@ -10,18 +10,23 @@ from contextlib import asynccontextmanager
 from typing import Any, Callable, Mapping, cast
 
 import anyio
-
 from mcp.server import MCPServer
 from mcp.server.mcpserver.context import Context
 from mcp.server.subscriptions import InMemorySubscriptionBus
-from mcp.types import ListResourceTemplatesResult, PaginatedRequestParams, ResourceTemplate
+from mcp.types import (
+    ListResourceTemplatesResult,
+    PaginatedRequestParams,
+    ResourceTemplate,
+)
 
 from .bindings import TargetToolBinding, TargetToolBindings
 from .config import GatewayConfig
 from .contracts import ActionSpec, EffectMode, OwnerRoute, VerbFamily
-from .registry import CatalogSearch, REGISTRY, RegistryError
-from .results import ProtocolError
-from .results import derive_cursor_key
+from .mcp_broker import McpEnvironmentError
+from .parity import legacy_parity_contract
+from .prompts import PROMPT_SPECS, PromptGenerator
+from .registry import REGISTRY, CatalogSearch, RegistryError
+from .results import ProtocolError, derive_cursor_key
 from .runtime import (
     AUDITED_READ_TOOL,
     IDEMPOTENT_MUTATION_TOOL,
@@ -31,9 +36,6 @@ from .runtime import (
     canonical_manifest,
     v2_tool_result,
 )
-from .parity import legacy_parity_contract
-from .mcp_broker import McpEnvironmentError
-from .prompts import PromptGenerator, PROMPT_SPECS
 from .schemas import V2ManifestEnvelope
 from .subscriptions import OwnerRevisionPublisher
 
@@ -55,7 +57,9 @@ def _bounded_resource_json(runtime: Runtime, payload: Any, kind: str) -> str:
         "truncated": True,
         "artifact": artifact,
     }
-    encoded_envelope = json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()
+    encoded_envelope = json.dumps(
+        envelope, sort_keys=True, separators=(",", ":")
+    ).encode()
     if len(encoded_envelope) > runtime.config.max_result_bytes:
         return json.dumps(
             {"artifact_id": artifact["artifact_id"], "truncated": True},
@@ -92,7 +96,9 @@ async def _query_owner(
     route = action.route
     if route is OwnerRoute.PROJECTS_SEARCH:
         if not isinstance(reference, str) or not isinstance(text, str):
-            raise ProtocolError("invalid_request", "projects.query requires ref and query")
+            raise ProtocolError(
+                "invalid_request", "projects.query requires ref and query"
+            )
         return runtime.v2_query(reference, text, max_matches)
     if route is OwnerRoute.BEADS_QUERY:
         return runtime.v2_beads_query(values)
@@ -104,39 +110,94 @@ async def _query_owner(
         OwnerRoute.PROJECTS_DIFF,
     }:
         if not isinstance(reference, str):
-            raise ProtocolError("invalid_request", f"{action.name} requires a canonical ref")
-        project_id, checkout_id, canonical_ref = runtime._project_reference(reference, allow_checkout=True)
+            raise ProtocolError(
+                "invalid_request", f"{action.name} requires a canonical ref"
+            )
+        project_id, checkout_id, canonical_ref = runtime._project_reference(
+            reference, allow_checkout=True
+        )
         if route is OwnerRoute.PROJECTS_TREE:
-            return {"ref": canonical_ref, **runtime.projects.tree(project_id, str(values.get("path", ".")), int(values.get("max_entries", 500)), checkout_id)}
+            return {
+                "ref": canonical_ref,
+                **runtime.projects.tree(
+                    project_id,
+                    str(values.get("path", ".")),
+                    int(values.get("max_entries", 500)),
+                    checkout_id,
+                ),
+            }
         if route is OwnerRoute.PROJECTS_READ:
             path = values.get("path")
             if not isinstance(path, str):
-                raise ProtocolError("invalid_request", "projects.read requires parameters.path")
-            return {"ref": canonical_ref, **runtime.projects.read(project_id, path, int(values.get("start_line", 1)), values.get("end_line"), int(values.get("max_bytes", 64_000)), checkout_id)}
-        return {"ref": canonical_ref, **runtime.projects.diff(project_id, values.get("git_ref"), checkout_id)}
+                raise ProtocolError(
+                    "invalid_request", "projects.read requires parameters.path"
+                )
+            return {
+                "ref": canonical_ref,
+                **runtime.projects.read(
+                    project_id,
+                    path,
+                    int(values.get("start_line", 1)),
+                    values.get("end_line"),
+                    int(values.get("max_bytes", 64_000)),
+                    checkout_id,
+                ),
+            }
+        return {
+            "ref": canonical_ref,
+            **runtime.projects.diff(project_id, values.get("git_ref"), checkout_id),
+        }
     if route is OwnerRoute.OBSERVE_MACHINE_QUERY:
         operation = values.get("operation")
         if not isinstance(operation, str):
-            raise ProtocolError("invalid_request", "machine.query requires parameters.operation")
-        return runtime.observe.machine_query(operation, int(values.get("cursor", 0)), int(values.get("limit", 100)))
+            raise ProtocolError(
+                "invalid_request", "machine.query requires parameters.operation"
+            )
+        if operation == "actions":
+            if int(values.get("cursor", 0)) != 0:
+                raise ProtocolError(
+                    "invalid_request",
+                    "machine actions snapshot does not support a cursor",
+                )
+            return runtime.machine_actions.snapshot()
+        return runtime.observe.machine_query(
+            operation, int(values.get("cursor", 0)), int(values.get("limit", 100))
+        )
     if route is OwnerRoute.CAPABILITY_INDEX_QUERY:
         if values.get("operation", "search") == "describe":
             name = values.get("name")
             if not isinstance(name, str):
-                raise ProtocolError("invalid_request", "capability description requires parameters.name")
+                raise ProtocolError(
+                    "invalid_request", "capability description requires parameters.name"
+                )
             return runtime.capability_index.describe(name, values.get("kind"))
-        return runtime.capability_index.search(str(values.get("query", "")), values.get("kind"), values.get("enabled"), int(values.get("cursor", 0)), int(values.get("limit", 100)))
+        return runtime.capability_index.search(
+            str(values.get("query", "")),
+            values.get("kind"),
+            values.get("enabled"),
+            int(values.get("cursor", 0)),
+            int(values.get("limit", 100)),
+        )
     if route is OwnerRoute.MCP_CALL_READ:
         if values.get("operation", "catalog") == "catalog":
             if reference is not None:
-                raise ProtocolError("invalid_request", "MCP catalog does not accept a target ref")
+                raise ProtocolError(
+                    "invalid_request", "MCP catalog does not accept a target ref"
+                )
             if set(values) - {"operation"}:
-                raise ProtocolError("invalid_request", "MCP catalog accepts no tool arguments")
+                raise ProtocolError(
+                    "invalid_request", "MCP catalog accepts no tool arguments"
+                )
             return await runtime.mcp_broker.catalog()
         if values.get("operation") != "call" or not isinstance(reference, str):
-            raise ProtocolError("invalid_request", "MCP calls require operation=call and a canonical tool ref")
+            raise ProtocolError(
+                "invalid_request",
+                "MCP calls require operation=call and a canonical tool ref",
+            )
         if set(values) - {"operation", "arguments"}:
-            raise ProtocolError("invalid_request", "MCP calls accept only declared tool arguments")
+            raise ProtocolError(
+                "invalid_request", "MCP calls accept only declared tool arguments"
+            )
         arguments = values.get("arguments")
         if not isinstance(arguments, Mapping):
             raise ProtocolError("invalid_request", "MCP calls require arguments")
@@ -152,7 +213,9 @@ async def _query_owner(
         return {"ref": _canonical_ref, **result}
     if route is OwnerRoute.DESKTOP_READ:
         if not isinstance(reference, str):
-            raise ProtocolError("invalid_request", "desktop.query requires the canonical desktop ref")
+            raise ProtocolError(
+                "invalid_request", "desktop.query requires the canonical desktop ref"
+            )
         _resource, _target, canonical_ref = runtime._resource_reference(
             reference, {"desktop"}, "desktop.query requires the canonical desktop ref"
         )
@@ -163,26 +226,38 @@ async def _query_owner(
             }
         operation = values.get("operation")
         if not isinstance(operation, str):
-            raise ProtocolError("invalid_request", "desktop.query requires parameters.operation")
+            raise ProtocolError(
+                "invalid_request", "desktop.query requires parameters.operation"
+            )
         return {"ref": canonical_ref, **runtime.desktop.read(operation)}
     if route is OwnerRoute.TERMINALS_READ:
         operation = values.get("operation")
         if not isinstance(operation, str):
-            raise ProtocolError("invalid_request", "terminals.query requires parameters.operation")
+            raise ProtocolError(
+                "invalid_request", "terminals.query requires parameters.operation"
+            )
         if operation == "list":
             if reference is not None:
-                raise ProtocolError("invalid_request", "terminal list does not accept a target ref")
+                raise ProtocolError(
+                    "invalid_request", "terminal list does not accept a target ref"
+                )
             return runtime.terminals.read(operation)
         if operation != "capture" or not isinstance(reference, str):
-            raise ProtocolError("invalid_request", "terminal capture requires a canonical terminal ref")
+            raise ProtocolError(
+                "invalid_request", "terminal capture requires a canonical terminal ref"
+            )
         _resource, target, canonical_ref = runtime._resource_reference(
-            reference, {"terminal"}, "terminal capture requires a canonical terminal ref"
+            reference,
+            {"terminal"},
+            "terminal capture requires a canonical terminal ref",
         )
         arguments = values.get("arguments")
         if not isinstance(arguments, Mapping):
             arguments = {}
         if "match" in arguments:
-            raise ProtocolError("invalid_request", "terminal match is derived from the canonical ref")
+            raise ProtocolError(
+                "invalid_request", "terminal match is derived from the canonical ref"
+            )
         return {
             "ref": canonical_ref,
             **runtime.terminals.read(
@@ -193,18 +268,30 @@ async def _query_owner(
     if route is OwnerRoute.BROWSER_READ:
         operation = values.get("operation")
         if not isinstance(operation, str):
-            raise ProtocolError("invalid_request", "browser.query requires parameters.operation")
+            raise ProtocolError(
+                "invalid_request", "browser.query requires parameters.operation"
+            )
         if operation in {"status", "list", "list_tabs"}:
             if reference is not None:
-                raise ProtocolError("invalid_request", f"browser {operation} does not accept a target ref")
+                raise ProtocolError(
+                    "invalid_request",
+                    f"browser {operation} does not accept a target ref",
+                )
             return runtime.browser.read(operation)
         if not isinstance(reference, str):
-            raise ProtocolError("invalid_request", "browser target reads require a canonical browser page ref")
+            raise ProtocolError(
+                "invalid_request",
+                "browser target reads require a canonical browser page ref",
+            )
         _resource, target, canonical_ref = runtime._resource_reference(
-            reference, {"browser_page"}, "browser target reads require a canonical browser page ref"
+            reference,
+            {"browser_page"},
+            "browser target reads require a canonical browser page ref",
         )
         if values.get("page_id") is not None:
-            raise ProtocolError("invalid_request", "browser page_id is derived from the canonical ref")
+            raise ProtocolError(
+                "invalid_request", "browser page_id is derived from the canonical ref"
+            )
         page_id = target["page_id"]
         if operation == "capture":
             return {
@@ -223,12 +310,17 @@ async def _query_owner(
     if route is OwnerRoute.FILES_READ:
         operation = values.get("operation")
         if not isinstance(operation, str) or not isinstance(reference, str):
-            raise ProtocolError("invalid_request", "files.query requires operation and a canonical host-file ref")
+            raise ProtocolError(
+                "invalid_request",
+                "files.query requires operation and a canonical host-file ref",
+            )
         _resource, target, canonical_ref = runtime._resource_reference(
             reference, {"host_file"}, "files.query requires a canonical host-file ref"
         )
         if values.get("path") is not None:
-            raise ProtocolError("invalid_request", "file path is derived from the canonical ref")
+            raise ProtocolError(
+                "invalid_request", "file path is derived from the canonical ref"
+            )
         return {
             "ref": canonical_ref,
             **runtime.files.read(
@@ -242,24 +334,56 @@ async def _query_owner(
     if route is OwnerRoute.SESSIONS_QUERY:
         operation = values.get("operation")
         if operation == "list":
-            return runtime.sessions.list(str(values.get("provider")), int(values.get("limit", 100)))
+            return runtime.sessions.list(
+                str(values.get("provider")), int(values.get("limit", 100))
+            )
         if operation == "read":
-            return runtime.sessions.read(str(values.get("reference")), int(values.get("offset", 0)), int(values.get("max_bytes", 64_000)))
+            return runtime.sessions.read(
+                str(values.get("reference")),
+                int(values.get("offset", 0)),
+                int(values.get("max_bytes", 64_000)),
+            )
         if operation == "search":
-            return runtime.sessions.search(str(values.get("provider")), str(values.get("query")), int(values.get("max_results", 100)))
-        raise ProtocolError("invalid_request", "sessions.query operation is not recognized")
+            return runtime.sessions.search(
+                str(values.get("provider")),
+                str(values.get("query")),
+                int(values.get("max_results", 100)),
+            )
+        raise ProtocolError(
+            "invalid_request", "sessions.query operation is not recognized"
+        )
     if route is OwnerRoute.MEMORY_QUERY:
         if values.get("operation", "search") == "get":
-            return runtime.memory.get(str(values.get("reference")), int(values.get("offset", 0)), int(values.get("max_bytes", 64_000)))
-        return runtime.memory.search(str(values.get("query")), values.get("providers"), int(values.get("limit", 100)))
+            return runtime.memory.get(
+                str(values.get("reference")),
+                int(values.get("offset", 0)),
+                int(values.get("max_bytes", 64_000)),
+            )
+        return runtime.memory.search(
+            str(values.get("query")),
+            values.get("providers"),
+            int(values.get("limit", 100)),
+        )
     if route is OwnerRoute.TIMELINE_QUERY:
-        return runtime.timeline.query(values.get("start"), values.get("end"), values.get("query"), values.get("providers"), int(values.get("limit", 100)))
+        return runtime.timeline.query(
+            values.get("start"),
+            values.get("end"),
+            values.get("query"),
+            values.get("providers"),
+            int(values.get("limit", 100)),
+        )
     if route is OwnerRoute.ARTIFACTS_QUERY:
         if values.get("operation", "list") == "read":
             artifact_id = values.get("artifact_id")
             if not isinstance(artifact_id, str):
-                raise ProtocolError("invalid_request", "artifact read requires parameters.artifact_id")
-            return runtime.artifacts.read(artifact_id, int(values.get("offset", 0)), int(values.get("max_bytes", 64_000)))
+                raise ProtocolError(
+                    "invalid_request", "artifact read requires parameters.artifact_id"
+                )
+            return runtime.artifacts.read(
+                artifact_id,
+                int(values.get("offset", 0)),
+                int(values.get("max_bytes", 64_000)),
+            )
         return runtime.artifacts.list(int(values.get("limit", 100)))
     if route is OwnerRoute.AUDIT_VERIFY:
         return runtime.audit.verify()
@@ -269,15 +393,24 @@ async def _query_owner(
         operation = values.pop("operation", "lanes")
         if operation == "lanes":
             if values:
-                raise ProtocolError("invalid_request", "capture-lane listing accepts no other parameters")
+                raise ProtocolError(
+                    "invalid_request",
+                    "capture-lane listing accepts no other parameters",
+                )
             return runtime.captures.lanes_visible()
         if operation != "query":
-            raise ProtocolError("invalid_request", "captures.query operation is not recognized")
+            raise ProtocolError(
+                "invalid_request", "captures.query operation is not recognized"
+            )
         unsupported = set(values).difference({"lanes", "since", "limit"})
         if unsupported:
-            raise ProtocolError("invalid_request", "captures.query received unsupported parameters")
+            raise ProtocolError(
+                "invalid_request", "captures.query received unsupported parameters"
+            )
         return runtime.captures.query(**values)
-    raise ProtocolError("unsupported_capability", f"query action {action.name!r} has no owner handler")
+    raise ProtocolError(
+        "unsupported_capability", f"query action {action.name!r} has no owner handler"
+    )
 
 
 def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
@@ -355,17 +488,24 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     @mcp.resource("sinnix://results/{result_id}")
     def gateway_v2_result(result_id: str) -> str:
         """Return one immutable V2 result snapshot for the active principal."""
-        return _bounded_resource_json(runtime, runtime.results.read(result_id), "result")
+        return _bounded_resource_json(
+            runtime, runtime.results.read(result_id), "result"
+        )
 
     @mcp.resource("sinnix://receipts/{receipt_id}")
     def gateway_v2_receipt(receipt_id: str) -> str:
         """Return one principal-scoped audit receipt behind its canonical ref."""
-        return _bounded_resource_json(runtime, runtime.audit.receipt(receipt_id), "receipt")
+        return _bounded_resource_json(
+            runtime, runtime.audit.receipt(receipt_id), "receipt"
+        )
 
     def register_canonical_templates() -> None:
         """Register only principal-visible canonical owner templates."""
         for resource in REGISTRY.resources:
-            if principal_name not in resource.principals or resource.kind in {"result", "receipt"}:
+            if principal_name not in resource.principals or resource.kind in {
+                "result",
+                "receipt",
+            }:
                 continue
             variables = resource.ref_template.variables
 
@@ -384,7 +524,10 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                         None,
                     )
                     if match is None:
-                        raise ProtocolError("not_found", "MCP tool is not in the current admitted catalog")
+                        raise ProtocolError(
+                            "not_found",
+                            "MCP tool is not in the current admitted catalog",
+                        )
                     payload = {"ref": reference, "kind": "mcp_tool", "tool": match}
                 else:
                     payload = runtime.v2_get(reference)
@@ -414,15 +557,23 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
 
     def template_cursor(offset: int) -> str:
         body = json.dumps(
-            {"revision": REGISTRY.revision, "principal": principal_name, "offset": offset},
+            {
+                "revision": REGISTRY.revision,
+                "principal": principal_name,
+                "offset": offset,
+            },
             sort_keys=True,
             separators=(",", ":"),
         ).encode()
         encoded = base64.urlsafe_b64encode(body).decode().rstrip("=")
-        mac = hmac.new(template_cursor_key, encoded.encode(), hashlib.sha256).hexdigest()
+        mac = hmac.new(
+            template_cursor_key, encoded.encode(), hashlib.sha256
+        ).hexdigest()
         cursor = f"{encoded}.{mac}"
         if len(cursor.encode()) > 4_096:
-            raise ProtocolError("response_bound", "resource template cursor exceeds its size bound")
+            raise ProtocolError(
+                "response_bound", "resource template cursor exceeds its size bound"
+            )
         return cursor
 
     def template_offset(cursor: str | None) -> int:
@@ -432,27 +583,46 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             if len(cursor.encode()) > 4_096:
                 raise ValueError
             encoded, mac = cursor.rsplit(".", 1)
-            expected = hmac.new(template_cursor_key, encoded.encode(), hashlib.sha256).hexdigest()
+            expected = hmac.new(
+                template_cursor_key, encoded.encode(), hashlib.sha256
+            ).hexdigest()
             if not hmac.compare_digest(mac, expected):
                 raise ValueError
             body = json.loads(
                 base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode()
             )
-            if body.get("revision") != REGISTRY.revision or body.get("principal") != principal_name:
+            if (
+                body.get("revision") != REGISTRY.revision
+                or body.get("principal") != principal_name
+            ):
                 raise ValueError
             offset = body.get("offset")
             if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
                 raise ValueError
             return offset
-        except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError, binascii.Error) as exc:
-            raise ProtocolError("stale_cursor", "resource template cursor is stale or out of scope") from exc
+        except (
+            ValueError,
+            TypeError,
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            binascii.Error,
+        ) as exc:
+            raise ProtocolError(
+                "stale_cursor", "resource template cursor is stale or out of scope"
+            ) from exc
 
-    async def list_resource_templates(_ctx: Any, params: PaginatedRequestParams) -> ListResourceTemplatesResult:
+    async def list_resource_templates(
+        _ctx: Any, params: PaginatedRequestParams
+    ) -> ListResourceTemplatesResult:
         templates = await mcp.list_resource_templates()
         offset = template_offset(params.cursor)
         page_size = 16
-        page = templates[offset:offset + page_size]
-        next_cursor = template_cursor(offset + page_size) if offset + page_size < len(templates) else None
+        page = templates[offset : offset + page_size]
+        next_cursor = (
+            template_cursor(offset + page_size)
+            if offset + page_size < len(templates)
+            else None
+        )
         return ListResourceTemplatesResult(
             resource_templates=[
                 ResourceTemplate(
@@ -481,8 +651,11 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         catalog=lambda principal: REGISTRY.search(CatalogSearch(principal=principal)),
     )
     for prompt_spec in PROMPT_SPECS:
+
         def make_prompt(name: str):
-            def generated_prompt(ref: str, job_ref: str | None = None) -> list[dict[str, Any]]:
+            def generated_prompt(
+                ref: str, job_ref: str | None = None
+            ) -> list[dict[str, Any]]:
                 return prompt_generator.generate(name, {"ref": ref, "job_ref": job_ref})
 
             generated_prompt.__name__ = name
@@ -569,7 +742,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             preconditions: dict[str, Any] | None = None,
         ) -> V2ManifestEnvelope:
             """Search the principal-filtered V2 resource and executable action catalog."""
-            action = target_bindings.action_for_tool("catalog", principal=principal_name)
+            action = target_bindings.action_for_tool(
+                "catalog", principal=principal_name
+            )
             response = runtime.execute_v2(
                 action,
                 lambda: runtime.catalog(
@@ -623,7 +798,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             action = target_bindings.action_for_tool("get", principal=principal_name)
             response = runtime.execute_v2(
                 action,
-                lambda: runtime.v2_get(ref, projection, offset, max_bytes, includes, as_of),
+                lambda: runtime.v2_get(
+                    ref, projection, offset, max_bytes, includes, as_of
+                ),
                 {
                     "ref": ref,
                     "projection": projection,
@@ -665,7 +842,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             """
             selector_error: ProtocolError | None = None
             try:
-                action = target_bindings.action_for_tool("query", action_name, principal_name)
+                action = target_bindings.action_for_tool(
+                    "query", action_name, principal_name
+                )
             except RegistryError as error:
                 action = target_bindings.fallback_for_tool("query", principal_name)
                 failure = selector_failure("query", error)
@@ -716,7 +895,10 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             preconditions: dict[str, Any] | None = None,
         ) -> V2ManifestEnvelope:
             """Compose project, assigned Beads-task, or evidence-review context."""
-            action = target_bindings.action_for_tool("context", principal=principal_name)
+            action = target_bindings.action_for_tool(
+                "context", principal=principal_name
+            )
+
             async def callback() -> dict[str, Any]:
                 return runtime.v2_context(ref, intent, job_ref)
 
@@ -753,6 +935,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         ) -> V2ManifestEnvelope:
             """Read bounded audit events visible to the active principal."""
             action = target_bindings.action_for_tool("events", principal=principal_name)
+
             async def callback() -> dict[str, Any]:
                 return runtime.v2_events(limit, cursor, project_ids)
 
@@ -889,54 +1072,71 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
 
             else:
                 if action.route is OwnerRoute.JOB_SHELL_START:
-                    callback = lambda: runtime.v2_run_shell(
-                        project_id=project_id,
-                        checkout_id=checkout_id,
-                        argv=argv,
-                        cwd=cwd,
-                        timeout_seconds=3_600 if timeout_seconds is None else timeout_seconds,
-                    )
-                elif action.route is OwnerRoute.JOB_AGENT_START:
-                    callback = lambda: runtime.v2_run_for_bead(
-                        reference=ref,
-                        checkout_id=checkout_id,
-                        claim_mode=claim_mode,
-                        assignment_ref=assignment_ref,
-                        instructions=instructions,
-                        backend=backend,
-                        model=model,
-                        reasoning_effort=reasoning_effort,
-                        timeout_seconds=3_600 if timeout_seconds is None else timeout_seconds,
-                        credential_profile=credential_profile,
-                        request_id=request_id,
-                    )
-                elif action.route is OwnerRoute.JOB_START:
-                    if any(
-                        value is not None
-                        for value in (
-                            checkout_id,
-                            argv,
-                            prompt,
-                            backend,
-                            model,
-                            reasoning_effort,
-                            timeout_seconds,
+
+                    def callback():
+                        return runtime.v2_run_shell(
+                            project_id=project_id,
+                            checkout_id=checkout_id,
+                            argv=argv,
+                            cwd=cwd,
+                            timeout_seconds=3_600
+                            if timeout_seconds is None
+                            else timeout_seconds,
                         )
-                    ) or credential_profile != "subscription" or cwd != ".":
+                elif action.route is OwnerRoute.JOB_AGENT_START:
+
+                    def callback():
+                        return runtime.v2_run_for_bead(
+                            reference=ref,
+                            checkout_id=checkout_id,
+                            claim_mode=claim_mode,
+                            assignment_ref=assignment_ref,
+                            instructions=instructions,
+                            backend=backend,
+                            model=model,
+                            reasoning_effort=reasoning_effort,
+                            timeout_seconds=3_600
+                            if timeout_seconds is None
+                            else timeout_seconds,
+                            credential_profile=credential_profile,
+                            request_id=request_id,
+                        )
+                elif action.route is OwnerRoute.JOB_START:
+                    if (
+                        any(
+                            value is not None
+                            for value in (
+                                checkout_id,
+                                argv,
+                                prompt,
+                                backend,
+                                model,
+                                reasoning_effort,
+                                timeout_seconds,
+                            )
+                        )
+                        or credential_profile != "subscription"
+                        or cwd != "."
+                    ):
+
                         def callback() -> dict[str, Any]:
                             raise ProtocolError(
                                 "invalid_request",
                                 "declared operations do not accept command, agent, or timeout overlays",
                             )
                     else:
-                        callback = lambda: runtime.v2_run_declared_operation(
-                            project_id=project_id,
-                            operation=operation,
-                            workspace_id=workspace_id,
-                            parameters=parameters,
-                        )
+
+                        def callback():
+                            return runtime.v2_run_declared_operation(
+                                project_id=project_id,
+                                operation=operation,
+                                workspace_id=workspace_id,
+                                parameters=parameters,
+                            )
                 else:
-                    raise RegistryError(f"run action {action.name!r} is not implemented")
+                    raise RegistryError(
+                        f"run action {action.name!r} is not implemented"
+                    )
             response = runtime.execute_v2(
                 action, callback, request, selector_error=selector_error
             )
@@ -984,6 +1184,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                     raise failure
 
             else:
+
                 async def callback() -> dict[str, Any]:
                     if action.route is OwnerRoute.PROJECTS_CHANGE:
                         return runtime.v2_change(
@@ -1010,7 +1211,10 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                         )
                     if action.route is OwnerRoute.BEADS_CHANGESET:
                         if preconditions is not None:
-                            raise ProtocolError("invalid_request", "Beads changeset preconditions belong to individual actions")
+                            raise ProtocolError(
+                                "invalid_request",
+                                "Beads changeset preconditions belong to individual actions",
+                            )
                         return runtime.v2_beads_changeset(
                             reference=ref,
                             operation=operation,
@@ -1020,7 +1224,9 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
                         return await runtime.v2_mcp_change(
                             reference=ref, operation=operation, parameters=parameters
                         )
-                    raise RegistryError(f"change action {action.name!r} is not implemented")
+                    raise RegistryError(
+                        f"change action {action.name!r} is not implemented"
+                    )
 
             response = await runtime.execute_v2_async(
                 action, callback, request, selector_error=selector_error
@@ -1029,7 +1235,10 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
 
     if target_bindings.is_visible("operate", principal_name):
 
-        @mcp.tool(title="Operate canonical machine target", annotations=IDEMPOTENT_MUTATION_TOOL)
+        @mcp.tool(
+            title="Operate canonical machine target",
+            annotations=IDEMPOTENT_MUTATION_TOOL,
+        )
         def operate(
             action_name: str,
             ref: str,
@@ -1070,37 +1279,51 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
 
             else:
                 if contract.route is OwnerRoute.OPS_ACTIONS_EXECUTE:
-                    callback = lambda: runtime.v2_operate(
-                        reference=ref,
-                        action=operation,
-                        parameters=parameters,
-                        reason=reason,
-                        idempotency_key=idempotency_key,
-                        preconditions=preconditions,
-                    )
+
+                    def callback():
+                        return runtime.v2_operate(
+                            reference=ref,
+                            action=operation,
+                            parameters=parameters,
+                            reason=reason,
+                            idempotency_key=idempotency_key,
+                            preconditions=preconditions,
+                        )
                 elif contract.route is OwnerRoute.JOB_CANCEL:
-                    callback = lambda: runtime.v2_cancel_job(
-                        reference=ref,
-                        preconditions=preconditions,
-                    )
+
+                    def callback():
+                        return runtime.v2_cancel_job(
+                            reference=ref,
+                            preconditions=preconditions,
+                        )
                 elif contract.route is OwnerRoute.DESKTOP_ACTION:
-                    callback = lambda: runtime.v2_desktop_operate(
-                        reference=ref, operation=operation, parameters=parameters
-                    )
+
+                    def callback():
+                        return runtime.v2_desktop_operate(
+                            reference=ref, operation=operation, parameters=parameters
+                        )
                 elif contract.route is OwnerRoute.TERMINALS_ACTION:
-                    callback = lambda: runtime.v2_terminal_operate(
-                        reference=ref, operation=operation, parameters=parameters
-                    )
+
+                    def callback():
+                        return runtime.v2_terminal_operate(
+                            reference=ref, operation=operation, parameters=parameters
+                        )
                 elif contract.route is OwnerRoute.BROWSER_ACTION:
-                    callback = lambda: runtime.v2_browser_operate(
-                        reference=ref, operation=operation, parameters=parameters
-                    )
+
+                    def callback():
+                        return runtime.v2_browser_operate(
+                            reference=ref, operation=operation, parameters=parameters
+                        )
                 elif contract.route is OwnerRoute.BEADS_MAINTENANCE:
-                    callback = lambda: runtime.v2_beads_operate(
-                        reference=ref, operation=operation, parameters=parameters
-                    )
+
+                    def callback():
+                        return runtime.v2_beads_operate(
+                            reference=ref, operation=operation, parameters=parameters
+                        )
                 else:
-                    raise RegistryError(f"operate action {contract.name!r} is not implemented")
+                    raise RegistryError(
+                        f"operate action {contract.name!r} is not implemented"
+                    )
             response = runtime.execute_v2(
                 contract, callback, request, selector_error=selector_error
             )

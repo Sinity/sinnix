@@ -8,6 +8,7 @@ in
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
+      polylogueSentinelDataDir = "/tmp/sinnix-polylogue-agent-tools-sentinel";
       # The packaged binary, not a copy of the source with a hand-patched
       # shebang: the wrapper and the withPackages interpreter that discovery
       # builds are part of what these fixtures are testing, and a fixture that
@@ -95,6 +96,7 @@ in
             sinnix.features.dev.shell.enable = true;
             sinnix.features.dev.mcp-servers.enable = true;
             sinnix.services.clodex.enable = true;
+            sinnix.services.polylogue.dataDir = polylogueSentinelDataDir;
           })
         ];
         assertions =
@@ -484,7 +486,7 @@ in
               ([.hooks.SessionStart[].hooks[].command]
                 | any(contains("sessionstart-sinex-recall.sh"))) and
               ([.hooks.Stop[].hooks[].command]
-                | any(contains("polylogue-hook Stop --provider claude-code")))
+                | any(. == "polylogue-hook Stop --provider claude-code"))
             ' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
 
             # Rendered profile configs must match the registry's own computed
@@ -571,7 +573,7 @@ in
 
             jq -e '
               [.hooks.Stop[].hooks[].command]
-              | any(contains("polylogue-hook Stop --provider codex"))
+              | any(. == "polylogue-hook Stop --provider codex")
             ' "$HOME/.codex/hooks.json" >/dev/null
             jq -e '
               [.hooks.SessionStart[].hooks[].command] | any(contains("sessionstart-sinex-recall.sh"))
@@ -762,9 +764,14 @@ in
                     parameters={},
                 )
                 record = jobs.store.load(started["job_id"])
-                expected = (*project.environment.command, *operation.command)
+                expected = project.environment.command_for(
+                    operation.command,
+                    overrides={"TMPDIR": str(jobs.store.scratch_path_for(operation.scratch, record.job_id))},
+                )
+                declared_command, _ = jobs.store.declared_launch(record.job_id)
                 assert started["kind"] == "declared-operation"
                 assert record.spec.timeout_seconds == 7200
+                assert declared_command == expected
                 assert systemd.started[0]["command"] == expected
                 assert systemd.started[0]["timeout_seconds"] == 7200
             PY

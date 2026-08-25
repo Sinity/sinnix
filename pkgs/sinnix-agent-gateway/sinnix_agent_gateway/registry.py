@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import base64
 import binascii
+import hashlib
 import hmac
+import json
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Mapping
+
+from sinnix_mcp.refs import RefTemplate, SinnixRef
 
 from .contracts import (
     BASE_TYPED_FAILURES,
@@ -16,9 +18,8 @@ from .contracts import (
     ResourceSpec,
     VerbFamily,
 )
-from .schemas import V2ToolEnvelope
 from .results import derive_cursor_key
-from sinnix_mcp.refs import RefTemplate, SinnixRef
+from .schemas import V2ToolEnvelope
 
 
 class RegistryError(ValueError):
@@ -67,7 +68,9 @@ class CatalogRegistry:
     ) -> None:
         self.resources = tuple(resources)
         self.actions = tuple(actions)
-        self._resources_by_kind = {resource.kind: resource for resource in self.resources}
+        self._resources_by_kind = {
+            resource.kind: resource for resource in self.resources
+        }
         self._actions_by_name = {action.name: action for action in self.actions}
         self._validate()
 
@@ -114,10 +117,14 @@ class CatalogRegistry:
             "action": action.catalog_row(),
         }
 
-    def resource_contract(self, kind: str, principal: str | None = None) -> dict[str, Any]:
+    def resource_contract(
+        self, kind: str, principal: str | None = None
+    ) -> dict[str, Any]:
         resource = self.resource(kind)
         if principal is not None and principal not in resource.principals:
-            raise RegistryError(f"principal {principal!r} cannot read resource {kind!r}")
+            raise RegistryError(
+                f"principal {principal!r} cannot read resource {kind!r}"
+            )
         return {
             "revision": self.revision,
             "resource": resource.catalog_row(),
@@ -131,12 +138,21 @@ class CatalogRegistry:
         }
 
     def template_page(
-        self, *, principal: str, cursor_key: bytes, limit: int = 100, cursor: str | None = None
+        self,
+        *,
+        principal: str,
+        cursor_key: bytes,
+        limit: int = 100,
+        cursor: str | None = None,
     ) -> dict[str, Any]:
         """Return principal-filtered resource templates with an opaque cursor."""
         if principal not in {"observer", "agent-control", "operator"}:
             raise RegistryError("unknown template principal")
-        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 500:
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or not 1 <= limit <= 500
+        ):
             raise RegistryError("template page limit must be 1-500")
         rows = [
             resource.catalog_row()
@@ -153,18 +169,54 @@ class CatalogRegistry:
                 expected = hmac.new(key, encoded.encode(), hashlib.sha256).hexdigest()
                 if not hmac.compare_digest(mac, expected):
                     raise ValueError
-                payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode())
-                if payload.get("revision") != self.revision or payload.get("principal") != principal:
+                payload = json.loads(
+                    base64.urlsafe_b64decode(
+                        encoded + "=" * (-len(encoded) % 4)
+                    ).decode()
+                )
+                if (
+                    payload.get("revision") != self.revision
+                    or payload.get("principal") != principal
+                ):
                     raise ValueError
                 offset = int(payload["offset"])
-            except (ValueError, KeyError, TypeError, json.JSONDecodeError, binascii.Error) as exc:
-                raise RegistryError("template cursor is stale or belongs to another principal") from exc
-        page = rows[offset:offset + limit]
+            except (
+                ValueError,
+                KeyError,
+                TypeError,
+                json.JSONDecodeError,
+                binascii.Error,
+            ) as exc:
+                raise RegistryError(
+                    "template cursor is stale or belongs to another principal"
+                ) from exc
+        page = rows[offset : offset + limit]
         next_cursor = None
         if offset + limit < len(rows):
-            encoded = base64.urlsafe_b64encode(_canonical_json({"revision": self.revision, "principal": principal, "offset": offset + limit}).encode()).decode().rstrip("=")
-            next_cursor = encoded + "." + hmac.new(key, encoded.encode(), hashlib.sha256).hexdigest()
-        return {"templates": page, "limit": limit, "next_cursor": next_cursor, "total": len(rows)}
+            encoded = (
+                base64.urlsafe_b64encode(
+                    _canonical_json(
+                        {
+                            "revision": self.revision,
+                            "principal": principal,
+                            "offset": offset + limit,
+                        }
+                    ).encode()
+                )
+                .decode()
+                .rstrip("=")
+            )
+            next_cursor = (
+                encoded
+                + "."
+                + hmac.new(key, encoded.encode(), hashlib.sha256).hexdigest()
+            )
+        return {
+            "templates": page,
+            "limit": limit,
+            "next_cursor": next_cursor,
+            "total": len(rows),
+        }
 
     def _resource_rows(
         self,
@@ -182,7 +234,10 @@ class CatalogRegistry:
                 continue
             if resource_kind is not None and resource.kind != resource_kind:
                 continue
-            if project is not None and "project_id" not in resource.ref_template.variables:
+            if (
+                project is not None
+                and "project_id" not in resource.ref_template.variables
+            ):
                 continue
             row = resource.catalog_row()
             searchable = " ".join(
@@ -221,7 +276,9 @@ class CatalogRegistry:
         }
         return hashlib.sha256(_canonical_json(payload).encode()).hexdigest()
 
-    def resolve(self, reference: str | SinnixRef) -> tuple[ResourceSpec, dict[str, str]]:
+    def resolve(
+        self, reference: str | SinnixRef
+    ) -> tuple[ResourceSpec, dict[str, str]]:
         parsed = SinnixRef.parse(reference) if isinstance(reference, str) else reference
         matches = [
             (resource, values)
@@ -236,10 +293,11 @@ class CatalogRegistry:
 
     def search(
         self,
-        search: CatalogSearch = CatalogSearch(),
+        search: CatalogSearch | None = None,
         *,
         availability_resolver: CatalogAvailabilityResolver | None = None,
     ) -> dict[str, Any]:
+        search = CatalogSearch() if search is None else search
         text = search.text.casefold() if search.text else None
         actions = []
         for action in self.actions:
@@ -269,7 +327,10 @@ class CatalogRegistry:
                 continue
             if search.effect and action.effect is not search.effect:
                 continue
-            if search.resource_kind and search.resource_kind not in action.resource_kinds:
+            if (
+                search.resource_kind
+                and search.resource_kind not in action.resource_kinds
+            ):
                 continue
             if search.project and not any(
                 "project_id" in self.resource(kind).ref_template.variables
@@ -354,7 +415,22 @@ RESOURCE_GET_SCHEMA: dict[str, Any] = _with_request_controls(
                 "maximum": 262_144,
                 "default": 64_000,
             },
-            "includes": {"type": "array", "maxItems": 8, "items": {"enum": ["blockers", "comments", "history", "events", "dependencies", "dependents", "children", "refs"]}},
+            "includes": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                    "enum": [
+                        "blockers",
+                        "comments",
+                        "history",
+                        "events",
+                        "dependencies",
+                        "dependents",
+                        "children",
+                        "refs",
+                    ]
+                },
+            },
             "as_of": {"type": "string", "minLength": 1, "maxLength": 128},
         },
     }
@@ -380,13 +456,23 @@ JOB_WAIT_SCHEMA: dict[str, Any] = _with_request_controls(
             },
             "target": {
                 "enum": [
-                    "job_terminal", "bead_status", "bead_revision", "unit_state",
-                    "file_hash", "capture_freshness", "receipt_appearance",
+                    "job_terminal",
+                    "bead_status",
+                    "bead_revision",
+                    "unit_state",
+                    "file_hash",
+                    "capture_freshness",
+                    "receipt_appearance",
                 ],
                 "default": "job_terminal",
             },
             "expected": {"type": "object", "maxProperties": 8},
-            "poll_seconds": {"type": "number", "minimum": 0.01, "maximum": 5, "default": 0.25},
+            "poll_seconds": {
+                "type": "number",
+                "minimum": 0.01,
+                "maximum": 5,
+                "default": 0.25,
+            },
         },
     }
 )
@@ -475,10 +561,20 @@ AGENT_FOR_BEAD_SCHEMA: dict[str, Any] = _with_request_controls(
             "request_id",
         ],
         "properties": {
-            "ref": {"type": "string", "minLength": 1, "maxLength": 2_048, "pattern": "^sinnix://projects/[^/]+/beads/[^/]+$"},
+            "ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2_048,
+                "pattern": "^sinnix://projects/[^/]+/beads/[^/]+$",
+            },
             "checkout_id": {"type": "string", "minLength": 1, "maxLength": 128},
             "claim_mode": {"enum": ["none", "claim"], "default": "none"},
-            "assignment_ref": {"type": "string", "minLength": 1, "maxLength": 2_048, "pattern": "^sinnix://jobs/[^/]+$"},
+            "assignment_ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2_048,
+                "pattern": "^sinnix://jobs/[^/]+$",
+            },
             "instructions": {"type": "string", "maxLength": 32_000},
             "backend": {"enum": ["claude", "codex", "gemini", "grok", "antigravity"]},
             "model": {"type": "string", "minLength": 1, "maxLength": 256},
@@ -576,8 +672,24 @@ PROJECT_CONTEXT_SCHEMA: dict[str, Any] = _with_request_controls(
                 "maxLength": 2_048,
                 "pattern": "^sinnix://(?:projects/[^/]+(?:/beads/[^/]+)?|jobs/[^/]+)$",
             },
-            "intent": {"enum": ["project", "project.orientation", "project.triage", "bead.work", "bead.review", "job.review", "incident"], "default": "project.orientation"},
-            "job_ref": {"type": "string", "minLength": 1, "maxLength": 2_048, "pattern": "^sinnix://jobs/[^/]+$"},
+            "intent": {
+                "enum": [
+                    "project",
+                    "project.orientation",
+                    "project.triage",
+                    "bead.work",
+                    "bead.review",
+                    "job.review",
+                    "incident",
+                ],
+                "default": "project.orientation",
+            },
+            "job_ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2_048,
+                "pattern": "^sinnix://jobs/[^/]+$",
+            },
         },
     }
 )
@@ -694,38 +806,179 @@ BEADS_CHANGE_SCHEMA = _owner_change_schema(
 )
 
 BEADS_QUERY_SCHEMA: dict[str, Any] = _with_request_controls(
-    {"type": "object", "additionalProperties": False, "required": ["action_name", "parameters"], "properties": {
-        "action_name": {"const": "beads.query"},
-        "parameters": {"type": "object", "additionalProperties": False, "properties": {
-            "project_ids": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 128}},
-            "view": {"enum": ["query", "ready", "blocked", "open", "all", "recent", "overdue", "deferred", "unassigned", "stale_claims", "epic_progress", "changed_since"]},
-            "filters": {"type": "object", "maxProperties": 32}, "expression": {"type": "string", "minLength": 1, "maxLength": 4000}, "native_filters": {"type": "object", "maxProperties": 40},
-            "order": {"type": "object", "additionalProperties": False, "properties": {"field": {"enum": ["priority", "created", "updated", "closed", "status", "id", "title", "type", "assignee"]}, "reverse": {"type": "boolean"}}},
-            "includes": {"type": "array", "maxItems": 8, "items": {"enum": ["comments", "history", "events", "dependencies", "dependents", "children", "refs"]}},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 200}, "cursor": {"type": "string", "minLength": 1, "maxLength": 256},
-            "graph": {"type": "object", "additionalProperties": False, "properties": {"bead_id": {"type": "string"}, "direction": {"enum": ["down", "up", "both"]}, "edge_type": {"type": "string"}, "status": {"type": "string"}, "depth": {"type": "integer", "minimum": 1, "maximum": 20}, "max_rows": {"type": "integer", "minimum": 1, "maximum": 1000}, "mermaid": {"type": "boolean"}}},
-            "memory": {"type": "object", "additionalProperties": False, "properties": {"key": {"type": "string"}, "query": {"type": "string"}}},
-        }},
-    }}
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["action_name", "parameters"],
+        "properties": {
+            "action_name": {"const": "beads.query"},
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "project_ids": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "items": {"type": "string", "minLength": 1, "maxLength": 128},
+                    },
+                    "view": {
+                        "enum": [
+                            "query",
+                            "ready",
+                            "blocked",
+                            "open",
+                            "all",
+                            "recent",
+                            "overdue",
+                            "deferred",
+                            "unassigned",
+                            "stale_claims",
+                            "epic_progress",
+                            "changed_since",
+                        ]
+                    },
+                    "filters": {"type": "object", "maxProperties": 32},
+                    "expression": {"type": "string", "minLength": 1, "maxLength": 4000},
+                    "native_filters": {"type": "object", "maxProperties": 40},
+                    "order": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "field": {
+                                "enum": [
+                                    "priority",
+                                    "created",
+                                    "updated",
+                                    "closed",
+                                    "status",
+                                    "id",
+                                    "title",
+                                    "type",
+                                    "assignee",
+                                ]
+                            },
+                            "reverse": {"type": "boolean"},
+                        },
+                    },
+                    "includes": {
+                        "type": "array",
+                        "maxItems": 8,
+                        "items": {
+                            "enum": [
+                                "comments",
+                                "history",
+                                "events",
+                                "dependencies",
+                                "dependents",
+                                "children",
+                                "refs",
+                            ]
+                        },
+                    },
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+                    "cursor": {"type": "string", "minLength": 1, "maxLength": 256},
+                    "graph": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "bead_id": {"type": "string"},
+                            "direction": {"enum": ["down", "up", "both"]},
+                            "edge_type": {"type": "string"},
+                            "status": {"type": "string"},
+                            "depth": {"type": "integer", "minimum": 1, "maximum": 20},
+                            "max_rows": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 1000,
+                            },
+                            "mermaid": {"type": "boolean"},
+                        },
+                    },
+                    "memory": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "key": {"type": "string"},
+                            "query": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        },
+    }
 )
 
 BEADS_CHANGE_SCHEMA["properties"]["parameters"] = {
-    "type": "object", "additionalProperties": False,
+    "type": "object",
+    "additionalProperties": False,
     "properties": {
-        "id": {"type": "string", "minLength": 1, "maxLength": 128}, "mode": {"enum": ["preview", "apply"]},
-        "preview_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "title": {"type": "string", "maxLength": 512},
-        "text": {"type": "string", "maxLength": 32000}, "depends_on": {"type": "string", "maxLength": 128},
-        "other_id": {"type": "string", "maxLength": 128}, "parent_id": {"type": "string", "maxLength": 128},
-        "type": {"type": "string", "maxLength": 64}, "reason": {"type": "string", "maxLength": 32000}, "key": {"type": "string", "maxLength": 256}, "graph": {"type": "object", "maxProperties": 256},
+        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "mode": {"enum": ["preview", "apply"]},
+        "preview_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "title": {"type": "string", "maxLength": 512},
+        "text": {"type": "string", "maxLength": 32000},
+        "depends_on": {"type": "string", "maxLength": 128},
+        "other_id": {"type": "string", "maxLength": 128},
+        "parent_id": {"type": "string", "maxLength": 128},
+        "type": {"type": "string", "maxLength": 64},
+        "reason": {"type": "string", "maxLength": 32000},
+        "key": {"type": "string", "maxLength": 256},
+        "graph": {"type": "object", "maxProperties": 256},
         "force": {"type": "boolean", "const": True},
-        "verdict": {"enum": ["accepted", "rejected", "partial"]}, "residuals": {"type": "array", "maxItems": 32, "items": {"type": "string", "maxLength": 2_000}}, "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string", "pattern": "^sinnix://"}}, "job_ref": {"type": "string", "pattern": "^sinnix://jobs/[^/]+$"}, "code_revision": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"}, "task_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "task_etag": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "patch": {"type": "object", "additionalProperties": False, "properties": {
-            "set": {"type": "object"},
-            "labels": {"type": "object", "additionalProperties": False, "properties": {"add": {"type": "array", "items": {"type": "string"}}, "remove": {"type": "array", "items": {"type": "string"}}, "replace": {"type": "array", "items": {"type": "string"}}}},
-            "metadata": {"type": "object", "additionalProperties": False, "properties": {"set": {"type": "object"}, "unset": {"type": "array", "items": {"type": "string"}}}},
-            "notes": {"type": "object", "additionalProperties": False, "required": ["text"], "properties": {"text": {"type": "string", "maxLength": 32000}, "mode": {"enum": ["append", "replace"]}}},
-            "unset": {"type": "array", "items": {"enum": ["due", "defer", "parent"]}},
-        }},
+        "verdict": {"enum": ["accepted", "rejected", "partial"]},
+        "residuals": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {"type": "string", "maxLength": 2_000},
+        },
+        "evidence_refs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {"type": "string", "pattern": "^sinnix://"},
+        },
+        "job_ref": {"type": "string", "pattern": "^sinnix://jobs/[^/]+$"},
+        "code_revision": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+        "task_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "task_etag": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "patch": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "set": {"type": "object"},
+                "labels": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "add": {"type": "array", "items": {"type": "string"}},
+                        "remove": {"type": "array", "items": {"type": "string"}},
+                        "replace": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "set": {"type": "object"},
+                        "unset": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                "notes": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["text"],
+                    "properties": {
+                        "text": {"type": "string", "maxLength": 32000},
+                        "mode": {"enum": ["append", "replace"]},
+                    },
+                },
+                "unset": {
+                    "type": "array",
+                    "items": {"enum": ["due", "defer", "parent"]},
+                },
+            },
+        },
     },
 }
 
@@ -753,7 +1006,11 @@ BEADS_CHANGESET_SCHEMA["properties"]["parameters"] = {
                         "maxLength": 8_192,
                         "pattern": r"^sinnix://projects/[^/]+(?:/beads/[^/]+)?$",
                     },
-                    "operation": {"enum": list(BEADS_CHANGE_SCHEMA["properties"]["operation"]["enum"])},
+                    "operation": {
+                        "enum": list(
+                            BEADS_CHANGE_SCHEMA["properties"]["operation"]["enum"]
+                        )
+                    },
                     "parameters": {"type": "object", "maxProperties": 32},
                     "preconditions": BEADS_CHANGE_SCHEMA["properties"]["preconditions"],
                     "bind": {
@@ -772,7 +1029,14 @@ BEADS_CHANGESET_SCHEMA["properties"]["parameters"] = {
 
 BEADS_OPERATE_SCHEMA = _owner_change_schema(
     ref_pattern=r"^sinnix://projects/[^/]+$",
-    operations=("backup.create", "backup.list", "backup.restore", "snapshot.publish", "sync.pull", "sync.push"),
+    operations=(
+        "backup.create",
+        "backup.list",
+        "backup.restore",
+        "snapshot.publish",
+        "sync.pull",
+        "sync.push",
+    ),
 )
 BEADS_OPERATE_SCHEMA["properties"]["parameters"] = {
     "type": "object",
@@ -789,7 +1053,14 @@ MCP_CHANGE_SCHEMA = _owner_change_schema(
 
 DESKTOP_OPERATE_SCHEMA = _owner_change_schema(
     ref_pattern=r"^sinnix://desktop/current$",
-    operations=("dispatch", "focus_window", "keyword", "paste", "send_keystate", "send_shortcut"),
+    operations=(
+        "dispatch",
+        "focus_window",
+        "keyword",
+        "paste",
+        "send_keystate",
+        "send_shortcut",
+    ),
 )
 
 TERMINAL_OPERATE_SCHEMA = _owner_change_schema(
@@ -799,7 +1070,18 @@ TERMINAL_OPERATE_SCHEMA = _owner_change_schema(
 
 BROWSER_OPERATE_SCHEMA = _owner_change_schema(
     ref_pattern=r"^sinnix://browser/(?:agent-workspace|pages/[^/]+)$",
-    operations=("agent_window", "await", "click", "close", "evaluate", "fill_form", "inject_text", "navigate", "reload", "wait_selector"),
+    operations=(
+        "agent_window",
+        "await",
+        "click",
+        "close",
+        "evaluate",
+        "fill_form",
+        "inject_text",
+        "navigate",
+        "reload",
+        "wait_selector",
+    ),
 )
 
 MACHINE_OPERATE_SCHEMA: dict[str, Any] = _with_request_controls(
@@ -821,9 +1103,7 @@ MACHINE_OPERATE_SCHEMA: dict[str, Any] = _with_request_controls(
                 "maxLength": 2_048,
                 "pattern": "^sinnix://(?:jobs|machine|processes)/",
             },
-            "action": {
-                "enum": list(MACHINE_OPERATIONS)
-            },
+            "action": {"enum": list(MACHINE_OPERATIONS)},
             "parameters": {"type": "object"},
             "preconditions": {
                 "type": "object",
@@ -850,7 +1130,8 @@ AUDIT_EVENTS_SCHEMA: dict[str, Any] = _with_request_controls(
             },
             "cursor": {"type": "string", "minLength": 1, "maxLength": 4_096},
             "project_ids": {
-                "type": "array", "maxItems": 16,
+                "type": "array",
+                "maxItems": 16,
                 "items": {"type": "string", "minLength": 1, "maxLength": 128},
             },
         },
@@ -901,23 +1182,159 @@ def _owner_query_actions() -> tuple[ActionSpec, ...]:
     all_principals = frozenset({"observer", "agent-control", "operator"})
     observer_operator = frozenset({"observer", "operator"})
     return (
-        _owner_query_action("projects.list", "projects", "projects", "projects.list", all_principals, ("project",), "List principal-visible projects without host paths."),
-        _owner_query_action("projects.tree", "projects", "projects", "projects.tree", all_principals, ("project", "checkout"), "List a bounded canonical project tree without following symlinks."),
-        _owner_query_action("projects.read", "projects", "projects", "projects.read", all_principals, ("project", "checkout"), "Read a bounded project file through a canonical project or checkout ref."),
-        _owner_query_action("projects.diff", "projects", "projects", "projects.diff", all_principals, ("project", "checkout"), "Read a bounded Git diff through a canonical project or checkout ref."),
-        _owner_query_action("machine.query", "machine", "machine", "observe.machine_query", all_principals, ("machine_unit", "process"), "Read one bounded, provenance-carrying machine section; overview replaces the retired whole-machine report."),
-        _owner_query_action("capabilities.query", "capabilities", "capability-index", "capability_index.query", all_principals, ("capability",), "Search or exactly describe generated machine capabilities."),
-        _owner_query_action("mcp.query", "mcp", "mcp-broker", "mcp.call.read", observer_operator, ("mcp_tool",), "Discover brokered MCP servers or invoke a declared read-only upstream tool."),
-        _owner_query_action("desktop.query", "desktop", "desktop", "desktop.read", observer_operator, ("desktop",), "Read desktop state or capture output without changing focus."),
-        _owner_query_action("terminals.query", "terminals", "terminals", "terminals.read", observer_operator, ("terminal",), "List terminals or read bounded terminal evidence."),
-        _owner_query_action("browser.query", "browser", "browser", "browser.read", observer_operator, ("browser_page",), "Read browser state or capture only a registered gateway-owned browser target."),
-        _owner_query_action("files.query", "files", "files", "files.read", observer_operator, ("host_file",), "Stat, list, or read a bounded principal-authorized host path."),
-        _owner_query_action("sessions.query", "sessions", "sessions", "sessions.query", observer_operator, ("session",), "List, read, or search bounded provider-scoped coding sessions."),
-        _owner_query_action("memory.query", "memory", "memory", "memory.query", observer_operator, ("session",), "Search or retrieve semantic memory while retaining source provenance."),
-        _owner_query_action("timeline.query", "timeline", "timeline", "timeline.query", observer_operator, ("session",), "Query available session evidence without claiming unavailable upstream coverage."),
-        _owner_query_action("artifacts.query", "artifacts", "artifacts", "artifacts.query", all_principals, ("artifact",), "List opaque artifact metadata or read a bounded artifact range."),
-        _owner_query_action("audit.verify", "audit", "audit", "audit.verify", all_principals, ("receipt",), "Verify the tamper-evident audit hash chain."),
-        _owner_query_action("captures.query", "captures", "captures", "captures.query", all_principals, ("capture_lane",), "List visible capture lanes or query their declared native owner roots."),
+        _owner_query_action(
+            "projects.list",
+            "projects",
+            "projects",
+            "projects.list",
+            all_principals,
+            ("project",),
+            "List principal-visible projects without host paths.",
+        ),
+        _owner_query_action(
+            "projects.tree",
+            "projects",
+            "projects",
+            "projects.tree",
+            all_principals,
+            ("project", "checkout"),
+            "List a bounded canonical project tree without following symlinks.",
+        ),
+        _owner_query_action(
+            "projects.read",
+            "projects",
+            "projects",
+            "projects.read",
+            all_principals,
+            ("project", "checkout"),
+            "Read a bounded project file through a canonical project or checkout ref.",
+        ),
+        _owner_query_action(
+            "projects.diff",
+            "projects",
+            "projects",
+            "projects.diff",
+            all_principals,
+            ("project", "checkout"),
+            "Read a bounded Git diff through a canonical project or checkout ref.",
+        ),
+        _owner_query_action(
+            "machine.query",
+            "machine",
+            "machine",
+            "observe.machine_query",
+            all_principals,
+            ("machine_unit", "process"),
+            "Read one bounded, provenance-carrying machine section; operation=actions returns the authoritative revision required by machine.operate.",
+        ),
+        _owner_query_action(
+            "capabilities.query",
+            "capabilities",
+            "capability-index",
+            "capability_index.query",
+            all_principals,
+            ("capability",),
+            "Search or exactly describe generated machine capabilities.",
+        ),
+        _owner_query_action(
+            "mcp.query",
+            "mcp",
+            "mcp-broker",
+            "mcp.call.read",
+            observer_operator,
+            ("mcp_tool",),
+            "Discover brokered MCP servers or invoke a declared read-only upstream tool.",
+        ),
+        _owner_query_action(
+            "desktop.query",
+            "desktop",
+            "desktop",
+            "desktop.read",
+            observer_operator,
+            ("desktop",),
+            "Read desktop state or capture output without changing focus.",
+        ),
+        _owner_query_action(
+            "terminals.query",
+            "terminals",
+            "terminals",
+            "terminals.read",
+            observer_operator,
+            ("terminal",),
+            "List terminals or read bounded terminal evidence.",
+        ),
+        _owner_query_action(
+            "browser.query",
+            "browser",
+            "browser",
+            "browser.read",
+            observer_operator,
+            ("browser_page",),
+            "Read browser state or capture only a registered gateway-owned browser target.",
+        ),
+        _owner_query_action(
+            "files.query",
+            "files",
+            "files",
+            "files.read",
+            observer_operator,
+            ("host_file",),
+            "Stat, list, or read a bounded principal-authorized host path.",
+        ),
+        _owner_query_action(
+            "sessions.query",
+            "sessions",
+            "sessions",
+            "sessions.query",
+            observer_operator,
+            ("session",),
+            "List, read, or search bounded provider-scoped coding sessions.",
+        ),
+        _owner_query_action(
+            "memory.query",
+            "memory",
+            "memory",
+            "memory.query",
+            observer_operator,
+            ("session",),
+            "Search or retrieve semantic memory while retaining source provenance.",
+        ),
+        _owner_query_action(
+            "timeline.query",
+            "timeline",
+            "timeline",
+            "timeline.query",
+            observer_operator,
+            ("session",),
+            "Query available session evidence without claiming unavailable upstream coverage.",
+        ),
+        _owner_query_action(
+            "artifacts.query",
+            "artifacts",
+            "artifacts",
+            "artifacts.query",
+            all_principals,
+            ("artifact",),
+            "List opaque artifact metadata or read a bounded artifact range.",
+        ),
+        _owner_query_action(
+            "audit.verify",
+            "audit",
+            "audit",
+            "audit.verify",
+            all_principals,
+            ("receipt",),
+            "Verify the tamper-evident audit hash chain.",
+        ),
+        _owner_query_action(
+            "captures.query",
+            "captures",
+            "captures",
+            "captures.query",
+            all_principals,
+            ("capture_lane",),
+            "List visible capture lanes or query their declared native owner roots.",
+        ),
         ActionSpec(
             name="jobs.query",
             verb=VerbFamily.QUERY,
@@ -938,26 +1355,155 @@ def _owner_query_actions() -> tuple[ActionSpec, ...]:
 
 def build_registry() -> CatalogRegistry:
     resources = (
-        ResourceSpec("project", RefTemplate("project", "sinnix://projects/{project_id}"), "projects", ("summary", "git", "tree"), True),
-        ResourceSpec("checkout", RefTemplate("checkout", "sinnix://projects/{project_id}/checkouts/{checkout_id}"), "projects", ("summary", "git", "files"), True),
-        ResourceSpec("bead", RefTemplate("bead", "sinnix://projects/{project_id}/beads/{bead_id}"), "beads", ("summary", "history", "graph"), True, principals=frozenset({"observer", "operator"})),
-        ResourceSpec("task_authority", RefTemplate("task_authority", "sinnix://projects/{project_id}/task-authority"), "beads", ("status",), False),
-        ResourceSpec("job", RefTemplate("job", "sinnix://jobs/{job_id}"), "jobs", ("summary", "output", "manifest"), True),
-        ResourceSpec("artifact", RefTemplate("artifact", "sinnix://artifacts/{artifact_id}"), "artifacts", ("metadata", "content"), True),
-        ResourceSpec("receipt", RefTemplate("receipt", "sinnix://receipts/{receipt_id}"), "audit", ("summary",), True),
-        ResourceSpec("result", RefTemplate("result", "sinnix://results/{result_id}"), "results", ("metadata", "page"), True),
-        ResourceSpec("machine_unit", RefTemplate("machine_unit", "sinnix://machine/units/{manager}/{unit}"), "machine", ("status", "health"), True),
-        ResourceSpec("browser_page", RefTemplate("browser_page", "sinnix://browser/pages/{page_id}"), "browser", ("summary", "content"), True),
-        ResourceSpec("browser_workspace", RefTemplate("browser_workspace", "sinnix://browser/agent-workspace"), "browser", ("summary",), False, principals=frozenset({"operator"})),
-        ResourceSpec("process", RefTemplate("process", "sinnix://processes/{pid}/{start_ticks}"), "machine", ("status",), True),
-        ResourceSpec("terminal", RefTemplate("terminal", "sinnix://terminals/{terminal_id}"), "terminals", ("summary", "scrollback"), True),
-        ResourceSpec("desktop", RefTemplate("desktop", "sinnix://desktop/current"), "desktop", ("summary",), True, principals=frozenset({"observer", "operator"})),
-        ResourceSpec("host_file", RefTemplate("host_file", "sinnix://files/{file_token}"), "files", ("summary",), True, principals=frozenset({"observer", "operator"})),
-        ResourceSpec("mcp_tool", RefTemplate("mcp_tool", "sinnix://mcp/{server}/tools/{tool}"), "mcp-broker", ("summary",), True, principals=frozenset({"observer", "operator"})),
-        ResourceSpec("capture_lane", RefTemplate("capture_lane", "sinnix://captures/{lane}"), "captures", ("summary", "query"), True),
-        ResourceSpec("capability", RefTemplate("capability", "sinnix://capabilities/{name}"), "capability-index", ("summary",), True),
-        ResourceSpec("session", RefTemplate("session", "sinnix://sessions/{provider}/{session_id}"), "sessions", ("summary", "messages"), True),
-        ResourceSpec("context_snapshot", RefTemplate("context_snapshot", "sinnix://contexts/{snapshot_id}"), "context", ("summary", "sources"), True),
+        ResourceSpec(
+            "project",
+            RefTemplate("project", "sinnix://projects/{project_id}"),
+            "projects",
+            ("summary", "git", "tree"),
+            True,
+        ),
+        ResourceSpec(
+            "checkout",
+            RefTemplate(
+                "checkout", "sinnix://projects/{project_id}/checkouts/{checkout_id}"
+            ),
+            "projects",
+            ("summary", "git", "files"),
+            True,
+        ),
+        ResourceSpec(
+            "bead",
+            RefTemplate("bead", "sinnix://projects/{project_id}/beads/{bead_id}"),
+            "beads",
+            ("summary", "history", "graph"),
+            True,
+            principals=frozenset({"observer", "operator"}),
+        ),
+        ResourceSpec(
+            "task_authority",
+            RefTemplate(
+                "task_authority", "sinnix://projects/{project_id}/task-authority"
+            ),
+            "beads",
+            ("status",),
+            False,
+        ),
+        ResourceSpec(
+            "job",
+            RefTemplate("job", "sinnix://jobs/{job_id}"),
+            "jobs",
+            ("summary", "output", "manifest"),
+            True,
+        ),
+        ResourceSpec(
+            "artifact",
+            RefTemplate("artifact", "sinnix://artifacts/{artifact_id}"),
+            "artifacts",
+            ("metadata", "content"),
+            True,
+        ),
+        ResourceSpec(
+            "receipt",
+            RefTemplate("receipt", "sinnix://receipts/{receipt_id}"),
+            "audit",
+            ("summary",),
+            True,
+        ),
+        ResourceSpec(
+            "result",
+            RefTemplate("result", "sinnix://results/{result_id}"),
+            "results",
+            ("metadata", "page"),
+            True,
+        ),
+        ResourceSpec(
+            "machine_unit",
+            RefTemplate("machine_unit", "sinnix://machine/units/{manager}/{unit}"),
+            "machine",
+            ("status", "health"),
+            True,
+        ),
+        ResourceSpec(
+            "browser_page",
+            RefTemplate("browser_page", "sinnix://browser/pages/{page_id}"),
+            "browser",
+            ("summary", "content"),
+            True,
+        ),
+        ResourceSpec(
+            "browser_workspace",
+            RefTemplate("browser_workspace", "sinnix://browser/agent-workspace"),
+            "browser",
+            ("summary",),
+            False,
+            principals=frozenset({"operator"}),
+        ),
+        ResourceSpec(
+            "process",
+            RefTemplate("process", "sinnix://processes/{pid}/{start_ticks}"),
+            "machine",
+            ("status",),
+            True,
+        ),
+        ResourceSpec(
+            "terminal",
+            RefTemplate("terminal", "sinnix://terminals/{terminal_id}"),
+            "terminals",
+            ("summary", "scrollback"),
+            True,
+        ),
+        ResourceSpec(
+            "desktop",
+            RefTemplate("desktop", "sinnix://desktop/current"),
+            "desktop",
+            ("summary",),
+            True,
+            principals=frozenset({"observer", "operator"}),
+        ),
+        ResourceSpec(
+            "host_file",
+            RefTemplate("host_file", "sinnix://files/{file_token}"),
+            "files",
+            ("summary",),
+            True,
+            principals=frozenset({"observer", "operator"}),
+        ),
+        ResourceSpec(
+            "mcp_tool",
+            RefTemplate("mcp_tool", "sinnix://mcp/{server}/tools/{tool}"),
+            "mcp-broker",
+            ("summary",),
+            True,
+            principals=frozenset({"observer", "operator"}),
+        ),
+        ResourceSpec(
+            "capture_lane",
+            RefTemplate("capture_lane", "sinnix://captures/{lane}"),
+            "captures",
+            ("summary", "query"),
+            True,
+        ),
+        ResourceSpec(
+            "capability",
+            RefTemplate("capability", "sinnix://capabilities/{name}"),
+            "capability-index",
+            ("summary",),
+            True,
+        ),
+        ResourceSpec(
+            "session",
+            RefTemplate("session", "sinnix://sessions/{provider}/{session_id}"),
+            "sessions",
+            ("summary", "messages"),
+            True,
+        ),
+        ResourceSpec(
+            "context_snapshot",
+            RefTemplate("context_snapshot", "sinnix://contexts/{snapshot_id}"),
+            "context",
+            ("summary", "sources"),
+            True,
+        ),
     )
     actions = (
         ActionSpec(
@@ -1005,10 +1551,26 @@ def build_registry() -> CatalogRegistry:
             input_schema=RESOURCE_GET_SCHEMA,
             output_schema=V2_ENVELOPE_SCHEMA,
             resource_kinds=(
-                "project", "checkout", "bead", "task_authority", "job",
-                "artifact", "receipt", "result", "machine_unit", "browser_page",
-                "browser_workspace", "process", "terminal", "desktop", "host_file",
-                "mcp_tool", "capture_lane", "capability", "session", "context_snapshot",
+                "project",
+                "checkout",
+                "bead",
+                "task_authority",
+                "job",
+                "artifact",
+                "receipt",
+                "result",
+                "machine_unit",
+                "browser_page",
+                "browser_workspace",
+                "process",
+                "terminal",
+                "desktop",
+                "host_file",
+                "mcp_tool",
+                "capture_lane",
+                "capability",
+                "session",
+                "context_snapshot",
             ),
             examples=({"input": {"ref": "sinnix://projects/sinnix"}},),
             documentation="Resolve one canonical owner-backed resource through its registered source of truth.",
@@ -1046,7 +1608,23 @@ def build_registry() -> CatalogRegistry:
             input_schema=BEADS_QUERY_SCHEMA,
             output_schema=V2_ENVELOPE_SCHEMA,
             resource_kinds=("project", "bead", "task_authority"),
-            examples=({"input": {"action_name": "beads.query", "parameters": {"project_ids": ["polylogue"], "view": "query", "filters": {"status": "open", "priority": {"op": "<=", "value": 1}}, "includes": ["dependencies"], "limit": 50}}},),
+            examples=(
+                {
+                    "input": {
+                        "action_name": "beads.query",
+                        "parameters": {
+                            "project_ids": ["polylogue"],
+                            "view": "query",
+                            "filters": {
+                                "status": "open",
+                                "priority": {"op": "<=", "value": 1},
+                            },
+                            "includes": ["dependencies"],
+                            "limit": 50,
+                        },
+                    }
+                },
+            ),
             documentation="Query canonical project-qualified Beads resources with bounded snapshot paging and explicit coverage.",
         ),
         ActionSpec(
@@ -1060,9 +1638,7 @@ def build_registry() -> CatalogRegistry:
             input_schema=PROJECT_CONTEXT_SCHEMA,
             output_schema=V2_ENVELOPE_SCHEMA,
             resource_kinds=("project", "checkout", "bead", "task_authority"),
-            examples=(
-                {"input": {"ref": "sinnix://projects/sinnix"}},
-            ),
+            examples=({"input": {"ref": "sinnix://projects/sinnix"}},),
             documentation="Compose Git and bounded task orientation for one canonical project.",
         ),
         ActionSpec(
@@ -1143,7 +1719,16 @@ def build_registry() -> CatalogRegistry:
             supports_idempotency=True,
             supports_precondition=True,
             receipt_policy="audit",
-            examples=({"input": {"ref": "sinnix://files/L3JlYWxtL3RtcC9maWxl", "operation": "replace", "parameters": {"content": "updated content\\n"}, "idempotency_key": "file-replace-example"}},),
+            examples=(
+                {
+                    "input": {
+                        "ref": "sinnix://files/L3JlYWxtL3RtcC9maWxl",
+                        "operation": "replace",
+                        "parameters": {"content": "updated content\\n"},
+                        "idempotency_key": "file-replace-example",
+                    }
+                },
+            ),
             documentation="Apply one bounded host-file mutation through an opaque canonical file reference.",
         ),
         ActionSpec(
@@ -1160,7 +1745,19 @@ def build_registry() -> CatalogRegistry:
             supports_idempotency=True,
             supports_precondition=True,
             receipt_policy="audit",
-            examples=({"input": {"ref": "sinnix://projects/sinnix", "operation": "comment", "parameters": {"id": "sinnix-example", "text": "recorded by the operator"}, "idempotency_key": "bead-comment-example"}},),
+            examples=(
+                {
+                    "input": {
+                        "ref": "sinnix://projects/sinnix",
+                        "operation": "comment",
+                        "parameters": {
+                            "id": "sinnix-example",
+                            "text": "recorded by the operator",
+                        },
+                        "idempotency_key": "bead-comment-example",
+                    }
+                },
+            ),
             documentation="Perform one structured, attested Beads mutation for a canonical project.",
         ),
         ActionSpec(
@@ -1177,7 +1774,33 @@ def build_registry() -> CatalogRegistry:
             supports_idempotency=True,
             supports_precondition=True,
             receipt_policy="audit",
-            examples=({"input": {"ref": "sinnix://projects/sinnix", "operation": "preview", "parameters": {"actions": [{"ref": "sinnix://projects/sinnix", "operation": "create", "parameters": {"title": "parent"}, "bind": "parent"}, {"ref": "sinnix://projects/sinnix", "operation": "create", "parameters": {"title": "child", "parent": "$parent"}}]}, "idempotency_key": "beads-changeset-example"}},),
+            examples=(
+                {
+                    "input": {
+                        "ref": "sinnix://projects/sinnix",
+                        "operation": "preview",
+                        "parameters": {
+                            "actions": [
+                                {
+                                    "ref": "sinnix://projects/sinnix",
+                                    "operation": "create",
+                                    "parameters": {"title": "parent"},
+                                    "bind": "parent",
+                                },
+                                {
+                                    "ref": "sinnix://projects/sinnix",
+                                    "operation": "create",
+                                    "parameters": {
+                                        "title": "child",
+                                        "parent": "$parent",
+                                    },
+                                },
+                            ]
+                        },
+                        "idempotency_key": "beads-changeset-example",
+                    }
+                },
+            ),
             documentation="Preview or apply an ordered, project-partitioned Beads changeset with explicit step outcomes and no global rollback claim.",
         ),
         ActionSpec(
@@ -1193,7 +1816,16 @@ def build_registry() -> CatalogRegistry:
             resource_kinds=("project", "task_authority"),
             supports_idempotency=True,
             receipt_policy="audit",
-            examples=({"input": {"ref": "sinnix://projects/sinnix", "operation": "snapshot.publish", "parameters": {}, "idempotency_key": "beads-publish-example"}},),
+            examples=(
+                {
+                    "input": {
+                        "ref": "sinnix://projects/sinnix",
+                        "operation": "snapshot.publish",
+                        "parameters": {},
+                        "idempotency_key": "beads-publish-example",
+                    }
+                },
+            ),
             documentation="Run one explicit Beads publication, Dolt sync, or supported backup operation. Ordinary mutations do not publish JSONL or create Git commits.",
         ),
         ActionSpec(
@@ -1209,7 +1841,16 @@ def build_registry() -> CatalogRegistry:
             resource_kinds=("mcp_tool",),
             supports_idempotency=True,
             receipt_policy="audit",
-            examples=({"input": {"ref": "sinnix://mcp/lynchpin/tools/refresh", "operation": "call", "parameters": {}, "idempotency_key": "mcp-refresh-example"}},),
+            examples=(
+                {
+                    "input": {
+                        "ref": "sinnix://mcp/lynchpin/tools/refresh",
+                        "operation": "call",
+                        "parameters": {},
+                        "idempotency_key": "mcp-refresh-example",
+                    }
+                },
+            ),
             documentation="Call one brokered upstream MCP tool whose live metadata does not declare it read-only.",
         ),
         ActionSpec(
@@ -1331,7 +1972,16 @@ def build_registry() -> CatalogRegistry:
             resource_kinds=("desktop",),
             supports_idempotency=True,
             receipt_policy="audit",
-            examples=({"input": {"ref": "sinnix://desktop/current", "operation": "focus_window", "parameters": {"window": "address:0xfixture"}, "idempotency_key": "desktop-focus-example"}},),
+            examples=(
+                {
+                    "input": {
+                        "ref": "sinnix://desktop/current",
+                        "operation": "focus_window",
+                        "parameters": {"window": "address:0xfixture"},
+                        "idempotency_key": "desktop-focus-example",
+                    }
+                },
+            ),
             documentation="Operate the current desktop through the declared Hyprland owner route.",
         ),
         ActionSpec(
@@ -1347,7 +1997,16 @@ def build_registry() -> CatalogRegistry:
             resource_kinds=("terminal",),
             supports_idempotency=True,
             receipt_policy="audit",
-            examples=({"input": {"ref": "sinnix://terminals/7", "operation": "send", "parameters": {"text": "printf fixture", "enter": True}, "idempotency_key": "terminal-send-example"}},),
+            examples=(
+                {
+                    "input": {
+                        "ref": "sinnix://terminals/7",
+                        "operation": "send",
+                        "parameters": {"text": "printf fixture", "enter": True},
+                        "idempotency_key": "terminal-send-example",
+                    }
+                },
+            ),
             documentation="Operate one canonical Kitty terminal without accepting an arbitrary matcher.",
         ),
         ActionSpec(
@@ -1363,7 +2022,16 @@ def build_registry() -> CatalogRegistry:
             resource_kinds=("browser_workspace", "browser_page"),
             supports_idempotency=True,
             receipt_policy="audit",
-            examples=({"input": {"ref": "sinnix://browser/agent-workspace", "operation": "agent_window", "parameters": {"url": "https://example.test"}, "idempotency_key": "browser-window-example"}},),
+            examples=(
+                {
+                    "input": {
+                        "ref": "sinnix://browser/agent-workspace",
+                        "operation": "agent_window",
+                        "parameters": {"url": "https://example.test"},
+                        "idempotency_key": "browser-window-example",
+                    }
+                },
+            ),
             documentation="Create or operate only a gateway-owned browser target on the hidden agent workspace.",
         ),
         ActionSpec(
@@ -1394,6 +2062,7 @@ def build_registry() -> CatalogRegistry:
             documentation="Start one typed operator-shell job and return its daemon-owned handle.",
         ),
     )
+
     def with_failure_contract(action: ActionSpec) -> ActionSpec:
         failures = set(BASE_TYPED_FAILURES) | {"deadline"}
         if action.supports_precondition:
@@ -1413,7 +2082,10 @@ def build_registry() -> CatalogRegistry:
 
     return CatalogRegistry(
         resources,
-        tuple(with_failure_contract(action) for action in (*actions, *_owner_query_actions())),
+        tuple(
+            with_failure_contract(action)
+            for action in (*actions, *_owner_query_actions())
+        ),
     )
 
 

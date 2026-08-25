@@ -58,7 +58,9 @@ def test_list_preserves_daemon_order_and_paging_for_an_exactly_bounded_page() ->
     ],
 )
 def test_list_rejects_contradictory_or_unbounded_pages(value: dict) -> None:
-    client = AgentCtlClient("fixture-agentctl", runner=lambda *_args, **_kwargs: response(value))
+    client = AgentCtlClient(
+        "fixture-agentctl", runner=lambda *_args, **_kwargs: response(value)
+    )
 
     with pytest.raises(AgentCtlError):
         client.list()

@@ -65,7 +65,7 @@
             ];
           };
           approvedManifestHash = "78d04f9a59828ec9c5283058b5b4f39f9fbdf4bc6ee2b2db22861221e51fc87e";
-          approvedActionCatalogHash = "738942447310f3d10a9c09046c1572e1bc408f0f620bba88d4ee37de9182c06e";
+          approvedActionCatalogHash = "1290616ae8088b94b609af056d1b7314989b216bdaad678423204b6bc47ff93e";
         };
       };
     };
@@ -390,9 +390,10 @@
   # Polylogue's managed verifier owns and promptly reclaims per-run trees.
   # Keep its high-churn fixtures off NVMe while bounding the lane independently
   # from the shared /tmp mount; failure evidence is copied into its receipts.
-  # A 12-worker exact-corpus run exceeded 2G with concurrent live fixtures and
-  # cascaded into 634 ENOSPC outcomes before reclaim; 4G is the measured-safe
-  # lane ceiling while fixture work continues toward a sub-2G live footprint.
+  # The current 12-worker exact-corpus run peaked at 924 MiB allocated fixture
+  # scratch after prompt per-test reclamation. Keep roughly 60% headroom while
+  # making renewed fixture growth fail locally instead of consuming several
+  # GiB of host RAM.
   fileSystems."/realm/tmp/polylogue-pytest" = {
     device = "tmpfs";
     fsType = "tmpfs";
@@ -400,7 +401,7 @@
       "mode=0700"
       "uid=1000"
       "gid=100"
-      "size=4G"
+      "size=1536M"
       "nosuid"
       "nodev"
     ];

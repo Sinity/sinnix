@@ -112,7 +112,9 @@ let
       "${scriptPkgs.sinnix-shader}/bin/sinnix-shader play --random --interval 6 --crossfade 1.5"
     )
     (run "F6" "Toggle the WeeChat scratchpad" "uwsm app -- ${script "toggle-scratch"} weechat")
-    (run "F7" "Switch to or leave the agent browser workspace" "sinnix-chrome-control toggle-agent-workspace")
+    (run "F7" "Switch to or leave the agent browser workspace"
+      "sinnix-chrome-control toggle-agent-workspace"
+    )
     (run "F8" "Toggle the raw-log scratchpad" "uwsm app -- ${script "toggle-scratch"} rawlog")
     (run "F9" "Emergency stop for runaway builds and background work"
       "sudo -n ${scriptPkgs.nuke-builds}/bin/nuke-builds"

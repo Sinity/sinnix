@@ -74,7 +74,12 @@ mkFeatureModule {
       };
 
       home-manager.users.${user} =
-        { pkgs, lib, config, ... }:
+        {
+          pkgs,
+          lib,
+          config,
+          ...
+        }:
         {
           # awatcher (Rust) handles both AFK and window tracking natively on
           # Wayland; aw-watcher-afk is X11-only.

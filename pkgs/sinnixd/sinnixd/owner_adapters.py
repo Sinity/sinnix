@@ -2,11 +2,22 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, replace
-from typing import Any, Mapping
+from typing import Mapping
 
-from sinnix_mcp import RequestEnvelope, ResponseEnvelope, SourceBinding, SinnixRef, response_envelope_from_dict
+from sinnix_mcp import (
+    RequestEnvelope,
+    ResponseEnvelope,
+    SinnixRef,
+    SourceBinding,
+    response_envelope_from_dict,
+)
+from sinnix_mcp.execution import (
+    EnvironmentProfile,
+    ExecutionProfile,
+    OwnerExecution,
+    OwnerRoute,
+)
 from sinnix_mcp.protocol import DEFAULT_INLINE_PAYLOAD_BYTES
-from sinnix_mcp.execution import EnvironmentProfile, ExecutionProfile, OwnerExecution, OwnerRoute
 
 from .projects import ProjectAdapter, ProjectOwnerAdapter
 
@@ -71,9 +82,7 @@ class DeclaredOwnerAdapters:
         result = self.execution.run(
             command,
             ExecutionProfile(
-                route=OwnerRoute(
-                    "declared-owner-adapter", EnvironmentProfile.USER_BUS
-                ),
+                route=OwnerRoute("declared-owner-adapter", EnvironmentProfile.USER_BUS),
                 timeout_seconds=adapter.timeout_seconds + 5,
                 max_stdout_bytes=self.max_response_bytes,
                 max_stderr_bytes=8_192,
@@ -85,28 +94,50 @@ class DeclaredOwnerAdapters:
             ),
         )
         if result.failure_class is not None:
-            code = "owner_unavailable" if result.failure_class.startswith("command_unavailable") else "operation_failed"
-            raise OwnerAdapterError(code, f"owner adapter {adapter.spec.owner!r} failed: {result.failure_class}")
+            code = (
+                "owner_unavailable"
+                if result.failure_class.startswith("command_unavailable")
+                else "operation_failed"
+            )
+            raise OwnerAdapterError(
+                code,
+                f"owner adapter {adapter.spec.owner!r} failed: {result.failure_class}",
+            )
         try:
             response = response_envelope_from_dict(result.decode_json())
         except (TypeError, ValueError, json.JSONDecodeError) as error:
-            raise OwnerAdapterError("result_invalid", f"owner adapter {adapter.spec.owner!r} returned an invalid response") from error
+            raise OwnerAdapterError(
+                "result_invalid",
+                f"owner adapter {adapter.spec.owner!r} returned an invalid response",
+            ) from error
         self._validate_response(adapter, request, response, expected_source_binding)
         return response
 
     @staticmethod
-    def _forward_request(request: RequestEnvelope) -> tuple[RequestEnvelope, SourceBinding | None]:
+    def _forward_request(
+        request: RequestEnvelope,
+    ) -> tuple[RequestEnvelope, SourceBinding | None]:
         arguments = dict(request.arguments)
         expected = arguments.pop("expected_source_binding", None)
         if expected is None:
             return request, None
-        if not isinstance(expected, Mapping) or set(expected) != {"source_ref", "generation", "root_digest"}:
-            raise OwnerAdapterError("invalid_argument", "expected_source_binding has invalid fields")
+        if not isinstance(expected, Mapping) or set(expected) != {
+            "source_ref",
+            "generation",
+            "root_digest",
+        }:
+            raise OwnerAdapterError(
+                "invalid_argument", "expected_source_binding has invalid fields"
+            )
         source_ref = expected["source_ref"]
         generation = expected["generation"]
         root_digest = expected["root_digest"]
-        if not all(isinstance(value, str) for value in (source_ref, generation, root_digest)):
-            raise OwnerAdapterError("invalid_argument", "expected_source_binding fields must be strings")
+        if not all(
+            isinstance(value, str) for value in (source_ref, generation, root_digest)
+        ):
+            raise OwnerAdapterError(
+                "invalid_argument", "expected_source_binding fields must be strings"
+            )
         try:
             binding = SourceBinding(
                 source_ref=SinnixRef.parse(source_ref),
@@ -114,7 +145,9 @@ class DeclaredOwnerAdapters:
                 root_digest=root_digest,
             )
         except ValueError as error:
-            raise OwnerAdapterError("invalid_argument", f"expected_source_binding is invalid: {error}") from error
+            raise OwnerAdapterError(
+                "invalid_argument", f"expected_source_binding is invalid: {error}"
+            ) from error
         return replace(request, arguments=arguments), binding
 
     @staticmethod
@@ -124,15 +157,34 @@ class DeclaredOwnerAdapters:
         response: ResponseEnvelope,
         expected_source_binding: SourceBinding | None,
     ) -> None:
-        if response.request_id != request.request_id or response.correlation_id != request.correlation_id:
-            raise OwnerAdapterError("result_invalid", "owner adapter response does not match the request")
+        if (
+            response.request_id != request.request_id
+            or response.correlation_id != request.correlation_id
+        ):
+            raise OwnerAdapterError(
+                "result_invalid", "owner adapter response does not match the request"
+            )
         if response.owner != adapter.spec.owner:
-            raise OwnerAdapterError("authority_mismatch", "owner adapter response names the wrong owner")
+            raise OwnerAdapterError(
+                "authority_mismatch", "owner adapter response names the wrong owner"
+            )
         if response.ok:
             if len(response.source_bindings) != 1:
-                raise OwnerAdapterError("result_invalid", "source-scoped owner responses require exactly one source binding")
+                raise OwnerAdapterError(
+                    "result_invalid",
+                    "source-scoped owner responses require exactly one source binding",
+                )
             binding = response.source_bindings[0]
             if binding.source_ref != adapter.source_ref:
-                raise OwnerAdapterError("authority_mismatch", "owner adapter response names the wrong source")
-            if expected_source_binding is not None and binding != expected_source_binding:
-                raise OwnerAdapterError("authority_mismatch", "owner adapter response does not match expected source binding")
+                raise OwnerAdapterError(
+                    "authority_mismatch",
+                    "owner adapter response names the wrong source",
+                )
+            if (
+                expected_source_binding is not None
+                and binding != expected_source_binding
+            ):
+                raise OwnerAdapterError(
+                    "authority_mismatch",
+                    "owner adapter response does not match expected source binding",
+                )

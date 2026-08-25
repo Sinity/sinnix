@@ -7,15 +7,16 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .artifacts import ArtifactService
-from .capabilities import Capability, Principal
-from .config import GatewayConfig
 from sinnix_mcp.execution import (
     ExecutionProfile,
     OwnerDiagnosticError,
     OwnerExecution,
     OwnerRoute,
 )
+
+from .artifacts import ArtifactService
+from .capabilities import Capability, Principal
+from .config import GatewayConfig
 
 
 class BrowserError(ValueError):
@@ -81,7 +82,9 @@ class BrowserService:
             f".{self._targets_path.name}.{uuid.uuid4().hex}.tmp"
         )
         try:
-            temporary.write_text(json.dumps(targets, sort_keys=True, separators=(",", ":")))
+            temporary.write_text(
+                json.dumps(targets, sort_keys=True, separators=(",", ":"))
+            )
             temporary.chmod(0o600)
             os.replace(temporary, self._targets_path)
         finally:
@@ -115,7 +118,9 @@ class BrowserService:
         if not isinstance(full_page, bool):
             raise BrowserError("full_page must be boolean")
         if quality is not None and (
-            isinstance(quality, bool) or not isinstance(quality, int) or not 1 <= quality <= 100
+            isinstance(quality, bool)
+            or not isinstance(quality, int)
+            or not 1 <= quality <= 100
         ):
             raise BrowserError("quality must be 1-100")
         capture_dir = self.config.state_dir / "captures" / uuid.uuid4().hex
@@ -137,9 +142,13 @@ class BrowserService:
         try:
             source = source.resolve(strict=True)
         except OSError as exc:
-            raise BrowserError("Chrome control did not produce its declared screenshot") from exc
+            raise BrowserError(
+                "Chrome control did not produce its declared screenshot"
+            ) from exc
         if capture_dir.resolve() not in source.parents or not source.is_file():
-            raise BrowserError("Chrome control returned a file outside gateway capture state")
+            raise BrowserError(
+                "Chrome control returned a file outside gateway capture state"
+            )
         receipt = self.artifacts.attest_capture(
             capture_dir,
             source="chrome-cdp",
@@ -179,7 +188,9 @@ class BrowserService:
         if operation in {"status", "list", "list_tabs"}:
             if page_id is not None or selector is not None:
                 raise BrowserError(f"{operation} does not accept page_id or selector")
-            command = {"status": "status", "list": "list", "list_tabs": "list-tabs"}[operation]
+            command = {"status": "status", "list": "list", "list_tabs": "list-tabs"}[
+                operation
+            ]
             return {"operation": operation, **self._run([command])}
         if operation not in {"info", "get_text", "get_html"}:
             raise BrowserError(
@@ -187,7 +198,9 @@ class BrowserService:
                 "['get_html', 'get_text', 'info', 'list', 'list_tabs', 'status']"
             )
         page_id = self._require_owned_target(page_id)
-        command = {"info": "info", "get_text": "get-text", "get_html": "get-html"}[operation]
+        command = {"info": "info", "get_text": "get-text", "get_html": "get-html"}[
+            operation
+        ]
         arguments = [command, page_id]
         if selector is not None:
             if operation == "info":
@@ -213,7 +226,9 @@ class BrowserService:
                         candidate = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    if isinstance(candidate, dict) and isinstance(candidate.get("id"), str):
+                    if isinstance(candidate, dict) and isinstance(
+                        candidate.get("id"), str
+                    ):
                         target = candidate
                         break
             if not isinstance(target, dict) or not isinstance(target.get("id"), str):
@@ -223,7 +238,9 @@ class BrowserService:
                     self._run(["close", target["id"]])
                 except BrowserError:
                     pass
-                raise BrowserError("agent-window was not parked on the hidden workspace")
+                raise BrowserError(
+                    "agent-window was not parked on the hidden workspace"
+                )
             targets = self._load_targets()
             targets[target["id"]] = target
             self._save_targets(targets)
@@ -233,7 +250,12 @@ class BrowserService:
         if operation == "navigate":
             if set(arguments) != {"page_id", "url"}:
                 raise BrowserError("navigate requires page_id and url")
-            command = ["navigate", page_id, "--url", self._string(arguments["url"], "url")]
+            command = [
+                "navigate",
+                page_id,
+                "--url",
+                self._string(arguments["url"], "url"),
+            ]
         elif operation == "reload":
             if set(arguments) != {"page_id"}:
                 raise BrowserError("reload requires only page_id")
@@ -241,7 +263,9 @@ class BrowserService:
         elif operation == "inject_text":
             allowed = {"page_id", "text", "selector"}
             if not {"page_id", "text"} <= set(arguments) or set(arguments) - allowed:
-                raise BrowserError("inject_text requires page_id, text, and optional selector")
+                raise BrowserError(
+                    "inject_text requires page_id, text, and optional selector"
+                )
             command = [
                 "inject-text",
                 page_id,
@@ -249,11 +273,21 @@ class BrowserService:
                 self._string(arguments["text"], "text"),
             ]
             if "selector" in arguments:
-                command.extend(["--selector", self._string(arguments["selector"], "selector", 8_192)])
+                command.extend(
+                    [
+                        "--selector",
+                        self._string(arguments["selector"], "selector", 8_192),
+                    ]
+                )
         elif operation == "click":
             if set(arguments) != {"page_id", "selector"}:
                 raise BrowserError("click requires page_id and selector")
-            command = ["click", page_id, "--selector", self._string(arguments["selector"], "selector", 8_192)]
+            command = [
+                "click",
+                page_id,
+                "--selector",
+                self._string(arguments["selector"], "selector", 8_192),
+            ]
         elif operation == "fill_form":
             if set(arguments) != {"page_id", "selector", "value"}:
                 raise BrowserError("fill_form requires page_id, selector, and value")
@@ -268,10 +302,19 @@ class BrowserService:
         elif operation in {"evaluate", "await"}:
             javascript_key = "javascript"
             allowed = {"page_id", javascript_key, "timeout_seconds"}
-            if not {"page_id", javascript_key} <= set(arguments) or set(arguments) - allowed:
-                raise BrowserError(f"{operation} requires page_id, javascript, and optional timeout_seconds")
+            if (
+                not {"page_id", javascript_key} <= set(arguments)
+                or set(arguments) - allowed
+            ):
+                raise BrowserError(
+                    f"{operation} requires page_id, javascript, and optional timeout_seconds"
+                )
             timeout = arguments.get("timeout_seconds", 30)
-            if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 300:
+            if (
+                isinstance(timeout, bool)
+                or not isinstance(timeout, int)
+                or not 1 <= timeout <= 300
+            ):
                 raise BrowserError("timeout_seconds must be 1-300")
             command = [
                 "evaluate" if operation == "evaluate" else "await",
@@ -284,10 +327,19 @@ class BrowserService:
                 execution_timeout = timeout + 10
         elif operation == "wait_selector":
             allowed = {"page_id", "selector", "timeout_seconds"}
-            if not {"page_id", "selector"} <= set(arguments) or set(arguments) - allowed:
-                raise BrowserError("wait_selector requires page_id, selector, and optional timeout_seconds")
+            if (
+                not {"page_id", "selector"} <= set(arguments)
+                or set(arguments) - allowed
+            ):
+                raise BrowserError(
+                    "wait_selector requires page_id, selector, and optional timeout_seconds"
+                )
             timeout = arguments.get("timeout_seconds", 30)
-            if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 300:
+            if (
+                isinstance(timeout, bool)
+                or not isinstance(timeout, int)
+                or not 1 <= timeout <= 300
+            ):
                 raise BrowserError("timeout_seconds must be 1-300")
             command = [
                 "wait-selector",

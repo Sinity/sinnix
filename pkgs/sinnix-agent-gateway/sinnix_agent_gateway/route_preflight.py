@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
-from .captures import queryable_capture_lanes
-from .config import GatewayConfig
 from sinnix_mcp.execution import (
     EnvironmentProfile,
     ExecutionProfile,
@@ -12,6 +10,9 @@ from sinnix_mcp.execution import (
     OwnerExecution,
     OwnerRoute,
 )
+
+from .captures import queryable_capture_lanes
+from .config import GatewayConfig
 
 
 class GatewayRoutePreflight:
@@ -93,7 +94,10 @@ class GatewayRoutePreflight:
         captures_by_root = {}
         for lane in sorted(lanes):
             capture = lanes[lane]
-            if capture.native_contract != "sinnix-capture-v1-sidecar" or capture.root is None:
+            if (
+                capture.native_contract != "sinnix-capture-v1-sidecar"
+                or capture.root is None
+            ):
                 continue
             captures_by_root.setdefault(capture.root, capture)
 
@@ -127,10 +131,12 @@ class GatewayRoutePreflight:
                     OwnerRoute("capture-query"),
                     "json_lane_summary_list",
                     ExecutionResult.decode_json,
-                    lambda value: isinstance(value, list)
-                    and any(
-                        isinstance(record, dict) and record.get("lane") == lane
-                        for record in value
+                    lambda value, lane=lane: (
+                        isinstance(value, list)
+                        and any(
+                            isinstance(record, dict) and record.get("lane") == lane
+                            for record in value
+                        )
                     ),
                 )
             )
@@ -140,7 +146,9 @@ class GatewayRoutePreflight:
         return {
             "route": "capture.query",
             "status": (
-                "pass" if all(probe["status"] == "pass" for probe in probes) else "degraded"
+                "pass"
+                if all(probe["status"] == "pass" for probe in probes)
+                else "degraded"
             ),
             "probed_roots": [str(capture.root) for capture in selected_captures],
             "probes": probes,
@@ -206,7 +214,9 @@ class GatewayRoutePreflight:
                 lambda value: isinstance(value, str) and bool(value.strip()),
             ),
         ]
-        if any(server.get("brokered") for server in self.config.mcp_broker_servers.values()):
+        if any(
+            server.get("brokered") for server in self.config.mcp_broker_servers.values()
+        ):
             environment, missing = self.execution.environment_for(
                 OwnerRoute("mcp-user-bus", EnvironmentProfile.USER_BUS)
             )
@@ -217,13 +227,16 @@ class GatewayRoutePreflight:
                     "failure_class": (
                         None if missing is None else "user_bus_environment_missing"
                     ),
-                    "dbus_session_bus_address": "DBUS_SESSION_BUS_ADDRESS" in environment,
+                    "dbus_session_bus_address": "DBUS_SESSION_BUS_ADDRESS"
+                    in environment,
                     "xdg_runtime_dir": "XDG_RUNTIME_DIR" in environment,
                 }
             )
         return {
             "status": (
-                "ready" if all(row["status"] == "pass" for row in routes) else "degraded"
+                "ready"
+                if all(row["status"] == "pass" for row in routes)
+                else "degraded"
             ),
             "routes": routes,
         }

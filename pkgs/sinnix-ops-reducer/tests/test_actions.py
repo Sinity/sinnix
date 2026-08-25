@@ -291,7 +291,9 @@ def test_valid_rejected_action_leaves_a_receipt(tmp_path: Path) -> None:
     assert receipt["status"] == "rejected"
 
 
-def test_interrupt_uses_agentctl_and_records_its_cancellation_truth(tmp_path: Path) -> None:
+def test_interrupt_uses_agentctl_and_records_its_cancellation_truth(
+    tmp_path: Path,
+) -> None:
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
     job = {

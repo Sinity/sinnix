@@ -17,7 +17,6 @@ from .capabilities import Capability, Principal
 from .config import GatewayConfig
 from .schemas import V2ToolEnvelope
 
-
 EXPECTED_ERROR_CODES = frozenset(
     {
         "invalid_request",
@@ -69,9 +68,16 @@ def derive_cursor_key(master_key: bytes, purpose: str, principal: str) -> bytes:
     """Derive a purpose and principal bound cursor key from the private key."""
     if not isinstance(master_key, bytes) or len(master_key) < 32:
         raise ResultError("cursor key is malformed", "unavailable")
-    if not isinstance(purpose, str) or not purpose or not isinstance(principal, str) or not principal:
+    if (
+        not isinstance(purpose, str)
+        or not purpose
+        or not isinstance(principal, str)
+        or not principal
+    ):
         raise ResultError("cursor key derivation scope is malformed", "unavailable")
-    message = b"sinnix-gateway-cursor-v1\0" + purpose.encode() + b"\0" + principal.encode()
+    message = (
+        b"sinnix-gateway-cursor-v1\0" + purpose.encode() + b"\0" + principal.encode()
+    )
     return hmac.new(master_key, message, hashlib.sha256).digest()
 
 
@@ -151,9 +157,13 @@ class ResultSnapshotWriter:
         try:
             encoded = _canonical(row)
         except (TypeError, ValueError) as exc:
-            raise ResultError("JSONL owner row is not serializable", "owner_failed") from exc
+            raise ResultError(
+                "JSONL owner row is not serializable", "owner_failed"
+            ) from exc
         if len(encoded) > self.service.config.max_result_bytes:
-            raise ResultError("JSONL owner row exceeded response bound", "response_bound")
+            raise ResultError(
+                "JSONL owner row exceeded response bound", "response_bound"
+            )
         line = encoded + b"\n"
         self.handle.write(line)
         self.hasher.update(line)
@@ -329,7 +339,9 @@ class ResultService:
             encoded_text, signature_text = cursor.split(".", 1)
             encoded = encoded_text.encode()
             padding = b"=" * (-len(encoded) % 4)
-            signature = base64.urlsafe_b64decode(signature_text + "=" * (-len(signature_text) % 4))
+            signature = base64.urlsafe_b64decode(
+                signature_text + "=" * (-len(signature_text) % 4)
+            )
             expected = hmac.new(self.cursor_key, encoded, hashlib.sha256).digest()
             if not hmac.compare_digest(signature, expected):
                 raise ValueError
@@ -385,7 +397,9 @@ class ResultService:
                 try:
                     rows.append(json.loads(line))
                 except json.JSONDecodeError as exc:
-                    raise ResultError("snapshot row is malformed", "unavailable") from exc
+                    raise ResultError(
+                        "snapshot row is malformed", "unavailable"
+                    ) from exc
         return {
             "rows": rows,
             "row_count": metadata["row_count"],
@@ -413,11 +427,17 @@ class ResultService:
         ):
             raise ResultError("cursor does not match this request", "stale_cursor")
         metadata, directory = self._snapshot_metadata(snapshot_id)
-        if payload.get("expires_at") != metadata["expires_at"] or time.time() >= metadata["expires_at"]:
+        if (
+            payload.get("expires_at") != metadata["expires_at"]
+            or time.time() >= metadata["expires_at"]
+        ):
             raise ResultError("cursor has expired", "stale_cursor")
         if metadata["query_sha256"] != query_sha256:
             raise ResultError("cursor query does not match snapshot", "stale_cursor")
-        if source_revision is not None and source_revision != metadata["source_revision"]:
+        if (
+            source_revision is not None
+            and source_revision != metadata["source_revision"]
+        ):
             raise ResultError("source changed after snapshot", "source_changed")
         page = self._snapshot_page(metadata, directory, offset, page_size=page_size)
         page["snapshot_ref"] = f"sinnix://results/{snapshot_id}"
@@ -449,7 +469,9 @@ class ResultService:
             ) from exc
         metadata_budget = min(4_096, max(1, self.config.max_result_bytes // 2))
         if len(payload_bytes) > max(1, self.config.max_result_bytes - metadata_budget):
-            raise ResultError("owner response exceeded V2 result bound", "response_bound")
+            raise ResultError(
+                "owner response exceeded V2 result bound", "response_bound"
+            )
 
     def record(
         self,
@@ -466,9 +488,7 @@ class ResultService:
     ) -> dict[str, Any]:
         if outcome not in {"ok", "error"}:
             raise ResultError("result outcome must be ok or error", "invalid_request")
-        request = request or RequestContext.create(
-            hashlib.sha256(b"{}").hexdigest()
-        )
+        request = request or RequestContext.create(hashlib.sha256(b"{}").hexdigest())
         artifact: dict[str, Any] | None = None
         try:
             self.require_payload_bound(payload)
@@ -526,10 +546,14 @@ class ResultService:
         try:
             V2ToolEnvelope.model_validate(envelope)
         except ValueError as exc:
-            raise ResultError("V2 result envelope is malformed", "owner_failed") from exc
+            raise ResultError(
+                "V2 result envelope is malformed", "owner_failed"
+            ) from exc
         encoded = _canonical(envelope)
         if len(encoded) > max(self.config.max_result_bytes, 4_096):
-            raise ResultError("V2 result envelope exceeded response bound", "response_bound")
+            raise ResultError(
+                "V2 result envelope exceeded response bound", "response_bound"
+            )
         destination = self._path(result_id)
         temporary = self.root / f".{result_id}.{uuid.uuid4().hex}.tmp"
         try:
@@ -565,7 +589,9 @@ class ResultService:
                 "expires_at": metadata["expires_at"],
             }
         )
-        next_cursor = initial_cursor if metadata["row_count"] > writer.page_size else None
+        next_cursor = (
+            initial_cursor if metadata["row_count"] > writer.page_size else None
+        )
         return self.record(
             action=action,
             owner=owner,

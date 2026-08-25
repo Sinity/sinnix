@@ -7,8 +7,13 @@ import subprocess
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from .jobs import GenericJobStore, JobRecordError, MAX_RESULT_BYTES
-from .limits import maximum_timeout_seconds, valid_timeout_seconds
+from .jobs import (
+    MAX_RESULT_BYTES,
+    GenericJobStore,
+    JobRecordError,
+    _open_preallocated_private_artifact,
+)
+from .limits import valid_timeout_seconds
 from .projects import ProjectConfigError, revalidate_registered_checkout
 
 AGENT_PREFLIGHT_TIMEOUT_SECONDS = 30
@@ -19,7 +24,9 @@ class RunnerError(ValueError):
 
 
 def _require_strings(value: Mapping[str, Any], fields: Sequence[str]) -> None:
-    if any(not isinstance(value.get(field), str) or not value[field] for field in fields):
+    if any(
+        not isinstance(value.get(field), str) or not value[field] for field in fields
+    ):
         raise RunnerError("private typed-job input is invalid")
 
 
@@ -32,7 +39,7 @@ def _non_empty_argv(value: Any) -> bool:
 def _load(path: Path, job_id: str) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise RunnerError("private typed-job input is unavailable") from error
     if not isinstance(value, dict) or value.get("job_id") != job_id:
         raise RunnerError("private typed-job identity is invalid")
@@ -75,9 +82,14 @@ def _require_environment(job_id: str, unit: str, value: Mapping[str, Any]) -> No
         "SINNIXD_TIMEOUT_SECONDS": os.environ.get("SINNIXD_TIMEOUT_SECONDS", ""),
     }
     timeout_seconds = expected["SINNIXD_TIMEOUT_SECONDS"]
-    if not timeout_seconds.isdecimal() or not valid_timeout_seconds(int(timeout_seconds), kind=value["kind"]):
+    if not timeout_seconds.isdecimal() or not valid_timeout_seconds(
+        int(timeout_seconds), kind=value["kind"]
+    ):
         raise RunnerError("typed-job timeout identity is invalid")
-    if any(os.environ.get(key) != expected_value for key, expected_value in expected.items()):
+    if any(
+        os.environ.get(key) != expected_value
+        for key, expected_value in expected.items()
+    ):
         raise RunnerError("typed-job environment identity is invalid")
     if any(key.startswith("SINNIX") and key not in expected for key in os.environ):
         raise RunnerError("typed-job environment contains an untrusted SINNIX identity")
@@ -108,7 +120,10 @@ def _run_declared(state_root: Path, job_id: str, unit: str) -> None:
         "SINNIXD_CHECKOUT_ID": checkout.get("checkout_id"),
         "SINNIXD_CHECKOUT_HEAD": checkout.get("head"),
     }
-    if any(not isinstance(value, str) or os.environ.get(key) != value for key, value in expected.items()):
+    if any(
+        not isinstance(value, str) or os.environ.get(key) != value
+        for key, value in expected.items()
+    ):
         raise RunnerError("declared-job environment identity is invalid")
     checkout_path = _revalidate_checkout(checkout)
     os.chdir(checkout_path)
@@ -126,7 +141,9 @@ def _exec_shell(value: Mapping[str, Any], checkout: Path) -> None:
     if not isinstance(cwd, str):
         raise RunnerError("operator shell cwd is invalid")
     workdir = Path(cwd).resolve(strict=True)
-    if not workdir.is_dir() or (workdir != checkout and checkout not in workdir.parents):
+    if not workdir.is_dir() or (
+        workdir != checkout and checkout not in workdir.parents
+    ):
         raise RunnerError("operator shell cwd escaped the registered checkout")
     command = [*environment_command, *argv]
     os.chdir(workdir)
@@ -140,14 +157,29 @@ def _run_agent(
     native_runner: Path,
     state_root: Path,
 ) -> int:
-    _require_strings(value, ("backend", "model", "effort", "credential_profile", "prompt_path", "result_path"))
-    if value.get("principal") not in {"agent-control", "operator"} or value["backend"] not in {"claude", "codex", "gemini", "grok", "antigravity"}:
+    _require_strings(
+        value,
+        (
+            "backend",
+            "model",
+            "effort",
+            "credential_profile",
+            "prompt_path",
+            "result_path",
+        ),
+    )
+    if value.get("principal") not in {"agent-control", "operator"} or value[
+        "backend"
+    ] not in {"claude", "codex", "gemini", "grok", "antigravity"}:
         raise RunnerError("attested agent contract is invalid")
     if value["credential_profile"] not in {"subscription", "api"}:
         raise RunnerError("attested agent credential profile is invalid")
     prompt_path = Path(value["prompt_path"]).resolve(strict=True)
     result_path = Path(value["result_path"]).resolve()
-    if not prompt_path.is_file() or (state_root / "inputs").resolve() not in prompt_path.parents:
+    if (
+        not prompt_path.is_file()
+        or (state_root / "inputs").resolve() not in prompt_path.parents
+    ):
         raise RunnerError("attested agent prompt input is invalid")
     if (state_root / "results").resolve() not in result_path.parents:
         raise RunnerError("attested agent result artifact is invalid")
@@ -206,11 +238,59 @@ def _run_agent(
     ]
     try:
         completed = subprocess.run(command, cwd=checkout, check=False)
+        binding = value.get("bead_binding")
+        if isinstance(binding, Mapping) and "write_scope" in binding:
+            _seal_packet_result(value, checkout, result_path)
         if result_path.exists() and result_path.stat().st_size > MAX_RESULT_BYTES:
             result_path.write_bytes(result_path.read_bytes()[:MAX_RESULT_BYTES])
         return completed.returncode
     finally:
         prompt_path.unlink(missing_ok=True)
+
+
+def _seal_packet_result(
+    value: Mapping[str, Any], checkout: Path, result_path: Path
+) -> None:
+    """Bind a structured worker report to the runtime-observed terminal Git head."""
+    try:
+        if result_path.stat().st_size > MAX_RESULT_BYTES:
+            raise RunnerError("packet result exceeds the artifact limit")
+        raw = result_path.read_bytes()
+        delivery = json.loads(raw)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RunnerError("packet worker result is unavailable or malformed") from error
+    observed = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    final_head = observed.stdout.strip()
+    if (
+        observed.returncode != 0
+        or len(final_head) != 40
+        or any(value not in "0123456789abcdef" for value in final_head)
+    ):
+        raise RunnerError("packet final Git head is unavailable")
+    envelope = json.dumps(
+        {
+            "schema_version": 1,
+            "job_id": value["job_id"],
+            "start_head": value["checkout"]["head"],
+            "final_head": final_head,
+            "delivery": delivery,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    if len(envelope) > MAX_RESULT_BYTES:
+        raise RunnerError("packet result exceeds the artifact limit")
+    with _open_preallocated_private_artifact(result_path) as result_file:
+        os.ftruncate(result_file.fileno(), 0)
+        result_file.write(envelope)
+        result_file.flush()
+        os.fsync(result_file.fileno())
 
 
 def main(arguments: Sequence[str] | None = None) -> int:

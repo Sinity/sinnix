@@ -14,7 +14,6 @@ from .beads import BeadsService
 from .projects import ProjectService
 from .results import derive_cursor_key
 
-
 MAX_CURSOR_BYTES = 4_096
 MAX_RESPONSE_BYTES = 262_144
 # A cursor carries two independent owner revisions per selected project. The
@@ -30,7 +29,9 @@ class EventCursorError(ValueError):
 
 
 def _canonical(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), default=str
+    ).encode()
 
 
 def _digest(value: Any) -> str:
@@ -49,7 +50,12 @@ class OpaqueEventCursor:
 
     @staticmethod
     def _initial_state() -> dict[str, Any]:
-        return {"audit_sequence": 0, "runtime_offset": 0, "owner_revisions": {}, "job_revision": None}
+        return {
+            "audit_sequence": 0,
+            "runtime_offset": 0,
+            "owner_revisions": {},
+            "job_revision": None,
+        }
 
     def encode(self, state: Mapping[str, Any], projects: list[str]) -> str:
         body = {"v": 1, "scope": self._scope(projects), "state": dict(state)}
@@ -63,7 +69,11 @@ class OpaqueEventCursor:
     def decode(self, value: str | None, projects: list[str]) -> dict[str, Any]:
         if value is None:
             return self._initial_state()
-        if not isinstance(value, str) or len(value.encode()) > MAX_CURSOR_BYTES or "." not in value:
+        if (
+            not isinstance(value, str)
+            or len(value.encode()) > MAX_CURSOR_BYTES
+            or "." not in value
+        ):
             raise EventCursorError("event cursor is malformed or too large")
         payload, mac = value.rsplit(".", 1)
         expected = hmac.new(self._key, payload.encode(), hashlib.sha256).hexdigest()
@@ -72,24 +82,55 @@ class OpaqueEventCursor:
         try:
             padded = payload + "=" * (-len(payload) % 4)
             body = json.loads(base64.urlsafe_b64decode(padded).decode())
-        except (ValueError, json.JSONDecodeError, binascii.Error, UnicodeDecodeError) as exc:
+        except (
+            ValueError,
+            json.JSONDecodeError,
+            binascii.Error,
+            UnicodeDecodeError,
+        ) as exc:
             raise EventCursorError("event cursor is not valid JSON") from exc
-        if not isinstance(body, Mapping) or body.get("v") != 1 or body.get("scope") != self._scope(projects):
-            raise EventCursorError("event cursor scope is stale or belongs to another principal")
+        if (
+            not isinstance(body, Mapping)
+            or body.get("v") != 1
+            or body.get("scope") != self._scope(projects)
+        ):
+            raise EventCursorError(
+                "event cursor scope is stale or belongs to another principal"
+            )
         state = body.get("state")
         if not isinstance(state, Mapping):
             raise EventCursorError("event cursor state is malformed")
-        if set(state) != {"audit_sequence", "runtime_offset", "owner_revisions", "job_revision"}:
+        if set(state) != {
+            "audit_sequence",
+            "runtime_offset",
+            "owner_revisions",
+            "job_revision",
+        }:
             raise EventCursorError("event cursor state is malformed")
-        if any(not isinstance(state[key], int) or isinstance(state[key], bool) or state[key] < 0 for key in ("audit_sequence", "runtime_offset")):
+        if any(
+            not isinstance(state[key], int)
+            or isinstance(state[key], bool)
+            or state[key] < 0
+            for key in ("audit_sequence", "runtime_offset")
+        ):
             raise EventCursorError("event cursor position is malformed")
         owner_revisions = state["owner_revisions"]
-        if not isinstance(owner_revisions, Mapping) or len(owner_revisions) > MAX_OWNER_REVISIONS:
+        if (
+            not isinstance(owner_revisions, Mapping)
+            or len(owner_revisions) > MAX_OWNER_REVISIONS
+        ):
             raise EventCursorError("event cursor owner state is too large")
-        if any(not isinstance(key, str) or not isinstance(revision, str) or len(revision) > 256 for key, revision in owner_revisions.items()):
+        if any(
+            not isinstance(key, str)
+            or not isinstance(revision, str)
+            or len(revision) > 256
+            for key, revision in owner_revisions.items()
+        ):
             raise EventCursorError("event cursor owner state is malformed")
         job_revision = state["job_revision"]
-        if job_revision is not None and (not isinstance(job_revision, str) or len(job_revision) > 256):
+        if job_revision is not None and (
+            not isinstance(job_revision, str) or len(job_revision) > 256
+        ):
             raise EventCursorError("event cursor job state is malformed")
         return dict(state)
 
@@ -157,7 +198,9 @@ class NormalizedEventService:
         }
         return compact
 
-    def _fits(self, events: list[dict[str, Any]], sources: Mapping[str, Any], limit: int) -> bool:
+    def _fits(
+        self, events: list[dict[str, Any]], sources: Mapping[str, Any], limit: int
+    ) -> bool:
         payload = {
             "schema": "sinnix.gateway-events.v1",
             "principal": self.principal,
@@ -169,7 +212,13 @@ class NormalizedEventService:
         }
         return len(_canonical(payload)) <= self.max_response_bytes
 
-    def _accept(self, events: list[dict[str, Any]], sources: Mapping[str, Any], event: dict[str, Any], limit: int) -> bool:
+    def _accept(
+        self,
+        events: list[dict[str, Any]],
+        sources: Mapping[str, Any],
+        event: dict[str, Any],
+        limit: int,
+    ) -> bool:
         if len(events) >= limit:
             return False
         candidate = self._bounded_event(event)
@@ -193,11 +242,19 @@ class NormalizedEventService:
                 chunks.append(chunk)
             if chunk.endswith(b"\n"):
                 if total > MAX_RUNTIME_ROW_BYTES:
-                    marker = json.dumps({"truncated": True, "bytes": total, "sha256": digest.hexdigest()}).encode()
+                    marker = json.dumps(
+                        {
+                            "truncated": True,
+                            "bytes": total,
+                            "sha256": digest.hexdigest(),
+                        }
+                    ).encode()
                     return marker, total, True
                 return b"".join(chunks), total, True
 
-    def _runtime_events(self, offset: int, limit: int, accept: Callable[[dict[str, Any]], bool]) -> tuple[int, dict[str, Any], bool]:
+    def _runtime_events(
+        self, offset: int, limit: int, accept: Callable[[dict[str, Any]], bool]
+    ) -> tuple[int, dict[str, Any], bool]:
         try:
             with self.transitions_path.open("rb") as handle:
                 handle.seek(max(0, offset))
@@ -218,26 +275,55 @@ class NormalizedEventService:
                         next_offset = handle.tell()
                         continue
                     revision = _digest(row)
-                    event = self._event(event_id=str(row.get("event_id") or f"offset:{start}"), kind="runtime_transition", source="ops-reducer.transitions", source_revision=revision, data=row, exact=row.get("schema") == "sinnix-health-transition-v1")
+                    event = self._event(
+                        event_id=str(row.get("event_id") or f"offset:{start}"),
+                        kind="runtime_transition",
+                        source="ops-reducer.transitions",
+                        source_revision=revision,
+                        data=row,
+                        exact=row.get("schema") == "sinnix-health-transition-v1",
+                    )
                     if not accept(event):
-                        return next_offset, {"availability": "available", "offset": next_offset}, True
+                        return (
+                            next_offset,
+                            {"availability": "available", "offset": next_offset},
+                            True,
+                        )
                     next_offset = handle.tell()
                     if limit <= 0:
                         break
                 probe = handle.read(1)
                 if probe:
                     handle.seek(-1, 1)
-                return next_offset, {"availability": "available", "offset": next_offset}, bool(probe)
+                return (
+                    next_offset,
+                    {"availability": "available", "offset": next_offset},
+                    bool(probe),
+                )
         except OSError as exc:
             return offset, {"availability": "unavailable", "reason": str(exc)}, False
 
-    def read(self, *, limit: int = 100, cursor: str | None = None, project_ids: list[str] | None = None) -> dict[str, Any]:
-        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1_000:
+    def read(
+        self,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+        project_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or not 1 <= limit <= 1_000
+        ):
             raise ValueError("event limit must be 1-1000")
         selected = sorted(project_ids or self.projects.config.projects)
         if not selected or len(selected) > MAX_EVENT_PROJECTS:
-            raise ValueError(f"event project scope must contain 1-{MAX_EVENT_PROJECTS} projects")
-        if any(project_id not in self.projects.config.projects for project_id in selected):
+            raise ValueError(
+                f"event project scope must contain 1-{MAX_EVENT_PROJECTS} projects"
+            )
+        if any(
+            project_id not in self.projects.config.projects for project_id in selected
+        ):
             raise ValueError("event project scope contains an unknown project")
         state = self.cursor.decode(cursor, selected)
         events: list[dict[str, Any]] = []
@@ -248,13 +334,34 @@ class NormalizedEventService:
         truncated = False
 
         audit_rows = self.audit.events_since(audit_sequence, limit)
-        sources["gateway.audit"] = {"availability": "available", "last_sequence": audit_sequence}
+        sources["gateway.audit"] = {
+            "availability": "available",
+            "last_sequence": audit_sequence,
+        }
         for row in audit_rows:
             payload = row.get("payload", {})
             owner = payload.get("owner") if isinstance(payload, Mapping) else None
-            kind = "ops_receipt" if owner == "ops-reducer" or row.get("operation") == "machine.operate" else "gateway_receipt"
-            event = self._event(event_id=str(row["event_id"]), kind=kind, source="gateway.audit", source_revision=str(row["entry_hash"]), data=row, exact=True, subject_ref=(payload.get("target_refs", [None])[0] if isinstance(payload, Mapping) and payload.get("target_refs") else None))
-            event.update({key: row[key] for key in ("operation", "outcome", "sequence")})
+            kind = (
+                "ops_receipt"
+                if owner == "ops-reducer" or row.get("operation") == "machine.operate"
+                else "gateway_receipt"
+            )
+            event = self._event(
+                event_id=str(row["event_id"]),
+                kind=kind,
+                source="gateway.audit",
+                source_revision=str(row["entry_hash"]),
+                data=row,
+                exact=True,
+                subject_ref=(
+                    payload.get("target_refs", [None])[0]
+                    if isinstance(payload, Mapping) and payload.get("target_refs")
+                    else None
+                ),
+            )
+            event.update(
+                {key: row[key] for key in ("operation", "outcome", "sequence")}
+            )
             if not self._accept(events, sources, event, limit):
                 truncated = True
                 break
@@ -268,39 +375,101 @@ class NormalizedEventService:
             try:
                 summary = self.projects.summary(project_id)
                 git_revision = _digest(summary)
-                sources[f"git:{project_id}"] = {"availability": "available", "revision": git_revision}
+                sources[f"git:{project_id}"] = {
+                    "availability": "available",
+                    "revision": git_revision,
+                }
                 key = f"git:{project_id}"
                 if owner_revisions.get(key) != git_revision:
-                    event = self._event(event_id=f"git:{project_id}:{git_revision}", kind="git_revision", source="git.project", source_revision=git_revision, data={"project_id": project_id, "latest_commit": summary.get("latest_commit"), "changes": summary.get("changes")}, exact=False, subject_ref=project_ref)
+                    event = self._event(
+                        event_id=f"git:{project_id}:{git_revision}",
+                        kind="git_revision",
+                        source="git.project",
+                        source_revision=git_revision,
+                        data={
+                            "project_id": project_id,
+                            "latest_commit": summary.get("latest_commit"),
+                            "changes": summary.get("changes"),
+                        },
+                        exact=False,
+                        subject_ref=project_ref,
+                    )
                     if self._accept(events, sources, event, limit):
                         owner_revisions[key] = git_revision
                     else:
                         truncated = True
             except Exception as exc:
-                sources[f"git:{project_id}"] = {"availability": "unavailable", "reason": str(exc)}
+                sources[f"git:{project_id}"] = {
+                    "availability": "unavailable",
+                    "reason": str(exc),
+                }
             try:
                 authority = self.beads.task_authority_status(project_id)
                 bead_revision = str(authority["revision"])
-                sources[f"beads:{project_id}"] = {"availability": "available", "revision": bead_revision}
+                sources[f"beads:{project_id}"] = {
+                    "availability": "available",
+                    "revision": bead_revision,
+                }
                 key = f"beads:{project_id}"
                 if owner_revisions.get(key) != bead_revision:
-                    event = self._event(event_id=f"beads:{project_id}:{bead_revision}", kind="owner_revision", source="beads.owner", source_revision=bead_revision, data={"project_id": project_id, "revision": bead_revision, "diff": authority.get("diff"), "change": "owner revision changed"}, exact=False, subject_ref=f"{project_ref}/task-authority")
+                    event = self._event(
+                        event_id=f"beads:{project_id}:{bead_revision}",
+                        kind="owner_revision",
+                        source="beads.owner",
+                        source_revision=bead_revision,
+                        data={
+                            "project_id": project_id,
+                            "revision": bead_revision,
+                            "diff": authority.get("diff"),
+                            "change": "owner revision changed",
+                        },
+                        exact=False,
+                        subject_ref=f"{project_ref}/task-authority",
+                    )
                     if self._accept(events, sources, event, limit):
                         owner_revisions[key] = bead_revision
                     else:
                         truncated = True
             except Exception as exc:
-                sources[f"beads:{project_id}"] = {"availability": "unavailable", "reason": str(exc)}
+                sources[f"beads:{project_id}"] = {
+                    "availability": "unavailable",
+                    "reason": str(exc),
+                }
 
         if self.jobs is not None and len(events) < limit:
             try:
                 page = self.jobs(min(100, limit), None)
                 jobs = page.get("jobs", []) if isinstance(page, Mapping) else []
-                observation = {"snapshot": page.get("snapshot") if isinstance(page, Mapping) else None, "jobs": [{"job_id": job.get("job_id"), "state": job.get("state")} for job in jobs if isinstance(job, Mapping) and isinstance(job.get("job_id"), str)]}
+                observation = {
+                    "snapshot": page.get("snapshot")
+                    if isinstance(page, Mapping)
+                    else None,
+                    "jobs": [
+                        {"job_id": job.get("job_id"), "state": job.get("state")}
+                        for job in jobs
+                        if isinstance(job, Mapping)
+                        and isinstance(job.get("job_id"), str)
+                    ],
+                }
                 observed_revision = _digest(observation)
-                sources["sinnixd.jobs"] = {"availability": "available", "count": len(jobs) if isinstance(jobs, list) else 0, "revision": observed_revision}
+                sources["sinnixd.jobs"] = {
+                    "availability": "available",
+                    "count": len(jobs) if isinstance(jobs, list) else 0,
+                    "revision": observed_revision,
+                }
                 if job_revision != observed_revision:
-                    event = self._event(event_id=f"jobs:{observed_revision}", kind="job_state", source="sinnixd.jobs", source_revision=observed_revision, data={"snapshot": observation["snapshot"], "jobs": observation["jobs"]}, exact=False, subject_ref="sinnix://jobs")
+                    event = self._event(
+                        event_id=f"jobs:{observed_revision}",
+                        kind="job_state",
+                        source="sinnixd.jobs",
+                        source_revision=observed_revision,
+                        data={
+                            "snapshot": observation["snapshot"],
+                            "jobs": observation["jobs"],
+                        },
+                        exact=False,
+                        subject_ref="sinnix://jobs",
+                    )
                     if self._accept(events, sources, event, limit):
                         job_revision = observed_revision
                     else:
@@ -308,19 +477,38 @@ class NormalizedEventService:
                 if isinstance(page, Mapping) and page.get("next_cursor"):
                     truncated = True
             except Exception as exc:
-                sources["sinnixd.jobs"] = {"availability": "unavailable", "reason": str(exc)}
+                sources["sinnixd.jobs"] = {
+                    "availability": "unavailable",
+                    "reason": str(exc),
+                }
 
         runtime_offset = int(state["runtime_offset"])
         if len(events) < limit:
-            runtime_offset, runtime_source, runtime_more = self._runtime_events(runtime_offset, limit - len(events), lambda event: self._accept(events, sources, event, limit))
+            runtime_offset, runtime_source, runtime_more = self._runtime_events(
+                runtime_offset,
+                limit - len(events),
+                lambda event: self._accept(events, sources, event, limit),
+            )
             sources["ops-reducer.transitions"] = runtime_source
             truncated = truncated or runtime_more
         else:
             sources["ops-reducer.transitions"] = {"availability": "not_requested"}
 
-        next_state = {"audit_sequence": audit_sequence, "runtime_offset": runtime_offset, "owner_revisions": owner_revisions, "job_revision": job_revision}
+        next_state = {
+            "audit_sequence": audit_sequence,
+            "runtime_offset": runtime_offset,
+            "owner_revisions": owner_revisions,
+            "job_revision": job_revision,
+        }
         next_cursor = self.cursor.encode(next_state, selected)
-        response = {"schema": "sinnix.gateway-events.v1", "principal": self.principal, "events": events, "sources": sources, "next_cursor": next_cursor, "truncated": truncated or len(events) >= limit}
+        response = {
+            "schema": "sinnix.gateway-events.v1",
+            "principal": self.principal,
+            "events": events,
+            "sources": sources,
+            "next_cursor": next_cursor,
+            "truncated": truncated or len(events) >= limit,
+        }
         if len(_canonical(response)) > self.max_response_bytes:
             raise EventCursorError("event response exceeds its size bound")
         return response

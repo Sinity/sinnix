@@ -20,11 +20,19 @@ class PromptSpec:
 
 
 PROMPT_SPECS = (
-    PromptSpec("orient-project", "project.orientation", "Orient on one project before acting."),
-    PromptSpec("triage-beads", "project.triage", "Triage bounded Beads work for one project."),
+    PromptSpec(
+        "orient-project", "project.orientation", "Orient on one project before acting."
+    ),
+    PromptSpec(
+        "triage-beads", "project.triage", "Triage bounded Beads work for one project."
+    ),
     PromptSpec("work-bead", "bead.work", "Prepare to work one canonical Beads task."),
-    PromptSpec("review-job", "job.review", "Review one daemon-owned job and its evidence."),
-    PromptSpec("incident-orient", "incident", "Orient on current runtime incident evidence."),
+    PromptSpec(
+        "review-job", "job.review", "Review one daemon-owned job and its evidence."
+    ),
+    PromptSpec(
+        "incident-orient", "incident", "Orient on current runtime incident evidence."
+    ),
 )
 
 PROMPT_KINDS = {
@@ -40,7 +48,9 @@ PROMPT_KINDS = {
 class PromptGenerator:
     """Generate principal-visible guidance from canonical registry references."""
 
-    def __init__(self, *, principal: str, catalog: Callable[[str], Mapping[str, Any]]) -> None:
+    def __init__(
+        self, *, principal: str, catalog: Callable[[str], Mapping[str, Any]]
+    ) -> None:
         self.principal = principal
         self.catalog = catalog
         self._specs = {spec.name: spec for spec in PROMPT_SPECS}
@@ -51,8 +61,16 @@ class PromptGenerator:
                 "name": spec.name,
                 "description": spec.description,
                 "arguments": [
-                    {"name": "ref", "description": "Canonical Sinnix target reference", "required": True},
-                    {"name": "job_ref", "description": "Canonical assigned job reference", "required": False},
+                    {
+                        "name": "ref",
+                        "description": "Canonical Sinnix target reference",
+                        "required": True,
+                    },
+                    {
+                        "name": "job_ref",
+                        "description": "Canonical assigned job reference",
+                        "required": False,
+                    },
                 ],
             }
             for spec in PROMPT_SPECS
@@ -64,20 +82,27 @@ class PromptGenerator:
         try:
             resource, values = REGISTRY.resolve(reference)
         except (RegistryError, ValueError) as exc:
-            raise ValueError("prompt ref is not a canonical registry reference") from exc
+            raise ValueError(
+                "prompt ref is not a canonical registry reference"
+            ) from exc
         if self.principal not in resource.principals:
             raise ValueError("prompt ref is not visible to this principal")
         if str(resource.ref_template.format(values)) != reference:
             raise ValueError("prompt ref is not canonical")
         return resource, values
 
-    def generate(self, name: str, arguments: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+    def generate(
+        self, name: str, arguments: Mapping[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         try:
             spec = self._specs[name]
         except KeyError as exc:
             raise ValueError(f"unknown gateway prompt: {name}") from exc
         values = dict(arguments or {})
-        if len(json.dumps(values, sort_keys=True, default=str).encode()) > MAX_PROMPT_INPUT_BYTES:
+        if (
+            len(json.dumps(values, sort_keys=True, default=str).encode())
+            > MAX_PROMPT_INPUT_BYTES
+        ):
             raise ValueError("prompt arguments exceed their input bound")
         unknown = set(values) - {"ref", "job_ref"}
         if unknown:
@@ -87,7 +112,9 @@ class PromptGenerator:
             raise ValueError("prompt ref must be a canonical Sinnix reference")
         resource, _ = self._resolve_visible(ref)
         if resource.kind not in PROMPT_KINDS[spec.intent]:
-            raise ValueError(f"prompt {spec.name} does not accept resource kind {resource.kind!r}")
+            raise ValueError(
+                f"prompt {spec.name} does not accept resource kind {resource.kind!r}"
+            )
         job_ref = values.get("job_ref")
         if job_ref is not None:
             if not isinstance(job_ref, str):

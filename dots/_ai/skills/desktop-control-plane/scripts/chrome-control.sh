@@ -240,7 +240,7 @@ cdp_read_response() {
     fi
     printf -v remaining_sec '%d.%06d' $((remaining_us / 1000000)) $((remaining_us % 1000000))
     if ! IFS= read -r -t "$remaining_sec" line <&"$fd"; then
-      if (( $(cdp_now_us) >= deadline_us )); then
+      if (($(cdp_now_us) >= deadline_us)); then
         printf 'timed out waiting for CDP response id %s (%s) after %ss\n' \
           "$expected_id" "$method" "$timeout_sec" >&2
         return 124
@@ -602,7 +602,7 @@ agent-window)
         fullscreen=$(jq -r '.fullscreen' <<<"$client_state")
         visible=$(hyprctl_call monitors -j 2>/dev/null | jq -r --arg workspace "$AGENT_WORKSPACE" \
           'any(.[]; .activeWorkspace.name == $workspace)')
-        if [[ $workspace == "$AGENT_WORKSPACE" && $visible == "false" && $floating == "false" && \
+        if [[ $workspace == "$AGENT_WORKSPACE" && $visible == "false" && $floating == "false" &&
           $pinned == "false" && $fullscreen == "0" ]]; then
           ((stable_checks += 1))
           if [[ $stable_checks -ge 3 ]]; then
