@@ -9,7 +9,16 @@ any cost-sensitive decision.
 ## Pricing ($/M in/out, 2026-08)
 
 Fable 10/50 · Opus 5 5/25 · Sonnet 5 3/15 · Sol 5/30 · Terra 2.5/15 ·
-Luna 1/6 · Gemini 3.7 Flash = current cost floor.
+Luna 1/6 · Gemini 3.7 Flash = current cost floor. (Sol's famous 750 TPS is
+Cerebras-hosted — irrelevant to our dispatch path; don't count speed as a
+Sol argument.)
+
+**Quota framing (operator, 2026-08-25)**: "Codex quota is plentiful" is a
+NEAR-TERM preservation ordering (Claude is currently the more precious
+pool), not a standing fact. The durable economic thesis is: Luna is cheap
+and roughly Sonnet-tier — the volume engine for massive parallel work if we
+economize properly. Sol is for contained analysis where Luna-tier judgment
+falls short and Claude should be preserved — not a free tier.
 
 **Sticker price lies**: total-token consumption can erase a tier discount —
 measured Sonnet-over-Opus runs came out *more* expensive than Opus. Judge a
@@ -37,7 +46,12 @@ lane by realized burn per merged outcome, never by rate card.
   the PocketOS DB deletion happened against explicit instructions. Structural
   review and authority gating apply to ALL executors, not just cheap ones —
   the risk model must assume no human in the loop (humans rubber-stamp;
-  automated review catches more than human review in practice).
+  automated review catches more than human review in practice). Local
+  calibration (operator, 2026-08-25): don't over-index on the 0.25% stat for
+  bounded read-only jobs — the demonstrated local failure is Sol in an
+  UNBOUNDED COORDINATOR SEAT (the 30h spiral session was Sol). Contained,
+  deliverable-shaped Sol jobs performed excellently the same day. The seat,
+  not the stat, is the risk.
 - **Tokens are a cost, not a benefit**: "Always beware those who maximize
   costs and present this as a benefit." Process machinery that generates
   spend without merged outcomes is the failure mode, and it flatters itself
