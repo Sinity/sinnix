@@ -59,9 +59,9 @@ or `cd /realm/project/sinnix && nix develop --command switch`) — never bare
 
 ## Runtime and workspaces
 
-`agentctl` (CLI verbs: status, shell, agent, project, workspace, job, owner,
-task) is the one interface for durable machine work, workspaces, coding-agent
-jobs, and task backends. Load the `agent-runtime` skill before nontrivial
+`agentctl` is the one interface for durable machine work, workspaces,
+coding-agent jobs, and task backends (verb surface: `agentctl --help` — it
+grows; don't cache it). Load the `agent-runtime` skill before nontrivial
 runtime/workspace operations and `orchestrate` before multi-agent work.
 
 - Ordinary short foreground commands run directly. Detached, queued,
