@@ -15,9 +15,9 @@ beads-in-git snapshots are immutable evidence, never live state.
 
 - `bd ready` / `bd list --status ...` / `bd show <id>` / `bd graph --open
 <epic>` — the graph is the authority; epic child-counts are not closure
-  evidence (membership is dependency-based).
-- Through AgentCTL (cross-project, typed): `agentctl task list <project>
-[--ready]`, `agentctl task get`.
+  evidence (membership is dependency-based). All task reads go through `bd`
+  directly; AgentCTL deliberately has no `task list`/`task get` (it owns only
+  journalled mutations, reconcile, and the authority-bound snapshot).
 - "Ready" means dependency-ready, not necessarily executable now: live-proof
   and operator-window items are ready-for-a-window, not ready-for-a-lane.
   Check the bead's design for window/consent requirements before claiming.

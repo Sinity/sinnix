@@ -92,6 +92,12 @@ project.toml`. A document restating them is a cache that goes stale — the
 - **Sediment**: stale layers settle because adding feels safe and removing
   feels risky. Every instruction-file edit should delete at least as
   deliberately as it adds; a refresh that only appends is suspect.
+- **Transcription trivia** (recorded failure class, 2026-08-25): agents
+  distilling a source carry its color into durable surfaces — vendor
+  hosting details, benchmark numbers, narrative flourishes that decide
+  nothing. Test each fact: what decision changes if it's wrong or absent?
+  None → delete, don't caveat. (A wrong-but-cited detail is worse than
+  absent: it invites a correction cycle over a fact nobody needed.)
 
 ## Estate specifics
 

@@ -35,6 +35,7 @@ MAX_SERVICE_PORT_RANGE = 256
 _PARAMETER_FLAG = re.compile(r"--[a-z][a-z0-9-]*\Z")
 _SERVICE_PORT_SLOT = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
 _SERVICE_ENVIRONMENT = re.compile(r"(?:[A-Z][A-Z0-9_]*_)?PORT\Z")
+_ENVIRONMENT_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
 _PARAMETER_GRAMMARS = {
     "identifier": re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z"),
     "package-name": re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z"),
@@ -223,6 +224,10 @@ class ConflictPolicy:
         }
 
 
+class ProjectEnvironmentError(ProjectConfigError):
+    """A declared-required environment variable is absent at job build time."""
+
+
 @dataclass(frozen=True)
 class ProjectEnvironment:
     kind: str
@@ -230,9 +235,28 @@ class ProjectEnvironment:
     inherit: tuple[str, ...]
     unset: tuple[str, ...]
     preflight: tuple[str, ...] = ()
+    declared: tuple[tuple[str, str], ...] = ()
+    require: tuple[str, ...] = ()
 
     def values(self) -> dict[str, str]:
-        return build_environment(inherit=self.inherit, unset=self.unset)
+        """Resolve the job environment; a missing required variable fails loudly.
+
+        Inherited names that are absent from the daemon environment are still
+        dropped silently — that is what ``require`` exists to forbid, one
+        declared name at a time, instead of guessing which drops matter.
+        """
+        environment = build_environment(
+            inherit=self.inherit, unset=self.unset, values=dict(self.declared)
+        )
+        missing = sorted(name for name in self.require if name not in environment)
+        if missing:
+            raise ProjectEnvironmentError(
+                "required environment variable(s) unavailable at job build time: "
+                + ", ".join(missing)
+                + " (declare a value under [environment.values] or provide them"
+                " to the daemon)"
+            )
+        return environment
 
     def command_for(
         self, payload: Sequence[str], *, overrides: Mapping[str, str] | None = None
@@ -259,6 +283,8 @@ class ProjectEnvironment:
             "command": list(self.command),
             "preflight": list(self.preflight),
             "agent_capable": agent_capable,
+            "declared": sorted(name for name, _value in self.declared),
+            "require": list(self.require),
         }
 
 
@@ -962,6 +988,28 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
     environment_kind = environment.get("kind")
     if not isinstance(environment_kind, str) or not environment_kind:
         raise ProjectConfigError(f"{descriptor} environment.kind must be non-empty")
+    declared_values = environment.get("values", {})
+    if not isinstance(declared_values, Mapping) or any(
+        not isinstance(name, str)
+        or _ENVIRONMENT_NAME.fullmatch(name) is None
+        or name.startswith("SINNIX")
+        or not isinstance(value, str)
+        for name, value in declared_values.items()
+    ):
+        raise ProjectConfigError(
+            f"{descriptor} [environment.values] must map uppercase non-SINNIX"
+            " variable names to strings"
+        )
+    required_names = _optional_string_list(
+        environment.get("require"), "environment.require"
+    )
+    if any(
+        _ENVIRONMENT_NAME.fullmatch(name) is None or name.startswith("SINNIX")
+        for name in required_names
+    ):
+        raise ProjectConfigError(
+            f"{descriptor} environment.require must name uppercase non-SINNIX variables"
+        )
     execution_environment = ProjectEnvironment(
         kind=environment_kind,
         command=_string_list(environment.get("command"), "environment.command"),
@@ -974,6 +1022,8 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             if "preflight" in environment
             else ()
         ),
+        declared=tuple(sorted(declared_values.items())),
+        require=required_names,
     )
 
     raw_workspace = raw.get("workspace")
