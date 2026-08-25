@@ -162,9 +162,11 @@ def parser() -> argparse.ArgumentParser:
     task_list.add_argument("--reverse", action="store_true")
     task_list.add_argument("--include-closed", action="store_true")
     task_list.add_argument("--ready", action="store_true")
-    task_get = task_subcommands.add_parser("get")
-    task_get.add_argument("project_id")
-    task_get.add_argument("task_id")
+    task_list.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    for command in ("get", "show"):
+        task_get = task_subcommands.add_parser(command)
+        task_get.add_argument("project_id")
+        task_get.add_argument("task_id")
     task_create = task_subcommands.add_parser("create")
     task_create.add_argument("project_id")
     task_create.add_argument("title")
@@ -499,7 +501,7 @@ def main() -> int:
             )
             if arguments.parent is not None:
                 task_arguments["parent_task_id"] = arguments.parent
-        elif arguments.task_command in {"get", "claim", "complete", "release", "note", "relate"}:
+        elif arguments.task_command in {"get", "show", "claim", "complete", "release", "note", "relate"}:
             task_arguments["task_id"] = arguments.task_id
             if arguments.task_command == "note":
                 if (arguments.text is None) == (arguments.text_option is None):
@@ -517,8 +519,9 @@ def main() -> int:
                 if arguments.task_command == "release" and arguments.if_assignee is not None:
                     task_arguments["if_assignee"] = arguments.if_assignee
         mutation_id = getattr(arguments, "request_id", None)
+        task_operation = "get" if arguments.task_command == "show" else arguments.task_command
         request = _request(
-            f"task.{arguments.task_command}",
+            f"task.{task_operation}",
             "task-backend",
             task_arguments,
             "operator",

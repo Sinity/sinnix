@@ -186,7 +186,9 @@ def test_canonical_client_redacts_unrecognized_json_rpc_errors(tmp_path: Path) -
     ("argv", "operation", "payload"),
     (
         (("agentctl", "task", "list", "fixture", "--status", "open"), "task.list", {"project_id": "fixture", "status": "open", "limit": 100}),
+        (("agentctl", "task", "list", "fixture", "--status", "open", "--json"), "task.list", {"project_id": "fixture", "status": "open", "limit": 100}),
         (("agentctl", "task", "get", "fixture", "fixture-1"), "task.get", {"project_id": "fixture", "task_id": "fixture-1"}),
+        (("agentctl", "task", "show", "fixture", "fixture-1"), "task.get", {"project_id": "fixture", "task_id": "fixture-1"}),
         (("agentctl", "task", "create", "fixture", "typed title", "--description", "typed description", "--type", "task", "--priority", "2", "--label", "area:agentctl", "--parent", "fixture-parent", "--dependency", "depends-on:fixture-blocker", "--request-id", "request-1"), "task.create", {"project_id": "fixture", "title": "typed title", "description": "typed description", "issue_type": "task", "priority": 2, "labels": ["area:agentctl"], "parent_task_id": "fixture-parent", "dependencies": [{"relation": "depends-on", "task_id": "fixture-blocker"}]}),
         (("agentctl", "task", "claim", "fixture", "fixture-1", "--request-id", "request-1"), "task.claim", {"project_id": "fixture", "task_id": "fixture-1"}),
         (("agentctl", "task", "note", "fixture", "fixture-1", "note", "--request-id", "request-1"), "task.note", {"project_id": "fixture", "task_id": "fixture-1", "text": "note"}),
