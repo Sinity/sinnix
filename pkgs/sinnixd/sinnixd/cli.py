@@ -142,7 +142,7 @@ def parser() -> argparse.ArgumentParser:
     job_list.add_argument("--cursor")
     job_list.add_argument("--project")
     job_list.add_argument("--phase", action="append", default=[])
-    job_list.add_argument("--active", action="store_true")
+    job_list.add_argument("--active", "--active-only", dest="active", action="store_true")
     wait = job_subcommands.add_parser("wait")
     wait.add_argument("job_id")
     wait.add_argument("--timeout-seconds", type=int, default=30)
