@@ -37,6 +37,7 @@
         rebuildServicePath
         localInputOverrideArgs
         resolveFlakeDir
+        agentEnvironmentContract
         avoidRepoCwdForActivation
         switchFallback
         ;
@@ -49,6 +50,7 @@
           ${avoidRepoCwdForActivation}
           ${localInputOverrideArgs}
           ${commandRegistry.rebuildDefaultArgs}
+          ${agentEnvironmentContract}
           ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
 
           _rebuild_status=0

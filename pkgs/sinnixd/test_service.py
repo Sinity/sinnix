@@ -21,6 +21,7 @@ import pytest
 import sinnixd.api as api_module
 import sinnixd.cli as cli_module
 import sinnixd.jobs as jobs_module
+import sinnixd.runner as runner_module
 from sinnix_mcp import ErrorCode, OpaquePayload, RequestEnvelope, ResponseEnvelope, SinnixRef, SourceBinding
 from sinnix_mcp.execution import EnvironmentProfile, ExecutionResult, OwnerExecution
 
@@ -58,9 +59,16 @@ from sinnixd.jobs import (
 )
 from sinnixd.limits import MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
 from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
-from sinnixd.projects import ProjectCatalog, ProjectConfigError, RegisteredCheckout, parse_worktree_records
+from sinnixd.projects import (
+    ProjectCatalog,
+    ProjectConfigError,
+    RegisteredCheckout,
+    parse_worktree_records,
+    validate_agent_environment_descriptors,
+)
 from sinnixd.runner import (
     RunnerError,
+    _load,
     _exec_shell,
     _require_environment,
     _revalidate_checkout,
@@ -4752,17 +4760,17 @@ def test_typed_shell_runner_enters_the_registered_project_environment(
     assert observed["argv"] == ["nix", "develop", "--command", "python", "-m", "fixture"]
 
 
-def test_agent_production_route_binds_environment_to_assigned_checkout_and_interpreter(
+def test_agent_production_route_uses_declared_environment_over_poisoned_ambient_imports(
     tmp_path: Path,
 ) -> None:
-    """A real typed input reaches the contract runner before the native backend."""
+    """A real typed input gets its PATH and import root only from the declared environment."""
     write_adapter(tmp_path)
     environment = tmp_path / "fixture-environment"
     environment.write_text(
         "#!/bin/sh\n"
         "set -eu\n"
         "printf 'entered\\n' >> environment.calls\n"
-        "export PATH=\"$PWD/.venv/bin:/run/current-system/sw/bin\"\n"
+        "export PATH=\"$PWD/project-bin:/run/current-system/sw/bin\"\n"
         "export PYTHONPATH=\"$PWD\"\n"
         "exec \"$@\"\n"
     )
@@ -4774,8 +4782,7 @@ def test_agent_production_route_binds_environment_to_assigned_checkout_and_inter
             f'command = ["{environment}"]',
         )
     )
-    (tmp_path / ".venv" / "bin").mkdir(parents=True)
-    (tmp_path / ".venv" / "bin" / "python").symlink_to(sys.executable)
+    (tmp_path / "project-bin").mkdir()
     (tmp_path / "devtools").mkdir()
     (tmp_path / "devtools" / "__init__.py").write_text("")
     (tmp_path / "devtools" / "__main__.py").write_text(
@@ -4784,10 +4791,10 @@ def test_agent_production_route_binds_environment_to_assigned_checkout_and_inter
         "with Path('devtools.calls').open('a') as handle:\n"
         "    handle.write(' '.join(sys.argv[1:]) + '\\n')\n"
     )
-    (tmp_path / "polylogue").mkdir()
-    (tmp_path / "polylogue" / "__init__.py").write_text("CHECKOUT = __file__\n")
-    devtools = tmp_path / ".venv" / "bin" / "devtools"
-    devtools.write_text("#!/bin/sh\nexec python -m devtools \"$@\"\n")
+    (tmp_path / "fixture_package").mkdir()
+    (tmp_path / "fixture_package" / "__init__.py").write_text("CHECKOUT = __file__\n")
+    devtools = tmp_path / "project-bin" / "devtools"
+    devtools.write_text(f"#!/bin/sh\nexec {sys.executable} -m devtools \"$@\"\n")
     devtools.chmod(0o700)
     initialize_git_checkout(tmp_path)
 
@@ -4799,11 +4806,11 @@ def test_agent_production_route_binds_environment_to_assigned_checkout_and_inter
         "while [ $# -gt 0 ]; do\n"
         "  case $1 in --last-file) last=$2; shift 2 ;; *) shift ;; esac\n"
         "done\n"
-        "test \"$(command -v devtools)\" = \"$PWD/.venv/bin/devtools\"\n"
+        "test \"$(command -v devtools)\" = \"$PWD/project-bin/devtools\"\n"
         "devtools status\n"
         "devtools test tests/fixture.py::test_noop\n"
         "devtools verify --quick\n"
-        "python -c 'import polylogue; assert polylogue.CHECKOUT'\n"
+        f"{sys.executable} -c 'import fixture_package; assert fixture_package.CHECKOUT'\n"
         "printf native-started > native.started\n"
         "printf native-result > \"$last\"\n"
     )
@@ -4835,10 +4842,11 @@ def test_agent_production_route_binds_environment_to_assigned_checkout_and_inter
     private = json.loads((tmp_path / "state" / "inputs" / f"{job_id}.json").read_text())
     assert private["environment_command"] == [str(environment)]
     assert private["environment_preflight"] == ["devtools", "status", "--stderr"]
+    assert private["schema_version"] == 2
 
     poisoned = {str(key): str(value) for key, value in launch["environment"].items()}
     poisoned["PATH"] = ":".join(
-        [str(tmp_path / "another-checkout" / ".venv" / "bin"), poisoned["PATH"]]
+        [str(tmp_path / "another-checkout" / "project-bin"), poisoned["PATH"]]
     )
     poisoned["PYTHONPATH"] = os.environ.get("PYTHONPATH", "")
     mutant = subprocess.run(
@@ -4933,7 +4941,7 @@ def test_agent_environment_preflight_refuses_corrupt_environment_before_native_r
     prompt.write_text("prompt")
     job_id = "11111111-1111-1111-1111-111111111111"
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "job_id": job_id,
         "kind": "attested-agent",
         "principal": "agent-control",
@@ -4954,6 +4962,97 @@ def test_agent_environment_preflight_refuses_corrupt_environment_before_native_r
     ):
         _run_agent(payload, tmp_path, native_runner=runner, state_root=state)
     assert not (results / "fixture.result").exists()
+
+
+def test_agent_environment_preflight_timeout_is_distinct_and_prevents_native_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = tmp_path / "state"
+    inputs = state / "inputs"
+    results = state / "results"
+    inputs.mkdir(parents=True)
+    results.mkdir()
+    prompt = inputs / "fixture.prompt"
+    prompt.write_text("prompt")
+    runner = tmp_path / "native-runner"
+    native_runner(runner)
+    payload = {
+        "schema_version": 2,
+        "job_id": "11111111-1111-1111-1111-111111111111",
+        "kind": "attested-agent",
+        "principal": "agent-control",
+        "environment_command": ["fixture-environment"],
+        "environment_preflight": ["status"],
+        "backend": "codex",
+        "model": "fixture",
+        "effort": "high",
+        "credential_profile": "subscription",
+        "prompt_path": str(prompt),
+        "result_path": str(results / "fixture.result"),
+    }
+
+    def timeout(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.TimeoutExpired("fixture-environment", 30)
+
+    monkeypatch.setattr(runner_module.subprocess, "run", timeout)
+    with pytest.raises(RunnerError, match="agent-preflight-timeout.*30 seconds"):
+        _run_agent(payload, tmp_path, native_runner=runner, state_root=state)
+    assert not (results / "fixture.result").exists()
+
+
+def test_pre_upgrade_attested_agent_input_fails_closed_with_stale_schema(tmp_path: Path) -> None:
+    input_path = tmp_path / "legacy-agent.json"
+    input_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "job_id": "11111111-1111-1111-1111-111111111111",
+                "kind": "attested-agent",
+                "principal": "agent-control",
+            }
+        )
+    )
+    with pytest.raises(RunnerError, match="stale attested-agent private input schema"):
+        _load(input_path, "11111111-1111-1111-1111-111111111111")
+
+
+def test_agent_environment_descriptor_audit_reports_each_registered_project(tmp_path: Path) -> None:
+    fixture = tmp_path / "fixture"
+    missing_command = tmp_path / "missing-command"
+    write_adapter(fixture, project_id="fixture")
+    write_adapter(missing_command, project_id="missing_command")
+    descriptor = fixture / ".agentctl" / "project.toml"
+    descriptor.write_text(descriptor.read_text().replace('preflight = ["devtools", "status", "--stderr"]\n', ""))
+    descriptor = missing_command / ".agentctl" / "project.toml"
+    descriptor.write_text(descriptor.read_text().replace('command = ["fixture-env", "--command"]', "command = []"))
+
+    with pytest.raises(ProjectConfigError, match="agent-capable project environment contract failed") as error:
+        validate_agent_environment_descriptors([fixture, missing_command])
+    message = str(error.value)
+    assert "fixture:" in message
+    assert "environment.preflight" in message
+    assert "missing_command:" in message
+    assert "environment.command" in message
+
+
+def test_project_get_publishes_agent_environment_capability(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    runner = tmp_path / "native-runner"
+    native_runner(runner)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path), native_runner=runner)
+
+    response = service.dispatch(
+        request("project.get", "project-adapters", {"project_id": "fixture"}, "observer")
+    )
+
+    assert response.ok and response.payload is not None
+    environment = response.payload.inline["environment"]
+    assert environment == {
+        "kind": "fixture",
+        "command": ["fixture-env", "--command"],
+        "preflight": ["devtools", "status", "--stderr"],
+        "agent_capable": True,
+    }
 
 
 def test_typed_contracts_refuse_spoofed_principals_checkout_backend_environment_and_results(tmp_path: Path) -> None:
@@ -5059,7 +5158,7 @@ def test_agent_runner_revalidates_checkout_and_writes_a_bounded_result_fixture(t
     prompt = inputs / "fixture.prompt"
     prompt.write_text("private fixture prompt")
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "job_id": "11111111-1111-1111-1111-111111111111",
         "kind": "attested-agent",
         "principal": "agent-control",
@@ -5120,7 +5219,7 @@ def test_runner_rejects_forged_sinnix_environment(tmp_path: Path) -> None:
     input_path.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "job_id": job_id,
                 "kind": "attested-agent",
                 "principal": "agent-control",
