@@ -515,6 +515,7 @@ in
         ${rebuildLock "test-vm"}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
+        # build-vm builds a separate guest and does not activate the live host.
         sudo ${pkgs.systemd}/bin/systemd-run \
           --quiet \
           --collect \
@@ -540,6 +541,7 @@ in
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
+        ${agentEnvironmentContract}
         ${pkgs.systemd}/bin/systemd-run \
           --user \
           --quiet --collect --pipe --service-type=exec --wait \
@@ -672,12 +674,12 @@ in
     {
       name = "boot";
       category = "Core";
-      description = "Build + set boot default — safer, reboot to activate (nh os boot)";
+      description = "Build and set the boot default for activation on the next reboot (nh os boot)";
     }
     {
       name = "test-system";
       category = "Core";
-      description = "Test host config without persisting (nh os test)";
+      description = "Build and activate a temporary host configuration with nh os test";
     }
     {
       name = "test-vm";

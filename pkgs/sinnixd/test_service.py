@@ -4692,7 +4692,7 @@ def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: P
         request(
             "job.agent.start",
             "systemd-jobs",
-            {"project_id": "fixture", "checkout_id": "default", "prompt": "operator prompt", "backend": "codex", "model": "fixture", "effort": "high", "credential_profile": "subscription", "timeout_seconds": 60, "result": "last-message"},
+            {"project_id": "fixture", "checkout_id": "default", "prompt": "operator prompt", "backend": "claude", "model": "fixture", "effort": "high", "credential_profile": "subscription", "timeout_seconds": 60, "result": "last-message"},
             "operator",
         )
     )
@@ -4717,6 +4717,7 @@ def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: P
     assert "shell-secret" not in persisted
     assert "display only" not in persisted
     assert operator_agent.payload.inline["principal"] == "operator"
+    assert operator_agent.payload.inline["contract"]["backend"] == "claude"
     assert len(systemd.started) == 3
     assert all(start["unit"].startswith("sinnixd-job-") for start in systemd.started)
     restarted = GenericJobs(systemd, service.jobs.store, wait_poll_seconds=0.001)
@@ -4991,12 +4992,16 @@ def test_agent_environment_preflight_timeout_is_distinct_and_prevents_native_run
         "result_path": str(results / "fixture.result"),
     }
 
-    def timeout(*_args: object, **_kwargs: object) -> None:
+    calls: list[dict[str, object]] = []
+
+    def timeout(*_args: object, **kwargs: object) -> None:
+        calls.append(kwargs)
         raise subprocess.TimeoutExpired("fixture-environment", 30)
 
     monkeypatch.setattr(runner_module.subprocess, "run", timeout)
     with pytest.raises(RunnerError, match="agent-preflight-timeout.*30 seconds"):
         _run_agent(payload, tmp_path, native_runner=runner, state_root=state)
+    assert calls == [{"cwd": tmp_path, "check": False, "timeout": 30}]
     assert not (results / "fixture.result").exists()
 
 
@@ -5018,21 +5023,21 @@ def test_pre_upgrade_attested_agent_input_fails_closed_with_stale_schema(tmp_pat
 
 def test_agent_environment_descriptor_audit_reports_each_registered_project(tmp_path: Path) -> None:
     fixture = tmp_path / "fixture"
-    missing_command = tmp_path / "missing-command"
+    missing_preflight = tmp_path / "missing-preflight"
     write_adapter(fixture, project_id="fixture")
-    write_adapter(missing_command, project_id="missing_command")
+    write_adapter(missing_preflight, project_id="missing_preflight")
     descriptor = fixture / ".agentctl" / "project.toml"
     descriptor.write_text(descriptor.read_text().replace('preflight = ["devtools", "status", "--stderr"]\n', ""))
-    descriptor = missing_command / ".agentctl" / "project.toml"
-    descriptor.write_text(descriptor.read_text().replace('command = ["fixture-env", "--command"]', "command = []"))
+    descriptor = missing_preflight / ".agentctl" / "project.toml"
+    descriptor.write_text(descriptor.read_text().replace('preflight = ["devtools", "status", "--stderr"]\n', ""))
 
     with pytest.raises(ProjectConfigError, match="agent-capable project environment contract failed") as error:
-        validate_agent_environment_descriptors([fixture, missing_command])
+        validate_agent_environment_descriptors([fixture, missing_preflight])
     message = str(error.value)
     assert "fixture:" in message
     assert "environment.preflight" in message
-    assert "missing_command:" in message
-    assert "environment.command" in message
+    assert "missing_preflight:" in message
+    assert message.count("environment.preflight") == 2
 
 
 def test_project_get_publishes_agent_environment_capability(tmp_path: Path) -> None:
