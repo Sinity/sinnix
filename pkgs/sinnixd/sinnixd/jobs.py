@@ -10,15 +10,16 @@ import selectors
 import shutil
 import socket
 import stat
+import struct
 import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from threading import Lock, RLock
+from threading import Condition, Lock, RLock
 from typing import Any, Iterator, Protocol
 from uuid import UUID, uuid4
 
@@ -37,7 +38,11 @@ from .projects import (
 )
 
 DEFAULT_WAIT_SECONDS = 30
-MAX_WAIT_SECONDS = 300
+MAX_WAIT_SECONDS = 3600
+MAX_WAIT_ANY_JOBS = 32
+MAX_TERMINAL_EVENT_ENTRIES = 4096
+NOTIFY_TIMEOUT_SECONDS = 2.0
+MAX_EVENT_SPOOL_BYTES = 64 * 1024 * 1024
 SYSTEMD_COMMAND_TIMEOUT_SECONDS = 0.25
 CANCEL_OUTCOME_RECONCILIATION_GRACE_SECONDS = 300
 MAX_LOG_BYTES = 64_000
@@ -304,6 +309,8 @@ class SystemdJobs(Protocol):
         timeout_seconds: int,
         log_path: Path,
         json_result_path: Path | None = None,
+        notify_socket: Path | None = None,
+        notify_job_id: str | None = None,
     ) -> None: ...
 
     def show(
@@ -330,6 +337,8 @@ class UserSystemdJobs:
         timeout_seconds: int,
         log_path: Path,
         json_result_path: Path | None = None,
+        notify_socket: Path | None = None,
+        notify_job_id: str | None = None,
     ) -> None:
         args = [
             "systemd-run",
@@ -357,6 +366,15 @@ class UserSystemdJobs:
                     str(json_result_path),
                     "--result-overflow-path",
                     str(json_result_path.with_suffix(".overflow")),
+                ]
+            )
+        if notify_socket is not None and notify_job_id is not None:
+            args.extend(
+                [
+                    "--notify-socket",
+                    str(notify_socket),
+                    "--notify-job-id",
+                    notify_job_id,
                 ]
             )
         args.extend(["--", "/run/current-system/sw/bin/env", "-i"])
@@ -443,6 +461,70 @@ def job_unit_name(job_id: str) -> str:
 
 def _timestamp() -> str:
     return datetime.now(UTC).isoformat()
+
+
+class TerminalEvents:
+    """In-process wake-ups for terminal job transitions.
+
+    Events only accelerate observation: firing is best-effort, a missed event
+    is recovered by the fallback observation cadence, and a spurious event
+    costs one extra bounded observation. Systemd observation remains the sole
+    state authority.
+    """
+
+    def __init__(self) -> None:
+        self._condition = Condition()
+        self._fired: dict[str, float] = {}
+
+    def fire(self, job_id: str) -> None:
+        with self._condition:
+            self._fired[job_id] = time.monotonic()
+            if len(self._fired) > MAX_TERMINAL_EVENT_ENTRIES:
+                for stale in sorted(self._fired, key=self._fired.__getitem__)[
+                    : len(self._fired) - MAX_TERMINAL_EVENT_ENTRIES
+                ]:
+                    del self._fired[stale]
+            self._condition.notify_all()
+
+    def wait_terminal(self, job_ids: Sequence[str], seconds: float) -> bool:
+        """Block up to ``seconds`` for a fired event covering any of ``job_ids``."""
+        with self._condition:
+            if any(job_id in self._fired for job_id in job_ids):
+                return True
+            if seconds > 0:
+                self._condition.wait(seconds)
+            return any(job_id in self._fired for job_id in job_ids)
+
+
+def notify_job_exit(socket_path: Path, job_id: str, exit_code: int) -> None:
+    """Best-effort daemon wake-up sent by the capture wrapper at process exit.
+
+    Failure is silent by design: the daemon may be down or restarting, and the
+    observation path recovers the outcome without this accelerator.
+    """
+    request_id = str(uuid4())
+    payload = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "dispatch",
+            "params": {
+                "request_id": request_id,
+                "correlation_id": str(uuid4()),
+                "operation": "job.notify-exit",
+                "owner": "systemd-jobs",
+                "principal": "agent-control",
+                "arguments": {"job_id": job_id, "exit_code": exit_code},
+            },
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(NOTIFY_TIMEOUT_SECONDS)
+        connection.connect(str(socket_path))
+        connection.sendall(struct.pack("!I", len(payload)) + payload)
+        connection.recv(4)
 
 
 def _host_pressure() -> Mapping[str, float]:
@@ -598,6 +680,7 @@ class GenericJobSpec:
             "foreground-command",
             "operator-shell",
             "attested-agent",
+            "delivery-operation",
         }:
             raise ValueError("job kind is invalid")
         if not self.command and not self.command_digest:
@@ -1588,8 +1671,13 @@ class GenericJobStore:
         path = self._record_path(job_id)
         try:
             value = json.loads(path.read_text())
-        except FileNotFoundError as error:
-            raise JobRecordError(f"unknown job: {job_id}") from error
+        except FileNotFoundError:
+            try:
+                value = json.loads(self._archived_record_path(job_id).read_text())
+            except FileNotFoundError as error:
+                raise JobRecordError(f"unknown job: {job_id}") from error
+            except (OSError, json.JSONDecodeError) as error:
+                raise JobRecordError(f"malformed job record: {job_id}") from error
         except (OSError, json.JSONDecodeError) as error:
             raise JobRecordError(f"malformed job record: {job_id}") from error
         if not isinstance(value, Mapping):
@@ -1824,6 +1912,48 @@ class GenericJobStore:
         _ = job_unit_name(job_id)
         return self.records_root / f"{job_id}.json"
 
+    @property
+    def archived_records_root(self) -> Path:
+        return self.root / "jobs-archive"
+
+    def _archived_record_path(self, job_id: str) -> Path:
+        _ = job_unit_name(job_id)
+        return self.archived_records_root / f"{job_id}.json"
+
+    def prune_terminal_records(self, *, retention_days: int) -> int:
+        """Move terminal records past the retention window out of the live set.
+
+        Listing costs one parse per live record file, so an unbounded terminal
+        history degrades every list forever. Archived records stay loadable by
+        id; non-terminal records are never touched, and an unparseable
+        timestamp keeps its record in place rather than guessing.
+        """
+        if retention_days <= 0 or not self.records_root.exists():
+            return 0
+        cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+        moved = 0
+        for path in sorted(self.records_root.glob("*.json")):
+            try:
+                record = self.load(path.stem)
+            except JobRecordError:
+                continue
+            if not record.state.get("terminal"):
+                continue
+            observed = record.state.get("observed_at") or record.created_at
+            try:
+                stamp = datetime.fromisoformat(str(observed))
+            except ValueError:
+                continue
+            if stamp.tzinfo is None or stamp >= cutoff:
+                continue
+            _ensure_durable_directory(self.archived_records_root)
+            os.replace(path, self._archived_record_path(record.job_id))
+            _fsync_directory(self.archived_records_root)
+            _fsync_directory(self.records_root)
+            (self.locks_root / f"{record.job_id}.lock").unlink(missing_ok=True)
+            moved += 1
+        return moved
+
 
 @dataclass
 class GenericJobs:
@@ -1834,13 +1964,23 @@ class GenericJobs:
     wait_poll_seconds: float = 0.1
     pressure_probe: Callable[[], Mapping[str, float]] = _host_pressure
     before_admission_start: Callable[[str], None] | None = None
+    notify_socket: Path | None = None
+    record_retention_days: int = 14
+    event_spool_path: Path | None = None
+    recover_on_init: bool = True
+    events: TerminalEvents = field(default_factory=TerminalEvents, repr=False)
     _admission_lock: RLock = field(default_factory=RLock, init=False, repr=False)
+    _spooled: set[str] = field(default_factory=set, init=False, repr=False)
 
     def __post_init__(self) -> None:
         # Recovery observes only the durable nonterminal set. Terminal lease
         # artifacts carry their own bounded reconciliation path, so a daemon
         # restart cannot serialize systemd calls or per-job locks across the
-        # historical corpus.
+        # historical corpus. Auxiliary processes (the delivery runner) open
+        # the store read-mostly with recover_on_init=False so they never race
+        # the daemon's recovery, scratch cleanup, or retention.
+        if not self.recover_on_init:
+            return
         if self.store.records_root.exists() or self.store.leases_root.exists():
             records = self.store.recover_service_leases(self.systemd.show)
         else:
@@ -1857,7 +1997,7 @@ class GenericJobs:
                 ):
                     record = self._recover_unpublished_declared_locked(record)
                 if record.state.get("terminal"):
-                    self._terminal_cleanup(record)
+                    self._finalize_terminal(record)
                 else:
                     self._get_locked(record.job_id)
                     record = self.store.load(record.job_id)
@@ -1868,6 +2008,7 @@ class GenericJobs:
                 state = self._admission_state()
                 for record in finalized:
                     self._finish_admission(record, state)
+        self.store.prune_terminal_records(retention_days=self.record_retention_days)
 
     def _recover_unpublished_declared_locked(
         self, record: GenericJobRecord
@@ -2007,6 +2148,7 @@ class GenericJobs:
                     json_result_path=record.result_path
                     if spec.result_kind in {"json", "pytest"}
                     else None,
+                    **self._notify_arguments(record.job_id),
                 )
             except SystemdJobError:
                 return self._reconcile_launch_error(record)
@@ -2362,7 +2504,7 @@ class GenericJobs:
                     updated = self._with_state(record, blocked)
                     self.store.save(updated)
                     if blocked.get("terminal"):
-                        self._terminal_cleanup(updated)
+                        self._finalize_terminal(updated)
                         self._finish_admission(updated, state)
                     continue
                 policy = POOL_POLICIES[record.spec.pool]
@@ -2437,6 +2579,7 @@ class GenericJobs:
                         json_result_path=current.result_path
                         if current.spec.result_kind in {"json", "pytest"}
                         else None,
+                        **self._notify_arguments(current.job_id),
                     )
                 except SystemdJobError:
                     self._reconcile_launch_error(current)
@@ -2452,7 +2595,7 @@ class GenericJobs:
                         },
                     )
                     self.store.save(terminal)
-                    self._terminal_cleanup(terminal)
+                    self._finalize_terminal(terminal)
                 else:
                     submitted = self._with_state(
                         current,
@@ -2465,7 +2608,7 @@ class GenericJobs:
                     )
                     self.store.save(submitted)
             if terminal is not None and terminal.state.get("terminal"):
-                self._terminal_cleanup(terminal)
+                self._finalize_terminal(terminal)
                 self._finish_admission(terminal, state)
             elif submitted is not None:
                 active[submitted.spec.pool].append(submitted)
@@ -2548,7 +2691,55 @@ class GenericJobs:
             )
         self._save_admission_state(state)
 
+    def _finalize_terminal(self, record: GenericJobRecord) -> None:
+        """Handle a just-observed terminal transition exactly once per process.
+
+        Already-terminal records re-observed later (restart recovery, repeat
+        gets) go through _terminal_cleanup directly and are never re-spooled:
+        a terminal record cannot transition again, so the once-set only needs
+        process scope.
+        """
+        if record.job_id not in self._spooled:
+            self._spooled.add(record.job_id)
+            self._spool_terminal_event(record)
+        self._terminal_cleanup(record)
+
+    def _spool_terminal_event(self, record: GenericJobRecord) -> None:
+        if self.event_spool_path is None:
+            return
+        checkout = record.spec.checkout
+        line = json.dumps(
+            {
+                "job_id": record.job_id,
+                "kind": record.spec.kind,
+                "project": record.spec.project_id,
+                "phase": record.state.get("phase"),
+                "completed_at": record.state.get("observed_at"),
+                "checkout": checkout.get("checkout_id")
+                if isinstance(checkout, Mapping)
+                else None,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        try:
+            _ensure_durable_directory(self.event_spool_path.parent)
+            try:
+                if self.event_spool_path.stat().st_size > MAX_EVENT_SPOOL_BYTES:
+                    os.replace(
+                        self.event_spool_path,
+                        self.event_spool_path.with_suffix(".jsonl.old"),
+                    )
+            except FileNotFoundError:
+                pass
+            with open(self.event_spool_path, "a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+        except OSError:
+            # The spool is an advisory watch point, never state authority.
+            pass
+
     def _terminal_cleanup(self, record: GenericJobRecord) -> None:
+        self.events.fire(record.job_id)
         self.store.cleanup_scratch(record)
         self.store.cleanup_service_readiness(record.job_id)
         if record.spec.kind == "declared-operation":
@@ -2607,6 +2798,7 @@ class GenericJobs:
         cursor: str | None = None,
         project_id: str | None = None,
         phases: tuple[str, ...] = (),
+        kinds: tuple[str, ...] = (),
         active_only: bool = False,
     ) -> dict[str, Any]:
         if not 1 <= limit <= 1_000:
@@ -2617,8 +2809,11 @@ class GenericJobs:
             raise ValueError("job list project_id must be a non-empty string")
         if any(not isinstance(phase, str) or not phase for phase in phases):
             raise ValueError("job list phases must be non-empty strings")
+        if any(not isinstance(kind, str) or not kind for kind in kinds):
+            raise ValueError("job list kinds must be non-empty strings")
         query = {
             "active_only": active_only,
+            "kinds": sorted(set(kinds)),
             "phases": sorted(set(phases)),
             "project_id": project_id,
         }
@@ -2631,6 +2826,7 @@ class GenericJobs:
                 if principal == "operator" or record.spec.principal == principal
                 if project_id is None or record.spec.project_id == project_id
                 if not query["phases"] or record.state.get("phase") in query["phases"]
+                if not query["kinds"] or record.spec.kind in query["kinds"]
                 if not active_only or not record.state.get("terminal", False)
             ),
             key=_job_order_key,
@@ -2712,9 +2908,58 @@ class GenericJobs:
                 return status
             if time.monotonic() >= deadline:
                 return {**status, "wait_timed_out": True}
-            time.sleep(
-                min(self.wait_poll_seconds, max(0.0, deadline - time.monotonic()))
+            self.events.wait_terminal(
+                (job_id,),
+                min(self.wait_poll_seconds, max(0.0, deadline - time.monotonic())),
             )
+
+    def wait_any(
+        self, job_ids: Sequence[str], timeout_seconds: int = DEFAULT_WAIT_SECONDS
+    ) -> dict[str, Any]:
+        """Return the first terminal job among ``job_ids``, or a bounded timeout."""
+        if not 1 <= timeout_seconds <= MAX_WAIT_SECONDS:
+            raise ValueError(
+                f"wait timeout_seconds must be between 1 and {MAX_WAIT_SECONDS}"
+            )
+        if (
+            not job_ids
+            or len(job_ids) > MAX_WAIT_ANY_JOBS
+            or len(set(job_ids)) != len(job_ids)
+        ):
+            raise ValueError(
+                f"wait_any requires 1-{MAX_WAIT_ANY_JOBS} distinct job ids"
+            )
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            phases: dict[str, Any] = {}
+            for job_id in job_ids:
+                with self.store.locked(job_id):
+                    status = self._get_locked(job_id)
+                with self._admission_lock:
+                    self._admit_locked()
+                if status["state"]["terminal"]:
+                    return {**status, "completed_job_id": job_id}
+                phases[job_id] = status["state"].get("phase")
+            if time.monotonic() >= deadline:
+                return {"wait_timed_out": True, "jobs": phases}
+            self.events.wait_terminal(
+                job_ids,
+                min(self.wait_poll_seconds, max(0.0, deadline - time.monotonic())),
+            )
+
+    def _notify_arguments(self, job_id: str) -> dict[str, Any]:
+        """Capture notify args only when configured, so fakes with strict
+        start signatures keep proving the unextended launch contract."""
+        if self.notify_socket is None:
+            return {}
+        return {"notify_socket": self.notify_socket, "notify_job_id": job_id}
+
+    def notify_exit(self, job_id: str) -> dict[str, Any]:
+        """Record a capture-reported exit as a wake-up; observation stays authoritative."""
+        _ = job_unit_name(job_id)
+        _ = self.store.load(job_id)
+        self.events.fire(job_id)
+        return {"job_id": job_id, "notified": True}
 
     def cancel(self, job_id: str) -> dict[str, Any]:
         terminal: GenericJobRecord | None = None
@@ -2758,7 +3003,7 @@ class GenericJobs:
                 }
         with self._admission_lock:
             if terminal is not None:
-                self._terminal_cleanup(terminal)
+                self._finalize_terminal(terminal)
                 self._finish_admission(terminal, self._admission_state())
             elif response["state"].get("terminal"):
                 self._finish_admission(self.store.load(job_id), self._admission_state())
@@ -2911,10 +3156,29 @@ class GenericJobs:
         else:
             state = self._classify(properties, record)
         updated = self._with_state(record, state)
+        if self._observation_unchanged(record, updated):
+            return self._public(record, state)
         self.store.save(updated)
         if state.get("terminal"):
-            self._terminal_cleanup(updated)
+            self._finalize_terminal(updated)
         return self._public(updated, state)
+
+    @staticmethod
+    def _observation_unchanged(
+        record: GenericJobRecord, updated: GenericJobRecord
+    ) -> bool:
+        """True when a re-observation would rewrite only its own timestamp.
+
+        Skipping the durable save then spares an fsync pair per poll on the
+        wear-limited state volume without dropping any state transition.
+        """
+        before = {
+            key: value for key, value in record.state.items() if key != "observed_at"
+        }
+        after = {
+            key: value for key, value in updated.state.items() if key != "observed_at"
+        }
+        return before == after
 
     def _reconcile_launch_error(self, record: GenericJobRecord) -> dict[str, Any]:
         try:
@@ -2939,13 +3203,13 @@ class GenericJobs:
             }
             updated = self._with_state(record, state)
             self.store.save(updated)
-            self._terminal_cleanup(updated)
+            self._finalize_terminal(updated)
             return self._public(updated, state)
         state = self._classify(properties, record)
         updated = self._with_state(record, state)
         self.store.save(updated)
         if state.get("terminal"):
-            self._terminal_cleanup(updated)
+            self._finalize_terminal(updated)
         return self._public(updated, state)
 
     @staticmethod
@@ -3367,6 +3631,8 @@ def capture_main(arguments: Sequence[str] | None = None) -> int:
     parser.add_argument("--max-bytes", type=int, required=True)
     parser.add_argument("--result-path", type=Path)
     parser.add_argument("--result-overflow-path", type=Path)
+    parser.add_argument("--notify-socket", type=Path)
+    parser.add_argument("--notify-job-id")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     parsed = parser.parse_args(arguments)
     if (
@@ -3374,6 +3640,7 @@ def capture_main(arguments: Sequence[str] | None = None) -> int:
         or parsed.command[0] != "--"
         or not 1 <= parsed.max_bytes <= MAX_LOG_ARTIFACT_BYTES
         or (parsed.result_path is None) != (parsed.result_overflow_path is None)
+        or (parsed.notify_socket is None) != (parsed.notify_job_id is None)
     ):
         parser.error(
             "requires --max-bytes within the artifact cap and a command after --"
@@ -3437,6 +3704,11 @@ def capture_main(arguments: Sequence[str] | None = None) -> int:
             result_handle.close()
     if return_code == 0:
         _write_private_marker(_completion_marker_path(parsed.log_path))
+    if parsed.notify_socket is not None and parsed.notify_job_id is not None:
+        try:
+            notify_job_exit(parsed.notify_socket, parsed.notify_job_id, return_code)
+        except (OSError, ValueError):
+            pass
     return return_code
 
 
