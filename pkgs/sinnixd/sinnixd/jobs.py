@@ -578,6 +578,7 @@ class GenericJobSpec:
     environment_keys: tuple[str, ...] = ()
     command_digest: str | None = None
     parameter_digest: str | None = None
+    input_generation: str | None = None
     principal: str | None = None
     checkout: Mapping[str, str] | None = None
     contract: Mapping[str, Any] = field(default_factory=dict)
@@ -620,6 +621,13 @@ class GenericJobSpec:
             raise ValueError("declared operation jobs require a parameter digest")
         if self.kind != "declared-operation" and self.parameter_digest is not None:
             raise ValueError("only declared operation jobs may have a parameter digest")
+        if self.input_generation is not None and (
+            self.kind != "declared-operation"
+            or not isinstance(self.input_generation, str)
+            or not self.input_generation
+            or len(self.input_generation) > 256
+        ):
+            raise ValueError("job input generation is invalid")
         if not isinstance(self.working_directory, str) or not self.working_directory:
             raise ValueError("job working_directory must be non-empty")
         maximum_timeout = maximum_timeout_seconds(self.kind)
@@ -720,6 +728,7 @@ class GenericJobSpec:
             "timeout_seconds": self.timeout_seconds,
             "project_id": self.project_id,
             "operation": self.operation,
+            "input_generation": self.input_generation,
             "principal": self.principal,
             "checkout": dict(self.checkout) if self.checkout is not None else None,
             "contract": dict(self.contract),
@@ -739,9 +748,11 @@ class GenericJobSpec:
         if self.kind != "declared-operation":
             result["command"] = {
                 "digest": self.command_digest or _command_digest(self.command),
-                "display": "synthetic foreground command"
-                if self.kind == "foreground-command"
-                else f"{self.kind} contract runner",
+                "display": (
+                    "synthetic foreground command"
+                    if self.kind == "foreground-command"
+                    else f"{self.kind} contract runner"
+                ),
             }
         else:
             result["command"] = {
@@ -796,6 +807,7 @@ class GenericJobSpec:
                 timeout_seconds=value.get("timeout_seconds"),
                 project_id=value.get("project_id"),
                 operation=value.get("operation"),
+                input_generation=value.get("input_generation"),
                 environment_keys=tuple(environment_keys),
                 command_digest=digest,
                 parameter_digest=parameter_digest,
@@ -811,9 +823,9 @@ class GenericJobSpec:
                 estimate_key=admission.get("estimate_key"),
                 estimate_memory_bytes=admission.get("estimate_memory_bytes"),
                 scratch=admission.get("scratch", "none"),
-                lease=ServiceLease.from_dict(raw_lease)
-                if raw_lease is not None
-                else None,
+                lease=(
+                    ServiceLease.from_dict(raw_lease) if raw_lease is not None else None
+                ),
             )
         except ValueError as error:
             raise JobRecordError(str(error)) from error
@@ -842,12 +854,12 @@ class GenericJobRecord:
             "spec": self.spec.to_dict(),
             "artifacts": {
                 "log": str(self.log_path),
-                "result": str(self.result_path)
-                if self.result_path is not None
-                else None,
-                "scratch": str(self.scratch_path)
-                if self.scratch_path is not None
-                else None,
+                "result": (
+                    str(self.result_path) if self.result_path is not None else None
+                ),
+                "scratch": (
+                    str(self.scratch_path) if self.scratch_path is not None else None
+                ),
             },
             "created_at": self.created_at,
             "cancel_requested_at": self.cancel_requested_at,
@@ -2004,9 +2016,11 @@ class GenericJobs:
                     environment=spec.environment,
                     timeout_seconds=spec.timeout_seconds,
                     log_path=record.log_path,
-                    json_result_path=record.result_path
-                    if spec.result_kind in {"json", "pytest"}
-                    else None,
+                    json_result_path=(
+                        record.result_path
+                        if spec.result_kind in {"json", "pytest"}
+                        else None
+                    ),
                 )
             except SystemdJobError:
                 return self._reconcile_launch_error(record)
@@ -2027,6 +2041,9 @@ class GenericJobs:
         checkout: RegisteredCheckout | None = None,
         principal: str = "operator",
         contract: Mapping[str, Any] | None = None,
+        dependency_job_ids: Sequence[str] = (),
+        input_generation: str | None = None,
+        plan_node: bool = False,
     ) -> dict[str, Any]:
         if principal not in {"agent-control", "operator"}:
             raise ValueError(
@@ -2044,6 +2061,9 @@ class GenericJobs:
                 checkout,
                 (),
                 contract or {},
+                tuple(dependency_job_ids),
+                input_generation,
+                plan_node,
             )
 
     def _start_declared_locked(
@@ -2056,6 +2076,9 @@ class GenericJobs:
         checkout: RegisteredCheckout | None,
         lineage: tuple[str, ...],
         contract: Mapping[str, Any],
+        external_dependency_job_ids: tuple[str, ...] = (),
+        input_generation: str | None = None,
+        plan_node: bool = False,
     ) -> dict[str, Any]:
         if operation.name in lineage:
             raise ValueError("declared operation dependency cycle")
@@ -2073,6 +2096,13 @@ class GenericJobs:
             for name in operation.dependencies
         )
         dependency_ids = tuple(job["job_id"] for job in dependency_jobs)
+        if lineage:
+            external_ids: tuple[str, ...] = ()
+        else:
+            external_ids = external_dependency_job_ids
+        for dependency_id in external_ids:
+            self.store.load(dependency_id)
+        dependency_ids = (*external_ids, *dependency_ids)
         dependency_environment: dict[str, str] = {}
         for dependency_id in dependency_ids:
             dependency = self.store.load(dependency_id)
@@ -2099,10 +2129,15 @@ class GenericJobs:
                 tree,
                 checkout,
             )
-            if operation.service is None or operation.cache == "tree+environment"
+            if not plan_node
+            and (operation.service is None or operation.cache == "tree+environment")
             else None
         )
-        cache_key = coalesce_key if operation.cache == "tree+environment" else None
+        cache_key = (
+            coalesce_key
+            if not plan_node and operation.cache == "tree+environment"
+            else None
+        )
         state = self._admission_state()
         if cache_key is not None:
             cached = state["cache"].get(cache_key)
@@ -2196,6 +2231,7 @@ class GenericJobs:
                 project_id=project.project_id,
                 operation=operation.name,
                 parameter_digest=parameter_digest,
+                input_generation=input_generation,
                 principal=principal,
                 timeout_seconds=operation.timeout_seconds,
                 checkout=checkout.to_dict() if checkout is not None else None,
@@ -2434,9 +2470,11 @@ class GenericJobs:
                         environment=environment,
                         timeout_seconds=current.spec.timeout_seconds,
                         log_path=current.log_path,
-                        json_result_path=current.result_path
-                        if current.spec.result_kind in {"json", "pytest"}
-                        else None,
+                        json_result_path=(
+                            current.result_path
+                            if current.spec.result_kind in {"json", "pytest"}
+                            else None
+                        ),
                     )
                 except SystemdJobError:
                     self._reconcile_launch_error(current)
@@ -2665,9 +2703,11 @@ class GenericJobs:
         )
         return {
             "jobs": [
-                self._public(record, record.state)
-                if record.state.get("terminal")
-                else self.get(record.job_id)
+                (
+                    self._public(record, record.state)
+                    if record.state.get("terminal")
+                    else self.get(record.job_id)
+                )
                 for record in records
             ],
             "limit": limit,
@@ -3300,10 +3340,11 @@ class GenericJobs:
                 if record.spec.kind == "declared-operation"
                 else None
             ),
+            "input_generation": record.spec.input_generation,
             "principal": record.spec.principal,
-            "checkout": dict(record.spec.checkout)
-            if record.spec.checkout is not None
-            else None,
+            "checkout": (
+                dict(record.spec.checkout) if record.spec.checkout is not None else None
+            ),
             "contract": dict(record.spec.contract),
             "created_at": record.created_at,
             "timeout_seconds": record.spec.timeout_seconds,
@@ -3393,9 +3434,9 @@ def capture_main(arguments: Sequence[str] | None = None) -> int:
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-            if parsed.result_path is not None
-            else subprocess.STDOUT,
+            stderr=(
+                subprocess.PIPE if parsed.result_path is not None else subprocess.STDOUT
+            ),
         )
         assert process.stdout is not None
         streams = selectors.DefaultSelector()
