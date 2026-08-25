@@ -821,8 +821,11 @@ def test_service_lease_is_bounded_public_metadata_and_injects_only_declared_port
     assert rejected.error.code.value == "INVALID_ARGUMENT"
 
 
-def test_nix_develop_payload_receives_job_owned_tmpdir_after_environment_entry(tmp_path: Path) -> None:
+def test_nix_develop_payload_receives_job_owned_tmpdir_after_environment_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The Nix shell's transient TMPDIR must not replace durable job scratch."""
+    monkeypatch.setenv("SINNIXD_NVME_SCRATCH_ROOT", str(tmp_path / "scratch"))
     write_adapter(tmp_path)
     descriptor = tmp_path / ".agentctl" / "project.toml"
     descriptor.write_text(
