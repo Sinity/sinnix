@@ -6,13 +6,15 @@ verdict note. Deletion trigger: rows whose doctrine update landed are dead
 weight — prune on consumption; the registry never becomes a database.
 
 Every experiment row must name:
+
 - **The decision it could change** (a doctrine line, a model default, a
   dispatch shape). No decision → not an experiment, don't register it.
 - **A stopping rule** and an **expiry** (in merged packets or days).
-  Blocked/expired experiments close as *inconclusive*, never linger.
+  Blocked/expired experiments close as _inconclusive_, never linger.
 - Its **status**: designed | running | complete | superseded | inconclusive.
 
 Discipline (adopted 2026-08-25 after the Sol process critique):
+
 - Prefer **piggybacking on product work** that would be dispatched anyway
   over dedicated experiment arms; dedicated arms need the decision to be
   worth their cost.

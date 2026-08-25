@@ -19,7 +19,7 @@ from threading import RLock
 from typing import Any, Mapping, Sequence
 from uuid import uuid4
 
-from .jobs import GenericJobs, JobRecordError, JobResultError, MAX_RESULT_BYTES
+from .jobs import MAX_RESULT_BYTES, GenericJobs, JobRecordError, JobResultError
 from .projects import ProjectAdapter, ProjectCatalog, RegisteredCheckout
 
 MAX_PLAN_NODES = 256
@@ -503,7 +503,7 @@ class ProjectPlanExecutor:
     @staticmethod
     def _validate_graph(nodes: Sequence[Mapping[str, Any]]) -> None:
         ids = {node["node_id"] for node in nodes}
-        indegree = {node_id: 0 for node_id in ids}
+        indegree = dict.fromkeys(ids, 0)
         children = {node_id: [] for node_id in ids}
         for node in nodes:
             for dependency in node["dependencies"]:
