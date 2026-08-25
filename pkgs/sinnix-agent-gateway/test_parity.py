@@ -3,12 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sinnix_agent_gateway.parity import (
-    LEGACY_MANIFEST_SCHEMA,
-    PARITY_SCHEMA,
-    V2_MIGRATIONS,
-    legacy_parity_contract,
-)
+from sinnix_agent_gateway.legacy_manifest import LEGACY_MANIFEST_SCHEMA
+from sinnix_agent_gateway.parity import PARITY_SCHEMA, V2_MIGRATIONS, legacy_parity_contract
 from sinnix_agent_gateway.registry import REGISTRY
 
 
