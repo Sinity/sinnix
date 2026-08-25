@@ -542,6 +542,7 @@ class GenericJobSpec:
     pool: str = "interactive"
     exclusive_keys: tuple[str, ...] = ()
     dependency_job_ids: tuple[str, ...] = ()
+    coalesce_key: str | None = None
     cache_key: str | None = None
     estimate_key: str | None = None
     estimate_memory_bytes: int | None = None
@@ -609,8 +610,9 @@ class GenericJobSpec:
             raise ValueError("job exclusive keys must be unique")
         if any(not isinstance(value, str) or not value for value in self.dependency_job_ids):
             raise ValueError("job dependency IDs are invalid")
-        if self.cache_key is not None and (len(self.cache_key) != 64 or any(value not in "0123456789abcdef" for value in self.cache_key)):
-            raise ValueError("job cache key is invalid")
+        for name, key in (("coalesce", self.coalesce_key), ("cache", self.cache_key)):
+            if key is not None and (len(key) != 64 or any(value not in "0123456789abcdef" for value in key)):
+                raise ValueError(f"job {name} key is invalid")
         if self.estimate_key is not None and (not isinstance(self.estimate_key, str) or not self.estimate_key):
             raise ValueError("job estimate key is invalid")
         if self.estimate_memory_bytes is not None and (
@@ -645,6 +647,7 @@ class GenericJobSpec:
                 "pool": self.pool,
                 "exclusive_keys": list(self.exclusive_keys),
                 "dependencies": list(self.dependency_job_ids),
+                "coalesce_key": self.coalesce_key,
                 "cache_key": self.cache_key,
                 "estimate_key": self.estimate_key,
                 "estimate_memory_bytes": self.estimate_memory_bytes,
@@ -713,6 +716,7 @@ class GenericJobSpec:
                 pool=admission.get("pool", "interactive"),
                 exclusive_keys=tuple(admission.get("exclusive_keys", ())),
                 dependency_job_ids=tuple(admission.get("dependencies", ())),
+                coalesce_key=admission.get("coalesce_key"),
                 cache_key=admission.get("cache_key"),
                 estimate_key=admission.get("estimate_key"),
                 estimate_memory_bytes=admission.get("estimate_memory_bytes"),
@@ -1794,9 +1798,14 @@ class GenericJobs:
         workdir = checkout.path if checkout is not None else project.root
         environment = project.environment.values()
         tree = self._cache_tree(workdir)
-        cache_key = self._cache_key(
-            project, operation, parameter_digest, principal, environment, tree, checkout
+        coalesce_key = (
+            self._operation_identity_key(
+                project, operation, parameter_digest, principal, environment, tree, checkout
+            )
+            if operation.service is None or operation.cache == "tree+environment"
+            else None
         )
+        cache_key = coalesce_key if operation.cache == "tree+environment" else None
         state = self._admission_state()
         if cache_key is not None:
             cached = state["cache"].get(cache_key)
@@ -1810,13 +1819,13 @@ class GenericJobs:
                         response = self._public(record, record.state)
                         response["reused"] = True
                         return response
-        if cache_key is not None:
-            active_id = state["active"].get(cache_key)
+        if coalesce_key is not None:
+            active_id = state["active"].get(coalesce_key)
             if isinstance(active_id, str):
                 try:
                     record = self.store.load(active_id)
                 except JobRecordError:
-                    state["active"].pop(cache_key, None)
+                    state["active"].pop(coalesce_key, None)
                 else:
                     if not record.state.get("terminal"):
                         subscribers = int(record.state.get("subscribers", 1)) + 1
@@ -1863,7 +1872,7 @@ class GenericJobs:
                 checkout=checkout.to_dict() if checkout is not None else None,
                 result_kind={"exit": "exit-status", "json": "json", "pytest": "pytest"}[operation.result],
                 pool=operation.pool, exclusive_keys=operation.exclusive_keys, dependency_job_ids=dependency_ids,
-                cache_key=cache_key, estimate_key=estimate_key, estimate_memory_bytes=estimate,
+                coalesce_key=coalesce_key, cache_key=cache_key, estimate_key=estimate_key, estimate_memory_bytes=estimate,
                 scratch=operation.scratch,
                 lease=lease,
             )
@@ -1891,8 +1900,8 @@ class GenericJobs:
             "dependencies": list(dependency_ids), "admission": {"pool": spec.pool, "estimate_memory_bytes": self._estimate(spec, state)},
         })
         self.store.save(queued)
-        if cache_key is not None:
-            state["active"][cache_key] = job_id
+        if coalesce_key is not None:
+            state["active"][coalesce_key] = job_id
         self._save_admission_state(state)
         self._admit_locked()
         record = self.store.load(job_id)
@@ -1910,7 +1919,7 @@ class GenericJobs:
             return None
 
     @staticmethod
-    def _cache_key(
+    def _operation_identity_key(
         project: ProjectAdapter,
         operation: ProjectOperation,
         parameter_digest: str,
@@ -1919,7 +1928,7 @@ class GenericJobs:
         tree: str | None,
         checkout: RegisteredCheckout | None,
     ) -> str | None:
-        if operation.cache != "tree+environment" or tree is None:
+        if tree is None:
             return None
         payload = {
             "project": project.project_id,
@@ -2086,8 +2095,9 @@ class GenericJobs:
         return None
 
     def _finish_admission(self, record: GenericJobRecord, state: dict[str, Any]) -> None:
-        if record.spec.cache_key is not None and state["active"].get(record.spec.cache_key) == record.job_id:
-            state["active"].pop(record.spec.cache_key, None)
+        active_key = record.spec.coalesce_key or record.spec.cache_key
+        if active_key is not None and state["active"].get(active_key) == record.job_id:
+            state["active"].pop(active_key, None)
         if (
             record.state.get("phase") == "succeeded"
             and record.spec.lease is None
