@@ -315,6 +315,8 @@ class OperationParameter:
         row: dict[str, Any] = {"name": self.name, "type": self.kind}
         if self.flag is not None:
             row["flag"] = self.flag
+            if self.required:
+                row["required"] = True
         else:
             assert self.position is not None and self.required
             row.update({"position": self.position, "required": True})
@@ -596,6 +598,9 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
             flag = definition.get("flag")
             if not isinstance(flag, str) or _PARAMETER_FLAG.fullmatch(flag) is None:
                 raise ProjectConfigError(f"{field}.{name} has an invalid flag")
+            required = definition.get("required", False)
+            if not isinstance(required, bool):
+                raise ProjectConfigError(f"{field}.{name} required must be boolean")
         else:
             position = definition.get("position")
             required = definition.get("required")
@@ -609,7 +614,11 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
                 raise ProjectConfigError(
                     f"{field}.{name} has an invalid required positional declaration"
                 )
-        mapping_fields = {"flag"} if flag is not None else {"position", "required"}
+        mapping_fields = (
+            {"flag", "required"}
+            if flag is not None and "required" in definition
+            else {"flag"} if flag is not None else {"position", "required"}
+        )
         if kind == "bool":
             if set(definition) != {"type", *mapping_fields}:
                 raise ProjectConfigError(

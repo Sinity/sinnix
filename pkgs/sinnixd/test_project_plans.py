@@ -93,6 +93,7 @@ exclusive_keys = ["fixture:promotion"]
 [operations.node.parameters.value]
 type = "string"
 flag = "--value"
+required = true
 max_length = 32
 """)
     subprocess.run(["git", "init", "--quiet", str(root)], check=True)
@@ -153,6 +154,8 @@ def test_plan_rejects_cycles_and_validates_payload_schema(tmp_path: Path) -> Non
             plans,
             [{"id": "n", "operation": "node", "parameters": {"unknown": True}}],
         )
+    with pytest.raises(ProjectPlanError, match="omit required field"):
+        submit(plans, [{"id": "n", "operation": "node"}])
 
 
 def test_ready_nodes_run_concurrently_and_keep_dependency_job_ids(
