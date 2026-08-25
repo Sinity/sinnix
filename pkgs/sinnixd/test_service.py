@@ -1186,8 +1186,8 @@ def test_nix_develop_payload_receives_job_owned_tmpdir_after_environment_entry(
         f"TMPDIR={expected}",
         "fixture-check",
     )
-    assert environment["TMPDIR"] == expected
-    assert systemd.started[0]["environment"]["TMPDIR"] == expected
+    assert "TMPDIR" not in environment
+    assert "TMPDIR" not in systemd.started[0]["environment"]
 
 
 def test_declared_service_dependency_supplies_lease_and_unblocks_when_bound(
