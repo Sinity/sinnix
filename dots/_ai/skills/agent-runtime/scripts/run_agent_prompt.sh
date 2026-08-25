@@ -53,7 +53,10 @@ cd "$workdir"
 
 case "$agent" in
 codex)
-  exec "$agent_bin" exec -C "$workdir" --model "$model" --output-last-message "$last_file" -c "model_reasoning_effort=\"$reasoning_effort\"" - < "$prompt_file"
+  exec "$agent_bin" exec -C "$workdir" --model "$model" --output-last-message "$last_file" \
+    -c "model_reasoning_effort=\"$reasoning_effort\"" \
+    -c shell_environment_policy.inherit=all \
+    - < "$prompt_file"
   ;;
 claude)
   if [[ $credential_profile == subscription ]]; then
