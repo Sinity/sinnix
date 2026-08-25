@@ -49,6 +49,14 @@ class JobAuthorizationError(PermissionError):
 # deadlines in delivery.py. They bound the background job, not a control
 # worker: workspace.publish/land return a job id immediately.
 DELIVERY_TIMEOUT_SECONDS = {"publish": 790, "land": 185}
+CAPABILITIES = [
+    "completion_events",
+    "wait_any",
+    "environment_require",
+    "workspace_provision",
+    "usage_capture",
+    "timeout_wip_preserve",
+]
 
 
 @dataclass(frozen=True)
@@ -253,6 +261,7 @@ class SinnixdService:
         if operation == "runtime.status":
             return {
                 "version": self.version,
+                "capabilities": list(CAPABILITIES),
                 "owners": self.owners.catalog(),
                 "projects": len(self.projects.list()),
             }

@@ -144,6 +144,23 @@ def test_canonical_client_validates_typed_response_identity() -> None:
         mismatched.dispatch(request)
 
 
+def test_runtime_status_lists_build_capabilities(tmp_path: Path) -> None:
+    """Anti-vacuity: status exposes the build capability contract, not only version and owners."""
+    service = SinnixdService(ProjectCatalog([]), jobs=generic_jobs(tmp_path))
+
+    response = service.dispatch(request("runtime.status", "sinnixd"))
+
+    assert response.ok and response.payload is not None
+    assert response.payload.inline["capabilities"] == [
+        "completion_events",
+        "wait_any",
+        "environment_require",
+        "workspace_provision",
+        "usage_capture",
+        "timeout_wip_preserve",
+    ]
+
+
 @pytest.mark.parametrize(
     ("shape", "error"),
     (
@@ -4440,8 +4457,10 @@ def test_user_systemd_calls_use_finite_timeouts_and_redact_timeout_details(
 ) -> None:
     """Anti-vacuity: omitting subprocess timeouts leaves a control worker held by a stuck user manager."""
     calls: list[dict[str, object]] = []
+    commands: list[list[str]] = []
 
     def fake_run(args, **kwargs):
+        commands.append(list(args))
         calls.append(kwargs)
         return SimpleNamespace(stdout="LoadState=loaded\nActiveState=active\n")
 
@@ -4463,6 +4482,11 @@ def test_user_systemd_calls_use_finite_timeouts_and_redact_timeout_details(
         SYSTEMD_COMMAND_TIMEOUT_SECONDS,
         SYSTEMD_COMMAND_TIMEOUT_SECONDS,
     ]
+    assert {
+        "--property=CPUUsageNSec",
+        "--property=IOReadBytes",
+        "--property=IOWriteBytes",
+    }.issubset(set(commands[1]))
 
     secret = "timeout-command-detail-must-not-escape"
 
@@ -5292,6 +5316,39 @@ def test_workspace_create_is_git_derived_durable_and_restart_safe(
     assert recovered.ok and recovered.payload is not None
     assert recovered.payload.inline["head"] == workspace["head"]
     assert recovered.payload.inline["checkout_id"].startswith("worktree-")
+
+
+def test_workspace_create_inherits_declared_seed_files_and_records_missing_sources(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: create copies a main-checkout seed while missing declarations become typed notes."""
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + '\n[workspace.provision]\ncopy = [".cache/testmon/testmondata", "missing.seed"]\n'
+    )
+    initialize_git_checkout(tmp_path)
+    seed = tmp_path / ".cache" / "testmon" / "testmondata"
+    seed.parent.mkdir(parents=True)
+    seed.write_text("seed\n")
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+
+    created = service.workspaces.create(
+        project_id="fixture",
+        name="seed-lane",
+        branch="feature/seed-lane",
+        base="HEAD",
+    )
+
+    copied = Path(created["path"]) / ".cache" / "testmon" / "testmondata"
+    assert copied.read_text() == "seed\n"
+    assert os.stat(copied).st_ino == os.stat(seed).st_ino
+    assert created["provision_notes"] == [
+        {"kind": "missing-source", "path": "missing.seed"}
+    ]
+    recovered = service.workspaces.get(created["workspace_id"])
+    assert recovered["provision_notes"] == created["provision_notes"]
 
 
 def test_workspace_adopt_uses_existing_linked_checkout_without_claiming_creation(
@@ -8358,6 +8415,7 @@ def test_job_store_fsyncs_parents_when_creating_state_directories(
 
     assert synchronized == [
         tmp_path,
+        store.root,
         store.root,
         store.root,
         store.logs_root,
