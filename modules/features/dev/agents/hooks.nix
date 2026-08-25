@@ -19,7 +19,7 @@ jsonFormat.generate "codex-hooks.json" {
           }
           {
             type = "command";
-            command = "sinnix-polylogue-hook SessionStart --provider codex";
+            command = "polylogue-hook SessionStart --provider codex";
           }
         ];
       }
@@ -29,7 +29,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "sinnix-polylogue-hook UserPromptSubmit --provider codex";
+            command = "polylogue-hook UserPromptSubmit --provider codex";
           }
         ];
       }
@@ -49,7 +49,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "sinnix-polylogue-hook PreToolUse --provider codex";
+            command = "polylogue-hook PreToolUse --provider codex";
           }
         ];
       }
@@ -59,7 +59,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "sinnix-polylogue-hook PostToolUse --provider codex";
+            command = "polylogue-hook PostToolUse --provider codex";
           }
         ];
       }
@@ -69,7 +69,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "sinnix-polylogue-hook Stop --provider codex";
+            command = "polylogue-hook Stop --provider codex";
           }
         ];
       }
