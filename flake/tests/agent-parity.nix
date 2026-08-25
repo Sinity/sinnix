@@ -1,15 +1,18 @@
 # Claude/Codex hook parity: the rows docs/agent-hook-parity.md records as
 # "Enforced" on both clients are checked against the two real hook sources
 # (dots/claude/managed-settings.json and the generated Codex hooks), not
-# restated as a list of expected names here. Both clients name the generated
-# `sinnix-polylogue-hook` adapter; its configured root is checked below.
+# restated as a list of expected names here. Both clients invoke the installed
+# upstream `polylogue-hook`; its archive root comes from generated
+# `polylogue.toml`.
 #
-# Provably fails when: a `sinnix-polylogue-hook <Event>` lane present in Claude's
-# settings is dropped from the generated Codex hooks (verified by removing
-# the PostToolUse entry from modules/features/dev/agents/hooks.nix), when a
-# writer loses the canonical primary sidecar destination, or when either
-# client loses the pre-compaction handoff or the shared hook coverage.
+# Provably fails when: a `polylogue-hook <Event>` lane present in Claude's
+# settings is dropped from the generated Codex hooks, when a writer bakes a
+# sidecar path, when generated archive.root stops following dataDir, or when
+# either client loses the pre-compaction handoff or shared hook coverage.
 { inputs, ... }:
+let
+  inherit (inputs.nixpkgs) lib;
+in
 {
   perSystem =
     { system, ... }:
@@ -17,34 +20,51 @@
       pkgs = inputs.nixpkgs.legacyPackages.${system};
       sentinelDataDir = "/tmp/sinnix-polylogue-parity-sentinel";
       enrichDumpSource = ../../scripts/sinnix-enrich-dump;
+      repoRoot = inputs.self;
       codexHooks = import ../../modules/features/dev/agents/hooks.nix {
         inherit pkgs;
         dotsRoot = inputs.self + "/dots";
       };
       claudeHooks = ../../dots/claude/managed-settings.json;
       polylogueHook = inputs.polylogue.packages.${system}.default;
-      polylogueHookBin = import ../../modules/features/dev/agents/polylogue-hook.nix {
-        inherit (pkgs) lib;
-        inherit pkgs;
-        dataDir = sentinelDataDir;
-        inherit polylogueHook;
+      testLib = import ../test-lib.nix { inherit inputs lib; };
+      inherit (testLib)
+        evalTestSpec
+        hmFor
+        mkServiceTest
+        ;
+      polylogueSpec = mkServiceTest {
+        name = "polylogue-agent-hook-parity";
+        service = "polylogue";
+        extraModules = [
+          (_: {
+            sinnix.services.polylogue.dataDir = sentinelDataDir;
+          })
+        ];
+        assertions = _config: [ ];
       };
+      polylogueEvaluated = evalTestSpec system polylogueSpec;
+      polylogueConfigSource =
+        (hmFor polylogueEvaluated.config).xdg.configFile."polylogue/polylogue.toml".source;
     in
     {
       checks.agent-hook-parity =
         pkgs.runCommand "agent-hook-parity-check"
           {
             inherit
-              codexHooks
               claudeHooks
+              codexHooks
               enrichDumpSource
+              polylogueConfigSource
               polylogueHook
-              polylogueHookBin
+              repoRoot
               sentinelDataDir
               ;
             nativeBuildInputs = [
               pkgs.coreutils
+              pkgs.gnugrep
               pkgs.jq
+              pkgs.ripgrep
               pkgs.strace
             ];
           }
@@ -81,6 +101,8 @@
               fi
             }
 
+            test -x "$polylogueHook/bin/polylogue-hook"
+
             # The evidence lanes: every lifecycle event on which a client
             # ships a session to Polylogue. Codex must cover at least what
             # Claude does, or half the machine's agent history stops being
@@ -91,7 +113,7 @@
                 | to_entries
                 | map(select(
                     .key as $event
-                    | any(.value[]?.hooks[]?.command; startswith("sinnix-polylogue-hook " + $event))
+                    | any(.value[]?.hooks[]?.command; startswith("polylogue-hook " + $event))
                   ))
                 | map(.key)
                 | sort[]
@@ -106,15 +128,16 @@
               exit 1
             fi
 
-            # Every actual Polylogue writer declaration must use the same
-            # generated executable and provider-specific payload shape.
+            # Every actual Polylogue writer declaration must use the upstream
+            # executable with event/provider arguments only. In particular,
+            # the anchored provider capture rejects any trailing sidecar flag.
             writer_rows() {
               jq -r '
                 .hooks
                 | to_entries[]
                 | .key as $event
                 | .value[]?.hooks[]?.command
-                | select(type == "string" and startswith("sinnix-polylogue-hook "))
+                | select(type == "string" and startswith("polylogue-hook "))
                 | [$event, (capture(" --provider (?<provider>[^ ]+)$").provider)]
                 | @tsv
               ' "$1"
@@ -137,12 +160,39 @@
             require_row $'Stop\tcodex' codex-writers codex-stop
             require_row $'UserPromptSubmit\tcodex' codex-writers codex-prompt
 
-            # This custom-root assertion is separate from command comparison.
-            # A default-root wrapper or an unconfigured packaged writer must
-            # fail even when both payloads agree.
-            require_text "$sentinelDataDir/hooks" "$polylogueHookBin/bin/sinnix-polylogue-hook" configured-hook-root
-            reject_text '/realm/state/polylogue' "$polylogueHookBin/bin/sinnix-polylogue-hook" default-hook-root
-            reject_text '/home/sinity/.local/share/polylogue' "$polylogueHookBin/bin/sinnix-polylogue-hook" legacy-hook-root
+            # Check the generated production config, not a test-only wrapper.
+            # This is the authority consumed by a flag-less upstream hook.
+            awk -v expected="root = \"$sentinelDataDir\"" '
+              $0 == "[archive]" { in_archive = 1; next }
+              /^\[/ { in_archive = 0 }
+              in_archive && $0 == expected { found = 1 }
+              END { exit(found ? 0 : 1) }
+            ' "$polylogueConfigSource" || {
+              echo "generated polylogue.toml does not derive archive.root from dataDir" >&2
+              sed -n '1,40p' "$polylogueConfigSource" >&2
+              exit 1
+            }
+            reject_text '/realm/state/polylogue' "$polylogueConfigSource" default-config-root
+            reject_text '/home/sinity/.local/share/polylogue' "$polylogueConfigSource" legacy-config-root
+
+            # No repository hook command may bake a sidecar path. Keep this
+            # source census scoped to the actual hook declarations so this
+            # assertion cannot pass because a test copied a command literal.
+            sidecar_flag="--sidecar"-dir
+            if rg -n --fixed-strings -- "$sidecar_flag" \
+              "$repoRoot/dots/claude/managed-settings.json" \
+              "$repoRoot/modules/features/dev/agents/hooks.nix"; then
+              echo 'repository hook command bakes a Polylogue sidecar path' >&2
+              exit 1
+            fi
+            test ! -e "$repoRoot/modules/features/dev/agents/polylogue-hook.nix"
+
+            # The managed Claude file is an out-of-store dots symlink. It and
+            # generated Codex config both retain the continuously installed
+            # upstream command name, so landing cannot create an activation
+            # interval where the named executable is absent.
+            require_text 'polylogue-hook Stop --provider claude-code' "$claudeHooks" claude-command-name
+            require_text 'polylogue-hook Stop --provider codex' "$codexHooks" codex-command-name
 
             # Standalone enrichment must fail before assembling or mutating
             # any output when its archive-root contract is not configured.
@@ -153,37 +203,49 @@
             fi
             require_text POLYLOGUE_ARCHIVE_ROOT missing-enrich-root.stderr missing-enrich-root-diagnostic
 
-            # Fresh-writer smoke: isolate every ambient resolution input and
-            # trace file access. The explicit primary spool must receive the
-            # event while archive/XDG fallback paths and the real legacy roots
-            # remain untouched.
+            # Fresh-writer smoke: install the generated TOML at the same XDG
+            # path Home Manager uses in production, leave POLYLOGUE_ARCHIVE_ROOT
+            # unset, and execute the actual upstream hook for both providers.
+            # HOME, XDG data/state, and the absent archive-root environment are
+            # decoys. Only the configured archive root may receive sidecars.
             smoke_root="$TMPDIR/polylogue-hook-smoke"
             primary="$sentinelDataDir/hooks"
-            archive="$smoke_root/archive"
-            legacy="$smoke_root/legacy-home"
-            mkdir -p "$smoke_root/home" "$smoke_root/xdg" "$archive" "$legacy"
+            config_home="$smoke_root/config"
+            archive_decoy="$smoke_root/archive-decoy"
+            mkdir -p "$smoke_root/home" "$config_home/polylogue" "$smoke_root/xdg-data" "$smoke_root/xdg-state" "$archive_decoy"
+            cp "$polylogueConfigSource" "$config_home/polylogue/polylogue.toml"
             trace="$smoke_root/access.trace"
-            printf '%s' '{"session_id":"parity-smoke","source":"codex","turn_id":"turn-1"}' \
-              | HOME="$smoke_root/home" \
-                XDG_DATA_HOME="$smoke_root/xdg" \
-                POLYLOGUE_ARCHIVE_ROOT="$archive" \
+            printf '%s' '{"session_id":"parity-codex","source":"codex","turn_id":"turn-1"}' \
+              | env -u POLYLOGUE_ARCHIVE_ROOT -u POLYLOGUE_CONFIG \
+                HOME="$smoke_root/home" \
+                XDG_CONFIG_HOME="$config_home" \
+                XDG_DATA_HOME="$smoke_root/xdg-data" \
+                XDG_STATE_HOME="$smoke_root/xdg-state" \
                 strace -f -e trace=file -o "$trace" \
-                "$polylogueHookBin/bin/sinnix-polylogue-hook" UserPromptSubmit \
+                "$polylogueHook/bin/polylogue-hook" UserPromptSubmit \
                   --provider codex
-            test -n "$(find "$primary" -type f -print -quit)"
-            record="$(find "$primary" -type f -name 'codex-parity-smoke.jsonl' -print -quit)"
-            test -n "$record"
-            jq -e '.event_type == "UserPromptSubmit" and .provider == "codex" and .payload.session_id == "parity-smoke"' "$record" >/dev/null \
-              || { echo "wrapper did not preserve event/provider payload in $record" >&2; exit 1; }
-            require_text 'UserPromptSubmit' "$trace" forwarded-event
-            require_text '--provider' "$trace" forwarded-provider-flag
-            require_text 'codex' "$trace" forwarded-provider
-            require_text "$primary" "$trace" trailing-sidecar-destination
-            test -z "$(find "$archive" "$legacy" "$smoke_root/home" "$smoke_root/xdg" -mindepth 1 -print -quit)" \
-              || { echo 'isolated Polylogue hook smoke wrote an ambient root' >&2; exit 1; }
+            printf '%s' '{"session_id":"parity-claude","source":"claude","turn_id":"turn-2"}' \
+              | env -u POLYLOGUE_ARCHIVE_ROOT -u POLYLOGUE_CONFIG \
+                HOME="$smoke_root/home" \
+                XDG_CONFIG_HOME="$config_home" \
+                XDG_DATA_HOME="$smoke_root/xdg-data" \
+                XDG_STATE_HOME="$smoke_root/xdg-state" \
+                strace -f -e trace=file -o "$smoke_root/claude.trace" \
+                "$polylogueHook/bin/polylogue-hook" Stop \
+                  --provider claude-code
+            test -n "$(find "$primary" -type f -name 'codex-*.jsonl' -print -quit)"
+            test -n "$(find "$primary" -type f -name 'claude-code-*.jsonl' -print -quit)"
+            require_text UserPromptSubmit "$trace" codex-event
+            require_text --provider "$trace" provider-flag
+            require_text codex "$trace" codex-provider
+            require_text Stop "$smoke_root/claude.trace" claude-event
+            require_text claude-code "$smoke_root/claude.trace" claude-provider
+            test -z "$(find "$archive_decoy" "$smoke_root/home" "$smoke_root/xdg-data" "$smoke_root/xdg-state" -mindepth 1 -print -quit)" \
+              || { echo 'isolated Polylogue hook smoke wrote a decoy root' >&2; exit 1; }
             reject_text '/realm/state/polylogue' "$trace" live-hook-root
-            reject_text '/home/sinity/.local/share/polylogue' "$trace" default-hook-root
-            reject_text '/realm/db/polylogue' "$trace" legacy-hook-root
+            reject_text '/home/sinity/.local/share/polylogue' "$trace" legacy-hook-root
+            reject_text '/realm/state/polylogue' "$smoke_root/claude.trace" claude-live-hook-root
+            reject_text '/home/sinity/.local/share/polylogue' "$smoke_root/claude.trace" claude-legacy-hook-root
 
             # The shared context handoff is configured independently for both
             # clients, so this verifies the intended cross-client agreement.
