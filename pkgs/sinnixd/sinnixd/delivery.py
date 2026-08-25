@@ -243,8 +243,8 @@ class GitHubDelivery:
             for path in change.get("paths", [])
             if isinstance(path, str)
         }
-        if deleted and (any(not isinstance(path, str) for path in deletions) or not deleted <= set(deletions)):
-            raise DeliveryError("project delivery result omits deletion evidence")
+        if any(not isinstance(path, str) for path in deletions) or set(deletions) != deleted:
+            raise DeliveryError("project delivery result deletion evidence does not exactly match deleted paths")
         if not changes and not delivery["evidence_only"]:
             raise DeliveryError("no-change delivery lacks the evidence-only exception")
         if changes and delivery["evidence_only"]:
