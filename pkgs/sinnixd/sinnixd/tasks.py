@@ -46,8 +46,8 @@ _MERGE_SHA_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _READ_PRINCIPALS = frozenset({"observer", "agent-control", "operator"})
 _WRITE_PRINCIPALS = frozenset({"agent-control", "operator"})
-_MUTATIONS = frozenset({"task.create", "task.claim", "task.note", "task.relate", "task.complete", "task.release", "task.reconcile"})
-_IDEMPOTENT_MUTATIONS = frozenset({"task.create", "task.claim", "task.note", "task.relate", "task.complete", "task.release"})
+_MUTATIONS = frozenset({"task.create", "task.claim", "task.note", "task.relate", "task.complete", "task.release", "task.update", "task.reconcile"})
+_IDEMPOTENT_MUTATIONS = frozenset({"task.create", "task.claim", "task.note", "task.relate", "task.complete", "task.release", "task.update"})
 _MUTATION_STATES = frozenset({"pending", "dispatching", "applied", "failed"})
 _ISSUE_TYPES = frozenset({"bug", "feature", "task", "epic", "chore", "decision", "spike", "story", "milestone"})
 _DEPENDENCY_RELATIONS = frozenset({"depends-on", "blocks", "tracks", "related", "discovered-from", "until", "caused-by", "validates", "relates-to", "supersedes"})
@@ -599,6 +599,15 @@ class TaskService:
         if operation == "task.note":
             self._require_exact(arguments, {"project_id", "task_id", "text"}, operation)
             return ("note", self._task_id(arguments["task_id"]), self._string(arguments["text"], "text", 32_000))
+        if operation == "task.update":
+            self._require_exact(arguments, {"project_id", "task_id", "metadata"}, operation)
+            metadata = arguments["metadata"]
+            if not isinstance(metadata, dict) or not metadata or len(metadata) > 32:
+                raise TaskError(ErrorCode.INVALID_ARGUMENT, "metadata must be a non-empty object with at most 32 entries")
+            command = ["update", self._task_id(arguments["task_id"])]
+            for key, value in sorted(metadata.items()):
+                command.extend(("--set-metadata", f"{self._string(key, 'metadata key', 256)}={self._string(value, 'metadata value', 4_000)}"))
+            return tuple(command)
         if operation == "task.relate":
             self._require_exact(arguments, {"project_id", "task_id", "related_task_id"}, operation)
             return ("dep", "relate", self._task_id(arguments["task_id"]), self._task_id(arguments["related_task_id"], "related_task_id"))

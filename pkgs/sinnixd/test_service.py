@@ -193,6 +193,7 @@ def test_canonical_client_redacts_unrecognized_json_rpc_errors(tmp_path: Path) -
         (("agentctl", "task", "claim", "fixture", "fixture-1", "--request-id", "request-1"), "task.claim", {"project_id": "fixture", "task_id": "fixture-1"}),
         (("agentctl", "task", "note", "fixture", "fixture-1", "note", "--request-id", "request-1"), "task.note", {"project_id": "fixture", "task_id": "fixture-1", "text": "note"}),
         (("agentctl", "task", "note", "fixture", "fixture-1", "--text", "note", "--request-id", "request-1"), "task.note", {"project_id": "fixture", "task_id": "fixture-1", "text": "note"}),
+        (("agentctl", "task", "update", "fixture", "fixture-1", "--set-metadata", "write_scope=[\"pkgs/sinnixd/\"]", "--request-id", "request-1"), "task.update", {"project_id": "fixture", "task_id": "fixture-1", "metadata": {"write_scope": '["pkgs/sinnixd/"]'}}),
         (("agentctl", "task", "relate", "fixture", "fixture-1", "fixture-2", "--request-id", "request-1"), "task.relate", {"project_id": "fixture", "task_id": "fixture-1", "related_task_id": "fixture-2"}),
         (("agentctl", "task", "complete", "fixture", "fixture-1", "--reason", "done", "--merge-sha", "a" * 40, "--request-id", "request-1"), "task.complete", {"project_id": "fixture", "task_id": "fixture-1", "reason": "done", "merge_sha": "a" * 40}),
         (("agentctl", "task", "release", "fixture", "fixture-1", "--if-assignee", "worker", "--request-id", "request-1"), "task.release", {"project_id": "fixture", "task_id": "fixture-1", "if_assignee": "worker"}),
@@ -218,7 +219,7 @@ def test_agentctl_task_commands_map_to_task_envelopes(
     assert outbound.owner == "task-backend"
     assert outbound.principal == "operator"
     assert dict(outbound.arguments) == payload
-    expected_key = "request-1" if operation in {"task.create", "task.claim", "task.note", "task.relate", "task.complete", "task.release"} else None
+    expected_key = "request-1" if operation in {"task.create", "task.claim", "task.note", "task.relate", "task.complete", "task.release", "task.update"} else None
     assert outbound.idempotency_key == expected_key
 
 
@@ -2503,6 +2504,7 @@ def test_task_list_service_returns_structured_stale_cursor_error(tmp_path: Path)
     (
         ("task.claim", {"task_id": "fixture-1"}, ("update", "fixture-1", "--claim")),
         ("task.note", {"task_id": "fixture-1", "text": "append this"}, ("note", "fixture-1", "append this")),
+        ("task.update", {"task_id": "fixture-1", "metadata": {"write_scope": '["pkgs/sinnixd/"]'}}, ("update", "fixture-1", "--set-metadata", 'write_scope=["pkgs/sinnixd/"]')),
         ("task.relate", {"task_id": "fixture-1", "related_task_id": "fixture-2"}, ("dep", "relate", "fixture-1", "fixture-2")),
         ("task.complete", {"task_id": "fixture-1", "merge_sha": "a" * 40, "reason": "verified"}, ("close", "fixture-1", "--reason", "verified")),
         ("task.release", {"task_id": "fixture-1", "reason": "stopped", "if_assignee": "worker"}, ("unclaim", "fixture-1", "--reason", "stopped", "--if-assignee", "worker")),
