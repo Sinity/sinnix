@@ -22,6 +22,13 @@ def _dependency_argument(value: str) -> tuple[str, str]:
     return relation, task_id
 
 
+def _metadata_argument(value: str) -> tuple[str, str]:
+    key, separator, metadata_value = value.partition("=")
+    if not separator or not key:
+        raise argparse.ArgumentTypeError("--set-metadata must be key=value")
+    return key, metadata_value
+
+
 def default_socket_path() -> Path:
     return Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "sinnixd.sock"
 
@@ -194,6 +201,11 @@ def parser() -> argparse.ArgumentParser:
     task_note.add_argument("text", nargs="?")
     task_note.add_argument("--text", dest="text_option")
     task_note.add_argument("--request-id", required=True)
+    task_update = task_subcommands.add_parser("update")
+    task_update.add_argument("project_id")
+    task_update.add_argument("task_id")
+    task_update.add_argument("--set-metadata", action="append", type=_metadata_argument, default=[], required=True)
+    task_update.add_argument("--request-id", required=True)
     task_relate = task_subcommands.add_parser("relate")
     task_relate.add_argument("project_id")
     task_relate.add_argument("task_id")
@@ -501,7 +513,7 @@ def main() -> int:
             )
             if arguments.parent is not None:
                 task_arguments["parent_task_id"] = arguments.parent
-        elif arguments.task_command in {"get", "show", "claim", "complete", "release", "note", "relate"}:
+        elif arguments.task_command in {"get", "show", "claim", "complete", "release", "note", "relate", "update"}:
             task_arguments["task_id"] = arguments.task_id
             if arguments.task_command == "note":
                 if (arguments.text is None) == (arguments.text_option is None):
@@ -511,6 +523,8 @@ def main() -> int:
                 )
             elif arguments.task_command == "relate":
                 task_arguments["related_task_id"] = arguments.related_task_id
+            elif arguments.task_command == "update":
+                task_arguments["metadata"] = dict(arguments.set_metadata)
             elif arguments.task_command in {"complete", "release"}:
                 if arguments.reason is not None:
                     task_arguments["reason"] = arguments.reason
