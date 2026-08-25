@@ -7,7 +7,11 @@ description: Read or mutate durable Beads task state: find ready work, claim, no
 
 Task state lives OUTSIDE every checkout: canonical Beads/Dolt databases under
 `/realm/state/tasks/<project>`, reached via the repo's `.beads` redirect
-(`bd where` confirms) or `agentctl task ...`. Feature branches never touch
+(`bd where` confirms) or `agentctl task ...`. **`bd` routes by cwd** — run it
+from the owning repo or IDs resolve against the wrong backend (filing
+included: a create from the wrong cwd lands in the wrong project). Set
+`BEADS_ACTOR` in agent sessions; the default records the operator as author.
+Feature branches never touch
 task state; claims, notes, and closures generate no git commits. Historical
 beads-in-git snapshots are immutable evidence, never live state.
 
@@ -45,7 +49,12 @@ beads-in-git snapshots are immutable evidence, never live state.
   each AC as satisfied / deferred-to-named-successor / misframed. Partial
   scope splits to a successor bead; it does not stretch the closure.
 - Batch tracker housekeeping (multiple closes/notes from one wave) rather
-  than emitting one operation at a time.
+  than emitting one operation at a time. Multi-id closes map `--reason`
+  flags positionally; a close refused by an open blocker means close the
+  blocker first (or `--force` deliberately, stating why).
+- Co-execution batches are marked with `dispatch_group=<leader-id>` metadata
+  — mechanics in [[orchestrate]]'s worker-contract reference; never merge
+  beads to co-execute them.
 
 ## Filing new work
 
@@ -71,10 +80,11 @@ lives in beads via notes on the owning record — not in scratch files, not
 in per-checkout markdown. Local plans are the current turn's checklist
 only; markdown TODOs are never the shared source of truth.
 
-## Typed close reasons (adopted 2026-08-26)
+## Typed close reasons
 
 Prefer machine-parsable close metadata over prose-only reasons: on close, set
 `--set-metadata closed_kind=<fixed-by-pr|superseded-by|refuted|delivered|
 misfiled|inconclusive>` plus `closed_ref=<PR#/bead-id/receipt>` alongside the
 prose `--reason`. Corpus mining and evidence joins then query exactly instead
-of keyword-clustering 1,300 prose reasons (the 2026-08-25 mine's main cost).
+of keyword-clustering prose reasons. (`bd close` itself lacks
+`--set-metadata`: set metadata via `bd update` first, then close.)

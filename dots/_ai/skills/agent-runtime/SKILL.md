@@ -36,8 +36,20 @@ not add a parallel ledger for any of them.
 - Start with `agentctl job start <project> <operation> [--workspace <id>]`.
   Parameters, when declared, enter through `--parameters-json` and are retained
   publicly only as a digest.
-- Observe with `job get`, `job logs`, and bounded `job wait`; consume the typed
-  artifact with `job result`. Cancel by job ID, then verify terminal state.
+- Observe with `job get`, `job logs`, `job list --kind <kind>`, and `job wait
+  <id...> --any`; consume the typed artifact with `job result`. Cancel by job
+  ID, then verify terminal state. `agentctl agent list|status|wait|result`
+  are sugar over jobs of kind `attested-agent`.
+- **Never poll.** Terminal transitions append to
+  `/realm/state/agentctl/events.jsonl` — tail that one stream (or one
+  persistent Monitor on it) instead of per-job status loops. Non-job scripts
+  append their completions to the same spool by convention.
+- Feature gate: the event plane, agent verbs, `--kind`, wait `--any`,
+  `environment.require` (missing required vars fail dispatch loudly),
+  `BEADS_ACTOR=agent-<job-id>` injection, timeout WIP-preservation, and
+  14-day record retention deploy together — the daemon's `status` capability
+  list is the runtime check; a daemon predating the current rebuild lacks
+  them.
 - The operation descriptor owns environment, resources, dependencies, result
   contract, and timeout. Declared operations may run for up to eight hours;
   typed agent jobs remain capped at one hour.
@@ -60,6 +72,12 @@ to restore orientation without replaying the whole transcript.
 
 ## Failures
 
+- `agentctl agent --checkout` takes the CHECKOUT id (`worktree-…` from
+  `workspace list`), not the workspace UUID — the UUID fails with "unknown
+  registered checkout".
+- `dispose` refuses squash-merged branches as "unpublished committed content"
+  (ancestry check, not content-equality): verify branch-own files match the
+  default branch, then remove worktree and branch with git directly.
 - Missing workspace: inspect Git membership and checkpoint authority before
   `recover`; preserve evidence before any repair.
 - Wedged job: inspect `job get` and logs, cancel once, and confirm the unit and

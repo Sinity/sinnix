@@ -46,10 +46,12 @@ able to trust.
 - **Blocking edges are the plan.** Wire them as real `bd` dependencies, not
   prose; the frontier (open, unblocked, unclaimed) is then queryable and
   the sequencing enforces itself. A bead with no blockers can start now.
-- **Lane clusters**: group 3–5 related beads (same code region or theme)
-  and say so in the beads — one worker lane takes the cluster, one
-  integration branch, one review. Declare the shared files so collision
-  detection has something to check.
+- **Dispatch groups**: beads sharing a file, area, fix pattern, or required
+  context get `dispatch_group=<leader-id>` metadata (leader's notes list the
+  members) — one lane executes the group, one integration branch, one
+  review. A lane is one independently verifiable change; its bead count may
+  be one or many. Declare the shared files so collision detection has
+  something to check.
 
 ## Decision beads (foggy programs)
 
