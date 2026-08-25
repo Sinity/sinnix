@@ -7,9 +7,9 @@ metadata:
 
 # Android device control (unrooted)
 
-Hard-won on a Redmi Note 11 (HyperOS V816 / Android 13) joined to the tailnet
-as `100.124.215.25`. Everything here was verified live; where a claim is
-inferred it says so. The device-specific facts live in bead `sinnix-uyvt`.
+Verified live on the operator's unrooted Xiaomi device; where a claim is
+inferred it says so. Device-specific facts (model, tailnet address) live in
+bead `sinnix-uyvt` — read it, don't assume them from here.
 
 ## The two control surfaces
 
@@ -113,8 +113,7 @@ Two rules learned the hard way:
   a linked Mi account and Find Device. Removing them forecloses rooting later.
 - **Prefer evidence over vibes.** Diff the _previous phone's_ package census
   against the current device to find orphans; a device switch strands whole
-  vendor stacks (a Samsung watch-manager + health-plugin + Smart Switch set
-  survived onto a Xiaomi and was pure dead weight).
+  vendor stacks.
 
 Unambiguously safe MIUI removals: `com.miui.msa.global` (the ad engine),
 `com.miui.analytics`, `com.xiaomi.mipicks`, `com.mi.globalminusscreen`
@@ -123,9 +122,8 @@ Unambiguously safe MIUI removals: `com.miui.msa.global` (the ad engine),
 
 ## Finding devices on the network
 
-`nmap -sn` misses IoT endpoints that do not answer ICMP — an Awair Element was
-invisible to a full sweep while serving HTTP happily. **Read the router's DHCP
-lease table instead** (`ssh <router> cat /tmp/dhcp.leases`): it lists every
+`nmap -sn` misses IoT endpoints that do not answer ICMP while serving HTTP
+happily. **Read the router's DHCP lease table instead** (`ssh <router> cat /tmp/dhcp.leases`): it lists every
 device that ever connected, with MAC and hostname, including ones currently
 asleep. To tell "asleep" from "off-network", check association directly:
 `iwinfo <ap> assoclist` per AP — a device with a lease but no association is

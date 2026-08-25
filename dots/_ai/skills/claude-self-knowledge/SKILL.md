@@ -10,7 +10,7 @@ Anything version-gated (harness features, model ids, pricing, limits) must be
 verified against a live source — `claude --version`, the claude-code-guide
 agent (docs lookup), the `claude-api` skill (API/pricing) — not recalled from
 training or from this file when precision matters. This file is the map, not
-the territory; its snapshot date is 2026-08-11.
+the territory.
 
 ## Models (the family, and what tier means)
 
@@ -39,14 +39,12 @@ the territory; its snapshot date is 2026-08-11.
   completion auto-notifies the parent (>=2.1.211) — never poll.
 - **Forks** (`/subtask`): inherit full conversation + system prompt + model
   (prompt-cache reuse); for context-heavy side-tasks; cannot nest.
-- **Agent teams** (adopted narrowly 2026-08-12, env-gated): a normal
-  coordination shape for READ-ONLY research/synthesis tasks — the blinded
-  pilot showed teams beat independent subagents there (3.45 vs 2.73 weighted,
-  faster critical path; protocol in git history of docs/agent-teams-pilot.json).
-  Implementation/write work keeps the ordinary subagent doctrine. Mechanics:
-  teammates = full sessions, shared task list + SendMessage mailboxes; no
-  resume of in-process teammates; one team per session; teammates don't
-  inherit lead model (explicit model per teammate, as with any dispatch).
+- **Agent teams**: DISABLED by operator decision (2026-08-25) — they were
+  used with no advantage over subagents and their idle teammates linger
+  (teammates also don't auto-deliver final reports: the silent-idle failure
+  mode). The env flag is removed from managed settings; sessions started
+  before the next activation may still have it. Use forks and ordinary
+  subagents.
 - **Agent definitions** (`.claude/agents/*.md`): body = the subagent's entire
   system prompt; frontmatter: `model`, `effort`, `tools`, `isolation:
 worktree`, `skills`, `memory`, `maxTurns`, hooks. Bake standing contracts
@@ -70,33 +68,24 @@ worktree`, `skills`, `memory`, `maxTurns`, hooks. Bake standing contracts
   `~/.claude/` (settings.json, CLAUDE.md, hooks are instant-propagating;
   ADDING new skills/hook files needs a home-manager switch — check
   `readlink -f` when unsure which regime a file is in).
-- Enabled here: fork subagents + experimental agent teams (settings env).
+- Enabled here: fork subagents (settings env).
 
 ## Dispatch doctrine (this machine)
 
-Grounded in measured fanout ops (2026-08-02) + capability research
-(2026-08-03, digest: polylogue
-`.agent/scratch/2026-08-03-claude-code-dispatch-capabilities.md`).
-
-- **Explicit model on every fresh Agent dispatch.** Sonnet default, Haiku for
-  triage-grade read-only lanes, Fable/Opus permitted for judgment lanes
-  (design review, adjudication, postmortem synthesis) as an explicit choice —
-  never via inheritance. **Mechanically enforced, hard, for every dispatch
-  type** (tightened 2026-08-11): a global PreToolUse hook DENIES any Agent
-  dispatch — bespoke-prompt, named agent definition, or teammate spawn —
+- **Explicit model on every fresh Agent dispatch** — model/tier selection
+  doctrine lives in the [[orchestrate]] skill (model-landscape reference);
+  this file owns only the mechanics. **Mechanically enforced, hard, for every dispatch
+  type**: a global PreToolUse hook DENIES any Agent
+  dispatch — bespoke-prompt or named agent definition —
   that omits `model` at the call site. A named agent's own frontmatter
   `model:` does not exempt the call; every launch is auditable at the
   dispatch site. On every ALLOWED dispatch the hook emits a visible
-  `systemMessage` confirming the resolved `subagent_type`/`model` (and
-  teammate name) — affirmative feedback, visible across concurrent sessions.
+  `systemMessage` confirming the resolved `subagent_type`/`model` —
+  affirmative feedback, visible across concurrent sessions.
 - **Forks are exempt** (`/subtask`, `fork` type): they inherit context AND
   model by design (prompt-cache reuse). Right tool for context-heavy
   side-tasks; using a fork as a de-facto implementation lane violates the
   explicit-model rule in disguise. Forks cannot nest.
-- **Teams caveats** (beyond the one-liner above): no resume of in-process
-  teammates, one team per session, no nesting, teammates do NOT inherit the
-  lead's model (specify per spawn; they DO inherit effort). Lab capability,
-  not load-bearing process.
 - **Never poll background agents** — completion notifications are automatic;
   Monitor only with an until-condition; ScheduleWakeup only for genuine
   wall-clock deadlines (CI grace windows, external state).

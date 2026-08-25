@@ -1,11 +1,9 @@
 # Model Tiering and Launch Mechanics
 
-Real campaigns mix Claude Code's own subagent dispatch (via `Agent`/`fork`)
-with directly-launched non-Claude backends for cheap, high-volume narrow
-passes. This reference covers picking the tier and the concrete mechanics
-that worked. For the generic runtime-mode decision (local/background/cloud/
-Kitty) and the shared launch helpers, defer to `orchestrate`; this
-file only adds what audit campaigns specifically need on top.
+Campaigns mix Claude Code's own subagent dispatch (via `Agent`/`fork`) with
+directly-launched non-Claude backends for cheap, high-volume narrow passes.
+For the generic runtime-mode decision and shared launch helpers, defer to
+`orchestrate`; this file only adds what audit campaigns need on top.
 
 ## Picking a tier
 
@@ -82,13 +80,10 @@ report instead of tail-parsing a verbose log.
 
 ### Concurrency and batching
 
-A shared per-user launcher wrapper script can race under high concurrency —
-firing 6+ invocations at the exact same instant risked a `Text file busy`
-error on the wrapper itself in practice. Batch concurrent launches (5 was a
-safe number observed), and stagger the start of each launch within a batch
-by 1-2 seconds rather than firing them all in the same instant. Retry any
-individual launch that hits the race — it's a one-off infra collision, not a
-systemic failure.
+A shared per-user launcher wrapper script can race under high concurrency
+(`Text file busy` on the wrapper itself). Batch concurrent launches at ~5,
+stagger starts within a batch by 1-2 seconds, and retry any individual
+launch that hits the race.
 
 Do NOT add a hard `wait`-barrier between batches unless you actually need
 one — a full wait-for-all-N-to-finish gate between every batch of 5

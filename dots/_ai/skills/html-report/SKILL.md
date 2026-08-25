@@ -17,17 +17,14 @@ rather than _re-edit_, it is usually the wrong ceiling. Self-contained HTML
 gives information density (tables, grids, badges, swatches), spatial layout
 (side-by-side, timelines, SVG diagrams), and progressive disclosure
 (`<details>`, tabs, sortable/filterable tables) that markdown flattens into
-scroll. Token cost is no longer a reason to prefer markdown. (Thariq
-Shihipar, "Using Claude Code: The unreasonable effectiveness of HTML",
-2026-05; gallery at thariqs.github.io/html-effectiveness.)
+scroll. Token cost is no longer a reason to prefer markdown.
 
 The structural ideas below — semantic zoom, hover popups, sidenotes, metadata
-blocks carrying status and epistemic confidence, progressive enhancement — are
-adapted from **gwern.net** (`gwern.net/design`), which has been solving
-"one document, many reading depths" for longer than anyone else. Deliberately
-_not_ adopted: link archiving and backlink graphs (meaningless in a single
-file), dropcaps and Art Nouveau ornament (decoration without a job here), and
-reader mode (the A−/A+ and theme controls already cover it).
+blocks carrying status and epistemic confidence, progressive enhancement —
+solve "one document, many reading depths". Deliberately _not_ adopted: link
+archiving and backlink graphs (meaningless in a single file), ornament
+without a job, and reader mode (the A−/A+ and theme controls already cover
+it).
 
 ## When to use HTML
 
@@ -49,9 +46,8 @@ the HTML is a _view_ — never maintain the same prose in both.
 
 ## Semantic zoom (the organizing principle)
 
-Borrowed from gwern.net, which solves the length problem without fragmenting a
-document: build **one page readable at many depths**, and let the reader choose
-how deep to go rather than choosing for them.
+Build **one page readable at many depths**, and let the reader choose how
+deep to go rather than choosing for them.
 
     title -> stat tiles -> metadata block -> lead paragraph -> section headers
       -> tables -> body prose -> collapsed <details> -> hover popups -> the file itself
@@ -68,15 +64,13 @@ A generated report's numbers rot, and the reader cannot tell by looking. Two
 mechanisms, both in the template:
 
 **Timestamps that age themselves.** `<time class="age" datetime="…">` renders as
-`2026-07-30 22:14 (3d ago)` at view time, with the absolute value in the
-tooltip. Add `data-stale-days="7"` and it turns amber with a ⚠ once past that
+`<date> (<age> ago)` at view time, with the absolute value in the tooltip. Add `data-stale-days="7"` and it turns amber with a ⚠ once past that
 budget. Always carry two: **generated** (when the document was written) and
 **data as of** (when the figures were actually measured) — they are frequently
 not the same day, and only the second one matters for trust.
 
-**Epistemic basis per claim.** gwern tags pages with confidence on the
-Kesselman scale; for agent output the useful axis is not _how sure am I_ but
-_what does this rest on_:
+**Epistemic basis per claim.** The useful axis for agent output is not
+_how sure am I_ but _what does this rest on_:
 
 | tag                                            | meaning                                               |
 | ---------------------------------------------- | ----------------------------------------------------- |
@@ -86,9 +80,7 @@ _what does this rest on_:
 | `<span class="ev ev-assumed">assumed</span>`   | taken on faith, untested                              |
 
 Tag anything a reader might act on. `assumed` is not an admission of failure —
-an _unlabelled_ assumption is. In practice this pays for itself: re-measuring
-something previously tagged `inferred` is where a large share of real findings
-come from.
+an _unlabelled_ assumption is.
 
 **Scope the tag, don't float it.** In prose, wrap exactly the certified words in
 a claim tint — `<span class="claim claim-m">…words…<span class="ev
@@ -144,12 +136,11 @@ with `tk-k`/`tk-s`/`tk-c`/`tk-n`/`tk-f` **as you write** — you already know
 which token is a keyword, so shipping a runtime highlighter would be a
 dependency bought for nothing.
 
-**Quotes are never the same box as your own narration.** This is the single
-most common legibility failure in a report with any back-and-forth structure
-(corrections, timelines, review threads): wrapping _both_ the paraphrase
-you're writing and the words someone actually said in one identically-styled
-box. A reader can't tell which is which without parsing every sentence.
-Fix it structurally, not by remembering: narration is a **plain paragraph**,
+**Quotes are never the same box as your own narration.** In any
+back-and-forth structure (corrections, timelines, review threads), wrapping
+both your paraphrase and the words someone actually said in one
+identically-styled box leaves the reader parsing every sentence to tell
+which is which. Fix it structurally: narration is a **plain paragraph**,
 no border, no background — exactly like the rest of your prose. The moment
 you're relaying words someone actually wrote or said, switch to
 `<blockquote class="q">…<cite>who, when</cite></blockquote>` — it renders in
@@ -164,12 +155,10 @@ facts. A short quote inside a running sentence doesn't need the full block —
 **Sidenotes** (`<span class="sn" tabindex="0"><template class="pop">…`) are a
 small superscript marker using the _same_ popup mechanism as path/evidence
 previews, not a separate margin-column trick. A true wide-margin sidenote
-needs a page layout that reserves real margin space (gwern's does); a
+needs a page layout that reserves real margin space; a
 `left: calc(50% + Nrem)` guess relative to the viewport has no real containing
-block in a single-column report layout, and drifts off-position — verified
-broken in production, not a hypothetical — the moment a real viewport hits
-the boundary the guess assumed. One interaction pattern for every aside beats
-maintaining a second, fragile one.
+block in a single-column report layout and drifts off-position. One
+interaction pattern for every aside beats maintaining a second, fragile one.
 
 ## Operator input: annotations, corrections, questionnaires
 
@@ -428,23 +417,17 @@ is the signal to bead it or kill it.
    sibling directories are auto-reaped on a 7-day tmpfiles timer. Reserve
    scratch/`/realm/tmp` for genuinely single-use output you will not need to
    reference again.
-4. Deliver it. **Publishing as an Artifact is the DEFAULT step of shipping any
-   HTML report, not an optional extra** — do it in the same breath as copying
-   the file to its durable home, without waiting to be asked (operator standing
-   instruction, 2026-08-02). Artifacts are private-to-the-operator until they
-   share them ("publishing" here just means the operator's own browsable view),
-   and a link at `claude.ai/code/artifacts` is more useful long after the turn
-   ends than a file sitting in scratch. Skim the content first
-   for anything genuinely sensitive (credentials, unredacted personal data,
-   material the operator hasn't seen if you didn't author it this turn) —
-   internal paths, hostnames, and ordinary project/engineering detail are not
-   a reason to hold back. Also send it with `SendUserFile`
-   (`display: "render"`) so it previews inline in the same turn — the two
-   aren't redundant: `SendUserFile` is the immediate look, `Artifact` is the
-   thing that still exists next week. Skip the `Artifact` publish only when
-   the tool genuinely isn't available (other agents/harnesses: print the
-   path; `xdg-open` works), the content is explicitly scratch/throwaway, or
-   the operator asked to keep it local.
+4. Deliver it. **Publishing as an Artifact is the DEFAULT step of shipping
+   any HTML report** (operator standing instruction) — same breath as the
+   durable-home copy, without waiting to be asked. Artifacts stay
+   private-to-the-operator until shared. Skim first for genuinely sensitive
+   content (credentials, unredacted personal data, material the operator
+   hasn't seen if you didn't author it this turn) — internal paths and
+   ordinary engineering detail are not a reason to hold back. Also send via
+   `SendUserFile` (`display: "render"`): the immediate look vs the thing
+   that still exists next week. Skip the publish only when the tool is
+   unavailable (print the path; `xdg-open` works), the content is throwaway,
+   or the operator asked local-only.
 5. Updating a living workspace across sessions: republish the **same
    `file_path`** to redeploy to the same `Artifact` URL rather than minting a
    new one each pass — that's what makes the browsable-later property work
