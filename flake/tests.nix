@@ -32,6 +32,7 @@ in
     ./tests/capture-primary.nix
     ./tests/backup.nix
     ./tests/agent-environment.nix
+    ./tests/command-registry.nix
     ./tests/agent-parity.nix
     ./tests/swarm-fixture.nix
     ./tests/observability.nix
