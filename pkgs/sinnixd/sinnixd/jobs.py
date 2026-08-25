@@ -14,6 +14,7 @@ import struct
 import subprocess
 import sys
 import time
+import re
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -571,6 +572,83 @@ def _terminal_resources(properties: Mapping[str, str]) -> dict[str, Any]:
         "io_write_bytes": integer("IOWriteBytes"),
         "memory_pressure": pressure,
     }
+
+
+_USAGE_NUMBER = r"([0-9][0-9,]*)"
+
+
+def parse_backend_usage(log: str) -> dict[str, int | str | None]:
+    """Parse only explicit backend usage fields, retaining nulls when absent."""
+    usage: dict[str, int | str | None] = {
+        "input_tokens": None,
+        "output_tokens": None,
+        "cached_tokens": None,
+        "model": None,
+    }
+
+    def number(value: Any) -> int | None:
+        try:
+            parsed = int(str(value).replace(",", ""))
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed >= 0 else None
+
+    def update(value: Mapping[str, Any]) -> None:
+        aliases = {
+            "input_tokens": ("input_tokens", "inputTokens"),
+            "output_tokens": ("output_tokens", "outputTokens"),
+            "cached_tokens": (
+                "cached_tokens",
+                "cachedTokens",
+                "cache_read_input_tokens",
+                "cacheReadInputTokens",
+            ),
+        }
+        for target, names in aliases.items():
+            for name in names:
+                if target not in usage or usage[target] is not None:
+                    continue
+                parsed = number(value.get(name))
+                if parsed is not None:
+                    usage[target] = parsed
+        model = value.get("model")
+        if usage["model"] is None and isinstance(model, str) and model:
+            usage["model"] = model
+
+    for line in log.splitlines():
+        try:
+            value = json.loads(line)
+        except (TypeError, json.JSONDecodeError):
+            value = None
+        if isinstance(value, Mapping):
+            update(value)
+            nested = value.get("usage")
+            if isinstance(nested, Mapping):
+                update(nested)
+
+        text = line.replace(",", "")
+        patterns = {
+            "input_tokens": rf"\binput(?:[_ ]tokens?)?\s*[:=]\s*{_USAGE_NUMBER}",
+            "output_tokens": rf"\boutput(?:[_ ]tokens?)?\s*[:=]\s*{_USAGE_NUMBER}",
+            "cached_tokens": rf"\b(?:cached|cache[_ ]read[_ ]input)(?:[_ ]tokens?)?\s*[:=]\s*{_USAGE_NUMBER}",
+        }
+        for target, pattern in patterns.items():
+            if usage[target] is None:
+                match = re.search(pattern, text, flags=re.IGNORECASE)
+                if match:
+                    usage[target] = number(match.group(1))
+        if usage["model"] is None:
+            match = re.search(r"\bmodel\s*[:=]\s*([^\s,]+)", line, flags=re.IGNORECASE)
+            if match:
+                usage["model"] = match.group(1)
+    return usage
+
+
+def _terminal_usage(record: "GenericJobRecord") -> dict[str, int | str | None]:
+    content = _read_private_artifact(record.log_path, MAX_LOG_ARTIFACT_BYTES)
+    if content is None:
+        return parse_backend_usage("")
+    return parse_backend_usage(content.decode(errors="replace"))
 
 
 def _loopback_port_available(port: int) -> bool:
@@ -3378,6 +3456,7 @@ class GenericJobs:
                 },
             )
             state["resources"] = _terminal_resources(properties)
+            state["usage"] = _terminal_usage(record)
             return state
         active = properties.get("ActiveState", "unknown")
         if active in {"active", "activating", "reloading"}:
@@ -3415,6 +3494,7 @@ class GenericJobs:
         )
         if state.get("terminal"):
             state["resources"] = _terminal_resources(properties)
+            state["usage"] = _terminal_usage(record)
         return state
 
     @staticmethod

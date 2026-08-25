@@ -507,6 +507,66 @@ def test_terminal_capture_records_resources_at_the_observed_cgroup(
     }
 
 
+def test_terminal_capture_records_explicit_backend_usage_fields(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: terminal capture persists labeled backend totals and model in the job record."""
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "Result": "success",
+            "ExecMainStatus": "0",
+        }
+    )
+    jobs = generic_jobs(tmp_path, systemd)
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
+    record = jobs.store.load(started["job_id"])
+    record.log_path.write_text(
+        '{"usage":{"input_tokens":1234,"output_tokens":567,"cache_read_input_tokens":89,"model":"claude-sonnet"}}\n'
+    )
+
+    terminal = jobs.get(started["job_id"])
+
+    assert terminal["state"]["usage"] == {
+        "input_tokens": 1234,
+        "output_tokens": 567,
+        "cached_tokens": 89,
+        "model": "claude-sonnet",
+    }
+
+
+def test_terminal_capture_leaves_unparseable_usage_as_null(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: unrelated log numbers never become guessed token totals."""
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "Result": "success",
+            "ExecMainStatus": "0",
+        }
+    )
+    jobs = generic_jobs(tmp_path, systemd)
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
+    record = jobs.store.load(started["job_id"])
+    record.log_path.write_text("completed 1234 requests in 567 ms\n")
+
+    terminal = jobs.get(started["job_id"])
+
+    assert terminal["state"]["usage"] == {
+        "input_tokens": None,
+        "output_tokens": None,
+        "cached_tokens": None,
+        "model": None,
+    }
+
+
 @pytest.mark.parametrize(
     ("state", "expected_message"),
     [
