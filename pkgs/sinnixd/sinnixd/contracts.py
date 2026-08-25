@@ -134,7 +134,7 @@ class TypedJobContracts:
         if not self.native_runner.is_file() or not os.access(self.native_runner, os.X_OK):
             raise ContractError("native agent runner is unavailable")
         checkout = self.projects.checkout(project_id, checkout_id)
-        binding = self._bead_binding(bead_binding, checkout)
+        binding = self.bead_binding(bead_binding, checkout)
         job_id = str(uuid4())
         prompt_path = self.inputs_root / f"{job_id}.prompt"
         public_contract = {
@@ -240,10 +240,10 @@ class TypedJobContracts:
         return response
 
     @staticmethod
-    def _bead_binding(
+    def bead_binding(
         value: Mapping[str, Any] | None, checkout: RegisteredCheckout
     ) -> dict[str, Any] | None:
-        """Validate public Beads provenance carried by an attested agent job."""
+        """Validate public Beads provenance frozen into a packet job contract."""
         if value is None:
             return None
         expected = {
@@ -258,9 +258,11 @@ class TypedJobContracts:
         if scope is not None and (
             not isinstance(scope, list)
             or not scope
+            or len(scope) > 128
             or any(
                 not isinstance(path, str)
                 or not path
+                or len(path.encode()) > 1024
                 or path.startswith("/")
                 or ".." in Path(path).parts
                 for path in scope
@@ -307,7 +309,9 @@ class TypedJobContracts:
             UUID(str(binding["request_id"]))
         except (TypeError, ValueError, AttributeError) as error:
             raise ContractError("agent bead binding request_id is malformed") from error
-        return binding
+        # The caller retains its request object. Persist an independent JSON value so
+        # neither it nor a nested claim receipt can mutate a launched job's binding.
+        return json.loads(json.dumps(binding, sort_keys=True, separators=(",", ":")))
 
     def _environment(
         self, checkout: RegisteredCheckout, job_id: str, principal: str, timeout_seconds: int

@@ -875,6 +875,15 @@ class Runtime:
             "request_id": request_id,
             "assignment_ref": parent_assignment_ref,
         }
+        metadata = bead.get("metadata")
+        encoded_scope = metadata.get("write_scope") if isinstance(metadata, Mapping) else None
+        if isinstance(encoded_scope, str):
+            try:
+                write_scope = json.loads(encoded_scope)
+            except json.JSONDecodeError:
+                write_scope = None
+            if isinstance(write_scope, list):
+                binding["write_scope"] = write_scope
         assigned_context = {
             "bead": bead,
             "project_ref": project_ref,

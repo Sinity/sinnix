@@ -59,7 +59,14 @@ from sinnixd.jobs import (
 from sinnixd.limits import MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
 from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from sinnixd.projects import ProjectCatalog, ProjectConfigError, RegisteredCheckout, parse_worktree_records
-from sinnixd.runner import RunnerError, _exec_shell, _require_environment, _revalidate_checkout, _run_declared
+from sinnixd.runner import (
+    RunnerError,
+    _exec_shell,
+    _require_environment,
+    _revalidate_checkout,
+    _run_declared,
+    _seal_packet_result,
+)
 from sinnixd.service import SinnixdService
 from sinnixd.tasks import (
     BeadsCommandBoundary,
@@ -4528,6 +4535,214 @@ def test_delivery_snapshot_is_nul_safe_and_exact_file_scope_does_not_include_des
     assert {change["status"][0] for change in snapshot["changes"]} >= {"D", "R", "A"}
     assert any("\n" in item for change in snapshot["changes"] for item in change["paths"])
     assert service.workspaces.delivery_snapshot(workspace["workspace_id"], start, scope=("dir/",))["in_scope"]
+
+
+def test_beads_bound_packet_and_exact_head_verifier_compose_into_delivery(tmp_path: Path) -> None:
+    """The accepting path joins two authoritative jobs; neither can substitute for the other."""
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    native = tmp_path / "native-runner"
+    native_runner(native)
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs, native_runner=native)
+    workspace = service.workspaces.create(
+        project_id="fixture", name="packet-delivery", branch="feature/packet-delivery", base="HEAD"
+    )
+    checkout_id = workspace["checkout_id"]
+    binding = {
+        "bead_ref": "sinnix://projects/fixture/beads/fixture-1",
+        "project_ref": "sinnix://projects/fixture",
+        "checkout_ref": f"sinnix://projects/fixture/checkouts/{checkout_id}",
+        "task_revision": "a" * 64,
+        "task_etag": "b" * 64,
+        "claim_ref": f"sinnix://projects/fixture/beads/fixture-1/claims/{'c' * 64}",
+        "claim_receipt": {
+            "ref": f"sinnix://projects/fixture/beads/fixture-1/claims/{'c' * 64}",
+            "owner_route": "beads.cli",
+        },
+        "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b",
+        "assignment_ref": None,
+        "write_scope": ["delivery.txt", "obsolete.txt"],
+    }
+    path = Path(workspace["path"])
+    (path / "obsolete.txt").write_text("remove me\n")
+    subprocess.run(["git", "-C", str(path), "add", "obsolete.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "seed deletion"],
+        check=True,
+    )
+    packet = service.dispatch(
+        request(
+            "job.agent.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture", "checkout_id": checkout_id, "prompt": "return structured delivery",
+                "backend": "codex", "model": "fixture", "effort": "high",
+                "credential_profile": "subscription", "timeout_seconds": 60,
+                "result": "last-message", "bead_binding": binding,
+            },
+            "agent-control",
+        )
+    )
+    assert packet.ok and packet.payload is not None
+    packet_id = packet.payload.inline["job_id"]
+    packet_record = jobs.store.load(packet_id)
+    start_head = packet_record.spec.checkout["head"]
+    (path / "delivery.txt").write_text("delivered\n")
+    (path / "obsolete.txt").unlink()
+    subprocess.run(["git", "-C", str(path), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "delivery"],
+        check=True,
+    )
+    final_head = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    worker_delivery = {
+        "anti_vacuity": True,
+        "unresolved_work": [],
+        "delegation": {"visibility": "unsupported", "pending": None},
+        "deletion_evidence": ["obsolete.txt"],
+        "evidence_only": False,
+    }
+    assert packet_record.result_path is not None
+    packet_record.result_path.write_text(json.dumps({
+        "schema_version": 1, "job_id": packet_id, "start_head": start_head,
+        "final_head": final_head, "delivery": worker_delivery,
+    }))
+    jobs_module._write_private_marker(jobs_module._completion_marker_path(packet_record.log_path))
+    systemd.properties = {
+        "LoadState": "loaded", "ActiveState": "inactive", "Result": "success",
+        "ExecMainStatus": "0", "InvocationID": "fixture-invocation",
+    }
+    assert jobs.get(packet_id)["state"]["phase"] == "succeeded"
+    verifier = service.dispatch(request(
+        "job.start", "systemd-jobs",
+        {
+            "project_id": "fixture", "operation": "check", "workspace_id": workspace["workspace_id"],
+            "bead_binding": binding,
+        },
+    ))
+    assert verifier.ok and verifier.payload is not None
+    verifier_id = verifier.payload.inline["job_id"]
+    assert jobs.get(verifier_id)["state"]["phase"] == "succeeded"
+
+    delivery = GitHubDelivery(service.projects, service.workspaces, jobs)
+    _workspace, _project, receipt = delivery._verified_workspace(
+        workspace["workspace_id"], verifier_id, packet_id
+    )
+    assert receipt["bead_ref"] == binding["bead_ref"]
+    assert receipt["head"] == final_head
+
+    (path / "dirty.txt").write_text("uncommitted\n")
+    with pytest.raises(DeliveryError, match="exact HEAD"):
+        delivery._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
+    (path / "dirty.txt").unlink()
+
+    bad_binding = {**binding, "write_scope": ["other.txt"]}
+    jobs.store.save(replace(
+        packet_record,
+        spec=replace(packet_record.spec, contract={**packet_record.spec.contract, "bead_binding": bad_binding}),
+    ))
+    verifier_record = jobs.store.load(verifier_id)
+    jobs.store.save(replace(
+        verifier_record,
+        spec=replace(verifier_record.spec, contract={**verifier_record.spec.contract, "bead_binding": bad_binding}),
+    ))
+    with pytest.raises(DeliveryError, match="write scope"):
+        delivery._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
+    jobs.store.save(packet_record)
+    jobs.store.save(verifier_record)
+
+    for evidence in ([], ["unrelated.txt"]):
+        packet_record.result_path.write_text(json.dumps({
+            "schema_version": 1, "job_id": packet_id, "start_head": start_head,
+            "final_head": final_head,
+            "delivery": {**worker_delivery, "deletion_evidence": evidence},
+        }))
+        with pytest.raises(DeliveryError, match="deletion evidence"):
+            delivery._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
+
+    packet_record.result_path.write_text(json.dumps({
+        "schema_version": 1, "job_id": packet_id, "start_head": start_head,
+        "final_head": final_head,
+        "delivery": {**worker_delivery, "unresolved_work": ["still running"]},
+    }))
+    with pytest.raises(DeliveryError, match="incomplete"):
+        delivery._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
+    packet_record.result_path.write_text(json.dumps({
+        "schema_version": 1, "job_id": packet_id, "start_head": start_head,
+        "final_head": final_head, "delivery": worker_delivery,
+    }))
+
+    packet_record.result_path.write_text(json.dumps({
+        "schema_version": 1, "job_id": packet_id, "start_head": start_head,
+        "final_head": final_head, "delivery": None,
+    }))
+    with pytest.raises(DeliveryError, match="malformed"):
+        delivery._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
+    packet_record.result_path.write_text(json.dumps({
+        "schema_version": 1, "job_id": packet_id, "start_head": start_head,
+        "final_head": final_head, "delivery": worker_delivery,
+    }))
+
+    for scope in (["../outside"], [f"entry-{index}" for index in range(129)]):
+        rejected = service.dispatch(request(
+            "job.start", "systemd-jobs",
+            {
+                "project_id": "fixture", "operation": "check", "workspace_id": workspace["workspace_id"],
+                "bead_binding": {**binding, "write_scope": scope},
+            },
+        ))
+        assert not rejected.ok
+
+    (path / "later.txt").write_text("post-terminal\n")
+    subprocess.run(["git", "-C", str(path), "add", "later.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "later"],
+        check=True,
+    )
+    with pytest.raises(DeliveryError, match="exact HEAD"):
+        delivery._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
+
+
+def test_packet_runner_seals_worker_report_to_runtime_observed_head(tmp_path: Path) -> None:
+    initialize_git_checkout(tmp_path)
+    start_head = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    (tmp_path / "change.txt").write_text("change\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "change.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "change"],
+        check=True,
+    )
+    final_head = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    result_root = tmp_path / "private-results"
+    result_root.mkdir(mode=0o700)
+    result_path = result_root / "packet.result"
+    result_path.touch(mode=0o600)
+    delivery = {
+        "anti_vacuity": True, "unresolved_work": [],
+        "delegation": {"visibility": "unsupported", "pending": None},
+        "deletion_evidence": [], "evidence_only": False,
+    }
+    result_path.write_text(json.dumps(delivery))
+
+    _seal_packet_result(
+        {"job_id": "packet-job", "checkout": {"head": start_head}}, tmp_path, result_path
+    )
+
+    assert json.loads(result_path.read_text()) == {
+        "schema_version": 1,
+        "job_id": "packet-job",
+        "start_head": start_head,
+        "final_head": final_head,
+        "delivery": delivery,
+    }
 
 
 def test_admission_revalidates_queued_declared_workspace_before_systemd_launch(tmp_path: Path) -> None:

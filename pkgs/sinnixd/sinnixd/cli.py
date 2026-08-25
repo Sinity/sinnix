@@ -89,6 +89,7 @@ def parser() -> argparse.ArgumentParser:
     workspace_publish = workspace_subcommands.add_parser("publish")
     workspace_publish.add_argument("workspace_id")
     workspace_publish.add_argument("--job", required=True)
+    workspace_publish.add_argument("--packet-job")
     workspace_publish.add_argument("--title", required=True)
     workspace_publish.add_argument("--body", default="")
     workspace_review = workspace_subcommands.add_parser("review-status")
@@ -96,6 +97,7 @@ def parser() -> argparse.ArgumentParser:
     workspace_land = workspace_subcommands.add_parser("land")
     workspace_land.add_argument("workspace_id")
     workspace_land.add_argument("--job", required=True)
+    workspace_land.add_argument("--packet-job")
     workspace_finish = workspace_subcommands.add_parser("finish")
     workspace_finish.add_argument("workspace_id")
     workspace_finish_integrated = workspace_subcommands.add_parser("finish-integrated")
@@ -108,6 +110,7 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("operation")
     start.add_argument("--workspace")
     start.add_argument("--parameters-json", default="{}")
+    start.add_argument("--bead-binding-json")
     get = job_subcommands.add_parser("get")
     get.add_argument("job_id")
     status = job_subcommands.add_parser("status")
@@ -366,7 +369,13 @@ def main() -> int:
     elif arguments.command == "workspace" and arguments.workspace_command == "publish":
         request = _request(
             "workspace.publish", "git-workspaces",
-            {"workspace_id": arguments.workspace_id, "job_id": arguments.job, "title": arguments.title, "body": arguments.body},
+            {
+                "workspace_id": arguments.workspace_id,
+                "job_id": arguments.job,
+                "title": arguments.title,
+                "body": arguments.body,
+                **({"packet_job_id": arguments.packet_job} if arguments.packet_job else {}),
+            },
             "agent-control",
         )
     elif arguments.command == "workspace" and arguments.workspace_command == "review-status":
@@ -374,7 +383,11 @@ def main() -> int:
     elif arguments.command == "workspace" and arguments.workspace_command == "land":
         request = _request(
             "workspace.land", "git-workspaces",
-            {"workspace_id": arguments.workspace_id, "job_id": arguments.job}, "agent-control",
+            {
+                "workspace_id": arguments.workspace_id,
+                "job_id": arguments.job,
+                **({"packet_job_id": arguments.packet_job} if arguments.packet_job else {}),
+            }, "agent-control",
         )
     elif arguments.command == "workspace" and arguments.workspace_command == "finish-integrated":
         request = _request(
@@ -394,6 +407,14 @@ def main() -> int:
             parser().error(f"--parameters-json must be valid JSON: {error.msg}")
         if not isinstance(parameters, dict):
             parser().error("--parameters-json must be a JSON object")
+        binding = None
+        if arguments.bead_binding_json is not None:
+            try:
+                binding = json.loads(arguments.bead_binding_json)
+            except json.JSONDecodeError as error:
+                parser().error(f"--bead-binding-json must be valid JSON: {error.msg}")
+            if not isinstance(binding, dict):
+                parser().error("--bead-binding-json must be a JSON object")
         request = _request(
             "job.start",
             "systemd-jobs",
@@ -402,6 +423,7 @@ def main() -> int:
                 "operation": arguments.operation,
                 "workspace_id": arguments.workspace,
                 "parameters": parameters,
+                **({"bead_binding": binding} if binding is not None else {}),
             },
         )
     elif arguments.command == "job" and arguments.job_command in {"get", "status"}:
