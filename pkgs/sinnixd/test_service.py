@@ -9809,3 +9809,90 @@ def test_unix_socket_server_continues_after_malformed_and_stalled_clients(
 
     assert not thread.is_alive()
     assert response["ok"]
+
+
+def test_environment_values_and_require_parse_into_the_catalog(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "declared-environment"
+    write_adapter(root)
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'unset = ["PYTHONPATH"]',
+            'unset = ["PYTHONPATH"]\n'
+            'require = ["FIXTURE_ARCHIVE_ROOT", "HOME"]\n\n'
+            "[environment.values]\n"
+            'FIXTURE_ARCHIVE_ROOT = "/realm/state/fixture"\n',
+        )
+    )
+    catalog = ProjectCatalog((root,))
+    project = catalog.get("fixture")
+
+    environment = project.environment.values()
+    row = project.environment.catalog_row(agent_capable=True)
+
+    assert environment["FIXTURE_ARCHIVE_ROOT"] == "/realm/state/fixture"
+    assert row["declared"] == ["FIXTURE_ARCHIVE_ROOT"]
+    assert row["require"] == ["FIXTURE_ARCHIVE_ROOT", "HOME"]
+    assert "/realm/state/fixture" not in json.dumps(
+        {key: value for key, value in row.items() if key != "declared"}
+    )
+
+
+def test_environment_missing_required_variable_fails_job_build_loudly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Anti-vacuity: the silent-drop inherit model shipped jobs with absent variables."""
+    from sinnixd.projects import ProjectEnvironmentError
+
+    root = tmp_path / "required-environment"
+    write_adapter(root)
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'inherit = ["HOME"]',
+            'inherit = ["HOME", "FIXTURE_ARCHIVE_ROOT"]\n'
+            'require = ["FIXTURE_ARCHIVE_ROOT"]',
+        )
+    )
+    catalog = ProjectCatalog((root,))
+    project = catalog.get("fixture")
+    monkeypatch.delenv("FIXTURE_ARCHIVE_ROOT", raising=False)
+
+    with pytest.raises(ProjectEnvironmentError, match="FIXTURE_ARCHIVE_ROOT"):
+        project.environment.values()
+
+    monkeypatch.setenv("FIXTURE_ARCHIVE_ROOT", "/realm/state/fixture")
+    assert project.environment.values()["FIXTURE_ARCHIVE_ROOT"] == (
+        "/realm/state/fixture"
+    )
+
+
+@pytest.mark.parametrize(
+    "fragment",
+    (
+        "[environment.values]\nSINNIXD_JOB_ID = \"forged\"\n",
+        "[environment.values]\nlowercase = \"rejected\"\n",
+        "[environment.values]\nFIXTURE_NUMBER = 7\n",
+        "require = [\"SINNIXD_JOB_ID\"]\n",
+        "require = [\"lowercase\"]\n",
+    ),
+)
+def test_environment_declarations_reject_forged_or_malformed_names(
+    tmp_path: Path, fragment: str
+) -> None:
+    root = tmp_path / "malformed-environment"
+    write_adapter(root)
+    descriptor = root / ".agentctl" / "project.toml"
+    marker = 'unset = ["PYTHONPATH"]'
+    if fragment.startswith("require"):
+        descriptor.write_text(
+            descriptor.read_text().replace(marker, marker + "\n" + fragment)
+        )
+    else:
+        descriptor.write_text(
+            descriptor.read_text().replace(marker, marker + "\n\n" + fragment)
+        )
+    with pytest.raises(ProjectConfigError, match="environment"):
+        ProjectCatalog((root,)).get("fixture")
