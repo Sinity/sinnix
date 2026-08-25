@@ -223,22 +223,7 @@ If any verification or cutover command fails, leave Sinnixd stopped. Before the 
 
 Both routes use the same UUID job ID, transient user service, cancellation, reconciliation, `job get/list/logs/result/wait`, and bounded artifact readers as declared operations. Their durable public record contains the principal, job kind, canonical project and checkout identity, redacted argv digest or prompt digest, and bounded artifact references. It never stores raw shell argv arguments after launch, prompt text, environment values, or credentials.
 
-`job.packet-completion` is the generic AgentCTL handoff for an agent packet. It
-requires the bound job and workspace IDs, the packet write scope, a structured
-worker delivery record, typed verification receipts (or a project-owned receipt
-provider), and explicit delegation capability metadata. The inspector composes
-the job terminal state, live workspace/Git facts, receipt heads, worker command
-results, anti-vacuity evidence, unresolved items, deletion ledger, and optional
-independent review into one bounded result. A successful process is only one
-input: dirty or untracked work, a missing commit, divergent or out-of-scope
-changes, missing/stale final-head receipts, lost worker results, unresolved
-structured delegation, or required review failure remains non-complete.
-
-Evidence-only packets must opt into no-change completion and name immutable
-evidence references. Delegation visibility is `supported` with a structured
-pending boolean or `unsupported` with no pending claim; last-message prose is
-never parsed. Project adapters own semantic receipt production, Beads remains
-task authority, and model/backend names have no completion-policy meaning.
+Delivery is a precondition of `workspace.publish` and `workspace.land`, not a caller-fed completion route. It reads the declared verification job through `job.result`, snapshots the bound workspace from Git at the job's exact launch head, and repeats that precondition after push and after review inspection. A JSON or pytest result may carry the bounded `delivery` object with only anti-vacuity, unresolved-work, delegation-visibility, deletion-evidence, and evidence-only fields. The packet write scope comes from the immutable Beads binding, never that result. Git owns paths, dirtiness, commits, and heads; the project verifier owns its result artifact; GitHub owns independent review state. A missing Beads write scope means a structured packet cannot be delivered. Beads closure consumes the returned completion artifact reference in its own owner; wiring that external closure consumer is not implemented by Sinnixd.
 
 Typed jobs accept no environment overlay. The daemon creates the `env -i` environment from the declared project environment and fixed `SINNIXD_*` identity fields. Immediately before execution, the contract runner verifies those fields, rechecks the exact registered project, canonical worktree root, common Git directory, porcelain worktree membership, and recorded HEAD. A changed, missing, symlinked, or spoofed identity fails closed. Agent handoff includes `--registered-project`, `--expected-git-common-dir`, and the canonical checkout path; nested scope creation remains disabled, so the native runner provides backend execution and native attestation while the shared transient user service remains the sole process, cgroup, timeout, and cancellation authority. Private launch inputs are mode 0600, removed before shell execution, and removed after agent handoff or every terminal lifecycle outcome, including confirmed launch failure. Native private logs are removed after handoff; only the bounded shared log and result artifacts remain addressable.
 

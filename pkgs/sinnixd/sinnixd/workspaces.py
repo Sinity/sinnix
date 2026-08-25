@@ -13,7 +13,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 from uuid import uuid4
 
 from sinnix_lib.atomic_json import modify_json, read_json, write_json_atomic
@@ -336,6 +336,22 @@ class GitWorkspaces:
     def get(self, workspace_id: str) -> dict[str, Any]:
         record = self._record(workspace_id)
         return self._status(record)
+
+    def delivery_snapshot(self, workspace_id: str, start_head: str, *, scope: Sequence[str] = ()) -> dict[str, Any]:
+        """Read one exact-head Git fact set for a delivery precondition."""
+        record = self._record(workspace_id)
+        checkout, _project = self._available(record)
+        before = self._git(checkout.path, "rev-parse", "HEAD").stdout.strip()
+        if before != checkout.head:
+            raise WorkspaceError("workspace HEAD changed during delivery snapshot")
+        descendant = self._git(checkout.path, "merge-base", "--is-ancestor", start_head, before, check=False).returncode == 0
+        changes = self._name_status(checkout.path, start_head, before)
+        dirty = self._porcelain_status(checkout.path)
+        after = self._git(checkout.path, "rev-parse", "HEAD").stdout.strip()
+        if after != before:
+            raise WorkspaceError("workspace HEAD changed during delivery snapshot")
+        paths = tuple(path for change in changes for path in change["paths"])
+        return {"workspace_id": workspace_id, "checkout_id": checkout.checkout_id, "start_head": start_head, "head": before, "descendant": descendant, "dirty": bool(dirty), "status": dirty, "changes": changes, "in_scope": all(self._scope_contains(path, scope) for path in paths) if scope else True}
 
     def checkout(self, workspace_id: str) -> RegisteredCheckout:
         record = self._record(workspace_id)
@@ -775,6 +791,67 @@ class GitWorkspaces:
         except (FileNotFoundError, KeyError, WorkspaceError):
             row.update({"state": "missing", "checkout_id": None, "head": None, "current_branch": None, "dirty": None, "identity_matches": False})
         return row
+
+    @classmethod
+    def _porcelain_status(cls, path: Path) -> list[dict[str, Any]]:
+        raw = cls._git_bytes(path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+        records = [item for item in raw.split(b"\0") if item]
+        result: list[dict[str, Any]] = []
+        index = 0
+        while index < len(records):
+            entry = records[index]
+            if len(entry) < 4 or entry[2:3] != b" ":
+                raise WorkspaceError("Git status porcelain is malformed")
+            status = entry[:2].decode("ascii", errors="strict")
+            paths = [cls._decode_git_path(entry[3:])]
+            index += 1
+            if "R" in status or "C" in status:
+                if index == len(records):
+                    raise WorkspaceError("Git status rename porcelain is malformed")
+                paths.append(cls._decode_git_path(records[index]))
+                index += 1
+            result.append({"status": status, "paths": paths})
+        return result
+
+    @classmethod
+    def _name_status(cls, path: Path, start_head: str, head: str) -> list[dict[str, Any]]:
+        raw = cls._git_bytes(path, "diff", "--name-status", "-z", "--find-renames", start_head, head, "--")
+        records = [item for item in raw.split(b"\0") if item]
+        result: list[dict[str, Any]] = []
+        index = 0
+        while index < len(records):
+            status = records[index].decode("ascii", errors="strict")
+            if not status or status[0] not in "ACDMRTUXB":
+                raise WorkspaceError("Git diff name-status porcelain is malformed")
+            index += 1
+            count = 2 if status[0] in {"R", "C"} else 1
+            if len(records) - index < count:
+                raise WorkspaceError("Git diff rename porcelain is malformed")
+            result.append({"status": status, "paths": [cls._decode_git_path(item) for item in records[index:index + count]]})
+            index += count
+        return result
+
+    @staticmethod
+    def _decode_git_path(value: bytes) -> str:
+        try:
+            path = value.decode()
+        except UnicodeDecodeError as error:
+            raise WorkspaceError("Git path is not UTF-8") from error
+        if not path or Path(path).is_absolute() or ".." in Path(path).parts:
+            raise WorkspaceError("Git path is unsafe")
+        return path
+
+    @staticmethod
+    def _scope_contains(path: str, scope: Sequence[str]) -> bool:
+        for entry in scope:
+            if not isinstance(entry, str) or not entry or entry.startswith("/") or ".." in Path(entry).parts:
+                raise WorkspaceError("delivery scope is unsafe")
+            if entry.endswith("/"):
+                if path.startswith(entry):
+                    return True
+            elif path == entry:
+                return True
+        return False
 
     def _record(self, workspace_id: str) -> WorkspaceRecord:
         for record in self.store.records():

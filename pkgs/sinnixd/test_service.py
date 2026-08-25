@@ -4463,7 +4463,7 @@ def test_declared_job_binds_workspace_and_exact_head(tmp_path: Path) -> None:
     assert record.spec.checkout["head"] == workspace["head"]
 
 
-def test_packet_completion_dispatch_composes_job_and_workspace_bindings(tmp_path: Path) -> None:
+def test_forged_packet_completion_arguments_have_no_service_route(tmp_path: Path) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     jobs = generic_jobs(tmp_path)
@@ -4503,9 +4503,31 @@ def test_packet_completion_dispatch_composes_job_and_workspace_bindings(tmp_path
         )
     )
 
-    assert response.ok and response.payload is not None
-    assert not response.payload.inline["complete"]
-    assert "worker_result_missing" in response.payload.inline["reasons"]
+    assert response.error is not None
+    assert response.error.code.value == "INVALID_ARGUMENT"
+
+
+def test_delivery_snapshot_is_nul_safe_and_exact_file_scope_does_not_include_descendants(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    workspace = service.workspaces.create(project_id="fixture", name="snapshot-lane", branch="feature/snapshot", base="HEAD")
+    path = Path(workspace["path"])
+    (path / "dir").mkdir()
+    (path / "dir" / "exact").write_text("old\n")
+    (path / "dir" / "delete\nfile").write_text("delete\n")
+    subprocess.run(["git", "-C", str(path), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "seed"], check=True)
+    start = service.workspaces.get(workspace["workspace_id"])["head"]
+    subprocess.run(["git", "-C", str(path), "mv", "dir/exact", "dir/renamed\nfile"], check=True)
+    (path / "dir" / "delete\nfile").unlink()
+    (path / "dir" / "exact.child").write_text("outside exact-file scope\n")
+    subprocess.run(["git", "-C", str(path), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "paths"], check=True)
+    snapshot = service.workspaces.delivery_snapshot(workspace["workspace_id"], start, scope=("dir/exact",))
+    assert not snapshot["in_scope"]
+    assert {change["status"][0] for change in snapshot["changes"]} >= {"D", "R", "A"}
+    assert any("\n" in item for change in snapshot["changes"] for item in change["paths"])
+    assert service.workspaces.delivery_snapshot(workspace["workspace_id"], start, scope=("dir/",))["in_scope"]
 
 
 def test_admission_revalidates_queued_declared_workspace_before_systemd_launch(tmp_path: Path) -> None:
