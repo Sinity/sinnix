@@ -5,10 +5,9 @@
 # demand by AI agent runtimes via the stdio transport registered in
 # mcp-registry.nix.
 #
-# Substrate materialization is a daily oneshot systemd timer.
-# When `enable = true` and `materializationTimer.enable = true`, the full DAG
-# runs daily and promotes results to the DuckDB substrate so observability
-# answers don't lag the week.
+# A daily oneshot only submits Lynchpin's typed convergence plan to sinnixd.
+# The runtime owns admission, node dependencies, reuse, artifacts, and the
+# exclusive promotion job; this module does not execute the DAG itself.
 #
 # Enable with:
 #   sinnix.services.lynchpin.enable = true;
@@ -62,29 +61,8 @@ mkServiceModule {
     }:
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-      machineTelemetryDb = "${config.sinnix.paths.machineRoot}/telemetry.sqlite";
       machineTelemetryLakeRoot = "${config.sinnix.paths.dataRoot}/derived/machine-telemetry";
       localRoot = "${cfg.repoRoot}/.lynchpin";
-      # github_context shells out to `gh`, which authenticates from
-      # GITHUB_TOKEN. A systemd unit sources no profile.d, so the agenix
-      # export every interactive shell gets is not there -- resolve the
-      # secret explicitly and exec the CLI.
-      materializeEntrypoint = pkgs.writeShellApplication {
-        name = "lynchpin-materialize-entrypoint";
-        runtimeInputs = [ pkgs.coreutils ];
-        text = ''
-          ${lib.sinnix.mkSecretLookup {
-            secretName = "github-token";
-            caller = "lynchpin-materialize";
-          }}
-          if [ -e ${lib.escapeShellArg machineTelemetryDb} ]; then
-            ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.cli.machine_telemetry_export
-          else
-            echo "lynchpin: machine telemetry database is absent; skipping lake export" >&2
-          fi
-          exec ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.cli.materialize --all --promote --history incremental
-        '';
-      };
       localHotDirs = [
         "cache"
         "enrich"
@@ -125,53 +103,19 @@ mkServiceModule {
         '';
       };
 
-      # Optional: daily substrate materialization.
-      # Refreshes bounded per-product tails, then publishes a full coherent
-      # graph by replacing only its affected tail in the candidate generation.
-      # Whole-history replay is an explicit repair operation, never timer work.
+      # Optional: submit the daily typed convergence plan. This unit is only a
+      # control-plane trigger; its child jobs own execution and result state.
       systemd.services.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {
-        description = "Lynchpin analysis DAG materialization";
-        # A broken ExecStart here fails silently every night; route failures
-        # to the desktop like the backup jobs do.
+        description = "Submit Lynchpin convergence plan";
         onFailure = [ "sinnix-unit-failure-notify@%n.service" ];
         requires = [ "lynchpin-local-attrs.service" ];
-        after = [
-          "network.target"
-          "lynchpin-local-attrs.service"
-        ];
-        path = [
-          pkgs.git
-          # code_snapshot invokes repomix directly. Systemd does not inherit
-          # environment.systemPackages, so this runtime dependency belongs in
-          # the unit PATH rather than only in the interactive CLI feature.
-          pkgs.repomix
-          # github_context calls `gh` via shutil.which and records
-          # "gh_not_found" for every repo when it is absent -- which is
-          # exactly what it did, nightly, unnoticed, until a different
-          # failure earlier in the DAG stopped it from getting this far.
-          pkgs.gh
-        ];
-        # The materialization CLI resolves `.lynchpin/` relative to its working
-        # directory (repo-rooted, like git), so without WorkingDirectory the
-        # unit runs from `/` and dies on PermissionError. Pin CWD and the root
-        # env vars.
+        after = [ "lynchpin-local-attrs.service" ];
         serviceConfig = {
           Type = "oneshot";
-          # `lynchpin.analysis materialize` is not a valid subcommand; the
-          # transparent-DAG runner is lynchpin.cli.materialize (requires
-          # explicit --all).
-          ExecStart = "${materializeEntrypoint}/bin/lynchpin-materialize-entrypoint";
+          ExecStart = "${scriptPkgs.sinnixd}/bin/agentctl job start lynchpin schedule_convergence";
           User = "sinity";
           Group = "users";
-          WorkingDirectory = cfg.repoRoot;
-          Environment = [
-            "LYNCHPIN_REPO_ROOT=${cfg.repoRoot}"
-            "LYNCHPIN_LOCAL_ROOT=${cfg.repoRoot}/.lynchpin"
-            "LYNCHPIN_MACHINE_TELEMETRY_DB=${machineTelemetryDb}"
-            "LYNCHPIN_MACHINE_TELEMETRY_LAKE_ROOT=${machineTelemetryLakeRoot}"
-          ];
-          # 4-hour timeout — the full DAG can be heavy.
-          TimeoutStartSec = 14400;
+          TimeoutStartSec = 60;
         };
       };
 
@@ -183,11 +127,11 @@ mkServiceModule {
       # this daily job in front of the health sweep, which it was not.
       sinnix.runtime.surfaces.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {
         unit = "lynchpin-materialize.service";
-        resourceClass = "background-maintenance";
+        resourceClass = "system";
         observe.enable = true;
         workload = {
           class = "sacrificial";
-          rationale = "Daily analysis DAG and browser-history capture; rerunnable at will.";
+          rationale = "Short daily control-plane submission; AgentCTL owns all materialization work.";
         };
         captures = [
           {
