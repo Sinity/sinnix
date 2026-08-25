@@ -7494,7 +7494,7 @@ def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(
                 "project_id": "fixture",
                 "checkout_id": "default",
                 "prompt": "operator prompt",
-                "backend": "codex",
+                "backend": "claude",
                 "model": "fixture",
                 "effort": "high",
                 "credential_profile": "subscription",
@@ -7539,6 +7539,7 @@ def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(
     assert "shell-secret" not in persisted
     assert "display only" not in persisted
     assert operator_agent.payload.inline["principal"] == "operator"
+    assert operator_agent.payload.inline["contract"]["backend"] == "claude"
     assert len(systemd.started) == 3
     assert all(start["unit"].startswith("sinnixd-job-") for start in systemd.started)
     restarted = GenericJobs(systemd, service.jobs.store, wait_poll_seconds=0.001)
@@ -7854,7 +7855,7 @@ def test_agent_environment_preflight_timeout_is_distinct_and_prevents_native_run
     monkeypatch.setattr(runner_module.subprocess, "run", timeout)
     with pytest.raises(RunnerError, match="agent-preflight-timeout.*30 seconds"):
         _run_agent(payload, tmp_path, native_runner=runner, state_root=state)
-    assert observed["timeout"] == 30
+    assert observed == {"cwd": tmp_path, "check": False, "timeout": 30}
     assert not (results / "fixture.result").exists()
 
 

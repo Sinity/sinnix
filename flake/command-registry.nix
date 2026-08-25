@@ -533,7 +533,7 @@ in
     };
 
     test-system = {
-      description = "Test configuration without applying it to the system (nh os test)";
+      description = "Build and activate a temporary host configuration with nh os test";
       script = ''
         ${resolveFlakeDir}
         ${rebuildLock "test-system"}
@@ -557,7 +557,7 @@ in
     };
 
     boot = {
-      description = "Build + set boot default, activate on next reboot (nh os boot)";
+      description = "Build and set the boot default for activation on the next reboot (nh os boot)";
       script = ''
         ${resolveFlakeDir}
         ${rebuildLock "boot"}
@@ -673,12 +673,12 @@ in
     {
       name = "boot";
       category = "Core";
-      description = "Build + set boot default — safer, reboot to activate (nh os boot)";
+      description = "Build and set the boot default for activation on the next reboot (nh os boot)";
     }
     {
       name = "test-system";
       category = "Core";
-      description = "Test host config without persisting (nh os test)";
+      description = "Build and activate a temporary host configuration with nh os test";
     }
     {
       name = "test-vm";

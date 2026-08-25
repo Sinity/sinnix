@@ -31,6 +31,7 @@ in
     ./tests/capture-clipboard.nix
     ./tests/capture-primary.nix
     ./tests/backup.nix
+    ./tests/command-registry.nix
     ./tests/agent-environment.nix
     ./tests/agent-parity.nix
     ./tests/swarm-fixture.nix

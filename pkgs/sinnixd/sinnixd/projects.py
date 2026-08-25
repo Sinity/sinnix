@@ -491,6 +491,10 @@ class ProjectAdapter:
     operations: tuple[ProjectOperation, ...]
     owner_adapters: tuple[ProjectOwnerAdapter, ...] = ()
 
+    @property
+    def agent_capable(self) -> bool:
+        return self.workspace is not None
+
     def operation(self, name: str) -> ProjectOperation:
         for operation in self.operations:
             if operation.name == name:
@@ -519,11 +523,9 @@ class ProjectAdapter:
             "digest": self.digest,
             "descriptor_status": self.descriptor_status(),
             "environment": self.environment.catalog_row(
-                agent_capable=self.workspace is not None
+                agent_capable=self.agent_capable
             ),
-            "workspace": self.workspace.catalog_row()
-            if self.workspace is not None
-            else None,
+            "workspace": self.workspace.catalog_row() if self.agent_capable else None,
             "conflicts": self.conflicts.catalog_row(),
             "operations": [operation.catalog_row() for operation in self.operations],
             "owner_adapters": [
@@ -1377,7 +1379,7 @@ def validate_agent_environment_descriptors(roots: Iterable[Path]) -> None:
                 f"{project_name}: invalid descriptor {descriptor}: {error}"
             )
             continue
-        if adapter.workspace is None:
+        if not adapter.agent_capable:
             continue
     if diagnostics:
         raise ProjectConfigError(
