@@ -451,7 +451,10 @@ def test_owned_scratch_is_injected_cleaned_on_terminal_and_recovered(
     )
     record = subject.store.load(started["job_id"])
     assert record.scratch_path is not None and record.scratch_path.exists()
-    assert systemd.started[0]["environment"]["TMPDIR"] == str(record.scratch_path)
+    command, environment = subject.store.declared_launch(record.job_id)
+    assert command[:2] == ("env", f"TMPDIR={record.scratch_path}")
+    assert "TMPDIR" not in environment
+    assert "TMPDIR" not in systemd.started[0]["environment"]
     systemd.properties = {
         "LoadState": "loaded",
         "ActiveState": "inactive",
@@ -588,9 +591,10 @@ def test_queued_job_recreates_aged_scratch_before_launch(
 
     assert launched["state"]["phase"] in {"submitted", "running"}
     assert queued_record.scratch_path.is_dir()
-    assert systemd.started[-1]["environment"]["TMPDIR"] == str(
-        queued_record.scratch_path
-    )
+    command, environment = subject.store.declared_launch(queued_record.job_id)
+    assert command[:2] == ("env", f"TMPDIR={queued_record.scratch_path}")
+    assert "TMPDIR" not in environment
+    assert "TMPDIR" not in systemd.started[-1]["environment"]
 
 
 def test_exit_json_pytest_and_agent_result_parsers_are_contract_specific(
