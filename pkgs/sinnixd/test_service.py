@@ -582,6 +582,7 @@ def test_agentctl_job_list_exposes_service_pagination(
         "cursor": "next-page",
         "project_id": "polylogue",
         "phases": ["queued", "running"],
+        "kinds": [],
         "active_only": True,
     }
 
@@ -7929,6 +7930,8 @@ def test_project_get_publishes_agent_environment_capability(tmp_path: Path) -> N
         "command": ["fixture-env", "--command"],
         "preflight": ["devtools", "status", "--stderr"],
         "agent_capable": True,
+        "declared": [],
+        "require": [],
     }
 
 
@@ -9896,3 +9899,174 @@ def test_environment_declarations_reject_forged_or_malformed_names(
         )
     with pytest.raises(ProjectConfigError, match="environment"):
         ProjectCatalog((root,)).get("fixture")
+
+
+@pytest.mark.parametrize(
+    ("argv", "operation", "payload"),
+    (
+        (
+            ("agentctl", "agent", "list", "--active"),
+            "job.list",
+            {
+                "limit": 100,
+                "cursor": None,
+                "project_id": None,
+                "phases": [],
+                "kinds": ["attested-agent"],
+                "active_only": True,
+            },
+        ),
+        (
+            (
+                "agentctl",
+                "agent",
+                "status",
+                "74e64cb4-282e-4b27-b4b1-af052b268161",
+            ),
+            "job.get",
+            {"job_id": "74e64cb4-282e-4b27-b4b1-af052b268161"},
+        ),
+        (
+            (
+                "agentctl",
+                "agent",
+                "wait",
+                "74e64cb4-282e-4b27-b4b1-af052b268161",
+                "84e64cb4-282e-4b27-b4b1-af052b268161",
+                "--any",
+                "--timeout-seconds",
+                "120",
+            ),
+            "job.wait",
+            {
+                "job_ids": [
+                    "74e64cb4-282e-4b27-b4b1-af052b268161",
+                    "84e64cb4-282e-4b27-b4b1-af052b268161",
+                ],
+                "timeout_seconds": 120,
+            },
+        ),
+        (
+            (
+                "agentctl",
+                "agent",
+                "result",
+                "74e64cb4-282e-4b27-b4b1-af052b268161",
+            ),
+            "job.result",
+            {"job_id": "74e64cb4-282e-4b27-b4b1-af052b268161", "max_bytes": 64_000},
+        ),
+        (
+            (
+                "agentctl",
+                "job",
+                "list",
+                "--kind",
+                "attested-agent",
+                "--kind",
+                "declared-operation",
+            ),
+            "job.list",
+            {
+                "limit": 100,
+                "cursor": None,
+                "project_id": None,
+                "phases": [],
+                "kinds": ["attested-agent", "declared-operation"],
+                "active_only": False,
+            },
+        ),
+        (
+            (
+                "agentctl",
+                "job",
+                "wait",
+                "74e64cb4-282e-4b27-b4b1-af052b268161",
+            ),
+            "job.wait",
+            {
+                "job_id": "74e64cb4-282e-4b27-b4b1-af052b268161",
+                "timeout_seconds": 30,
+            },
+        ),
+    ),
+)
+def test_agentctl_supervision_commands_map_to_job_envelopes(
+    argv: tuple[str, ...],
+    operation: str,
+    payload: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, RequestEnvelope] = {}
+
+    def fake_call(socket_path, request_value):
+        captured["request"] = request_value
+        return {"schema": 1, "ok": True}
+
+    monkeypatch.setattr(sys, "argv", list(argv))
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    outbound = captured["request"]
+    assert outbound.operation == operation
+    assert outbound.owner == "systemd-jobs"
+    assert dict(outbound.arguments) == payload
+
+
+@pytest.mark.parametrize("launch_form", (("launch",), ()))
+def test_agent_dispatch_and_launch_forms_send_the_same_contract(
+    launch_form: tuple[str, ...],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: the launch alias failing loudly was retried blind by coordinators."""
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("fixture prompt")
+    captured: dict[str, RequestEnvelope] = {}
+
+    def fake_call(socket_path, request_value):
+        captured["request"] = request_value
+        return {"schema": 1, "ok": True}
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "agentctl",
+            "agent",
+            *launch_form,
+            "--project",
+            "fixture",
+            "--checkout",
+            "default",
+            "--prompt-file",
+            str(prompt_file),
+            "--backend",
+            "codex",
+            "--model",
+            "fixture-model",
+            "--effort",
+            "high",
+        ],
+    )
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    outbound = captured["request"]
+    assert outbound.operation == "job.agent.start"
+    assert outbound.arguments["prompt"] == "fixture prompt"
+    assert outbound.arguments["backend"] == "codex"
+
+
+def test_agent_dispatch_without_required_flags_names_the_alternatives(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["agentctl", "agent", "--project", "fixture"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli_module.main()
+
+    assert excinfo.value.code == 2
+    stderr = capsys.readouterr().err
+    assert "--checkout" in stderr
+    assert "agent launch|list|status|wait|result" in stderr

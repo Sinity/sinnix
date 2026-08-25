@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Condition, Lock, RLock
 from typing import Any, Iterator, Protocol
@@ -1669,8 +1669,13 @@ class GenericJobStore:
         path = self._record_path(job_id)
         try:
             value = json.loads(path.read_text())
-        except FileNotFoundError as error:
-            raise JobRecordError(f"unknown job: {job_id}") from error
+        except FileNotFoundError:
+            try:
+                value = json.loads(self._archived_record_path(job_id).read_text())
+            except FileNotFoundError as error:
+                raise JobRecordError(f"unknown job: {job_id}") from error
+            except (OSError, json.JSONDecodeError) as error:
+                raise JobRecordError(f"malformed job record: {job_id}") from error
         except (OSError, json.JSONDecodeError) as error:
             raise JobRecordError(f"malformed job record: {job_id}") from error
         if not isinstance(value, Mapping):
@@ -1905,6 +1910,48 @@ class GenericJobStore:
         _ = job_unit_name(job_id)
         return self.records_root / f"{job_id}.json"
 
+    @property
+    def archived_records_root(self) -> Path:
+        return self.root / "jobs-archive"
+
+    def _archived_record_path(self, job_id: str) -> Path:
+        _ = job_unit_name(job_id)
+        return self.archived_records_root / f"{job_id}.json"
+
+    def prune_terminal_records(self, *, retention_days: int) -> int:
+        """Move terminal records past the retention window out of the live set.
+
+        Listing costs one parse per live record file, so an unbounded terminal
+        history degrades every list forever. Archived records stay loadable by
+        id; non-terminal records are never touched, and an unparseable
+        timestamp keeps its record in place rather than guessing.
+        """
+        if retention_days <= 0 or not self.records_root.exists():
+            return 0
+        cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+        moved = 0
+        for path in sorted(self.records_root.glob("*.json")):
+            try:
+                record = self.load(path.stem)
+            except JobRecordError:
+                continue
+            if not record.state.get("terminal"):
+                continue
+            observed = record.state.get("observed_at") or record.created_at
+            try:
+                stamp = datetime.fromisoformat(str(observed))
+            except ValueError:
+                continue
+            if stamp.tzinfo is None or stamp >= cutoff:
+                continue
+            _ensure_durable_directory(self.archived_records_root)
+            os.replace(path, self._archived_record_path(record.job_id))
+            _fsync_directory(self.archived_records_root)
+            _fsync_directory(self.records_root)
+            (self.locks_root / f"{record.job_id}.lock").unlink(missing_ok=True)
+            moved += 1
+        return moved
+
 
 @dataclass
 class GenericJobs:
@@ -1916,6 +1963,7 @@ class GenericJobs:
     pressure_probe: Callable[[], Mapping[str, float]] = _host_pressure
     before_admission_start: Callable[[str], None] | None = None
     notify_socket: Path | None = None
+    record_retention_days: int = 14
     events: TerminalEvents = field(default_factory=TerminalEvents, repr=False)
     _admission_lock: RLock = field(default_factory=RLock, init=False, repr=False)
 
@@ -1951,6 +1999,7 @@ class GenericJobs:
                 state = self._admission_state()
                 for record in finalized:
                     self._finish_admission(record, state)
+        self.store.prune_terminal_records(retention_days=self.record_retention_days)
 
     def _recover_unpublished_declared_locked(
         self, record: GenericJobRecord
@@ -2693,6 +2742,7 @@ class GenericJobs:
         cursor: str | None = None,
         project_id: str | None = None,
         phases: tuple[str, ...] = (),
+        kinds: tuple[str, ...] = (),
         active_only: bool = False,
     ) -> dict[str, Any]:
         if not 1 <= limit <= 1_000:
@@ -2703,8 +2753,11 @@ class GenericJobs:
             raise ValueError("job list project_id must be a non-empty string")
         if any(not isinstance(phase, str) or not phase for phase in phases):
             raise ValueError("job list phases must be non-empty strings")
+        if any(not isinstance(kind, str) or not kind for kind in kinds):
+            raise ValueError("job list kinds must be non-empty strings")
         query = {
             "active_only": active_only,
+            "kinds": sorted(set(kinds)),
             "phases": sorted(set(phases)),
             "project_id": project_id,
         }
@@ -2717,6 +2770,7 @@ class GenericJobs:
                 if principal == "operator" or record.spec.principal == principal
                 if project_id is None or record.spec.project_id == project_id
                 if not query["phases"] or record.state.get("phase") in query["phases"]
+                if not query["kinds"] or record.spec.kind in query["kinds"]
                 if not active_only or not record.state.get("terminal", False)
             ),
             key=_job_order_key,

@@ -597,6 +597,7 @@ class SinnixdService:
                 "cursor",
                 "project_id",
                 "phases",
+                "kinds",
                 "active_only",
             }:
                 raise ValueError(
@@ -616,6 +617,11 @@ class SinnixdService:
                 not isinstance(phase, str) for phase in phases
             ):
                 raise ValueError("job.list phases must be a list of strings")
+            kinds = arguments.get("kinds", [])
+            if not isinstance(kinds, list) or any(
+                not isinstance(kind, str) for kind in kinds
+            ):
+                raise ValueError("job.list kinds must be a list of strings")
             active_only = arguments.get("active_only", False)
             if not isinstance(active_only, bool):
                 raise ValueError("job.list active_only must be a boolean")
@@ -626,6 +632,7 @@ class SinnixdService:
                     cursor=cursor,
                     project_id=project_id,
                     phases=tuple(phases),
+                    kinds=tuple(kinds),
                     active_only=active_only,
                 )
             )
