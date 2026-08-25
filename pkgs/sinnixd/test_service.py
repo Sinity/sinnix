@@ -183,6 +183,7 @@ def test_canonical_client_redacts_unrecognized_json_rpc_errors(tmp_path: Path) -
         (("agentctl", "task", "create", "fixture", "typed title", "--description", "typed description", "--type", "task", "--priority", "2", "--label", "area:agentctl", "--parent", "fixture-parent", "--dependency", "depends-on:fixture-blocker", "--request-id", "request-1"), "task.create", {"project_id": "fixture", "title": "typed title", "description": "typed description", "issue_type": "task", "priority": 2, "labels": ["area:agentctl"], "parent_task_id": "fixture-parent", "dependencies": [{"relation": "depends-on", "task_id": "fixture-blocker"}]}),
         (("agentctl", "task", "claim", "fixture", "fixture-1", "--request-id", "request-1"), "task.claim", {"project_id": "fixture", "task_id": "fixture-1"}),
         (("agentctl", "task", "note", "fixture", "fixture-1", "note", "--request-id", "request-1"), "task.note", {"project_id": "fixture", "task_id": "fixture-1", "text": "note"}),
+        (("agentctl", "task", "note", "fixture", "fixture-1", "--text", "note", "--request-id", "request-1"), "task.note", {"project_id": "fixture", "task_id": "fixture-1", "text": "note"}),
         (("agentctl", "task", "relate", "fixture", "fixture-1", "fixture-2", "--request-id", "request-1"), "task.relate", {"project_id": "fixture", "task_id": "fixture-1", "related_task_id": "fixture-2"}),
         (("agentctl", "task", "complete", "fixture", "fixture-1", "--reason", "done", "--merge-sha", "a" * 40, "--request-id", "request-1"), "task.complete", {"project_id": "fixture", "task_id": "fixture-1", "reason": "done", "merge_sha": "a" * 40}),
         (("agentctl", "task", "release", "fixture", "fixture-1", "--if-assignee", "worker", "--request-id", "request-1"), "task.release", {"project_id": "fixture", "task_id": "fixture-1", "if_assignee": "worker"}),
@@ -242,6 +243,33 @@ def test_agentctl_task_mutations_require_a_stable_request_id() -> None:
         cli_module.parser().parse_args(["task", "create", "fixture", "title", "--description", "body", "--type", "task", "--priority", "2"])
     with pytest.raises(SystemExit):
         cli_module.parser().parse_args(["task", "create", "fixture", "title", "--description", "body", "--type", "task", "--priority", "5", "--request-id", "request-1"])
+
+
+@pytest.mark.parametrize(
+    "argv",
+    (
+        ["agentctl", "task", "note", "fixture", "fixture-1", "--request-id", "request-1"],
+        [
+            "agentctl",
+            "task",
+            "note",
+            "fixture",
+            "fixture-1",
+            "positional",
+            "--text",
+            "option",
+            "--request-id",
+            "request-1",
+        ],
+    ),
+)
+def test_agentctl_task_note_requires_one_text_spelling(
+    argv: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "argv", argv)
+
+    with pytest.raises(SystemExit):
+        cli_module.main()
 
 
 def test_agentctl_job_start_accepts_checkout_as_workspace_alias() -> None:

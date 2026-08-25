@@ -186,7 +186,8 @@ def parser() -> argparse.ArgumentParser:
     task_note = task_subcommands.add_parser("note")
     task_note.add_argument("project_id")
     task_note.add_argument("task_id")
-    task_note.add_argument("text")
+    task_note.add_argument("text", nargs="?")
+    task_note.add_argument("--text", dest="text_option")
     task_note.add_argument("--request-id", required=True)
     task_relate = task_subcommands.add_parser("relate")
     task_relate.add_argument("project_id")
@@ -479,7 +480,11 @@ def main() -> int:
         elif arguments.task_command in {"get", "claim", "complete", "release", "note", "relate"}:
             task_arguments["task_id"] = arguments.task_id
             if arguments.task_command == "note":
-                task_arguments["text"] = arguments.text
+                if (arguments.text is None) == (arguments.text_option is None):
+                    parser().error("task note requires exactly one of positional text or --text")
+                task_arguments["text"] = (
+                    arguments.text_option if arguments.text_option is not None else arguments.text
+                )
             elif arguments.task_command == "relate":
                 task_arguments["related_task_id"] = arguments.related_task_id
             elif arguments.task_command in {"complete", "release"}:
