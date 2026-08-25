@@ -42,6 +42,7 @@ MAX_WAIT_SECONDS = 3600
 MAX_WAIT_ANY_JOBS = 32
 MAX_TERMINAL_EVENT_ENTRIES = 4096
 NOTIFY_TIMEOUT_SECONDS = 2.0
+MAX_EVENT_SPOOL_BYTES = 64 * 1024 * 1024
 SYSTEMD_COMMAND_TIMEOUT_SECONDS = 0.25
 CANCEL_OUTCOME_RECONCILIATION_GRACE_SECONDS = 300
 MAX_LOG_BYTES = 64_000
@@ -1964,8 +1965,10 @@ class GenericJobs:
     before_admission_start: Callable[[str], None] | None = None
     notify_socket: Path | None = None
     record_retention_days: int = 14
+    event_spool_path: Path | None = None
     events: TerminalEvents = field(default_factory=TerminalEvents, repr=False)
     _admission_lock: RLock = field(default_factory=RLock, init=False, repr=False)
+    _spooled: set[str] = field(default_factory=set, init=False, repr=False)
 
     def __post_init__(self) -> None:
         # Recovery observes only the durable nonterminal set. Terminal lease
@@ -1988,7 +1991,7 @@ class GenericJobs:
                 ):
                     record = self._recover_unpublished_declared_locked(record)
                 if record.state.get("terminal"):
-                    self._terminal_cleanup(record)
+                    self._finalize_terminal(record)
                 else:
                     self._get_locked(record.job_id)
                     record = self.store.load(record.job_id)
@@ -2495,7 +2498,7 @@ class GenericJobs:
                     updated = self._with_state(record, blocked)
                     self.store.save(updated)
                     if blocked.get("terminal"):
-                        self._terminal_cleanup(updated)
+                        self._finalize_terminal(updated)
                         self._finish_admission(updated, state)
                     continue
                 policy = POOL_POLICIES[record.spec.pool]
@@ -2586,7 +2589,7 @@ class GenericJobs:
                         },
                     )
                     self.store.save(terminal)
-                    self._terminal_cleanup(terminal)
+                    self._finalize_terminal(terminal)
                 else:
                     submitted = self._with_state(
                         current,
@@ -2599,7 +2602,7 @@ class GenericJobs:
                     )
                     self.store.save(submitted)
             if terminal is not None and terminal.state.get("terminal"):
-                self._terminal_cleanup(terminal)
+                self._finalize_terminal(terminal)
                 self._finish_admission(terminal, state)
             elif submitted is not None:
                 active[submitted.spec.pool].append(submitted)
@@ -2681,6 +2684,53 @@ class GenericJobs:
                 state["estimates"], MAX_ADMISSION_ESTIMATES
             )
         self._save_admission_state(state)
+
+    def _finalize_terminal(self, record: GenericJobRecord) -> None:
+        """Handle a just-observed terminal transition exactly once per process.
+
+        Already-terminal records re-observed later (restart recovery, repeat
+        gets) go through _terminal_cleanup directly and are never re-spooled:
+        a terminal record cannot transition again, so the once-set only needs
+        process scope.
+        """
+        if record.job_id not in self._spooled:
+            self._spooled.add(record.job_id)
+            self._spool_terminal_event(record)
+        self._terminal_cleanup(record)
+
+    def _spool_terminal_event(self, record: GenericJobRecord) -> None:
+        if self.event_spool_path is None:
+            return
+        checkout = record.spec.checkout
+        line = json.dumps(
+            {
+                "job_id": record.job_id,
+                "kind": record.spec.kind,
+                "project": record.spec.project_id,
+                "phase": record.state.get("phase"),
+                "completed_at": record.state.get("observed_at"),
+                "checkout": checkout.get("checkout_id")
+                if isinstance(checkout, Mapping)
+                else None,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        try:
+            _ensure_durable_directory(self.event_spool_path.parent)
+            try:
+                if self.event_spool_path.stat().st_size > MAX_EVENT_SPOOL_BYTES:
+                    os.replace(
+                        self.event_spool_path,
+                        self.event_spool_path.with_suffix(".jsonl.old"),
+                    )
+            except FileNotFoundError:
+                pass
+            with open(self.event_spool_path, "a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+        except OSError:
+            # The spool is an advisory watch point, never state authority.
+            pass
 
     def _terminal_cleanup(self, record: GenericJobRecord) -> None:
         self.events.fire(record.job_id)
@@ -2947,7 +2997,7 @@ class GenericJobs:
                 }
         with self._admission_lock:
             if terminal is not None:
-                self._terminal_cleanup(terminal)
+                self._finalize_terminal(terminal)
                 self._finish_admission(terminal, self._admission_state())
             elif response["state"].get("terminal"):
                 self._finish_admission(self.store.load(job_id), self._admission_state())
@@ -3104,7 +3154,7 @@ class GenericJobs:
             return self._public(record, state)
         self.store.save(updated)
         if state.get("terminal"):
-            self._terminal_cleanup(updated)
+            self._finalize_terminal(updated)
         return self._public(updated, state)
 
     @staticmethod
@@ -3143,13 +3193,13 @@ class GenericJobs:
             }
             updated = self._with_state(record, state)
             self.store.save(updated)
-            self._terminal_cleanup(updated)
+            self._finalize_terminal(updated)
             return self._public(updated, state)
         state = self._classify(properties, record)
         updated = self._with_state(record, state)
         self.store.save(updated)
         if state.get("terminal"):
-            self._terminal_cleanup(updated)
+            self._finalize_terminal(updated)
         return self._public(updated, state)
 
     @staticmethod

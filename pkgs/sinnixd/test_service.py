@@ -10070,3 +10070,116 @@ def test_agent_dispatch_without_required_flags_names_the_alternatives(
     stderr = capsys.readouterr().err
     assert "--checkout" in stderr
     assert "agent launch|list|status|wait|result" in stderr
+
+
+def test_attested_agent_environment_carries_agent_actor_attribution(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: agents inheriting the operator's default actor pollute task audit trails."""
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    runner = tmp_path / "native-runner"
+    native_runner(runner)
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]),
+        jobs=generic_jobs(tmp_path, FakeSystemdJobs()),
+        native_runner=runner,
+    )
+
+    agent = service.dispatch(
+        request(
+            "job.agent.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "checkout_id": "default",
+                "prompt": "fixture prompt",
+                "backend": "codex",
+                "model": "fixture",
+                "effort": "high",
+                "credential_profile": "subscription",
+                "timeout_seconds": 60,
+                "result": "last-message",
+            },
+            "agent-control",
+        )
+    )
+    shell = service.dispatch(
+        request(
+            "job.shell.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "checkout_id": "default",
+                "argv": ["printf", "shell"],
+                "cwd": ".",
+                "timeout_seconds": 60,
+                "result": "exit-status",
+            },
+            "operator",
+        )
+    )
+
+    assert agent.ok and shell.ok
+    agent_job_id = agent.payload.inline["job_id"]
+    agent_keys = service.jobs.store.load(agent_job_id).spec.environment_keys
+    shell_keys = service.jobs.store.load(
+        shell.payload.inline["job_id"]
+    ).spec.environment_keys
+    launched = {
+        started["unit"]: started["environment"]
+        for started in service.jobs.systemd.started
+    }
+    assert "BEADS_ACTOR" in agent_keys
+    assert "BEADS_ACTOR" not in shell_keys
+    agent_unit = f"sinnixd-job-{agent_job_id}.service"
+    assert launched[agent_unit]["BEADS_ACTOR"] == f"agent-{agent_job_id}"
+
+
+def test_descriptor_declared_actor_overrides_the_per_job_attribution(
+    tmp_path: Path,
+) -> None:
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'unset = ["PYTHONPATH"]',
+            'unset = ["PYTHONPATH"]\n\n[environment.values]\n'
+            'BEADS_ACTOR = "fixture-fleet"\n',
+        )
+    )
+    initialize_git_checkout(tmp_path)
+    runner = tmp_path / "native-runner"
+    native_runner(runner)
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]),
+        jobs=generic_jobs(tmp_path, FakeSystemdJobs()),
+        native_runner=runner,
+    )
+
+    agent = service.dispatch(
+        request(
+            "job.agent.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "checkout_id": "default",
+                "prompt": "fixture prompt",
+                "backend": "codex",
+                "model": "fixture",
+                "effort": "high",
+                "credential_profile": "subscription",
+                "timeout_seconds": 60,
+                "result": "last-message",
+            },
+            "agent-control",
+        )
+    )
+
+    assert agent.ok
+    launched = {
+        started["unit"]: started["environment"]
+        for started in service.jobs.systemd.started
+    }
+    agent_unit = f"sinnixd-job-{agent.payload.inline['job_id']}.service"
+    assert launched[agent_unit]["BEADS_ACTOR"] == "fixture-fleet"

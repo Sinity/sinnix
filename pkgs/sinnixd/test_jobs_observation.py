@@ -1032,3 +1032,87 @@ def test_retention_never_touches_live_or_undated_records(tmp_path: Path) -> None
 
     assert moved == 0
     assert (tmp_path / "state" / "jobs" / f"{running['job_id']}.json").exists()
+
+
+def test_terminal_transition_spools_exactly_one_event_line(tmp_path: Path) -> None:
+    """Anti-vacuity: spooling per observation would duplicate lines on every get."""
+    spool = tmp_path / "events" / "events.jsonl"
+    systemd = FakeSystemdJobs()
+    jobs = GenericJobs(
+        systemd, GenericJobStore(tmp_path / "state"), event_spool_path=spool
+    )
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
+    assert jobs.get(started["job_id"])["state"]["phase"] == "running"
+    assert not spool.exists()
+
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+    }
+    assert jobs.get(started["job_id"])["state"]["terminal"]
+    jobs.get(started["job_id"])
+    jobs.list()
+
+    lines = [json.loads(line) for line in spool.read_text().splitlines()]
+    assert len(lines) == 1
+    assert lines[0]["job_id"] == started["job_id"]
+    assert lines[0]["kind"] == "foreground-command"
+    assert lines[0]["phase"] == "succeeded"
+    assert lines[0]["completed_at"]
+
+
+def test_restart_reobservation_of_old_terminal_records_does_not_respool(
+    tmp_path: Path,
+) -> None:
+    spool = tmp_path / "events.jsonl"
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "Result": "success",
+            "ExecMainStatus": "0",
+        }
+    )
+    jobs = GenericJobs(
+        systemd, GenericJobStore(tmp_path / "state"), event_spool_path=spool
+    )
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
+    assert jobs.get(started["job_id"])["state"]["terminal"]
+    assert len(spool.read_text().splitlines()) == 1
+
+    restarted = GenericJobs(
+        systemd, GenericJobStore(jobs.store.root), event_spool_path=spool
+    )
+    restarted.get(started["job_id"])
+    restarted.list()
+
+    assert len(spool.read_text().splitlines()) == 1
+
+
+def test_spool_failure_never_breaks_the_job_route(tmp_path: Path) -> None:
+    blocked = tmp_path / "blocked"
+    blocked.write_text("not a directory")
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "Result": "success",
+            "ExecMainStatus": "0",
+        }
+    )
+    jobs = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        event_spool_path=blocked / "events.jsonl",
+    )
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
+
+    assert jobs.get(started["job_id"])["state"]["terminal"]
