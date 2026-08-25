@@ -983,7 +983,7 @@ def main() -> int:
         if not isinstance(owner_arguments, dict):
             parser().error("--arguments-json must be a JSON object")
         request = _request(arguments.operation, arguments.owner, owner_arguments)
-    if arguments.command != "packet":
+    if not (arguments.command == "packet" and arguments.packet_command == "launch"):
         try:
             response = call(arguments.socket, request)
             if (
