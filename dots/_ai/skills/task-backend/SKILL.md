@@ -70,3 +70,11 @@ Durable project memory that is task-shaped (decisions, lessons, blockers)
 lives in beads via notes on the owning record — not in scratch files, not
 in per-checkout markdown. Local plans are the current turn's checklist
 only; markdown TODOs are never the shared source of truth.
+
+## Typed close reasons (adopted 2026-08-26)
+
+Prefer machine-parsable close metadata over prose-only reasons: on close, set
+`--set-metadata closed_kind=<fixed-by-pr|superseded-by|refuted|delivered|
+misfiled|inconclusive>` plus `closed_ref=<PR#/bead-id/receipt>` alongside the
+prose `--reason`. Corpus mining and evidence joins then query exactly instead
+of keyword-clustering 1,300 prose reasons (the 2026-08-25 mine's main cost).
