@@ -1,5 +1,13 @@
 # Worker contract template and process smells
 
+> Direction (operator, 2026-08-26): defaults should be AUTOMAGIC, not
+> contractual. Every mechanizable clause below migrates into machinery
+> (launch snapshot → packet-launch compiler; managed verification →
+> `lane verify`; report-once → `lane done`; seeds → workspace provisioning;
+> exit honesty → bounded.py). This document trends toward the machinery's
+> spec plus only the unmechanizable residue: red-first judgment, honest
+> report content, no scope expansion.
+
 ## The dispatch contract (v2, 2026-08-25)
 
 Every implementation dispatch carries, verbatim in the prompt:
