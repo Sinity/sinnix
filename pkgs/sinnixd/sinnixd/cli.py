@@ -9,6 +9,15 @@ from uuid import uuid4
 from sinnix_mcp import ErrorCode, ErrorEnvelope, RequestEnvelope, ResponseEnvelope
 
 from .api import ProtocolError, SinnixdClientError, UnixSocketServer, call
+from .fleet import (
+    DEFAULT_FLEET_LIMIT,
+    DEFAULT_GH_LIMIT,
+    DEFAULT_RECENT_HOURS,
+    read_evidence,
+    read_fleet,
+    render_evidence,
+    render_fleet,
+)
 from .jobs import GenericJobs, GenericJobStore, UserSystemdJobs, default_state_dir
 from .limits import DEFAULT_TIMEOUT_SECONDS
 from .packets import (
@@ -65,6 +74,25 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--socket", type=Path, default=default_socket_path())
     subcommands = result.add_subparsers(dest="command", required=True)
     subcommands.add_parser("status")
+    fleet = subcommands.add_parser(
+        "fleet", help="Show active, queued, and recent jobs with best-effort joins."
+    )
+    fleet.add_argument("--state-dir", type=Path, default=default_state_dir())
+    fleet.add_argument(
+        "--limit", type=int, choices=range(1, 201), default=DEFAULT_FLEET_LIMIT
+    )
+    fleet.add_argument("--recent-hours", type=float, default=DEFAULT_RECENT_HOURS)
+    fleet.add_argument(
+        "--gh-limit", type=int, choices=range(0, 33), default=DEFAULT_GH_LIMIT
+    )
+    fleet.add_argument("--json", action="store_true")
+    evidence = subcommands.add_parser(
+        "evidence", help="Show all locally available evidence for one job or workspace."
+    )
+    evidence.add_argument("unit_id", metavar="job-id|workspace-id")
+    evidence.add_argument("--state-dir", type=Path, default=default_state_dir())
+    evidence.add_argument("--gh-limit", type=int, choices=range(0, 2), default=1)
+    evidence.add_argument("--json", action="store_true")
     shell = subcommands.add_parser("shell")
     shell.add_argument("--project", required=True)
     shell.add_argument("--checkout", required=True)
@@ -370,6 +398,31 @@ def _unavailable_response(request: RequestEnvelope) -> dict[str, object]:
 
 def main() -> int:
     arguments = parser().parse_args()
+    if arguments.command == "fleet":
+        payload = read_fleet(
+            GenericJobStore(arguments.state_dir),
+            limit=arguments.limit,
+            recent_hours=arguments.recent_hours,
+            gh_limit=arguments.gh_limit,
+        )
+        print(
+            json.dumps(payload, indent=2, sort_keys=True)
+            if arguments.json
+            else render_fleet(payload)
+        )
+        return 0
+    if arguments.command == "evidence":
+        payload = read_evidence(
+            GenericJobStore(arguments.state_dir),
+            arguments.unit_id,
+            gh_limit=arguments.gh_limit,
+        )
+        print(
+            json.dumps(payload, indent=2, sort_keys=True)
+            if arguments.json
+            else render_evidence(payload)
+        )
+        return 0 if payload["unit_kind"] != "absent" else 1
     if arguments.command == "status":
         request = _request("runtime.status", "sinnixd", {})
     elif arguments.command == "shell":
