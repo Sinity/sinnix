@@ -14,13 +14,15 @@
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
+      canonicalDataDir = "/realm/state/polylogue";
       codexHooks = import ../../modules/features/dev/agents/hooks.nix {
         inherit pkgs;
         dotsRoot = inputs.self + "/dots";
+        dataDir = canonicalDataDir;
       };
       claudeHooks = ../../dots/claude/managed-settings.json;
       polylogueHook = inputs.polylogue.packages.${system}.default;
-      primarySidecarDir = "/realm/state/polylogue/hooks";
+      primarySidecarDir = "${canonicalDataDir}/hooks";
     in
     {
       checks.agent-hook-parity =

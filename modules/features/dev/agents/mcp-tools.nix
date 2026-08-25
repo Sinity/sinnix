@@ -49,17 +49,8 @@ let
   '';
   mcpPolylogueBin = pkgs.writeShellScriptBin "mcp-polylogue" ''
     set -euo pipefail
-    # The polylogue repo's .claude/settings.json pins POLYLOGUE_ARCHIVE_ROOT
-    # to the cloud-lane fixture (/tmp/polylogue-archive), and that env leaks
-    # into locally-launched MCP servers, pointing recall at an empty archive.
-    # Drop any leaked override that does not resolve to a real directory —
-    # testing existence rather than the one known literal also catches other
-    # stale overrides, while preserving a deliberate override to a real path.
-    # It cannot un-stick a server process already running with the leak in its
-    # inherited environment; that needs the MCP connection restarted.
-    if [ -n "''${POLYLOGUE_ARCHIVE_ROOT:-}" ] && [ ! -d "''${POLYLOGUE_ARCHIVE_ROOT}" ]; then
-      unset POLYLOGUE_ARCHIVE_ROOT
-    fi
+    # The configured service data directory is the sole archive-root owner.
+    export POLYLOGUE_ARCHIVE_ROOT=${lib.escapeShellArg config.sinnix.services.polylogue.dataDir}
     exec ${scriptPkgs.polylogue-cli}/bin/polylogue-mcp "$@"
   '';
   # The user-facing files stay tiny out-of-store launchers, while the gateway

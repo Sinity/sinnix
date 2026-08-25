@@ -119,6 +119,7 @@ mkFeatureModule {
       codexHooksFile = import ./hooks.nix {
         inherit pkgs;
         dotsRoot = config.sinnix.paths.dotsRoot;
+        dataDir = config.sinnix.services.polylogue.dataDir;
       };
       inherit (browser)
         mcpChromeDevtoolsBin
