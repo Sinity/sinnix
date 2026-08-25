@@ -633,6 +633,16 @@ def test_agent_control_bead_scope_requires_matching_current_assignment(
     assert daemon.calls[-1].arguments["bead_binding"]["write_scope"] == ["pkgs/sinnixd/"]
     assert "private launch instruction" not in daemon.calls[-1].arguments["bead_binding"].values()
 
+    malformed_scope = {**bead, "metadata": {"write_scope": "not-json"}}
+    monkeypatch.setattr(runtime.beads, "get", lambda *_args, **_kwargs: malformed_scope)
+    with pytest.raises(ProtocolError, match="JSON array"):
+        runtime.v2_run_for_bead(
+            reference=bead["ref"], checkout_id="default", claim_mode="none", assignment_ref=assignment_ref,
+            instructions=None, backend="codex", model="gpt-5.6-terra", reasoning_effort="high",
+            timeout_seconds=60, credential_profile="subscription", request_id="4a42f848-9057-4cef-9d27-80a022c0e16f",
+        )
+    monkeypatch.setattr(runtime.beads, "get", lambda *_args, **_kwargs: bead)
+
     foreign = {**binding, "bead_ref": "sinnix://projects/fixture/beads/fixture-2"}
     daemon.responses["job.get"] = {**daemon.responses["job.get"], "contract": {"bead_binding": foreign}}
     with pytest.raises(ProtocolError, match="not the requested"):

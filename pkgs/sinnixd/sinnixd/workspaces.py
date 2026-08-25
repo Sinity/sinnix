@@ -337,21 +337,28 @@ class GitWorkspaces:
         record = self._record(workspace_id)
         return self._status(record)
 
-    def delivery_snapshot(self, workspace_id: str, start_head: str, *, scope: Sequence[str] = ()) -> dict[str, Any]:
+    def delivery_snapshot(
+        self, workspace_id: str, start_head: str, *, scope: Sequence[str] = (), merge_base: bool = False
+    ) -> dict[str, Any]:
         """Read one exact-head Git fact set for a delivery precondition."""
         record = self._record(workspace_id)
         checkout, _project = self._available(record)
         before = self._git(checkout.path, "rev-parse", "HEAD").stdout.strip()
         if before != checkout.head:
             raise WorkspaceError("workspace HEAD changed during delivery snapshot")
-        descendant = self._git(checkout.path, "merge-base", "--is-ancestor", start_head, before, check=False).returncode == 0
-        changes = self._name_status(checkout.path, start_head, before)
+        range_start = (
+            self._git(checkout.path, "merge-base", start_head, before).stdout.strip()
+            if merge_base
+            else start_head
+        )
+        descendant = self._git(checkout.path, "merge-base", "--is-ancestor", range_start, before, check=False).returncode == 0
+        changes = self._name_status(checkout.path, range_start, before)
         dirty = self._porcelain_status(checkout.path)
         after = self._git(checkout.path, "rev-parse", "HEAD").stdout.strip()
         if after != before:
             raise WorkspaceError("workspace HEAD changed during delivery snapshot")
         paths = tuple(path for change in changes for path in change["paths"])
-        return {"workspace_id": workspace_id, "checkout_id": checkout.checkout_id, "start_head": start_head, "head": before, "descendant": descendant, "dirty": bool(dirty), "status": dirty, "changes": changes, "in_scope": all(self._scope_contains(path, scope) for path in paths) if scope else True}
+        return {"workspace_id": workspace_id, "checkout_id": checkout.checkout_id, "start_head": range_start, "head": before, "descendant": descendant, "dirty": bool(dirty), "status": dirty, "changes": changes, "in_scope": all(self._scope_contains(path, scope) for path in paths) if scope else True}
 
     def checkout(self, workspace_id: str) -> RegisteredCheckout:
         record = self._record(workspace_id)

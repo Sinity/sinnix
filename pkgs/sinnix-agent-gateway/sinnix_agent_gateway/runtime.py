@@ -880,10 +880,11 @@ class Runtime:
         if isinstance(encoded_scope, str):
             try:
                 write_scope = json.loads(encoded_scope)
-            except json.JSONDecodeError:
-                write_scope = None
-            if isinstance(write_scope, list):
-                binding["write_scope"] = write_scope
+            except json.JSONDecodeError as error:
+                raise ProtocolError("invalid_request", "Bead write_scope metadata must be a JSON array") from error
+            if not isinstance(write_scope, list):
+                raise ProtocolError("invalid_request", "Bead write_scope metadata must be a JSON array")
+            binding["write_scope"] = write_scope
         assigned_context = {
             "bead": bead,
             "project_ref": project_ref,
