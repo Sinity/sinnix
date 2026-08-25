@@ -206,35 +206,9 @@ def parser() -> argparse.ArgumentParser:
     call_owner.add_argument("--arguments-json", default="{}")
     task = subcommands.add_parser("task")
     task_subcommands = task.add_subparsers(dest="task_command", required=True)
-    task_list = task_subcommands.add_parser("list")
-    task_list.add_argument("project_id")
-    task_list.add_argument("--status")
-    task_list.add_argument("--assignee")
-    task_list.add_argument("--label")
-    task_list.add_argument("--limit", type=int, default=100)
-    task_list.add_argument("--cursor")
-    task_list.add_argument(
-        "--sort",
-        choices=(
-            "priority",
-            "created",
-            "updated",
-            "closed",
-            "status",
-            "id",
-            "title",
-            "type",
-            "assignee",
-        ),
-    )
-    task_list.add_argument("--reverse", action="store_true")
-    task_list.add_argument("--include-closed", action="store_true")
-    task_list.add_argument("--ready", action="store_true")
-    task_list.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
-    for command in ("get", "show"):
-        task_get = task_subcommands.add_parser(command)
-        task_get.add_argument("project_id")
-        task_get.add_argument("task_id")
+    # task list/get were deliberately removed: read task state through the
+    # task backend CLI (bd) directly; agentctl owns only journalled mutations,
+    # reconcile, and the authority-bound snapshot.
     task_create = task_subcommands.add_parser("create")
     task_create.add_argument("project_id")
     task_create.add_argument("title")
@@ -682,25 +656,7 @@ def main() -> int:
         request = _request("job.cancel", "systemd-jobs", {"job_id": arguments.job_id})
     elif arguments.command == "task":
         task_arguments: dict[str, object] = {"project_id": arguments.project_id}
-        if arguments.task_command == "list":
-            task_arguments["limit"] = arguments.limit
-            if arguments.cursor is not None:
-                task_arguments["cursor"] = arguments.cursor
-            for name in ("status", "assignee", "label"):
-                value = getattr(arguments, name)
-                if value is not None:
-                    task_arguments[name] = value
-            if arguments.sort is not None:
-                task_arguments["order"] = {
-                    "field": arguments.sort,
-                    "reverse": arguments.reverse,
-                }
-            elif arguments.reverse:
-                parser().error("--reverse requires --sort")
-            for name in ("include_closed", "ready"):
-                if getattr(arguments, name):
-                    task_arguments[name] = True
-        elif arguments.task_command == "create":
+        if arguments.task_command == "create":
             task_arguments.update(
                 {
                     "title": arguments.title,
@@ -717,8 +673,6 @@ def main() -> int:
             if arguments.parent is not None:
                 task_arguments["parent_task_id"] = arguments.parent
         elif arguments.task_command in {
-            "get",
-            "show",
             "claim",
             "complete",
             "release",
@@ -752,11 +706,8 @@ def main() -> int:
                 ):
                     task_arguments["if_assignee"] = arguments.if_assignee
         mutation_id = getattr(arguments, "request_id", None)
-        task_operation = (
-            "get" if arguments.task_command == "show" else arguments.task_command
-        )
         request = _request(
-            f"task.{task_operation}",
+            f"task.{arguments.task_command}",
             "task-backend",
             task_arguments,
             "operator",
