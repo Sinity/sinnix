@@ -905,7 +905,7 @@ def _owner_query_actions() -> tuple[ActionSpec, ...]:
         _owner_query_action("projects.tree", "projects", "projects", "projects.tree", all_principals, ("project", "checkout"), "List a bounded canonical project tree without following symlinks."),
         _owner_query_action("projects.read", "projects", "projects", "projects.read", all_principals, ("project", "checkout"), "Read a bounded project file through a canonical project or checkout ref."),
         _owner_query_action("projects.diff", "projects", "projects", "projects.diff", all_principals, ("project", "checkout"), "Read a bounded Git diff through a canonical project or checkout ref."),
-        _owner_query_action("machine.query", "machine", "machine", "observe.machine_query", all_principals, ("machine_unit", "process"), "Read one bounded, provenance-carrying machine section; overview replaces the retired whole-machine report."),
+        _owner_query_action("machine.query", "machine", "machine", "observe.machine_query", all_principals, ("machine_unit", "process"), "Read one bounded, provenance-carrying machine section; operation=actions returns the authoritative revision required by machine.operate."),
         _owner_query_action("capabilities.query", "capabilities", "capability-index", "capability_index.query", all_principals, ("capability",), "Search or exactly describe generated machine capabilities."),
         _owner_query_action("mcp.query", "mcp", "mcp-broker", "mcp.call.read", observer_operator, ("mcp_tool",), "Discover brokered MCP servers or invoke a declared read-only upstream tool."),
         _owner_query_action("desktop.query", "desktop", "desktop", "desktop.read", observer_operator, ("desktop",), "Read desktop state or capture output without changing focus."),

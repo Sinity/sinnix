@@ -154,7 +154,7 @@ The CLI invokes the matching MCP verb through the same server runtime and princi
 - Work or review a bead: use `{agent}` only with the canonical bead ref and explicit checkout. Use `projects.context` with `intent=bead.work` or `bead.review` to inspect assignment and evidence.
 - Incident orientation: use `machine.query` for one bounded owner-selected section and `audit.events` for recent gateway receipts. Do not reconstruct a whole-machine view locally.
 - Browser or desktop manipulation: discover or use the canonical gateway-owned browser page or desktop ref, then invoke `{browser}` or `{desktop}` as operator. Existing operator tabs are never accepted as implicit targets.
-- Machine action: discover a canonical machine target, supply the owner-required revision, reason, idempotency key, and preconditions, then use `machine.operate`.
+- Machine action: discover a canonical machine target, query `machine.query` with `operation=actions` for the current owner revision, then supply it with the reason, idempotency key, and preconditions to `machine.operate`.
 
 ## Beads direct-owner fallback
 

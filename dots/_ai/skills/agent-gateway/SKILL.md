@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v2-g2.10-context-events -->
-<!-- gateway-catalog-sha256: 4fd6f1e385f1b6747354dfa003d42cef761a629f8ddab79a2f0a6311b5b4acd3 -->
+<!-- gateway-catalog-sha256: 65c2cba708186a4858fca7f3750ea9366782f3072272410a99e6b7dac61100d2 -->
 # Agent Gateway V2
 
 Use `sinnix-agent-gateway` when a local agent needs the same principal-scoped routes and normalized envelopes as MCP. The complete action schemas and examples are in `docs/generated/agent-gateway-reference.md`.
@@ -26,10 +26,10 @@ The CLI invokes the matching MCP verb through the same server runtime and princi
 - Work or review a bead: use `agent.for_bead` only with the canonical bead ref and explicit checkout. Use `projects.context` with `intent=bead.work` or `bead.review` to inspect assignment and evidence.
 - Incident orientation: use `machine.query` for one bounded owner-selected section and `audit.events` for recent gateway receipts. Do not reconstruct a whole-machine view locally.
 - Browser or desktop manipulation: discover or use the canonical gateway-owned browser page or desktop ref, then invoke `browser.operate` or `desktop.operate` as operator. Existing operator tabs are never accepted as implicit targets.
-- Machine action: discover a canonical machine target, supply the owner-required revision, reason, idempotency key, and preconditions, then use `machine.operate`.
+- Machine action: discover a canonical machine target, query `machine.query` with `operation=actions` for the current owner revision, then supply it with the reason, idempotency key, and preconditions to `machine.operate`.
 
 ## Beads direct-owner fallback
 
 The gateway is the preferred route for typed, principal-scoped Beads work. The direct owner fallback is `bd 1.1.0-dev` against the project’s canonical standalone Dolt workspace, resolved through the project’s canonical worktree and `.beads/redirect`. Dolt is the authority for ordinary mutations. `issues.jsonl` is an optional JSONL export, not a write authority. Use the gateway `beads.operate` action with `snapshot.publish` when an explicit deterministic snapshot is required. Snapshot publication does not imply a Git commit or a Dolt push. Use `sync.push` or `sync.pull` explicitly for Dolt synchronization. Never hand-author `bd` argv when the gateway catalog exposes the needed action.
 
-Catalog revision: `v2-g2.10-context-events`. Catalog SHA-256: `4fd6f1e385f1b6747354dfa003d42cef761a629f8ddab79a2f0a6311b5b4acd3`.
+Catalog revision: `v2-g2.10-context-events`. Catalog SHA-256: `65c2cba708186a4858fca7f3750ea9366782f3072272410a99e6b7dac61100d2`.
