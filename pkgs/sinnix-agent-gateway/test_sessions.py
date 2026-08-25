@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.sessions import SessionError, SessionLogService, SessionSource
@@ -41,7 +40,9 @@ def test_default_codex_source_is_the_canonical_sessions_root(tmp_path: Path) -> 
     ]
 
 
-def test_session_list_read_and_search_preserve_provider_reference(tmp_path: Path) -> None:
+def test_session_list_read_and_search_preserve_provider_reference(
+    tmp_path: Path,
+) -> None:
     service, root = session_service(tmp_path)
     session = root / "project" / "session.jsonl"
     session.parent.mkdir()

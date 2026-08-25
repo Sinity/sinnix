@@ -17,9 +17,19 @@ from sinnix_mcp import (
 )
 from sinnix_mcp.execution import OwnerExecution
 
-from .jobs import GenericJobStore, GenericJobs, JobPageCursorError, JobRecordError, JobResultError, JobResultLimitError, SystemdJobError, UserSystemdJobs, default_state_dir
 from .contracts import TypedJobContracts
 from .delivery import DeliveryError, GitHubDelivery
+from .jobs import (
+    GenericJobs,
+    GenericJobStore,
+    JobPageCursorError,
+    JobRecordError,
+    JobResultError,
+    JobResultLimitError,
+    SystemdJobError,
+    UserSystemdJobs,
+    default_state_dir,
+)
 from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from .projects import ProjectCatalog
 from .tasks import TaskError, TaskService
@@ -41,25 +51,39 @@ class SinnixdService:
 
     projects: ProjectCatalog
     jobs: GenericJobs = field(
-        default_factory=lambda: GenericJobs(UserSystemdJobs(), GenericJobStore(default_state_dir()))
+        default_factory=lambda: GenericJobs(
+            UserSystemdJobs(), GenericJobStore(default_state_dir())
+        )
     )
     owner_adapters: DeclaredOwnerAdapters = field(
         default_factory=lambda: DeclaredOwnerAdapters(OwnerExecution())
     )
     version: str = "0.2.0"
-    native_runner: Path = Path("/home/sinity/.config/hermes/skills/agent-runtime/scripts/run_agent_prompt.sh")
+    native_runner: Path = Path(
+        "/home/sinity/.config/hermes/skills/agent-runtime/scripts/run_agent_prompt.sh"
+    )
     workspaces: GitWorkspaces | None = None
     delivery: GitHubDelivery | None = None
     tasks: TaskService | None = None
 
     def __post_init__(self) -> None:
         if self.workspaces is None:
-            object.__setattr__(self, "workspaces", GitWorkspaces(self.projects, WorkspaceStore(self.jobs.store.root)))
+            object.__setattr__(
+                self,
+                "workspaces",
+                GitWorkspaces(self.projects, WorkspaceStore(self.jobs.store.root)),
+            )
         if self.delivery is None:
             assert self.workspaces is not None
-            object.__setattr__(self, "delivery", GitHubDelivery(self.projects, self.workspaces, self.jobs))
+            object.__setattr__(
+                self,
+                "delivery",
+                GitHubDelivery(self.projects, self.workspaces, self.jobs),
+            )
         if self.tasks is None:
-            object.__setattr__(self, "tasks", TaskService(self.projects, jobs=self.jobs))
+            object.__setattr__(
+                self, "tasks", TaskService(self.projects, jobs=self.jobs)
+            )
         _ = self.owners
 
     @property
@@ -106,7 +130,9 @@ class SinnixdService:
                 documentation="Backend-neutral AgentCTL task operations through the current task authority.",
             ),
         )
-        return OwnerRegistry((*builtin, *(adapter.spec for adapter in self.projects.owner_adapters())))
+        return OwnerRegistry(
+            (*builtin, *(adapter.spec for adapter in self.projects.owner_adapters()))
+        )
 
     def dispatch(self, request: RequestEnvelope) -> ResponseEnvelope:
         owner_name = "sinnixd"
@@ -122,7 +148,9 @@ class SinnixdService:
                 )
             if owner.source_scoped:
                 project, adapter = self.projects.owner_adapter(request.operation)
-                return self.owner_adapters.call(project=project, adapter=adapter, request=request)
+                return self.owner_adapters.call(
+                    project=project, adapter=adapter, request=request
+                )
             payload = self._dispatch(
                 request.operation,
                 request.arguments,
@@ -131,7 +159,9 @@ class SinnixdService:
                 request.idempotency_key,
             )
         except KeyError as error:
-            return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
+            return self._error(
+                request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error)
+            )
         except OwnerAdapterError as error:
             return self._error(
                 request,
@@ -140,25 +170,39 @@ class SinnixdService:
                 str(error),
             )
         except JobResultLimitError as error:
-            return self._error(request, owner_name, ErrorCode.RESOURCE_EXHAUSTED, str(error))
+            return self._error(
+                request, owner_name, ErrorCode.RESOURCE_EXHAUSTED, str(error)
+            )
         except JobResultError as error:
-            return self._error(request, owner_name, ErrorCode.RESULT_INVALID, str(error))
+            return self._error(
+                request, owner_name, ErrorCode.RESULT_INVALID, str(error)
+            )
         except JobAuthorizationError as error:
             return self._error(request, owner_name, ErrorCode.POLICY_DENIED, str(error))
         except JobPageCursorError as error:
-            return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
+            return self._error(
+                request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error)
+            )
         except (JobRecordError, SystemdJobError) as error:
-            return self._error(request, owner_name, ErrorCode.OPERATION_FAILED, str(error))
+            return self._error(
+                request, owner_name, ErrorCode.OPERATION_FAILED, str(error)
+            )
         except (WorkspaceError, DeliveryError) as error:
-            return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
+            return self._error(
+                request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error)
+            )
         except TaskError as error:
             return self._error(request, owner_name, error.code, str(error))
         except ValueError as error:
-            return self._error(request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error))
+            return self._error(
+                request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error)
+            )
         try:
             bounded_payload = OpaquePayload.bounded(payload)
         except ValueError as error:
-            return self._error(request, owner_name, ErrorCode.RESOURCE_EXHAUSTED, str(error))
+            return self._error(
+                request, owner_name, ErrorCode.RESOURCE_EXHAUSTED, str(error)
+            )
         return ResponseEnvelope(
             request_id=request.request_id,
             correlation_id=request.correlation_id,
@@ -195,7 +239,9 @@ class SinnixdService:
             return {
                 "project_id": project.project_id,
                 "descriptor_status": project.descriptor_status(),
-                "operations": [operation.catalog_row() for operation in project.operations],
+                "operations": [
+                    operation.catalog_row() for operation in project.operations
+                ],
             }
         if operation.startswith("task."):
             assert self.tasks is not None
@@ -209,19 +255,27 @@ class SinnixdService:
             if set(arguments) - {"project_id"}:
                 raise ValueError("workspace.list accepts optional project_id")
             project_id = arguments.get("project_id")
-            if project_id is not None and (not isinstance(project_id, str) or not project_id):
+            if project_id is not None and (
+                not isinstance(project_id, str) or not project_id
+            ):
                 raise ValueError("workspace.list project_id must be non-empty")
             assert self.workspaces is not None
             return self.workspaces.list(project_id)
         if operation == "workspace.get":
             assert self.workspaces is not None
-            return self.workspaces.get(self._single_workspace_id(arguments, "workspace.get"))
+            return self.workspaces.get(
+                self._single_workspace_id(arguments, "workspace.get")
+            )
         if operation == "workspace.create":
             if principal not in {"agent-control", "operator"}:
-                raise ValueError("workspace creation requires agent-control or operator principal")
+                raise ValueError(
+                    "workspace creation requires agent-control or operator principal"
+                )
             required = {"project_id", "name", "branch", "base"}
             if set(arguments) != required:
-                raise ValueError("workspace.create requires project_id, name, branch, and nullable base")
+                raise ValueError(
+                    "workspace.create requires project_id, name, branch, and nullable base"
+                )
             base = arguments.get("base")
             if base is not None and (not isinstance(base, str) or not base):
                 raise ValueError("workspace.create base must be null or non-empty")
@@ -234,10 +288,14 @@ class SinnixdService:
             )
         if operation == "workspace.adopt":
             if principal not in {"agent-control", "operator"}:
-                raise ValueError("workspace adoption requires agent-control or operator principal")
+                raise ValueError(
+                    "workspace adoption requires agent-control or operator principal"
+                )
             required = {"project_id", "checkout_id", "name"}
             if set(arguments) != required:
-                raise ValueError("workspace.adopt requires project_id, checkout_id, and name")
+                raise ValueError(
+                    "workspace.adopt requires project_id, checkout_id, and name"
+                )
             assert self.workspaces is not None
             return self.workspaces.adopt(
                 project_id=self._job_argument(arguments, "project_id"),
@@ -246,24 +304,40 @@ class SinnixdService:
             )
         if operation == "workspace.reap":
             if principal not in {"agent-control", "operator"}:
-                raise ValueError("workspace reap requires agent-control or operator principal")
+                raise ValueError(
+                    "workspace reap requires agent-control or operator principal"
+                )
             assert self.workspaces is not None
-            return self.workspaces.reap(self._single_workspace_id(arguments, "workspace.reap"))
+            return self.workspaces.reap(
+                self._single_workspace_id(arguments, "workspace.reap")
+            )
         if operation == "workspace.dispose":
             if principal not in {"agent-control", "operator"}:
-                raise ValueError("workspace disposal requires agent-control or operator principal")
+                raise ValueError(
+                    "workspace disposal requires agent-control or operator principal"
+                )
             assert self.workspaces is not None
-            return self.workspaces.dispose(self._single_workspace_id(arguments, "workspace.dispose"))
+            return self.workspaces.dispose(
+                self._single_workspace_id(arguments, "workspace.dispose")
+            )
         if operation == "workspace.checkpoint":
             if principal not in {"agent-control", "operator"}:
-                raise ValueError("workspace checkpoint requires agent-control or operator principal")
+                raise ValueError(
+                    "workspace checkpoint requires agent-control or operator principal"
+                )
             assert self.workspaces is not None
-            return self.workspaces.checkpoint(self._single_workspace_id(arguments, "workspace.checkpoint"))
+            return self.workspaces.checkpoint(
+                self._single_workspace_id(arguments, "workspace.checkpoint")
+            )
         if operation == "workspace.restore":
             if principal not in {"agent-control", "operator"}:
-                raise ValueError("workspace restore requires agent-control or operator principal")
+                raise ValueError(
+                    "workspace restore requires agent-control or operator principal"
+                )
             if set(arguments) != {"workspace_id", "checkpoint_id"}:
-                raise ValueError("workspace.restore requires workspace_id and checkpoint_id")
+                raise ValueError(
+                    "workspace.restore requires workspace_id and checkpoint_id"
+                )
             assert self.workspaces is not None
             return self.workspaces.restore(
                 self._job_argument(arguments, "workspace_id"),
@@ -271,9 +345,13 @@ class SinnixdService:
             )
         if operation == "workspace.recover":
             if principal not in {"agent-control", "operator"}:
-                raise ValueError("workspace recovery requires agent-control or operator principal")
+                raise ValueError(
+                    "workspace recovery requires agent-control or operator principal"
+                )
             if set(arguments) != {"workspace_id", "checkpoint_id"}:
-                raise ValueError("workspace.recover requires workspace_id and checkpoint_id")
+                raise ValueError(
+                    "workspace.recover requires workspace_id and checkpoint_id"
+                )
             assert self.workspaces is not None
             return self.workspaces.recover(
                 self._job_argument(arguments, "workspace_id"),
@@ -281,50 +359,103 @@ class SinnixdService:
             )
         if operation == "workspace.stack":
             if principal not in {"agent-control", "operator"}:
-                raise ValueError("workspace stacking requires agent-control or operator principal")
+                raise ValueError(
+                    "workspace stacking requires agent-control or operator principal"
+                )
             if set(arguments) != {"parent_workspace_id", "name", "branch"}:
-                raise ValueError("workspace.stack requires parent_workspace_id, name, and branch")
+                raise ValueError(
+                    "workspace.stack requires parent_workspace_id, name, and branch"
+                )
             assert self.workspaces is not None
             return self.workspaces.stack(
-                parent_workspace_id=self._job_argument(arguments, "parent_workspace_id"),
+                parent_workspace_id=self._job_argument(
+                    arguments, "parent_workspace_id"
+                ),
                 name=self._job_argument(arguments, "name"),
                 branch=self._job_argument(arguments, "branch"),
             )
         if operation == "workspace.restack":
             if principal not in {"agent-control", "operator"}:
-                raise ValueError("workspace restacking requires agent-control or operator principal")
+                raise ValueError(
+                    "workspace restacking requires agent-control or operator principal"
+                )
             assert self.workspaces is not None
-            return self.workspaces.restack(self._single_workspace_id(arguments, "workspace.restack"))
+            return self.workspaces.restack(
+                self._single_workspace_id(arguments, "workspace.restack")
+            )
         if operation == "workspace.publish":
             if principal not in {"agent-control", "operator"}:
-                raise ValueError("workspace publication requires agent-control or operator principal")
-            if set(arguments) != {"workspace_id", "job_id", "title", "body"}:
-                raise ValueError("workspace.publish requires workspace_id, job_id, title, and body")
+                raise ValueError(
+                    "workspace publication requires agent-control or operator principal"
+                )
+            if set(arguments) - {
+                "workspace_id",
+                "job_id",
+                "packet_job_id",
+                "title",
+                "body",
+            } or not {"workspace_id", "job_id", "title", "body"} <= set(arguments):
+                raise ValueError(
+                    "workspace.publish requires workspace_id, job_id, title, and body"
+                )
             assert self.delivery is not None
-            return self.delivery.publish(
+            publish_arguments = (
                 self._job_argument(arguments, "workspace_id"),
                 self._job_argument(arguments, "job_id"),
                 self._job_argument(arguments, "title"),
                 arguments.get("body") if isinstance(arguments.get("body"), str) else "",
             )
+            packet_job_id = arguments.get("packet_job_id")
+            return self.delivery.publish(
+                *publish_arguments,
+                **(
+                    {"packet_job_id": packet_job_id}
+                    if isinstance(packet_job_id, str)
+                    else {}
+                ),
+            )
         if operation == "workspace.review-status":
             assert self.delivery is not None
-            return self.delivery.review_status(self._single_workspace_id(arguments, "workspace.review-status"))
+            return self.delivery.review_status(
+                self._single_workspace_id(arguments, "workspace.review-status")
+            )
         if operation == "workspace.land":
-            if principal not in {"agent-control", "operator"} or set(arguments) != {"workspace_id", "job_id"}:
-                raise ValueError("workspace.land requires agent-control or operator plus workspace_id and job_id")
+            if (
+                principal not in {"agent-control", "operator"}
+                or set(arguments) - {"workspace_id", "job_id", "packet_job_id"}
+                or not {"workspace_id", "job_id"} <= set(arguments)
+            ):
+                raise ValueError(
+                    "workspace.land requires agent-control or operator plus workspace_id and job_id"
+                )
             assert self.delivery is not None
+            packet_job_id = arguments.get("packet_job_id")
             return self.delivery.land(
-                self._job_argument(arguments, "workspace_id"), self._job_argument(arguments, "job_id")
+                self._job_argument(arguments, "workspace_id"),
+                self._job_argument(arguments, "job_id"),
+                **(
+                    {"packet_job_id": packet_job_id}
+                    if isinstance(packet_job_id, str)
+                    else {}
+                ),
             )
         if operation == "workspace.finish":
             if principal not in {"agent-control", "operator"}:
-                raise ValueError("workspace finish requires agent-control or operator principal")
+                raise ValueError(
+                    "workspace finish requires agent-control or operator principal"
+                )
             assert self.delivery is not None
-            return self.delivery.finish(self._single_workspace_id(arguments, "workspace.finish"))
+            return self.delivery.finish(
+                self._single_workspace_id(arguments, "workspace.finish")
+            )
         if operation == "workspace.finish-integrated":
-            if principal not in {"agent-control", "operator"} or set(arguments) != {"workspace_id", "target_ref"}:
-                raise ValueError("workspace.finish-integrated requires agent-control or operator plus workspace_id and target_ref")
+            if principal not in {"agent-control", "operator"} or set(arguments) != {
+                "workspace_id",
+                "target_ref",
+            }:
+                raise ValueError(
+                    "workspace.finish-integrated requires agent-control or operator plus workspace_id and target_ref"
+                )
             assert self.workspaces is not None
             return self.workspaces.finish_integrated(
                 self._job_argument(arguments, "workspace_id"),
@@ -337,14 +468,24 @@ class SinnixdService:
                 )
             project_id = self._job_argument(arguments, "project_id")
             operation_name = self._job_argument(arguments, "operation")
-            if set(arguments) - {"project_id", "operation", "workspace_id", "parameters"}:
-                raise ValueError("job.start accepts project_id, operation, optional workspace_id, and optional parameters")
+            if set(arguments) - {
+                "project_id",
+                "operation",
+                "workspace_id",
+                "parameters",
+                "bead_binding",
+            }:
+                raise ValueError(
+                    "job.start accepts project_id, operation, optional workspace_id, optional parameters, and optional bead_binding"
+                )
             parameters = arguments.get("parameters", {})
             if not isinstance(parameters, Mapping):
                 raise ValueError("job.start parameters must be an object")
             project = self.projects.get(project_id)
             workspace_id = arguments.get("workspace_id")
-            if workspace_id is not None and (not isinstance(workspace_id, str) or not workspace_id):
+            if workspace_id is not None and (
+                not isinstance(workspace_id, str) or not workspace_id
+            ):
                 raise ValueError("job.start workspace_id must be null or non-empty")
             assert self.workspaces is not None
             checkout = (
@@ -352,49 +493,96 @@ class SinnixdService:
                 if workspace_id is not None
                 else self.projects.checkout(project_id, "default")
             )
-            return self._cleanup_terminal(self.jobs.start_declared(
-                project=project,
-                operation=project.operation(operation_name),
-                correlation_id=correlation_id,
-                principal=principal,
-                parameters=parameters,
-                checkout=checkout,
-            ))
+            binding = arguments.get("bead_binding")
+            if (
+                binding is not None
+                and operation_name not in project.workspace.verification_operations
+            ):
+                raise ValueError(
+                    "a Beads packet binding requires a declared verification operation"
+                )
+            packet_contract = (
+                {"bead_binding": self.job_contracts.bead_binding(binding, checkout)}
+                if binding is not None
+                else {}
+            )
+            return self._cleanup_terminal(
+                self.jobs.start_declared(
+                    project=project,
+                    operation=project.operation(operation_name),
+                    correlation_id=correlation_id,
+                    principal=principal,
+                    parameters=parameters,
+                    checkout=checkout,
+                    contract=packet_contract,
+                )
+            )
         if operation == "job.shell.start":
-            required = {"project_id", "checkout_id", "argv", "cwd", "timeout_seconds", "result"}
+            required = {
+                "project_id",
+                "checkout_id",
+                "argv",
+                "cwd",
+                "timeout_seconds",
+                "result",
+            }
             if set(arguments) != required:
-                raise ValueError("job.shell.start requires project_id, checkout_id, argv, cwd, timeout_seconds, and result")
+                raise ValueError(
+                    "job.shell.start requires project_id, checkout_id, argv, cwd, timeout_seconds, and result"
+                )
             argv = arguments["argv"]
             if not isinstance(argv, list):
                 raise ValueError("job.shell.start argv must be a list")
-            return self._cleanup_terminal(self.job_contracts.start_shell(
-                principal=principal,
-                project_id=self._job_argument(arguments, "project_id"),
-                checkout_id=self._job_argument(arguments, "checkout_id"),
-                argv=argv,
-                cwd=self._job_argument(arguments, "cwd"),
-                timeout_seconds=self._integer_argument(arguments, "timeout_seconds"),
-                result=self._job_argument(arguments, "result"),
-            ))
+            return self._cleanup_terminal(
+                self.job_contracts.start_shell(
+                    principal=principal,
+                    project_id=self._job_argument(arguments, "project_id"),
+                    checkout_id=self._job_argument(arguments, "checkout_id"),
+                    argv=argv,
+                    cwd=self._job_argument(arguments, "cwd"),
+                    timeout_seconds=self._integer_argument(
+                        arguments, "timeout_seconds"
+                    ),
+                    result=self._job_argument(arguments, "result"),
+                )
+            )
         if operation == "job.agent.start":
             required = {
-                "project_id", "checkout_id", "prompt", "backend", "model", "effort", "credential_profile", "timeout_seconds", "result"
+                "project_id",
+                "checkout_id",
+                "prompt",
+                "backend",
+                "model",
+                "effort",
+                "credential_profile",
+                "timeout_seconds",
+                "result",
             }
-            if not required <= set(arguments) or set(arguments) - (required | {"bead_binding"}):
-                raise ValueError("job.agent.start requires the complete typed agent contract")
-            return self._cleanup_terminal(self.job_contracts.start_agent(
-                principal=principal,
-                project_id=self._job_argument(arguments, "project_id"),
-                checkout_id=self._job_argument(arguments, "checkout_id"),
-                prompt=self._job_argument(arguments, "prompt"),
-                backend=self._job_argument(arguments, "backend"),
-                model=self._job_argument(arguments, "model"),
-                effort=self._job_argument(arguments, "effort"),
-                credential_profile=self._job_argument(arguments, "credential_profile"),
-                timeout_seconds=self._integer_argument(arguments, "timeout_seconds"),
-                result=self._job_argument(arguments, "result"),
-                bead_binding=arguments.get("bead_binding"),
-            ))
+            if not required <= set(arguments) or set(arguments) - (
+                required | {"bead_binding"}
+            ):
+                raise ValueError(
+                    "job.agent.start requires the complete typed agent contract"
+                )
+            return self._cleanup_terminal(
+                self.job_contracts.start_agent(
+                    principal=principal,
+                    project_id=self._job_argument(arguments, "project_id"),
+                    checkout_id=self._job_argument(arguments, "checkout_id"),
+                    prompt=self._job_argument(arguments, "prompt"),
+                    backend=self._job_argument(arguments, "backend"),
+                    model=self._job_argument(arguments, "model"),
+                    effort=self._job_argument(arguments, "effort"),
+                    credential_profile=self._job_argument(
+                        arguments, "credential_profile"
+                    ),
+                    timeout_seconds=self._integer_argument(
+                        arguments, "timeout_seconds"
+                    ),
+                    result=self._job_argument(arguments, "result"),
+                    bead_binding=arguments.get("bead_binding"),
+                )
+            )
         if operation == "job.get":
             return self._cleanup_terminal(
                 self.jobs.get(
@@ -411,7 +599,9 @@ class SinnixdService:
                 "phases",
                 "active_only",
             }:
-                raise ValueError("job.list accepts only pagination and filter arguments")
+                raise ValueError(
+                    "job.list accepts only pagination and filter arguments"
+                )
             limit = arguments.get("limit", 100)
             if not isinstance(limit, int) or isinstance(limit, bool):
                 raise ValueError("job.list limit must be an integer")
@@ -440,24 +630,37 @@ class SinnixdService:
                 )
             )
         if operation == "job.wait":
-            job_id = self._authorize_job(principal, self._job_argument(arguments, "job_id"))
+            job_id = self._authorize_job(
+                principal, self._job_argument(arguments, "job_id")
+            )
             timeout_seconds = arguments.get("timeout_seconds", 30)
             if set(arguments) - {"job_id", "timeout_seconds"}:
                 raise ValueError("job.wait accepts job_id and optional timeout_seconds")
-            if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool):
+            if not isinstance(timeout_seconds, int) or isinstance(
+                timeout_seconds, bool
+            ):
                 raise ValueError("job.wait timeout_seconds must be an integer")
             return self._cleanup_terminal(self.jobs.wait(job_id, timeout_seconds))
         if operation == "job.logs":
-            job_id = self._authorize_job(principal, self._job_argument(arguments, "job_id"))
+            job_id = self._authorize_job(
+                principal, self._job_argument(arguments, "job_id")
+            )
             offset = arguments.get("offset", 0)
             max_bytes = arguments.get("max_bytes", 64_000)
             if set(arguments) - {"job_id", "offset", "max_bytes"}:
-                raise ValueError("job.logs accepts job_id, optional offset, and optional max_bytes")
-            if any(not isinstance(value, int) or isinstance(value, bool) for value in (offset, max_bytes)):
+                raise ValueError(
+                    "job.logs accepts job_id, optional offset, and optional max_bytes"
+                )
+            if any(
+                not isinstance(value, int) or isinstance(value, bool)
+                for value in (offset, max_bytes)
+            ):
                 raise ValueError("job.logs offset and max_bytes must be integers")
             return self.jobs.logs(job_id, offset=offset, max_bytes=max_bytes)
         if operation == "job.result":
-            job_id = self._authorize_job(principal, self._job_argument(arguments, "job_id"))
+            job_id = self._authorize_job(
+                principal, self._job_argument(arguments, "job_id")
+            )
             max_bytes = arguments.get("max_bytes", 64_000)
             if set(arguments) - {"job_id", "max_bytes"}:
                 raise ValueError("job.result accepts job_id and optional max_bytes")

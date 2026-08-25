@@ -209,7 +209,8 @@ rec {
       litellm_params = {
         model = if m ? litellmModel then m.litellmModel else "ollama_chat/${m.ollamaTag}";
         api_base = if m ? litellmApiBase then m.litellmApiBase else ollamaApiBase;
-      } // lib.optionalAttrs (m ? litellmApiKey) {
+      }
+      // lib.optionalAttrs (m ? litellmApiKey) {
         api_key = m.litellmApiKey;
       };
     }

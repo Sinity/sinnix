@@ -8,7 +8,7 @@ This host keeps local AI services on demand. The public loopback port is a stabl
 | ---------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- | ---------------------------------------------------- |
 | Ollama text and vision | `127.0.0.1:11434` | `local-chat`, `local-vision`, `local-coder`, `local-coder-moe`, `local-reasoner`, `local-thinker`, `local-multimodal-moe`, `local-reader` | on demand                        | CUDA, one GPU inference occupant                     |
 | LiteLLM gateway        | `127.0.0.1:4000`  | OpenAI `/v1/chat/completions` and Anthropic `/v1/messages`                                                                                | on demand                        | translates agent clients to local backends           |
-| Muse Glimmer           | `127.0.0.1:8083`  | direct llama.cpp model `muse-glimmer` (abliterated Q4_K_M)                                                                            | on demand, 15 minute idle window | CUDA plus CPU/RAM hybrid, one GPU inference occupant |
+| Muse Glimmer           | `127.0.0.1:8083`  | direct llama.cpp model `muse-glimmer` (abliterated Q4_K_M)                                                                                | on demand, 15 minute idle window | CUDA plus CPU/RAM hybrid, one GPU inference occupant |
 | KoboldCpp              | `127.0.0.1:5001`  | configured GGUF, KoboldAI Lite UI, text/image APIs                                                                                        | on demand                        | CUDA, one GPU inference occupant                     |
 | Open WebUI             | `127.0.0.1:8080`  | browser chat over Ollama                                                                                                                  | configured startup policy        | frontend only; currently targets Ollama              |
 | llama.cpp reranker     | `127.0.0.1:8081`  | `/v1/rerank`                                                                                                                              | on demand                        | CPU resident by policy, outside GPU admission        |
@@ -106,18 +106,18 @@ The gateway path can start both LiteLLM and the selected backend. The first requ
 
 The model name is the stable LiteLLM name. The Ollama tag is the storage and pull name:
 
-| LiteLLM name           | Ollama tag                          | Intended use                                |
-| ---------------------- | ----------------------------------- | ------------------------------------------- |
-| `local-chat`           | `huihui_ai/gemma-4-abliterated:12b` | daily text chat                             |
-| `local-vision`         | `gemma4:12b-it-qat`                 | text plus image/audio input                 |
-| `local-coder`          | `qwen2.5-coder:7b`                  | fast coding and triage                      |
-| `local-coder-moe`      | `qwen3-coder:30b`                   | slower, stronger coding stretch tier        |
-| `local-reasoner`       | `gpt-oss:20b`                       | general reasoning and agent jobs            |
-| `local-thinker`        | `qwen3:30b`                         | reasoning-heavy general work                |
-| `local-multimodal-moe` | `gemma4:26b`                        | larger multimodal generalist                |
-| `local-gemma4-26b-abliterated` | `hf.co/TrevorJS/gemma-4-26B-A4B-it-uncensored-GGUF:Q4_K_M` | abliterated larger multimodal MoE |
-| `local-reader`         | `hf.co/rbehzadan/ReaderLM-v2.gguf`  | HTML to Markdown or JSON                    |
-| `local-glimmer`        | direct llama.cpp                    | dense reasoning with CPU/RAM hybrid offload |
+| LiteLLM name                   | Ollama tag                                                 | Intended use                                |
+| ------------------------------ | ---------------------------------------------------------- | ------------------------------------------- |
+| `local-chat`                   | `huihui_ai/gemma-4-abliterated:12b`                        | daily text chat                             |
+| `local-vision`                 | `gemma4:12b-it-qat`                                        | text plus image/audio input                 |
+| `local-coder`                  | `qwen2.5-coder:7b`                                         | fast coding and triage                      |
+| `local-coder-moe`              | `qwen3-coder:30b`                                          | slower, stronger coding stretch tier        |
+| `local-reasoner`               | `gpt-oss:20b`                                              | general reasoning and agent jobs            |
+| `local-thinker`                | `qwen3:30b`                                                | reasoning-heavy general work                |
+| `local-multimodal-moe`         | `gemma4:26b`                                               | larger multimodal generalist                |
+| `local-gemma4-26b-abliterated` | `hf.co/TrevorJS/gemma-4-26B-A4B-it-uncensored-GGUF:Q4_K_M` | abliterated larger multimodal MoE           |
+| `local-reader`                 | `hf.co/rbehzadan/ReaderLM-v2.gguf`                         | HTML to Markdown or JSON                    |
+| `local-glimmer`                | direct llama.cpp                                           | dense reasoning with CPU/RAM hybrid offload |
 
 Use the Ollama API when you need Ollama-specific options or model management:
 

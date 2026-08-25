@@ -45,7 +45,7 @@ language is the point.
 
 ## Deletion needs consent, not just a failed deletion test
 
-The deletion test judges a module's *shape*. Whether code should be REMOVED
+The deletion test judges a module's _shape_. Whether code should be REMOVED
 is a different question with its own doctrine, learned expensively (four
 recorded wrong deletions from grep-level reasoning):
 

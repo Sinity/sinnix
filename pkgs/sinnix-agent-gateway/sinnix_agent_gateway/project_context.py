@@ -37,7 +37,9 @@ class ProjectContextService:
             try:
                 tasks = {
                     "availability": "available",
-                    **self.beads.query(project_ids=[project_id], view="ready", limit=20),
+                    **self.beads.query(
+                        project_ids=[project_id], view="ready", limit=20
+                    ),
                 }
             except BeadsError as exc:
                 tasks = {

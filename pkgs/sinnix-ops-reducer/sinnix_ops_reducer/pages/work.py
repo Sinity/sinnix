@@ -24,6 +24,7 @@ from .shell import (
     tile,
 )
 
+
 def slice_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
     slices = state.get("resource_slices")
     if not isinstance(slices, list):
@@ -72,7 +73,11 @@ def work_verdict(in_flight: list[Any], failed_recent: int) -> tuple[str, str, st
             f"{len(in_flight)} command{'s' if len(in_flight) != 1 else ''} in flight",
             "submitted as named project operations",
         )
-    return "muted", "Nothing running", "no project operation in flight and no recent failures"
+    return (
+        "muted",
+        "Nothing running",
+        "no project operation in flight and no recent failures",
+    )
 
 
 def ledger_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -92,13 +97,7 @@ def agentctl_jobs(state: dict[str, Any]) -> list[dict[str, Any]]:
     agentctl = state.get("agentctl")
     jobs = agentctl.get("jobs") if isinstance(agentctl, dict) else None
     return (
-        [
-            job
-            for job in jobs
-            if isinstance(job, dict)
-        ]
-        if isinstance(jobs, list)
-        else []
+        [job for job in jobs if isinstance(job, dict)] if isinstance(jobs, list) else []
     )
 
 
@@ -220,9 +219,14 @@ def agent_jobs_card(state: dict[str, Any], now: dt.datetime) -> str:
         tone = {"succeeded": "ok", "failed": "bad", "cancelled": "muted"}.get(
             lifecycle, "info"
         )
-        label = contract.get("backend") or job.get("operation") or job.get("kind") or "job"
+        label = (
+            contract.get("backend") or job.get("operation") or job.get("kind") or "job"
+        )
         headline = f"<strong>{esc(label)}</strong> <code>{esc(project_of(checkout.get('path')) or job.get('project_id') or '?')}</code>"
-        meta = [badge(lifecycle, tone), esc(age_since(state.get("observed_at") or job.get("created_at"), now))]
+        meta = [
+            badge(lifecycle, tone),
+            esc(age_since(state.get("observed_at") or job.get("created_at"), now)),
+        ]
         if contract.get("effort"):
             meta.append(f"effort {esc(contract['effort'])}")
         controls = ""

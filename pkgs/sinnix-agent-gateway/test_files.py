@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.files import FileError, HostFileService
@@ -53,9 +52,7 @@ def test_operator_write_uses_compare_and_swap_and_receipts(tmp_path: Path) -> No
         operator.write(
             "replace", str(target), content="lost update", expected_sha256=before
         )
-    removed = operator.write(
-        "remove", str(target), expected_sha256=appended["sha256"]
-    )
+    removed = operator.write("remove", str(target), expected_sha256=appended["sha256"])
     assert removed["removed"] is True
     assert not target.exists()
 
@@ -99,7 +96,9 @@ def test_operator_rejects_symlink_mutation(tmp_path: Path) -> None:
     assert target.read_text() == "before"
 
 
-def test_observer_cannot_read_secret_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_observer_cannot_read_secret_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from sinnix_agent_gateway import files
 
     secret_root = tmp_path / "secret-root"

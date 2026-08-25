@@ -4,24 +4,26 @@ import json
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
-
 from sinnix_agent_gateway.gateway_codegen import (
     DOCS_PATH,
     FIXTURE_PATH,
     REFERENCE_PATH,
     SKILL_PATH,
-    check_artifacts,
     catalog_payload,
+    check_artifacts,
     render_fixtures,
     render_reference,
     render_skill,
     update_docs,
 )
 
-
 candidate_root = Path(__file__).resolve().parents[2]
 ROOT = candidate_root if (candidate_root / DOCS_PATH).exists() else None
-FIXTURE_FILE = (ROOT / FIXTURE_PATH) if ROOT is not None else Path(__file__).parent / "fixtures" / FIXTURE_PATH.name
+FIXTURE_FILE = (
+    (ROOT / FIXTURE_PATH)
+    if ROOT is not None
+    else Path(__file__).parent / "fixtures" / FIXTURE_PATH.name
+)
 
 
 def test_generated_artifacts_are_current_and_deterministic() -> None:
@@ -33,7 +35,10 @@ def test_generated_artifacts_are_current_and_deterministic() -> None:
         "---\nname: agent-gateway\ndescription: Use when invoking, inspecting, or documenting "
     )
     assert render_fixtures() == render_fixtures()
-    assert json.loads(FIXTURE_FILE.read_text())["action_catalog_hash"] == catalog_payload()["action_catalog_hash"]
+    assert (
+        json.loads(FIXTURE_FILE.read_text())["action_catalog_hash"]
+        == catalog_payload()["action_catalog_hash"]
+    )
 
 
 def test_every_generated_example_validates_against_the_live_action_schema() -> None:
@@ -45,7 +50,9 @@ def test_every_generated_example_validates_against_the_live_action_schema() -> N
         assert errors == [], (fixture["action"], errors)
 
 
-def test_corrupting_an_action_name_or_field_fails_generation_check(tmp_path: Path) -> None:
+def test_corrupting_an_action_name_or_field_fails_generation_check(
+    tmp_path: Path,
+) -> None:
     artifacts = {
         REFERENCE_PATH: render_reference(),
         SKILL_PATH: render_skill(),
@@ -57,7 +64,9 @@ def test_corrupting_an_action_name_or_field_fails_generation_check(tmp_path: Pat
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content)
     reference = tmp_path / REFERENCE_PATH
-    reference.write_text(reference.read_text().replace("`gateway.status`", "`gateway.corrupt`", 1))
+    reference.write_text(
+        reference.read_text().replace("`gateway.status`", "`gateway.corrupt`", 1)
+    )
     assert check_artifacts(tmp_path)
 
     reference.write_text(render_reference().replace("Catalog SHA-256", "Corrupt field"))

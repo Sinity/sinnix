@@ -19,7 +19,7 @@ jsonFormat.generate "codex-hooks.json" {
           }
           {
             type = "command";
-            command = "polylogue-hook SessionStart --provider codex --sidecar-dir /home/sinity/.local/share/polylogue/hooks";
+            command = "polylogue-hook SessionStart --provider codex";
           }
         ];
       }
@@ -29,7 +29,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue-hook UserPromptSubmit --provider codex --sidecar-dir /home/sinity/.local/share/polylogue/hooks";
+            command = "polylogue-hook UserPromptSubmit --provider codex";
           }
         ];
       }
@@ -49,7 +49,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue-hook PreToolUse --provider codex --sidecar-dir /home/sinity/.local/share/polylogue/hooks";
+            command = "polylogue-hook PreToolUse --provider codex";
           }
         ];
       }
@@ -59,7 +59,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue-hook PostToolUse --provider codex --sidecar-dir /home/sinity/.local/share/polylogue/hooks";
+            command = "polylogue-hook PostToolUse --provider codex";
           }
         ];
       }
@@ -69,7 +69,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue-hook Stop --provider codex --sidecar-dir /home/sinity/.local/share/polylogue/hooks";
+            command = "polylogue-hook Stop --provider codex";
           }
         ];
       }

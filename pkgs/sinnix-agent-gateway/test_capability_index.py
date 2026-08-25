@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.capability_index import (
     CapabilityIndexError,
@@ -45,7 +44,9 @@ def service(
     )
 
 
-def test_search_filters_index_rows_with_provenance_and_pagination(tmp_path: Path) -> None:
+def test_search_filters_index_rows_with_provenance_and_pagination(
+    tmp_path: Path,
+) -> None:
     capability_index = service(
         tmp_path,
         [
@@ -72,9 +73,7 @@ def test_search_filters_index_rows_with_provenance_and_pagination(tmp_path: Path
         ],
     )
 
-    result = capability_index.search(
-        "inspect", kind="script", enabled=True, limit=1
-    )
+    result = capability_index.search("inspect", kind="script", enabled=True, limit=1)
 
     assert result["available"] is True
     assert result["source"] == {

@@ -9,16 +9,16 @@ from typing import Any
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
-
-from .artifacts import ArtifactService
-from .capabilities import Capability, Principal
-from .config import GatewayConfig
 from sinnix_mcp.execution import (
     EnvironmentProfile,
     ExecutionProfile,
     OwnerExecution,
     OwnerRoute,
 )
+
+from .artifacts import ArtifactService
+from .capabilities import Capability, Principal
+from .config import GatewayConfig
 
 
 class McpBrokerError(ValueError):
@@ -53,13 +53,27 @@ class McpBrokerService:
         self.principal.require(Capability.MCP_READ)
         rows = sorted(self.config.mcp_broker_servers.items())
         probes = await asyncio.gather(
-            *(self._catalog_server(name, row) for name, row in rows if isinstance(row, dict))
+            *(
+                self._catalog_server(name, row)
+                for name, row in rows
+                if isinstance(row, dict)
+            )
         )
         servers = list(probes)
         full_response = {"servers": servers}
-        if len(json.dumps(full_response, sort_keys=True, separators=(",", ":")).encode()) > self.config.max_result_bytes:
+        if (
+            len(
+                json.dumps(
+                    full_response, sort_keys=True, separators=(",", ":")
+                ).encode()
+            )
+            > self.config.max_result_bytes
+        ):
             catalog_artifact = self._store_json_artifact(
-                full_response, kind="mcp-catalog", owner_id="mcp-broker", source="mcp-catalog"
+                full_response,
+                kind="mcp-catalog",
+                owner_id="mcp-broker",
+                source="mcp-catalog",
             )
         else:
             catalog_artifact = None
@@ -68,22 +82,33 @@ class McpBrokerService:
             if catalog_artifact is not None:
                 response["truncated"] = True
                 response["catalog_artifact"] = catalog_artifact
-            if len(json.dumps(response, sort_keys=True, separators=(",", ":")).encode()) <= self.config.max_result_bytes:
+            if (
+                len(
+                    json.dumps(response, sort_keys=True, separators=(",", ":")).encode()
+                )
+                <= self.config.max_result_bytes
+            ):
                 return response
             candidates = [
-                server for server in servers
+                server
+                for server in servers
                 if isinstance(server.get("tools"), list) and server["tools"]
             ]
             if not candidates:
                 if catalog_artifact is None:
                     catalog_artifact = self._store_json_artifact(
-                        response, kind="mcp-catalog", owner_id="mcp-broker", source="mcp-catalog"
+                        response,
+                        kind="mcp-catalog",
+                        owner_id="mcp-broker",
+                        source="mcp-catalog",
                     )
                 return {
                     "truncated": True,
                     "catalog_artifact": catalog_artifact,
                 }
-            largest = max(candidates, key=lambda server: len(json.dumps(server["tools"])))
+            largest = max(
+                candidates, key=lambda server: len(json.dumps(server["tools"]))
+            )
             largest["tools"].pop()
             largest["tools_truncated"] = True
 
@@ -148,12 +173,17 @@ class McpBrokerService:
 
         async def inspect() -> tuple[list[dict[str, Any]], int]:
             with stderr_path.open("w", encoding="utf-8") as stderr:
-                async with stdio_client(parameters, errlog=stderr) as (read, write_stream):
+                async with stdio_client(parameters, errlog=stderr) as (
+                    read,
+                    write_stream,
+                ):
                     async with ClientSession(read, write_stream) as session:
                         await session.initialize()
                         tools = (await session.list_tools()).tools
             contracts = [self._tool_contract(server_name, tool) for tool in tools]
-            return contracts, sum(contract["effect"] == "read" for contract in contracts)
+            return contracts, sum(
+                contract["effect"] == "read" for contract in contracts
+            )
 
         try:
             tools, read_only_tool_count = await asyncio.wait_for(inspect(), timeout=5)
@@ -201,14 +231,18 @@ class McpBrokerService:
         schema = getattr(tool, "inputSchema", getattr(tool, "input_schema", None))
         if not isinstance(schema, dict):
             raise McpBrokerError(f"MCP tool {name!r} has no input schema")
-        read_only = getattr(getattr(tool, "annotations", None), "read_only_hint", None) is True
+        read_only = (
+            getattr(getattr(tool, "annotations", None), "read_only_hint", None) is True
+        )
         contract: dict[str, Any] = {
             "name": name,
             "ref": f"sinnix://mcp/{server_name}/tools/{name}",
             "description": getattr(tool, "description", None),
             "effect": "read" if read_only else "change",
         }
-        encoded_schema = json.dumps(schema, sort_keys=True, separators=(",", ":")).encode()
+        encoded_schema = json.dumps(
+            schema, sort_keys=True, separators=(",", ":")
+        ).encode()
         if len(encoded_schema) <= max(1, self.config.max_result_bytes // 2):
             contract["input_schema"] = schema
         else:
@@ -254,11 +288,13 @@ class McpBrokerService:
             or not isinstance(args, list)
             or any(not isinstance(value, str) for value in args)
             or not isinstance(environment, dict)
-            or any(not isinstance(key, str) or not isinstance(value, str) for key, value in environment.items())
+            or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in environment.items()
+            )
             or not isinstance(observer_writable_paths, list)
             or any(
-                not isinstance(path, str)
-                or not path.startswith(("/", "%t/"))
+                not isinstance(path, str) or not path.startswith(("/", "%t/"))
                 for path in observer_writable_paths
             )
         ):
@@ -411,7 +447,12 @@ class McpBrokerService:
         return self.artifacts.register(source, kind="mcp-stderr", owner_id=server_name)
 
     async def call(
-        self, server_name: str, tool_name: str, arguments: dict[str, Any], *, write: bool
+        self,
+        server_name: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        write: bool,
     ) -> dict[str, Any]:
         self.principal.require(Capability.MCP_WRITE if write else Capability.MCP_READ)
         server_name = self._string(server_name, "server", 128)
@@ -428,13 +469,18 @@ class McpBrokerService:
             tool: Any | None = None
             response: Any | None = None
             with stderr_path.open("w", encoding="utf-8") as stderr:
-                async with stdio_client(parameters, errlog=stderr) as (read, write_stream):
+                async with stdio_client(parameters, errlog=stderr) as (
+                    read,
+                    write_stream,
+                ):
                     async with ClientSession(read, write_stream) as session:
                         await session.initialize()
                         tool = self._tool((await session.list_tools()).tools, tool_name)
                         if tool is not None:
                             read_only = getattr(
-                                getattr(tool, "annotations", None), "read_only_hint", None
+                                getattr(tool, "annotations", None),
+                                "read_only_hint",
+                                None,
                             )
                             if (not write and read_only is True) or (
                                 write and read_only is not True
@@ -443,13 +489,17 @@ class McpBrokerService:
 
             if tool is None:
                 raise McpBrokerError(f"MCP server does not expose tool {tool_name!r}")
-            read_only = getattr(getattr(tool, "annotations", None), "read_only_hint", None)
+            read_only = getattr(
+                getattr(tool, "annotations", None), "read_only_hint", None
+            )
             if not write and read_only is not True:
                 raise McpBrokerError(
                     "MCP tool is not explicitly declared read-only; select mcp.change through change"
                 )
             if write and read_only is True:
-                raise McpBrokerError("MCP tool is declared read-only; invoke its read contract")
+                raise McpBrokerError(
+                    "MCP tool is declared read-only; invoke its read contract"
+                )
             if response is None:
                 raise McpBrokerError("MCP server returned no tool result")
             return self._response_payload(response)

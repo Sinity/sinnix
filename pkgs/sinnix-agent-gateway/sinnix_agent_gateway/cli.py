@@ -9,16 +9,16 @@ from typing import Any
 import anyio
 
 from .app import canonical_manifest, create_server
+from .capabilities import PRINCIPAL_CAPABILITIES
 from .cli_support import (
     CliInputError,
     build_request,
     catalog_display,
     invoke,
 )
-from .runtime import manifest_measurement
-from .capabilities import PRINCIPAL_CAPABILITIES
 from .config import GatewayConfig
 from .registry import REGISTRY
+from .runtime import manifest_measurement
 
 LOCAL_CONFIG_PATH = Path("/etc/sinnix/agent-gateway.json")
 
@@ -32,7 +32,9 @@ def _default_config_path() -> Path | None:
 
 
 async def build_manifest(config: GatewayConfig, principal_name: str) -> dict[str, Any]:
-    manifest = canonical_manifest(await create_server(config, principal_name).list_tools())
+    manifest = canonical_manifest(
+        await create_server(config, principal_name).list_tools()
+    )
     return {**manifest, "measurement": manifest_measurement(manifest)}
 
 
@@ -90,7 +92,9 @@ def parser() -> argparse.ArgumentParser:
         source = command.add_mutually_exclusive_group()
         source.add_argument("--input", help="inline JSON object")
         source.add_argument("--input-file", type=Path, help="JSON object file")
-        source.add_argument("--stdin", action="store_true", help="read one JSON object from stdin")
+        source.add_argument(
+            "--stdin", action="store_true", help="read one JSON object from stdin"
+        )
         command.add_argument("--action", "--action-name", dest="action_name")
         command.add_argument("--ref")
         command.add_argument("--operation")
@@ -109,7 +113,17 @@ def parser() -> argparse.ArgumentParser:
             choices=sorted(PRINCIPAL_CAPABILITIES),
         )
 
-    for verb in ("status", "query", "get", "context", "events", "wait", "change", "operate", "run"):
+    for verb in (
+        "status",
+        "query",
+        "get",
+        "context",
+        "events",
+        "wait",
+        "change",
+        "operate",
+        "run",
+    ):
         command = subcommands.add_parser(verb)
         add_input_flags(command)
         if verb == "change":
@@ -130,7 +144,9 @@ def main() -> None:
     arguments = parser().parse_args()
     config = GatewayConfig.load(arguments.config)
     command = arguments.command or "serve"
-    principal_name = getattr(arguments, "command_principal", None) or arguments.principal
+    principal_name = (
+        getattr(arguments, "command_principal", None) or arguments.principal
+    )
     if command == "serve":
         create_server(config, arguments.principal).run("stdio")
     elif command == "manifest":
@@ -181,17 +197,21 @@ def main() -> None:
             complete=arguments.complete,
         )
         print(json.dumps(payload, indent=2, sort_keys=True))
-    elif command in {
-        "status",
-        "query",
-        "get",
-        "context",
-        "events",
-        "wait",
-        "change",
-        "operate",
-        "run",
-    } and arguments.explain:
+    elif (
+        command
+        in {
+            "status",
+            "query",
+            "get",
+            "context",
+            "events",
+            "wait",
+            "change",
+            "operate",
+            "run",
+        }
+        and arguments.explain
+    ):
         action_name = arguments.action_name or {
             "status": "gateway.status",
             "get": "resources.get",

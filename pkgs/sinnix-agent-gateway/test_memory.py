@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.memory import MemoryError, MemoryService
@@ -42,10 +41,23 @@ def test_memory_search_preserves_raw_source_provenance_and_unavailability(
         match["authority"] == "authoritative-local-session-jsonl"
         for match in result["matches"]
     )
-    unavailable = {row["source"]: row for row in result["sources"] if row["availability"] == "unavailable"}
-    assert unavailable["polylogue"]["reason"] == "upstream is intentionally unavailable on this host"
-    assert unavailable["sinex"]["reason"] == "upstream is intentionally unavailable on this host"
-    assert unavailable["lynchpin"]["reason"] == "no gateway semantic adapter is registered yet"
+    unavailable = {
+        row["source"]: row
+        for row in result["sources"]
+        if row["availability"] == "unavailable"
+    }
+    assert (
+        unavailable["polylogue"]["reason"]
+        == "upstream is intentionally unavailable on this host"
+    )
+    assert (
+        unavailable["sinex"]["reason"]
+        == "upstream is intentionally unavailable on this host"
+    )
+    assert (
+        unavailable["lynchpin"]["reason"]
+        == "no gateway semantic adapter is registered yet"
+    )
 
 
 def test_memory_get_returns_bounded_source_object(tmp_path: Path) -> None:
@@ -62,7 +74,9 @@ def test_memory_get_returns_bounded_source_object(tmp_path: Path) -> None:
     assert result["bytes"] == 8
 
 
-def test_memory_search_rejects_unknown_source_and_denied_principal(tmp_path: Path) -> None:
+def test_memory_search_rejects_unknown_source_and_denied_principal(
+    tmp_path: Path,
+) -> None:
     memory = memory_service(tmp_path, "operator")
 
     with pytest.raises(MemoryError, match="unknown memory source"):

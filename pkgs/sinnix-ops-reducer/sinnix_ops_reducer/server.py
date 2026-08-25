@@ -485,6 +485,26 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, json.JSONDecodeError):
                 value = self.reducer.health()
             self._write(HTTPStatus.OK, value)
+        elif self.path == "/v1/revision":
+            try:
+                snapshot = json.loads(
+                    self.reducer.snapshot_path.read_text(encoding="utf-8")
+                )
+            except (OSError, json.JSONDecodeError):
+                snapshot = self.reducer.health()
+            self._write(
+                HTTPStatus.OK,
+                {
+                    key: snapshot.get(key)
+                    for key in (
+                        "schema",
+                        "sequence",
+                        "observed_at",
+                        "degradation",
+                        "sources",
+                    )
+                },
+            )
         elif self.path == "/v1/events":
             last = self.headers.get("Last-Event-ID")
             try:

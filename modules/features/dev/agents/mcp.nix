@@ -322,14 +322,6 @@ mkFeatureModule {
                 source = "${scriptPkgs.sinnix-mcp-sinex}/bin/sinnix-mcp-sinex";
                 force = true;
               };
-              ".local/share/polylogue/inbox/chatgpt" = {
-                source = config.lib.file.mkOutOfStoreSymlink "/realm/data/ai/chatlog/raw/chatgpt";
-                force = true;
-              };
-              ".local/share/polylogue/inbox/claude" = {
-                source = config.lib.file.mkOutOfStoreSymlink "/realm/data/ai/chatlog/raw/claude";
-                force = true;
-              };
             };
           };
       }

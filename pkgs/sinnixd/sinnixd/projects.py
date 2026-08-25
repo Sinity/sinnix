@@ -5,15 +5,19 @@ import hashlib
 import json
 import re
 import subprocess
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+import tomllib
 from sinnix_mcp import Authority, Lifecycle, OwnerRegistry, OwnerSpec, SinnixRef
 
 from .environment import build_environment
-from .limits import DEFAULT_TIMEOUT_SECONDS, MAX_DECLARED_OPERATION_TIMEOUT_SECONDS, valid_timeout_seconds
+from .limits import (
+    DEFAULT_TIMEOUT_SECONDS,
+    MAX_DECLARED_OPERATION_TIMEOUT_SECONDS,
+    valid_timeout_seconds,
+)
 
 
 class ProjectConfigError(ValueError):
@@ -42,7 +46,9 @@ DEFAULT_PARAMETER_GRAMMAR = "safe-token"
 
 def _parameter_digest(parameters: Mapping[str, Any]) -> str:
     return hashlib.sha256(
-        json.dumps(parameters, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+        json.dumps(
+            parameters, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode()
     ).hexdigest()
 
 
@@ -87,14 +93,26 @@ def _checkout_git(path: Path, *arguments: str) -> str:
             timeout=2,
         )
     except (OSError, subprocess.SubprocessError) as error:
-        raise ProjectConfigError(f"could not verify registered checkout {path}") from error
+        raise ProjectConfigError(
+            f"could not verify registered checkout {path}"
+        ) from error
     return result.stdout
 
 
 def revalidate_registered_checkout(checkout: Mapping[str, Any]) -> Path:
     """Prove a durable checkout binding still names the same registered Git worktree."""
-    expected = {"project_id", "project_path", "checkout_id", "path", "git_common_dir", "head"}
-    if set(checkout) != expected or any(not isinstance(checkout.get(field), str) or not checkout[field] for field in expected):
+    expected = {
+        "project_id",
+        "project_path",
+        "checkout_id",
+        "path",
+        "git_common_dir",
+        "head",
+    }
+    if set(checkout) != expected or any(
+        not isinstance(checkout.get(field), str) or not checkout[field]
+        for field in expected
+    ):
         raise ProjectConfigError("registered checkout identity is invalid")
     recorded_path = Path(checkout["path"])
     project_path = Path(checkout["project_path"])
@@ -110,13 +128,21 @@ def revalidate_registered_checkout(checkout: Mapping[str, Any]) -> Path:
     if not (project_root / ".agentctl" / "project.toml").is_file():
         raise ProjectConfigError("registered project is unavailable")
     try:
-        top_level = Path(_checkout_git(path, "rev-parse", "--show-toplevel").strip()).resolve(strict=True)
-        common_dir = Path(
-            _checkout_git(path, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+        top_level = Path(
+            _checkout_git(path, "rev-parse", "--show-toplevel").strip()
         ).resolve(strict=True)
-        project_top_level = Path(_checkout_git(project_root, "rev-parse", "--show-toplevel").strip()).resolve(strict=True)
+        common_dir = Path(
+            _checkout_git(
+                path, "rev-parse", "--path-format=absolute", "--git-common-dir"
+            ).strip()
+        ).resolve(strict=True)
+        project_top_level = Path(
+            _checkout_git(project_root, "rev-parse", "--show-toplevel").strip()
+        ).resolve(strict=True)
         project_common_dir = Path(
-            _checkout_git(project_root, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+            _checkout_git(
+                project_root, "rev-parse", "--path-format=absolute", "--git-common-dir"
+            ).strip()
         ).resolve(strict=True)
     except OSError as error:
         raise ProjectConfigError("registered checkout is unavailable") from error
@@ -128,8 +154,13 @@ def revalidate_registered_checkout(checkout: Mapping[str, Any]) -> Path:
         or _registered_checkout_id(path, project_root) != checkout["checkout_id"]
     ):
         raise ProjectConfigError("registered checkout identity changed")
-    records = parse_worktree_records(_checkout_git(project_root, "worktree", "list", "--porcelain"))
-    if not any(record.get("worktree") == str(path) and record.get("HEAD") == checkout["head"] for record in records):
+    records = parse_worktree_records(
+        _checkout_git(project_root, "worktree", "list", "--porcelain")
+    )
+    if not any(
+        record.get("worktree") == str(path) and record.get("HEAD") == checkout["head"]
+        for record in records
+    ):
         raise ProjectConfigError("checkout is no longer a registered Git worktree")
     return path
 
@@ -186,7 +217,9 @@ class ConflictPolicy:
         return {
             "exact_files": list(self.exact_files),
             "generated_surfaces": list(self.generated_surfaces),
-            "semantic_slots": {name: list(paths) for name, paths in self.semantic_slots.items()},
+            "semantic_slots": {
+                name: list(paths) for name, paths in self.semantic_slots.items()
+            },
         }
 
 
@@ -200,6 +233,25 @@ class ProjectEnvironment:
 
     def values(self) -> dict[str, str]:
         return build_environment(inherit=self.inherit, unset=self.unset)
+
+    def command_for(
+        self, payload: Sequence[str], *, overrides: Mapping[str, str] | None = None
+    ) -> tuple[str, ...]:
+        """Enter the project environment and apply runtime-owned payload variables.
+
+        Nix creates a per-invocation ``nix-shell.*`` TMPDIR while entering a
+        development shell.  That directory is an implementation detail, not a
+        durable job scratch contract.  Place runtime-owned overrides after
+        ``nix develop --command`` so the payload sees the job-owned path.
+        """
+        assignments = tuple(
+            f"{name}={value}" for name, value in sorted((overrides or {}).items())
+        )
+        if not assignments:
+            return (*self.command, *payload)
+        if self.kind == "nix-develop":
+            return (*self.command, "env", *assignments, *payload)
+        return ("env", *assignments, *self.command, *payload)
 
     def catalog_row(self, *, agent_capable: bool) -> dict[str, Any]:
         return {
@@ -297,7 +349,9 @@ class OperationParameter:
         if self.kind in {"string", "enum"}:
             self._validate_string(value)
             if self.kind == "enum" and value not in self.values:
-                raise ValueError(f"parameter {self.name} must be one of its declared values")
+                raise ValueError(
+                    f"parameter {self.name} must be one of its declared values"
+                )
             return value
         if not isinstance(value, list) or not value:
             raise ValueError(f"parameter {self.name} must be a non-empty list")
@@ -307,15 +361,22 @@ class OperationParameter:
         for item in value:
             self._validate_string(item)
             if self.kind == "enum-list" and item not in self.values:
-                raise ValueError(f"parameter {self.name} must contain only declared values")
+                raise ValueError(
+                    f"parameter {self.name} must contain only declared values"
+                )
         return tuple(sorted(set(value)))
 
     def _validate_string(self, value: Any) -> None:
         if not isinstance(value, str) or not value:
             raise ValueError(f"parameter {self.name} must be a non-empty string")
         assert self.max_length is not None and self.grammar is not None
-        if len(value) > self.max_length or _PARAMETER_GRAMMARS[self.grammar].fullmatch(value) is None:
-            raise ValueError(f"parameter {self.name} contains an unsafe or malformed string")
+        if (
+            len(value) > self.max_length
+            or _PARAMETER_GRAMMARS[self.grammar].fullmatch(value) is None
+        ):
+            raise ValueError(
+                f"parameter {self.name} contains an unsafe or malformed string"
+            )
 
 
 @dataclass(frozen=True)
@@ -334,20 +395,27 @@ class ProjectOperation:
     parameters: tuple[OperationParameter, ...] = ()
     service: OperationService | None = None
 
-    def derive_argv(self, raw_parameters: Mapping[str, Any]) -> tuple[tuple[str, ...], str]:
+    def derive_argv(
+        self, raw_parameters: Mapping[str, Any]
+    ) -> tuple[tuple[str, ...], str]:
         if not isinstance(raw_parameters, Mapping):
             raise ValueError("declared job parameters must be an object")
         parameter_by_name = {parameter.name: parameter for parameter in self.parameters}
         unknown = set(raw_parameters) - set(parameter_by_name)
         if unknown:
-            raise ValueError("declared job parameters contain unknown field(s): " + ", ".join(sorted(unknown)))
+            raise ValueError(
+                "declared job parameters contain unknown field(s): "
+                + ", ".join(sorted(unknown))
+            )
         canonical: dict[str, Any] = {}
         positional_argv: list[tuple[int, str]] = []
         flag_argv: list[str] = []
         for parameter in self.parameters:
             if parameter.name not in raw_parameters:
                 if parameter.required:
-                    raise ValueError(f"declared job parameters omit required field: {parameter.name}")
+                    raise ValueError(
+                        f"declared job parameters omit required field: {parameter.name}"
+                    )
                 continue
             value = parameter.canonicalize(raw_parameters[parameter.name])
             if parameter.position is not None:
@@ -435,7 +503,9 @@ class ProjectAdapter:
 
     def descriptor_status(self) -> dict[str, Any]:
         try:
-            on_disk_digest = "sha256:" + hashlib.sha256(self.descriptor.read_bytes()).hexdigest()
+            on_disk_digest = (
+                "sha256:" + hashlib.sha256(self.descriptor.read_bytes()).hexdigest()
+            )
         except OSError:
             on_disk_digest = None
         return {
@@ -456,20 +526,30 @@ class ProjectAdapter:
             "workspace": self.workspace.catalog_row() if self.agent_capable else None,
             "conflicts": self.conflicts.catalog_row(),
             "operations": [operation.catalog_row() for operation in self.operations],
-            "owner_adapters": [adapter.catalog_row() for adapter in self.owner_adapters],
+            "owner_adapters": [
+                adapter.catalog_row() for adapter in self.owner_adapters
+            ],
         }
 
 
 def _string_list(value: Any, field: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or not value or any(not isinstance(item, str) or not item for item in value):
-        raise ProjectConfigError(f"{field} must be a non-empty list of non-empty strings")
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(item, str) or not item for item in value)
+    ):
+        raise ProjectConfigError(
+            f"{field} must be a non-empty list of non-empty strings"
+        )
     return tuple(value)
 
 
 def _optional_string_list(value: Any, field: str) -> tuple[str, ...]:
     if value is None:
         return ()
-    if not isinstance(value, list) or any(not isinstance(item, str) or not item for item in value):
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or not item for item in value
+    ):
         raise ProjectConfigError(f"{field} must be a list of non-empty strings")
     return tuple(value)
 
@@ -481,15 +561,30 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
         raise ProjectConfigError(f"{field} must be a bounded table")
     parameters: list[OperationParameter] = []
     for name, definition in value.items():
-        if not isinstance(name, str) or not name.isidentifier() or not isinstance(definition, Mapping):
-            raise ProjectConfigError(f"{field} contains an invalid parameter declaration")
+        if (
+            not isinstance(name, str)
+            or not name.isidentifier()
+            or not isinstance(definition, Mapping)
+        ):
+            raise ProjectConfigError(
+                f"{field} contains an invalid parameter declaration"
+            )
         kind = definition.get("type")
-        if kind not in {"bool", "string", "enum", "integer", "string-list", "enum-list"}:
+        if kind not in {
+            "bool",
+            "string",
+            "enum",
+            "integer",
+            "string-list",
+            "enum-list",
+        }:
             raise ProjectConfigError(f"{field}.{name} has an invalid type")
         has_flag = "flag" in definition
         has_position = "position" in definition
         if has_flag == has_position:
-            raise ProjectConfigError(f"{field}.{name} must declare exactly one flag or position")
+            raise ProjectConfigError(
+                f"{field}.{name} must declare exactly one flag or position"
+            )
         flag: str | None = None
         position: int | None = None
         required = False
@@ -507,16 +602,22 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
                 or not 1 <= position <= MAX_OPERATION_PARAMETERS
                 or required is not True
             ):
-                raise ProjectConfigError(f"{field}.{name} has an invalid required positional declaration")
+                raise ProjectConfigError(
+                    f"{field}.{name} has an invalid required positional declaration"
+                )
         mapping_fields = {"flag"} if flag is not None else {"position", "required"}
         if kind == "bool":
             if set(definition) != {"type", *mapping_fields}:
-                raise ProjectConfigError(f"{field}.{name} bool parameters only accept type and flag")
+                raise ProjectConfigError(
+                    f"{field}.{name} bool parameters only accept type and flag"
+                )
             parameters.append(OperationParameter(name=name, kind=kind, flag=flag))
             continue
         if kind == "integer":
             if set(definition) != {"type", *mapping_fields, "min", "max"}:
-                raise ProjectConfigError(f"{field}.{name} integer parameters require min and max")
+                raise ProjectConfigError(
+                    f"{field}.{name} integer parameters require min and max"
+                )
             minimum = definition.get("min")
             maximum = definition.get("max")
             if (
@@ -524,13 +625,21 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
                 or isinstance(minimum, bool)
                 or not isinstance(maximum, int)
                 or isinstance(maximum, bool)
-                or not MIN_PARAMETER_INTEGER <= minimum <= maximum <= MAX_PARAMETER_INTEGER
+                or not MIN_PARAMETER_INTEGER
+                <= minimum
+                <= maximum
+                <= MAX_PARAMETER_INTEGER
             ):
                 raise ProjectConfigError(f"{field}.{name} has invalid integer bounds")
             parameters.append(
                 OperationParameter(
-                    name=name, kind=kind, flag=flag, position=position, required=required,
-                    minimum=minimum, maximum=maximum,
+                    name=name,
+                    kind=kind,
+                    flag=flag,
+                    position=position,
+                    required=required,
+                    minimum=minimum,
+                    maximum=maximum,
                 )
             )
             continue
@@ -539,18 +648,28 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
             if kind == "enum-list":
                 allowed.add("max_items")
             if set(definition) != allowed:
-                raise ProjectConfigError(f"{field}.{name} {kind} parameters require declared values and bounds")
+                raise ProjectConfigError(
+                    f"{field}.{name} {kind} parameters require declared values and bounds"
+                )
             values = definition.get("values")
-            if not isinstance(values, list) or not 1 <= len(values) <= MAX_PARAMETER_ENUM_VALUES:
-                raise ProjectConfigError(f"{field}.{name} must declare bounded enum values")
+            if (
+                not isinstance(values, list)
+                or not 1 <= len(values) <= MAX_PARAMETER_ENUM_VALUES
+            ):
+                raise ProjectConfigError(
+                    f"{field}.{name} must declare bounded enum values"
+                )
             if any(
                 not isinstance(item, str)
                 or not item
                 or len(item) > MAX_PARAMETER_STRING_LENGTH
-                or _PARAMETER_GRAMMARS[DEFAULT_PARAMETER_GRAMMAR].fullmatch(item) is None
+                or _PARAMETER_GRAMMARS[DEFAULT_PARAMETER_GRAMMAR].fullmatch(item)
+                is None
                 for item in values
             ) or len(set(values)) != len(values):
-                raise ProjectConfigError(f"{field}.{name} has invalid or duplicate enum values")
+                raise ProjectConfigError(
+                    f"{field}.{name} has invalid or duplicate enum values"
+                )
             max_items = None
             if kind == "enum-list":
                 max_items = definition.get("max_items")
@@ -574,7 +693,9 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
         if kind == "string-list":
             allowed.add("max_items")
         if set(definition) != allowed - {"grammar"} and set(definition) != allowed:
-            raise ProjectConfigError(f"{field}.{name} {kind} parameters require explicit bounds")
+            raise ProjectConfigError(
+                f"{field}.{name} {kind} parameters require explicit bounds"
+            )
         max_length = definition.get("max_length")
         grammar = definition.get("grammar", DEFAULT_PARAMETER_GRAMMAR)
         if (
@@ -603,19 +724,31 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
     flags = [parameter.flag for parameter in parameters if parameter.flag is not None]
     if len(set(flags)) != len(flags):
         raise ProjectConfigError(f"{field} parameter flags must be unique")
-    positions = [parameter.position for parameter in parameters if parameter.position is not None]
+    positions = [
+        parameter.position for parameter in parameters if parameter.position is not None
+    ]
     if len(set(positions)) != len(positions):
-        raise ProjectConfigError(f"{field} positional parameter positions must be unique")
+        raise ProjectConfigError(
+            f"{field} positional parameter positions must be unique"
+        )
     if positions and set(positions) != set(range(1, len(positions) + 1)):
-        raise ProjectConfigError(f"{field} positional parameter positions must be contiguous from 1")
+        raise ProjectConfigError(
+            f"{field} positional parameter positions must be contiguous from 1"
+        )
     return tuple(parameters)
 
 
 def _operation_service(value: Any, field: str) -> OperationService | None:
     if value is None:
         return None
-    if not isinstance(value, Mapping) or set(value) != {"readiness", "lifetime", "ports"}:
-        raise ProjectConfigError(f"{field} must contain only readiness, lifetime, and ports")
+    if not isinstance(value, Mapping) or set(value) != {
+        "readiness",
+        "lifetime",
+        "ports",
+    }:
+        raise ProjectConfigError(
+            f"{field} must contain only readiness, lifetime, and ports"
+        )
     readiness = value.get("readiness")
     lifetime = value.get("lifetime")
     ports = value.get("ports")
@@ -647,29 +780,49 @@ def _operation_service(value: Any, field: str) -> OperationService | None:
         if (
             not isinstance(port_range, list)
             or len(port_range) != 2
-            or any(not isinstance(port, int) or isinstance(port, bool) for port in port_range)
+            or any(
+                not isinstance(port, int) or isinstance(port, bool)
+                for port in port_range
+            )
         ):
             raise ProjectConfigError(f"{field}.ports.{name}.range is invalid")
         minimum, maximum = port_range
-        if not 1024 <= minimum <= maximum <= 65535 or maximum - minimum + 1 > MAX_SERVICE_PORT_RANGE:
+        if (
+            not 1024 <= minimum <= maximum <= 65535
+            or maximum - minimum + 1 > MAX_SERVICE_PORT_RANGE
+        ):
             raise ProjectConfigError(f"{field}.ports.{name}.range is invalid")
         environments.add(environment)
-        slots.append(ServicePortSlot(name=name, environment=environment, minimum=minimum, maximum=maximum))
+        slots.append(
+            ServicePortSlot(
+                name=name, environment=environment, minimum=minimum, maximum=maximum
+            )
+        )
     return OperationService(readiness=readiness, lifetime=lifetime, ports=tuple(slots))
 
 
 def _bounded_parameter_count(value: Any, maximum: int) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= maximum
+    return (
+        isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= maximum
+    )
 
 
-def _owner_adapters(raw: Mapping[str, Any], descriptor: Path) -> tuple[ProjectOwnerAdapter, ...]:
+def _owner_adapters(
+    raw: Mapping[str, Any], descriptor: Path
+) -> tuple[ProjectOwnerAdapter, ...]:
     definitions = raw.get("owner_adapters", {})
     if not isinstance(definitions, Mapping):
         raise ProjectConfigError(f"{descriptor} [owner_adapters] must be a table")
     adapters: list[ProjectOwnerAdapter] = []
     for name, definition in sorted(definitions.items()):
-        if not isinstance(name, str) or not name.isidentifier() or not isinstance(definition, Mapping):
-            raise ProjectConfigError(f"{descriptor} contains an invalid owner adapter declaration")
+        if (
+            not isinstance(name, str)
+            or not name.isidentifier()
+            or not isinstance(definition, Mapping)
+        ):
+            raise ProjectConfigError(
+                f"{descriptor} contains an invalid owner adapter declaration"
+            )
         allowed = {
             "namespace",
             "owner",
@@ -689,21 +842,42 @@ def _owner_adapters(raw: Mapping[str, Any], descriptor: Path) -> tuple[ProjectOw
         documentation = definition.get("documentation", "")
         versions = definition.get("protocol_versions")
         if not isinstance(namespace, str) or not isinstance(owner, str):
-            raise ProjectConfigError(f"owner_adapters.{name} requires namespace and owner")
+            raise ProjectConfigError(
+                f"owner_adapters.{name} requires namespace and owner"
+            )
         if not isinstance(documentation, str):
-            raise ProjectConfigError(f"owner_adapters.{name}.documentation must be a string")
-        if not isinstance(versions, list) or not versions or any(
-            not isinstance(version, int) or isinstance(version, bool) for version in versions
+            raise ProjectConfigError(
+                f"owner_adapters.{name}.documentation must be a string"
+            )
+        if (
+            not isinstance(versions, list)
+            or not versions
+            or any(
+                not isinstance(version, int) or isinstance(version, bool)
+                for version in versions
+            )
         ):
-            raise ProjectConfigError(f"owner_adapters.{name}.protocol_versions must be non-empty integers")
+            raise ProjectConfigError(
+                f"owner_adapters.{name}.protocol_versions must be non-empty integers"
+            )
         if definition.get("source_scoped") is not True:
-            raise ProjectConfigError(f"owner_adapters.{name} must declare source_scoped = true")
+            raise ProjectConfigError(
+                f"owner_adapters.{name} must declare source_scoped = true"
+            )
         source_ref = definition.get("source_ref")
         if not isinstance(source_ref, str):
-            raise ProjectConfigError(f"owner_adapters.{name}.source_ref must be a string")
+            raise ProjectConfigError(
+                f"owner_adapters.{name}.source_ref must be a string"
+            )
         timeout_seconds = definition.get("timeout_seconds", 30)
-        if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool) or not 1 <= timeout_seconds <= 300:
-            raise ProjectConfigError(f"owner_adapters.{name}.timeout_seconds must be between 1 and 300")
+        if (
+            not isinstance(timeout_seconds, int)
+            or isinstance(timeout_seconds, bool)
+            or not 1 <= timeout_seconds <= 300
+        ):
+            raise ProjectConfigError(
+                f"owner_adapters.{name}.timeout_seconds must be between 1 and 300"
+            )
         try:
             spec = OwnerSpec(
                 namespace=namespace,
@@ -716,11 +890,15 @@ def _owner_adapters(raw: Mapping[str, Any], descriptor: Path) -> tuple[ProjectOw
             )
             parsed_source_ref = SinnixRef.parse(source_ref)
         except (TypeError, ValueError) as error:
-            raise ProjectConfigError(f"owner_adapters.{name} is invalid: {error}") from error
+            raise ProjectConfigError(
+                f"owner_adapters.{name} is invalid: {error}"
+            ) from error
         adapters.append(
             ProjectOwnerAdapter(
                 spec=spec,
-                command=_string_list(definition.get("exec"), f"owner_adapters.{name}.exec"),
+                command=_string_list(
+                    definition.get("exec"), f"owner_adapters.{name}.exec"
+                ),
                 source_ref=parsed_source_ref,
                 timeout_seconds=timeout_seconds,
             )
@@ -728,7 +906,9 @@ def _owner_adapters(raw: Mapping[str, Any], descriptor: Path) -> tuple[ProjectOw
     try:
         OwnerRegistry(adapter.spec for adapter in adapters)
     except ValueError as error:
-        raise ProjectConfigError(f"{descriptor} owner adapters overlap: {error}") from error
+        raise ProjectConfigError(
+            f"{descriptor} owner adapters overlap: {error}"
+        ) from error
     return tuple(adapters)
 
 
@@ -742,7 +922,9 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
     try:
         raw = tomllib.loads(raw_bytes.decode())
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
-        raise ProjectConfigError(f"invalid project adapter {descriptor}: {error}") from error
+        raise ProjectConfigError(
+            f"invalid project adapter {descriptor}: {error}"
+        ) from error
     if raw.get("schema") != 1:
         raise ProjectConfigError(f"{descriptor} must declare schema = 1")
     project = raw.get("project")
@@ -757,7 +939,9 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
     markers = _string_list(project.get("root_markers"), "project.root_markers")
     missing_markers = [marker for marker in markers if not (root / marker).exists()]
     if missing_markers:
-        raise ProjectConfigError(f"{descriptor} root marker(s) missing: {', '.join(missing_markers)}")
+        raise ProjectConfigError(
+            f"{descriptor} root marker(s) missing: {', '.join(missing_markers)}"
+        )
 
     environment = raw.get("environment")
     if not isinstance(environment, Mapping):
@@ -768,7 +952,9 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
     execution_environment = ProjectEnvironment(
         kind=environment_kind,
         command=_string_list(environment.get("command"), "environment.command"),
-        inherit=_optional_string_list(environment.get("inherit"), "environment.inherit"),
+        inherit=_optional_string_list(
+            environment.get("inherit"), "environment.inherit"
+        ),
         unset=_optional_string_list(environment.get("unset"), "environment.unset"),
         preflight=(
             _string_list(environment["preflight"], "environment.preflight")
@@ -783,45 +969,69 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         if not isinstance(raw_workspace, Mapping):
             raise ProjectConfigError(f"{descriptor} [workspace] must be a table")
         allowed_workspace = {
-            "provider", "root", "default_base", "identity_check", "checkpoint_untracked",
+            "provider",
+            "root",
+            "default_base",
+            "identity_check",
+            "checkpoint_untracked",
             "verification_operations",
         }
         if set(raw_workspace) - allowed_workspace:
-            raise ProjectConfigError(f"{descriptor} [workspace] contains unknown fields")
+            raise ProjectConfigError(
+                f"{descriptor} [workspace] contains unknown fields"
+            )
         provider = raw_workspace.get("provider")
         workspace_root = raw_workspace.get("root")
         default_base = raw_workspace.get("default_base")
         checkpoint_untracked = raw_workspace.get("checkpoint_untracked")
         if provider != "git-worktree":
-            raise ProjectConfigError(f"{descriptor} workspace.provider must be git-worktree")
-        if not isinstance(workspace_root, str) or not Path(workspace_root).is_absolute():
-            raise ProjectConfigError(f"{descriptor} workspace.root must be an absolute path")
+            raise ProjectConfigError(
+                f"{descriptor} workspace.provider must be git-worktree"
+            )
+        if (
+            not isinstance(workspace_root, str)
+            or not Path(workspace_root).is_absolute()
+        ):
+            raise ProjectConfigError(
+                f"{descriptor} workspace.root must be an absolute path"
+            )
         if not isinstance(default_base, str) or not default_base:
-            raise ProjectConfigError(f"{descriptor} workspace.default_base must be non-empty")
+            raise ProjectConfigError(
+                f"{descriptor} workspace.default_base must be non-empty"
+            )
         if not isinstance(checkpoint_untracked, bool):
-            raise ProjectConfigError(f"{descriptor} workspace.checkpoint_untracked must be boolean")
+            raise ProjectConfigError(
+                f"{descriptor} workspace.checkpoint_untracked must be boolean"
+            )
         workspace = WorkspacePolicy(
             provider=provider,
             root=Path(workspace_root),
             default_base=default_base,
-            identity_check=_string_list(raw_workspace.get("identity_check"), "workspace.identity_check"),
+            identity_check=_string_list(
+                raw_workspace.get("identity_check"), "workspace.identity_check"
+            ),
             checkpoint_untracked=checkpoint_untracked,
             verification_operations=_optional_string_list(
-                raw_workspace.get("verification_operations"), "workspace.verification_operations"
+                raw_workspace.get("verification_operations"),
+                "workspace.verification_operations",
             ),
         )
 
     raw_conflicts = raw.get("conflicts", {})
     if not isinstance(raw_conflicts, Mapping) or set(raw_conflicts) - {
-        "exact_files", "generated_surfaces", "semantic_slots"
+        "exact_files",
+        "generated_surfaces",
+        "semantic_slots",
     }:
         raise ProjectConfigError(f"{descriptor} [conflicts] is invalid")
     raw_semantic_slots = raw_conflicts.get("semantic_slots", {})
     if isinstance(raw_semantic_slots, list):
-        semantic_slots = {
-            name: () for name in _optional_string_list(raw_semantic_slots, "conflicts.semantic_slots")
-        }
-    elif isinstance(raw_semantic_slots, Mapping) and all(isinstance(name, str) and name for name in raw_semantic_slots):
+        semantic_slots = dict.fromkeys(
+            _optional_string_list(raw_semantic_slots, "conflicts.semantic_slots"), ()
+        )
+    elif isinstance(raw_semantic_slots, Mapping) and all(
+        isinstance(name, str) and name for name in raw_semantic_slots
+    ):
         semantic_slots = {
             name: _string_list(paths, f"conflicts.semantic_slots.{name}")
             for name, paths in sorted(raw_semantic_slots.items())
@@ -829,7 +1039,9 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
     else:
         raise ProjectConfigError(f"{descriptor} conflicts.semantic_slots is invalid")
     conflicts = ConflictPolicy(
-        exact_files=_optional_string_list(raw_conflicts.get("exact_files"), "conflicts.exact_files"),
+        exact_files=_optional_string_list(
+            raw_conflicts.get("exact_files"), "conflicts.exact_files"
+        ),
         generated_surfaces=_optional_string_list(
             raw_conflicts.get("generated_surfaces"), "conflicts.generated_surfaces"
         ),
@@ -842,17 +1054,37 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         raise ProjectConfigError(f"{descriptor} [operations] must be a table")
     operations: list[ProjectOperation] = []
     for name, definition in sorted(raw_operations.items()):
-        if not isinstance(name, str) or not name.isidentifier() or not isinstance(definition, Mapping):
-            raise ProjectConfigError(f"{descriptor} contains an invalid operation declaration")
+        if (
+            not isinstance(name, str)
+            or not name.isidentifier()
+            or not isinstance(definition, Mapping)
+        ):
+            raise ProjectConfigError(
+                f"{descriptor} contains an invalid operation declaration"
+            )
         allowed_operation = {
-            "description", "exec", "pool", "result", "cache", "exclusive_keys",
-            "dependencies", "estimate_memory_bytes", "scratch", "parameters", "timeout_seconds", "service",
+            "description",
+            "exec",
+            "pool",
+            "result",
+            "cache",
+            "exclusive_keys",
+            "dependencies",
+            "estimate_memory_bytes",
+            "scratch",
+            "parameters",
+            "timeout_seconds",
+            "service",
         }
         if set(definition) - allowed_operation:
-            raise ProjectConfigError(f"{descriptor} operation {name} contains unknown fields")
+            raise ProjectConfigError(
+                f"{descriptor} operation {name} contains unknown fields"
+            )
         description = definition.get("description")
         if not isinstance(description, str) or not description:
-            raise ProjectConfigError(f"{descriptor} operation {name} requires description")
+            raise ProjectConfigError(
+                f"{descriptor} operation {name} requires description"
+            )
         command = _string_list(definition.get("exec"), f"operations.{name}.exec")
         pool = definition.get("pool", "normal")
         result = definition.get("result", "exit")
@@ -871,7 +1103,9 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 f"operations.{name}.timeout_seconds must be between 1 and "
                 f"{MAX_DECLARED_OPERATION_TIMEOUT_SECONDS}"
             )
-        dependencies = _optional_string_list(definition.get("dependencies"), f"operations.{name}.dependencies")
+        dependencies = _optional_string_list(
+            definition.get("dependencies"), f"operations.{name}.dependencies"
+        )
         if name in dependencies or len(set(dependencies)) != len(dependencies):
             raise ProjectConfigError(f"operations.{name}.dependencies is invalid")
         estimate_memory_bytes = definition.get("estimate_memory_bytes")
@@ -880,11 +1114,15 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             or isinstance(estimate_memory_bytes, bool)
             or not 1 <= estimate_memory_bytes <= 128 * 1024 * 1024 * 1024
         ):
-            raise ProjectConfigError(f"operations.{name}.estimate_memory_bytes is invalid")
+            raise ProjectConfigError(
+                f"operations.{name}.estimate_memory_bytes is invalid"
+            )
         scratch = definition.get("scratch", "none")
         if scratch not in {"none", "tmpfs", "nvme"}:
             raise ProjectConfigError(f"operations.{name}.scratch is invalid")
-        service = _operation_service(definition.get("service"), f"operations.{name}.service")
+        service = _operation_service(
+            definition.get("service"), f"operations.{name}.service"
+        )
         operations.append(
             ProjectOperation(
                 name=name,
@@ -895,12 +1133,15 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 cache=cache,
                 timeout_seconds=timeout_seconds,
                 exclusive_keys=_optional_string_list(
-                    definition.get("exclusive_keys"), f"operations.{name}.exclusive_keys"
+                    definition.get("exclusive_keys"),
+                    f"operations.{name}.exclusive_keys",
                 ),
                 dependencies=dependencies,
                 estimate_memory_bytes=estimate_memory_bytes,
                 scratch=scratch,
-                parameters=_operation_parameters(definition.get("parameters"), f"operations.{name}.parameters"),
+                parameters=_operation_parameters(
+                    definition.get("parameters"), f"operations.{name}.parameters"
+                ),
                 service=service,
             )
         )
@@ -913,7 +1154,8 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
     }
     if unknown_dependencies:
         raise ProjectConfigError(
-            f"{descriptor} operation dependency/dependencies are undeclared: " + ", ".join(sorted(unknown_dependencies))
+            f"{descriptor} operation dependency/dependencies are undeclared: "
+            + ", ".join(sorted(unknown_dependencies))
         )
     required_parameter_operations = {
         operation.name
@@ -973,7 +1215,10 @@ class ProjectCatalog:
         self._adapters = by_id
 
     def list(self) -> list[dict[str, Any]]:
-        return [self._adapters[project_id].catalog_row() for project_id in sorted(self._adapters)]
+        return [
+            self._adapters[project_id].catalog_row()
+            for project_id in sorted(self._adapters)
+        ]
 
     def get(self, project_id: str) -> ProjectAdapter:
         try:
@@ -992,20 +1237,30 @@ class ProjectCatalog:
     def checkouts(self, project_id: str) -> tuple[RegisteredCheckout, ...]:
         project = self.get(project_id)
         root = project.root.resolve(strict=True)
-        records = parse_worktree_records(self._git(root, "worktree", "list", "--porcelain"))
+        records = parse_worktree_records(
+            self._git(root, "worktree", "list", "--porcelain")
+        )
         checkouts: list[RegisteredCheckout] = []
         for record in records:
             raw_path = record.get("worktree")
             head = record.get("HEAD")
             if raw_path is None or head is None:
-                raise ProjectConfigError("git worktree record is missing worktree or HEAD")
+                raise ProjectConfigError(
+                    "git worktree record is missing worktree or HEAD"
+                )
             path = Path(raw_path).resolve(strict=True)
-            top_level = Path(self._git(path, "rev-parse", "--show-toplevel").strip()).resolve(strict=True)
+            top_level = Path(
+                self._git(path, "rev-parse", "--show-toplevel").strip()
+            ).resolve(strict=True)
             common_dir = Path(
-                self._git(path, "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+                self._git(
+                    path, "rev-parse", "--path-format=absolute", "--git-common-dir"
+                ).strip()
             ).resolve(strict=True)
             if top_level != path:
-                raise ProjectConfigError("registered checkout has a non-canonical worktree root")
+                raise ProjectConfigError(
+                    "registered checkout has a non-canonical worktree root"
+                )
             checkouts.append(
                 RegisteredCheckout(
                     project_id=project.project_id,
@@ -1016,9 +1271,22 @@ class ProjectCatalog:
                     head=head,
                 )
             )
-        if not any(checkout.checkout_id == "default" and checkout.path == root for checkout in checkouts):
-            raise ProjectConfigError("configured project root is not a registered Git worktree")
-        return tuple(sorted(checkouts, key=lambda checkout: (checkout.checkout_id != "default", checkout.checkout_id)))
+        if not any(
+            checkout.checkout_id == "default" and checkout.path == root
+            for checkout in checkouts
+        ):
+            raise ProjectConfigError(
+                "configured project root is not a registered Git worktree"
+            )
+        return tuple(
+            sorted(
+                checkouts,
+                key=lambda checkout: (
+                    checkout.checkout_id != "default",
+                    checkout.checkout_id,
+                ),
+            )
+        )
 
     def checkout(self, project_id: str, checkout_id: str) -> RegisteredCheckout:
         if not isinstance(checkout_id, str) or not checkout_id:
@@ -1037,10 +1305,14 @@ class ProjectCatalog:
         try:
             OwnerRegistry(adapter.spec for adapter in adapters)
         except ValueError as error:
-            raise ProjectConfigError(f"project owner adapters overlap: {error}") from error
+            raise ProjectConfigError(
+                f"project owner adapters overlap: {error}"
+            ) from error
         return adapters
 
-    def owner_adapter(self, operation: str) -> tuple[ProjectAdapter, ProjectOwnerAdapter]:
+    def owner_adapter(
+        self, operation: str
+    ) -> tuple[ProjectAdapter, ProjectOwnerAdapter]:
         registry = OwnerRegistry(adapter.spec for adapter in self.owner_adapters())
         spec = registry.resolve(operation)
         for project in self._adapters.values():
@@ -1051,7 +1323,7 @@ class ProjectCatalog:
 
 
 def validate_agent_environment_descriptors(roots: Iterable[Path]) -> None:
-    """Require a declared preflight for every checkout-capable project."""
+    """Require a declared command and preflight for every checkout-capable project."""
     diagnostics: list[str] = []
     for root in roots:
         descriptor = root / ".agentctl" / "project.toml"
@@ -1061,16 +1333,52 @@ def validate_agent_environment_descriptors(roots: Iterable[Path]) -> None:
             project = raw.get("project")
             if isinstance(project, Mapping) and isinstance(project.get("id"), str):
                 project_name = project["id"]
+            if isinstance(raw.get("workspace"), Mapping):
+                environment = raw.get("environment")
+                command = (
+                    environment.get("command")
+                    if isinstance(environment, Mapping)
+                    else None
+                )
+                preflight = (
+                    environment.get("preflight")
+                    if isinstance(environment, Mapping)
+                    else None
+                )
+                invalid_environment = False
+                if not (
+                    isinstance(command, list)
+                    and command
+                    and all(isinstance(value, str) and value for value in command)
+                ):
+                    diagnostics.append(
+                        f"{project_name}: {descriptor} must declare a non-empty environment.command"
+                    )
+                    invalid_environment = True
+                if not (
+                    isinstance(preflight, list)
+                    and preflight
+                    and all(isinstance(value, str) and value for value in preflight)
+                ):
+                    diagnostics.append(
+                        f"{project_name}: {descriptor} must declare a non-empty environment.preflight"
+                    )
+                    invalid_environment = True
+                if invalid_environment:
+                    continue
             adapter = load_project_adapter(root)
-        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, ProjectConfigError) as error:
-            diagnostics.append(f"{project_name}: invalid descriptor {descriptor}: {error}")
+        except (
+            OSError,
+            UnicodeDecodeError,
+            tomllib.TOMLDecodeError,
+            ProjectConfigError,
+        ) as error:
+            diagnostics.append(
+                f"{project_name}: invalid descriptor {descriptor}: {error}"
+            )
             continue
         if not adapter.agent_capable:
             continue
-        if not adapter.environment.preflight:
-            diagnostics.append(
-                f"{adapter.project_id}: {descriptor} must declare a non-empty environment.preflight"
-            )
     if diagnostics:
         raise ProjectConfigError(
             "agent-capable project environment contract failed:\n"

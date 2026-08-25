@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import anyio
-
 from mcp.shared.subscriptions import ResourceUpdated
-
 from sinnix_agent_gateway.subscriptions import OwnerRevisionPublisher
 
 

@@ -17,7 +17,7 @@ local data systems, and frequent operational changes.
 | Area                 | Current scope                                                                                                                                                        |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Workstation          | Hyprland and Noctalia desktop, Home Manager configuration, GPU modes, audio, terminal capture, local AI services, development environments, and desktop applications |
-| Services             | typed service inventory, systemd resource classes, monitoring, and common policy for user and system units                                                         |
+| Services             | typed service inventory, systemd resource classes, monitoring, and common policy for user and system units                                                           |
 | Local data           | Sinex, Polylogue, Lynchpin, ActivityWatch, machine telemetry, shell history, and terminal recordings                                                                 |
 | Storage and recovery | impermanence, explicit persistence, Btrfs snapshots, Borg archives, restore drills, and separate treatment for durable, rebuildable, and bulk data                   |
 | Agent tooling        | shared instructions and skills, generated MCP profiles, browser and desktop control, local model backends, and a trusted repository gateway                          |
@@ -131,15 +131,15 @@ nix develop
 
 Common commands:
 
-| Command       | Purpose                                                                       |
-| ------------- | ----------------------------------------------------------------------------- |
-| `check`       | run the curated default verification tier sequentially                        |
-| `lint`        | run static Nix and shell checks without modifying files                       |
-| `format`      | format supported source with treefmt                                          |
+| Command       | Purpose                                                                        |
+| ------------- | ------------------------------------------------------------------------------ |
+| `check`       | run the curated default verification tier sequentially                         |
+| `lint`        | run static Nix and shell checks without modifying files                        |
+| `format`      | format supported source with treefmt                                           |
 | `switch`      | build and activate the workstation through the shared lock and resource policy |
-| `boot`        | build and register the next boot generation without activating it             |
-| `test-system` | test activation without changing the boot default                             |
-| `test-vm`     | build the NixOS VM smoke test                                                 |
+| `boot`        | build and register the next boot generation without activating it              |
+| `test-system` | test activation without changing the boot default                              |
+| `test-vm`     | build the NixOS VM smoke test                                                  |
 
 Direct commands stay direct. Submit scheduled or heavy work as a named
 AgentCTL project operation; `switch` remains the supported activation command.

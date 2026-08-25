@@ -206,9 +206,13 @@ class ActionSpec:
             raise ValueError(
                 f"action {self.name!r} names unknown principals: {sorted(unknown_principals)}"
             )
-        if not isinstance(self.input_schema, Mapping) or not self.input_schema.get("type"):
+        if not isinstance(self.input_schema, Mapping) or not self.input_schema.get(
+            "type"
+        ):
             raise ValueError(f"action {self.name!r} requires an input JSON Schema")
-        if not isinstance(self.output_schema, Mapping) or not self.output_schema.get("type"):
+        if not isinstance(self.output_schema, Mapping) or not self.output_schema.get(
+            "type"
+        ):
             raise ValueError(f"action {self.name!r} requires an output JSON Schema")
         if len(set(self.resource_kinds)) != len(self.resource_kinds):
             raise ValueError(f"action {self.name!r} repeats resource kinds")
@@ -243,16 +247,26 @@ class ActionSpec:
             raise ValueError(f"action {self.name!r} has unknown receipt policy")
         if not self.storage_effects <= frozenset(StorageEffect):
             raise ValueError(f"action {self.name!r} has unknown storage effects")
-        if self.failure_codes is not None and not self.failure_codes <= KNOWN_TYPED_FAILURES:
+        if (
+            self.failure_codes is not None
+            and not self.failure_codes <= KNOWN_TYPED_FAILURES
+        ):
             raise ValueError(f"action {self.name!r} has unknown typed failures")
-        if self.receipt_policy == "audit" and StorageEffect.AUDIT_APPEND not in self.storage_effects:
-            raise ValueError(f"action {self.name!r} audit receipts require audit persistence")
+        if (
+            self.receipt_policy == "audit"
+            and StorageEffect.AUDIT_APPEND not in self.storage_effects
+        ):
+            raise ValueError(
+                f"action {self.name!r} audit receipts require audit persistence"
+            )
 
     @property
     def typed_failures(self) -> frozenset[str]:
-        return (self.failure_codes or KNOWN_TYPED_FAILURES) | (
-            {"precondition_failed"} if self.supports_precondition else set()
-        ) | ({"idempotency_conflict"} if self.supports_idempotency else set())
+        return (
+            (self.failure_codes or KNOWN_TYPED_FAILURES)
+            | ({"precondition_failed"} if self.supports_precondition else set())
+            | ({"idempotency_conflict"} if self.supports_idempotency else set())
+        )
 
     @property
     def schema_ref(self) -> str:
@@ -265,7 +279,9 @@ class ActionSpec:
             "verb": self.verb.value,
             "domain": self.domain,
             "owner": self.owner,
-            "route": self.route.value if isinstance(self.route, OwnerRoute) else self.route,
+            "route": self.route.value
+            if isinstance(self.route, OwnerRoute)
+            else self.route,
             "availability": "declared",
             "effect": self.effect.value,
             "principals": sorted(self.principals),

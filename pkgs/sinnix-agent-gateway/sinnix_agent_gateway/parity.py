@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
 from .contracts import OBSERVABILITY_PERSISTENCE, ActionSpec
-from .legacy_manifest import LEGACY_MANIFEST, LEGACY_MANIFEST_SCHEMA
+from .legacy_manifest import LEGACY_MANIFEST
 from .registry import CatalogRegistry
 
 PARITY_SCHEMA = "sinnix.gateway-legacy-parity.v2"
@@ -43,11 +43,16 @@ class LegacyParityRow:
 
 
 def _migration(
-    route: str, action: str | None = None, *, deletion_verdict: str | None = None,
+    route: str,
+    action: str | None = None,
+    *,
+    deletion_verdict: str | None = None,
     semantic_change: str | None = None,
 ) -> LegacyMigration:
     if (action is None) == (deletion_verdict is None):
-        raise ValueError("legacy capability requires exactly one migration or deletion verdict")
+        raise ValueError(
+            "legacy capability requires exactly one migration or deletion verdict"
+        )
     return LegacyMigration(route, action, deletion_verdict, semantic_change)
 
 
@@ -64,7 +69,9 @@ V2_MIGRATIONS = {
     ),
     "machine_query": _migration("observe.machine_query", "machine.query"),
     "capability_search": _migration("capability_index.search", "capabilities.query"),
-    "capability_describe": _migration("capability_index.describe", "capabilities.query"),
+    "capability_describe": _migration(
+        "capability_index.describe", "capabilities.query"
+    ),
     "mcp_catalog": _migration("mcp_broker.catalog", "mcp.query"),
     "mcp_read": _migration("mcp_broker.call.read", "mcp.query"),
     "mcp_write": _migration("mcp_broker.call.write", "mcp.change"),
@@ -123,7 +130,9 @@ V2_MIGRATIONS = {
 }
 
 
-def _row(legacy_tool: str, migration: LegacyMigration, action: ActionSpec | None) -> LegacyParityRow:
+def _row(
+    legacy_tool: str, migration: LegacyMigration, action: ActionSpec | None
+) -> LegacyParityRow:
     if action is None:
         assert migration.deletion_verdict is not None
         return LegacyParityRow(
@@ -153,7 +162,11 @@ def _row(legacy_tool: str, migration: LegacyMigration, action: ActionSpec | None
 
 def _validate_row(row: LegacyParityRow, registry: CatalogRegistry) -> None:
     if row.disposition == "deleted":
-        if row.v2_action is not None or row.v2_route is not None or not row.deletion_verdict:
+        if (
+            row.v2_action is not None
+            or row.v2_route is not None
+            or not row.deletion_verdict
+        ):
             raise ValueError(f"{row.legacy_tool} has an unexplained deletion")
         return
     if row.v2_action is None or row.v2_route is None:
@@ -208,8 +221,10 @@ def legacy_parity_contract(registry: CatalogRegistry) -> dict[str, Any]:
             "migrated": sum(row.disposition == "migrated" for row in rows),
             "deleted": sum(row.disposition == "deleted" for row in rows),
             "unexplained": sum(
-                row.disposition == "migrated" and row.v2_action is None
-                or row.disposition == "deleted" and not row.deletion_verdict
+                row.disposition == "migrated"
+                and row.v2_action is None
+                or row.disposition == "deleted"
+                and not row.deletion_verdict
                 for row in rows
             ),
         },

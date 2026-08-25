@@ -3,10 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-
 from sinnix_agent_gateway.bindings import TargetToolBinding, TargetToolBindings
-from sinnix_agent_gateway.registry import CatalogRegistry, REGISTRY, RegistryError
-
+from sinnix_agent_gateway.registry import REGISTRY, CatalogRegistry, RegistryError
 
 VALID_BINDINGS = tuple(
     TargetToolBinding(action.verb.value, action.name, action.owner, action.route)
@@ -20,31 +18,63 @@ def test_target_tool_bindings_cover_every_declared_action() -> None:
     assert bindings.action_for_tool("status") is REGISTRY.action("gateway.status")
     assert bindings.action_for_tool("catalog") is REGISTRY.action("gateway.catalog")
     assert bindings.action_for_tool("get") is REGISTRY.action("resources.get")
-    assert bindings.action_for_tool("query", "projects.query") is REGISTRY.action("projects.query")
-    assert bindings.action_for_tool("query", "beads.query") is REGISTRY.action("beads.query")
-    assert bindings.action_for_tool("query", "machine.query") is REGISTRY.action("machine.query")
+    assert bindings.action_for_tool("query", "projects.query") is REGISTRY.action(
+        "projects.query"
+    )
+    assert bindings.action_for_tool("query", "beads.query") is REGISTRY.action(
+        "beads.query"
+    )
+    assert bindings.action_for_tool("query", "machine.query") is REGISTRY.action(
+        "machine.query"
+    )
     with pytest.raises(RegistryError, match="requires a declared action selector"):
         bindings.action_for_tool("query")
     assert bindings.action_for_tool("context") is REGISTRY.action("projects.context")
     assert bindings.action_for_tool("events") is REGISTRY.action("audit.events")
     assert bindings.action_for_tool("wait") is REGISTRY.action("jobs.wait")
     assert bindings.action_for_tool("run", "shell.run") is REGISTRY.action("shell.run")
-    assert bindings.action_for_tool("run", "agent.for_bead") is REGISTRY.action("agent.for_bead")
-    assert bindings.action_for_tool("change", "projects.change") is REGISTRY.action("projects.change")
-    assert bindings.action_for_tool("change", "files.change") is REGISTRY.action("files.change")
-    assert bindings.action_for_tool("change", "beads.change") is REGISTRY.action("beads.change")
-    assert bindings.action_for_tool("change", "beads.changeset") is REGISTRY.action("beads.changeset")
-    assert bindings.action_for_tool("change", "mcp.change") is REGISTRY.action("mcp.change")
-    assert bindings.action_for_tool("operate", "machine.operate") is REGISTRY.action("machine.operate")
-    assert bindings.action_for_tool("operate", "beads.operate") is REGISTRY.action("beads.operate")
-    assert bindings.action_for_tool("operate", "jobs.cancel") is REGISTRY.action("jobs.cancel")
-    assert bindings.action_for_tool("operate", "desktop.operate") is REGISTRY.action("desktop.operate")
-    assert bindings.action_for_tool("operate", "terminals.operate") is REGISTRY.action("terminals.operate")
-    assert bindings.action_for_tool("operate", "browser.operate") is REGISTRY.action("browser.operate")
+    assert bindings.action_for_tool("run", "agent.for_bead") is REGISTRY.action(
+        "agent.for_bead"
+    )
+    assert bindings.action_for_tool("change", "projects.change") is REGISTRY.action(
+        "projects.change"
+    )
+    assert bindings.action_for_tool("change", "files.change") is REGISTRY.action(
+        "files.change"
+    )
+    assert bindings.action_for_tool("change", "beads.change") is REGISTRY.action(
+        "beads.change"
+    )
+    assert bindings.action_for_tool("change", "beads.changeset") is REGISTRY.action(
+        "beads.changeset"
+    )
+    assert bindings.action_for_tool("change", "mcp.change") is REGISTRY.action(
+        "mcp.change"
+    )
+    assert bindings.action_for_tool("operate", "machine.operate") is REGISTRY.action(
+        "machine.operate"
+    )
+    assert bindings.action_for_tool("operate", "beads.operate") is REGISTRY.action(
+        "beads.operate"
+    )
+    assert bindings.action_for_tool("operate", "jobs.cancel") is REGISTRY.action(
+        "jobs.cancel"
+    )
+    assert bindings.action_for_tool("operate", "desktop.operate") is REGISTRY.action(
+        "desktop.operate"
+    )
+    assert bindings.action_for_tool("operate", "terminals.operate") is REGISTRY.action(
+        "terminals.operate"
+    )
+    assert bindings.action_for_tool("operate", "browser.operate") is REGISTRY.action(
+        "browser.operate"
+    )
 
 
 def test_target_tool_bindings_enforce_declared_principal() -> None:
-    status = replace(REGISTRY.action("gateway.status"), principals=frozenset({"observer"}))
+    status = replace(
+        REGISTRY.action("gateway.status"), principals=frozenset({"observer"})
+    )
     registry = CatalogRegistry(
         REGISTRY.resources,
         tuple(
@@ -77,7 +107,9 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
         (VALID_BINDINGS[:1], "missing target tool bindings"),
         (
             (
-                TargetToolBinding("status", "gateway.status", "registry", "observe.gateway_status"),
+                TargetToolBinding(
+                    "status", "gateway.status", "registry", "observe.gateway_status"
+                ),
                 VALID_BINDINGS[1],
                 VALID_BINDINGS[2],
                 *VALID_BINDINGS[3:],
@@ -86,7 +118,9 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
         ),
         (
             (
-                TargetToolBinding("status", "gateway.status", "gateway", "registry.search"),
+                TargetToolBinding(
+                    "status", "gateway.status", "gateway", "registry.search"
+                ),
                 VALID_BINDINGS[1],
                 VALID_BINDINGS[2],
                 *VALID_BINDINGS[3:],
@@ -95,7 +129,9 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
         ),
         (
             (
-                TargetToolBinding("status", "gateway.unknown", "gateway", "gateway.unknown"),
+                TargetToolBinding(
+                    "status", "gateway.unknown", "gateway", "gateway.unknown"
+                ),
                 VALID_BINDINGS[1],
                 VALID_BINDINGS[2],
                 *VALID_BINDINGS[3:],
@@ -104,7 +140,9 @@ def test_target_tool_bindings_enforce_declared_principal() -> None:
         ),
         (
             tuple(
-                TargetToolBinding("operate", "agent.for_bead", "systemd-jobs", "job.agent.start")
+                TargetToolBinding(
+                    "operate", "agent.for_bead", "systemd-jobs", "job.agent.start"
+                )
                 if binding.action_name == "agent.for_bead"
                 else binding
                 for binding in VALID_BINDINGS

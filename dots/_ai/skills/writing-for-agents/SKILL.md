@@ -20,6 +20,7 @@ material. A load-bearing target behind weak wording is a variance bug:
 sharpen the wording first; inline the material only if sharpening fails.
 
 Pointer rules (they pay rent every turn, so prune hardest here):
+
 - Front-load the trigger word; one trigger per genuinely distinct branch;
   collapse synonyms that rename the same branch.
 - Cut identity the body already carries.
@@ -50,6 +51,7 @@ material fragments one meaning across many places.
 ## Completion criteria
 
 End every step on a condition the agent can check. Two levers:
+
 - **Clarity**: "understanding reached" invites stopping early; "every
   modified surface accounted for" does not.
 - **Demand**: the criterion's wording drives how much digging happens.
@@ -65,6 +67,7 @@ A **leading word** is a compact pretrained concept the agent thinks with
 (tight loop, red twin, tracer bullet, frontier). Repeated as a token it
 anchors behavior cheaply. Hunt for restatements a leading word retires.
 Two cautions, both estate doctrine:
+
 - A coined word recruits no priors — you pay its definition everywhere. This
   is how the jargon debt (receipt ×8 meanings, authority ×3) accumulated.
   Before coining, check the [[vocabulary]] glossary; never mint a new noun
@@ -79,7 +82,7 @@ Two cautions, both estate doctrine:
   AGENTS.md is a symlink to CLAUDE.md for exactly this reason.
 - **The environment is a source of truth**: `devtools --list-commands`,
   `agentctl --help`, `bd --help`, generated reference docs, `.agentctl/
-  project.toml`. A document restating them is a cache that goes stale — the
+project.toml`. A document restating them is a cache that goes stale — the
   estate's recorded failure class (six stale CLAUDE.md claims, skills
   teaching nonexistent verbs). Cache only what no lookup confesses: the
   unwritten convention, the reason, the gotcha.

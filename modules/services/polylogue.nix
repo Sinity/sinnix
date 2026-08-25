@@ -154,6 +154,14 @@ mkServiceModule {
         }
       ];
 
+      # These are Polylogue archive inputs, so their destination must follow
+      # the same archive-root option as the daemon and hook spool.
+      systemd.tmpfiles.rules = [
+        "d ${cfg.dataDir}/inbox 0755 ${userName} users -"
+        "L+ ${cfg.dataDir}/inbox/chatgpt - - - - /realm/data/ai/chatlog/raw/chatgpt"
+        "L+ ${cfg.dataDir}/inbox/claude - - - - /realm/data/ai/chatlog/raw/claude"
+      ];
+
       # ── Import the upstream Home Manager module ────────────────────
       home-manager.users.${userName} = {
         imports = [ inputs.polylogue.homeManagerModules.default ];

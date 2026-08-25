@@ -8,7 +8,6 @@ from typing import Any
 from .contracts import VerbFamily
 from .registry import REGISTRY
 
-
 BEGIN_MARKER = "<!-- BEGIN GENERATED GATEWAY V2 REFERENCE -->"
 END_MARKER = "<!-- END GENERATED GATEWAY V2 REFERENCE -->"
 REFERENCE_PATH = Path("docs/generated/agent-gateway-reference.md")
@@ -25,7 +24,10 @@ def catalog_payload() -> dict[str, Any]:
     rows = REGISTRY.documentation_rows()
     for row in rows["actions"]:
         for example in row["examples"]:
-            if row["name"] == "projects.change" and "parameters" not in example["input"]:
+            if (
+                row["name"] == "projects.change"
+                and "parameters" not in example["input"]
+            ):
                 example["input"]["parameters"] = {
                     key: example["input"].pop(key)
                     for key in ("path", "content", "patch")
@@ -84,8 +86,22 @@ def render_reference() -> str:
         "| --- | --- | --- |",
     ]
     for verb in VerbFamily:
-        lines.append(f"| `{verb.value}` | `sinnix-agent-gateway {verb.value}` | `{verb.value}` |")
-    lines.extend(["", "## Resources", "", *_resource_table(catalog["resources"]), "", "## Actions", "", *_action_table(catalog["actions"]), ""])
+        lines.append(
+            f"| `{verb.value}` | `sinnix-agent-gateway {verb.value}` | `{verb.value}` |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Resources",
+            "",
+            *_resource_table(catalog["resources"]),
+            "",
+            "## Actions",
+            "",
+            *_action_table(catalog["actions"]),
+            "",
+        ]
+    )
     for row in catalog["actions"]:
         lines.extend(
             [
@@ -109,7 +125,9 @@ def render_reference() -> str:
             for example in row["examples"]:
                 lines.extend(["```json", _json(example["input"]), "```", ""])
         else:
-            lines.append("No example is declared. Discover the live schema before invoking this action.\n")
+            lines.append(
+                "No example is declared. Discover the live schema before invoking this action.\n"
+            )
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -123,17 +141,17 @@ def render_skill() -> str:
     triage = _action_name(catalog["actions"], "beads.query", "gateway.catalog")
     changeset = _action_name(catalog["actions"], "beads.changeset", "gateway.catalog")
     agent = _action_name(catalog["actions"], "agent.for_bead", "gateway.catalog")
-    machine = _action_name(catalog["actions"], "machine.query", "gateway.catalog")
+    _action_name(catalog["actions"], "machine.query", "gateway.catalog")
     browser = _action_name(catalog["actions"], "browser.operate", "gateway.catalog")
     desktop = _action_name(catalog["actions"], "desktop.operate", "gateway.catalog")
-    return f'''---
+    return f"""---
 name: agent-gateway
 description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway V2 resources and actions through its ten-verb CLI or MCP contract.
 ---
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
-<!-- gateway-catalog-revision: {catalog['revision']} -->
-<!-- gateway-catalog-sha256: {catalog['action_catalog_hash']} -->
+<!-- gateway-catalog-revision: {catalog["revision"]} -->
+<!-- gateway-catalog-sha256: {catalog["action_catalog_hash"]} -->
 # Agent Gateway V2
 
 Use `sinnix-agent-gateway` when a local agent needs the same principal-scoped routes and normalized envelopes as MCP. The complete action schemas and examples are in `docs/generated/agent-gateway-reference.md`.
@@ -154,14 +172,14 @@ The CLI invokes the matching MCP verb through the same server runtime and princi
 - Work or review a bead: use `{agent}` only with the canonical bead ref and explicit checkout. Use `projects.context` with `intent=bead.work` or `bead.review` to inspect assignment and evidence.
 - Incident orientation: use `machine.query` for one bounded owner-selected section and `audit.events` for recent gateway receipts. Do not reconstruct a whole-machine view locally.
 - Browser or desktop manipulation: discover or use the canonical gateway-owned browser page or desktop ref, then invoke `{browser}` or `{desktop}` as operator. Existing operator tabs are never accepted as implicit targets.
-- Machine action: discover a canonical machine target, supply the owner-required revision, reason, idempotency key, and preconditions, then use `machine.operate`.
+- Machine action: discover a canonical machine target, query `machine.query` with `operation=actions` for the current owner revision, then supply it with the reason, idempotency key, and preconditions to `machine.operate`.
 
 ## Beads direct-owner fallback
 
 The gateway is the preferred route for typed, principal-scoped Beads work. The direct owner fallback is `bd 1.1.0-dev` against the project’s canonical standalone Dolt workspace, resolved through the project’s canonical worktree and `.beads/redirect`. Dolt is the authority for ordinary mutations. `issues.jsonl` is an optional JSONL export, not a write authority. Use the gateway `beads.operate` action with `snapshot.publish` when an explicit deterministic snapshot is required. Snapshot publication does not imply a Git commit or a Dolt push. Use `sync.push` or `sync.pull` explicitly for Dolt synchronization. Never hand-author `bd` argv when the gateway catalog exposes the needed action.
 
-Catalog revision: `{catalog['revision']}`. Catalog SHA-256: `{catalog['action_catalog_hash']}`.
-'''
+Catalog revision: `{catalog["revision"]}`. Catalog SHA-256: `{catalog["action_catalog_hash"]}`.
+"""
 
 
 def _fixture_input(row: dict[str, Any]) -> dict[str, Any]:
@@ -169,15 +187,21 @@ def _fixture_input(row: dict[str, Any]) -> dict[str, Any]:
         value = dict(row["examples"][0]["input"])
     else:
         value = {}
-    if row["verb"] in {verb.value for verb in (VerbFamily.QUERY, VerbFamily.RUN, VerbFamily.CHANGE, VerbFamily.OPERATE)}:
+    if row["verb"] in {
+        verb.value
+        for verb in (
+            VerbFamily.QUERY,
+            VerbFamily.RUN,
+            VerbFamily.CHANGE,
+            VerbFamily.OPERATE,
+        )
+    }:
         value.setdefault("action_name", row["name"])
     if row["name"] == "machine.operate" and "action" in value:
         value["operation"] = value.pop("action")
     if row["name"] == "projects.change" and "parameters" not in value:
         value["parameters"] = {
-            key: value.pop(key)
-            for key in ("path", "content", "patch")
-            if key in value
+            key: value.pop(key) for key in ("path", "content", "patch") if key in value
         }
     return value
 
@@ -223,7 +247,9 @@ def update_docs(text: str) -> str:
     if BEGIN_MARKER in text and END_MARKER in text:
         before = text.split(BEGIN_MARKER, 1)[0].rstrip("\n")
         after = text.split(END_MARKER, 1)[1].lstrip("\n")
-        return f"{before}\n{generated}\n{after}" if after else f"{before}\n{generated}\n"
+        return (
+            f"{before}\n{generated}\n{after}" if after else f"{before}\n{generated}\n"
+        )
     return text.rstrip("\n") + "\n\n" + generated + "\n"
 
 
@@ -248,12 +274,16 @@ def check_artifacts(root: Path) -> list[str]:
         if not path.exists():
             mismatches.append(f"missing generated artifact: {path.relative_to(root)}")
         elif path.read_text() != expected:
-            mismatches.append(f"stale or corrupt generated artifact: {path.relative_to(root)}")
+            mismatches.append(
+                f"stale or corrupt generated artifact: {path.relative_to(root)}"
+            )
     return mismatches
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate gateway V2 docs, skill, and fixtures")
+    parser = argparse.ArgumentParser(
+        description="Generate gateway V2 docs, skill, and fixtures"
+    )
     parser.add_argument("--root", type=Path, required=True)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--write", action="store_true")

@@ -8,9 +8,10 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from sinnix_mcp.execution import ExecutionResult
+
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from sinnix_mcp.execution import ExecutionResult
 from .redaction import redact
 
 
@@ -64,7 +65,9 @@ class ArtifactService:
         for file in files:
             file = file.resolve(strict=True)
             if file.parent != directory or not file.is_file():
-                raise ArtifactError("capture file is outside its declared capture directory")
+                raise ArtifactError(
+                    "capture file is outside its declared capture directory"
+                )
             names.append(file.name)
         if not names or len(names) != len(set(names)):
             raise ArtifactError("capture receipt must identify distinct files")
@@ -78,7 +81,9 @@ class ArtifactService:
         output = directory / "receipt.json"
         temporary = directory / f".{output.name}.{uuid.uuid4().hex}.tmp"
         try:
-            temporary.write_text(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
+            temporary.write_text(
+                json.dumps(receipt, sort_keys=True, separators=(",", ":"))
+            )
             temporary.chmod(0o600)
             os.replace(temporary, output)
         finally:
@@ -115,7 +120,9 @@ class ArtifactService:
             "files": [source.name],
         }
         receipt_path = directory / "receipt.json"
-        receipt_path.write_text(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
+        receipt_path.write_text(
+            json.dumps(receipt, sort_keys=True, separators=(",", ":"))
+        )
         receipt_path.chmod(0o600)
         artifact_id = self.register(
             source,
@@ -195,7 +202,10 @@ class ArtifactService:
             metadata = json.loads(path.read_text())
         except (FileNotFoundError, json.JSONDecodeError) as exc:
             raise ArtifactError("unknown or malformed artifact") from exc
-        if self.principal.name != "operator" and metadata.get("principal") != self.principal.name:
+        if (
+            self.principal.name != "operator"
+            and metadata.get("principal") != self.principal.name
+        ):
             raise ArtifactError("artifact is unavailable to this principal")
         source = Path(metadata["source"]).resolve(strict=True)
         if not source.is_file() or not self._source_is_attested(source):
@@ -215,7 +225,10 @@ class ArtifactService:
                 if self.principal.name == "operator":
                     rows.append({"artifact_id": path.parent.name, "malformed": True})
                 continue
-            if self.principal.name != "operator" and row.get("principal") != self.principal.name:
+            if (
+                self.principal.name != "operator"
+                and row.get("principal") != self.principal.name
+            ):
                 continue
             row.pop("source", None)
             rows.append(row)

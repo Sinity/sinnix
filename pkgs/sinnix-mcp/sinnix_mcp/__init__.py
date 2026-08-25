@@ -12,7 +12,7 @@ from .protocol import (
     SourceBinding,
     response_envelope_from_dict,
 )
-from .refs import RefTemplate, ReferenceError, SinnixRef
+from .refs import ReferenceError, RefTemplate, SinnixRef
 
 __all__ = [
     "Authority",
