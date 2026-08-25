@@ -522,7 +522,9 @@ class ProjectAdapter:
             "descriptor": str(self.descriptor),
             "digest": self.digest,
             "descriptor_status": self.descriptor_status(),
-            "environment": self.environment.catalog_row(agent_capable=self.agent_capable),
+            "environment": self.environment.catalog_row(
+                agent_capable=self.agent_capable
+            ),
             "workspace": self.workspace.catalog_row() if self.agent_capable else None,
             "conflicts": self.conflicts.catalog_row(),
             "operations": [operation.catalog_row() for operation in self.operations],

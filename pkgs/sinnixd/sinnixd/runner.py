@@ -31,8 +31,10 @@ def _require_strings(value: Mapping[str, Any], fields: Sequence[str]) -> None:
 
 
 def _non_empty_argv(value: Any) -> bool:
-    return isinstance(value, list) and bool(value) and all(
-        isinstance(item, str) and item for item in value
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(isinstance(item, str) and item for item in value)
     )
 
 

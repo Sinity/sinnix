@@ -7600,9 +7600,9 @@ def test_agent_production_route_uses_declared_environment_over_poisoned_ambient_
         "#!/bin/sh\n"
         "set -eu\n"
         "printf 'entered\\n' >> environment.calls\n"
-        "export PATH=\"$PWD/project-bin:/run/current-system/sw/bin\"\n"
-        "export PYTHONPATH=\"$PWD\"\n"
-        "exec \"$@\"\n"
+        'export PATH="$PWD/project-bin:/run/current-system/sw/bin"\n'
+        'export PYTHONPATH="$PWD"\n'
+        'exec "$@"\n'
     )
     environment.chmod(0o700)
     descriptor = tmp_path / ".agentctl" / "project.toml"
@@ -7624,7 +7624,7 @@ def test_agent_production_route_uses_declared_environment_over_poisoned_ambient_
     (tmp_path / "fixture_package").mkdir()
     (tmp_path / "fixture_package" / "__init__.py").write_text("CHECKOUT = __file__\n")
     devtools = tmp_path / "project-bin" / "devtools"
-    devtools.write_text(f"#!/bin/sh\nexec {sys.executable} -m devtools \"$@\"\n")
+    devtools.write_text(f'#!/bin/sh\nexec {sys.executable} -m devtools "$@"\n')
     devtools.chmod(0o700)
     initialize_git_checkout(tmp_path)
 
@@ -7636,18 +7636,22 @@ def test_agent_production_route_uses_declared_environment_over_poisoned_ambient_
         "while [ $# -gt 0 ]; do\n"
         "  case $1 in --last-file) last=$2; shift 2 ;; *) shift ;; esac\n"
         "done\n"
-        "test \"$(command -v devtools)\" = \"$PWD/project-bin/devtools\"\n"
+        'test "$(command -v devtools)" = "$PWD/project-bin/devtools"\n'
         "devtools status\n"
         "devtools test tests/fixture.py::test_noop\n"
         "devtools verify --quick\n"
         f"{sys.executable} -c 'import fixture_package; assert fixture_package.CHECKOUT'\n"
         "printf native-started > native.started\n"
-        "printf native-result > \"$last\"\n"
+        'printf native-result > "$last"\n'
     )
     native.chmod(0o700)
 
     systemd = FakeSystemdJobs()
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd), native_runner=native)
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]),
+        jobs=generic_jobs(tmp_path, systemd),
+        native_runner=native,
+    )
     response = service.dispatch(
         request(
             "job.agent.start",
@@ -7680,7 +7684,11 @@ def test_agent_production_route_uses_declared_environment_over_poisoned_ambient_
     )
     poisoned["PYTHONPATH"] = os.environ.get("PYTHONPATH", "")
     mutant = subprocess.run(
-        [str(native), "--last-file", str(tmp_path / "state" / "results" / "mutant.result")],
+        [
+            str(native),
+            "--last-file",
+            str(tmp_path / "state" / "results" / "mutant.result"),
+        ],
         cwd=tmp_path,
         env=poisoned,
         capture_output=True,
@@ -7713,8 +7721,13 @@ def test_agent_production_route_uses_declared_environment_over_poisoned_ambient_
     )
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "native.started").read_text() == "native-started"
-    assert (tmp_path / "state" / "results" / f"{job_id}.result").read_text() == "native-result"
-    assert (tmp_path / "environment.calls").read_text().splitlines() == ["entered", "entered"]
+    assert (
+        tmp_path / "state" / "results" / f"{job_id}.result"
+    ).read_text() == "native-result"
+    assert (tmp_path / "environment.calls").read_text().splitlines() == [
+        "entered",
+        "entered",
+    ]
     assert (tmp_path / "devtools.calls").read_text().splitlines() == [
         "status --stderr",
         "status",
@@ -7723,15 +7736,25 @@ def test_agent_production_route_uses_declared_environment_over_poisoned_ambient_
     ]
 
 
-def test_agent_environment_preflight_refuses_missing_declaration_before_launch(tmp_path: Path) -> None:
+def test_agent_environment_preflight_refuses_missing_declaration_before_launch(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     descriptor = tmp_path / ".agentctl" / "project.toml"
-    descriptor.write_text(descriptor.read_text().replace('preflight = ["devtools", "status", "--stderr"]\n', ""))
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'preflight = ["devtools", "status", "--stderr"]\n', ""
+        )
+    )
     initialize_git_checkout(tmp_path)
     runner = tmp_path / "native-runner"
     native_runner(runner)
     systemd = FakeSystemdJobs()
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd), native_runner=runner)
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]),
+        jobs=generic_jobs(tmp_path, systemd),
+        native_runner=runner,
+    )
 
     response = service.dispatch(
         request(
@@ -7757,139 +7780,9 @@ def test_agent_environment_preflight_refuses_missing_declaration_before_launch(t
     assert systemd.started == []
 
 
-def test_agent_environment_preflight_refuses_corrupt_environment_before_native_runner(tmp_path: Path) -> None:
-    write_adapter(tmp_path)
-    initialize_git_checkout(tmp_path)
-    runner = tmp_path / "native-runner"
-    native_runner(runner)
-    state = tmp_path / "state"
-    inputs = state / "inputs"
-    results = state / "results"
-    inputs.mkdir(parents=True)
-    results.mkdir()
-    prompt = inputs / "fixture.prompt"
-    prompt.write_text("prompt")
-    job_id = "11111111-1111-1111-1111-111111111111"
-    payload = {
-        "schema_version": 2,
-        "job_id": job_id,
-        "kind": "attested-agent",
-        "principal": "agent-control",
-        "checkout": ProjectCatalog([tmp_path]).checkout("fixture", "default").to_dict(),
-        "environment_command": [sys.executable, "-c", "raise SystemExit(17)"],
-        "environment_preflight": ["fixture-preflight"],
-        "backend": "codex",
-        "model": "fixture",
-        "effort": "high",
-        "credential_profile": "subscription",
-        "prompt_path": str(prompt),
-        "result_path": str(results / "fixture.result"),
-    }
-
-    with pytest.raises(
-        RunnerError,
-        match="project environment preflight failed before agent implementation.*17",
-    ):
-        _run_agent(payload, tmp_path, native_runner=runner, state_root=state)
-    assert not (results / "fixture.result").exists()
-
-
-def test_agent_environment_preflight_timeout_is_distinct_and_prevents_native_runner(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_agent_environment_preflight_refuses_corrupt_environment_before_native_runner(
+    tmp_path: Path,
 ) -> None:
-    state = tmp_path / "state"
-    inputs = state / "inputs"
-    results = state / "results"
-    inputs.mkdir(parents=True)
-    results.mkdir()
-    prompt = inputs / "fixture.prompt"
-    prompt.write_text("prompt")
-    runner = tmp_path / "native-runner"
-    native_runner(runner)
-    payload = {
-        "schema_version": 2,
-        "job_id": "11111111-1111-1111-1111-111111111111",
-        "kind": "attested-agent",
-        "principal": "agent-control",
-        "environment_command": ["fixture-environment"],
-        "environment_preflight": ["status"],
-        "backend": "codex",
-        "model": "fixture",
-        "effort": "high",
-        "credential_profile": "subscription",
-        "prompt_path": str(prompt),
-        "result_path": str(results / "fixture.result"),
-    }
-
-    calls: list[dict[str, object]] = []
-
-    def timeout(*_args: object, **kwargs: object) -> None:
-        calls.append(kwargs)
-        raise subprocess.TimeoutExpired("fixture-environment", 30)
-
-    monkeypatch.setattr(runner_module.subprocess, "run", timeout)
-    with pytest.raises(RunnerError, match="agent-preflight-timeout.*30 seconds"):
-        _run_agent(payload, tmp_path, native_runner=runner, state_root=state)
-    assert calls == [{"cwd": tmp_path, "check": False, "timeout": 30}]
-    assert not (results / "fixture.result").exists()
-
-
-def test_pre_upgrade_attested_agent_input_fails_closed_with_stale_schema(tmp_path: Path) -> None:
-    input_path = tmp_path / "legacy-agent.json"
-    input_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "job_id": "11111111-1111-1111-1111-111111111111",
-                "kind": "attested-agent",
-                "principal": "agent-control",
-            }
-        )
-    )
-    with pytest.raises(RunnerError, match="stale attested-agent private input schema"):
-        _load(input_path, "11111111-1111-1111-1111-111111111111")
-
-
-def test_agent_environment_descriptor_audit_reports_each_registered_project(tmp_path: Path) -> None:
-    fixture = tmp_path / "fixture"
-    missing_preflight = tmp_path / "missing-preflight"
-    write_adapter(fixture, project_id="fixture")
-    write_adapter(missing_preflight, project_id="missing_preflight")
-    descriptor = fixture / ".agentctl" / "project.toml"
-    descriptor.write_text(descriptor.read_text().replace('preflight = ["devtools", "status", "--stderr"]\n', ""))
-    descriptor = missing_preflight / ".agentctl" / "project.toml"
-    descriptor.write_text(descriptor.read_text().replace('preflight = ["devtools", "status", "--stderr"]\n', ""))
-
-    with pytest.raises(ProjectConfigError, match="agent-capable project environment contract failed") as error:
-        validate_agent_environment_descriptors([fixture, missing_preflight])
-    message = str(error.value)
-    assert "fixture:" in message
-    assert "environment.preflight" in message
-    assert "missing_preflight:" in message
-    assert message.count("environment.preflight") == 2
-
-
-def test_project_get_publishes_agent_environment_capability(tmp_path: Path) -> None:
-    write_adapter(tmp_path)
-    runner = tmp_path / "native-runner"
-    native_runner(runner)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path), native_runner=runner)
-
-    response = service.dispatch(
-        request("project.get", "project-adapters", {"project_id": "fixture"}, "observer")
-    )
-
-    assert response.ok and response.payload is not None
-    environment = response.payload.inline["environment"]
-    assert environment == {
-        "kind": "fixture",
-        "command": ["fixture-env", "--command"],
-        "preflight": ["devtools", "status", "--stderr"],
-        "agent_capable": True,
-    }
-
-
-def test_typed_contracts_refuse_spoofed_principals_checkout_backend_environment_and_results(tmp_path: Path) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     runner = tmp_path / "native-runner"
