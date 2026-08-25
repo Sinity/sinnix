@@ -8894,6 +8894,7 @@ def test_delivery_operations_have_truthful_bounded_response_timeouts() -> None:
     expected = {
         "workspace.review-status": 65.0,
         "workspace.finish": 185.0,
+        "packet.finalize": 420.0,
     }
     assert CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS == expected
     for operation, timeout in expected.items():

@@ -29,6 +29,7 @@ WAIT_TRANSPORT_MARGIN_SECONDS = 5.0
 CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS = {
     "workspace.review-status": 65.0,
     "workspace.finish": 185.0,
+    "packet.finalize": 420.0,
 }
 ACCEPT_POLL_SECONDS = 0.1
 RESERVED_CONTROL_WORKERS = 2

@@ -151,6 +151,14 @@ def parser() -> argparse.ArgumentParser:
     workspace_finish_integrated = workspace_subcommands.add_parser("finish-integrated")
     workspace_finish_integrated.add_argument("workspace_id")
     workspace_finish_integrated.add_argument("--target", required=True)
+    packet = subcommands.add_parser("packet")
+    packet_subcommands = packet.add_subparsers(dest="packet_command", required=True)
+    packet_finalize = packet_subcommands.add_parser("finalize")
+    packet_finalize.add_argument("workspace_id")
+    packet_finalize.add_argument("--verification-job", required=True)
+    packet_finalize.add_argument("--packet-job", required=True)
+    packet_status = packet_subcommands.add_parser("status")
+    packet_status.add_argument("saga_id")
     job = subcommands.add_parser("job")
     job_subcommands = job.add_subparsers(dest="job_command", required=True)
     start = job_subcommands.add_parser("start")
@@ -601,6 +609,24 @@ def main() -> int:
             "git-workspaces",
             {"workspace_id": arguments.workspace_id},
             "agent-control",
+        )
+    elif arguments.command == "packet" and arguments.packet_command == "finalize":
+        request = _request(
+            "packet.finalize",
+            "packet-saga",
+            {
+                "workspace_id": arguments.workspace_id,
+                "verification_job_id": arguments.verification_job,
+                "packet_job_id": arguments.packet_job,
+            },
+            "operator",
+        )
+    elif arguments.command == "packet" and arguments.packet_command == "status":
+        request = _request(
+            "packet.status",
+            "packet-saga",
+            {"saga_id": arguments.saga_id},
+            "operator",
         )
     elif arguments.command == "job" and arguments.job_command == "start":
         try:
