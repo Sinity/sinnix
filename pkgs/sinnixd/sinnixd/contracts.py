@@ -223,6 +223,11 @@ class TypedJobContracts:
             json.dumps(private, sort_keys=True, separators=(",", ":")).encode(),
         )
         environment = self._environment(checkout, job_id, principal, timeout_seconds)
+        if kind == "attested-agent":
+            # Task-authority writes from an agent job must not default to the
+            # operator's identity; a descriptor [environment.values] entry
+            # still overrides this per-job attribution.
+            environment.setdefault("BEADS_ACTOR", f"agent-{job_id}")
         command = (
             str(contract_runner_executable()),
             "--input",

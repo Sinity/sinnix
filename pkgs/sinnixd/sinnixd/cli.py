@@ -297,6 +297,12 @@ def daemon_parser() -> argparse.ArgumentParser:
     result.add_argument("--state-dir", type=Path, default=default_state_dir())
     result.add_argument("--project-root", type=Path, action="append", required=True)
     result.add_argument("--native-runner", type=Path, required=True)
+    result.add_argument(
+        "--event-spool",
+        type=Path,
+        default=Path("/realm/state/agentctl/events.jsonl"),
+        help="Append-only JSONL of terminal job events (the zero-polling watch point).",
+    )
     return result
 
 
@@ -770,6 +776,7 @@ def daemon_main() -> None:
             UserSystemdJobs(),
             GenericJobStore(arguments.state_dir),
             notify_socket=arguments.socket,
+            event_spool_path=arguments.event_spool,
         ),
         native_runner=arguments.native_runner,
     )
