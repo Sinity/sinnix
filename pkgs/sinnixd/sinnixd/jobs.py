@@ -2509,7 +2509,6 @@ class GenericJobs:
             scratch_path = self.store.scratch_path_for(operation.scratch, job_id)
             payload_overrides: dict[str, str] = {}
             if scratch_path is not None:
-                launch_environment["TMPDIR"] = str(scratch_path)
                 payload_overrides["TMPDIR"] = str(scratch_path)
             return GenericJobSpec(
                 kind="declared-operation",
