@@ -5,13 +5,16 @@
   # ReadWritePaths silently discards that agent's session transcript and hook
   # spool. Any such unit must union this in and leave ProtectHome off.
   agentRuntimeWritePaths =
-    { home }:
+    {
+      home,
+      polylogueDataDir,
+    }:
     [
       "${home}/.claude"
       "${home}/.codex"
       "${home}/.cache/claude-cli-nodejs"
       "${home}/.local/state/claude-code"
-      "/realm/state/polylogue/hooks"
+      "${polylogueDataDir}/hooks"
     ];
 
   mkRestartPolicy =

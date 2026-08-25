@@ -16,6 +16,7 @@
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
       sentinelDataDir = "/tmp/sinnix-polylogue-parity-sentinel";
+      enrichDumpSource = ../../scripts/sinnix-enrich-dump;
       codexHooks = import ../../modules/features/dev/agents/hooks.nix {
         inherit pkgs;
         dotsRoot = inputs.self + "/dots";
@@ -36,6 +37,7 @@
             inherit
               codexHooks
               claudeHooks
+              enrichDumpSource
               polylogueHook
               polylogueHookBin
               sentinelDataDir
@@ -47,6 +49,38 @@
             ];
           }
           ''
+            require_text() {
+              needle="$1"
+              file="$2"
+              label="$3"
+              if ! grep -Fq -- "$needle" "$file"; then
+                echo "missing $label: $needle in $file" >&2
+                exit 1
+              fi
+            }
+
+            reject_text() {
+              needle="$1"
+              file="$2"
+              label="$3"
+              if grep -Fq -- "$needle" "$file"; then
+                echo "forbidden $label: $needle in $file" >&2
+                grep -Fn -- "$needle" "$file" >&2
+                exit 1
+              fi
+            }
+
+            require_row() {
+              row="$1"
+              file="$2"
+              label="$3"
+              if ! grep -Fxq -- "$row" "$file"; then
+                echo "missing $label row: $row in $file" >&2
+                sed -n '1,120p' "$file" >&2
+                exit 1
+              fi
+            }
+
             # The evidence lanes: every lifecycle event on which a client
             # ships a session to Polylogue. Codex must cover at least what
             # Claude does, or half the machine's agent history stops being
@@ -92,50 +126,64 @@
             cut -f1 claude-writers > claude-writer-lanes
             cut -f1 codex-writers > codex-writer-lanes
             diff -u claude-writer-lanes codex-writer-lanes
-            grep -Fx $'PreToolUse\tclaude-code' claude-writers
-            grep -Fx $'PostToolUse\tclaude-code' claude-writers
-            grep -Fx $'SessionStart\tclaude-code' claude-writers
-            grep -Fx $'Stop\tclaude-code' claude-writers
-            grep -Fx $'UserPromptSubmit\tclaude-code' claude-writers
-            grep -Fx $'PreToolUse\tcodex' codex-writers
-            grep -Fx $'PostToolUse\tcodex' codex-writers
-            grep -Fx $'SessionStart\tcodex' codex-writers
-            grep -Fx $'Stop\tcodex' codex-writers
-            grep -Fx $'UserPromptSubmit\tcodex' codex-writers
+            require_row $'PreToolUse\tclaude-code' claude-writers claude-pretool
+            require_row $'PostToolUse\tclaude-code' claude-writers claude-posttool
+            require_row $'SessionStart\tclaude-code' claude-writers claude-sessionstart
+            require_row $'Stop\tclaude-code' claude-writers claude-stop
+            require_row $'UserPromptSubmit\tclaude-code' claude-writers claude-prompt
+            require_row $'PreToolUse\tcodex' codex-writers codex-pretool
+            require_row $'PostToolUse\tcodex' codex-writers codex-posttool
+            require_row $'SessionStart\tcodex' codex-writers codex-sessionstart
+            require_row $'Stop\tcodex' codex-writers codex-stop
+            require_row $'UserPromptSubmit\tcodex' codex-writers codex-prompt
 
             # This custom-root assertion is separate from command comparison.
             # A default-root wrapper or an unconfigured packaged writer must
             # fail even when both payloads agree.
-            grep -F -- "$sentinelDataDir/hooks" "$polylogueHookBin/bin/sinnix-polylogue-hook"
-            if grep -F -e '/realm/state/polylogue' -e '/home/sinity/.local/share/polylogue' "$polylogueHookBin/bin/sinnix-polylogue-hook"; then
-              echo 'generated Polylogue hook wrapper contains a default or legacy root' >&2
+            require_text "$sentinelDataDir/hooks" "$polylogueHookBin/bin/sinnix-polylogue-hook" configured-hook-root
+            reject_text '/realm/state/polylogue' "$polylogueHookBin/bin/sinnix-polylogue-hook" default-hook-root
+            reject_text '/home/sinity/.local/share/polylogue' "$polylogueHookBin/bin/sinnix-polylogue-hook" legacy-hook-root
+
+            # Standalone enrichment must fail before assembling or mutating
+            # any output when its archive-root contract is not configured.
+            if env -u POLYLOGUE_ARCHIVE_ROOT "${pkgs.bash}/bin/bash" "$enrichDumpSource" \
+              >/dev/null 2>missing-enrich-root.stderr; then
+              echo 'enrichment dump accepted a missing Polylogue archive root' >&2
               exit 1
             fi
+            require_text POLYLOGUE_ARCHIVE_ROOT missing-enrich-root.stderr missing-enrich-root-diagnostic
 
             # Fresh-writer smoke: isolate every ambient resolution input and
             # trace file access. The explicit primary spool must receive the
             # event while archive/XDG fallback paths and the real legacy roots
             # remain untouched.
             smoke_root="$TMPDIR/polylogue-hook-smoke"
-            primary="$smoke_root/primary-hooks"
+            primary="$sentinelDataDir/hooks"
             archive="$smoke_root/archive"
             legacy="$smoke_root/legacy-home"
-            mkdir -p "$smoke_root/home" "$smoke_root/xdg" "$primary" "$archive" "$legacy"
+            mkdir -p "$smoke_root/home" "$smoke_root/xdg" "$archive" "$legacy"
             trace="$smoke_root/access.trace"
             printf '%s' '{"session_id":"parity-smoke","source":"codex","turn_id":"turn-1"}' \
               | HOME="$smoke_root/home" \
                 XDG_DATA_HOME="$smoke_root/xdg" \
                 POLYLOGUE_ARCHIVE_ROOT="$archive" \
                 strace -f -e trace=file -o "$trace" \
-                "$polylogueHook/bin/polylogue-hook" UserPromptSubmit \
-                  --provider codex --sidecar-dir "$primary"
+                "$polylogueHookBin/bin/sinnix-polylogue-hook" UserPromptSubmit \
+                  --provider codex
             test -n "$(find "$primary" -type f -print -quit)"
-            grep -R -F 'parity-smoke' "$primary" >/dev/null
-            test -z "$(find "$archive" "$legacy" "$smoke_root/home" "$smoke_root/xdg" -type f -print -quit)"
-            if grep -F -e '/realm/state/polylogue' -e '/home/sinity/.local/share/polylogue' -e '/realm/db/polylogue' "$trace"; then
-              echo 'isolated Polylogue hook smoke accessed a live or legacy root' >&2
-              exit 1
-            fi
+            record="$(find "$primary" -type f -name 'codex-parity-smoke.jsonl' -print -quit)"
+            test -n "$record"
+            jq -e '.event_type == "UserPromptSubmit" and .provider == "codex" and .payload.session_id == "parity-smoke"' "$record" >/dev/null \
+              || { echo "wrapper did not preserve event/provider payload in $record" >&2; exit 1; }
+            require_text 'UserPromptSubmit' "$trace" forwarded-event
+            require_text '--provider' "$trace" forwarded-provider-flag
+            require_text 'codex' "$trace" forwarded-provider
+            require_text "$primary" "$trace" trailing-sidecar-destination
+            test -z "$(find "$archive" "$legacy" "$smoke_root/home" "$smoke_root/xdg" -mindepth 1 -print -quit)" \
+              || { echo 'isolated Polylogue hook smoke wrote an ambient root' >&2; exit 1; }
+            reject_text '/realm/state/polylogue' "$trace" live-hook-root
+            reject_text '/home/sinity/.local/share/polylogue' "$trace" default-hook-root
+            reject_text '/realm/db/polylogue' "$trace" legacy-hook-root
 
             # The shared context handoff is configured independently for both
             # clients, so this verifies the intended cross-client agreement.

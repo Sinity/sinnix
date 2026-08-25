@@ -10,8 +10,14 @@ set -euo pipefail
 # Single-writer invariant: writes only the output root and the watermark at
 # /realm/state/cursors/enrichment/; never polylogue's or sinex's stores.
 #
-# Every input is optional. Absent or empty means nothing changed since the
-# watermark, not a fault -- the skill tells the model to treat it that way.
+# The service exports POLYLOGUE_ARCHIVE_ROOT from its configured dataDir.
+# Standalone callers must export the same variable; guessing a root would make
+# an apparently successful pass read the wrong archive.
+
+if [[ -z "${POLYLOGUE_ARCHIVE_ROOT:-}" ]]; then
+  echo "sinnix-enrich-dump: POLYLOGUE_ARCHIVE_ROOT is required (set it to the configured Polylogue dataDir)" >&2
+  exit 2
+fi
 
 WATERMARK_FILE="/realm/state/cursors/enrichment/last-run"
 OUTPUT_ROOT="/realm/data/derived/reports/enrichment"
@@ -103,7 +109,7 @@ fi
 # timestamp then selects the rows actually in-window (mtime alone over-read
 # this ~33x). Uncapped -- the model reads by offset, so a wide window costs
 # turns rather than truncated evidence.
-POLYLOGUE_HOOKS_DIR="/realm/state/polylogue/hooks"
+POLYLOGUE_HOOKS_DIR="${POLYLOGUE_ARCHIVE_ROOT}/hooks"
 if [[ -d "$POLYLOGUE_HOOKS_DIR" ]]; then
   : >"$BUNDLE/polylogue-hooks.jsonl"
   find "$POLYLOGUE_HOOKS_DIR" -name '*.jsonl' -newermt "$SINCE_ISO" -exec cat {} + 2>/dev/null \
