@@ -676,7 +676,9 @@ class GitWorkspaces:
                 provision_notes=notes,
             )
         except BaseException:
-            self._git(project.root, "worktree", "remove", "--force", str(path), check=False)
+            self._git(
+                project.root, "worktree", "remove", "--force", str(path), check=False
+            )
             if not branch_exists:
                 self._git(project.root, "branch", "-D", branch, check=False)
             raise
@@ -1525,9 +1527,7 @@ class GitWorkspaces:
         )
 
     @staticmethod
-    def _provision(
-        project: ProjectAdapter, target: Path
-    ) -> tuple[dict[str, str], ...]:
+    def _provision(project: ProjectAdapter, target: Path) -> tuple[dict[str, str], ...]:
         assert project.workspace is not None
         notes: list[dict[str, str]] = []
         for relative in project.workspace.provision_copy:
@@ -1537,7 +1537,9 @@ class GitWorkspaces:
                 notes.append({"kind": "missing-source", "path": relative})
                 continue
             if source.is_symlink():
-                raise WorkspaceError(f"workspace provision source is a symlink: {relative}")
+                raise WorkspaceError(
+                    f"workspace provision source is a symlink: {relative}"
+                )
             destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             if source.is_file():
                 try:

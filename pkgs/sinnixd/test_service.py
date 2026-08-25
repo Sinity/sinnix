@@ -144,6 +144,23 @@ def test_canonical_client_validates_typed_response_identity() -> None:
         mismatched.dispatch(request)
 
 
+def test_runtime_status_lists_build_capabilities(tmp_path: Path) -> None:
+    """Anti-vacuity: status exposes the build capability contract, not only version and owners."""
+    service = SinnixdService(ProjectCatalog([]), jobs=generic_jobs(tmp_path))
+
+    response = service.dispatch(request("runtime.status", "sinnixd"))
+
+    assert response.ok and response.payload is not None
+    assert response.payload.inline["capabilities"] == [
+        "completion_events",
+        "wait_any",
+        "environment_require",
+        "workspace_provision",
+        "usage_capture",
+        "timeout_wip_preserve",
+    ]
+
+
 @pytest.mark.parametrize(
     ("shape", "error"),
     (
