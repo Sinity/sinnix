@@ -155,6 +155,25 @@ def parser() -> argparse.ArgumentParser:
     job_result.add_argument("--max-bytes", type=int, default=64_000)
     cancel = job_subcommands.add_parser("cancel")
     cancel.add_argument("job_id")
+    plan = subcommands.add_parser("plan")
+    plan_subcommands = plan.add_subparsers(dest="plan_command", required=True)
+    plan_submit = plan_subcommands.add_parser("submit")
+    plan_submit.add_argument("project_id")
+    plan_submit.add_argument("--input-generation", required=True)
+    plan_submit.add_argument("--node-operation")
+    plan_submit.add_argument("--workspace")
+    plan_submit.add_argument("--checkout")
+    plan_submit.add_argument("--plan-file", type=Path, required=True)
+    plan_get = plan_subcommands.add_parser("get")
+    plan_get.add_argument("plan_id")
+    plan_list = plan_subcommands.add_parser("list")
+    plan_list.add_argument("--project")
+    plan_wait = plan_subcommands.add_parser("wait")
+    plan_wait.add_argument("plan_id")
+    plan_wait.add_argument("--timeout-seconds", type=int, default=30)
+    plan_result = plan_subcommands.add_parser("result")
+    plan_result.add_argument("plan_id")
+    plan_result.add_argument("--max-bytes", type=int, default=64_000)
     owner = subcommands.add_parser("owner")
     owner_subcommands = owner.add_subparsers(dest="owner_command", required=True)
     call_owner = owner_subcommands.add_parser("call")
@@ -529,6 +548,56 @@ def main() -> int:
                 "parameters": parameters,
                 **({"bead_binding": binding} if binding is not None else {}),
             },
+        )
+    elif arguments.command == "plan" and arguments.plan_command == "submit":
+        if arguments.workspace is not None and arguments.checkout is not None:
+            parser().error("plan submit accepts --workspace or --checkout, not both")
+        try:
+            plan_input = json.loads(arguments.plan_file.read_text())
+        except (OSError, json.JSONDecodeError) as error:
+            parser().error(f"--plan-file must contain valid JSON: {error}")
+        if isinstance(plan_input, list):
+            nodes = plan_input
+        elif isinstance(plan_input, dict) and isinstance(plan_input.get("nodes"), list):
+            nodes = plan_input["nodes"]
+        else:
+            parser().error(
+                "--plan-file must contain a node array or an object with nodes"
+            )
+        request_arguments: dict[str, object] = {
+            "project_id": arguments.project_id,
+            "input_generation": arguments.input_generation,
+            "nodes": nodes,
+        }
+        if arguments.node_operation is not None:
+            request_arguments["node_operation"] = arguments.node_operation
+        if arguments.workspace is not None:
+            request_arguments["workspace_id"] = arguments.workspace
+        if arguments.checkout is not None:
+            request_arguments["checkout_id"] = arguments.checkout
+        request = _request("plan.submit", "project-plans", request_arguments)
+    elif arguments.command == "plan" and arguments.plan_command == "get":
+        request = _request("plan.get", "project-plans", {"plan_id": arguments.plan_id})
+    elif arguments.command == "plan" and arguments.plan_command == "list":
+        request = _request(
+            "plan.list",
+            "project-plans",
+            ({"project_id": arguments.project} if arguments.project else {}),
+        )
+    elif arguments.command == "plan" and arguments.plan_command == "wait":
+        request = _request(
+            "plan.wait",
+            "project-plans",
+            {
+                "plan_id": arguments.plan_id,
+                "timeout_seconds": arguments.timeout_seconds,
+            },
+        )
+    elif arguments.command == "plan" and arguments.plan_command == "result":
+        request = _request(
+            "plan.result",
+            "project-plans",
+            {"plan_id": arguments.plan_id, "max_bytes": arguments.max_bytes},
         )
     elif arguments.command == "job" and arguments.job_command in {"get", "status"}:
         request = _request("job.get", "systemd-jobs", {"job_id": arguments.job_id})

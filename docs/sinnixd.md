@@ -265,6 +265,28 @@ Result parsing is pure and bounded. `exit` reads the observed systemd exit resul
 
 The daemon owns bounded descriptor-declared development-service leases and typed shells only through their stated contracts. It does not own arbitrary shells, product readiness, Git history, hosted review state, or merge state. Beads remains the task-state authority and GitHub remains authoritative for reviews and merges. The gateway’s legacy controllers remain downstream and are unchanged here.
 
+## Generic project plans
+
+`plan.submit` accepts one bounded serializable DAG and materializes every node as an ordinary inspectable `declared-operation` job. Nodes may name different operations, or the plan may name one operation with `plan_node = true` and supply one validated `payload` object per node. Payload validation and fixed argv derivation reuse the operation's descriptor-owned parameter schema. Sinnixd does not interpret the payload or result domain.
+
+The service API is owned by `project-plans`:
+
+```text
+plan.submit  {project_id, input_generation, nodes, [node_operation], [workspace_id|checkout_id]}
+plan.get     {plan_id}
+plan.list    {[project_id]}
+plan.wait    {plan_id, [timeout_seconds]}
+plan.result  {plan_id, [max_bytes]}
+```
+
+The CLI equivalents are `agentctl plan submit`, `get`, `list`, `wait`, and `result`. `plan submit` reads a bounded JSON node file. A node has `node_id` (or `id`), `depends_on` (or `dependencies`), and either `operation` plus `parameters`, or `payload` when `node_operation` is supplied. The graph is checked for duplicate IDs, undeclared dependencies, cycles, node and edge bounds, and descriptor parameter validity before any job is created.
+
+Each plan node stores only its ID, operation, parameter digest, input generation, dependency node IDs, exact registered checkout identity, job ID, and bounded result references. Its durable job carries the plan and node identity and explicit dependency job IDs. Normal-pool admission therefore starts independent ready nodes concurrently and applies descriptor `exclusive_keys`, including project-defined promotion locks, through the existing scheduler. Systemd remains the process, timeout, cancellation, and terminal-result authority.
+
+Repeated plans do not use the ordinary operation cache. A completed node is reusable only when the prior plan's project, exact checkout and HEAD, node operation, parameter digest, node input generation, dependency-node list, and authoritative bounded result evidence all match. Running, failed, cancelled, missing, malformed, or artifact-less jobs are never reused. A plan manifest and node jobs survive daemon restart; recovery finds already-created node jobs by their durable plan and node identity, preserving their logs and results.
+
+For Lynchpin integration, its descriptor must mark the node operation with `plan_node = true`, declare every accepted payload field under `[operations.<node-operation>.parameters]`, and set the operation's `exec`, `pool`, `result`, `cache`, `timeout_seconds`, `exclusive_keys`, `estimate_memory_bytes`, and `scratch` fields as appropriate. Each submission must provide a bounded stable `input_generation` and a node list whose payloads contain no undeclared fields. A node operation should use `result = "json"` or `result = "pytest"` when Lynchpin needs a typed receipt. Lynchpin owns the generation value and convergence semantics; Sinnixd only preserves and compares it.
+
 ## Shared protocol
 
 All requests and responses use `sinnix-mcp` v1. Every request carries an explicit principal, canonical dotted operation, owner, request ID, and correlation ID. Responses preserve owner identity, typed errors, bounded payloads, and optional source-generation bindings. `OwnerRegistry` rejects overlapping operation namespaces, so a frontend cannot silently choose an owner for a domain operation.

@@ -32,6 +32,7 @@ from .jobs import (
 )
 from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from .projects import ProjectCatalog
+from .project_plans import PlanStore, ProjectPlanExecutor
 from .tasks import TaskError, TaskService
 from .workspaces import GitWorkspaces, WorkspaceError, WorkspaceStore
 
@@ -65,6 +66,7 @@ class SinnixdService:
     workspaces: GitWorkspaces | None = None
     delivery: GitHubDelivery | None = None
     tasks: TaskService | None = None
+    plans: ProjectPlanExecutor | None = None
 
     def __post_init__(self) -> None:
         if self.workspaces is None:
@@ -83,6 +85,18 @@ class SinnixdService:
         if self.tasks is None:
             object.__setattr__(
                 self, "tasks", TaskService(self.projects, jobs=self.jobs)
+            )
+        if self.plans is None:
+            assert self.workspaces is not None
+            object.__setattr__(
+                self,
+                "plans",
+                ProjectPlanExecutor(
+                    self.projects,
+                    self.jobs,
+                    PlanStore(self.jobs.store.root),
+                    self.workspaces,
+                ),
             )
         _ = self.owners
 
@@ -112,6 +126,14 @@ class SinnixdService:
                 lifecycle=Lifecycle.DAEMON_OWNED,
                 versions=frozenset({1}),
                 documentation="Durable generic jobs reconciled from transient user services.",
+            ),
+            OwnerSpec(
+                namespace="plan",
+                owner="project-plans",
+                authority=Authority.SYSTEMD,
+                lifecycle=Lifecycle.DAEMON_OWNED,
+                versions=frozenset({1}),
+                documentation="Bounded generic project execution plans over declared operation jobs.",
             ),
             OwnerSpec(
                 namespace="workspace",
@@ -243,6 +265,55 @@ class SinnixdService:
                     operation.catalog_row() for operation in project.operations
                 ],
             }
+        if operation == "plan.submit":
+            if principal not in {"agent-control", "operator"}:
+                raise JobAuthorizationError(
+                    "project plans require agent-control or operator principal"
+                )
+            assert self.plans is not None
+            return self.plans.submit(
+                arguments, correlation_id=correlation_id, principal=principal
+            )
+        if operation == "plan.get":
+            if set(arguments) != {"plan_id"}:
+                raise ValueError("plan.get requires plan_id")
+            assert self.plans is not None
+            return self.plans.get(self._job_argument(arguments, "plan_id"))
+        if operation == "plan.list":
+            if set(arguments) - {"project_id"}:
+                raise ValueError("plan.list accepts optional project_id")
+            project_id = arguments.get("project_id")
+            if project_id is not None and not isinstance(project_id, str):
+                raise ValueError("plan.list project_id must be a string")
+            assert self.plans is not None
+            return self.plans.list(project_id=project_id)
+        if operation == "plan.wait":
+            if (
+                set(arguments) - {"plan_id", "timeout_seconds"}
+                or "plan_id" not in arguments
+            ):
+                raise ValueError(
+                    "plan.wait requires plan_id and optional timeout_seconds"
+                )
+            timeout_seconds = arguments.get("timeout_seconds", 30)
+            if not isinstance(timeout_seconds, int) or isinstance(
+                timeout_seconds, bool
+            ):
+                raise ValueError("plan.wait timeout_seconds must be an integer")
+            assert self.plans is not None
+            return self.plans.wait(
+                self._job_argument(arguments, "plan_id"), timeout_seconds
+            )
+        if operation == "plan.result":
+            if set(arguments) - {"plan_id", "max_bytes"} or "plan_id" not in arguments:
+                raise ValueError("plan.result requires plan_id and optional max_bytes")
+            max_bytes = arguments.get("max_bytes", 64_000)
+            if not isinstance(max_bytes, int) or isinstance(max_bytes, bool):
+                raise ValueError("plan.result max_bytes must be an integer")
+            assert self.plans is not None
+            return self.plans.result(
+                self._job_argument(arguments, "plan_id"), max_bytes=max_bytes
+            )
         if operation.startswith("task."):
             assert self.tasks is not None
             return self.tasks.execute(
