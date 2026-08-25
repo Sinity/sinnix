@@ -586,6 +586,12 @@ def test_agentctl_job_list_exposes_service_pagination(
     }
 
 
+def test_agentctl_job_list_accepts_active_only_alias() -> None:
+    arguments = cli_module.parser().parse_args(["job", "list", "--active-only"])
+
+    assert arguments.active is True
+
+
 def test_agentctl_task_list_preserves_cursor_and_order_controls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
