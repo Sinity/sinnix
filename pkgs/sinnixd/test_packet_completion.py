@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import subprocess
 from dataclasses import replace
+from pathlib import Path
 
 from sinnixd.packet_completion import (
     DelegationCapability,
@@ -258,3 +260,47 @@ def test_pending_delegation_is_consumed_from_structured_capability() -> None:
 
     assert not result.complete
     assert "delegated_work_pending" in result.reasons
+
+
+def test_disposable_real_git_success_and_failed_packet_pair(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Fixture"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "fixture@example.test"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "--quiet", "--allow-empty", "-m", "base"], check=True)
+    start = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "changed.py").write_text("pass\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "src/changed.py"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "--quiet", "-m", "change"], check=True)
+    final = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    common = {
+        "job": {
+            "job_id": "job-1",
+            "state": {"phase": "succeeded", "terminal": True},
+            "checkout": {"checkout_id": "checkout-1", "head": start},
+        },
+        "workspace": {
+            "workspace_id": "workspace-1",
+            "checkout_id": "checkout-1",
+            "path": str(tmp_path),
+            "state": "available",
+            "identity_matches": True,
+            "head": final,
+            "dirty": False,
+        },
+        "contract": base_contract(),
+        "worker_result": delivery(),
+        "verification_receipts": (verification(head=final),),
+        "delegation": DelegationCapability(visibility="supported", pending=False),
+    }
+    assert PacketCompletionInspector().inspect(**common).complete
+
+    (tmp_path / "untracked.txt").write_text("unfinished\n")
+    failed = PacketCompletionInspector().inspect(**common)
+    assert not failed.complete
+    assert "workspace_dirty" in failed.reasons
+    assert "untracked_work" in failed.reasons
