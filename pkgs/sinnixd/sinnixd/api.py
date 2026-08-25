@@ -9,7 +9,13 @@ from pathlib import Path
 from threading import BoundedSemaphore, Event
 from typing import Any, Callable
 
-from sinnix_mcp import ErrorCode, ErrorEnvelope, RequestEnvelope, ResponseEnvelope, response_envelope_from_dict
+from sinnix_mcp import (
+    ErrorCode,
+    ErrorEnvelope,
+    RequestEnvelope,
+    ResponseEnvelope,
+    response_envelope_from_dict,
+)
 
 from .jobs import DEFAULT_WAIT_SECONDS, MAX_WAIT_SECONDS
 from .service import SinnixdService
@@ -96,7 +102,9 @@ def send_frame(connection: socket.socket, value: dict[str, Any]) -> None:
 
 def _response_timeout_seconds(request: RequestEnvelope) -> float:
     if request.operation != "job.wait":
-        return CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS.get(request.operation, CONNECTION_TIMEOUT_SECONDS)
+        return CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS.get(
+            request.operation, CONNECTION_TIMEOUT_SECONDS
+        )
     timeout_seconds = request.arguments.get("timeout_seconds", DEFAULT_WAIT_SECONDS)
     if (
         not isinstance(timeout_seconds, int)
@@ -113,8 +121,13 @@ def _json_rpc_error_from_dict(value: Any) -> JsonRpcErrorEnvelope:
     return JsonRpcErrorEnvelope(code=value["code"], message=value["message"])
 
 
-def _response_from_json_rpc_error(request: RequestEnvelope, error: JsonRpcErrorEnvelope) -> dict[str, Any]:
-    if error.code == JSON_RPC_INVALID_REQUEST and error.message == WAIT_CAPACITY_EXHAUSTED_MESSAGE:
+def _response_from_json_rpc_error(
+    request: RequestEnvelope, error: JsonRpcErrorEnvelope
+) -> dict[str, Any]:
+    if (
+        error.code == JSON_RPC_INVALID_REQUEST
+        and error.message == WAIT_CAPACITY_EXHAUSTED_MESSAGE
+    ):
         return ResponseEnvelope(
             request_id=request.request_id,
             correlation_id=request.correlation_id,
@@ -124,18 +137,24 @@ def _response_from_json_rpc_error(request: RequestEnvelope, error: JsonRpcErrorE
     raise SinnixdClientError("sinnixd is unavailable")
 
 
-def _response_result_from_json_rpc_frame(request: RequestEnvelope, response: dict[str, Any]) -> dict[str, Any]:
+def _response_result_from_json_rpc_frame(
+    request: RequestEnvelope, response: dict[str, Any]
+) -> dict[str, Any]:
     if response.get("jsonrpc") != "2.0" or response.get("id") != request.request_id:
         raise ProtocolError("response does not match the request")
     has_result = "result" in response
     has_error = "error" in response
     if has_result == has_error:
         raise ProtocolError("response requires exactly one of result or error")
-    expected_fields = {"jsonrpc", "id", "error"} if has_error else {"jsonrpc", "id", "result"}
+    expected_fields = (
+        {"jsonrpc", "id", "error"} if has_error else {"jsonrpc", "id", "result"}
+    )
     if set(response) != expected_fields:
         raise ProtocolError("response has invalid fields")
     if has_error:
-        return _response_from_json_rpc_error(request, _json_rpc_error_from_dict(response["error"]))
+        return _response_from_json_rpc_error(
+            request, _json_rpc_error_from_dict(response["error"])
+        )
     result = response["result"]
     if not isinstance(result, dict):
         raise ProtocolError("response requires an object result")
@@ -160,7 +179,9 @@ class UnixSocketServer:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
             self._bind(listener)
             try:
-                with ThreadPoolExecutor(max_workers=1, thread_name_prefix="sinnixd-rpc") as executor:
+                with ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix="sinnixd-rpc"
+                ) as executor:
                     self._accept_connection(listener, executor, BoundedSemaphore(1))
             finally:
                 self.socket_path.unlink(missing_ok=True)
@@ -220,7 +241,9 @@ class UnixSocketServer:
         except OSError:
             permits.release()
             raise
-        executor.submit(self._serve_connection, connection, permits, wait_executor, wait_permits)
+        executor.submit(
+            self._serve_connection, connection, permits, wait_executor, wait_permits
+        )
 
     def _serve_connection(
         self,
@@ -243,15 +266,31 @@ class UnixSocketServer:
             request = RequestEnvelope(**params)
             if request.request_id != request_id:
                 raise ProtocolError("JSON-RPC id must equal envelope request_id")
-            if request.operation == "job.wait" and wait_executor is not None and wait_permits is not None:
+            if (
+                request.operation == "job.wait"
+                and wait_executor is not None
+                and wait_permits is not None
+            ):
                 if not wait_permits.acquire(blocking=False):
                     raise ProtocolError("job.wait capacity is exhausted")
                 connection.settimeout(_response_timeout_seconds(request))
-                wait_executor.submit(self._serve_wait_connection, connection, request_id, request, wait_permits)
+                wait_executor.submit(
+                    self._serve_wait_connection,
+                    connection,
+                    request_id,
+                    request,
+                    wait_permits,
+                )
                 handed_off = True
             else:
                 self._send_response(connection, request_id, request)
-        except (ConnectionError, OSError, ProtocolError, TypeError, ValueError) as error:
+        except (
+            ConnectionError,
+            OSError,
+            ProtocolError,
+            TypeError,
+            ValueError,
+        ) as error:
             try:
                 send_frame(
                     connection,
@@ -283,7 +322,9 @@ class UnixSocketServer:
             connection.close()
             permits.release()
 
-    def _send_response(self, connection: socket.socket, request_id: str, request: RequestEnvelope) -> None:
+    def _send_response(
+        self, connection: socket.socket, request_id: str, request: RequestEnvelope
+    ) -> None:
         response = self.service.dispatch(request)
         send_frame(
             connection,

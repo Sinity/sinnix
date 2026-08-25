@@ -9,7 +9,7 @@ from uuid import uuid4
 from sinnix_mcp import ErrorCode, ErrorEnvelope, RequestEnvelope, ResponseEnvelope
 
 from .api import ProtocolError, SinnixdClientError, UnixSocketServer, call
-from .jobs import GenericJobStore, GenericJobs, UserSystemdJobs, default_state_dir
+from .jobs import GenericJobs, GenericJobStore, UserSystemdJobs, default_state_dir
 from .limits import DEFAULT_TIMEOUT_SECONDS
 from .projects import ProjectCatalog
 from .service import SinnixdService
@@ -30,7 +30,10 @@ def _metadata_argument(value: str) -> tuple[str, str]:
 
 
 def default_socket_path() -> Path:
-    return Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "sinnixd.sock"
+    return (
+        Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+        / "sinnixd.sock"
+    )
 
 
 def parser() -> argparse.ArgumentParser:
@@ -61,7 +64,9 @@ def parser() -> argparse.ArgumentParser:
     operations = project_subcommands.add_parser("operations")
     operations.add_argument("project_id")
     workspace = subcommands.add_parser("workspace")
-    workspace_subcommands = workspace.add_subparsers(dest="workspace_command", required=True)
+    workspace_subcommands = workspace.add_subparsers(
+        dest="workspace_command", required=True
+    )
     workspace_list = workspace_subcommands.add_parser("list")
     workspace_list.add_argument("--project")
     workspace_get = workspace_subcommands.add_parser("get")
@@ -165,7 +170,20 @@ def parser() -> argparse.ArgumentParser:
     task_list.add_argument("--label")
     task_list.add_argument("--limit", type=int, default=100)
     task_list.add_argument("--cursor")
-    task_list.add_argument("--sort", choices=("priority", "created", "updated", "closed", "status", "id", "title", "type", "assignee"))
+    task_list.add_argument(
+        "--sort",
+        choices=(
+            "priority",
+            "created",
+            "updated",
+            "closed",
+            "status",
+            "id",
+            "title",
+            "type",
+            "assignee",
+        ),
+    )
     task_list.add_argument("--reverse", action="store_true")
     task_list.add_argument("--include-closed", action="store_true")
     task_list.add_argument("--ready", action="store_true")
@@ -178,11 +196,28 @@ def parser() -> argparse.ArgumentParser:
     task_create.add_argument("project_id")
     task_create.add_argument("title")
     task_create.add_argument("--description", required=True)
-    task_create.add_argument("--type", dest="issue_type", choices=("bug", "feature", "task", "epic", "chore", "decision", "spike", "story", "milestone"), required=True)
+    task_create.add_argument(
+        "--type",
+        dest="issue_type",
+        choices=(
+            "bug",
+            "feature",
+            "task",
+            "epic",
+            "chore",
+            "decision",
+            "spike",
+            "story",
+            "milestone",
+        ),
+        required=True,
+    )
     task_create.add_argument("--priority", type=int, choices=range(5), required=True)
     task_create.add_argument("--label", action="append", default=[])
     task_create.add_argument("--parent")
-    task_create.add_argument("--dependency", action="append", type=_dependency_argument, default=[])
+    task_create.add_argument(
+        "--dependency", action="append", type=_dependency_argument, default=[]
+    )
     task_create.add_argument("--request-id", required=True)
     for command in ("claim", "complete", "release"):
         command_parser = task_subcommands.add_parser(command)
@@ -204,7 +239,13 @@ def parser() -> argparse.ArgumentParser:
     task_update = task_subcommands.add_parser("update")
     task_update.add_argument("project_id")
     task_update.add_argument("task_id")
-    task_update.add_argument("--set-metadata", action="append", type=_metadata_argument, default=[], required=True)
+    task_update.add_argument(
+        "--set-metadata",
+        action="append",
+        type=_metadata_argument,
+        default=[],
+        required=True,
+    )
     task_update.add_argument("--request-id", required=True)
     task_relate = task_subcommands.add_parser("relate")
     task_relate.add_argument("project_id")
@@ -259,7 +300,11 @@ def main() -> int:
     if arguments.command == "status":
         request = _request("runtime.status", "sinnixd", {})
     elif arguments.command == "shell":
-        shell_argv = arguments.argv[1:] if arguments.argv and arguments.argv[0] == "--" else arguments.argv
+        shell_argv = (
+            arguments.argv[1:]
+            if arguments.argv and arguments.argv[0] == "--"
+            else arguments.argv
+        )
         if not shell_argv:
             parser().error("shell requires a command after --")
         request = _request(
@@ -301,16 +346,22 @@ def main() -> int:
     elif arguments.command == "project" and arguments.project_command == "list":
         request = _request("project.list", "project-adapters", {})
     elif arguments.command == "project" and arguments.project_command == "get":
-        request = _request("project.get", "project-adapters", {"project_id": arguments.project_id})
+        request = _request(
+            "project.get", "project-adapters", {"project_id": arguments.project_id}
+        )
     elif arguments.command == "project":
         request = _request(
-            "project.operations", "project-adapters", {"project_id": arguments.project_id}
+            "project.operations",
+            "project-adapters",
+            {"project_id": arguments.project_id},
         )
     elif arguments.command == "workspace" and arguments.workspace_command == "list":
         payload = {"project_id": arguments.project} if arguments.project else {}
         request = _request("workspace.list", "git-workspaces", payload)
     elif arguments.command == "workspace" and arguments.workspace_command == "get":
-        request = _request("workspace.get", "git-workspaces", {"workspace_id": arguments.workspace_id})
+        request = _request(
+            "workspace.get", "git-workspaces", {"workspace_id": arguments.workspace_id}
+        )
     elif arguments.command == "workspace" and arguments.workspace_command == "create":
         request = _request(
             "workspace.create",
@@ -348,7 +399,9 @@ def main() -> int:
             {"workspace_id": arguments.workspace_id},
             "agent-control",
         )
-    elif arguments.command == "workspace" and arguments.workspace_command == "checkpoint":
+    elif (
+        arguments.command == "workspace" and arguments.workspace_command == "checkpoint"
+    ):
         request = _request(
             "workspace.checkpoint",
             "git-workspaces",
@@ -359,13 +412,20 @@ def main() -> int:
         request = _request(
             "workspace.restore",
             "git-workspaces",
-            {"workspace_id": arguments.workspace_id, "checkpoint_id": arguments.checkpoint_id},
+            {
+                "workspace_id": arguments.workspace_id,
+                "checkpoint_id": arguments.checkpoint_id,
+            },
             "agent-control",
         )
     elif arguments.command == "workspace" and arguments.workspace_command == "recover":
         request = _request(
-            "workspace.recover", "git-workspaces",
-            {"workspace_id": arguments.workspace_id, "checkpoint_id": arguments.checkpoint_id},
+            "workspace.recover",
+            "git-workspaces",
+            {
+                "workspace_id": arguments.workspace_id,
+                "checkpoint_id": arguments.checkpoint_id,
+            },
             "agent-control",
         )
     elif arguments.command == "workspace" and arguments.workspace_command == "stack":
@@ -388,28 +448,49 @@ def main() -> int:
         )
     elif arguments.command == "workspace" and arguments.workspace_command == "publish":
         request = _request(
-            "workspace.publish", "git-workspaces",
+            "workspace.publish",
+            "git-workspaces",
             {
                 "workspace_id": arguments.workspace_id,
                 "job_id": arguments.job,
                 "title": arguments.title,
                 "body": arguments.body,
-                **({"packet_job_id": arguments.packet_job} if arguments.packet_job else {}),
+                **(
+                    {"packet_job_id": arguments.packet_job}
+                    if arguments.packet_job
+                    else {}
+                ),
             },
             "agent-control",
         )
-    elif arguments.command == "workspace" and arguments.workspace_command == "review-status":
-        request = _request("workspace.review-status", "git-workspaces", {"workspace_id": arguments.workspace_id})
+    elif (
+        arguments.command == "workspace"
+        and arguments.workspace_command == "review-status"
+    ):
+        request = _request(
+            "workspace.review-status",
+            "git-workspaces",
+            {"workspace_id": arguments.workspace_id},
+        )
     elif arguments.command == "workspace" and arguments.workspace_command == "land":
         request = _request(
-            "workspace.land", "git-workspaces",
+            "workspace.land",
+            "git-workspaces",
             {
                 "workspace_id": arguments.workspace_id,
                 "job_id": arguments.job,
-                **({"packet_job_id": arguments.packet_job} if arguments.packet_job else {}),
-            }, "agent-control",
+                **(
+                    {"packet_job_id": arguments.packet_job}
+                    if arguments.packet_job
+                    else {}
+                ),
+            },
+            "agent-control",
         )
-    elif arguments.command == "workspace" and arguments.workspace_command == "finish-integrated":
+    elif (
+        arguments.command == "workspace"
+        and arguments.workspace_command == "finish-integrated"
+    ):
         request = _request(
             "workspace.finish-integrated",
             "git-workspaces",
@@ -418,7 +499,10 @@ def main() -> int:
         )
     elif arguments.command == "workspace":
         request = _request(
-            "workspace.finish", "git-workspaces", {"workspace_id": arguments.workspace_id}, "agent-control"
+            "workspace.finish",
+            "git-workspaces",
+            {"workspace_id": arguments.workspace_id},
+            "agent-control",
         )
     elif arguments.command == "job" and arguments.job_command == "start":
         try:
@@ -470,7 +554,11 @@ def main() -> int:
         request = _request(
             "job.logs",
             "systemd-jobs",
-            {"job_id": arguments.job_id, "offset": arguments.offset, "max_bytes": arguments.max_bytes},
+            {
+                "job_id": arguments.job_id,
+                "offset": arguments.offset,
+                "max_bytes": arguments.max_bytes,
+            },
         )
     elif arguments.command == "job" and arguments.job_command == "result":
         request = _request(
@@ -491,7 +579,10 @@ def main() -> int:
                 if value is not None:
                     task_arguments[name] = value
             if arguments.sort is not None:
-                task_arguments["order"] = {"field": arguments.sort, "reverse": arguments.reverse}
+                task_arguments["order"] = {
+                    "field": arguments.sort,
+                    "reverse": arguments.reverse,
+                }
             elif arguments.reverse:
                 parser().error("--reverse requires --sort")
             for name in ("include_closed", "ready"):
@@ -513,13 +604,26 @@ def main() -> int:
             )
             if arguments.parent is not None:
                 task_arguments["parent_task_id"] = arguments.parent
-        elif arguments.task_command in {"get", "show", "claim", "complete", "release", "note", "relate", "update"}:
+        elif arguments.task_command in {
+            "get",
+            "show",
+            "claim",
+            "complete",
+            "release",
+            "note",
+            "relate",
+            "update",
+        }:
             task_arguments["task_id"] = arguments.task_id
             if arguments.task_command == "note":
                 if (arguments.text is None) == (arguments.text_option is None):
-                    parser().error("task note requires exactly one of positional text or --text")
+                    parser().error(
+                        "task note requires exactly one of positional text or --text"
+                    )
                 task_arguments["text"] = (
-                    arguments.text_option if arguments.text_option is not None else arguments.text
+                    arguments.text_option
+                    if arguments.text_option is not None
+                    else arguments.text
                 )
             elif arguments.task_command == "relate":
                 task_arguments["related_task_id"] = arguments.related_task_id
@@ -530,10 +634,15 @@ def main() -> int:
                     task_arguments["reason"] = arguments.reason
                 if arguments.task_command == "complete":
                     task_arguments["merge_sha"] = arguments.merge_sha
-                if arguments.task_command == "release" and arguments.if_assignee is not None:
+                if (
+                    arguments.task_command == "release"
+                    and arguments.if_assignee is not None
+                ):
                     task_arguments["if_assignee"] = arguments.if_assignee
         mutation_id = getattr(arguments, "request_id", None)
-        task_operation = "get" if arguments.task_command == "show" else arguments.task_command
+        task_operation = (
+            "get" if arguments.task_command == "show" else arguments.task_command
+        )
         request = _request(
             f"task.{task_operation}",
             "task-backend",

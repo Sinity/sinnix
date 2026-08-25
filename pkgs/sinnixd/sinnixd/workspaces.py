@@ -4,14 +4,14 @@ import hashlib
 import io
 import os
 import re
-import stat
-from fnmatch import fnmatch
 import shutil
+import stat
 import subprocess
 import tarfile
 import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 from uuid import uuid4
@@ -20,7 +20,6 @@ from sinnix_lib.atomic_json import modify_json, read_json, write_json_atomic
 from sinnix_lib.lock import flock
 
 from .projects import ProjectAdapter, ProjectCatalog, RegisteredCheckout
-
 
 WORKSPACE_SCHEMA_VERSION = 1
 CHECKPOINT_SCHEMA_VERSION = 1
@@ -61,12 +60,27 @@ class WorkspaceRecord:
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> WorkspaceRecord:
         required = {
-            "schema_version", "workspace_id", "project_id", "name", "path", "branch", "base", "created_at", "managed"
+            "schema_version",
+            "workspace_id",
+            "project_id",
+            "name",
+            "path",
+            "branch",
+            "base",
+            "created_at",
+            "managed",
         }
-        if set(value) != required or value.get("schema_version") != WORKSPACE_SCHEMA_VERSION:
+        if (
+            set(value) != required
+            or value.get("schema_version") != WORKSPACE_SCHEMA_VERSION
+        ):
             raise WorkspaceError("workspace record schema is invalid")
-        strings = {key: value.get(key) for key in required - {"schema_version", "managed"}}
-        if any(not isinstance(item, str) or not item for item in strings.values()) or not isinstance(value.get("managed"), bool):
+        strings = {
+            key: value.get(key) for key in required - {"schema_version", "managed"}
+        }
+        if any(
+            not isinstance(item, str) or not item for item in strings.values()
+        ) or not isinstance(value.get("managed"), bool):
             raise WorkspaceError("workspace record fields are invalid")
         return cls(
             workspace_id=strings["workspace_id"],
@@ -127,10 +141,27 @@ class StackRecord:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> StackRecord:
-        required = {"schema_version", "child_workspace_id", "parent_workspace_id", "created_at", "parent_head"}
-        if set(value) != required or value.get("schema_version") != STACK_SCHEMA_VERSION:
+        required = {
+            "schema_version",
+            "child_workspace_id",
+            "parent_workspace_id",
+            "created_at",
+            "parent_head",
+        }
+        if (
+            set(value) != required
+            or value.get("schema_version") != STACK_SCHEMA_VERSION
+        ):
             raise WorkspaceError("workspace stack record schema is invalid")
-        fields = tuple(value.get(key) for key in ("child_workspace_id", "parent_workspace_id", "created_at", "parent_head"))
+        fields = tuple(
+            value.get(key)
+            for key in (
+                "child_workspace_id",
+                "parent_workspace_id",
+                "created_at",
+                "parent_head",
+            )
+        )
         if any(not isinstance(item, str) or not item for item in fields):
             raise WorkspaceError("workspace stack record fields are invalid")
         return cls(*fields)
@@ -144,18 +175,28 @@ class WorkspaceStore:
         self.stacks = self.root / "stacks.json"
 
     def records(self) -> tuple[WorkspaceRecord, ...]:
-        payload = read_json(self.index, {"schema_version": WORKSPACE_SCHEMA_VERSION, "workspaces": []})
-        if not isinstance(payload, Mapping) or payload.get("schema_version") != WORKSPACE_SCHEMA_VERSION:
+        payload = read_json(
+            self.index, {"schema_version": WORKSPACE_SCHEMA_VERSION, "workspaces": []}
+        )
+        if (
+            not isinstance(payload, Mapping)
+            or payload.get("schema_version") != WORKSPACE_SCHEMA_VERSION
+        ):
             raise WorkspaceError("workspace index schema is invalid")
         rows = payload.get("workspaces")
-        if not isinstance(rows, list) or any(not isinstance(row, Mapping) for row in rows):
+        if not isinstance(rows, list) or any(
+            not isinstance(row, Mapping) for row in rows
+        ):
             raise WorkspaceError("workspace index rows are invalid")
         return tuple(WorkspaceRecord.from_dict(row) for row in rows)
 
     def put(self, record: WorkspaceRecord) -> None:
         default = {"schema_version": WORKSPACE_SCHEMA_VERSION, "workspaces": []}
         with modify_json(self.index, default, mode=0o600) as payload:
-            if not isinstance(payload, dict) or payload.get("schema_version") != WORKSPACE_SCHEMA_VERSION:
+            if (
+                not isinstance(payload, dict)
+                or payload.get("schema_version") != WORKSPACE_SCHEMA_VERSION
+            ):
                 raise WorkspaceError("workspace index schema is invalid")
             rows = payload.get("workspaces")
             if not isinstance(rows, list):
@@ -163,24 +204,36 @@ class WorkspaceStore:
             existing = [WorkspaceRecord.from_dict(row) for row in rows]
             if any(item.workspace_id == record.workspace_id for item in existing):
                 raise WorkspaceError("workspace ID already exists")
-            if any(item.project_id == record.project_id and (item.name == record.name or item.path == record.path) for item in existing):
+            if any(
+                item.project_id == record.project_id
+                and (item.name == record.name or item.path == record.path)
+                for item in existing
+            ):
                 raise WorkspaceError("workspace name or path is already registered")
             rows.append(record.to_dict())
 
     def remove(self, workspace_id: str) -> WorkspaceRecord:
         default = {"schema_version": WORKSPACE_SCHEMA_VERSION, "workspaces": []}
         with modify_json(self.index, default, mode=0o600) as payload:
-            if not isinstance(payload, dict) or payload.get("schema_version") != WORKSPACE_SCHEMA_VERSION:
+            if (
+                not isinstance(payload, dict)
+                or payload.get("schema_version") != WORKSPACE_SCHEMA_VERSION
+            ):
                 raise WorkspaceError("workspace index schema is invalid")
             rows = payload.get("workspaces")
             if not isinstance(rows, list):
                 raise WorkspaceError("workspace index rows are invalid")
             records = [WorkspaceRecord.from_dict(row) for row in rows]
-            removed = next((record for record in records if record.workspace_id == workspace_id), None)
+            removed = next(
+                (record for record in records if record.workspace_id == workspace_id),
+                None,
+            )
             if removed is None:
                 raise KeyError(f"unknown workspace: {workspace_id}")
             payload["workspaces"] = [
-                record.to_dict() for record in records if record.workspace_id != workspace_id
+                record.to_dict()
+                for record in records
+                if record.workspace_id != workspace_id
             ]
         shutil.rmtree(self.checkpoints_root / workspace_id, ignore_errors=True)
         return removed
@@ -189,11 +242,15 @@ class WorkspaceStore:
         return self.checkpoints_root / workspace_id / checkpoint_id
 
     def stack_records(self) -> tuple[StackRecord, ...]:
-        payload = read_json(self.stacks, {"schema_version": STACK_SCHEMA_VERSION, "stacks": []})
+        payload = read_json(
+            self.stacks, {"schema_version": STACK_SCHEMA_VERSION, "stacks": []}
+        )
         if not isinstance(payload, Mapping):
             raise WorkspaceError("workspace stack index schema is invalid")
         rows = payload.get("stacks")
-        if not isinstance(rows, list) or any(not isinstance(row, Mapping) for row in rows):
+        if not isinstance(rows, list) or any(
+            not isinstance(row, Mapping) for row in rows
+        ):
             raise WorkspaceError("workspace stack index rows are invalid")
         if payload.get("schema_version") == 1 and not rows:
             return ()
@@ -210,7 +267,10 @@ class WorkspaceStore:
             if payload.get("schema_version") == 1 and not rows:
                 payload["schema_version"] = STACK_SCHEMA_VERSION
             existing = [StackRecord.from_dict(row) for row in rows]
-            if any(item.child_workspace_id == record.child_workspace_id for item in existing):
+            if any(
+                item.child_workspace_id == record.child_workspace_id
+                for item in existing
+            ):
                 raise WorkspaceError("workspace already has a stack parent")
             rows.append(record.to_dict())
 
@@ -223,13 +283,16 @@ class WorkspaceStore:
             if payload.get("schema_version") == 1 and not rows:
                 payload["schema_version"] = STACK_SCHEMA_VERSION
             payload["stacks"] = [
-                row for row in rows
+                row
+                for row in rows
                 if isinstance(row, Mapping)
                 and row.get("child_workspace_id") != workspace_id
                 and row.get("parent_workspace_id") != workspace_id
             ]
 
-    def update_stack_parent_head(self, child_workspace_id: str, parent_head: str) -> None:
+    def update_stack_parent_head(
+        self, child_workspace_id: str, parent_head: str
+    ) -> None:
         default = {"schema_version": STACK_SCHEMA_VERSION, "stacks": []}
         with modify_json(self.stacks, default, mode=0o600) as payload:
             rows = payload.get("stacks") if isinstance(payload, dict) else None
@@ -238,14 +301,18 @@ class WorkspaceStore:
             if payload.get("schema_version") == 1 and not rows:
                 payload["schema_version"] = STACK_SCHEMA_VERSION
             records = [StackRecord.from_dict(row) for row in rows]
-            if not any(record.child_workspace_id == child_workspace_id for record in records):
+            if not any(
+                record.child_workspace_id == child_workspace_id for record in records
+            ):
                 raise WorkspaceError("workspace is not a stacked child")
             payload["stacks"] = [
                 StackRecord(
                     child_workspace_id=record.child_workspace_id,
                     parent_workspace_id=record.parent_workspace_id,
                     created_at=record.created_at,
-                    parent_head=parent_head if record.child_workspace_id == child_workspace_id else record.parent_head,
+                    parent_head=parent_head
+                    if record.child_workspace_id == child_workspace_id
+                    else record.parent_head,
                 ).to_dict()
                 for record in records
             ]
@@ -258,32 +325,63 @@ class WorkspaceStore:
                 raise WorkspaceError("workspace stack index rows are invalid")
             if payload.get("schema_version") == 1 and not rows:
                 payload["schema_version"] = STACK_SCHEMA_VERSION
-            payload["stacks"] = [row for row in rows if row.get("child_workspace_id") != child_workspace_id]
+            payload["stacks"] = [
+                row
+                for row in rows
+                if row.get("child_workspace_id") != child_workspace_id
+            ]
 
-    def put_checkpoint(self, record: CheckpointRecord, staged: bytes, unstaged: bytes, untracked: bytes) -> None:
+    def put_checkpoint(
+        self, record: CheckpointRecord, staged: bytes, unstaged: bytes, untracked: bytes
+    ) -> None:
         root = self.checkpoint_path(record.workspace_id, record.checkpoint_id)
         root.mkdir(mode=0o700, parents=True)
-        for name, content in (("staged.patch", staged), ("unstaged.patch", unstaged), ("untracked.tar", untracked)):
+        for name, content in (
+            ("staged.patch", staged),
+            ("unstaged.patch", unstaged),
+            ("untracked.tar", untracked),
+        ):
             self._write_private(root / name, content)
-        write_json_atomic(root / "record.json", record.to_dict(), mode=0o600, fsync=True)
+        write_json_atomic(
+            root / "record.json", record.to_dict(), mode=0o600, fsync=True
+        )
 
-    def checkpoint(self, workspace_id: str, checkpoint_id: str) -> tuple[CheckpointRecord, Path]:
+    def checkpoint(
+        self, workspace_id: str, checkpoint_id: str
+    ) -> tuple[CheckpointRecord, Path]:
         root = self.checkpoint_path(workspace_id, checkpoint_id)
         value = read_json(root / "record.json")
-        if not isinstance(value, Mapping) or value.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
+        if (
+            not isinstance(value, Mapping)
+            or value.get("schema_version") != CHECKPOINT_SCHEMA_VERSION
+        ):
             raise WorkspaceError("checkpoint record is unavailable or invalid")
         files = value.get("untracked_files")
         fields = (
-            "checkpoint_id", "workspace_id", "project_id", "head", "branch", "created_at",
-            "staged_sha256", "unstaged_sha256", "untracked_sha256",
+            "checkpoint_id",
+            "workspace_id",
+            "project_id",
+            "head",
+            "branch",
+            "created_at",
+            "staged_sha256",
+            "unstaged_sha256",
+            "untracked_sha256",
         )
-        if any(not isinstance(value.get(field), str) or not value[field] for field in fields):
+        if any(
+            not isinstance(value.get(field), str) or not value[field]
+            for field in fields
+        ):
             raise WorkspaceError("checkpoint record fields are invalid")
-        if not isinstance(files, list) or any(not isinstance(item, str) or not item for item in files):
+        if not isinstance(files, list) or any(
+            not isinstance(item, str) or not item for item in files
+        ):
             raise WorkspaceError("checkpoint untracked manifest is invalid")
         return CheckpointRecord(*(value[field] for field in fields), tuple(files)), root
 
-    def checkpoints(self, workspace_id: str) -> tuple[tuple[CheckpointRecord, Path], ...]:
+    def checkpoints(
+        self, workspace_id: str
+    ) -> tuple[tuple[CheckpointRecord, Path], ...]:
         root = self.checkpoints_root / workspace_id
         if not root.exists():
             return ()
@@ -305,7 +403,9 @@ class WorkspaceStore:
 
     @staticmethod
     def _write_private(path: Path, content: bytes) -> None:
-        descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=f".{path.name}.", dir=path.parent
+        )
         try:
             with os.fdopen(descriptor, "wb") as handle:
                 handle.write(content)
@@ -330,7 +430,9 @@ class GitWorkspaces:
         records = self.store.records()
         if project_id is not None:
             self.projects.get(project_id)
-            records = tuple(record for record in records if record.project_id == project_id)
+            records = tuple(
+                record for record in records if record.project_id == project_id
+            )
         return {"workspaces": [self._status(record) for record in records]}
 
     def get(self, workspace_id: str) -> dict[str, Any]:
@@ -338,7 +440,12 @@ class GitWorkspaces:
         return self._status(record)
 
     def delivery_snapshot(
-        self, workspace_id: str, start_head: str, *, scope: Sequence[str] = (), merge_base: bool = False
+        self,
+        workspace_id: str,
+        start_head: str,
+        *,
+        scope: Sequence[str] = (),
+        merge_base: bool = False,
     ) -> dict[str, Any]:
         """Read one exact-head Git fact set for a delivery precondition."""
         record = self._record(workspace_id)
@@ -351,14 +458,36 @@ class GitWorkspaces:
             if merge_base
             else start_head
         )
-        descendant = self._git(checkout.path, "merge-base", "--is-ancestor", range_start, before, check=False).returncode == 0
+        descendant = (
+            self._git(
+                checkout.path,
+                "merge-base",
+                "--is-ancestor",
+                range_start,
+                before,
+                check=False,
+            ).returncode
+            == 0
+        )
         changes = self._name_status(checkout.path, range_start, before)
         dirty = self._porcelain_status(checkout.path)
         after = self._git(checkout.path, "rev-parse", "HEAD").stdout.strip()
         if after != before:
             raise WorkspaceError("workspace HEAD changed during delivery snapshot")
         paths = tuple(path for change in changes for path in change["paths"])
-        return {"workspace_id": workspace_id, "checkout_id": checkout.checkout_id, "start_head": range_start, "head": before, "descendant": descendant, "dirty": bool(dirty), "status": dirty, "changes": changes, "in_scope": all(self._scope_contains(path, scope) for path in paths) if scope else True}
+        return {
+            "workspace_id": workspace_id,
+            "checkout_id": checkout.checkout_id,
+            "start_head": range_start,
+            "head": before,
+            "descendant": descendant,
+            "dirty": bool(dirty),
+            "status": dirty,
+            "changes": changes,
+            "in_scope": all(self._scope_contains(path, scope) for path in paths)
+            if scope
+            else True,
+        }
 
     def checkout(self, workspace_id: str) -> RegisteredCheckout:
         record = self._record(workspace_id)
@@ -367,8 +496,14 @@ class GitWorkspaces:
 
     def resolve_checkout(self, project_id: str, reference: str) -> RegisteredCheckout:
         self._project(project_id)
-        records = tuple(record for record in self.store.records() if record.project_id == project_id)
-        matches = [record for record in records if reference in {record.workspace_id, record.name}]
+        records = tuple(
+            record for record in self.store.records() if record.project_id == project_id
+        )
+        matches = [
+            record
+            for record in records
+            if reference in {record.workspace_id, record.name}
+        ]
         if not matches:
             for record in records:
                 try:
@@ -389,20 +524,35 @@ class GitWorkspaces:
             record = self._record(workspace_id)
             if not record.managed:
                 raise WorkspaceError("adopted workspaces cannot be finished")
-            if any(stack.parent_workspace_id == workspace_id for stack in self.store.stack_records()):
-                raise WorkspaceError("workspace cannot be finished while stacked children exist")
+            if any(
+                stack.parent_workspace_id == workspace_id
+                for stack in self.store.stack_records()
+            ):
+                raise WorkspaceError(
+                    "workspace cannot be finished while stacked children exist"
+                )
             checkout, project = self._available(record)
             if checkout.head != expected_head:
-                raise WorkspaceError("merged review head no longer matches workspace HEAD")
-            if self._git(checkout.path, "status", "--porcelain", "--untracked-files=all").stdout:
+                raise WorkspaceError(
+                    "merged review head no longer matches workspace HEAD"
+                )
+            if self._git(
+                checkout.path, "status", "--porcelain", "--untracked-files=all"
+            ).stdout:
                 raise WorkspaceError("merged workspace must be clean before finish")
             removed = self._remove_worktree(project, record, checkout)
             if removed.returncode != 0:
-                raise WorkspaceError(removed.stderr.strip() or "git worktree remove failed")
+                raise WorkspaceError(
+                    removed.stderr.strip() or "git worktree remove failed"
+                )
             self._git(project.root, "branch", "-D", record.branch, check=False)
             self.store.remove_stack_references(workspace_id)
             self.store.remove(workspace_id)
-            return {"workspace_id": workspace_id, "finished": True, "head": expected_head}
+            return {
+                "workspace_id": workspace_id,
+                "finished": True,
+                "head": expected_head,
+            }
 
     def finish_integrated(self, workspace_id: str, target_ref: str) -> dict[str, Any]:
         """Remove a clean workspace whose tree contribution is present in a declared-base commit."""
@@ -410,27 +560,43 @@ class GitWorkspaces:
             record = self._record(workspace_id)
             if not record.managed:
                 raise WorkspaceError("adopted workspaces cannot be finished")
-            if any(stack.parent_workspace_id == workspace_id for stack in self.store.stack_records()):
-                raise WorkspaceError("workspace cannot be finished while stacked children exist")
+            if any(
+                stack.parent_workspace_id == workspace_id
+                for stack in self.store.stack_records()
+            ):
+                raise WorkspaceError(
+                    "workspace cannot be finished while stacked children exist"
+                )
             checkout, project = self._available(record)
-            if self._git(checkout.path, "status", "--porcelain", "--untracked-files=all").stdout:
+            if self._git(
+                checkout.path, "status", "--porcelain", "--untracked-files=all"
+            ).stdout:
                 raise WorkspaceError("integrated workspace must be clean before finish")
             self._verify_ref(project.root, target_ref, "integration target")
             assert project.workspace is not None
-            if self._git(
-                project.root,
-                "merge-base",
-                "--is-ancestor",
-                target_ref,
-                project.workspace.default_base,
-                check=False,
-            ).returncode != 0:
-                raise WorkspaceError("integration target is not contained in the declared default base")
+            if (
+                self._git(
+                    project.root,
+                    "merge-base",
+                    "--is-ancestor",
+                    target_ref,
+                    project.workspace.default_base,
+                    check=False,
+                ).returncode
+                != 0
+            ):
+                raise WorkspaceError(
+                    "integration target is not contained in the declared default base"
+                )
             if not self._tree_equivalent(project.root, target_ref, checkout.head):
-                raise WorkspaceError("workspace changes are not fully represented by the integration target")
+                raise WorkspaceError(
+                    "workspace changes are not fully represented by the integration target"
+                )
             removed = self._remove_worktree(project, record, checkout)
             if removed.returncode != 0:
-                raise WorkspaceError(removed.stderr.strip() or "git worktree remove failed")
+                raise WorkspaceError(
+                    removed.stderr.strip() or "git worktree remove failed"
+                )
             self._git(project.root, "branch", "-D", record.branch, check=False)
             self.store.remove_stack_references(workspace_id)
             self.store.remove(workspace_id)
@@ -438,14 +604,22 @@ class GitWorkspaces:
                 "workspace_id": workspace_id,
                 "finished": True,
                 "head": checkout.head,
-                "integration_target": self._git(project.root, "rev-parse", f"{target_ref}^{{commit}}").stdout.strip(),
+                "integration_target": self._git(
+                    project.root, "rev-parse", f"{target_ref}^{{commit}}"
+                ).stdout.strip(),
             }
 
-    def create(self, *, project_id: str, name: str, branch: str, base: str | None) -> dict[str, Any]:
+    def create(
+        self, *, project_id: str, name: str, branch: str, base: str | None
+    ) -> dict[str, Any]:
         with flock(self.mutation_lock):
-            return self._create_locked(project_id=project_id, name=name, branch=branch, base=base)
+            return self._create_locked(
+                project_id=project_id, name=name, branch=branch, base=base
+            )
 
-    def _create_locked(self, *, project_id: str, name: str, branch: str, base: str | None) -> dict[str, Any]:
+    def _create_locked(
+        self, *, project_id: str, name: str, branch: str, base: str | None
+    ) -> dict[str, Any]:
         project = self._project(project_id)
         policy = project.workspace
         assert policy is not None
@@ -455,9 +629,22 @@ class GitWorkspaces:
         self._verify_ref(project.root, resolved_base, "base")
         path = policy.root / name
         self._validate_target(policy.root, path)
-        if path.exists() or any(record.project_id == project_id and record.name == name for record in self.store.records()):
+        if path.exists() or any(
+            record.project_id == project_id and record.name == name
+            for record in self.store.records()
+        ):
             raise WorkspaceError("workspace target or name already exists")
-        branch_exists = self._git(project.root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode == 0
+        branch_exists = (
+            self._git(
+                project.root,
+                "show-ref",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{branch}",
+                check=False,
+            ).returncode
+            == 0
+        )
         arguments = ["worktree", "add"]
         if not branch_exists:
             arguments.extend(["-b", branch])
@@ -483,9 +670,13 @@ class GitWorkspaces:
         with flock(self.mutation_lock):
             checkout = self.projects.checkout(project_id, checkout_id)
             if checkout.path == project.root:
-                raise WorkspaceError("the configured project root cannot be adopted as a managed workspace")
+                raise WorkspaceError(
+                    "the configured project root cannot be adopted as a managed workspace"
+                )
             branch = self._branch(checkout.path)
-            record = self._new_record(project, name, checkout, checkout.head, managed=False, branch=branch)
+            record = self._new_record(
+                project, name, checkout, checkout.head, managed=False, branch=branch
+            )
             self.store.put(record)
         return self._status(record)
 
@@ -493,24 +684,41 @@ class GitWorkspaces:
         with flock(self.mutation_lock):
             record = self._record(workspace_id)
             status = self._status(record)
-            if any(stack.parent_workspace_id == workspace_id for stack in self.store.stack_records()):
-                raise WorkspaceError("workspace cannot be reaped while stacked children exist")
+            if any(
+                stack.parent_workspace_id == workspace_id
+                for stack in self.store.stack_records()
+            ):
+                raise WorkspaceError(
+                    "workspace cannot be reaped while stacked children exist"
+                )
             if status["state"] == "missing":
                 self.store.remove_stack_references(workspace_id)
                 self.store.remove(workspace_id)
-                return {"workspace_id": workspace_id, "reaped": True, "relationship_only": True}
+                return {
+                    "workspace_id": workspace_id,
+                    "reaped": True,
+                    "relationship_only": True,
+                }
             if not record.managed:
                 raise WorkspaceError("adopted workspaces cannot be reaped")
             if status["dirty"] or not status["identity_matches"]:
-                raise WorkspaceError("workspace is dirty or its branch identity changed")
+                raise WorkspaceError(
+                    "workspace is dirty or its branch identity changed"
+                )
             project = self._project(record.project_id)
             assert project.workspace is not None
             head = status["head"]
-            if not isinstance(head, str) or not self._head_is_contained_in_declared_base(project, head):
-                raise WorkspaceError("workspace HEAD is not contained in the declared base")
+            if not isinstance(
+                head, str
+            ) or not self._head_is_contained_in_declared_base(project, head):
+                raise WorkspaceError(
+                    "workspace HEAD is not contained in the declared base"
+                )
             removed = self._remove_worktree(project, record)
             if removed.returncode != 0:
-                raise WorkspaceError(removed.stderr.strip() or "git worktree remove failed")
+                raise WorkspaceError(
+                    removed.stderr.strip() or "git worktree remove failed"
+                )
             self.store.remove_stack_references(workspace_id)
             self.store.remove(workspace_id)
             return {
@@ -526,11 +734,18 @@ class GitWorkspaces:
             record = self._record(workspace_id)
             if not record.managed:
                 raise WorkspaceError("adopted workspaces cannot be disposed")
-            if any(stack.parent_workspace_id == workspace_id for stack in self.store.stack_records()):
-                raise WorkspaceError("workspace cannot be disposed while stacked children exist")
+            if any(
+                stack.parent_workspace_id == workspace_id
+                for stack in self.store.stack_records()
+            ):
+                raise WorkspaceError(
+                    "workspace cannot be disposed while stacked children exist"
+                )
             status = self._status(record)
             if status["state"] != "available" or not status["identity_matches"]:
-                raise WorkspaceError("workspace is unavailable or its branch identity changed")
+                raise WorkspaceError(
+                    "workspace is unavailable or its branch identity changed"
+                )
             if status["dirty"]:
                 raise WorkspaceError("workspace must be clean before disposal")
             checkout, project = self._available(record)
@@ -539,10 +754,14 @@ class GitWorkspaces:
             self._verify_disposable_checkpoints(workspace_id)
             removed = self._remove_worktree(project, record, checkout)
             if removed.returncode != 0:
-                raise WorkspaceError(removed.stderr.strip() or "git worktree remove failed")
+                raise WorkspaceError(
+                    removed.stderr.strip() or "git worktree remove failed"
+                )
             branch = self._git(project.root, "branch", "-D", record.branch, check=False)
             if branch.returncode != 0:
-                raise WorkspaceError(branch.stderr.strip() or "git branch deletion failed")
+                raise WorkspaceError(
+                    branch.stderr.strip() or "git branch deletion failed"
+                )
             self.store.remove_stack_references(workspace_id)
             self.store.remove(workspace_id)
             return {
@@ -552,7 +771,9 @@ class GitWorkspaces:
                 "deleted_branch": record.branch,
             }
 
-    def stack(self, *, parent_workspace_id: str, name: str, branch: str) -> dict[str, Any]:
+    def stack(
+        self, *, parent_workspace_id: str, name: str, branch: str
+    ) -> dict[str, Any]:
         with flock(self.mutation_lock):
             parent = self._record(parent_workspace_id)
             parent_checkout, _project = self._available(parent)
@@ -581,7 +802,11 @@ class GitWorkspaces:
     def restack(self, workspace_id: str) -> dict[str, Any]:
         with flock(self.mutation_lock):
             stack = next(
-                (item for item in self.store.stack_records() if item.child_workspace_id == workspace_id),
+                (
+                    item
+                    for item in self.store.stack_records()
+                    if item.child_workspace_id == workspace_id
+                ),
                 None,
             )
             if stack is None:
@@ -591,7 +816,9 @@ class GitWorkspaces:
             if child.project_id != parent.project_id:
                 raise WorkspaceError("stack parent belongs to another project")
             child_checkout, project = self._available(child)
-            if self._git(child_checkout.path, "status", "--porcelain", "--untracked-files=all").stdout:
+            if self._git(
+                child_checkout.path, "status", "--porcelain", "--untracked-files=all"
+            ).stdout:
                 raise WorkspaceError("restack requires a clean child workspace")
             parent_status = self._status(parent)
             detached_parent = parent_status["state"] == "missing"
@@ -600,7 +827,9 @@ class GitWorkspaces:
                 target_ref = project.workspace.default_base
                 parent_head = stack.parent_head
                 if not self._tree_equivalent(project.root, target_ref, parent_head):
-                    raise WorkspaceError("missing stack parent is not represented in the declared base")
+                    raise WorkspaceError(
+                        "missing stack parent is not represented in the declared base"
+                    )
             else:
                 parent_checkout, _ = self._available(parent)
                 target_ref = parent.branch
@@ -616,7 +845,11 @@ class GitWorkspaces:
                     "collisions": collisions,
                 }
             before = child_checkout.head
-            arguments = ("rebase", "--onto", target_ref, stack.parent_head) if detached_parent else ("rebase", target_ref)
+            arguments = (
+                ("rebase", "--onto", target_ref, stack.parent_head)
+                if detached_parent
+                else ("rebase", target_ref)
+            )
             result = self._git(child_checkout.path, *arguments, check=False)
             if result.returncode != 0:
                 self._git(child_checkout.path, "rebase", "--abort", check=False)
@@ -638,16 +871,37 @@ class GitWorkspaces:
             }
 
     def _declared_collisions(
-        self, project: ProjectAdapter, child_ref: str, parent_ref: str, *, base_ref: str | None = None
+        self,
+        project: ProjectAdapter,
+        child_ref: str,
+        parent_ref: str,
+        *,
+        base_ref: str | None = None,
     ) -> list[dict[str, str]]:
-        base = base_ref or self._git(project.root, "merge-base", child_ref, parent_ref).stdout.strip()
-        child_paths = set(self._git(project.root, "diff", "--name-only", base, child_ref, "--").stdout.splitlines())
-        parent_paths = set(self._git(project.root, "diff", "--name-only", base, parent_ref, "--").stdout.splitlines())
+        base = (
+            base_ref
+            or self._git(
+                project.root, "merge-base", child_ref, parent_ref
+            ).stdout.strip()
+        )
+        child_paths = set(
+            self._git(
+                project.root, "diff", "--name-only", base, child_ref, "--"
+            ).stdout.splitlines()
+        )
+        parent_paths = set(
+            self._git(
+                project.root, "diff", "--name-only", base, parent_ref, "--"
+            ).stdout.splitlines()
+        )
         overlap = child_paths & parent_paths
         exact = set(project.conflicts.exact_files)
         generated = set(project.conflicts.generated_surfaces)
         collisions = [
-            {"path": path, "class": "exact-file" if path in exact else "generated-surface"}
+            {
+                "path": path,
+                "class": "exact-file" if path in exact else "generated-surface",
+            }
             for path in sorted(overlap)
             if path in exact or path in generated
         ]
@@ -656,8 +910,16 @@ class GitWorkspaces:
             {"path": path, "class": "hard"} for path in sorted(overlap - classified)
         )
         for slot, patterns in project.conflicts.semantic_slots.items():
-            child_slot = sorted(path for path in child_paths if any(fnmatch(path, pattern) for pattern in patterns))
-            parent_slot = sorted(path for path in parent_paths if any(fnmatch(path, pattern) for pattern in patterns))
+            child_slot = sorted(
+                path
+                for path in child_paths
+                if any(fnmatch(path, pattern) for pattern in patterns)
+            )
+            parent_slot = sorted(
+                path
+                for path in parent_paths
+                if any(fnmatch(path, pattern) for pattern in patterns)
+            )
             if child_slot and parent_slot:
                 collisions.append(
                     {
@@ -670,48 +932,69 @@ class GitWorkspaces:
         return collisions
 
     def _tree_equivalent(self, root: Path, target_ref: str, source_ref: str) -> bool:
-        target_tree = self._git(root, "rev-parse", f"{target_ref}^{{tree}}", check=False)
-        merged_tree = self._git(root, "merge-tree", "--write-tree", target_ref, source_ref, check=False)
+        target_tree = self._git(
+            root, "rev-parse", f"{target_ref}^{{tree}}", check=False
+        )
+        merged_tree = self._git(
+            root, "merge-tree", "--write-tree", target_ref, source_ref, check=False
+        )
         return (
             target_tree.returncode == 0
             and merged_tree.returncode == 0
             and target_tree.stdout.strip() == merged_tree.stdout.strip()
         )
 
-    def _head_is_contained_in_declared_base(self, project: ProjectAdapter, head: str) -> bool:
+    def _head_is_contained_in_declared_base(
+        self, project: ProjectAdapter, head: str
+    ) -> bool:
         assert project.workspace is not None
-        return self._git(
-            project.root,
-            "merge-base",
-            "--is-ancestor",
-            head,
-            project.workspace.default_base,
-            check=False,
-        ).returncode == 0
+        return (
+            self._git(
+                project.root,
+                "merge-base",
+                "--is-ancestor",
+                head,
+                project.workspace.default_base,
+                check=False,
+            ).returncode
+            == 0
+        )
 
     def _verify_disposable_checkpoints(self, workspace_id: str) -> None:
         for checkpoint, root in self.store.checkpoints(workspace_id):
-            staged = self._verified_artifact(root / "staged.patch", checkpoint.staged_sha256)
-            unstaged = self._verified_artifact(root / "unstaged.patch", checkpoint.unstaged_sha256)
-            untracked = self._verified_artifact(root / "untracked.tar", checkpoint.untracked_sha256)
+            staged = self._verified_artifact(
+                root / "staged.patch", checkpoint.staged_sha256
+            )
+            unstaged = self._verified_artifact(
+                root / "unstaged.patch", checkpoint.unstaged_sha256
+            )
+            untracked = self._verified_artifact(
+                root / "untracked.tar", checkpoint.untracked_sha256
+            )
             try:
                 with tarfile.open(fileobj=io.BytesIO(untracked), mode="r:") as archive:
                     archive_members = archive.getmembers()
             except tarfile.TarError as error:
                 raise WorkspaceError("checkpoint archive is invalid") from error
             if staged or unstaged or checkpoint.untracked_files or archive_members:
-                raise WorkspaceError("workspace checkpoint retains content that must be preserved")
+                raise WorkspaceError(
+                    "workspace checkpoint retains content that must be preserved"
+                )
 
     def checkpoint(self, workspace_id: str) -> dict[str, Any]:
         with flock(self.mutation_lock):
             record = self._record(workspace_id)
             checkout, project = self._available(record)
             assert project.workspace is not None
-            staged = self._git_bytes(checkout.path, "diff", "--cached", "--binary", "HEAD", "--")
+            staged = self._git_bytes(
+                checkout.path, "diff", "--cached", "--binary", "HEAD", "--"
+            )
             unstaged = self._git_bytes(checkout.path, "diff", "--binary", "--")
             untracked_files = self._untracked(checkout.path)
             if untracked_files and not project.workspace.checkpoint_untracked:
-                raise WorkspaceError("project policy forbids checkpointing untracked files")
+                raise WorkspaceError(
+                    "project policy forbids checkpointing untracked files"
+                )
             untracked = self._archive_untracked(checkout.path, untracked_files)
             if sum(map(len, (staged, unstaged, untracked))) > MAX_CHECKPOINT_BYTES:
                 raise WorkspaceError("checkpoint exceeds the configured byte bound")
@@ -738,20 +1021,37 @@ class GitWorkspaces:
         record = self._record(workspace_id)
         checkout, project = self._available(record)
         checkpoint, root = self.store.checkpoint(workspace_id, checkpoint_id)
-        if checkpoint.workspace_id != record.workspace_id or checkpoint.project_id != record.project_id:
+        if (
+            checkpoint.workspace_id != record.workspace_id
+            or checkpoint.project_id != record.project_id
+        ):
             raise WorkspaceError("checkpoint authority does not match workspace")
         if checkout.head != checkpoint.head or record.branch != checkpoint.branch:
-            raise WorkspaceError("checkpoint source HEAD or branch no longer matches workspace")
-        if self._git(checkout.path, "status", "--porcelain", "--untracked-files=all").stdout:
+            raise WorkspaceError(
+                "checkpoint source HEAD or branch no longer matches workspace"
+            )
+        if self._git(
+            checkout.path, "status", "--porcelain", "--untracked-files=all"
+        ).stdout:
             raise WorkspaceError("checkpoint restore requires a clean workspace")
         self._identity_check(project, checkout.path)
-        staged = self._verified_artifact(root / "staged.patch", checkpoint.staged_sha256)
-        unstaged = self._verified_artifact(root / "unstaged.patch", checkpoint.unstaged_sha256)
-        untracked = self._verified_artifact(root / "untracked.tar", checkpoint.untracked_sha256)
+        staged = self._verified_artifact(
+            root / "staged.patch", checkpoint.staged_sha256
+        )
+        unstaged = self._verified_artifact(
+            root / "unstaged.patch", checkpoint.unstaged_sha256
+        )
+        untracked = self._verified_artifact(
+            root / "untracked.tar", checkpoint.untracked_sha256
+        )
         self._apply_patch(checkout.path, staged, index=True)
         self._apply_patch(checkout.path, unstaged, index=False)
         self._extract_untracked(checkout.path, untracked, checkpoint.untracked_files)
-        return {"workspace_id": workspace_id, "checkpoint_id": checkpoint_id, "restored": True}
+        return {
+            "workspace_id": workspace_id,
+            "checkpoint_id": checkpoint_id,
+            "restored": True,
+        }
 
     def recover(self, workspace_id: str, checkpoint_id: str) -> dict[str, Any]:
         with flock(self.mutation_lock):
@@ -762,16 +1062,32 @@ class GitWorkspaces:
             if status["state"] != "missing":
                 raise WorkspaceError("recover requires a missing managed workspace")
             checkpoint, _root = self.store.checkpoint(workspace_id, checkpoint_id)
-            if checkpoint.project_id != record.project_id or checkpoint.branch != record.branch:
+            if (
+                checkpoint.project_id != record.project_id
+                or checkpoint.branch != record.branch
+            ):
                 raise WorkspaceError("checkpoint authority does not match workspace")
             project = self._project(record.project_id)
-            branch_head = self._git(project.root, "rev-parse", "--verify", f"{record.branch}^{{commit}}").stdout.strip()
+            branch_head = self._git(
+                project.root, "rev-parse", "--verify", f"{record.branch}^{{commit}}"
+            ).stdout.strip()
             if branch_head != checkpoint.head:
-                raise WorkspaceError("workspace branch no longer matches checkpoint HEAD")
+                raise WorkspaceError(
+                    "workspace branch no longer matches checkpoint HEAD"
+                )
             self._validate_target(project.workspace.root, record.path)
-            result = self._git(project.root, "worktree", "add", str(record.path), record.branch, check=False)
+            result = self._git(
+                project.root,
+                "worktree",
+                "add",
+                str(record.path),
+                record.branch,
+                check=False,
+            )
             if result.returncode != 0:
-                raise WorkspaceError(result.stderr.strip() or "Git workspace recovery failed")
+                raise WorkspaceError(
+                    result.stderr.strip() or "Git workspace recovery failed"
+                )
             try:
                 restored = self._restore_locked(workspace_id, checkpoint_id)
             except BaseException:
@@ -784,7 +1100,11 @@ class GitWorkspaces:
         try:
             checkout = self._checkout_by_path(record.project_id, record.path)
             branch = self._branch(checkout.path)
-            dirty = bool(self._git(checkout.path, "status", "--porcelain", "--untracked-files=all").stdout)
+            dirty = bool(
+                self._git(
+                    checkout.path, "status", "--porcelain", "--untracked-files=all"
+                ).stdout
+            )
             row.update(
                 {
                     "state": "available",
@@ -796,12 +1116,23 @@ class GitWorkspaces:
                 }
             )
         except (FileNotFoundError, KeyError, WorkspaceError):
-            row.update({"state": "missing", "checkout_id": None, "head": None, "current_branch": None, "dirty": None, "identity_matches": False})
+            row.update(
+                {
+                    "state": "missing",
+                    "checkout_id": None,
+                    "head": None,
+                    "current_branch": None,
+                    "dirty": None,
+                    "identity_matches": False,
+                }
+            )
         return row
 
     @classmethod
     def _porcelain_status(cls, path: Path) -> list[dict[str, Any]]:
-        raw = cls._git_bytes(path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+        raw = cls._git_bytes(
+            path, "status", "--porcelain=v1", "-z", "--untracked-files=all"
+        )
         records = [item for item in raw.split(b"\0") if item]
         result: list[dict[str, Any]] = []
         index = 0
@@ -821,8 +1152,19 @@ class GitWorkspaces:
         return result
 
     @classmethod
-    def _name_status(cls, path: Path, start_head: str, head: str) -> list[dict[str, Any]]:
-        raw = cls._git_bytes(path, "diff", "--name-status", "-z", "--find-renames", start_head, head, "--")
+    def _name_status(
+        cls, path: Path, start_head: str, head: str
+    ) -> list[dict[str, Any]]:
+        raw = cls._git_bytes(
+            path,
+            "diff",
+            "--name-status",
+            "-z",
+            "--find-renames",
+            start_head,
+            head,
+            "--",
+        )
         records = [item for item in raw.split(b"\0") if item]
         result: list[dict[str, Any]] = []
         index = 0
@@ -834,7 +1176,15 @@ class GitWorkspaces:
             count = 2 if status[0] in {"R", "C"} else 1
             if len(records) - index < count:
                 raise WorkspaceError("Git diff rename porcelain is malformed")
-            result.append({"status": status, "paths": [cls._decode_git_path(item) for item in records[index:index + count]]})
+            result.append(
+                {
+                    "status": status,
+                    "paths": [
+                        cls._decode_git_path(item)
+                        for item in records[index : index + count]
+                    ],
+                }
+            )
             index += count
         return result
 
@@ -851,7 +1201,12 @@ class GitWorkspaces:
     @staticmethod
     def _scope_contains(path: str, scope: Sequence[str]) -> bool:
         for entry in scope:
-            if not isinstance(entry, str) or not entry or entry.startswith("/") or ".." in Path(entry).parts:
+            if (
+                not isinstance(entry, str)
+                or not entry
+                or entry.startswith("/")
+                or ".." in Path(entry).parts
+            ):
                 raise WorkspaceError("delivery scope is unsafe")
             if entry.endswith("/"):
                 if path.startswith(entry):
@@ -869,10 +1224,14 @@ class GitWorkspaces:
     def _project(self, project_id: str) -> ProjectAdapter:
         project = self.projects.get(project_id)
         if project.workspace is None:
-            raise WorkspaceError(f"project {project_id!r} does not declare workspace policy")
+            raise WorkspaceError(
+                f"project {project_id!r} does not declare workspace policy"
+            )
         return project
 
-    def _available(self, record: WorkspaceRecord) -> tuple[RegisteredCheckout, ProjectAdapter]:
+    def _available(
+        self, record: WorkspaceRecord
+    ) -> tuple[RegisteredCheckout, ProjectAdapter]:
         project = self._project(record.project_id)
         checkout = self._checkout_by_path(record.project_id, record.path)
         if self._branch(checkout.path) != record.branch:
@@ -880,16 +1239,23 @@ class GitWorkspaces:
         return checkout, project
 
     def _remove_worktree(
-        self, project: ProjectAdapter, record: WorkspaceRecord, *arguments: str | RegisteredCheckout
+        self,
+        project: ProjectAdapter,
+        record: WorkspaceRecord,
+        *arguments: str | RegisteredCheckout,
     ) -> subprocess.CompletedProcess[str]:
-        checkout = next((item for item in arguments if isinstance(item, RegisteredCheckout)), None)
+        checkout = next(
+            (item for item in arguments if isinstance(item, RegisteredCheckout)), None
+        )
         flags = tuple(item for item in arguments if isinstance(item, str))
         if checkout is None:
             checkout = self._checkout_by_path(record.project_id, record.path)
         if checkout.path != record.path:
             raise WorkspaceError("registered checkout does not match workspace record")
         self._canonicalize_gitfile_symlink(checkout)
-        return self._git(project.root, "worktree", "remove", *flags, str(record.path), check=False)
+        return self._git(
+            project.root, "worktree", "remove", *flags, str(record.path), check=False
+        )
 
     @staticmethod
     def _canonicalize_gitfile_symlink(checkout: RegisteredCheckout) -> None:
@@ -910,7 +1276,9 @@ class GitWorkspaces:
 
         try:
             target = gitfile.resolve(strict=True)
-            worktrees_root = (checkout.git_common_dir / "worktrees").resolve(strict=True)
+            worktrees_root = (checkout.git_common_dir / "worktrees").resolve(
+                strict=True
+            )
         except FileNotFoundError as error:
             raise WorkspaceError("workspace .git symlink is broken") from error
         except OSError as error:
@@ -918,10 +1286,14 @@ class GitWorkspaces:
         try:
             target.relative_to(worktrees_root)
         except ValueError as error:
-            raise WorkspaceError("workspace .git symlink target is outside the repository worktrees area") from error
+            raise WorkspaceError(
+                "workspace .git symlink target is outside the repository worktrees area"
+            ) from error
         expected = GitWorkspaces._registered_worktree_gitdir(checkout, worktrees_root)
         if target != expected:
-            raise WorkspaceError("workspace .git symlink target does not match its registered worktree gitdir")
+            raise WorkspaceError(
+                "workspace .git symlink target does not match its registered worktree gitdir"
+            )
 
         descriptor, temporary = tempfile.mkstemp(prefix=".git.", dir=gitfile.parent)
         try:
@@ -932,12 +1304,16 @@ class GitWorkspaces:
             os.chmod(temporary, 0o644)
             os.replace(temporary, gitfile)
         except OSError as error:
-            raise WorkspaceError("could not canonicalize workspace .git symlink") from error
+            raise WorkspaceError(
+                "could not canonicalize workspace .git symlink"
+            ) from error
         finally:
             Path(temporary).unlink(missing_ok=True)
 
     @staticmethod
-    def _registered_worktree_gitdir(checkout: RegisteredCheckout, worktrees_root: Path) -> Path:
+    def _registered_worktree_gitdir(
+        checkout: RegisteredCheckout, worktrees_root: Path
+    ) -> Path:
         expected_gitfile = checkout.path / ".git"
         try:
             entries = tuple(worktrees_root.iterdir())
@@ -958,28 +1334,48 @@ class GitWorkspaces:
             try:
                 candidate_target = candidate.resolve(strict=True)
             except OSError as error:
-                raise WorkspaceError("registered worktree gitdir is unavailable") from error
-            if candidate_target.parent != worktrees_root or not candidate_target.is_dir():
-                raise WorkspaceError("registered worktree gitdir is outside the repository worktrees area")
+                raise WorkspaceError(
+                    "registered worktree gitdir is unavailable"
+                ) from error
+            if (
+                candidate_target.parent != worktrees_root
+                or not candidate_target.is_dir()
+            ):
+                raise WorkspaceError(
+                    "registered worktree gitdir is outside the repository worktrees area"
+                )
             matches.append(candidate_target)
         if len(matches) != 1:
-            raise WorkspaceError("registered worktree gitdir is unavailable or ambiguous")
+            raise WorkspaceError(
+                "registered worktree gitdir is unavailable or ambiguous"
+            )
         return matches[0]
 
     def _identity_check(self, project: ProjectAdapter, path: Path) -> None:
         assert project.workspace is not None
-        result = subprocess.run(project.workspace.identity_check, cwd=path, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            project.workspace.identity_check,
+            cwd=path,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         if result.returncode != 0:
             raise WorkspaceError("workspace identity check failed")
 
     @classmethod
     def _git_bytes(cls, path: Path, *arguments: str) -> bytes:
         try:
-            result = subprocess.run(["git", "-C", str(path), *arguments], capture_output=True, timeout=30)
+            result = subprocess.run(
+                ["git", "-C", str(path), *arguments], capture_output=True, timeout=30
+            )
         except (OSError, subprocess.SubprocessError) as error:
             raise WorkspaceError("Git checkpoint operation failed") from error
         if result.returncode != 0:
-            raise WorkspaceError(result.stderr.decode(errors="replace").strip() or "Git checkpoint operation failed")
+            raise WorkspaceError(
+                result.stderr.decode(errors="replace").strip()
+                or "Git checkpoint operation failed"
+            )
         return result.stdout
 
     @classmethod
@@ -989,8 +1385,12 @@ class GitWorkspaces:
             files = tuple(item.decode() for item in raw.split(b"\0") if item)
         except UnicodeDecodeError as error:
             raise WorkspaceError("untracked checkpoint paths must be UTF-8") from error
-        if len(files) > MAX_UNTRACKED_FILES or any(Path(item).is_absolute() or ".." in Path(item).parts for item in files):
-            raise WorkspaceError("untracked checkpoint manifest exceeds its safety bounds")
+        if len(files) > MAX_UNTRACKED_FILES or any(
+            Path(item).is_absolute() or ".." in Path(item).parts for item in files
+        ):
+            raise WorkspaceError(
+                "untracked checkpoint manifest exceeds its safety bounds"
+            )
         return files
 
     @staticmethod
@@ -1002,23 +1402,40 @@ class GitWorkspaces:
                 try:
                     metadata = source.lstat()
                 except OSError as error:
-                    raise WorkspaceError("untracked checkpoint file disappeared") from error
-                if not source.is_file() or source.is_symlink() or metadata.st_size > MAX_CHECKPOINT_BYTES:
-                    raise WorkspaceError("untracked checkpoint entries must be bounded regular files")
+                    raise WorkspaceError(
+                        "untracked checkpoint file disappeared"
+                    ) from error
+                if (
+                    not source.is_file()
+                    or source.is_symlink()
+                    or metadata.st_size > MAX_CHECKPOINT_BYTES
+                ):
+                    raise WorkspaceError(
+                        "untracked checkpoint entries must be bounded regular files"
+                    )
                 archive.add(source, arcname=relative, recursive=False)
                 if buffer.tell() > MAX_CHECKPOINT_BYTES:
-                    raise WorkspaceError("untracked checkpoint archive exceeds its byte bound")
+                    raise WorkspaceError(
+                        "untracked checkpoint archive exceeds its byte bound"
+                    )
         return buffer.getvalue()
 
     @staticmethod
-    def _extract_untracked(root: Path, content: bytes, expected: tuple[str, ...]) -> None:
+    def _extract_untracked(
+        root: Path, content: bytes, expected: tuple[str, ...]
+    ) -> None:
         with tarfile.open(fileobj=io.BytesIO(content), mode="r:") as archive:
             members = archive.getmembers()
             if tuple(member.name for member in members) != expected:
                 raise WorkspaceError("checkpoint archive does not match its manifest")
             for member in members:
                 target = (root / member.name).resolve(strict=False)
-                if root.resolve() not in target.parents or member.issym() or member.islnk() or not member.isfile():
+                if (
+                    root.resolve() not in target.parents
+                    or member.issym()
+                    or member.islnk()
+                    or not member.isfile()
+                ):
                     raise WorkspaceError("checkpoint archive contains an unsafe entry")
             archive.extractall(root, members=members, filter="data")
 
@@ -1029,9 +1446,14 @@ class GitWorkspaces:
         arguments = ["git", "-C", str(root), "apply"]
         if index:
             arguments.append("--index")
-        result = subprocess.run(arguments, input=content, capture_output=True, timeout=30)
+        result = subprocess.run(
+            arguments, input=content, capture_output=True, timeout=30
+        )
         if result.returncode != 0:
-            raise WorkspaceError(result.stderr.decode(errors="replace").strip() or "checkpoint patch failed")
+            raise WorkspaceError(
+                result.stderr.decode(errors="replace").strip()
+                or "checkpoint patch failed"
+            )
 
     @staticmethod
     def _verified_artifact(path: Path, digest: str) -> bytes:
@@ -1078,7 +1500,9 @@ class GitWorkspaces:
     @staticmethod
     def _validate_name(name: str) -> None:
         if not isinstance(name, str) or not _NAME.fullmatch(name):
-            raise WorkspaceError("workspace name must be a lowercase path-safe identifier up to 64 characters")
+            raise WorkspaceError(
+                "workspace name must be a lowercase path-safe identifier up to 64 characters"
+            )
 
     @staticmethod
     def _validate_target(root: Path, path: Path) -> None:
@@ -1088,15 +1512,23 @@ class GitWorkspaces:
             raise WorkspaceError("workspace target escapes the declared workspace root")
 
     @staticmethod
-    def _git(path: Path, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    def _git(
+        path: Path, *arguments: str, check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
         try:
             result = subprocess.run(
-                ["git", "-C", str(path), *arguments], capture_output=True, text=True, timeout=10, check=False
+                ["git", "-C", str(path), *arguments],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
             )
         except (OSError, subprocess.SubprocessError) as error:
             raise WorkspaceError("Git workspace operation failed") from error
         if check and result.returncode != 0:
-            raise WorkspaceError(result.stderr.strip() or "Git workspace operation failed")
+            raise WorkspaceError(
+                result.stderr.strip() or "Git workspace operation failed"
+            )
         return result
 
     @classmethod
@@ -1111,12 +1543,24 @@ class GitWorkspaces:
     def _verify_ref(cls, root: Path, ref: str, label: str) -> None:
         if not isinstance(ref, str) or not ref or ref.startswith("-"):
             raise WorkspaceError(f"workspace {label} is invalid")
-        if cls._git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False).returncode != 0:
+        if (
+            cls._git(
+                root,
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                f"{ref}^{{commit}}",
+                check=False,
+            ).returncode
+            != 0
+        ):
             raise WorkspaceError(f"workspace {label} does not resolve to a commit")
 
     @classmethod
     def _branch(cls, path: Path) -> str:
-        branch = cls._git(path, "symbolic-ref", "--quiet", "--short", "HEAD", check=False).stdout.strip()
+        branch = cls._git(
+            path, "symbolic-ref", "--quiet", "--short", "HEAD", check=False
+        ).stdout.strip()
         if not branch:
             raise WorkspaceError("detached worktrees cannot be managed workspaces")
         return branch

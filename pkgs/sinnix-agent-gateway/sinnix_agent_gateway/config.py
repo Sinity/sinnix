@@ -6,17 +6,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+
 def default_state_dir() -> Path:
     base = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state")))
     return base / "sinnix" / "agent-gateway"
 
 
 def default_ops_socket_path() -> Path:
-    return Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")) / "sinnix" / "ops.sock"
+    return (
+        Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"))
+        / "sinnix"
+        / "ops.sock"
+    )
 
 
 def default_sinnixd_socket_path() -> Path:
-    return Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "sinnixd.sock"
+    return (
+        Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+        / "sinnixd.sock"
+    )
 
 
 @dataclass(frozen=True)
@@ -84,7 +92,9 @@ class GatewayConfig:
             task_authority: TaskAuthorityConfig | None = None
             if task_authority_row is not None:
                 if not isinstance(task_authority_row, dict):
-                    raise ValueError(f"project {project_id} taskAuthority must be an object")
+                    raise ValueError(
+                        f"project {project_id} taskAuthority must be an object"
+                    )
                 allowed_authority_fields = {
                     "owner",
                     "workspace",
@@ -122,7 +132,9 @@ class GatewayConfig:
                     raise ValueError(
                         f"project {project_id} taskAuthority projectUuid must be a string"
                     )
-                publication_policy = task_authority_row.get("publicationPolicy", "local")
+                publication_policy = task_authority_row.get(
+                    "publicationPolicy", "local"
+                )
                 if publication_policy not in {"local", "dolt-sync"}:
                     raise ValueError(
                         f"project {project_id} taskAuthority publicationPolicy is invalid"
@@ -175,7 +187,9 @@ class GatewayConfig:
             capability_index=Path(
                 raw.get("capabilityIndex", "/etc/sinnix/capability-index.json")
             ),
-            sinnixd_socket=Path(raw.get("sinnixdSocket", default_sinnixd_socket_path())),
+            sinnixd_socket=Path(
+                raw.get("sinnixdSocket", default_sinnixd_socket_path())
+            ),
             observe_command=raw.get("observeCommand", "sinnix-observe"),
             max_result_bytes=int(raw.get("maxResultBytes", 262_144)),
             approved_manifest_hash=raw.get("approvedManifestHash"),
@@ -193,8 +207,12 @@ class GatewayConfig:
             screenshot_control_command=raw.get(
                 "screenshotControlCommand", "sinnix-screenshot-control"
             ),
-            kitty_control_command=raw.get("kittyControlCommand", "sinnix-kitty-control"),
-            chrome_control_command=raw.get("chromeControlCommand", "sinnix-chrome-control"),
+            kitty_control_command=raw.get(
+                "kittyControlCommand", "sinnix-kitty-control"
+            ),
+            chrome_control_command=raw.get(
+                "chromeControlCommand", "sinnix-chrome-control"
+            ),
             beads_command=raw.get("beadsCommand", "bd"),
             mcp_broker_servers=broker_servers,
             capture_command=raw.get("captureCommand", "sinnix-capture"),

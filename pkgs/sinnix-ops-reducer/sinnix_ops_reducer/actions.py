@@ -14,8 +14,8 @@ from typing import Any, Callable
 from sinnix_lib.ledger import append_jsonl, iter_jsonl
 from sinnix_lib.systemd import show_units
 
-from .agent_jobs import AgentCtlClient, AgentCtlError
 from . import pressure as pressure_model
+from .agent_jobs import AgentCtlClient, AgentCtlError
 from .reducer import now_iso
 
 # Schema of the one-time marker record written to the receipts ledger the
@@ -235,8 +235,7 @@ def validate_request(value: Any) -> dict[str, Any]:
         raise ActionError("target must contain only job_id, unit, or process")
     if sum(key in target for key in ("job_id", "unit", "process")) != 1:
         raise ActionError(
-            "target must identify exactly one attested job, runtime unit, "
-            "or process"
+            "target must identify exactly one attested job, runtime unit, or process"
         )
     if "process" in target:
         process = target["process"]
@@ -424,7 +423,9 @@ class ActionService:
             try:
                 job = self.agent_jobs.get(target["job_id"])
             except AgentCtlError as error:
-                raise ActionError(f"AgentCTL job lookup failed: {error}", 503) from error
+                raise ActionError(
+                    f"AgentCTL job lookup failed: {error}", 503
+                ) from error
             if job.get("kind") != "attested-agent":
                 raise ActionError("job target is not an attested agent job", 403)
             return {"kind": "job", "job": job}
@@ -734,7 +735,9 @@ class ActionService:
             try:
                 return {"name": action, "job": self.agent_jobs.cancel(job_id)}
             except AgentCtlError as error:
-                raise ActionError(f"AgentCTL cancellation failed: {error}", 503) from error
+                raise ActionError(
+                    f"AgentCTL cancellation failed: {error}", 503
+                ) from error
         elif resolved.get("kind") == "process":
             # Not a systemd unit -- there is nothing for systemctl to
             # target, so this is the one adapter branch that does not shell

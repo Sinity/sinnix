@@ -6,19 +6,20 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from sinnix_agent_gateway.artifacts import ArtifactService
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_mcp.execution import OwnerExecution
 from sinnix_agent_gateway.terminals import (
     TerminalDiagnosticError,
     TerminalError,
     TerminalService,
 )
+from sinnix_mcp.execution import OwnerExecution
 
 
-def terminal_service(tmp_path: Path, principal_name: str) -> tuple[TerminalService, Path]:
+def terminal_service(
+    tmp_path: Path, principal_name: str
+) -> tuple[TerminalService, Path]:
     captured = tmp_path / "terminal-commands.jsonl"
     runner = tmp_path / "kitty-control"
     runner.write_text(
@@ -43,7 +44,9 @@ def terminal_service(tmp_path: Path, principal_name: str) -> tuple[TerminalServi
         }
     )
     principal = Principal.for_name(principal_name)
-    return TerminalService(config, principal, ArtifactService(config, principal), execution), captured
+    return TerminalService(
+        config, principal, ArtifactService(config, principal), execution
+    ), captured
 
 
 def commands(path: Path) -> list[list[str]]:

@@ -11,16 +11,16 @@ judged per merged outcome (rough proxy, not a metric to game).
 
 ## Model doctrine
 
-| Role | Route | Model | Effort |
-|---|---|---|---|
-| Specification, review, integration | this session | (session model) | default |
-| Context-carrying analysis | fork | inherited | — |
-| Implementation lane (well-specified beads) | `agentctl agent --backend codex` | gpt-5.6-luna | medium |
-| Escalated lane (luna floundered) | same | gpt-5.6-terra | high |
-| Design / debug / adversarial review | Agent tool or backend claude | claude-opus-5 | high |
-| Review alternate (Claude quota tight) | backend codex | gpt-5.6-sol | high |
-| Menial coordination (≥3 live lanes) | Agent tool | claude-haiku-4-5 | medium |
-| Broad read-only sweeps | Agent tool | sonnet or luna | low/medium |
+| Role                                       | Route                            | Model            | Effort     |
+| ------------------------------------------ | -------------------------------- | ---------------- | ---------- |
+| Specification, review, integration         | this session                     | (session model)  | default    |
+| Context-carrying analysis                  | fork                             | inherited        | —          |
+| Implementation lane (well-specified beads) | `agentctl agent --backend codex` | gpt-5.6-luna     | medium     |
+| Escalated lane (luna floundered)           | same                             | gpt-5.6-terra    | high       |
+| Design / debug / adversarial review        | Agent tool or backend claude     | claude-opus-5    | high       |
+| Review alternate (Claude quota tight)      | backend codex                    | gpt-5.6-sol      | high       |
+| Menial coordination (≥3 live lanes)        | Agent tool                       | claude-haiku-4-5 | medium     |
+| Broad read-only sweeps                     | Agent tool                       | sonnet or luna   | low/medium |
 
 Rules: every dispatch names its model explicitly (only forks inherit).
 Luna-first is quota-driven (separate Codex pool) AND review-driven
@@ -33,7 +33,7 @@ retry luna against the same failure.
 
 - Durable work: `agentctl workspace create` (worktree under /realm/worktrees)
   then `agentctl agent --project P --checkout C --prompt-file F --backend B
-  --model M --effort E`. Agent jobs are single-shot (no resume yet) and
+--model M --effort E`. Agent jobs are single-shot (no resume yet) and
   capped at 3600s — for longer arcs, have the lane checkpoint
   (`agentctl workspace checkpoint`) and re-dispatch a continuation prompt.
 - Job lifecycle: `agentctl job {get,wait,logs,result,cancel}`. Completion
@@ -60,10 +60,11 @@ retry luna against the same failure.
 ## Structural review (non-negotiable)
 
 Never accept a lane on its own report. Review = diff + typed verify result
-+ the lane's last message; transcripts only when something smells. Default
-cadence: one review per integrated batch, spot-checks per lane, Opus
-adversarial review for risky lanes. This applies to EVERY unsupervised
-executor regardless of tier — capable models fail confidently too.
+
+- the lane's last message; transcripts only when something smells. Default
+  cadence: one review per integrated batch, spot-checks per lane, Opus
+  adversarial review for risky lanes. This applies to EVERY unsupervised
+  executor regardless of tier — capable models fail confidently too.
 
 ## Batching
 

@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from sinnix_agent_gateway.artifacts import ArtifactError, ArtifactService
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
@@ -133,7 +132,9 @@ def test_desktop_capture_registers_raw_and_corrected_artifacts(tmp_path: Path) -
     desktop, captured = desktop_service(tmp_path, "observer")
 
     result = desktop.capture_output()
-    artifacts = [desktop.artifacts.read(artifact_id) for artifact_id in result["artifact_ids"]]
+    artifacts = [
+        desktop.artifacts.read(artifact_id) for artifact_id in result["artifact_ids"]
+    ]
     bounded = desktop.artifacts.read(result["artifact_ids"][0], max_bytes=3)
 
     assert result["capture"]["fix_hdr"] is True

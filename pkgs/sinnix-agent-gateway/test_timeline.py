@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from sinnix_agent_gateway.capabilities import PolicyError, Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.sessions import SessionLogService, SessionSource
@@ -60,11 +59,22 @@ def test_timeline_query_preserves_raw_source_time_basis_and_unavailability(
     )
     assert result["entries"][0]["object_reference"] == "codex:fixture.jsonl"
     unavailable = {
-        row["source"]: row for row in result["sources"] if row["availability"] == "unavailable"
+        row["source"]: row
+        for row in result["sources"]
+        if row["availability"] == "unavailable"
     }
-    assert unavailable["polylogue"]["reason"] == "upstream is intentionally unavailable on this host"
-    assert unavailable["sinex"]["reason"] == "upstream is intentionally unavailable on this host"
-    assert unavailable["lynchpin"]["reason"] == "no gateway semantic adapter is registered yet"
+    assert (
+        unavailable["polylogue"]["reason"]
+        == "upstream is intentionally unavailable on this host"
+    )
+    assert (
+        unavailable["sinex"]["reason"]
+        == "upstream is intentionally unavailable on this host"
+    )
+    assert (
+        unavailable["lynchpin"]["reason"]
+        == "no gateway semantic adapter is registered yet"
+    )
 
 
 def test_timeline_query_bounds_large_snippets(tmp_path: Path) -> None:
@@ -85,7 +95,9 @@ def test_timeline_query_bounds_large_snippets(tmp_path: Path) -> None:
     assert len(result["entries"]) < 2
 
 
-def test_timeline_query_rejects_ambiguous_range_and_unknown_source(tmp_path: Path) -> None:
+def test_timeline_query_rejects_ambiguous_range_and_unknown_source(
+    tmp_path: Path,
+) -> None:
     timeline = timeline_service(tmp_path, "operator")
 
     with pytest.raises(TimelineError, match="timezone"):

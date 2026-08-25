@@ -49,10 +49,16 @@ class MemoryService:
     ) -> dict[str, Any]:
         self.principal.require(Capability.SESSION_READ)
         query = self._query(query)
-        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 500
+        ):
             raise MemoryError("limit must be 1-500")
         requested = self._providers(providers)
-        raw_requested = [provider for provider in requested if provider in _RAW_PROVIDERS]
+        raw_requested = [
+            provider for provider in requested if provider in _RAW_PROVIDERS
+        ]
         per_source_limit = max(1, -(-limit // max(1, len(raw_requested))))
         sources = []
         matches = []
@@ -67,7 +73,11 @@ class MemoryService:
                     }
                 )
                 continue
-            source = next(source for source in self.sessions.sources if source.provider == provider)
+            source = next(
+                source
+                for source in self.sessions.sources
+                if source.provider == provider
+            )
             if not source.root.is_dir():
                 sources.append(
                     {
@@ -104,8 +114,10 @@ class MemoryService:
             "query": query,
             "sources": sources,
             "matches": matches[:limit],
-            "truncated": len(matches) > limit or any(
-                source.get("coverage", {}).get("truncated") is True for source in sources
+            "truncated": len(matches) > limit
+            or any(
+                source.get("coverage", {}).get("truncated") is True
+                for source in sources
             ),
         }
 

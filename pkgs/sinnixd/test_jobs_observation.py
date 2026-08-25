@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
 import json
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
-
 from sinnixd.jobs import (
     SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+    GenericJobs,
     GenericJobSpec,
     GenericJobStore,
-    GenericJobs,
     JobResultError,
     SystemdJobError,
     SystemdJobTimeout,
@@ -50,7 +49,9 @@ class FakeSystemdJobs:
 
 
 def generic_jobs(tmp_path: Path, systemd: FakeSystemdJobs) -> GenericJobs:
-    return GenericJobs(systemd, GenericJobStore(tmp_path / "state"), wait_poll_seconds=0.1)
+    return GenericJobs(
+        systemd, GenericJobStore(tmp_path / "state"), wait_poll_seconds=0.1
+    )
 
 
 def test_observation_timeout_remains_retryable_until_systemd_recovers(
@@ -65,7 +66,9 @@ def test_observation_timeout_remains_retryable_until_systemd_recovers(
     )
     systemd = FakeSystemdJobs(show_unavailable=True)
     jobs = generic_jobs(tmp_path, systemd)
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
 
     unknown = jobs.get(started["job_id"])
     persisted = (tmp_path / "state" / "jobs" / f"{started['job_id']}.json").read_text()
@@ -124,7 +127,9 @@ def test_repeated_wait_deadline_preserves_authoritatively_running_state(
     monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
     systemd = FirstLiveThenDeadlineExpires()
     jobs = generic_jobs(tmp_path, systemd)
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
 
     first = jobs.wait(started["job_id"], timeout_seconds=1)
     clock[0] = 0.0
@@ -166,7 +171,9 @@ def test_wait_deadline_persists_non_timeout_observation_failure(
     monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
     systemd = FirstLiveThenUnavailable()
     jobs = generic_jobs(tmp_path, systemd)
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
 
     first = jobs.wait(started["job_id"], timeout_seconds=1)
     clock[0] = 0.0
@@ -189,6 +196,7 @@ def test_cancel_reconciles_the_systemd_semantic_terminal_result(
     tmp_path: Path, result: str, status: str, expected: str
 ) -> None:
     """Anti-vacuity: a stop request must not override systemd's observed terminal result."""
+
     class TerminalOnStop(FakeSystemdJobs):
         def stop(self, unit: str) -> None:
             self.stopped.append(unit)
@@ -202,7 +210,9 @@ def test_cancel_reconciles_the_systemd_semantic_terminal_result(
 
     systemd = TerminalOnStop()
     jobs = generic_jobs(tmp_path, systemd)
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
 
     terminal = jobs.cancel(started["job_id"])
     record = jobs.store.load(started["job_id"])
@@ -213,8 +223,11 @@ def test_cancel_reconciles_the_systemd_semantic_terminal_result(
     assert terminal["state"]["terminal"]
 
 
-def test_stop_timeout_then_collected_unit_reconciles_after_restart(tmp_path: Path) -> None:
+def test_stop_timeout_then_collected_unit_reconciles_after_restart(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: not-found defaults must not turn persisted cancel uncertainty into success."""
+
     class StopTimesOutThenCollects(FakeSystemdJobs):
         def stop(self, unit: str) -> None:
             self.stopped.append(unit)
@@ -231,7 +244,9 @@ def test_stop_timeout_then_collected_unit_reconciles_after_restart(tmp_path: Pat
 
     systemd = StopTimesOutThenCollects()
     jobs = generic_jobs(tmp_path, systemd)
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
 
     with pytest.raises(SystemdJobError, match="timed out"):
         jobs.cancel(started["job_id"])
@@ -254,7 +269,9 @@ def test_stop_timeout_then_collected_unit_reconciles_after_restart(tmp_path: Pat
         },
     )
     jobs.store.save(legacy_false_success)
-    restarted = GenericJobs(systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.1)
+    restarted = GenericJobs(
+        systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.1
+    )
 
     repaired = restarted.get(started["job_id"])
     assert repaired["state"]["phase"] == "outcome-unknown"
@@ -272,7 +289,9 @@ def test_stop_timeout_then_collected_unit_reconciles_after_restart(tmp_path: Pat
     assert cancelled["state"]["terminal"]
 
 
-def test_collected_cancel_without_ack_terminalizes_after_reconciliation_grace(tmp_path: Path) -> None:
+def test_collected_cancel_without_ack_terminalizes_after_reconciliation_grace(
+    tmp_path: Path,
+) -> None:
     systemd = FakeSystemdJobs(
         properties={
             "LoadState": "not-found",
@@ -283,7 +302,9 @@ def test_collected_cancel_without_ack_terminalizes_after_reconciliation_grace(tm
         }
     )
     jobs = generic_jobs(tmp_path, systemd)
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     record = jobs.store.load(started["job_id"])
     jobs.store.save(
         replace(
@@ -293,11 +314,16 @@ def test_collected_cancel_without_ack_terminalizes_after_reconciliation_grace(tm
     )
 
     terminal = jobs.get(started["job_id"])
-    restarted = GenericJobs(systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.1)
+    restarted = GenericJobs(
+        systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.1
+    )
 
     assert terminal["state"]["phase"] == "outcome-unknown"
     assert terminal["state"]["terminal"]
-    assert terminal["state"]["outcome_evidence"] == "unit-collected-after-cancellation-grace"
+    assert (
+        terminal["state"]["outcome_evidence"]
+        == "unit-collected-after-cancellation-grace"
+    )
     assert restarted.get(started["job_id"])["state"] == terminal["state"]
 
 
@@ -332,7 +358,9 @@ def test_natural_success_requires_a_loaded_systemd_result(
 ) -> None:
     systemd = FakeSystemdJobs(properties=properties)
     jobs = generic_jobs(tmp_path, systemd)
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
 
     terminal = jobs.get(started["job_id"])
 
@@ -411,7 +439,9 @@ def test_capture_completion_marker_requires_zero_exit(
     assert log_path.with_suffix(".complete").exists() is completed
 
 
-def test_collected_exit_status_job_uses_capture_completion_marker(tmp_path: Path) -> None:
+def test_collected_exit_status_job_uses_capture_completion_marker(
+    tmp_path: Path,
+) -> None:
     """A successful short command remains succeeded after systemd collects its unit."""
     systemd = FakeSystemdJobs(
         properties={
@@ -424,7 +454,9 @@ def test_collected_exit_status_job_uses_capture_completion_marker(tmp_path: Path
         }
     )
     jobs = generic_jobs(tmp_path, systemd)
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     record = jobs.store.load(started["job_id"])
     record.log_path.with_suffix(".complete").touch(mode=0o600)
 
@@ -442,7 +474,11 @@ def test_collected_exit_status_job_uses_capture_completion_marker(tmp_path: Path
             {
                 "phase": "outcome-unknown",
                 "terminal": True,
-                "systemd": {"LoadState": "not-found", "ExecMainStatus": "0", "Result": "success"},
+                "systemd": {
+                    "LoadState": "not-found",
+                    "ExecMainStatus": "0",
+                    "Result": "success",
+                },
             },
             "unavailable",
         ),
@@ -450,7 +486,11 @@ def test_collected_exit_status_job_uses_capture_completion_marker(tmp_path: Path
             {
                 "phase": "missing",
                 "terminal": True,
-                "systemd": {"LoadState": "not-found", "ExecMainStatus": "0", "Result": "success"},
+                "systemd": {
+                    "LoadState": "not-found",
+                    "ExecMainStatus": "0",
+                    "Result": "success",
+                },
             },
             "unavailable",
         ),
@@ -458,12 +498,20 @@ def test_collected_exit_status_job_uses_capture_completion_marker(tmp_path: Path
             {
                 "phase": "launch-failed",
                 "terminal": True,
-                "systemd": {"LoadState": "not-found", "ExecMainStatus": "0", "Result": "success"},
+                "systemd": {
+                    "LoadState": "not-found",
+                    "ExecMainStatus": "0",
+                    "Result": "success",
+                },
             },
             "unavailable",
         ),
         (
-            {"phase": "launch-failed", "terminal": True, "launch_evidence": "not-started"},
+            {
+                "phase": "launch-failed",
+                "terminal": True,
+                "launch_evidence": "not-started",
+            },
             "unavailable",
         ),
     ],
@@ -473,7 +521,9 @@ def test_exit_result_rejects_default_success_without_authoritative_completion(
 ) -> None:
     """The result route must not promote systemd's absent-unit default status to success."""
     jobs = generic_jobs(tmp_path, FakeSystemdJobs())
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     record = jobs.store.load(started["job_id"])
     jobs.store.save(jobs._with_state(record, state))
 
@@ -484,10 +534,42 @@ def test_exit_result_rejects_default_success_without_authoritative_completion(
 @pytest.mark.parametrize(
     ("properties", "expected"),
     [
-        ({"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}, {"code": 0, "result": "success"}),
-        ({"LoadState": "loaded", "ActiveState": "failed", "Result": "exit-code", "ExecMainStatus": "7"}, {"code": 7, "result": "exit-code"}),
-        ({"LoadState": "loaded", "ActiveState": "failed", "Result": "timeout", "ExecMainStatus": "1"}, {"code": 1, "result": "timeout"}),
-        ({"LoadState": "loaded", "ActiveState": "inactive", "Result": "signal", "ExecMainStatus": "15"}, {"code": 15, "result": "signal"}),
+        (
+            {
+                "LoadState": "loaded",
+                "ActiveState": "inactive",
+                "Result": "success",
+                "ExecMainStatus": "0",
+            },
+            {"code": 0, "result": "success"},
+        ),
+        (
+            {
+                "LoadState": "loaded",
+                "ActiveState": "failed",
+                "Result": "exit-code",
+                "ExecMainStatus": "7",
+            },
+            {"code": 7, "result": "exit-code"},
+        ),
+        (
+            {
+                "LoadState": "loaded",
+                "ActiveState": "failed",
+                "Result": "timeout",
+                "ExecMainStatus": "1",
+            },
+            {"code": 1, "result": "timeout"},
+        ),
+        (
+            {
+                "LoadState": "loaded",
+                "ActiveState": "inactive",
+                "Result": "signal",
+                "ExecMainStatus": "15",
+            },
+            {"code": 15, "result": "signal"},
+        ),
     ],
 )
 def test_exit_result_preserves_authoritative_observed_outcomes(
@@ -496,12 +578,16 @@ def test_exit_result_preserves_authoritative_observed_outcomes(
     """Exact loaded systemd outcomes remain the public exit result."""
     systemd = FakeSystemdJobs(properties=properties)
     jobs = generic_jobs(tmp_path, systemd)
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
 
     assert jobs.result(started["job_id"])["value"] == expected
 
 
-def test_schema_v3_native_success_reconciles_after_restart_without_exec_main_status(tmp_path: Path) -> None:
+def test_schema_v3_native_success_reconciles_after_restart_without_exec_main_status(
+    tmp_path: Path,
+) -> None:
     """Evidence harness: a retained inactive unit must retain schema-v3 native completion evidence."""
     job_id = "74e64cb4-282e-4b27-b4b1-af052b268161"
     systemd = FakeSystemdJobs(
@@ -547,7 +633,9 @@ def test_schema_v3_native_success_reconciles_after_restart_without_exec_main_sta
     }
     record_path.write_text(json.dumps(legacy))
 
-    restarted = GenericJobs(systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.1)
+    restarted = GenericJobs(
+        systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.1
+    )
     reconciled = restarted.get(job_id)
 
     assert reconciled["state"]["phase"] == "succeeded"
@@ -557,7 +645,9 @@ def test_schema_v3_native_success_reconciles_after_restart_without_exec_main_sta
 
 
 @pytest.mark.parametrize("artifact", ("log", "result"))
-def test_malformed_artifacts_fail_closed_without_exposing_private_paths(tmp_path: Path, artifact: str) -> None:
+def test_malformed_artifacts_fail_closed_without_exposing_private_paths(
+    tmp_path: Path, artifact: str
+) -> None:
     """Evidence harness: a malformed durable artifact must not expose its path through retrieval."""
     jobs = generic_jobs(tmp_path, FakeSystemdJobs())
     started = jobs.start(
@@ -589,7 +679,9 @@ def test_log_reader_passes_the_requested_bounded_range_to_the_safe_artifact_read
 ) -> None:
     """Anti-vacuity: log offsets must seek before reading instead of expanding the read bound."""
     jobs = generic_jobs(tmp_path, FakeSystemdJobs())
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     observed: list[tuple[int, int]] = []
 
     def read_window(path: Path, max_bytes: int, *, offset: int = 0) -> bytes:

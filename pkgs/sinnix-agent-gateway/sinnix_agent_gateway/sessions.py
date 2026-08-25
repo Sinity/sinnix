@@ -214,11 +214,7 @@ class SessionLogService:
                 scanned_bytes += len(data)
                 text = data.decode("utf-8", errors="replace")
                 matching_line = next(
-                    (
-                        line
-                        for line in text.splitlines()
-                        if query in line
-                    ),
+                    (line for line in text.splitlines() if query in line),
                     None,
                 )
                 if matching_line is None:

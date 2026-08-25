@@ -9,17 +9,16 @@ from typing import Sequence, TextIO
 
 import anyio
 import pytest
-
 from sinnix_agent_gateway.artifacts import ArtifactService
 from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig
+from sinnix_agent_gateway.mcp_broker import McpBrokerError, McpBrokerService
 from sinnix_mcp.execution import (
     EnvironmentProfile,
     ExecutionProfile,
     ExecutionResult,
     OwnerExecution,
 )
-from sinnix_agent_gateway.mcp_broker import McpBrokerError, McpBrokerService
 
 
 class FakeTransport:
@@ -72,7 +71,10 @@ class FakeSession:
                 SimpleNamespace(
                     name="lookup",
                     description="Fixture lookup",
-                    inputSchema={"type": "object", "properties": {"query": {"type": "string"}}},
+                    inputSchema={
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                    },
                     annotations=SimpleNamespace(read_only_hint=True),
                 )
             ]
@@ -87,7 +89,9 @@ class FakeSession:
         )
 
 
-def broker_service(tmp_path: Path, principal_name: str, max_bytes: int = 262_144) -> McpBrokerService:
+def broker_service(
+    tmp_path: Path, principal_name: str, max_bytes: int = 262_144
+) -> McpBrokerService:
     config = GatewayConfig(
         state_dir=tmp_path / "state",
         projects={},
@@ -143,7 +147,9 @@ def test_observer_catalog_reports_missing_user_bus_environment(
     broker = broker_service(tmp_path, "observer")
     catalog = anyio.run(broker.catalog)
 
-    fixture = next(server for server in catalog["servers"] if server["name"] == "fixture")
+    fixture = next(
+        server for server in catalog["servers"] if server["name"] == "fixture"
+    )
     assert fixture["availability"] == "unavailable"
     assert fixture["failure_class"] == "environment_unavailable"
 
@@ -157,7 +163,9 @@ class LargeSchemaSession(FakeSession):
                     description="Fixture lookup",
                     inputSchema={
                         "type": "object",
-                        "properties": {"query": {"type": "string", "description": "x" * 8_000}},
+                        "properties": {
+                            "query": {"type": "string", "description": "x" * 8_000}
+                        },
                     },
                     annotations=SimpleNamespace(read_only_hint=True),
                 )
@@ -175,11 +183,18 @@ def test_catalog_artifactizes_an_oversized_tool_schema(
         "sinnix_agent_gateway.mcp_broker.stdio_client",
         lambda _params, **_kwargs: FakeTransport(),
     )
-    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", LargeSchemaSession)
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.ClientSession", LargeSchemaSession
+    )
 
     catalog = anyio.run(broker.catalog)
-    assert len(json.dumps(catalog, separators=(",", ":")).encode()) <= broker.config.max_result_bytes
-    fixture = next(server for server in catalog["servers"] if server["name"] == "fixture")
+    assert (
+        len(json.dumps(catalog, separators=(",", ":")).encode())
+        <= broker.config.max_result_bytes
+    )
+    fixture = next(
+        server for server in catalog["servers"] if server["name"] == "fixture"
+    )
     tool = fixture["tools"][0]
     assert tool["input_schema"]["x-sinnix-schema-truncated"] is True
     assert tool["input_schema_artifact"]["ref"].startswith("sinnix://artifacts/")
@@ -216,7 +231,18 @@ def test_catalog_probes_admitted_servers_and_keeps_exclusions_static(
                 "availability": "available",
                 "tool_count": 1,
                 "read_only_tool_count": 1,
-                "tools": [{"name": "lookup", "ref": "sinnix://mcp/fixture/tools/lookup", "description": "Fixture lookup", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}}, "effect": "read"}],
+                "tools": [
+                    {
+                        "name": "lookup",
+                        "ref": "sinnix://mcp/fixture/tools/lookup",
+                        "description": "Fixture lookup",
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {"query": {"type": "string"}},
+                        },
+                        "effect": "read",
+                    }
+                ],
             },
         ]
     }
@@ -272,7 +298,15 @@ for line in sys.stdin:
         "availability": "available",
         "tool_count": 1,
         "read_only_tool_count": 1,
-        "tools": [{"name": "fixture_read", "ref": "sinnix://mcp/fixture/tools/fixture_read", "description": "Fixture read tool", "input_schema": {"type": "object", "properties": {}}, "effect": "read"}],
+        "tools": [
+            {
+                "name": "fixture_read",
+                "ref": "sinnix://mcp/fixture/tools/fixture_read",
+                "description": "Fixture read tool",
+                "input_schema": {"type": "object", "properties": {}},
+                "effect": "read",
+            }
+        ],
     }
 
 
@@ -339,14 +373,19 @@ def test_observer_broker_runs_upstream_in_read_only_unit(
     monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.stdio_client", stdio)
     monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
 
-    anyio.run(lambda: broker.call("fixture", "lookup", {"query": "fixture"}, write=False))
+    anyio.run(
+        lambda: broker.call("fixture", "lookup", {"query": "fixture"}, write=False)
+    )
 
     assert captured[0].command == broker.config.systemd_run_command
     assert "--property=ReadOnlyPaths=/" in captured[0].args
     assert "--property=ReadWritePaths=/run/user/1000/fixture-locks" in captured[0].args
     assert "--property=PrivateNetwork=true" in captured[0].args
     assert "--property=InaccessiblePaths=/run/user" not in captured[0].args
-    assert "--setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus" in captured[0].args
+    assert (
+        "--setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus"
+        in captured[0].args
+    )
     assert "--setenv=XDG_RUNTIME_DIR=/run/user/1000" in captured[0].args
     assert captured[0].env["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/run/user/1000/bus"
     assert captured[0].env["XDG_RUNTIME_DIR"] == "/run/user/1000"
@@ -362,7 +401,8 @@ def test_observer_broker_stops_failed_read_only_unit(
     monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
     stopped = []
     monkeypatch.setattr(
-        "sinnix_agent_gateway.mcp_broker.stdio_client", lambda _params, **_kwargs: FakeTransport()
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: FakeTransport(),
     )
     monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
     monkeypatch.setattr(broker, "_stop", stopped.append)
@@ -401,7 +441,10 @@ def test_broker_artifactizes_large_upstream_response(
     broker = broker_service(tmp_path, "observer", max_bytes=10)
     monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
     monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
-    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.stdio_client", lambda _params, **_kwargs: FakeTransport())
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: FakeTransport(),
+    )
     monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
 
     result = anyio.run(

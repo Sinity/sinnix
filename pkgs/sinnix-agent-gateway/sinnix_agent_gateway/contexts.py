@@ -6,12 +6,14 @@ import os
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
 from pathlib import Path
+from typing import Any, Callable, Mapping
 
 
 def _canonical(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), default=str
+    ).encode()
 
 
 def source_revision(value: Any) -> str:
@@ -28,9 +30,13 @@ def source_revision(value: Any) -> str:
 class ContextSnapshotStore:
     """Persist a bounded set of immutable, principal-scoped context snapshots."""
 
-    def __init__(self, state_dir: Path, principal: str, *, max_entries: int = 64) -> None:
+    def __init__(
+        self, state_dir: Path, principal: str, *, max_entries: int = 64
+    ) -> None:
         if not principal or max_entries < 1:
-            raise ValueError("context snapshot store requires a principal and positive bound")
+            raise ValueError(
+                "context snapshot store requires a principal and positive bound"
+            )
         self.root = state_dir / "contexts" / principal
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.root.chmod(0o700)
@@ -78,12 +84,14 @@ class ContextSnapshotStore:
             key=lambda path: (path.stat().st_mtime_ns, path.name),
             reverse=True,
         )
-        for stale in retained[self.max_entries:]:
+        for stale in retained[self.max_entries :]:
             stale.unlink(missing_ok=True)
         return snapshot_ref
 
     def get(self, snapshot_id: str) -> dict[str, Any]:
-        if len(snapshot_id) != 64 or any(char not in "0123456789abcdef" for char in snapshot_id):
+        if len(snapshot_id) != 64 or any(
+            char not in "0123456789abcdef" for char in snapshot_id
+        ):
             raise KeyError(snapshot_id)
         path = self.root / f"{snapshot_id}.json"
         try:
@@ -171,7 +179,9 @@ class ComponentSpec:
 
     def __post_init__(self) -> None:
         if not self.name or self.budget_bytes < 128:
-            raise ValueError("context components require a name and useful positive budget")
+            raise ValueError(
+                "context components require a name and useful positive budget"
+            )
 
 
 @dataclass(frozen=True)
@@ -183,28 +193,61 @@ class ContextIntentSpec:
 
 CONTEXT_INTENTS: dict[str, ContextIntentSpec] = {
     "project.orientation": ContextIntentSpec(
-        "project.orientation", 48_000,
-        (("project", 12_000), ("checkout", 12_000), ("tasks", 16_000), ("authority", 8_000)),
+        "project.orientation",
+        48_000,
+        (
+            ("project", 12_000),
+            ("checkout", 12_000),
+            ("tasks", 16_000),
+            ("authority", 8_000),
+        ),
     ),
     "project.triage": ContextIntentSpec(
-        "project.triage", 56_000,
-        (("project", 12_000), ("open_beads", 18_000), ("stale_claims", 14_000), ("changes", 8_000)),
+        "project.triage",
+        56_000,
+        (
+            ("project", 12_000),
+            ("open_beads", 18_000),
+            ("stale_claims", 14_000),
+            ("changes", 8_000),
+        ),
     ),
     "bead.work": ContextIntentSpec(
-        "bead.work", 64_000,
-        (("bead", 18_000), ("project", 12_000), ("checkout", 12_000), ("assignment", 14_000), ("blockers", 8_000)),
+        "bead.work",
+        64_000,
+        (
+            ("bead", 18_000),
+            ("project", 12_000),
+            ("checkout", 12_000),
+            ("assignment", 14_000),
+            ("blockers", 8_000),
+        ),
     ),
     "bead.review": ContextIntentSpec(
-        "bead.review", 64_000,
-        (("bead", 16_000), ("job", 16_000), ("checkout", 12_000), ("diff", 12_000), ("evidence", 8_000)),
+        "bead.review",
+        64_000,
+        (
+            ("bead", 16_000),
+            ("job", 16_000),
+            ("checkout", 12_000),
+            ("diff", 12_000),
+            ("evidence", 8_000),
+        ),
     ),
     "job.review": ContextIntentSpec(
-        "job.review", 56_000,
+        "job.review",
+        56_000,
         (("job", 18_000), ("result", 18_000), ("project", 10_000), ("events", 8_000)),
     ),
     "incident": ContextIntentSpec(
-        "incident", 56_000,
-        (("runtime", 16_000), ("transitions", 14_000), ("receipts", 12_000), ("jobs", 8_000)),
+        "incident",
+        56_000,
+        (
+            ("runtime", 16_000),
+            ("transitions", 14_000),
+            ("receipts", 12_000),
+            ("jobs", 8_000),
+        ),
     ),
 }
 
@@ -217,7 +260,9 @@ class RevisionReuseCache:
             raise ValueError("context cache bounds must be positive")
         self.max_entries = max_entries
         self.max_bytes = max_bytes
-        self._values: OrderedDict[tuple[str, str], tuple[ComponentResult, int]] = OrderedDict()
+        self._values: OrderedDict[tuple[str, str], tuple[ComponentResult, int]] = (
+            OrderedDict()
+        )
         self._bytes = 0
 
     @staticmethod
@@ -288,31 +333,43 @@ class ContextComposer:
             raise ValueError(f"unknown context intent: {intent}") from exc
         total_budget = total_budget_bytes or declared.total_budget_bytes
         if total_budget < 512 or total_budget > declared.total_budget_bytes:
-            raise ValueError("context total budget is outside the declared intent bound")
+            raise ValueError(
+                "context total budget is outside the declared intent bound"
+            )
         budgets = dict(declared.components)
         expected = set(budgets)
         supplied = {component.name for component in components}
         if not supplied <= expected:
-            raise ValueError(f"context contains undeclared components: {sorted(supplied - expected)}")
+            raise ValueError(
+                f"context contains undeclared components: {sorted(supplied - expected)}"
+            )
         if len(supplied) != len(components):
             raise ValueError("context contains duplicate components")
         supplied_by_name = {component.name: component for component in components}
         rows: list[ComponentResult] = []
-        for name, budget in declared.components:
+        for name, _budget in declared.components:
             component = supplied_by_name.get(name)
             if component is None:
-                rows.append(ComponentResult.unavailable(name, "component plan was not supplied"))
+                rows.append(
+                    ComponentResult.unavailable(name, "component plan was not supplied")
+                )
                 continue
             try:
                 result = component.probe()
                 if not isinstance(result, ComponentResult):
                     raise TypeError("context component did not return ComponentResult")
             except Exception as exc:  # component isolation is part of the contract
-                result = ComponentResult.unavailable(component.name, str(exc) or "owner unavailable")
+                result = ComponentResult.unavailable(
+                    component.name, str(exc) or "owner unavailable"
+                )
             if result.status == "available" and result.source_revision is not None:
                 cached = self.cache.get(result.name, result.source_revision)
                 result = cached if cached is not None else self.cache.put(result)
-            rows.append(self._bound_component(result, min(component.budget_bytes, budgets[component.name])))
+            rows.append(
+                self._bound_component(
+                    result, min(component.budget_bytes, budgets[component.name])
+                )
+            )
 
         provisional = {
             "schema": "sinnix.gateway-context.v1",
@@ -320,7 +377,8 @@ class ContextComposer:
             "target_ref": target_ref,
             "components": [],
             "component_plan": [
-                {"name": name, "budget_bytes": budget} for name, budget in declared.components
+                {"name": name, "budget_bytes": budget}
+                for name, budget in declared.components
             ],
             "total_budget_bytes": total_budget,
         }
@@ -335,7 +393,11 @@ class ContextComposer:
             # revisions remain, so a caller can continue each healthy route.
             for index in sorted(
                 range(len(rows)),
-                key=lambda item: len(_canonical(rows[item].data)) if rows[item].status == "available" else 0,
+                key=lambda item: (
+                    len(_canonical(rows[item].data))
+                    if rows[item].status == "available"
+                    else 0
+                ),
                 reverse=True,
             ):
                 if rows[index].status != "available":

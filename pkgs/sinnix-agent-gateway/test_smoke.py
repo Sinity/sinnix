@@ -9,18 +9,16 @@ import socketserver
 import subprocess
 import sys
 import threading
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import anyio
 import pytest
 from mcp import ClientSession
+from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.server.mcpserver.context import Context
 from mcp.types import PaginatedRequestParams
-from mcp.client.stdio import StdioServerParameters, stdio_client
 from sinnix_agent_gateway.app import Runtime, create_server
-from sinnix_agent_gateway.server import _bounded_resource_json, _query_owner
-from sinnix_mcp.execution import ExecutionResult, OwnerDiagnosticError
 from sinnix_agent_gateway.artifacts import ArtifactError
 from sinnix_agent_gateway.capabilities import PolicyError
 from sinnix_agent_gateway.cli import build_manifest, parser, verify_approval
@@ -28,6 +26,8 @@ from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.projects import ProjectError
 from sinnix_agent_gateway.registry import REGISTRY
 from sinnix_agent_gateway.results import ProtocolError
+from sinnix_agent_gateway.server import _bounded_resource_json, _query_owner
+from sinnix_mcp.execution import ExecutionResult, OwnerDiagnosticError
 
 
 def config(tmp_path: Path, *, observer_read: bool = True) -> GatewayConfig:
@@ -55,37 +55,60 @@ def test_official_sdk_principals_expose_only_protocol_verbs(tmp_path: Path) -> N
     names = {row["name"] for row in operator["tools"]}
 
     assert names == {
-        "status", "catalog", "query", "get", "context", "events", "wait",
-        "change", "operate", "run",
+        "status",
+        "catalog",
+        "query",
+        "get",
+        "context",
+        "events",
+        "wait",
+        "change",
+        "operate",
+        "run",
     }
     assert {row["name"] for row in observer["tools"]} == names
     assert {row["name"] for row in agent_control["tools"]} == names
     assert {
         row["name"]
         for row in operator["tools"]
-        if row["annotations"] == {
-            "readOnlyHint": True, "destructiveHint": False, "idempotentHint": True,
+        if row["annotations"]
+        == {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
             "openWorldHint": False,
         }
     } == {"status", "catalog", "query", "get", "context", "events", "wait"}
-    assert next(row for row in operator["tools"] if row["name"] == "change")["annotations"] == {
-        "readOnlyHint": False, "destructiveHint": True, "idempotentHint": True,
+    assert next(row for row in operator["tools"] if row["name"] == "change")[
+        "annotations"
+    ] == {
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
         "openWorldHint": False,
     }
-    assert next(row for row in operator["tools"] if row["name"] == "operate")["annotations"] == {
-        "readOnlyHint": False, "destructiveHint": True, "idempotentHint": True,
+    assert next(row for row in operator["tools"] if row["name"] == "operate")[
+        "annotations"
+    ] == {
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
         "openWorldHint": False,
     }
-    assert next(row for row in operator["tools"] if row["name"] == "run")["annotations"] == {
-        "readOnlyHint": False, "destructiveHint": False, "idempotentHint": True,
+    assert next(row for row in operator["tools"] if row["name"] == "run")[
+        "annotations"
+    ] == {
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
         "openWorldHint": True,
     }
-    assert {
-        row["name"]: row["annotations"] for row in observer["tools"]
-    } == {
+    assert {row["name"]: row["annotations"] for row in observer["tools"]} == {
         row["name"]: row["annotations"] for row in operator["tools"]
     }
-    assert all("inputSchema" in row and "outputSchema" in row for row in operator["tools"])
+    assert all(
+        "inputSchema" in row and "outputSchema" in row for row in operator["tools"]
+    )
     assert observer["sha256"] == agent_control["sha256"] == operator["sha256"]
     assert operator["measurement"] == {
         "schema": "sinnix.gateway-schema-measurement.v1",
@@ -153,10 +176,15 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 )
                 assert {
                     template.uri_template for template in templates.resource_templates
-                }.isdisjoint({
-                    template.uri_template for template in continued_templates.resource_templates
-                })
-                all_templates = list(templates.resource_templates) + list(continued_templates.resource_templates)
+                }.isdisjoint(
+                    {
+                        template.uri_template
+                        for template in continued_templates.resource_templates
+                    }
+                )
+                all_templates = list(templates.resource_templates) + list(
+                    continued_templates.resource_templates
+                )
                 template_cursor = continued_templates.next_cursor
                 while template_cursor:
                     page = await session.list_resource_templates(
@@ -167,8 +195,16 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 names = {tool.name for tool in tools.tools}
                 assert initialized.server_info.name == "sinnix-agent-gateway"
                 assert names == {
-                    "status", "catalog", "query", "get", "context", "events", "wait",
-                    "change", "operate", "run",
+                    "status",
+                    "catalog",
+                    "query",
+                    "get",
+                    "context",
+                    "events",
+                    "wait",
+                    "change",
+                    "operate",
+                    "run",
                 }
                 denied_change = await session.call_tool(
                     "change",
@@ -196,7 +232,10 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 )
                 for denied in (denied_change, denied_operate, denied_run):
                     assert denied.is_error is True
-                    assert json.loads(denied.content[0].text)["error"]["code"] == "policy_denied"
+                    assert (
+                        json.loads(denied.content[0].text)["error"]["code"]
+                        == "policy_denied"
+                    )
                 assert {
                     "sinnix://gateway/v2/actions/{action_name}",
                     "sinnix://gateway/v2/resources/{resource_kind}",
@@ -215,7 +254,9 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "sinnix://gateway/v2/documentation"
                 )
                 documentation_rows = json.loads(documentation.contents[0].text)
-                parity = await session.read_resource("sinnix://gateway/v2/legacy-parity")
+                parity = await session.read_resource(
+                    "sinnix://gateway/v2/legacy-parity"
+                )
                 parity_rows = json.loads(parity.contents[0].text)
                 assert action_contract["action"]["schema_ref"] == (
                     "sinnix://gateway/v2/actions/gateway.catalog"
@@ -258,16 +299,22 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert status_envelope["schema"] == "sinnix.gateway-result.v3"
                 assert result.is_error is False
                 assert result.structured_content == status_envelope
-                status_tool = next(tool for tool in tools.tools if tool.name == "status")
-                assert status_tool.output_schema != REGISTRY.action(
-                    "gateway.status"
-                ).output_schema
-                assert action_contract["action"]["output_schema"] == REGISTRY.action(
-                    "gateway.status"
-                ).output_schema
+                status_tool = next(
+                    tool for tool in tools.tools if tool.name == "status"
+                )
+                assert (
+                    status_tool.output_schema
+                    != REGISTRY.action("gateway.status").output_schema
+                )
+                assert (
+                    action_contract["action"]["output_schema"]
+                    == REGISTRY.action("gateway.status").output_schema
+                )
                 assert status_envelope["result"]["action"] == "gateway.status"
                 assert status_envelope["result"]["outcome"] == "ok"
-                assert status_envelope["receipt"]["ref"].startswith("sinnix://receipts/")
+                assert status_envelope["receipt"]["ref"].startswith(
+                    "sinnix://receipts/"
+                )
                 assert status["principal"] == "observer"
                 assert status["route_preflight"]["routes"]
                 assert status["manifests"]["live_server"]["sha256"]
@@ -295,12 +342,17 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
 
                 query_tool = next(tool for tool in tools.tools if tool.name == "query")
                 assert "action_name" in query_tool.input_schema["required"]
-                assert "default" not in query_tool.input_schema["properties"]["action_name"]
+                assert (
+                    "default"
+                    not in query_tool.input_schema["properties"]["action_name"]
+                )
                 assert "projects.list" in (query_tool.description or "")
                 project_catalog_result = await session.call_tool(
                     "catalog", {"project": "fixture"}
                 )
-                project_catalog = json.loads(project_catalog_result.content[0].text)["data"]
+                project_catalog = json.loads(project_catalog_result.content[0].text)[
+                    "data"
+                ]
                 assert project_catalog["project"] == {
                     "project_id": "fixture",
                     "available": True,
@@ -309,7 +361,9 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "writable": False,
                     "ref": "sinnix://projects/fixture",
                 }
-                assert {resource["kind"] for resource in project_catalog["resources"]} == {
+                assert {
+                    resource["kind"] for resource in project_catalog["resources"]
+                } == {
                     "project",
                     "checkout",
                     "bead",
@@ -338,11 +392,18 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 checkout = project_resource["checkouts"][0]
                 assert checkout["ref"] == "sinnix://projects/fixture/checkouts/default"
                 assert checkout["checkout_id"] == "default"
-                assert project_resource["task_authority"]["availability"] == "unavailable"
-                checkout_result = await session.call_tool("get", {"ref": checkout["ref"]})
+                assert (
+                    project_resource["task_authority"]["availability"] == "unavailable"
+                )
+                checkout_result = await session.call_tool(
+                    "get", {"ref": checkout["ref"]}
+                )
                 checkout_resource = json.loads(checkout_result.content[0].text)["data"]
                 assert checkout_resource["kind"] == "checkout"
-                assert checkout_resource["checkout"]["checkout"]["checkout_id"] == "default"
+                assert (
+                    checkout_resource["checkout"]["checkout"]["checkout_id"]
+                    == "default"
+                )
                 query_result = await session.call_tool(
                     "query",
                     {
@@ -354,7 +415,9 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 query_envelope = json.loads(query_result.content[0].text)
                 assert query_envelope["result"]["action"] == "projects.query"
                 assert query_envelope["data"]["ref"] == checkout["ref"]
-                assert query_envelope["data"]["project_ref"] == "sinnix://projects/fixture"
+                assert (
+                    query_envelope["data"]["project_ref"] == "sinnix://projects/fixture"
+                )
                 assert query_envelope["meta"]["resource_refs"] == [
                     "sinnix://projects/fixture",
                     checkout["ref"],
@@ -377,13 +440,19 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                 assert context["ref"] == "sinnix://projects/fixture"
                 assert context["authority"]["canonical_checkout_ref"] == checkout["ref"]
                 assert len(context["authority"]["code_revision"]) == 64
-                assert context["authority"]["task_authority"]["availability"] == "unavailable"
+                assert (
+                    context["authority"]["task_authority"]["availability"]
+                    == "unavailable"
+                )
                 assert all(
                     component["status"] != "available"
                     or isinstance(component.get("source_revision"), str)
                     for component in context["components"]
                 )
-                assert all(component["status"] in {"available", "unavailable"} for component in context["components"])
+                assert all(
+                    component["status"] in {"available", "unavailable"}
+                    for component in context["components"]
+                )
                 events_result = await session.call_tool("events", {"limit": 100})
                 events_envelope = json.loads(events_result.content[0].text)
                 assert events_envelope["result"]["action"] == "audit.events"
@@ -405,14 +474,22 @@ def test_stdio_transport_negotiates_and_lists_readonly_tools(tmp_path: Path) -> 
                     "sinnix://receipts/"
                 )
                 mcp_catalog_result = await session.call_tool(
-                    "query", {"action_name": "mcp.query", "parameters": {"operation": "catalog"}}
+                    "query",
+                    {
+                        "action_name": "mcp.query",
+                        "parameters": {"operation": "catalog"},
+                    },
                 )
-                assert json.loads(mcp_catalog_result.content[0].text)["data"] == {"servers": []}
+                assert json.loads(mcp_catalog_result.content[0].text)["data"] == {
+                    "servers": []
+                }
 
     anyio.run(probe)
 
 
-def test_production_wait_route_observes_mcp_request_cancellation(tmp_path: Path) -> None:
+def test_production_wait_route_observes_mcp_request_cancellation(
+    tmp_path: Path,
+) -> None:
     server = create_server(config(tmp_path), "observer")
     cancelled = anyio.Event()
     cancelled.set()
@@ -441,7 +518,9 @@ def test_production_wait_route_observes_mcp_request_cancellation(tmp_path: Path)
     assert response["data"]["outcome"] == "cancelled", response
 
 
-def test_production_wait_route_runs_without_mcp_request_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_production_wait_route_runs_without_mcp_request_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     server = create_server(config(tmp_path), "observer")
     runtime = server._sinnix_revision_publisher.runtime
     monkeypatch.setattr(
@@ -464,15 +543,21 @@ def test_production_wait_route_runs_without_mcp_request_context(tmp_path: Path, 
     response = anyio.run(invoke)
     assert response["result"]["outcome"] == "ok", response
     assert response["data"]["job_id"] == "fixture-job", response
-    assert response["data"]["state"] == {"phase": "succeeded", "terminal": True}, response
+    assert response["data"]["state"] == {"phase": "succeeded", "terminal": True}, (
+        response
+    )
 
 
-def test_production_job_wait_route_cancels_owner_wait(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_production_job_wait_route_cancels_owner_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     server = create_server(config(tmp_path), "observer")
     runtime = server._sinnix_revision_publisher.runtime
     owner_started = threading.Event()
 
-    def delayed_owner(operation: str, _arguments: dict[str, object]) -> dict[str, object]:
+    def delayed_owner(
+        operation: str, _arguments: dict[str, object]
+    ) -> dict[str, object]:
         assert operation == "job.wait"
         owner_started.set()
         threading.Event().wait(0.5)
@@ -519,36 +604,63 @@ def test_public_v2_mutation_verbs_preserve_owner_routes(
     runtime = Runtime.create(cfg, "operator")
     calls: dict[str, object] = {}
 
-    def beads_change(project_id: str, operation: str, arguments: dict[str, object], **_kwargs: object) -> dict[str, object]:
+    def beads_change(
+        project_id: str, operation: str, arguments: dict[str, object], **_kwargs: object
+    ) -> dict[str, object]:
         calls["beads"] = (project_id, operation, arguments)
-        return {"project_id": project_id, "operation": operation, "mode": "apply", "atomicity": "owner_native"}
+        return {
+            "project_id": project_id,
+            "operation": operation,
+            "mode": "apply",
+            "atomicity": "owner_native",
+        }
 
     async def mcp_call(
         server: str, tool: str, arguments: dict[str, object], *, write: bool
     ) -> dict[str, object]:
         calls["mcp"] = (server, tool, arguments, write)
-        return {"server": server, "tool": tool, "mode": "write", "response": {"ok": True}}
+        return {
+            "server": server,
+            "tool": tool,
+            "mode": "write",
+            "response": {"ok": True},
+        }
 
-    def desktop_owner(operation: str, arguments: dict[str, object]) -> dict[str, object]:
+    def desktop_owner(
+        operation: str, arguments: dict[str, object]
+    ) -> dict[str, object]:
         calls["desktop"] = (operation, arguments)
         return {"operation": operation, "result": {"ok": True}}
 
-    def terminal_owner(operation: str, arguments: dict[str, object]) -> dict[str, object]:
+    def terminal_owner(
+        operation: str, arguments: dict[str, object]
+    ) -> dict[str, object]:
         calls["terminal"] = (operation, arguments)
         return {"operation": operation, "result": {"ok": True}}
 
-    def browser_owner(operation: str, arguments: dict[str, object]) -> dict[str, object]:
+    def browser_owner(
+        operation: str, arguments: dict[str, object]
+    ) -> dict[str, object]:
         calls.setdefault("browser", []).append((operation, arguments))
         if operation == "agent_window":
-            return {"operation": operation, "target": {"id": "agent-target", "parked": True}}
-        return {"operation": operation, "page_id": arguments["page_id"], "result": {"ok": True}}
+            return {
+                "operation": operation,
+                "target": {"id": "agent-target", "parked": True},
+            }
+        return {
+            "operation": operation,
+            "page_id": arguments["page_id"],
+            "result": {"ok": True},
+        }
 
     monkeypatch.setattr(runtime.beads, "change", beads_change)
     monkeypatch.setattr(runtime.mcp_broker, "call", mcp_call)
     monkeypatch.setattr(runtime.desktop, "action", desktop_owner)
     monkeypatch.setattr(runtime.terminals, "action", terminal_owner)
     monkeypatch.setattr(runtime.browser, "action", browser_owner)
-    monkeypatch.setattr(Runtime, "create", classmethod(lambda _cls, _cfg, _principal: runtime))
+    monkeypatch.setattr(
+        Runtime, "create", classmethod(lambda _cls, _cfg, _principal: runtime)
+    )
     server = create_server(cfg, "operator")
     target = tmp_path / "public-route.txt"
     file_token = base64.urlsafe_b64encode(str(target).encode()).decode().rstrip("=")
@@ -671,17 +783,32 @@ def test_public_v2_mutation_verbs_preserve_owner_routes(
     )
 
     assert target.read_text() == "public route\n"
-    assert calls["beads"] == ("fixture", "comment", {"id": "fixture-1", "text": "public route"})
+    assert calls["beads"] == (
+        "fixture",
+        "comment",
+        {"id": "fixture-1", "text": "public route"},
+    )
     assert calls["mcp"] == ("fixture", "mutate", {"value": "public route"}, True)
     assert calls["desktop"] == ("focus_window", {"window": "address:0xfixture"})
-    assert calls["terminal"] == ("send", {"match": "id:7", "text": "printf fixture", "enter": True})
+    assert calls["terminal"] == (
+        "send",
+        {"match": "id:7", "text": "printf fixture", "enter": True},
+    )
     assert calls["browser"] == [
         ("agent_window", {"url": "https://example.test"}),
         ("navigate", {"page_id": "agent-target", "url": "https://example.test/next"}),
     ]
     assert [
         result["result"]["action"]
-        for result in (file_result, beads_result, mcp_result, desktop_result, terminal_result, window_result, browser_result)
+        for result in (
+            file_result,
+            beads_result,
+            mcp_result,
+            desktop_result,
+            terminal_result,
+            window_result,
+            browser_result,
+        )
     ] == [
         "files.change",
         "beads.change",
@@ -698,11 +825,15 @@ def test_public_v2_mutation_verbs_preserve_owner_routes(
     assert wrong_verb_with_preconditions["error"]["code"] == "unsupported_capability"
 
 
-def test_mcp_dispatches_v2_change_and_operate_through_real_owners(tmp_path: Path) -> None:
+def test_mcp_dispatches_v2_change_and_operate_through_real_owners(
+    tmp_path: Path,
+) -> None:
     cfg = config(tmp_path)
     project = cfg.projects["fixture"].path
     subprocess.run(["git", "init", "--quiet", project], check=True)
-    subprocess.run(["git", "config", "user.name", "Gateway Test"], cwd=project, check=True)
+    subprocess.run(
+        ["git", "config", "user.name", "Gateway Test"], cwd=project, check=True
+    )
     subprocess.run(
         ["git", "config", "user.email", "gateway-test@example.invalid"],
         cwd=project,
@@ -900,7 +1031,9 @@ def test_mcp_query_derives_server_and_tool_from_a_canonical_ref(
     runtime = Runtime.create(config(tmp_path), "observer")
     captured: dict[str, object] = {}
 
-    async def call(server: str, tool: str, arguments: dict[str, object], *, write: bool) -> dict[str, object]:
+    async def call(
+        server: str, tool: str, arguments: dict[str, object], *, write: bool
+    ) -> dict[str, object]:
         captured.update(server=server, tool=tool, arguments=arguments, write=write)
         return {"response": {"ok": True}}
 
@@ -915,7 +1048,10 @@ def test_mcp_query_derives_server_and_tool_from_a_canonical_ref(
         {"operation": "call", "arguments": {"query": "fixture"}},
     )
 
-    assert result == {"ref": "sinnix://mcp/fixture/tools/lookup", "response": {"ok": True}}
+    assert result == {
+        "ref": "sinnix://mcp/fixture/tools/lookup",
+        "response": {"ok": True},
+    }
     assert captured == {
         "server": "fixture",
         "tool": "lookup",
@@ -929,16 +1065,70 @@ def test_target_query_adapters_round_trip_canonical_refs(
 ) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
     calls: dict[str, object] = {}
-    monkeypatch.setattr(runtime.desktop, "read", lambda operation: calls.update(desktop=operation) or {"ok": True})
-    monkeypatch.setattr(runtime.terminals, "read", lambda operation, arguments=None: calls.update(terminal=(operation, arguments)) or {"ok": True})
-    monkeypatch.setattr(runtime.browser, "read", lambda operation, page_id=None, selector=None: calls.update(browser=(operation, page_id, selector)) or {"ok": True})
-    monkeypatch.setattr(runtime.files, "read", lambda operation, path, **kwargs: calls.update(files=(operation, path, kwargs)) or {"ok": True})
+    monkeypatch.setattr(
+        runtime.desktop,
+        "read",
+        lambda operation: calls.update(desktop=operation) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        runtime.terminals,
+        "read",
+        lambda operation, arguments=None: (
+            calls.update(terminal=(operation, arguments)) or {"ok": True}
+        ),
+    )
+    monkeypatch.setattr(
+        runtime.browser,
+        "read",
+        lambda operation, page_id=None, selector=None: (
+            calls.update(browser=(operation, page_id, selector)) or {"ok": True}
+        ),
+    )
+    monkeypatch.setattr(
+        runtime.files,
+        "read",
+        lambda operation, path, **kwargs: (
+            calls.update(files=(operation, path, kwargs)) or {"ok": True}
+        ),
+    )
 
     file_token = base64.urlsafe_b64encode(b"/realm/fixture.txt").decode().rstrip("=")
-    desktop = anyio.run(_query_owner, runtime, "desktop.query", "sinnix://desktop/current", None, 200, {"operation": "status"})
-    terminal = anyio.run(_query_owner, runtime, "terminals.query", "sinnix://terminals/7", None, 200, {"operation": "capture", "arguments": {"extent": "screen"}})
-    browser = anyio.run(_query_owner, runtime, "browser.query", "sinnix://browser/pages/agent-target", None, 200, {"operation": "info"})
-    host_file = anyio.run(_query_owner, runtime, "files.query", f"sinnix://files/{file_token}", None, 200, {"operation": "stat"})
+    desktop = anyio.run(
+        _query_owner,
+        runtime,
+        "desktop.query",
+        "sinnix://desktop/current",
+        None,
+        200,
+        {"operation": "status"},
+    )
+    terminal = anyio.run(
+        _query_owner,
+        runtime,
+        "terminals.query",
+        "sinnix://terminals/7",
+        None,
+        200,
+        {"operation": "capture", "arguments": {"extent": "screen"}},
+    )
+    browser = anyio.run(
+        _query_owner,
+        runtime,
+        "browser.query",
+        "sinnix://browser/pages/agent-target",
+        None,
+        200,
+        {"operation": "info"},
+    )
+    host_file = anyio.run(
+        _query_owner,
+        runtime,
+        "files.query",
+        f"sinnix://files/{file_token}",
+        None,
+        200,
+        {"operation": "stat"},
+    )
 
     assert desktop["ref"] == "sinnix://desktop/current"
     assert terminal["ref"] == "sinnix://terminals/7"
@@ -948,10 +1138,22 @@ def test_target_query_adapters_round_trip_canonical_refs(
         "desktop": "status",
         "terminal": ("capture", {"match": "id:7", "extent": "screen"}),
         "browser": ("info", "agent-target", None),
-        "files": ("stat", "/realm/fixture.txt", {"offset": 0, "max_bytes": 64_000, "max_entries": 200}),
+        "files": (
+            "stat",
+            "/realm/fixture.txt",
+            {"offset": 0, "max_bytes": 64_000, "max_entries": 200},
+        ),
     }
     with pytest.raises(ProtocolError, match="canonical terminal ref"):
-        anyio.run(_query_owner, runtime, "terminals.query", None, None, 200, {"operation": "capture", "arguments": {"match": "id:7"}})
+        anyio.run(
+            _query_owner,
+            runtime,
+            "terminals.query",
+            None,
+            None,
+            200,
+            {"operation": "capture", "arguments": {"match": "id:7"}},
+        )
 
 
 def test_missing_observer_mcp_environment_is_a_typed_unavailable_failure(
@@ -992,7 +1194,11 @@ def test_browser_owner_failure_keeps_exact_diagnostic_ref_in_v2_envelope(
         runtime.browser.execution,
         "run",
         lambda command, profile: ExecutionResult(
-            tuple(command), None, b"", b"chrome missing", failure_class="command_unavailable:FileNotFoundError"
+            tuple(command),
+            None,
+            b"",
+            b"chrome missing",
+            failure_class="command_unavailable:FileNotFoundError",
         ),
     )
 
@@ -1008,8 +1214,12 @@ def test_browser_owner_failure_keeps_exact_diagnostic_ref_in_v2_envelope(
     assert runtime.artifacts.read(artifact_id)["kind"] == "owner-diagnostic"
 
 
-def test_gateway_resource_bounds_fall_back_to_an_attested_artifact(tmp_path: Path) -> None:
-    runtime = Runtime.create(dataclasses.replace(config(tmp_path), max_result_bytes=2_048), "observer")
+def test_gateway_resource_bounds_fall_back_to_an_attested_artifact(
+    tmp_path: Path,
+) -> None:
+    runtime = Runtime.create(
+        dataclasses.replace(config(tmp_path), max_result_bytes=2_048), "observer"
+    )
 
     encoded = _bounded_resource_json(runtime, {"payload": "x" * 4_000}, "fixture")
     envelope = json.loads(encoded)
@@ -1227,7 +1437,9 @@ def test_v2_events_are_principal_scoped_and_receipted(tmp_path: Path) -> None:
     assert response["receipt"]["ref"].startswith("sinnix://receipts/")
 
 
-def test_runtime_returns_owner_diagnostic_and_audits_its_reference(tmp_path: Path) -> None:
+def test_runtime_returns_owner_diagnostic_and_audits_its_reference(
+    tmp_path: Path,
+) -> None:
     runtime = Runtime.create(config(tmp_path), "observer")
     response = {
         "available": False,
@@ -1356,7 +1568,11 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
     cfg = config(tmp_path)
     runtime = Runtime.create(cfg, "observer")
     status = runtime.observe.gateway_status(
-        "observer", "capability-hash", "approved-fixture-hash", "catalog-hash", "v2-test"
+        "observer",
+        "capability-hash",
+        "approved-fixture-hash",
+        "catalog-hash",
+        "v2-test",
     )
     assert status["principal_contract_hash"] == "capability-hash"
     assert status["tool_manifest_hash"] == "approved-fixture-hash"
@@ -1396,7 +1612,11 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         )
     )
     status = runtime.observe.gateway_status(
-        "observer", "capability-hash", "approved-fixture-hash", "catalog-hash", "v2-test"
+        "observer",
+        "capability-hash",
+        "approved-fixture-hash",
+        "catalog-hash",
+        "v2-test",
     )
     assert set(status["manifests"]["comparisons"].values()) == {"match"}
     assert status["catalog"]["chatgpt_observed"] == {
@@ -1415,7 +1635,11 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         )
     )
     status = runtime.observe.gateway_status(
-        "observer", "capability-hash", "approved-fixture-hash", "catalog-hash", "v2-test"
+        "observer",
+        "capability-hash",
+        "approved-fixture-hash",
+        "catalog-hash",
+        "v2-test",
     )
     assert status["manifests"]["comparisons"] == {
         "live_to_nix_approved": "match",
@@ -1431,7 +1655,11 @@ def test_gateway_status_reports_catalog_approval_drift(tmp_path: Path) -> None:
     runtime = Runtime.create(cfg, "observer")
 
     status = runtime.observe.gateway_status(
-        "observer", "capability-hash", "approved-fixture-hash", "live-catalog-hash", "v2-test"
+        "observer",
+        "capability-hash",
+        "approved-fixture-hash",
+        "live-catalog-hash",
+        "v2-test",
     )
 
     assert status["catalog"]["nix_approved"] == {
@@ -1574,8 +1802,14 @@ def test_artifacts_are_scoped_to_the_creating_principal(tmp_path: Path) -> None:
         source="test.observer",
         target={"id": "observer"},
     )
-    assert observer.artifacts.read(observer_artifact["artifact_id"])["kind"] == "observer-fixture"
-    assert operator.artifacts.read(observer_artifact["artifact_id"])["kind"] == "observer-fixture"
+    assert (
+        observer.artifacts.read(observer_artifact["artifact_id"])["kind"]
+        == "observer-fixture"
+    )
+    assert (
+        operator.artifacts.read(observer_artifact["artifact_id"])["kind"]
+        == "observer-fixture"
+    )
 
 
 def test_unknown_principal_is_rejected_before_server_creation(tmp_path: Path) -> None:
@@ -1644,7 +1878,10 @@ def test_config_load_uses_one_project_contract(tmp_path: Path) -> None:
     assert loaded.projects["fixture"].observer_read is True
     assert loaded.projects["fixture"].devtools_entrypoint == "nix develop"
     assert loaded.projects["fixture"].task_authority is not None
-    assert loaded.projects["fixture"].task_authority.database == project / ".beads" / "dolt"
+    assert (
+        loaded.projects["fixture"].task_authority.database
+        == project / ".beads" / "dolt"
+    )
 
 
 def test_config_rejects_retired_project_visibility_fields(tmp_path: Path) -> None:
@@ -1740,14 +1977,23 @@ print(json.dumps(report))
 def test_machine_section_overflow_is_retained_as_an_attested_artifact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    runtime = Runtime.create(dataclasses.replace(config(tmp_path), max_result_bytes=1_024), "observer")
+    runtime = Runtime.create(
+        dataclasses.replace(config(tmp_path), max_result_bytes=1_024), "observer"
+    )
     report = {
         "schema": "sinnix.observe.v1",
         "generated_at": "2026-08-21T00:00:00Z",
         "window": {},
         "live_pressure": {"detail": "x" * 4_000},
     }
-    monkeypatch.setattr(runtime.observe, "_collect_report", lambda operation, cursor=0, page_limit=None: {"available": True, "report": report})
+    monkeypatch.setattr(
+        runtime.observe,
+        "_collect_report",
+        lambda operation, cursor=0, page_limit=None: {
+            "available": True,
+            "report": report,
+        },
+    )
 
     result = runtime.observe.machine_query("pressure")
 
@@ -1770,12 +2016,14 @@ def test_machine_query_requests_owner_selected_section(
     monkeypatch.setattr(
         runtime.observe.execution,
         "run",
-        lambda command, _profile: calls.append(command)
-        or ExecutionResult(
-            command=tuple(command),
-            exit_status=0,
-            stdout=json.dumps(report).encode(),
-            stderr=b"",
+        lambda command, _profile: (
+            calls.append(command)
+            or ExecutionResult(
+                command=tuple(command),
+                exit_status=0,
+                stdout=json.dumps(report).encode(),
+                stderr=b"",
+            )
         ),
     )
 
@@ -1811,8 +2059,7 @@ def test_machine_query_reduces_page_to_response_bound(
         "observer",
     )
     rows = [
-        {"unit": f"fixture-{index}.service", "detail": "x" * 700}
-        for index in range(3)
+        {"unit": f"fixture-{index}.service", "detail": "x" * 700} for index in range(3)
     ]
 
     def collect(_operation: str, cursor: int, page_limit: int) -> dict[str, object]:

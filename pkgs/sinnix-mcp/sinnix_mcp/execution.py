@@ -51,7 +51,10 @@ class ExecutionProfile:
             raise ValueError("execution timeout must be positive")
         if self.max_stdout_bytes < 1 or self.max_stderr_bytes < 1:
             raise ValueError("execution output bounds must be positive")
-        if self.max_combined_output_bytes is not None and self.max_combined_output_bytes < 1:
+        if (
+            self.max_combined_output_bytes is not None
+            and self.max_combined_output_bytes < 1
+        ):
             raise ValueError("combined execution output bound must be positive")
 
 

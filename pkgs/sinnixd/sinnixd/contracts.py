@@ -10,10 +10,9 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 from uuid import UUID, uuid4
 
-from .jobs import GenericJobSpec, GenericJobs
+from .jobs import GenericJobs, GenericJobSpec
 from .limits import maximum_timeout_seconds, valid_timeout_seconds
 from .projects import ProjectCatalog, RegisteredCheckout
-
 
 MAX_PROMPT_BYTES = 200_000
 AGENT_BACKENDS = frozenset({"claude", "codex", "gemini", "grok", "antigravity"})
@@ -61,7 +60,11 @@ class TypedJobContracts:
             raise ContractError("operator shell jobs require the operator principal")
         if result != "exit-status":
             raise ContractError("operator shell jobs require an exit-status result")
-        if not argv or len(argv) > 128 or any(not isinstance(item, str) or not item for item in argv):
+        if (
+            not argv
+            or len(argv) > 128
+            or any(not isinstance(item, str) or not item for item in argv)
+        ):
             raise ContractError("shell argv must contain 1-128 non-empty strings")
         if sum(len(item) for item in argv) > 32_768:
             raise ContractError("shell argv exceeds the configured bound")
@@ -122,16 +125,28 @@ class TypedJobContracts:
         if backend not in AGENT_BACKENDS:
             raise ContractError("agent backend is invalid")
         if not isinstance(model, str) or not model or len(model) > 256:
-            raise ContractError("agent model must be a non-empty string up to 256 characters")
+            raise ContractError(
+                "agent model must be a non-empty string up to 256 characters"
+            )
         if not isinstance(effort, str) or not effort or len(effort) > 32:
-            raise ContractError("agent effort must be a non-empty string up to 32 characters")
+            raise ContractError(
+                "agent effort must be a non-empty string up to 32 characters"
+            )
         if credential_profile not in CREDENTIAL_PROFILES:
             raise ContractError("agent credential profile is invalid")
         if result != "last-message":
             raise ContractError("attested agent jobs require a last-message result")
-        if not isinstance(prompt, str) or not prompt or len(prompt.encode()) > MAX_PROMPT_BYTES:
-            raise ContractError(f"agent prompt must be non-empty and at most {MAX_PROMPT_BYTES} bytes")
-        if not self.native_runner.is_file() or not os.access(self.native_runner, os.X_OK):
+        if (
+            not isinstance(prompt, str)
+            or not prompt
+            or len(prompt.encode()) > MAX_PROMPT_BYTES
+        ):
+            raise ContractError(
+                f"agent prompt must be non-empty and at most {MAX_PROMPT_BYTES} bytes"
+            )
+        if not self.native_runner.is_file() or not os.access(
+            self.native_runner, os.X_OK
+        ):
             raise ContractError("native agent runner is unavailable")
         checkout = self.projects.checkout(project_id, checkout_id)
         binding = self.bead_binding(bead_binding, checkout)
@@ -142,7 +157,10 @@ class TypedJobContracts:
             "model": model,
             "effort": effort,
             "credential_profile": credential_profile,
-            "prompt": {"sha256": hashlib.sha256(prompt.encode()).hexdigest(), "bytes": len(prompt.encode())},
+            "prompt": {
+                "sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+                "bytes": len(prompt.encode()),
+            },
             "result": result,
             **({"bead_binding": binding} if binding is not None else {}),
         }
@@ -189,9 +207,14 @@ class TypedJobContracts:
     ) -> dict[str, Any]:
         maximum_timeout = maximum_timeout_seconds(kind)
         if not valid_timeout_seconds(timeout_seconds, kind=kind):
-            raise ContractError(f"job timeout_seconds must be between 1 and {maximum_timeout}")
+            raise ContractError(
+                f"job timeout_seconds must be between 1 and {maximum_timeout}"
+            )
         input_path = self.inputs_root / f"{job_id}.json"
-        self._write_private(input_path, json.dumps(private, sort_keys=True, separators=(",", ":")).encode())
+        self._write_private(
+            input_path,
+            json.dumps(private, sort_keys=True, separators=(",", ":")).encode(),
+        )
         environment = self._environment(checkout, job_id, principal, timeout_seconds)
         command = (
             str(contract_runner_executable()),
@@ -209,7 +232,10 @@ class TypedJobContracts:
         result_path = self.jobs.store.results_root / f"{job_id}.result"
         if result_kind == "last-message":
             private = {**private, "result_path": str(result_path)}
-            self._write_private(input_path, json.dumps(private, sort_keys=True, separators=(",", ":")).encode())
+            self._write_private(
+                input_path,
+                json.dumps(private, sort_keys=True, separators=(",", ":")).encode(),
+            )
         try:
             response = self.jobs.start(
                 GenericJobSpec(
@@ -247,11 +273,20 @@ class TypedJobContracts:
         if value is None:
             return None
         expected = {
-            "bead_ref", "project_ref", "checkout_ref", "task_revision",
-            "task_etag", "claim_ref", "claim_receipt", "request_id", "assignment_ref",
+            "bead_ref",
+            "project_ref",
+            "checkout_ref",
+            "task_revision",
+            "task_etag",
+            "claim_ref",
+            "claim_receipt",
+            "request_id",
+            "assignment_ref",
         }
         allowed = expected | {"write_scope"}
-        if not isinstance(value, Mapping) or (set(value) != expected and set(value) != allowed):
+        if not isinstance(value, Mapping) or (
+            set(value) != expected and set(value) != allowed
+        ):
             raise ContractError("agent bead binding is malformed")
         binding = dict(value)
         scope = binding.get("write_scope")
@@ -284,9 +319,12 @@ class TypedJobContracts:
             or len(binding["task_revision"]) != 64
             or not isinstance(binding["task_etag"], str)
             or len(binding["task_etag"]) != 64
-            or binding["assignment_ref"] is not None and (
+            or binding["assignment_ref"] is not None
+            and (
                 not isinstance(binding["assignment_ref"], str)
-                or not re.fullmatch(r"sinnix://jobs/[0-9a-f-]{36}", binding["assignment_ref"])
+                or not re.fullmatch(
+                    r"sinnix://jobs/[0-9a-f-]{36}", binding["assignment_ref"]
+                )
             )
         ):
             raise ContractError("agent bead binding is malformed")
@@ -303,7 +341,10 @@ class TypedJobContracts:
             or claim_receipt.get("ref") != claim_ref
         ):
             raise ContractError("agent bead binding claim is malformed")
-        if any(character not in "0123456789abcdef" for character in binding["task_revision"] + binding["task_etag"]):
+        if any(
+            character not in "0123456789abcdef"
+            for character in binding["task_revision"] + binding["task_etag"]
+        ):
             raise ContractError("agent bead binding is malformed")
         try:
             UUID(str(binding["request_id"]))
@@ -314,13 +355,19 @@ class TypedJobContracts:
         return json.loads(json.dumps(binding, sort_keys=True, separators=(",", ":")))
 
     def _environment(
-        self, checkout: RegisteredCheckout, job_id: str, principal: str, timeout_seconds: int
+        self,
+        checkout: RegisteredCheckout,
+        job_id: str,
+        principal: str,
+        timeout_seconds: int,
     ) -> dict[str, str]:
         project = self.projects.get(checkout.project_id)
         environment = project.environment.values()
         forbidden = sorted(name for name in environment if name.startswith("SINNIX"))
         if forbidden:
-            raise ContractError("project environment cannot supply SINNIX identity variables")
+            raise ContractError(
+                "project environment cannot supply SINNIX identity variables"
+            )
         environment.update(
             {
                 "SINNIXD_JOB_ID": job_id,
@@ -336,18 +383,26 @@ class TypedJobContracts:
     def _working_directory(checkout: RegisteredCheckout, cwd: str) -> Path:
         candidate = Path(cwd)
         if candidate.is_absolute() or ".." in candidate.parts:
-            raise ContractError("shell cwd must be a relative path inside the registered checkout")
+            raise ContractError(
+                "shell cwd must be a relative path inside the registered checkout"
+            )
         try:
             resolved = (checkout.path / candidate).resolve(strict=True)
         except FileNotFoundError as error:
             raise ContractError("shell cwd does not exist") from error
-        if not resolved.is_dir() or (resolved != checkout.path and checkout.path not in resolved.parents):
-            raise ContractError("shell cwd must be a directory inside the registered checkout")
+        if not resolved.is_dir() or (
+            resolved != checkout.path and checkout.path not in resolved.parents
+        ):
+            raise ContractError(
+                "shell cwd must be a directory inside the registered checkout"
+            )
         return resolved
 
     def _write_private(self, path: Path, content: bytes) -> None:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=f".{path.name}.", dir=path.parent
+        )
         try:
             with os.fdopen(descriptor, "wb") as handle:
                 handle.write(content)

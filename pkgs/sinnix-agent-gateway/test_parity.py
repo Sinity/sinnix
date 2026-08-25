@@ -15,7 +15,9 @@ from sinnix_agent_gateway.registry import REGISTRY
 def test_legacy_to_v2_parity_is_exhaustive_and_registry_bound() -> None:
     contract = legacy_parity_contract(REGISTRY)
     manifest = json.loads(
-        (Path(__file__).parent / "sinnix_agent_gateway" / "legacy_manifest_v1.json").read_text()
+        (
+            Path(__file__).parent / "sinnix_agent_gateway" / "legacy_manifest_v1.json"
+        ).read_text()
     )
 
     assert contract["schema"] == PARITY_SCHEMA
@@ -46,7 +48,11 @@ def test_legacy_to_v2_parity_is_exhaustive_and_registry_bound() -> None:
         for row in contract["rows"]
         if row["disposition"] == "migrated"
     )
-    assert {row["receipt_policy"] for row in contract["rows"] if row["disposition"] == "migrated"} == {"audit", "owner"}
+    assert {
+        row["receipt_policy"]
+        for row in contract["rows"]
+        if row["disposition"] == "migrated"
+    } == {"audit", "owner"}
 
 
 def test_parity_map_preserves_the_checked_in_historical_order() -> None:
@@ -71,9 +77,9 @@ def test_job_list_and_agent_launch_have_visible_v2_replacements() -> None:
 
 
 def test_shell_query_semantic_change_is_explicit() -> None:
-    row = {
-        row["legacy_tool"]: row for row in legacy_parity_contract(REGISTRY)["rows"]
-    }["shell_query"]
+    row = {row["legacy_tool"]: row for row in legacy_parity_contract(REGISTRY)["rows"]}[
+        "shell_query"
+    ]
 
     assert row["v2_action"] == "shell.run"
     assert row["required_principals"] == ("operator",)
@@ -84,9 +90,9 @@ def test_shell_query_semantic_change_is_explicit() -> None:
 
 
 def test_machine_report_has_an_evidence_backed_deletion_verdict() -> None:
-    row = {
-        row["legacy_tool"]: row for row in legacy_parity_contract(REGISTRY)["rows"]
-    }["machine_report"]
+    row = {row["legacy_tool"]: row for row in legacy_parity_contract(REGISTRY)["rows"]}[
+        "machine_report"
+    ]
 
     assert row["disposition"] == "deleted"
     assert row["v2_action"] is None

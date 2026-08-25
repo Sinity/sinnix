@@ -6,15 +6,15 @@ import fcntl
 import hashlib
 import json
 import os
-import shutil
 import selectors
+import shutil
 import socket
 import stat
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,7 +22,11 @@ from threading import Lock, RLock
 from typing import Any, Iterator, Protocol
 from uuid import UUID, uuid4
 
-from .limits import DEFAULT_TIMEOUT_SECONDS, maximum_timeout_seconds, valid_timeout_seconds
+from .limits import (
+    DEFAULT_TIMEOUT_SECONDS,
+    maximum_timeout_seconds,
+    valid_timeout_seconds,
+)
 from .projects import (
     OperationService,
     ProjectAdapter,
@@ -49,14 +53,29 @@ MAX_ADMISSION_CACHE_ENTRIES = 128
 MAX_ADMISSION_ESTIMATES = 128
 MIB = 1024 * 1024
 POOL_POLICIES = {
-    "interactive": {"workers": 4, "memory_budget": 3 * 1024 * MIB, "default_estimate": 256 * MIB},
-    "normal": {"workers": 3, "memory_budget": 8 * 1024 * MIB, "default_estimate": 1024 * MIB},
-    "bulk": {"workers": 1, "memory_budget": 18 * 1024 * MIB, "default_estimate": 8 * 1024 * MIB},
+    "interactive": {
+        "workers": 4,
+        "memory_budget": 3 * 1024 * MIB,
+        "default_estimate": 256 * MIB,
+    },
+    "normal": {
+        "workers": 3,
+        "memory_budget": 8 * 1024 * MIB,
+        "default_estimate": 1024 * MIB,
+    },
+    "bulk": {
+        "workers": 1,
+        "memory_budget": 18 * 1024 * MIB,
+        "default_estimate": 8 * 1024 * MIB,
+    },
 }
 
 
 def default_state_dir() -> Path:
-    return Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "sinnixd"
+    return (
+        Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
+        / "sinnixd"
+    )
 
 
 class SystemdJobError(RuntimeError):
@@ -156,7 +175,9 @@ def _open_private_parent(path: Path) -> int:
     return parent_descriptor
 
 
-def _private_regular_artifact(descriptor: int, path: Path, *, require_private_mode: bool = True) -> None:
+def _private_regular_artifact(
+    descriptor: int, path: Path, *, require_private_mode: bool = True
+) -> None:
     artifact = os.fstat(descriptor)
     if (
         artifact.st_uid != os.getuid()
@@ -191,7 +212,9 @@ def _open_preallocated_private_artifact(path: Path) -> Any:
     """Open the store-reserved log artifact without accepting a replacement link."""
     parent_descriptor = _open_private_parent(path)
     try:
-        descriptor = os.open(path.name, os.O_WRONLY | os.O_NOFOLLOW, dir_fd=parent_descriptor)
+        descriptor = os.open(
+            path.name, os.O_WRONLY | os.O_NOFOLLOW, dir_fd=parent_descriptor
+        )
     finally:
         os.close(parent_descriptor)
     try:
@@ -203,7 +226,9 @@ def _open_preallocated_private_artifact(path: Path) -> Any:
     return os.fdopen(descriptor, "wb")
 
 
-def _read_private_artifact(path: Path, max_bytes: int, *, offset: int = 0) -> bytes | None:
+def _read_private_artifact(
+    path: Path, max_bytes: int, *, offset: int = 0
+) -> bytes | None:
     """Read one bounded, private regular artifact without following a replacement link."""
     try:
         parent_descriptor = _open_private_parent(path)
@@ -211,7 +236,9 @@ def _read_private_artifact(path: Path, max_bytes: int, *, offset: int = 0) -> by
         return None
     try:
         try:
-            descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_descriptor)
+            descriptor = os.open(
+                path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_descriptor
+            )
         except OSError:
             return None
         try:
@@ -376,7 +403,9 @@ class UserSystemdJobs:
         self._run(["systemctl", "--user", "stop", unit])
 
     @staticmethod
-    def _run(args: Sequence[str], *, timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS) -> str:
+    def _run(
+        args: Sequence[str], *, timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS
+    ) -> str:
         timeout_seconds = min(timeout_seconds, SYSTEMD_COMMAND_TIMEOUT_SECONDS)
         if timeout_seconds <= 0:
             raise ValueError("systemd command timeout must be positive")
@@ -389,11 +418,15 @@ class UserSystemdJobs:
                 timeout=timeout_seconds,
             )
         except FileNotFoundError as error:
-            raise SystemdJobError(f"systemd command is unavailable: {args[0]}") from error
+            raise SystemdJobError(
+                f"systemd command is unavailable: {args[0]}"
+            ) from error
         except subprocess.TimeoutExpired as error:
             raise SystemdJobTimeout("systemd command timed out") from error
         except OSError as error:
-            raise SystemdJobError(f"systemd command failed: {args[0]}: {error}") from error
+            raise SystemdJobError(
+                f"systemd command failed: {args[0]}: {error}"
+            ) from error
         except subprocess.CalledProcessError as error:
             detail = error.stderr.strip() or error.stdout.strip() or str(error)
             raise SystemdJobError(detail) from error
@@ -461,7 +494,11 @@ class ServiceLease:
             UUID(self.lease_id)
         except (ValueError, AttributeError) as error:
             raise ValueError("service lease ID is invalid") from error
-        if self.host != "127.0.0.1" or self.readiness not in {"none", "project-command"} or self.lifetime != "job":
+        if (
+            self.host != "127.0.0.1"
+            or self.readiness not in {"none", "project-command"}
+            or self.lifetime != "job"
+        ):
             raise ValueError("service lease metadata is invalid")
         if not self.ports or len(self.ports) > 8:
             raise ValueError("service lease ports are invalid")
@@ -503,10 +540,16 @@ class ServiceLease:
             raise JobRecordError("service lease ports are invalid")
         ports: list[ServiceLeasePort] = []
         for port in raw_ports:
-            if not isinstance(port, Mapping) or set(port) != {"name", "environment", "port"}:
+            if not isinstance(port, Mapping) or set(port) != {
+                "name",
+                "environment",
+                "port",
+            }:
                 raise JobRecordError("service lease ports are invalid")
             try:
-                ports.append(ServiceLeasePort(port["name"], port["environment"], port["port"]))
+                ports.append(
+                    ServiceLeasePort(port["name"], port["environment"], port["port"])
+                )
             except (KeyError, TypeError) as error:
                 raise JobRecordError("service lease ports are invalid") from error
         try:
@@ -550,18 +593,27 @@ class GenericJobSpec:
     lease: ServiceLease | None = None
 
     def __post_init__(self) -> None:
-        if self.kind not in {"declared-operation", "foreground-command", "operator-shell", "attested-agent"}:
+        if self.kind not in {
+            "declared-operation",
+            "foreground-command",
+            "operator-shell",
+            "attested-agent",
+        }:
             raise ValueError("job kind is invalid")
         if not self.command and not self.command_digest:
             raise ValueError("job needs a launch command or command digest")
-        if self.command and any(not isinstance(value, str) or not value for value in self.command):
+        if self.command and any(
+            not isinstance(value, str) or not value for value in self.command
+        ):
             raise ValueError("job command must be non-empty strings")
         if self.command_digest is not None and (
-            len(self.command_digest) != 64 or any(value not in "0123456789abcdef" for value in self.command_digest)
+            len(self.command_digest) != 64
+            or any(value not in "0123456789abcdef" for value in self.command_digest)
         ):
             raise ValueError("job command digest is invalid")
         if self.parameter_digest is not None and (
-            len(self.parameter_digest) != 64 or any(value not in "0123456789abcdef" for value in self.parameter_digest)
+            len(self.parameter_digest) != 64
+            or any(value not in "0123456789abcdef" for value in self.parameter_digest)
         ):
             raise ValueError("job parameter digest is invalid")
         if self.kind == "declared-operation" and self.parameter_digest is None:
@@ -572,7 +624,9 @@ class GenericJobSpec:
             raise ValueError("job working_directory must be non-empty")
         maximum_timeout = maximum_timeout_seconds(self.kind)
         if not valid_timeout_seconds(self.timeout_seconds, kind=self.kind):
-            raise ValueError(f"job timeout_seconds must be between 1 and {maximum_timeout}")
+            raise ValueError(
+                f"job timeout_seconds must be between 1 and {maximum_timeout}"
+            )
         if any(
             not isinstance(key, str) or not key or not isinstance(value, str)
             for key, value in self.environment.items()
@@ -580,7 +634,10 @@ class GenericJobSpec:
             raise ValueError("job environment must be string key/value pairs")
         if any(not isinstance(key, str) or not key for key in self.environment_keys):
             raise ValueError("job environment metadata must be non-empty strings")
-        if self.principal is not None and self.principal not in {"operator", "agent-control"}:
+        if self.principal is not None and self.principal not in {
+            "operator",
+            "agent-control",
+        }:
             raise ValueError("job principal is invalid")
         if self.kind == "operator-shell" and self.principal != "operator":
             raise ValueError("operator shell jobs require the operator principal")
@@ -594,11 +651,24 @@ class GenericJobSpec:
         if self.kind in {"operator-shell", "attested-agent"} and not self.checkout:
             raise ValueError("typed jobs require a registered checkout")
         if self.checkout is not None and (
-            set(self.checkout) != {"project_id", "project_path", "checkout_id", "path", "git_common_dir", "head"}
-            or any(not isinstance(value, str) or not value for value in self.checkout.values())
+            set(self.checkout)
+            != {
+                "project_id",
+                "project_path",
+                "checkout_id",
+                "path",
+                "git_common_dir",
+                "head",
+            }
+            or any(
+                not isinstance(value, str) or not value
+                for value in self.checkout.values()
+            )
         ):
             raise ValueError("job checkout identity is invalid")
-        if not isinstance(self.contract, Mapping) or any(not isinstance(key, str) or not key for key in self.contract):
+        if not isinstance(self.contract, Mapping) or any(
+            not isinstance(key, str) or not key for key in self.contract
+        ):
             raise ValueError("job contract is invalid")
         if self.result_kind not in {"exit-status", "last-message", "json", "pytest"}:
             raise ValueError("job result kind is invalid")
@@ -608,21 +678,31 @@ class GenericJobSpec:
             raise ValueError("job exclusive keys are invalid")
         if len(set(self.exclusive_keys)) != len(self.exclusive_keys):
             raise ValueError("job exclusive keys must be unique")
-        if any(not isinstance(value, str) or not value for value in self.dependency_job_ids):
+        if any(
+            not isinstance(value, str) or not value for value in self.dependency_job_ids
+        ):
             raise ValueError("job dependency IDs are invalid")
         for name, key in (("coalesce", self.coalesce_key), ("cache", self.cache_key)):
-            if key is not None and (len(key) != 64 or any(value not in "0123456789abcdef" for value in key)):
+            if key is not None and (
+                len(key) != 64 or any(value not in "0123456789abcdef" for value in key)
+            ):
                 raise ValueError(f"job {name} key is invalid")
-        if self.estimate_key is not None and (not isinstance(self.estimate_key, str) or not self.estimate_key):
+        if self.estimate_key is not None and (
+            not isinstance(self.estimate_key, str) or not self.estimate_key
+        ):
             raise ValueError("job estimate key is invalid")
         if self.estimate_memory_bytes is not None and (
-            not isinstance(self.estimate_memory_bytes, int) or isinstance(self.estimate_memory_bytes, bool) or self.estimate_memory_bytes < 1
+            not isinstance(self.estimate_memory_bytes, int)
+            or isinstance(self.estimate_memory_bytes, bool)
+            or self.estimate_memory_bytes < 1
         ):
             raise ValueError("job memory estimate is invalid")
         if self.scratch not in {"none", "tmpfs", "nvme"}:
             raise ValueError("job scratch is invalid")
         if self.lease is not None and (
-            self.kind != "declared-operation" or not self.project_id or not self.operation
+            self.kind != "declared-operation"
+            or not self.project_id
+            or not self.operation
         ):
             raise ValueError("only declared operations may own service leases")
         if self.kind == "operator-shell" and self.result_kind != "exit-status":
@@ -634,7 +714,9 @@ class GenericJobSpec:
         result: dict[str, Any] = {
             "kind": self.kind,
             "working_directory": self.working_directory,
-            "environment_keys": sorted(set(self.environment) | set(self.environment_keys)),
+            "environment_keys": sorted(
+                set(self.environment) | set(self.environment_keys)
+            ),
             "timeout_seconds": self.timeout_seconds,
             "project_id": self.project_id,
             "operation": self.operation,
@@ -657,7 +739,9 @@ class GenericJobSpec:
         if self.kind != "declared-operation":
             result["command"] = {
                 "digest": self.command_digest or _command_digest(self.command),
-                "display": "synthetic foreground command" if self.kind == "foreground-command" else f"{self.kind} contract runner",
+                "display": "synthetic foreground command"
+                if self.kind == "foreground-command"
+                else f"{self.kind} contract runner",
             }
         else:
             result["command"] = {
@@ -667,11 +751,15 @@ class GenericJobSpec:
         return result
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any], *, require_parameter_digest: bool = False) -> GenericJobSpec:
+    def from_dict(
+        cls, value: Mapping[str, Any], *, require_parameter_digest: bool = False
+    ) -> GenericJobSpec:
         command = value.get("command")
         environment_keys = value.get("environment_keys")
-        if not isinstance(command, Mapping) or not isinstance(environment_keys, list) or any(
-            not isinstance(key, str) or not key for key in environment_keys
+        if (
+            not isinstance(command, Mapping)
+            or not isinstance(environment_keys, list)
+            or any(not isinstance(key, str) or not key for key in environment_keys)
         ):
             raise JobRecordError("job spec has invalid command or environment metadata")
         kind = value.get("kind")
@@ -685,7 +773,9 @@ class GenericJobSpec:
         if kind == "declared-operation":
             if raw_parameters is None and not require_parameter_digest:
                 parameter_digest = _parameter_digest({})
-            elif not isinstance(raw_parameters, Mapping) or set(raw_parameters) != {"digest"}:
+            elif not isinstance(raw_parameters, Mapping) or set(raw_parameters) != {
+                "digest"
+            }:
                 raise JobRecordError("declared job spec has invalid parameter metadata")
             else:
                 parameter_digest = raw_parameters.get("digest")
@@ -721,7 +811,9 @@ class GenericJobSpec:
                 estimate_key=admission.get("estimate_key"),
                 estimate_memory_bytes=admission.get("estimate_memory_bytes"),
                 scratch=admission.get("scratch", "none"),
-                lease=ServiceLease.from_dict(raw_lease) if raw_lease is not None else None,
+                lease=ServiceLease.from_dict(raw_lease)
+                if raw_lease is not None
+                else None,
             )
         except ValueError as error:
             raise JobRecordError(str(error)) from error
@@ -750,8 +842,12 @@ class GenericJobRecord:
             "spec": self.spec.to_dict(),
             "artifacts": {
                 "log": str(self.log_path),
-                "result": str(self.result_path) if self.result_path is not None else None,
-                "scratch": str(self.scratch_path) if self.scratch_path is not None else None,
+                "result": str(self.result_path)
+                if self.result_path is not None
+                else None,
+                "scratch": str(self.scratch_path)
+                if self.scratch_path is not None
+                else None,
             },
             "created_at": self.created_at,
             "cancel_requested_at": self.cancel_requested_at,
@@ -767,11 +863,15 @@ class GenericJobRecord:
         unit = value.get("unit")
         artifacts = value.get("artifacts")
         schema_version = value.get("schema_version")
-        if schema_version not in {2, 3, 4, JOB_SCHEMA_VERSION} or not isinstance(job_id, str):
+        if schema_version not in {2, 3, 4, JOB_SCHEMA_VERSION} or not isinstance(
+            job_id, str
+        ):
             raise JobRecordError("job record schema or ID is invalid")
         if unit != job_unit_name(job_id):
             raise JobRecordError("job record unit does not match its ID")
-        if not isinstance(artifacts, Mapping) or not isinstance(artifacts.get("log"), str):
+        if not isinstance(artifacts, Mapping) or not isinstance(
+            artifacts.get("log"), str
+        ):
             raise JobRecordError("job record log artifact is invalid")
         log_path = Path(artifacts["log"]).resolve()
         logs_root = (root / "logs").resolve()
@@ -805,13 +905,20 @@ class GenericJobRecord:
             not isinstance(created_at, str)
             or (cancelled is not None and not isinstance(cancelled, str))
             or (invocation is not None and not isinstance(invocation, str))
-            or (stop_acknowledged is not None and not isinstance(stop_acknowledged, str))
+            or (
+                stop_acknowledged is not None and not isinstance(stop_acknowledged, str)
+            )
             or (stop_invocation is not None and not isinstance(stop_invocation, str))
             or (stop_acknowledged is None) != (stop_invocation is None)
-            or (stop_acknowledged is not None and (cancelled is None or stop_invocation != invocation))
+            or (
+                stop_acknowledged is not None
+                and (cancelled is None or stop_invocation != invocation)
+            )
         ):
             raise JobRecordError("job record timestamps are invalid")
-        parsed_spec = GenericJobSpec.from_dict(spec, require_parameter_digest=schema_version >= 4)
+        parsed_spec = GenericJobSpec.from_dict(
+            spec, require_parameter_digest=schema_version >= 4
+        )
         if parsed_spec.lease is not None and parsed_spec.lease.lease_id != job_id:
             raise JobRecordError("service lease ID does not match its job")
         return cls(
@@ -924,7 +1031,9 @@ class GenericJobStore:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
 
-    def allocate_service_lease(self, job_id: str, service: OperationService) -> ServiceLease:
+    def allocate_service_lease(
+        self, job_id: str, service: OperationService
+    ) -> ServiceLease:
         _ = job_unit_name(job_id)
         with self.locked(job_id):
             with self.locked_service_leases():
@@ -950,12 +1059,18 @@ class GenericJobStore:
                 lease = self._allocate_service_lease_locked(job_id, service)
                 record = self.create(build_spec(lease), job_id)
                 try:
-                    self.write_declared_launch(record.job_id, record.spec.command, record.spec.environment)
+                    self.write_declared_launch(
+                        record.job_id, record.spec.command, record.spec.environment
+                    )
                     self._save_service_lease(lease)
                 except BaseException:
                     failed = replace(
                         record,
-                        state={"phase": "launch-failed", "terminal": True, "observed_at": _timestamp()},
+                        state={
+                            "phase": "launch-failed",
+                            "terminal": True,
+                            "observed_at": _timestamp(),
+                        },
                     )
                     self.save(failed)
                     self.cleanup_scratch(failed)
@@ -1024,13 +1139,17 @@ class GenericJobStore:
         for lease in protected.values():
             ports = {port.port for port in lease.ports}
             if occupied.intersection(ports):
-                raise JobRecordError("protected service lease ports collide during recovery")
+                raise JobRecordError(
+                    "protected service lease ports collide during recovery"
+                )
             occupied.update(ports)
         for lease_id, lease in sorted(active.items()):
             assert lease is not None
             ports = {port.port for port in lease.ports}
             if occupied.intersection(ports):
-                raise JobRecordError("active service lease ports collide during recovery")
+                raise JobRecordError(
+                    "active service lease ports collide during recovery"
+                )
             occupied.update(ports)
             self._service_lease_released_path(lease_id).unlink(missing_ok=True)
             if existing.get(lease_id) != lease:
@@ -1056,15 +1175,20 @@ class GenericJobStore:
             cancellation = record.state.get("cancellation")
             return (
                 phase in {"missing", "launch-failed"}
-                or (phase == "succeeded" and record.state.get("result_evidence") == "completed")
+                or (
+                    phase == "succeeded"
+                    and record.state.get("result_evidence") == "completed"
+                )
                 or (
                     phase == "cancelled"
-                    and record.cancel_stop_acknowledged_invocation_id == record.cancel_requested_invocation_id
+                    and record.cancel_stop_acknowledged_invocation_id
+                    == record.cancel_requested_invocation_id
                     and record.cancel_stop_acknowledged_invocation_id is not None
                 )
                 or (
                     phase == "outcome-unknown"
-                    and record.state.get("outcome_evidence") == "unit-collected-after-cancellation-grace"
+                    and record.state.get("outcome_evidence")
+                    == "unit-collected-after-cancellation-grace"
                     and record.cancel_requested_at is not None
                     and isinstance(cancellation, Mapping)
                     and cancellation.get("requested_at") == record.cancel_requested_at
@@ -1091,7 +1215,11 @@ class GenericJobStore:
                 and result == "signal"
                 and record.cancel_stop_acknowledged_invocation_id == invocation
             )
-        return phase == "failed" and active in {"inactive", "failed"} and status not in {None, "0"}
+        return (
+            phase == "failed"
+            and active in {"inactive", "failed"}
+            and status not in {None, "0"}
+        )
 
     def release_terminal_service_lease(self, record: GenericJobRecord) -> None:
         if not self._terminal_service_lease_releasable(record):
@@ -1100,7 +1228,9 @@ class GenericJobStore:
         with self.locked_service_leases():
             self._mark_service_lease_released(record.spec.lease.lease_id)
 
-    def _allocate_service_lease_locked(self, job_id: str, service: OperationService) -> ServiceLease:
+    def _allocate_service_lease_locked(
+        self, job_id: str, service: OperationService
+    ) -> ServiceLease:
         occupied = {
             port.port
             for lease in self._service_leases().values()
@@ -1120,10 +1250,14 @@ class GenericJobStore:
                 None,
             )
             if port is None:
-                raise JobRecordError(f"no loopback port is available for service slot {slot.name}")
+                raise JobRecordError(
+                    f"no loopback port is available for service slot {slot.name}"
+                )
             occupied.add(port)
             allocations.append(ServiceLeasePort(slot.name, slot.environment, port))
-        return ServiceLease(job_id, service.readiness, service.lifetime, tuple(allocations))
+        return ServiceLease(
+            job_id, service.readiness, service.lifetime, tuple(allocations)
+        )
 
     def service_lease_ports_available(self, lease: ServiceLease | None) -> bool:
         """Confirm the descriptor-owned ports were not claimed before launch.
@@ -1158,7 +1292,9 @@ class GenericJobStore:
     def _save_service_lease(self, lease: ServiceLease) -> None:
         path = self._service_lease_path(lease.lease_id)
         temporary = path.with_suffix(".json.tmp")
-        descriptor = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        descriptor = os.open(
+            temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+        )
         try:
             with os.fdopen(descriptor, "w") as handle:
                 json.dump(lease.to_dict(), handle, sort_keys=True)
@@ -1179,7 +1315,10 @@ class GenericJobStore:
         return self.leases_root / f"{lease_id}.released"
 
     def _service_lease_released(self, lease_id: str) -> bool:
-        return _read_private_artifact(self._service_lease_released_path(lease_id), 1) == b""
+        return (
+            _read_private_artifact(self._service_lease_released_path(lease_id), 1)
+            == b""
+        )
 
     def _mark_service_lease_released(self, lease_id: str) -> None:
         self._service_lease_path(lease_id).unlink(missing_ok=True)
@@ -1190,12 +1329,16 @@ class GenericJobStore:
         self._set_service_lease_record(lease_id, active=False)
         _fsync_directory(self.leases_root)
 
-    def create(self, spec: GenericJobSpec, job_id: str | None = None) -> GenericJobRecord:
+    def create(
+        self, spec: GenericJobSpec, job_id: str | None = None
+    ) -> GenericJobRecord:
         _ensure_durable_directory(self.records_root)
         _ensure_durable_directory(self.logs_root)
         if spec.result_kind in {"last-message", "json", "pytest"}:
             _ensure_durable_directory(self.results_root)
-        candidates = (job_id,) if job_id is not None else tuple(str(uuid4()) for _ in range(8))
+        candidates = (
+            (job_id,) if job_id is not None else tuple(str(uuid4()) for _ in range(8))
+        )
         for candidate in candidates:
             _ = job_unit_name(candidate)
             path = self._record_path(candidate)
@@ -1222,7 +1365,11 @@ class GenericJobStore:
                 result_path=result_path.resolve() if result_path is not None else None,
                 scratch_path=scratch_path,
                 created_at=_timestamp(),
-                state={"phase": "launching", "terminal": False, "observed_at": _timestamp()},
+                state={
+                    "phase": "launching",
+                    "terminal": False,
+                    "observed_at": _timestamp(),
+                },
             )
             self.save(record)
             return record
@@ -1252,7 +1399,11 @@ class GenericJobStore:
     def cleanup_scratch(self, record: GenericJobRecord) -> None:
         if record.scratch_path is None:
             return
-        root = self.tmpfs_scratch_root.resolve() if record.spec.scratch == "tmpfs" else self.nvme_scratch_root.resolve()
+        root = (
+            self.tmpfs_scratch_root.resolve()
+            if record.spec.scratch == "tmpfs"
+            else self.nvme_scratch_root.resolve()
+        )
         path = record.scratch_path.resolve()
         if path.parent != root or path.name != record.job_id:
             raise JobRecordError("job scratch artifact escapes owned root")
@@ -1261,7 +1412,11 @@ class GenericJobStore:
     def prepare_scratch(self, record: GenericJobRecord) -> Path | None:
         if record.scratch_path is None:
             return None
-        root = self.tmpfs_scratch_root if record.spec.scratch == "tmpfs" else self.nvme_scratch_root
+        root = (
+            self.tmpfs_scratch_root
+            if record.spec.scratch == "tmpfs"
+            else self.nvme_scratch_root
+        )
         _ensure_durable_directory(root)
         root = root.resolve()
         path = record.scratch_path
@@ -1271,14 +1426,22 @@ class GenericJobStore:
             path.mkdir(mode=0o700)
         except FileExistsError:
             artifact = path.lstat()
-            if artifact.st_uid != os.getuid() or artifact.st_mode & 0o077 or not stat.S_ISDIR(artifact.st_mode):
-                raise JobRecordError("job scratch artifact is not a private directory")
+            if (
+                artifact.st_uid != os.getuid()
+                or artifact.st_mode & 0o077
+                or not stat.S_ISDIR(artifact.st_mode)
+            ):
+                raise JobRecordError(
+                    "job scratch artifact is not a private directory"
+                ) from None
         else:
             _fsync_directory(root)
         return path
 
     def cleanup_inactive_scratch(self, records: Sequence[GenericJobRecord]) -> None:
-        active = {record.job_id for record in records if not record.state.get("terminal")}
+        active = {
+            record.job_id for record in records if not record.state.get("terminal")
+        }
         for root in (self.tmpfs_scratch_root, self.nvme_scratch_root):
             if not root.exists():
                 continue
@@ -1302,7 +1465,11 @@ class GenericJobStore:
         _ = job_unit_name(job_id)
         path = self.readiness_root / job_id
         try:
-            return not path.is_symlink() and path.is_file() and path.read_text() == f"{job_id}\n"
+            return (
+                not path.is_symlink()
+                and path.is_file()
+                and path.read_text() == f"{job_id}\n"
+            )
         except OSError:
             return False
 
@@ -1316,7 +1483,9 @@ class GenericJobStore:
     def cleanup_inactive_readiness(self, records: Sequence[GenericJobRecord]) -> None:
         if not self.readiness_root.exists():
             return
-        active = {record.job_id for record in records if not record.state.get("terminal")}
+        active = {
+            record.job_id for record in records if not record.state.get("terminal")
+        }
         for path in sorted(self.readiness_root.iterdir()):
             try:
                 _ = job_unit_name(path.name)
@@ -1335,19 +1504,30 @@ class GenericJobStore:
             path.chmod(path.stat().st_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
             for directory, names, _files in os.walk(path, followlinks=False):
                 current = Path(directory)
-                current.chmod(current.stat().st_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+                current.chmod(
+                    current.stat().st_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+                )
                 for name in names:
                     child = current / name
                     if not child.is_symlink():
-                        child.chmod(child.stat().st_mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+                        child.chmod(
+                            child.stat().st_mode
+                            | stat.S_IRUSR
+                            | stat.S_IWUSR
+                            | stat.S_IXUSR
+                        )
             shutil.rmtree(path)
             _fsync_directory(root)
 
-    def write_declared_launch(self, job_id: str, command: Sequence[str], environment: Mapping[str, str]) -> None:
+    def write_declared_launch(
+        self, job_id: str, command: Sequence[str], environment: Mapping[str, str]
+    ) -> None:
         _ = job_unit_name(job_id)
         _ensure_durable_directory(self.inputs_root)
         path = self.inputs_root / f"{job_id}.launch"
-        payload = json.dumps({"command": list(command), "environment": dict(environment)}, sort_keys=True).encode()
+        payload = json.dumps(
+            {"command": list(command), "environment": dict(environment)}, sort_keys=True
+        ).encode()
         with _open_private_artifact(path) as handle:
             handle.write(payload)
             handle.flush()
@@ -1356,7 +1536,9 @@ class GenericJobStore:
 
     def declared_launch(self, job_id: str) -> tuple[tuple[str, ...], dict[str, str]]:
         _ = job_unit_name(job_id)
-        content = _read_private_artifact(self.inputs_root / f"{job_id}.launch", 128 * 1024)
+        content = _read_private_artifact(
+            self.inputs_root / f"{job_id}.launch", 128 * 1024
+        )
         try:
             value = json.loads(content.decode()) if content is not None else None
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -1366,8 +1548,14 @@ class GenericJobStore:
         command = value["command"]
         environment = value["environment"]
         if (
-            not isinstance(command, list) or not command or any(not isinstance(item, str) or not item for item in command)
-            or not isinstance(environment, Mapping) or any(not isinstance(key, str) or not key or not isinstance(item, str) for key, item in environment.items())
+            not isinstance(command, list)
+            or not command
+            or any(not isinstance(item, str) or not item for item in command)
+            or not isinstance(environment, Mapping)
+            or any(
+                not isinstance(key, str) or not key or not isinstance(item, str)
+                for key, item in environment.items()
+            )
         ):
             raise JobRecordError("declared job launch input is invalid")
         return tuple(command), dict(environment)
@@ -1386,7 +1574,9 @@ class GenericJobStore:
         with lock:
             _ensure_durable_directory(self.locks_root)
             lock_path = self.locks_root / f"{job_id}.lock"
-            descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+            descriptor = os.open(
+                lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600
+            )
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX)
                 yield
@@ -1438,15 +1628,20 @@ class GenericJobStore:
             job_ids = self._active_record_ids()
             if job_ids is None:
                 all_records = self.list()
-                records = [record for record in all_records if not record.state.get("terminal")]
+                records = [
+                    record for record in all_records if not record.state.get("terminal")
+                ]
                 self._write_active_record_ids({record.job_id for record in records})
                 if self._service_lease_record_ids() is None:
                     with self.locked_service_lease_records():
-                        self._write_service_lease_record_ids({
-                            record.job_id
-                            for record in all_records
-                            if record.spec.lease is not None and not self._service_lease_released(record.job_id)
-                        })
+                        self._write_service_lease_record_ids(
+                            {
+                                record.job_id
+                                for record in all_records
+                                if record.spec.lease is not None
+                                and not self._service_lease_released(record.job_id)
+                            }
+                        )
                 return records
             records: list[GenericJobRecord] = []
             recovered_ids: set[str] = set()
@@ -1471,8 +1666,14 @@ class GenericJobStore:
             value = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):
             return None
-        raw_ids = value.get("jobs") if isinstance(value, Mapping) and value.get("schema_version") == 1 else None
-        if not isinstance(raw_ids, list) or any(not isinstance(job_id, str) for job_id in raw_ids):
+        raw_ids = (
+            value.get("jobs")
+            if isinstance(value, Mapping) and value.get("schema_version") == 1
+            else None
+        )
+        if not isinstance(raw_ids, list) or any(
+            not isinstance(job_id, str) for job_id in raw_ids
+        ):
             return None
         try:
             return {str(UUID(job_id)) for job_id in raw_ids}
@@ -1492,10 +1693,16 @@ class GenericJobStore:
     def _write_active_record_ids(self, job_ids: set[str]) -> None:
         path = self.active_records_path
         temporary = path.with_suffix(".json.tmp")
-        descriptor = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        descriptor = os.open(
+            temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+        )
         try:
             with os.fdopen(descriptor, "w") as handle:
-                json.dump({"schema_version": 1, "jobs": sorted(job_ids)}, handle, sort_keys=True)
+                json.dump(
+                    {"schema_version": 1, "jobs": sorted(job_ids)},
+                    handle,
+                    sort_keys=True,
+                )
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -1512,9 +1719,12 @@ class GenericJobStore:
                 records = [
                     record
                     for record in self.list()
-                    if record.spec.lease is not None and not self._service_lease_released(record.job_id)
+                    if record.spec.lease is not None
+                    and not self._service_lease_released(record.job_id)
                 ]
-                self._write_service_lease_record_ids({record.job_id for record in records})
+                self._write_service_lease_record_ids(
+                    {record.job_id for record in records}
+                )
                 return records
             records: list[GenericJobRecord] = []
             recovered_ids: set[str] = set()
@@ -1539,8 +1749,14 @@ class GenericJobStore:
             value = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):
             return None
-        raw_ids = value.get("jobs") if isinstance(value, Mapping) and value.get("schema_version") == 1 else None
-        if not isinstance(raw_ids, list) or any(not isinstance(job_id, str) for job_id in raw_ids):
+        raw_ids = (
+            value.get("jobs")
+            if isinstance(value, Mapping) and value.get("schema_version") == 1
+            else None
+        )
+        if not isinstance(raw_ids, list) or any(
+            not isinstance(job_id, str) for job_id in raw_ids
+        ):
             return None
         try:
             return {str(UUID(job_id)) for job_id in raw_ids}
@@ -1560,10 +1776,16 @@ class GenericJobStore:
     def _write_service_lease_record_ids(self, job_ids: set[str]) -> None:
         path = self.service_lease_records_path
         temporary = path.with_suffix(".json.tmp")
-        descriptor = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        descriptor = os.open(
+            temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+        )
         try:
             with os.fdopen(descriptor, "w") as handle:
-                json.dump({"schema_version": 1, "jobs": sorted(job_ids)}, handle, sort_keys=True)
+                json.dump(
+                    {"schema_version": 1, "jobs": sorted(job_ids)},
+                    handle,
+                    sort_keys=True,
+                )
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -1579,7 +1801,9 @@ class GenericJobStore:
             self._set_active_record(record.job_id, active=True)
         if not self.service_lease_records_path.exists():
             self._set_service_lease_record(record.job_id, active=False)
-        if record.spec.lease is not None and not self._service_lease_released(record.job_id):
+        if record.spec.lease is not None and not self._service_lease_released(
+            record.job_id
+        ):
             self._set_service_lease_record(record.job_id, active=True)
         temporary = path.with_suffix(".json.tmp")
         descriptor = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
@@ -1627,7 +1851,10 @@ class GenericJobs:
         for record in records:
             with self.store.locked(record.job_id):
                 record = self.store.load(record.job_id)
-                if record.spec.kind == "declared-operation" and record.state.get("phase") == "launching":
+                if (
+                    record.spec.kind == "declared-operation"
+                    and record.state.get("phase") == "launching"
+                ):
                     record = self._recover_unpublished_declared_locked(record)
                 if record.state.get("terminal"):
                     self._terminal_cleanup(record)
@@ -1642,7 +1869,9 @@ class GenericJobs:
                 for record in finalized:
                     self._finish_admission(record, state)
 
-    def _recover_unpublished_declared_locked(self, record: GenericJobRecord) -> GenericJobRecord:
+    def _recover_unpublished_declared_locked(
+        self, record: GenericJobRecord
+    ) -> GenericJobRecord:
         """Recover the record/input publication window without guessing at systemd.
 
         A complete private input proves the durable intent can be queued.  An
@@ -1678,7 +1907,12 @@ class GenericJobs:
                 "observed_at": _timestamp(),
                 "subscribers": 1,
                 "dependencies": list(record.spec.dependency_job_ids),
-                "admission": {"pool": record.spec.pool, "estimate_memory_bytes": self._estimate(record.spec, self._admission_state())},
+                "admission": {
+                    "pool": record.spec.pool,
+                    "estimate_memory_bytes": self._estimate(
+                        record.spec, self._admission_state()
+                    ),
+                },
             },
         )
         self.store.save(queued)
@@ -1687,18 +1921,47 @@ class GenericJobs:
     def _admission_state(self) -> dict[str, Any]:
         path = self.store.admission_path
         if not path.exists():
-            return {"schema_version": ADMISSION_SCHEMA_VERSION, "active": {}, "cache": {}, "estimates": {}}
+            return {
+                "schema_version": ADMISSION_SCHEMA_VERSION,
+                "active": {},
+                "cache": {},
+                "estimates": {},
+            }
         try:
             value = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):
             # Conservatively recover by forgetting optimizations. Existing
             # records/systemd evidence still determine all real jobs.
-            return {"schema_version": ADMISSION_SCHEMA_VERSION, "active": {}, "cache": {}, "estimates": {}}
-        if not isinstance(value, Mapping) or value.get("schema_version") != ADMISSION_SCHEMA_VERSION:
-            return {"schema_version": ADMISSION_SCHEMA_VERSION, "active": {}, "cache": {}, "estimates": {}}
-        if not all(isinstance(value.get(key), Mapping) for key in ("active", "cache", "estimates")):
-            return {"schema_version": ADMISSION_SCHEMA_VERSION, "active": {}, "cache": {}, "estimates": {}}
-        return {"schema_version": ADMISSION_SCHEMA_VERSION, **{key: dict(value[key]) for key in ("active", "cache", "estimates")}}
+            return {
+                "schema_version": ADMISSION_SCHEMA_VERSION,
+                "active": {},
+                "cache": {},
+                "estimates": {},
+            }
+        if (
+            not isinstance(value, Mapping)
+            or value.get("schema_version") != ADMISSION_SCHEMA_VERSION
+        ):
+            return {
+                "schema_version": ADMISSION_SCHEMA_VERSION,
+                "active": {},
+                "cache": {},
+                "estimates": {},
+            }
+        if not all(
+            isinstance(value.get(key), Mapping)
+            for key in ("active", "cache", "estimates")
+        ):
+            return {
+                "schema_version": ADMISSION_SCHEMA_VERSION,
+                "active": {},
+                "cache": {},
+                "estimates": {},
+            }
+        return {
+            "schema_version": ADMISSION_SCHEMA_VERSION,
+            **{key: dict(value[key]) for key in ("active", "cache", "estimates")},
+        }
 
     def _save_admission_state(self, value: Mapping[str, Any]) -> None:
         path = self.store.admission_path
@@ -1714,7 +1977,16 @@ class GenericJobs:
 
     @staticmethod
     def _bounded(mapping: Mapping[str, Any], limit: int) -> dict[str, Any]:
-        return dict(sorted(mapping.items(), key=lambda item: str(item[1].get("touched_at", "")) if isinstance(item[1], Mapping) else "")[-limit:])
+        return dict(
+            sorted(
+                mapping.items(),
+                key=lambda item: (
+                    str(item[1].get("touched_at", ""))
+                    if isinstance(item[1], Mapping)
+                    else ""
+                ),
+            )[-limit:]
+        )
 
     def start(self, spec: GenericJobSpec, job_id: str | None = None) -> dict[str, Any]:
         candidate = job_id or str(uuid4())
@@ -1722,7 +1994,9 @@ class GenericJobs:
             record = self.store.create(spec, candidate)
             try:
                 if not self.store.service_lease_ports_available(spec.lease):
-                    raise SystemdJobError("leased loopback port became unavailable before launch")
+                    raise SystemdJobError(
+                        "leased loopback port became unavailable before launch"
+                    )
                 self.systemd.start(
                     unit=record.unit,
                     command=spec.command,
@@ -1730,11 +2004,16 @@ class GenericJobs:
                     environment=spec.environment,
                     timeout_seconds=spec.timeout_seconds,
                     log_path=record.log_path,
-                    json_result_path=record.result_path if spec.result_kind in {"json", "pytest"} else None,
+                    json_result_path=record.result_path
+                    if spec.result_kind in {"json", "pytest"}
+                    else None,
                 )
             except SystemdJobError:
                 return self._reconcile_launch_error(record)
-            submitted = self._with_state(record, {"phase": "submitted", "terminal": False, "observed_at": _timestamp()})
+            submitted = self._with_state(
+                record,
+                {"phase": "submitted", "terminal": False, "observed_at": _timestamp()},
+            )
             self.store.save(submitted)
             return self._public(submitted, submitted.state)
 
@@ -1750,12 +2029,21 @@ class GenericJobs:
         contract: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if principal not in {"agent-control", "operator"}:
-            raise ValueError("declared operations require agent-control or operator principal")
+            raise ValueError(
+                "declared operations require agent-control or operator principal"
+            )
         if checkout is not None and checkout.project_id != project.project_id:
             raise ValueError("declared job checkout belongs to another project")
         with self._admission_lock:
             return self._start_declared_locked(
-                project, operation, correlation_id, principal, parameters, checkout, (), contract or {}
+                project,
+                operation,
+                correlation_id,
+                principal,
+                parameters,
+                checkout,
+                (),
+                contract or {},
             )
 
     def _start_declared_locked(
@@ -1803,7 +2091,13 @@ class GenericJobs:
         tree = self._cache_tree(workdir)
         coalesce_key = (
             self._operation_identity_key(
-                project, operation, parameter_digest, principal, environment, tree, checkout
+                project,
+                operation,
+                parameter_digest,
+                principal,
+                environment,
+                tree,
+                checkout,
             )
             if operation.service is None or operation.cache == "tree+environment"
             else None
@@ -1818,7 +2112,9 @@ class GenericJobs:
                 except JobRecordError:
                     state["cache"].pop(cache_key, None)
                 else:
-                    if record.state.get("phase") == "succeeded" and record.state.get("terminal"):
+                    if record.state.get("phase") == "succeeded" and record.state.get(
+                        "terminal"
+                    ):
                         response = self._public(record, record.state)
                         response["reused"] = True
                         return response
@@ -1832,7 +2128,14 @@ class GenericJobs:
                 else:
                     if not record.state.get("terminal"):
                         subscribers = int(record.state.get("subscribers", 1)) + 1
-                        updated = self._with_state(record, {**record.state, "subscribers": subscribers, "coalesced": True})
+                        updated = self._with_state(
+                            record,
+                            {
+                                **record.state,
+                                "subscribers": subscribers,
+                                "coalesced": True,
+                            },
+                        )
                         self.store.save(updated)
                         response = self._public(updated, updated.state)
                         response["coalesced"] = True
@@ -1840,26 +2143,44 @@ class GenericJobs:
         job_id = str(uuid4())
         readiness_path = (
             self.store.prepare_service_readiness(job_id)
-            if operation.service is not None and operation.service.readiness == "project-command"
+            if operation.service is not None
+            and operation.service.readiness == "project-command"
             else None
         )
-        environment.update({
-            "SINNIXD_JOB_ID": job_id, "SINNIXD_CORRELATION_ID": correlation_id,
-            "SINNIXD_PROJECT_ID": project.project_id, "SINNIXD_OPERATION": operation.name,
-        })
+        environment.update(
+            {
+                "SINNIXD_JOB_ID": job_id,
+                "SINNIXD_CORRELATION_ID": correlation_id,
+                "SINNIXD_PROJECT_ID": project.project_id,
+                "SINNIXD_OPERATION": operation.name,
+            }
+        )
         if checkout is not None:
-            environment.update({"SINNIXD_CHECKOUT_ID": checkout.checkout_id, "SINNIXD_CHECKOUT_HEAD": checkout.head})
+            environment.update(
+                {
+                    "SINNIXD_CHECKOUT_ID": checkout.checkout_id,
+                    "SINNIXD_CHECKOUT_HEAD": checkout.head,
+                }
+            )
         estimate_key = f"{project.project_id}:{operation.name}"
         learned = state["estimates"].get(estimate_key)
-        estimate = learned.get("bytes") if isinstance(learned, Mapping) else operation.estimate_memory_bytes
+        estimate = (
+            learned.get("bytes")
+            if isinstance(learned, Mapping)
+            else operation.estimate_memory_bytes
+        )
 
         def build_spec(lease: ServiceLease | None) -> GenericJobSpec:
             launch_environment = dict(environment)
             launch_environment.update(dependency_environment)
             if lease is not None:
-                launch_environment.update({port.environment: str(port.port) for port in lease.ports})
+                launch_environment.update(
+                    {port.environment: str(port.port) for port in lease.ports}
+                )
                 if readiness_path is not None:
-                    launch_environment["SINNIXD_SERVICE_READY_FILE"] = str(readiness_path)
+                    launch_environment["SINNIXD_SERVICE_READY_FILE"] = str(
+                        readiness_path
+                    )
             scratch_path = self.store.scratch_path_for(operation.scratch, job_id)
             payload_overrides: dict[str, str] = {}
             if scratch_path is not None:
@@ -1867,16 +2188,28 @@ class GenericJobs:
                 payload_overrides["TMPDIR"] = str(scratch_path)
             return GenericJobSpec(
                 kind="declared-operation",
-                command=project.environment.command_for(operation_argv, overrides=payload_overrides),
-                working_directory=str(workdir), environment=launch_environment, project_id=project.project_id,
-                operation=operation.name, parameter_digest=parameter_digest,
+                command=project.environment.command_for(
+                    operation_argv, overrides=payload_overrides
+                ),
+                working_directory=str(workdir),
+                environment=launch_environment,
+                project_id=project.project_id,
+                operation=operation.name,
+                parameter_digest=parameter_digest,
                 principal=principal,
                 timeout_seconds=operation.timeout_seconds,
                 checkout=checkout.to_dict() if checkout is not None else None,
                 contract=dict(contract),
-                result_kind={"exit": "exit-status", "json": "json", "pytest": "pytest"}[operation.result],
-                pool=operation.pool, exclusive_keys=operation.exclusive_keys, dependency_job_ids=dependency_ids,
-                coalesce_key=coalesce_key, cache_key=cache_key, estimate_key=estimate_key, estimate_memory_bytes=estimate,
+                result_kind={"exit": "exit-status", "json": "json", "pytest": "pytest"}[
+                    operation.result
+                ],
+                pool=operation.pool,
+                exclusive_keys=operation.exclusive_keys,
+                dependency_job_ids=dependency_ids,
+                coalesce_key=coalesce_key,
+                cache_key=cache_key,
+                estimate_key=estimate_key,
+                estimate_memory_bytes=estimate,
                 scratch=operation.scratch,
                 lease=lease,
             )
@@ -1895,14 +2228,26 @@ class GenericJobs:
             raise
         try:
             if operation.service is None:
-                self.store.write_declared_launch(job_id, record.spec.command, record.spec.environment)
+                self.store.write_declared_launch(
+                    job_id, record.spec.command, record.spec.environment
+                )
         except BaseException:
             self.store.cleanup_scratch(record)
             raise
-        queued = self._with_state(record, {
-            "phase": "queued", "terminal": False, "observed_at": _timestamp(), "subscribers": 1,
-            "dependencies": list(dependency_ids), "admission": {"pool": spec.pool, "estimate_memory_bytes": self._estimate(spec, state)},
-        })
+        queued = self._with_state(
+            record,
+            {
+                "phase": "queued",
+                "terminal": False,
+                "observed_at": _timestamp(),
+                "subscribers": 1,
+                "dependencies": list(dependency_ids),
+                "admission": {
+                    "pool": spec.pool,
+                    "estimate_memory_bytes": self._estimate(spec, state),
+                },
+            },
+        )
         self.store.save(queued)
         if coalesce_key is not None:
             state["active"][coalesce_key] = job_id
@@ -1914,11 +2259,25 @@ class GenericJobs:
     @staticmethod
     def _cache_tree(path: Path) -> str | None:
         try:
-            clean = subprocess.run(["git", "-C", str(path), "status", "--porcelain"], capture_output=True, text=True, timeout=2)
+            clean = subprocess.run(
+                ["git", "-C", str(path), "status", "--porcelain"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
             if clean.returncode != 0 or clean.stdout:
                 return None
-            tree = subprocess.run(["git", "-C", str(path), "rev-parse", "HEAD^{tree}"], capture_output=True, text=True, timeout=2)
-            return tree.stdout.strip() if tree.returncode == 0 and len(tree.stdout.strip()) == 40 else None
+            tree = subprocess.run(
+                ["git", "-C", str(path), "rev-parse", "HEAD^{tree}"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            return (
+                tree.stdout.strip()
+                if tree.returncode == 0 and len(tree.stdout.strip()) == 40
+                else None
+            )
         except (OSError, subprocess.TimeoutExpired):
             return None
 
@@ -1947,7 +2306,9 @@ class GenericJobs:
                 "project_root": str(project.root.resolve()),
                 "checkout": checkout.to_dict() if checkout is not None else None,
             }
-        return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
 
     @staticmethod
     def _estimate(spec: GenericJobSpec, state: Mapping[str, Any]) -> int:
@@ -1967,7 +2328,20 @@ class GenericJobs:
         records = self.store.active_records()
         active: dict[str, list[GenericJobRecord]] = {pool: [] for pool in POOL_POLICIES}
         for record in records:
-            if record.spec.kind == "declared-operation" and not record.state.get("terminal") and record.state.get("phase") in {"submitted", "running", "cancelling", "stopping", "launch-unknown", "observation-unknown", "outcome-unknown"}:
+            if (
+                record.spec.kind == "declared-operation"
+                and not record.state.get("terminal")
+                and record.state.get("phase")
+                in {
+                    "submitted",
+                    "running",
+                    "cancelling",
+                    "stopping",
+                    "launch-unknown",
+                    "observation-unknown",
+                    "outcome-unknown",
+                }
+            ):
                 active[record.spec.pool].append(record)
         pressure = self.pressure_probe()
         for snapshot in records:
@@ -1979,7 +2353,10 @@ class GenericJobs:
             blocked = self._dependency_block(snapshot)
             with self.store.locked(snapshot.job_id):
                 record = self.store.load(snapshot.job_id)
-                if record.state.get("terminal") or record.state.get("phase") not in {"queued", "waiting-dependencies"}:
+                if record.state.get("terminal") or record.state.get("phase") not in {
+                    "queued",
+                    "waiting-dependencies",
+                }:
                     continue
                 if blocked is not None:
                     updated = self._with_state(record, blocked)
@@ -1990,8 +2367,16 @@ class GenericJobs:
                     continue
                 policy = POOL_POLICIES[record.spec.pool]
                 estimate = self._estimate(record.spec, state)
-                occupied = sum(self._estimate(item.spec, state) for item in active[record.spec.pool])
-                exclusive = {key for pool_records in active.values() for item in pool_records for key in item.spec.exclusive_keys}
+                occupied = sum(
+                    self._estimate(item.spec, state)
+                    for item in active[record.spec.pool]
+                )
+                exclusive = {
+                    key
+                    for pool_records in active.values()
+                    for item in pool_records
+                    for key in item.spec.exclusive_keys
+                }
                 pressure_blocked = (
                     record.spec.pool != "interactive"
                     and estimate >= policy["memory_budget"] // 2
@@ -2010,11 +2395,16 @@ class GenericJobs:
             submitted: GenericJobRecord | None = None
             with self.store.locked(record.job_id):
                 current = self.store.load(record.job_id)
-                if current.state.get("terminal") or current.state.get("phase") not in {"queued", "waiting-dependencies"}:
+                if current.state.get("terminal") or current.state.get("phase") not in {
+                    "queued",
+                    "waiting-dependencies",
+                }:
                     continue
                 try:
                     if not self.store.service_lease_ports_available(current.spec.lease):
-                        raise SystemdJobError("leased loopback port became unavailable before launch")
+                        raise SystemdJobError(
+                            "leased loopback port became unavailable before launch"
+                        )
                     command, environment = self.store.declared_launch(current.job_id)
                     if scratch_path := self.store.prepare_scratch(current):
                         environment["TMPDIR"] = str(scratch_path)
@@ -2028,13 +2418,25 @@ class GenericJobs:
                         from .contracts import contract_runner_executable
 
                         command = (
-                            str(contract_runner_executable()), "--declared", "--job-id", current.job_id,
-                            "--unit", current.unit, "--state-root", str(self.store.root),
+                            str(contract_runner_executable()),
+                            "--declared",
+                            "--job-id",
+                            current.job_id,
+                            "--unit",
+                            current.unit,
+                            "--state-root",
+                            str(self.store.root),
                         )
                     self.systemd.start(
-                        unit=current.unit, command=command, working_directory=current.spec.working_directory,
-                        environment=environment, timeout_seconds=current.spec.timeout_seconds, log_path=current.log_path,
-                        json_result_path=current.result_path if current.spec.result_kind in {"json", "pytest"} else None,
+                        unit=current.unit,
+                        command=command,
+                        working_directory=current.spec.working_directory,
+                        environment=environment,
+                        timeout_seconds=current.spec.timeout_seconds,
+                        log_path=current.log_path,
+                        json_result_path=current.result_path
+                        if current.spec.result_kind in {"json", "pytest"}
+                        else None,
                     )
                 except SystemdJobError:
                     self._reconcile_launch_error(current)
@@ -2053,7 +2455,13 @@ class GenericJobs:
                     self._terminal_cleanup(terminal)
                 else:
                     submitted = self._with_state(
-                        current, {**current.state, "phase": "submitted", "terminal": False, "observed_at": _timestamp()}
+                        current,
+                        {
+                            **current.state,
+                            "phase": "submitted",
+                            "terminal": False,
+                            "observed_at": _timestamp(),
+                        },
                     )
                     self.store.save(submitted)
             if terminal is not None and terminal.state.get("terminal"):
@@ -2074,7 +2482,10 @@ class GenericJobs:
                     "launch_evidence": "not-started",
                     "observed_at": _timestamp(),
                 }
-            if dependency["state"].get("terminal") and dependency["state"].get("phase") != "succeeded":
+            if (
+                dependency["state"].get("terminal")
+                and dependency["state"].get("phase") != "succeeded"
+            ):
                 return {
                     "phase": "dependency-failed",
                     "terminal": True,
@@ -2088,17 +2499,23 @@ class GenericJobs:
                 if (
                     lease is not None
                     and dependency["state"].get("phase") in {"submitted", "running"}
-                    and (
-                        lease.readiness == "none"
-                        or self.store.service_ready(job_id)
+                    and (lease.readiness == "none" or self.store.service_ready(job_id))
+                    and all(
+                        not _loopback_port_available(port.port) for port in lease.ports
                     )
-                    and all(not _loopback_port_available(port.port) for port in lease.ports)
                 ):
                     continue
-                return {"phase": "waiting-dependencies", "terminal": False, "observed_at": _timestamp(), "dependencies": list(record.spec.dependency_job_ids)}
+                return {
+                    "phase": "waiting-dependencies",
+                    "terminal": False,
+                    "observed_at": _timestamp(),
+                    "dependencies": list(record.spec.dependency_job_ids),
+                }
         return None
 
-    def _finish_admission(self, record: GenericJobRecord, state: dict[str, Any]) -> None:
+    def _finish_admission(
+        self, record: GenericJobRecord, state: dict[str, Any]
+    ) -> None:
         active_key = record.spec.coalesce_key or record.spec.cache_key
         if active_key is not None and state["active"].get(active_key) == record.job_id:
             state["active"].pop(active_key, None)
@@ -2106,14 +2523,29 @@ class GenericJobs:
             record.state.get("phase") == "succeeded"
             and record.spec.lease is None
             and record.spec.cache_key is not None
-            and (record.spec.result_kind == "exit-status" or self._has_authoritative_result(record))
+            and (
+                record.spec.result_kind == "exit-status"
+                or self._has_authoritative_result(record)
+            )
         ):
-            state["cache"][record.spec.cache_key] = {"job_id": record.job_id, "touched_at": _timestamp()}
+            state["cache"][record.spec.cache_key] = {
+                "job_id": record.job_id,
+                "touched_at": _timestamp(),
+            }
             state["cache"] = self._bounded(state["cache"], MAX_ADMISSION_CACHE_ENTRIES)
         peak = self._memory_peak(record.state.get("systemd", {}))
-        if record.state.get("phase") == "succeeded" and peak is not None and record.spec.estimate_key is not None:
-            state["estimates"][record.spec.estimate_key] = {"bytes": peak, "touched_at": _timestamp()}
-            state["estimates"] = self._bounded(state["estimates"], MAX_ADMISSION_ESTIMATES)
+        if (
+            record.state.get("phase") == "succeeded"
+            and peak is not None
+            and record.spec.estimate_key is not None
+        ):
+            state["estimates"][record.spec.estimate_key] = {
+                "bytes": peak,
+                "touched_at": _timestamp(),
+            }
+            state["estimates"] = self._bounded(
+                state["estimates"], MAX_ADMISSION_ESTIMATES
+            )
         self._save_admission_state(state)
 
     def _terminal_cleanup(self, record: GenericJobRecord) -> None:
@@ -2179,7 +2611,9 @@ class GenericJobs:
     ) -> dict[str, Any]:
         if not 1 <= limit <= 1_000:
             raise ValueError("job list limit must be between 1 and 1000")
-        if project_id is not None and (not isinstance(project_id, str) or not project_id):
+        if project_id is not None and (
+            not isinstance(project_id, str) or not project_id
+        ):
             raise ValueError("job list project_id must be a non-empty string")
         if any(not isinstance(phase, str) or not phase for phase in phases):
             raise ValueError("job list phases must be non-empty strings")
@@ -2214,9 +2648,7 @@ class GenericJobs:
         ]
         if after is not None:
             snapshot_records = [
-                record
-                for record in snapshot_records
-                if _job_order_key(record) < after
+                record for record in snapshot_records if _job_order_key(record) < after
             ]
         page_records = snapshot_records[: limit + 1]
         has_more = len(page_records) > limit
@@ -2233,7 +2665,9 @@ class GenericJobs:
         )
         return {
             "jobs": [
-                self._public(record, record.state) if record.state.get("terminal") else self.get(record.job_id)
+                self._public(record, record.state)
+                if record.state.get("terminal")
+                else self.get(record.job_id)
                 for record in records
             ],
             "limit": limit,
@@ -2247,20 +2681,29 @@ class GenericJobs:
             },
         }
 
-    def wait(self, job_id: str, timeout_seconds: int = DEFAULT_WAIT_SECONDS) -> dict[str, Any]:
+    def wait(
+        self, job_id: str, timeout_seconds: int = DEFAULT_WAIT_SECONDS
+    ) -> dict[str, Any]:
         if not 1 <= timeout_seconds <= MAX_WAIT_SECONDS:
-            raise ValueError(f"wait timeout_seconds must be between 1 and {MAX_WAIT_SECONDS}")
+            raise ValueError(
+                f"wait timeout_seconds must be between 1 and {MAX_WAIT_SECONDS}"
+            )
         deadline = time.monotonic() + timeout_seconds
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 with self.store.locked(job_id):
                     record = self.store.load(job_id)
-                    return {**self._public(record, record.state), "wait_timed_out": True}
+                    return {
+                        **self._public(record, record.state),
+                        "wait_timed_out": True,
+                    }
             with self.store.locked(job_id):
                 status = self._get_locked(
                     job_id,
-                    systemd_timeout_seconds=min(SYSTEMD_COMMAND_TIMEOUT_SECONDS, remaining),
+                    systemd_timeout_seconds=min(
+                        SYSTEMD_COMMAND_TIMEOUT_SECONDS, remaining
+                    ),
                     wait_deadline=deadline,
                 )
             with self._admission_lock:
@@ -2269,7 +2712,9 @@ class GenericJobs:
                 return status
             if time.monotonic() >= deadline:
                 return {**status, "wait_timed_out": True}
-            time.sleep(min(self.wait_poll_seconds, max(0.0, deadline - time.monotonic())))
+            time.sleep(
+                min(self.wait_poll_seconds, max(0.0, deadline - time.monotonic()))
+            )
 
     def cancel(self, job_id: str) -> dict[str, Any]:
         terminal: GenericJobRecord | None = None
@@ -2290,9 +2735,15 @@ class GenericJobs:
                 )
                 self.store.save(cancelled)
                 terminal = cancelled
-                response = {**self._public(cancelled, cancelled.state), "cancel_requested": True, "already_terminal": False}
+                response = {
+                    **self._public(cancelled, cancelled.state),
+                    "cancel_requested": True,
+                    "already_terminal": False,
+                }
             else:
-                intent = self._with_cancel_intent(record, status["state"].get("systemd", {}).get("InvocationID"))
+                intent = self._with_cancel_intent(
+                    record, status["state"].get("systemd", {}).get("InvocationID")
+                )
                 self.store.save(intent)
                 self.systemd.stop(intent.unit)
                 acknowledged = self._with_stop_acknowledgement(
@@ -2300,7 +2751,11 @@ class GenericJobs:
                     status["state"].get("systemd", {}).get("InvocationID"),
                 )
                 self.store.save(acknowledged)
-                response = {**self._get_locked(job_id), "cancel_requested": True, "already_terminal": False}
+                response = {
+                    **self._get_locked(job_id),
+                    "cancel_requested": True,
+                    "already_terminal": False,
+                }
         with self._admission_lock:
             if terminal is not None:
                 self._terminal_cleanup(terminal)
@@ -2310,9 +2765,13 @@ class GenericJobs:
             self._admit_locked()
         return response
 
-    def logs(self, job_id: str, *, offset: int = 0, max_bytes: int = MAX_LOG_BYTES) -> dict[str, Any]:
+    def logs(
+        self, job_id: str, *, offset: int = 0, max_bytes: int = MAX_LOG_BYTES
+    ) -> dict[str, Any]:
         if offset < 0 or not 1 <= max_bytes <= MAX_LOG_BYTES:
-            raise ValueError(f"log range must use offset >= 0 and max_bytes between 1 and {MAX_LOG_BYTES}")
+            raise ValueError(
+                f"log range must use offset >= 0 and max_bytes between 1 and {MAX_LOG_BYTES}"
+            )
         with self.store.locked(job_id):
             record = self.store.load(job_id)
         content = _read_private_artifact(record.log_path, max_bytes, offset=offset)
@@ -2328,9 +2787,13 @@ class GenericJobs:
             "artifact_truncated": overflowed,
         }
 
-    def result(self, job_id: str, *, max_bytes: int = MAX_RESULT_BYTES) -> dict[str, Any]:
+    def result(
+        self, job_id: str, *, max_bytes: int = MAX_RESULT_BYTES
+    ) -> dict[str, Any]:
         if not 1 <= max_bytes <= MAX_RESULT_BYTES:
-            raise ValueError(f"result max_bytes must be between 1 and {MAX_RESULT_BYTES}")
+            raise ValueError(
+                f"result max_bytes must be between 1 and {MAX_RESULT_BYTES}"
+            )
         with self.store.locked(job_id):
             record = self.store.load(job_id)
         if record.result_path is None:
@@ -2341,7 +2804,11 @@ class GenericJobs:
                 if not record.state.get("terminal"):
                     self._get_locked(job_id)
                     record = self.store.load(job_id)
-            return {"job_id": job_id, "kind": "exit-status", "value": self._parse_exit_result(record)}
+            return {
+                "job_id": job_id,
+                "kind": "exit-status",
+                "value": self._parse_exit_result(record),
+            }
         content = _read_private_artifact(record.result_path, MAX_RESULT_BYTES)
         if content is None:
             raise JobResultError("job result artifact is unavailable")
@@ -2350,13 +2817,23 @@ class GenericJobs:
             "max_bytes": MAX_RESULT_BYTES,
             "kind": record.spec.result_kind,
         }
-        if len(content) > MAX_RESULT_BYTES or record.result_path.with_suffix(".overflow").exists():
+        if (
+            len(content) > MAX_RESULT_BYTES
+            or record.result_path.with_suffix(".overflow").exists()
+        ):
             raise JobResultError("job result exceeds the artifact limit")
         if record.spec.result_kind in {"json", "pytest"}:
             if len(content) > max_bytes:
-                raise JobResultLimitError("job JSON result exceeds the requested response limit")
+                raise JobResultLimitError(
+                    "job JSON result exceeds the requested response limit"
+                )
             value = self._parse_json_result(content)
-            return {"job_id": job_id, "kind": record.spec.result_kind, "value": value, "artifact": artifact}
+            return {
+                "job_id": job_id,
+                "kind": record.spec.result_kind,
+                "value": value,
+                "artifact": artifact,
+            }
         return {
             "job_id": job_id,
             "kind": record.spec.result_kind,
@@ -2379,12 +2856,17 @@ class GenericJobs:
         state = record.state
         properties = state.get("systemd")
         phase = state.get("phase")
-        if isinstance(properties, Mapping) and properties.get("LoadState") == "loaded" and phase in {
-            "succeeded",
-            "failed",
-            "timed_out",
-            "cancelled",
-        }:
+        if (
+            isinstance(properties, Mapping)
+            and properties.get("LoadState") == "loaded"
+            and phase
+            in {
+                "succeeded",
+                "failed",
+                "timed_out",
+                "cancelled",
+            }
+        ):
             status = properties.get("ExecMainStatus")
             result = properties.get("Result")
             if not isinstance(result, str) or not result:
@@ -2411,7 +2893,9 @@ class GenericJobs:
         record = self.store.load(job_id)
         if record.state.get("phase") in {"queued", "waiting-dependencies"}:
             return self._public(record, record.state)
-        if record.state.get("terminal") and not self._terminal_state_requires_reconciliation(record):
+        if record.state.get(
+            "terminal"
+        ) and not self._terminal_state_requires_reconciliation(record):
             self._terminal_cleanup(record)
             return self._public(record, record.state)
         try:
@@ -2474,11 +2958,15 @@ class GenericJobs:
             "observed_at": _timestamp(),
         }
 
-    def _classify(self, properties: Mapping[str, str], record: GenericJobRecord) -> dict[str, Any]:
+    def _classify(
+        self, properties: Mapping[str, str], record: GenericJobRecord
+    ) -> dict[str, Any]:
         if self._is_authoritative_not_started_cancellation(record):
             return dict(record.state)
         if properties.get("LoadState") != "loaded":
-            if record.spec.kind == "declared-operation" and record.state.get("phase") in {
+            if record.spec.kind == "declared-operation" and record.state.get(
+                "phase"
+            ) in {
                 "launching",
                 "queued",
                 "waiting-dependencies",
@@ -2527,7 +3015,12 @@ class GenericJobs:
                     ),
                     "observed_at": _timestamp(),
                 }
-            return {"phase": "missing", "terminal": True, "systemd": dict(properties), "observed_at": _timestamp()}
+            return {
+                "phase": "missing",
+                "terminal": True,
+                "systemd": dict(properties),
+                "observed_at": _timestamp(),
+            }
         if record.spec.lease is not None:
             bound = record.state.get("lease_invocation_id")
             invocation = properties.get("InvocationID")
@@ -2541,21 +3034,30 @@ class GenericJobs:
                     "observed_at": _timestamp(),
                 }
         if self._has_schema_v3_native_success(record, properties):
-            return self._with_service_lease_invocation(record, properties, {
-                "phase": "succeeded",
-                "terminal": True,
-                "systemd": dict(properties),
-                "result_evidence": "native-v3",
-                "observed_at": _timestamp(),
-            })
+            return self._with_service_lease_invocation(
+                record,
+                properties,
+                {
+                    "phase": "succeeded",
+                    "terminal": True,
+                    "systemd": dict(properties),
+                    "result_evidence": "native-v3",
+                    "observed_at": _timestamp(),
+                },
+            )
         active = properties.get("ActiveState", "unknown")
         if active in {"active", "activating", "reloading"}:
             phase = "running"
             terminal = False
         elif active == "deactivating":
-            phase = "cancelling" if record.cancel_requested_at is not None else "stopping"
+            phase = (
+                "cancelling" if record.cancel_requested_at is not None else "stopping"
+            )
             terminal = False
-        elif properties.get("Result") == "success" and properties.get("ExecMainStatus") == "0":
+        elif (
+            properties.get("Result") == "success"
+            and properties.get("ExecMainStatus") == "0"
+        ):
             phase = "succeeded"
             terminal = True
         elif properties.get("Result") == "timeout":
@@ -2567,12 +3069,16 @@ class GenericJobs:
         else:
             phase = "failed"
             terminal = True
-        return self._with_service_lease_invocation(record, properties, {
-            "phase": phase,
-            "terminal": terminal,
-            "systemd": dict(properties),
-            "observed_at": _timestamp(),
-        })
+        return self._with_service_lease_invocation(
+            record,
+            properties,
+            {
+                "phase": phase,
+                "terminal": terminal,
+                "systemd": dict(properties),
+                "observed_at": _timestamp(),
+            },
+        )
 
     @staticmethod
     def _with_service_lease_invocation(
@@ -2597,7 +3103,9 @@ class GenericJobs:
             return False
         if requested_at.tzinfo is None:
             return False
-        return (datetime.now(UTC) - requested_at).total_seconds() >= CANCEL_OUTCOME_RECONCILIATION_GRACE_SECONDS
+        return (
+            datetime.now(UTC) - requested_at
+        ).total_seconds() >= CANCEL_OUTCOME_RECONCILIATION_GRACE_SECONDS
 
     def _terminal_state_requires_reconciliation(self, record: GenericJobRecord) -> bool:
         if self._is_authoritative_not_started_cancellation(record):
@@ -2615,7 +3123,9 @@ class GenericJobs:
         if phase == "succeeded" and properties.get("LoadState") != "loaded":
             return not self._has_authoritative_result(record)
         if phase == "cancelled" and not self._stop_acknowledgement_matches(record):
-            return properties.get("LoadState") != "loaded" or not self._cancel_matches(properties, record)
+            return properties.get("LoadState") != "loaded" or not self._cancel_matches(
+                properties, record
+            )
         return False
 
     @staticmethod
@@ -2646,7 +3156,9 @@ class GenericJobs:
             return completed
         return completed and self._has_valid_result_artifact(record)
 
-    def _has_schema_v3_native_success(self, record: GenericJobRecord, properties: Mapping[str, str]) -> bool:
+    def _has_schema_v3_native_success(
+        self, record: GenericJobRecord, properties: Mapping[str, str]
+    ) -> bool:
         return (
             record.spec.kind == "attested-agent"
             and record.spec.result_kind == "last-message"
@@ -2660,7 +3172,9 @@ class GenericJobs:
         )
 
     @staticmethod
-    def _with_state(record: GenericJobRecord, state: Mapping[str, Any]) -> GenericJobRecord:
+    def _with_state(
+        record: GenericJobRecord, state: Mapping[str, Any]
+    ) -> GenericJobRecord:
         return GenericJobRecord(
             job_id=record.job_id,
             unit=record.unit,
@@ -2677,9 +3191,13 @@ class GenericJobs:
         )
 
     @staticmethod
-    def _with_cancel_intent(record: GenericJobRecord, invocation_id: Any) -> GenericJobRecord:
+    def _with_cancel_intent(
+        record: GenericJobRecord, invocation_id: Any
+    ) -> GenericJobRecord:
         existing_intent = record.cancel_requested_at is not None
-        observed_invocation = invocation_id if isinstance(invocation_id, str) and invocation_id else None
+        observed_invocation = (
+            invocation_id if isinstance(invocation_id, str) and invocation_id else None
+        )
         return GenericJobRecord(
             job_id=record.job_id,
             unit=record.unit,
@@ -2690,7 +3208,9 @@ class GenericJobs:
             created_at=record.created_at,
             cancel_requested_at=record.cancel_requested_at or _timestamp(),
             cancel_requested_invocation_id=(
-                record.cancel_requested_invocation_id if existing_intent else observed_invocation
+                record.cancel_requested_invocation_id
+                if existing_intent
+                else observed_invocation
             ),
             cancel_stop_acknowledged_at=record.cancel_stop_acknowledged_at,
             cancel_stop_acknowledged_invocation_id=record.cancel_stop_acknowledged_invocation_id,
@@ -2698,7 +3218,9 @@ class GenericJobs:
         )
 
     @staticmethod
-    def _with_stop_acknowledgement(record: GenericJobRecord, invocation_id: Any) -> GenericJobRecord:
+    def _with_stop_acknowledgement(
+        record: GenericJobRecord, invocation_id: Any
+    ) -> GenericJobRecord:
         invocation = invocation_id if isinstance(invocation_id, str) else None
         if invocation is None or invocation != record.cancel_requested_invocation_id:
             return record
@@ -2718,7 +3240,9 @@ class GenericJobs:
         )
 
     @staticmethod
-    def _cancel_matches(properties: Mapping[str, str], record: GenericJobRecord) -> bool:
+    def _cancel_matches(
+        properties: Mapping[str, str], record: GenericJobRecord
+    ) -> bool:
         if record.cancel_requested_at is None:
             return False
         invocation = properties.get("InvocationID")
@@ -2733,7 +3257,8 @@ class GenericJobs:
         return (
             record.cancel_stop_acknowledged_at is not None
             and record.cancel_stop_acknowledged_invocation_id is not None
-            and record.cancel_stop_acknowledged_invocation_id == record.cancel_requested_invocation_id
+            and record.cancel_stop_acknowledged_invocation_id
+            == record.cancel_requested_invocation_id
         )
 
     @staticmethod
@@ -2761,7 +3286,9 @@ class GenericJobs:
             intent["invocation_id"] = record.cancel_requested_invocation_id
         return intent
 
-    def _public(self, record: GenericJobRecord, state: Mapping[str, Any]) -> dict[str, Any]:
+    def _public(
+        self, record: GenericJobRecord, state: Mapping[str, Any]
+    ) -> dict[str, Any]:
         return {
             "job_id": record.job_id,
             "unit": record.unit,
@@ -2774,7 +3301,9 @@ class GenericJobs:
                 else None
             ),
             "principal": record.spec.principal,
-            "checkout": dict(record.spec.checkout) if record.spec.checkout is not None else None,
+            "checkout": dict(record.spec.checkout)
+            if record.spec.checkout is not None
+            else None,
             "contract": dict(record.spec.contract),
             "created_at": record.created_at,
             "timeout_seconds": record.spec.timeout_seconds,
@@ -2784,7 +3313,9 @@ class GenericJobs:
                     "state": (
                         "released"
                         if state.get("terminal")
-                        and self.store._service_lease_released(record.spec.lease.lease_id)
+                        and self.store._service_lease_released(
+                            record.spec.lease.lease_id
+                        )
                         else "active"
                     ),
                 }
@@ -2792,7 +3323,10 @@ class GenericJobs:
                 else None
             ),
             "artifacts": {
-                "log": {"ref": f"sinnix://jobs/{record.job_id}/artifacts/log", "max_bytes": MAX_LOG_BYTES},
+                "log": {
+                    "ref": f"sinnix://jobs/{record.job_id}/artifacts/log",
+                    "max_bytes": MAX_LOG_BYTES,
+                },
                 "result": (
                     {
                         "ref": f"sinnix://jobs/{record.job_id}/artifacts/result",
@@ -2813,7 +3347,9 @@ def _command_digest(command: Sequence[str]) -> str:
 
 def _parameter_digest(parameters: Mapping[str, Any]) -> str:
     return hashlib.sha256(
-        json.dumps(parameters, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+        json.dumps(
+            parameters, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode()
     ).hexdigest()
 
 
@@ -2839,19 +3375,27 @@ def capture_main(arguments: Sequence[str] | None = None) -> int:
         or not 1 <= parsed.max_bytes <= MAX_LOG_ARTIFACT_BYTES
         or (parsed.result_path is None) != (parsed.result_overflow_path is None)
     ):
-        parser.error("requires --max-bytes within the artifact cap and a command after --")
+        parser.error(
+            "requires --max-bytes within the artifact cap and a command after --"
+        )
     command = parsed.command[1:]
     remaining = parsed.max_bytes
     overflowed = False
     log_handle = _open_preallocated_private_artifact(parsed.log_path)
-    result_handle = _open_private_artifact(parsed.result_path) if parsed.result_path is not None else None
+    result_handle = (
+        _open_private_artifact(parsed.result_path)
+        if parsed.result_path is not None
+        else None
+    )
     result_remaining = MAX_RESULT_BYTES
     result_overflowed = False
     try:
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE if parsed.result_path is not None else subprocess.STDOUT,
+            stderr=subprocess.PIPE
+            if parsed.result_path is not None
+            else subprocess.STDOUT,
         )
         assert process.stdout is not None
         streams = selectors.DefaultSelector()
@@ -2901,4 +3445,8 @@ def capture_cli() -> None:
 
 
 if __name__ == "__main__":
-    raise SystemExit(capture_main(sys.argv[2:] if len(sys.argv) > 1 and sys.argv[1] == "capture" else None))
+    raise SystemExit(
+        capture_main(
+            sys.argv[2:] if len(sys.argv) > 1 and sys.argv[1] == "capture" else None
+        )
+    )

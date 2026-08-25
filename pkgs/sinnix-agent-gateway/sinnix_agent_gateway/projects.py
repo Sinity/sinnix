@@ -11,10 +11,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
+from sinnix_lib.lock import flock
+from sinnix_mcp.execution import ExecutionProfile, OwnerExecution, OwnerRoute
+
 from .capabilities import Capability, Principal
 from .config import GatewayConfig, ProjectConfig
-from sinnix_mcp.execution import ExecutionProfile, OwnerExecution, OwnerRoute
-from sinnix_lib.lock import flock
 
 
 class ProjectError(ValueError):
@@ -47,10 +48,7 @@ LOCAL_ONLY_PATHS = (
 )
 LOCAL_ONLY_FILES = frozenset({(".mcp.json",)})
 _DIRECTORY_OPEN_FLAGS = (
-    os.O_RDONLY
-    | os.O_DIRECTORY
-    | os.O_NOFOLLOW
-    | getattr(os, "O_CLOEXEC", 0)
+    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
 )
 
 
@@ -69,7 +67,9 @@ def _mutation_parts(project: ProjectConfig, relative: str) -> tuple[str, ...]:
     try:
         candidate = Path(relative)
     except TypeError as exc:
-        raise ProjectError("path must be relative and remain inside the project") from exc
+        raise ProjectError(
+            "path must be relative and remain inside the project"
+        ) from exc
     if candidate.is_absolute() or not candidate.parts or ".." in candidate.parts:
         raise ProjectError("path must be relative and remain inside the project")
     if _is_excluded(candidate):
@@ -91,7 +91,7 @@ def _open_pinned_directory(
                 child = os.open(part, _DIRECTORY_OPEN_FLAGS, dir_fd=current)
             except FileNotFoundError:
                 if not create:
-                    raise ProjectError("path does not exist")
+                    raise ProjectError("path does not exist") from None
                 try:
                     os.mkdir(part, 0o700, dir_fd=current)
                 except FileExistsError:
@@ -311,7 +311,9 @@ class ProjectService:
                     "branch": branch,
                     "upstream": upstream,
                     "dirty_sha256": hashlib.sha256(status.encode()).hexdigest(),
-                    "lifecycle": "configured-root" if path == configured_root else "linked-worktree",
+                    "lifecycle": "configured-root"
+                    if path == configured_root
+                    else "linked-worktree",
                 }
             )
         rows.sort(key=lambda row: (row["checkout_id"] != "default", row["checkout_id"]))
@@ -353,7 +355,9 @@ class ProjectService:
             if len(checkouts) == 1:
                 return project
             choices = ", ".join(row["checkout_id"] for row in checkouts)
-            raise ProjectError(f"checkout_id is required; available checkouts: {choices}")
+            raise ProjectError(
+                f"checkout_id is required; available checkouts: {choices}"
+            )
         if not isinstance(checkout_id, str) or not checkout_id:
             raise ProjectError("checkout_id must be a non-empty string")
         for checkout in self._checkout_rows(project):
@@ -499,7 +503,9 @@ class ProjectService:
                         "preconditioned mutation requires checkout_id"
                     )
                 if set(preconditions) - {"head", "dirty_sha256"}:
-                    raise ProjectError("project mutation preconditions are not recognized")
+                    raise ProjectError(
+                        "project mutation preconditions are not recognized"
+                    )
                 checkout = self.checkout(project_id, checkout_id)["checkout"]
                 for name, expected in preconditions.items():
                     if not isinstance(expected, str) or checkout.get(name) != expected:
@@ -822,11 +828,15 @@ class ProjectService:
             mode = 0o100755 if metadata.st_mode & 0o111 else 0o100644
         else:
             raise ProjectError("git patch target has an unsupported file type")
-        object_id = self._owner_result(
-            ["git", "hash-object", "-w", "--stdin"],
-            root,
-            stdin_bytes=content,
-        ).decode().strip()
+        object_id = (
+            self._owner_result(
+                ["git", "hash-object", "-w", "--stdin"],
+                root,
+                stdin_bytes=content,
+            )
+            .decode()
+            .strip()
+        )
         if not re.fullmatch(r"[0-9a-f]{40,64}", object_id):
             raise ProjectError("git returned a malformed patch seed object")
         self._owner_result(
@@ -844,11 +854,15 @@ class ProjectService:
         )
 
     def _index_tree(self, root: Path, index: Path) -> str:
-        tree = self._owner_result(
-            ["git", "write-tree"],
-            root,
-            environment={"GIT_INDEX_FILE": str(index)},
-        ).decode().strip()
+        tree = (
+            self._owner_result(
+                ["git", "write-tree"],
+                root,
+                environment={"GIT_INDEX_FILE": str(index)},
+            )
+            .decode()
+            .strip()
+        )
         if not re.fullmatch(r"[0-9a-f]{40,64}", tree):
             raise ProjectError("git returned a malformed temporary tree")
         return tree
@@ -932,7 +946,9 @@ class ProjectService:
                         except ProjectError as exc:
                             if str(exc) != "path does not exist":
                                 raise
-                with tempfile.TemporaryDirectory(prefix="sinnix-gateway-apply-") as staging:
+                with tempfile.TemporaryDirectory(
+                    prefix="sinnix-gateway-apply-"
+                ) as staging:
                     index = Path(staging) / "index"
                     environment = {"GIT_INDEX_FILE": str(index)}
                     try:

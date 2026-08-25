@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import subprocess
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
-
 from sinnix_agent_gateway import projects as projects_module
 from sinnix_agent_gateway.capabilities import Principal
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
@@ -13,7 +12,9 @@ from sinnix_agent_gateway.projects import ProjectError, ProjectService
 
 
 def git(path: Path, *arguments: str) -> None:
-    subprocess.run(["git", "-C", str(path), *arguments], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), *arguments], check=True, capture_output=True
+    )
 
 
 def project_service(tmp_path: Path) -> tuple[ProjectService, Path, Path]:
@@ -92,7 +93,9 @@ def test_project_mutation_publishes_through_pinned_parent_when_replaced_by_symli
     original_open = projects_module._open_pinned_directory
     replaced = False
 
-    def hostile_open(config: ProjectConfig, parts: tuple[str, ...], *, create: bool) -> int:
+    def hostile_open(
+        config: ProjectConfig, parts: tuple[str, ...], *, create: bool
+    ) -> int:
         nonlocal replaced
         descriptor = original_open(config, parts, create=create)
         if not replaced and parts == ("safe",):
@@ -160,7 +163,9 @@ def test_project_write_syncs_file_and_parent_directory_before_success(
     assert synced_kinds.count("directory") >= 2
 
 
-def test_gateway_temporary_artifacts_are_excluded_from_project_apis(tmp_path: Path) -> None:
+def test_gateway_temporary_artifacts_are_excluded_from_project_apis(
+    tmp_path: Path,
+) -> None:
     _observer, project, _linked = project_service(tmp_path)
     observer = ProjectService(_observer.config, Principal.for_name("observer"))
     temporary = project / ".tracked.gateway-tmp-fixture"
@@ -168,7 +173,9 @@ def test_gateway_temporary_artifacts_are_excluded_from_project_apis(tmp_path: Pa
 
     with pytest.raises(ProjectError, match="excluded by project policy"):
         observer.read("fixture", temporary.name, checkout_id="default")
-    assert all(row["path"] != temporary.name for row in observer.tree("fixture")["entries"])
+    assert all(
+        row["path"] != temporary.name for row in observer.tree("fixture")["entries"]
+    )
     assert observer.search("fixture", "private temporary")["matches"] == []
 
 
@@ -199,11 +206,14 @@ rename to new.txt
     assert not source.exists()
     assert (project / "new.txt").read_text() == "tracked\n"
     assert ignored.read_text() == "must never enter the object database"
-    assert subprocess.run(
-        ["git", "-C", str(project), "cat-file", "-e", private_object],
-        check=False,
-        capture_output=True,
-    ).returncode != 0
+    assert (
+        subprocess.run(
+            ["git", "-C", str(project), "cat-file", "-e", private_object],
+            check=False,
+            capture_output=True,
+        ).returncode
+        != 0
+    )
 
 
 def git_stdout(path: Path, *arguments: str) -> str:

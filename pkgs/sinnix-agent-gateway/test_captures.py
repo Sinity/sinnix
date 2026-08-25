@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from sinnix_agent_gateway.capabilities import Capability, PolicyError, Principal
 from sinnix_agent_gateway.captures import CaptureService
 from sinnix_agent_gateway.config import GatewayConfig
@@ -58,7 +57,9 @@ def test_principals_have_full_operator_authorized_capture_read_access(
     principal.require_lane("clipboard")
 
 
-def test_capture_lanes_tool_lists_runtime_declared_envelope_lanes(tmp_path: Path) -> None:
+def test_capture_lanes_tool_lists_runtime_declared_envelope_lanes(
+    tmp_path: Path,
+) -> None:
     gateway_config, lane_paths = config(tmp_path)
     service = CaptureService(gateway_config, Principal.for_name("observer"))
 
@@ -66,9 +67,30 @@ def test_capture_lanes_tool_lists_runtime_declared_envelope_lanes(tmp_path: Path
 
     assert result == {
         "lanes": [
-            {"name": "clipboard", "ref": "sinnix://captures/clipboard", "path": str(lane_paths["clipboard"]), "capture_root": str(lane_paths["clipboard"].parent), "native_lane": "clipboard", "native_contract": "sinnix-capture-v1-sidecar"},
-            {"name": "mpris", "ref": "sinnix://captures/mpris", "path": str(lane_paths["mpris"]), "capture_root": str(lane_paths["mpris"].parent), "native_lane": "mpris", "native_contract": "sinnix-capture-v1-sidecar"},
-            {"name": "router", "ref": "sinnix://captures/router", "path": str(lane_paths["router"]), "capture_root": str(lane_paths["router"].parent), "native_lane": "router", "native_contract": "sinnix-capture-v1-sidecar"},
+            {
+                "name": "clipboard",
+                "ref": "sinnix://captures/clipboard",
+                "path": str(lane_paths["clipboard"]),
+                "capture_root": str(lane_paths["clipboard"].parent),
+                "native_lane": "clipboard",
+                "native_contract": "sinnix-capture-v1-sidecar",
+            },
+            {
+                "name": "mpris",
+                "ref": "sinnix://captures/mpris",
+                "path": str(lane_paths["mpris"]),
+                "capture_root": str(lane_paths["mpris"].parent),
+                "native_lane": "mpris",
+                "native_contract": "sinnix-capture-v1-sidecar",
+            },
+            {
+                "name": "router",
+                "ref": "sinnix://captures/router",
+                "path": str(lane_paths["router"]),
+                "capture_root": str(lane_paths["router"].parent),
+                "native_lane": "router",
+                "native_contract": "sinnix-capture-v1-sidecar",
+            },
         ],
         "total_declared_lanes": 3,
     }
@@ -135,7 +157,9 @@ def test_capture_query_groups_declared_lanes_by_inventory_root(tmp_path: Path) -
     ]
 
 
-def test_capture_query_reports_missing_collector_for_declared_lane(tmp_path: Path) -> None:
+def test_capture_query_reports_missing_collector_for_declared_lane(
+    tmp_path: Path,
+) -> None:
     gateway_config, lane_paths = config(tmp_path)
     service = CaptureService(
         GatewayConfig(
@@ -166,15 +190,21 @@ def test_capture_query_reports_missing_collector_for_declared_lane(tmp_path: Pat
     }
 
 
-def test_declared_file_lane_remains_visible_without_a_sidecar_guess(tmp_path: Path) -> None:
+def test_declared_file_lane_remains_visible_without_a_sidecar_guess(
+    tmp_path: Path,
+) -> None:
     inventory = tmp_path / "runtime-inventory.json"
     lane = tmp_path / "machine" / "telemetry.jsonl"
     lane.parent.mkdir(parents=True)
     lane.write_text("{}\n")
-    inventory.write_text(json.dumps({"captures": [{"name": "telemetry", "path": str(lane)}]}))
+    inventory.write_text(
+        json.dumps({"captures": [{"name": "telemetry", "path": str(lane)}]})
+    )
 
     service = CaptureService(
-        GatewayConfig(state_dir=tmp_path / "state", projects={}, runtime_inventory=inventory),
+        GatewayConfig(
+            state_dir=tmp_path / "state", projects={}, runtime_inventory=inventory
+        ),
         Principal.for_name("observer"),
     )
 
@@ -200,7 +230,9 @@ def test_capture_query_uses_the_native_lane_derived_from_a_nested_declared_path(
     path.mkdir(parents=True)
     (path / "logitech-index.jsonl").write_text('{"ts": 1, "seq": 1}\n')
     inventory = tmp_path / "runtime-inventory.json"
-    inventory.write_text(json.dumps({"captures": [{"name": "peripherals-logitech", "path": str(path)}]}))
+    inventory.write_text(
+        json.dumps({"captures": [{"name": "peripherals-logitech", "path": str(path)}]})
+    )
     captured = tmp_path / "collector-commands.jsonl"
     collector = tmp_path / "sinnix-capture"
     collector.write_text(
@@ -211,15 +243,28 @@ def test_capture_query_uses_the_native_lane_derived_from_a_nested_declared_path(
     )
     collector.chmod(0o700)
     service = CaptureService(
-        GatewayConfig(state_dir=tmp_path / "state", projects={}, runtime_inventory=inventory, capture_command=str(collector)),
+        GatewayConfig(
+            state_dir=tmp_path / "state",
+            projects={},
+            runtime_inventory=inventory,
+            capture_command=str(collector),
+        ),
         Principal.for_name("observer"),
     )
 
     assert service.query(["peripherals-logitech"]) == {
-        "records": [], "lanes_queried": ["peripherals-logitech"], "truncated": False,
+        "records": [],
+        "lanes_queried": ["peripherals-logitech"],
+        "truncated": False,
     }
     assert json.loads(captured.read_text()) == [
-        "query", "--capture-root", str(root), "--since", "0.0", "--lane", "logitech",
+        "query",
+        "--capture-root",
+        str(root),
+        "--since",
+        "0.0",
+        "--lane",
+        "logitech",
     ]
 
 

@@ -42,9 +42,10 @@ def _copy_exclusive(source: Path, destination: Path) -> None:
     except FileExistsError as exc:
         raise FileError("destination already exists") from exc
     try:
-        with source.open("rb") as input_handle, os.fdopen(
-            destination_fd, "wb"
-        ) as output_handle:
+        with (
+            source.open("rb") as input_handle,
+            os.fdopen(destination_fd, "wb") as output_handle,
+        ):
             destination_fd = -1
             shutil.copyfileobj(input_handle, output_handle)
     except Exception:
@@ -231,7 +232,9 @@ class HostFileService:
                 "removed": operation == "move",
             }
         if operation not in {"replace", "append"}:
-            raise FileError("operation must be replace, append, mkdir, remove, copy, or move")
+            raise FileError(
+                "operation must be replace, append, mkdir, remove, copy, or move"
+            )
         if content is None:
             raise FileError("content is required")
         encoded = content.encode()

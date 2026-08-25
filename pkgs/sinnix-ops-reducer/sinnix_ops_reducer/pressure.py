@@ -781,8 +781,12 @@ def lane_of(
     if job_match:
         job = (jobs_by_id or {}).get(job_match.group("job"))
         if isinstance(job, dict):
-            checkout = job.get("checkout") if isinstance(job.get("checkout"), dict) else {}
-            contract = job.get("contract") if isinstance(job.get("contract"), dict) else {}
+            checkout = (
+                job.get("checkout") if isinstance(job.get("checkout"), dict) else {}
+            )
+            contract = (
+                job.get("contract") if isinstance(job.get("contract"), dict) else {}
+            )
             worktree = str(checkout.get("path") or job.get("worktree") or "")
             where = Path(worktree).name if worktree else ""
             named = " ".join(

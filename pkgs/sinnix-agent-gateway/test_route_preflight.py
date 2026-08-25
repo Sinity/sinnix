@@ -6,10 +6,9 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_mcp.execution import OwnerExecution
 from sinnix_agent_gateway.route_preflight import GatewayRoutePreflight
+from sinnix_mcp.execution import OwnerExecution
 
 
 def make_inventory(tmp_path: Path) -> tuple[Path, Path]:
@@ -259,7 +258,9 @@ def test_route_preflight_marks_required_owner_environment_unavailable(
     assert row["failure_class"] == f"environment_unavailable:{missing}"
 
 
-def test_route_preflight_reports_missing_broker_environment(tmp_path: Path, monkeypatch) -> None:
+def test_route_preflight_reports_missing_broker_environment(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
 

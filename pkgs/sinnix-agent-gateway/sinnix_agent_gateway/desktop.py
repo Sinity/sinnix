@@ -5,9 +5,6 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .artifacts import ArtifactService
-from .capabilities import Capability, Principal
-from .config import GatewayConfig
 from sinnix_mcp.execution import (
     EnvironmentProfile,
     ExecutionProfile,
@@ -15,6 +12,10 @@ from sinnix_mcp.execution import (
     OwnerExecution,
     OwnerRoute,
 )
+
+from .artifacts import ArtifactService
+from .capabilities import Capability, Principal
+from .config import GatewayConfig
 
 
 class DesktopError(ValueError):
@@ -84,7 +85,13 @@ class DesktopService:
             raise DesktopError("fix_hdr must be boolean")
         capture_dir = self.config.state_dir / "captures" / uuid.uuid4().hex
         capture_dir.mkdir(mode=0o700, parents=True)
-        arguments = ["capture-output", "--out-dir", str(capture_dir), "--name", "gateway"]
+        arguments = [
+            "capture-output",
+            "--out-dir",
+            str(capture_dir),
+            "--name",
+            "gateway",
+        ]
         if fix_hdr:
             arguments.append("--fix-hdr")
         result = self._run("screenshot", arguments)
@@ -95,16 +102,24 @@ class DesktopService:
         for variant, key in (("raw", "raw_files"), ("corrected", "corrected_files")):
             files = response.get(key, [])
             if not isinstance(files, list):
-                raise DesktopError("screenshot control returned malformed capture metadata")
+                raise DesktopError(
+                    "screenshot control returned malformed capture metadata"
+                )
             for value in files:
                 if not isinstance(value, str):
-                    raise DesktopError("screenshot control returned malformed capture metadata")
+                    raise DesktopError(
+                        "screenshot control returned malformed capture metadata"
+                    )
                 try:
                     source = Path(value).resolve(strict=True)
                 except OSError as exc:
-                    raise DesktopError("screenshot control did not produce its declared file") from exc
+                    raise DesktopError(
+                        "screenshot control did not produce its declared file"
+                    ) from exc
                 if capture_dir.resolve() not in source.parents or not source.is_file():
-                    raise DesktopError("screenshot control returned a file outside gateway capture state")
+                    raise DesktopError(
+                        "screenshot control returned a file outside gateway capture state"
+                    )
                 files_by_variant.append((variant, source))
         if not files_by_variant:
             raise DesktopError("screenshot control did not produce any capture files")
@@ -177,7 +192,9 @@ class DesktopService:
             if (
                 not isinstance(extra, list)
                 or len(extra) > 32
-                or any(not isinstance(value, str) or len(value) > 8_192 for value in extra)
+                or any(
+                    not isinstance(value, str) or len(value) > 8_192 for value in extra
+                )
             ):
                 raise DesktopError("dispatch args must contain at most 32 strings")
             return {
@@ -187,7 +204,9 @@ class DesktopService:
         if operation == "send_shortcut":
             allowed = {"mods", "key", "window"}
             if not {"mods", "key"} <= set(arguments) or set(arguments) - allowed:
-                raise DesktopError("send_shortcut requires mods, key, and optional window")
+                raise DesktopError(
+                    "send_shortcut requires mods, key, and optional window"
+                )
             command = [
                 "send-shortcut",
                 self._string(arguments["mods"], "mods", 128),
@@ -198,7 +217,10 @@ class DesktopService:
             return {"operation": operation, **self._run("hypr", command)}
         if operation == "send_keystate":
             allowed = {"mods", "key", "state", "window"}
-            if not {"mods", "key", "state"} <= set(arguments) or set(arguments) - allowed:
+            if (
+                not {"mods", "key", "state"} <= set(arguments)
+                or set(arguments) - allowed
+            ):
                 raise DesktopError(
                     "send_keystate requires mods, key, state, and optional window"
                 )

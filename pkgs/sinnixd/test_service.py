@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
 import shutil
 import socket
@@ -17,19 +17,24 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-
 import sinnixd.api as api_module
 import sinnixd.cli as cli_module
 import sinnixd.jobs as jobs_module
-from sinnix_mcp import ErrorCode, OpaquePayload, RequestEnvelope, ResponseEnvelope, SinnixRef, SourceBinding
+from sinnix_mcp import (
+    ErrorCode,
+    OpaquePayload,
+    RequestEnvelope,
+    ResponseEnvelope,
+    SinnixRef,
+    SourceBinding,
+)
 from sinnix_mcp.execution import EnvironmentProfile, ExecutionResult, OwnerExecution
-
 from sinnixd.api import (
     CONNECTION_TIMEOUT_SECONDS,
     CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS,
     MAX_JSON_RPC_ERROR_MESSAGE_BYTES,
-    ProtocolError,
     WAIT_TRANSPORT_MARGIN_SECONDS,
+    ProtocolError,
     SinnixdClient,
     SinnixdClientError,
     UnixSocketServer,
@@ -38,15 +43,15 @@ from sinnixd.api import (
     receive_frame,
     send_frame,
 )
-from sinnixd.environment import build_environment
 from sinnixd.delivery import DeliveryError, GitHubDelivery
+from sinnixd.environment import build_environment
 from sinnixd.jobs import (
     DEFAULT_TIMEOUT_SECONDS,
     MAX_LOG_ARTIFACT_BYTES,
     SYSTEMD_COMMAND_TIMEOUT_SECONDS,
+    GenericJobs,
     GenericJobSpec,
     GenericJobStore,
-    GenericJobs,
     JobRecordError,
     JobResultError,
     JobResultLimitError,
@@ -58,7 +63,12 @@ from sinnixd.jobs import (
 )
 from sinnixd.limits import MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
 from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
-from sinnixd.projects import ProjectCatalog, ProjectConfigError, RegisteredCheckout, parse_worktree_records
+from sinnixd.projects import (
+    ProjectCatalog,
+    ProjectConfigError,
+    RegisteredCheckout,
+    parse_worktree_records,
+)
 from sinnixd.runner import (
     RunnerError,
     _exec_shell,
@@ -69,22 +79,25 @@ from sinnixd.runner import (
 )
 from sinnixd.service import SinnixdService
 from sinnixd.tasks import (
-    BeadsCommandBoundary,
     FLOCK_EXECUTABLE,
     MAX_TASK_OUTPUT_BYTES,
     TASK_MUTATION_JOURNAL_DIRECTORY,
+    BeadsCommandBoundary,
     TaskAuthority,
     TaskError,
     TaskMutationJournal,
     TaskService,
     reconcile_task_mutations,
 )
-from sinnixd.workspaces import GitWorkspaces, WorkspaceError, WorkspaceStore
+from sinnixd.workspaces import WorkspaceError
 
 
 @pytest.mark.parametrize(("ok", "expected"), ((True, 0), (False, 1)))
 def test_agentctl_exit_status_matches_response_envelope(
-    ok: bool, expected: int, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ok: bool,
+    expected: int,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     response = {"schema": 1, "ok": ok}
     monkeypatch.setattr(sys, "argv", ["agentctl", "status"])
@@ -145,10 +158,23 @@ def test_call_preserves_request_matching_and_rejects_malformed_json_rpc_errors(
 
     def reply(raw: dict[str, object]) -> dict[str, object]:
         if shape == "mismatched-id":
-            return {"jsonrpc": "2.0", "id": "not-the-request-id", "result": {"ok": True}}
+            return {
+                "jsonrpc": "2.0",
+                "id": "not-the-request-id",
+                "result": {"ok": True},
+            }
         if shape == "unexpected-response-field":
-            return {"jsonrpc": "2.0", "id": raw["id"], "result": {"ok": True}, "extra": "rejected"}
-        message = "server-secret" if shape == "unexpected-error-field" else "x" * (MAX_JSON_RPC_ERROR_MESSAGE_BYTES + 1)
+            return {
+                "jsonrpc": "2.0",
+                "id": raw["id"],
+                "result": {"ok": True},
+                "extra": "rejected",
+            }
+        message = (
+            "server-secret"
+            if shape == "unexpected-error-field"
+            else "x" * (MAX_JSON_RPC_ERROR_MESSAGE_BYTES + 1)
+        )
         error_value: dict[str, object] = {"code": -32600, "message": message}
         if shape == "unexpected-error-field":
             error_value["data"] = "must-not-be-accepted"
@@ -185,24 +211,195 @@ def test_canonical_client_redacts_unrecognized_json_rpc_errors(tmp_path: Path) -
 @pytest.mark.parametrize(
     ("argv", "operation", "payload"),
     (
-        (("agentctl", "task", "list", "fixture", "--status", "open"), "task.list", {"project_id": "fixture", "status": "open", "limit": 100}),
-        (("agentctl", "task", "list", "fixture", "--status", "open", "--json"), "task.list", {"project_id": "fixture", "status": "open", "limit": 100}),
-        (("agentctl", "task", "get", "fixture", "fixture-1"), "task.get", {"project_id": "fixture", "task_id": "fixture-1"}),
-        (("agentctl", "task", "show", "fixture", "fixture-1"), "task.get", {"project_id": "fixture", "task_id": "fixture-1"}),
-        (("agentctl", "task", "create", "fixture", "typed title", "--description", "typed description", "--type", "task", "--priority", "2", "--label", "area:agentctl", "--parent", "fixture-parent", "--dependency", "depends-on:fixture-blocker", "--request-id", "request-1"), "task.create", {"project_id": "fixture", "title": "typed title", "description": "typed description", "issue_type": "task", "priority": 2, "labels": ["area:agentctl"], "parent_task_id": "fixture-parent", "dependencies": [{"relation": "depends-on", "task_id": "fixture-blocker"}]}),
-        (("agentctl", "task", "claim", "fixture", "fixture-1", "--request-id", "request-1"), "task.claim", {"project_id": "fixture", "task_id": "fixture-1"}),
-        (("agentctl", "task", "note", "fixture", "fixture-1", "note", "--request-id", "request-1"), "task.note", {"project_id": "fixture", "task_id": "fixture-1", "text": "note"}),
-        (("agentctl", "task", "note", "fixture", "fixture-1", "--text", "note", "--request-id", "request-1"), "task.note", {"project_id": "fixture", "task_id": "fixture-1", "text": "note"}),
-        (("agentctl", "task", "update", "fixture", "fixture-1", "--set-metadata", "write_scope=[\"pkgs/sinnixd/\"]", "--request-id", "request-1"), "task.update", {"project_id": "fixture", "task_id": "fixture-1", "metadata": {"write_scope": '["pkgs/sinnixd/"]'}}),
-        (("agentctl", "task", "relate", "fixture", "fixture-1", "fixture-2", "--request-id", "request-1"), "task.relate", {"project_id": "fixture", "task_id": "fixture-1", "related_task_id": "fixture-2"}),
-        (("agentctl", "task", "complete", "fixture", "fixture-1", "--reason", "done", "--merge-sha", "a" * 40, "--request-id", "request-1"), "task.complete", {"project_id": "fixture", "task_id": "fixture-1", "reason": "done", "merge_sha": "a" * 40}),
-        (("agentctl", "task", "release", "fixture", "fixture-1", "--if-assignee", "worker", "--request-id", "request-1"), "task.release", {"project_id": "fixture", "task_id": "fixture-1", "if_assignee": "worker"}),
-        (("agentctl", "task", "reconcile", "fixture"), "task.reconcile", {"project_id": "fixture"}),
-        (("agentctl", "task", "snapshot", "fixture"), "task.snapshot", {"project_id": "fixture"}),
+        (
+            ("agentctl", "task", "list", "fixture", "--status", "open"),
+            "task.list",
+            {"project_id": "fixture", "status": "open", "limit": 100},
+        ),
+        (
+            ("agentctl", "task", "list", "fixture", "--status", "open", "--json"),
+            "task.list",
+            {"project_id": "fixture", "status": "open", "limit": 100},
+        ),
+        (
+            ("agentctl", "task", "get", "fixture", "fixture-1"),
+            "task.get",
+            {"project_id": "fixture", "task_id": "fixture-1"},
+        ),
+        (
+            ("agentctl", "task", "show", "fixture", "fixture-1"),
+            "task.get",
+            {"project_id": "fixture", "task_id": "fixture-1"},
+        ),
+        (
+            (
+                "agentctl",
+                "task",
+                "create",
+                "fixture",
+                "typed title",
+                "--description",
+                "typed description",
+                "--type",
+                "task",
+                "--priority",
+                "2",
+                "--label",
+                "area:agentctl",
+                "--parent",
+                "fixture-parent",
+                "--dependency",
+                "depends-on:fixture-blocker",
+                "--request-id",
+                "request-1",
+            ),
+            "task.create",
+            {
+                "project_id": "fixture",
+                "title": "typed title",
+                "description": "typed description",
+                "issue_type": "task",
+                "priority": 2,
+                "labels": ["area:agentctl"],
+                "parent_task_id": "fixture-parent",
+                "dependencies": [
+                    {"relation": "depends-on", "task_id": "fixture-blocker"}
+                ],
+            },
+        ),
+        (
+            (
+                "agentctl",
+                "task",
+                "claim",
+                "fixture",
+                "fixture-1",
+                "--request-id",
+                "request-1",
+            ),
+            "task.claim",
+            {"project_id": "fixture", "task_id": "fixture-1"},
+        ),
+        (
+            (
+                "agentctl",
+                "task",
+                "note",
+                "fixture",
+                "fixture-1",
+                "note",
+                "--request-id",
+                "request-1",
+            ),
+            "task.note",
+            {"project_id": "fixture", "task_id": "fixture-1", "text": "note"},
+        ),
+        (
+            (
+                "agentctl",
+                "task",
+                "note",
+                "fixture",
+                "fixture-1",
+                "--text",
+                "note",
+                "--request-id",
+                "request-1",
+            ),
+            "task.note",
+            {"project_id": "fixture", "task_id": "fixture-1", "text": "note"},
+        ),
+        (
+            (
+                "agentctl",
+                "task",
+                "update",
+                "fixture",
+                "fixture-1",
+                "--set-metadata",
+                'write_scope=["pkgs/sinnixd/"]',
+                "--request-id",
+                "request-1",
+            ),
+            "task.update",
+            {
+                "project_id": "fixture",
+                "task_id": "fixture-1",
+                "metadata": {"write_scope": '["pkgs/sinnixd/"]'},
+            },
+        ),
+        (
+            (
+                "agentctl",
+                "task",
+                "relate",
+                "fixture",
+                "fixture-1",
+                "fixture-2",
+                "--request-id",
+                "request-1",
+            ),
+            "task.relate",
+            {
+                "project_id": "fixture",
+                "task_id": "fixture-1",
+                "related_task_id": "fixture-2",
+            },
+        ),
+        (
+            (
+                "agentctl",
+                "task",
+                "complete",
+                "fixture",
+                "fixture-1",
+                "--reason",
+                "done",
+                "--merge-sha",
+                "a" * 40,
+                "--request-id",
+                "request-1",
+            ),
+            "task.complete",
+            {
+                "project_id": "fixture",
+                "task_id": "fixture-1",
+                "reason": "done",
+                "merge_sha": "a" * 40,
+            },
+        ),
+        (
+            (
+                "agentctl",
+                "task",
+                "release",
+                "fixture",
+                "fixture-1",
+                "--if-assignee",
+                "worker",
+                "--request-id",
+                "request-1",
+            ),
+            "task.release",
+            {"project_id": "fixture", "task_id": "fixture-1", "if_assignee": "worker"},
+        ),
+        (
+            ("agentctl", "task", "reconcile", "fixture"),
+            "task.reconcile",
+            {"project_id": "fixture"},
+        ),
+        (
+            ("agentctl", "task", "snapshot", "fixture"),
+            "task.snapshot",
+            {"project_id": "fixture"},
+        ),
     ),
 )
 def test_agentctl_task_commands_map_to_task_envelopes(
-    argv: tuple[str, ...], operation: str, payload: dict[str, object], monkeypatch: pytest.MonkeyPatch
+    argv: tuple[str, ...],
+    operation: str,
+    payload: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, RequestEnvelope] = {}
 
@@ -219,7 +416,20 @@ def test_agentctl_task_commands_map_to_task_envelopes(
     assert outbound.owner == "task-backend"
     assert outbound.principal == "operator"
     assert dict(outbound.arguments) == payload
-    expected_key = "request-1" if operation in {"task.create", "task.claim", "task.note", "task.relate", "task.complete", "task.release", "task.update"} else None
+    expected_key = (
+        "request-1"
+        if operation
+        in {
+            "task.create",
+            "task.claim",
+            "task.note",
+            "task.relate",
+            "task.complete",
+            "task.release",
+            "task.update",
+        }
+        else None
+    )
     assert outbound.idempotency_key == expected_key
 
 
@@ -248,17 +458,55 @@ def test_agentctl_task_mutations_require_a_stable_request_id() -> None:
     with pytest.raises(SystemExit):
         cli_module.parser().parse_args(["task", "claim", "fixture", "fixture-1"])
     with pytest.raises(SystemExit):
-        cli_module.parser().parse_args(["task", "complete", "fixture", "fixture-1", "--request-id", "request-1"])
+        cli_module.parser().parse_args(
+            ["task", "complete", "fixture", "fixture-1", "--request-id", "request-1"]
+        )
     with pytest.raises(SystemExit):
-        cli_module.parser().parse_args(["task", "create", "fixture", "title", "--description", "body", "--type", "task", "--priority", "2"])
+        cli_module.parser().parse_args(
+            [
+                "task",
+                "create",
+                "fixture",
+                "title",
+                "--description",
+                "body",
+                "--type",
+                "task",
+                "--priority",
+                "2",
+            ]
+        )
     with pytest.raises(SystemExit):
-        cli_module.parser().parse_args(["task", "create", "fixture", "title", "--description", "body", "--type", "task", "--priority", "5", "--request-id", "request-1"])
+        cli_module.parser().parse_args(
+            [
+                "task",
+                "create",
+                "fixture",
+                "title",
+                "--description",
+                "body",
+                "--type",
+                "task",
+                "--priority",
+                "5",
+                "--request-id",
+                "request-1",
+            ]
+        )
 
 
 @pytest.mark.parametrize(
     "argv",
     (
-        ["agentctl", "task", "note", "fixture", "fixture-1", "--request-id", "request-1"],
+        [
+            "agentctl",
+            "task",
+            "note",
+            "fixture",
+            "fixture-1",
+            "--request-id",
+            "request-1",
+        ],
         [
             "agentctl",
             "task",
@@ -346,7 +594,19 @@ def test_agentctl_task_list_preserves_cursor_and_order_controls(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["agentctl", "task", "list", "fixture", "--limit", "2", "--cursor", "cursor-fixture", "--sort", "id", "--reverse"],
+        [
+            "agentctl",
+            "task",
+            "list",
+            "fixture",
+            "--limit",
+            "2",
+            "--cursor",
+            "cursor-fixture",
+            "--sort",
+            "id",
+            "--reverse",
+        ],
     )
     monkeypatch.setattr(cli_module, "call", fake_call)
 
@@ -369,7 +629,9 @@ def test_agentctl_workspace_dispose_maps_to_a_typed_envelope(
         captured["request"] = request_value
         return {"schema": 1, "ok": True}
 
-    monkeypatch.setattr(sys, "argv", ["agentctl", "workspace", "dispose", "workspace-1"])
+    monkeypatch.setattr(
+        sys, "argv", ["agentctl", "workspace", "dispose", "workspace-1"]
+    )
     monkeypatch.setattr(cli_module, "call", fake_call)
 
     assert cli_module.main() == 0
@@ -392,7 +654,14 @@ def test_agentctl_workspace_finish_integrated_maps_target_to_a_typed_envelope(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["agentctl", "workspace", "finish-integrated", "workspace-1", "--target", "abc123"],
+        [
+            "agentctl",
+            "workspace",
+            "finish-integrated",
+            "workspace-1",
+            "--target",
+            "abc123",
+        ],
     )
     monkeypatch.setattr(cli_module, "call", fake_call)
 
@@ -401,7 +670,10 @@ def test_agentctl_workspace_finish_integrated_maps_target_to_a_typed_envelope(
     assert outbound.operation == "workspace.finish-integrated"
     assert outbound.owner == "git-workspaces"
     assert outbound.principal == "agent-control"
-    assert dict(outbound.arguments) == {"workspace_id": "workspace-1", "target_ref": "abc123"}
+    assert dict(outbound.arguments) == {
+        "workspace_id": "workspace-1",
+        "target_ref": "abc123",
+    }
 
 
 def test_agentctl_job_start_maps_parameters_json_to_the_typed_request(
@@ -416,7 +688,15 @@ def test_agentctl_job_start_maps_parameters_json_to_the_typed_request(
     monkeypatch.setattr(
         sys,
         "argv",
-        ["agentctl", "job", "start", "fixture", "parameterized", "--parameters-json", '{"package":["xtask","sinexd"],"full":true}'],
+        [
+            "agentctl",
+            "job",
+            "start",
+            "fixture",
+            "parameterized",
+            "--parameters-json",
+            '{"package":["xtask","sinexd"],"full":true}',
+        ],
     )
     monkeypatch.setattr(cli_module, "call", fake_call)
 
@@ -449,7 +729,7 @@ unset = ["PYTHONPATH"]
 
 [workspace]
 provider = "git-worktree"
-root = "{root / 'worktrees'}"
+root = "{root / "worktrees"}"
 default_base = "origin/master"
 identity_check = ["git", "diff", "--quiet"]
 checkpoint_untracked = true
@@ -617,22 +897,24 @@ documentation = "Bounded Polylogue archive status."
     "fragment",
     (
         "unknown = true\n",
-        "[operations.parameterized.parameters.broken]\ntype = \"integer\"\nflag = \"--broken\"\nmin = 1\n",
-        "[operations.parameterized.parameters.unbounded]\ntype = \"string-list\"\nflag = \"--unbounded\"\nmax_items = 4\n",
-        "[operations.parameterized.parameters.unknown_string]\ntype = \"string\"\nflag = \"--string\"\nmax_length = 4\ngrammar = \"shell\"\n",
-        "[operations.parameterized.parameters.boolean_integer]\ntype = \"integer\"\nflag = \"--integer\"\nmin = true\nmax = 4\n",
-        "[operations.parameterized.parameters.empty_enum]\ntype = \"enum\"\nflag = \"--enum\"\nvalues = []\n",
-        "[operations.parameterized.parameters.duplicate_enum]\ntype = \"enum\"\nflag = \"--enum\"\nvalues = [\"same\", \"same\"]\n",
-        "[operations.parameterized.parameters.unbounded_enum_list]\ntype = \"enum-list\"\nflag = \"--enum-list\"\nvalues = [\"one\"]\n",
-        "[operations.parameterized.parameters.duplicate_flag]\ntype = \"string\"\nflag = \"--full\"\nmax_length = 4\n",
-        "[operations.verify_closure.parameters.ambiguous]\ntype = \"string\"\nflag = \"--ambiguous\"\nposition = 2\nrequired = true\nmax_length = 4\n",
-        "[operations.verify_closure.parameters.optional]\ntype = \"string\"\nposition = 2\nrequired = false\nmax_length = 4\n",
-        "[operations.verify_closure.parameters.duplicate_position]\ntype = \"string\"\nposition = 1\nrequired = true\nmax_length = 4\n",
-        "[operations.verify_closure.parameters.gapped_position]\ntype = \"string\"\nposition = 3\nrequired = true\nmax_length = 4\n",
-        "[operations.verify_closure.parameters.list_position]\ntype = \"string-list\"\nposition = 2\nrequired = true\nmax_items = 1\nmax_length = 4\n",
+        '[operations.parameterized.parameters.broken]\ntype = "integer"\nflag = "--broken"\nmin = 1\n',
+        '[operations.parameterized.parameters.unbounded]\ntype = "string-list"\nflag = "--unbounded"\nmax_items = 4\n',
+        '[operations.parameterized.parameters.unknown_string]\ntype = "string"\nflag = "--string"\nmax_length = 4\ngrammar = "shell"\n',
+        '[operations.parameterized.parameters.boolean_integer]\ntype = "integer"\nflag = "--integer"\nmin = true\nmax = 4\n',
+        '[operations.parameterized.parameters.empty_enum]\ntype = "enum"\nflag = "--enum"\nvalues = []\n',
+        '[operations.parameterized.parameters.duplicate_enum]\ntype = "enum"\nflag = "--enum"\nvalues = ["same", "same"]\n',
+        '[operations.parameterized.parameters.unbounded_enum_list]\ntype = "enum-list"\nflag = "--enum-list"\nvalues = ["one"]\n',
+        '[operations.parameterized.parameters.duplicate_flag]\ntype = "string"\nflag = "--full"\nmax_length = 4\n',
+        '[operations.verify_closure.parameters.ambiguous]\ntype = "string"\nflag = "--ambiguous"\nposition = 2\nrequired = true\nmax_length = 4\n',
+        '[operations.verify_closure.parameters.optional]\ntype = "string"\nposition = 2\nrequired = false\nmax_length = 4\n',
+        '[operations.verify_closure.parameters.duplicate_position]\ntype = "string"\nposition = 1\nrequired = true\nmax_length = 4\n',
+        '[operations.verify_closure.parameters.gapped_position]\ntype = "string"\nposition = 3\nrequired = true\nmax_length = 4\n',
+        '[operations.verify_closure.parameters.list_position]\ntype = "string-list"\nposition = 2\nrequired = true\nmax_items = 1\nmax_length = 4\n',
     ),
 )
-def test_project_operation_parameter_schema_is_closed_and_bounded(tmp_path: Path, fragment: str) -> None:
+def test_project_operation_parameter_schema_is_closed_and_bounded(
+    tmp_path: Path, fragment: str
+) -> None:
     write_adapter(tmp_path)
     descriptor = tmp_path / ".agentctl" / "project.toml"
     descriptor.write_text(descriptor.read_text() + fragment)
@@ -641,7 +923,9 @@ def test_project_operation_parameter_schema_is_closed_and_bounded(tmp_path: Path
         ProjectCatalog([tmp_path])
 
 
-def test_project_operation_parameter_count_supports_broad_typed_clis(tmp_path: Path) -> None:
+def test_project_operation_parameter_count_supports_broad_typed_clis(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     descriptor = tmp_path / ".agentctl" / "project.toml"
     parameters = "".join(
@@ -676,7 +960,9 @@ def test_project_operation_parameter_count_remains_bounded(tmp_path: Path) -> No
         ProjectCatalog([tmp_path])
 
 
-def test_operation_dependencies_reject_required_parameter_targets(tmp_path: Path) -> None:
+def test_operation_dependencies_reject_required_parameter_targets(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: dependencies have no parameter payload to satisfy required inputs."""
     write_adapter(tmp_path)
     descriptor = tmp_path / ".agentctl" / "project.toml"
@@ -721,7 +1007,10 @@ grammar = "safe-token"
 """
     )
 
-    with pytest.raises(ProjectConfigError, match="cannot declare dependencies.*required_with_dependency"):
+    with pytest.raises(
+        ProjectConfigError,
+        match="cannot declare dependencies.*required_with_dependency",
+    ):
         ProjectCatalog([tmp_path])
 
 
@@ -729,7 +1018,9 @@ grammar = "safe-token"
     "value",
     ("true", '"3600"', "0", "-1", str(MAX_DECLARED_OPERATION_TIMEOUT_SECONDS + 1)),
 )
-def test_declared_operation_timeout_must_be_a_positive_bounded_integer(tmp_path: Path, value: str) -> None:
+def test_declared_operation_timeout_must_be_a_positive_bounded_integer(
+    tmp_path: Path, value: str
+) -> None:
     write_adapter(tmp_path)
     descriptor = tmp_path / ".agentctl" / "project.toml"
     descriptor.write_text(
@@ -743,7 +1034,9 @@ def test_declared_operation_timeout_must_be_a_positive_bounded_integer(tmp_path:
         ProjectCatalog([tmp_path])
 
 
-def test_declared_operation_timeout_defaults_and_survives_launch_recovery(tmp_path: Path) -> None:
+def test_declared_operation_timeout_defaults_and_survives_launch_recovery(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     descriptor = tmp_path / ".agentctl" / "project.toml"
     descriptor.write_text(
@@ -755,25 +1048,45 @@ def test_declared_operation_timeout_defaults_and_survives_launch_recovery(tmp_pa
     catalog = ProjectCatalog([tmp_path])
     check = catalog.get("fixture").operation("check")
     assert check.timeout_seconds == MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
-    assert catalog.get("fixture").operation("parameterized").timeout_seconds == DEFAULT_TIMEOUT_SECONDS
-    assert check.catalog_row()["timeout_seconds"] == MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
+    assert (
+        catalog.get("fixture").operation("parameterized").timeout_seconds
+        == DEFAULT_TIMEOUT_SECONDS
+    )
+    assert (
+        check.catalog_row()["timeout_seconds"] == MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
+    )
 
     systemd = FakeSystemdJobs()
     jobs = generic_jobs(tmp_path, systemd)
     service = SinnixdService(catalog, jobs=jobs)
-    response = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"}))
+    response = service.dispatch(
+        request(
+            "job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"}
+        )
+    )
     assert response.ok and response.payload is not None
     launched = response.payload.inline
     assert launched["timeout_seconds"] == MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
-    assert systemd.started[0]["timeout_seconds"] == MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
+    assert (
+        systemd.started[0]["timeout_seconds"] == MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
+    )
 
     record = jobs.store.load(launched["job_id"])
     assert record.spec.timeout_seconds == MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
     recovered = GenericJobs(systemd, jobs.store, wait_poll_seconds=0.001)
-    assert recovered.get(launched["job_id"])["timeout_seconds"] == MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
-    assert GenericJobSpec(
-        kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={}
-    ).timeout_seconds == DEFAULT_TIMEOUT_SECONDS
+    assert (
+        recovered.get(launched["job_id"])["timeout_seconds"]
+        == MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
+    )
+    assert (
+        GenericJobSpec(
+            kind="foreground-command",
+            command=("fixture",),
+            working_directory=str(tmp_path),
+            environment={},
+        ).timeout_seconds
+        == DEFAULT_TIMEOUT_SECONDS
+    )
 
 
 @pytest.mark.parametrize(
@@ -783,28 +1096,42 @@ def test_declared_operation_timeout_defaults_and_survives_launch_recovery(tmp_pa
         'lifetime = "daemon"',
         'environment = "SINNIXD_JOB_ID"',
         'environment = "HOME"',
-        'range = [1023, 1024]',
-        'range = [41000, 41256]',
+        "range = [1023, 1024]",
+        "range = [41000, 41256]",
     ),
 )
-def test_service_declaration_is_closed_and_bounded(tmp_path: Path, replacement: str) -> None:
+def test_service_declaration_is_closed_and_bounded(
+    tmp_path: Path, replacement: str
+) -> None:
     """Anti-vacuity: a service descriptor cannot become a caller-controlled launch overlay."""
     write_adapter(tmp_path)
     descriptor = tmp_path / ".agentctl" / "project.toml"
     if replacement.startswith("readiness"):
-        descriptor.write_text(descriptor.read_text().replace('readiness = "project-command"', replacement))
+        descriptor.write_text(
+            descriptor.read_text().replace('readiness = "project-command"', replacement)
+        )
     elif replacement.startswith("lifetime"):
-        descriptor.write_text(descriptor.read_text().replace('lifetime = "job"', replacement))
+        descriptor.write_text(
+            descriptor.read_text().replace('lifetime = "job"', replacement)
+        )
     elif replacement.startswith("environment"):
-        descriptor.write_text(descriptor.read_text().replace('environment = "FIXTURE_HTTP_PORT"', replacement))
+        descriptor.write_text(
+            descriptor.read_text().replace(
+                'environment = "FIXTURE_HTTP_PORT"', replacement
+            )
+        )
     else:
-        descriptor.write_text(descriptor.read_text().replace('range = [41000, 41001]', replacement))
+        descriptor.write_text(
+            descriptor.read_text().replace("range = [41000, 41001]", replacement)
+        )
 
     with pytest.raises(ProjectConfigError, match="operations.service.service"):
         ProjectCatalog([tmp_path])
 
 
-def test_service_lease_is_bounded_public_metadata_and_injects_only_declared_port(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_service_lease_is_bounded_public_metadata_and_injects_only_declared_port(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Anti-vacuity: a service lease must reach the generic launch without persisting arbitrary environment input."""
     monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
     write_adapter(tmp_path)
@@ -812,20 +1139,36 @@ def test_service_lease_is_bounded_public_metadata_and_injects_only_declared_port
     jobs = generic_jobs(tmp_path, systemd)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
 
-    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
+    )
 
     assert started.ok and started.payload is not None
     lease = started.payload.inline["lease"]
     assert lease is not None
     assert lease["id"] == started.payload.inline["job_id"]
     assert lease["host"] == "127.0.0.1"
-    assert lease["ports"] == [{"name": "http", "environment": "FIXTURE_HTTP_PORT", "port": 41000}]
+    assert lease["ports"] == [
+        {"name": "http", "environment": "FIXTURE_HTTP_PORT", "port": 41000}
+    ]
     assert systemd.started[0]["environment"]["FIXTURE_HTTP_PORT"] == "41000"
     persisted = (tmp_path / "state" / "jobs" / f"{lease['id']}.json").read_text()
     assert "fixture-service" not in persisted
     assert "FIXTURE_HTTP_PORT" in persisted
     rejected = service.dispatch(
-        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service", "environment": {"SECRET": "value"}})
+        request(
+            "job.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "operation": "service",
+                "environment": {"SECRET": "value"},
+            },
+        )
     )
     assert rejected.error is not None
     assert rejected.error.code.value == "INVALID_ARGUMENT"
@@ -841,15 +1184,23 @@ def test_nix_develop_payload_receives_job_owned_tmpdir_after_environment_entry(
     descriptor.write_text(
         descriptor.read_text()
         .replace('kind = "fixture"', 'kind = "nix-develop"')
-        .replace('command = ["fixture-env", "--command"]', 'command = ["nix", "develop", "--command"]')
-        .replace('exclusive_keys = ["fixture:check"]', 'exclusive_keys = ["fixture:check"]\nscratch = "nvme"')
+        .replace(
+            'command = ["fixture-env", "--command"]',
+            'command = ["nix", "develop", "--command"]',
+        )
+        .replace(
+            'exclusive_keys = ["fixture:check"]',
+            'exclusive_keys = ["fixture:check"]\nscratch = "nvme"',
+        )
     )
     systemd = FakeSystemdJobs()
     jobs = generic_jobs(tmp_path, systemd)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
 
     started = service.dispatch(
-        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"})
+        request(
+            "job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"}
+        )
     )
 
     assert started.ok and started.payload is not None
@@ -857,7 +1208,14 @@ def test_nix_develop_payload_receives_job_owned_tmpdir_after_environment_entry(
     assert record.scratch_path is not None
     expected = str(record.scratch_path)
     command, environment = jobs.store.declared_launch(record.job_id)
-    assert command == ("nix", "develop", "--command", "env", f"TMPDIR={expected}", "fixture-check")
+    assert command == (
+        "nix",
+        "develop",
+        "--command",
+        "env",
+        f"TMPDIR={expected}",
+        "fixture-check",
+    )
     assert environment["TMPDIR"] == expected
     assert systemd.started[0]["environment"]["TMPDIR"] == expected
 
@@ -867,7 +1225,9 @@ def test_declared_service_dependency_supplies_lease_and_unblocks_when_bound(
 ) -> None:
     """A dependent operation receives its service lease and starts only after the port is bound."""
     port_available = True
-    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: port_available)
+    monkeypatch.setattr(
+        "sinnixd.jobs._loopback_port_available", lambda _port: port_available
+    )
     write_adapter(tmp_path)
     descriptor = tmp_path / ".agentctl" / "project.toml"
     descriptor.write_text(
@@ -881,7 +1241,9 @@ def test_declared_service_dependency_supplies_lease_and_unblocks_when_bound(
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
 
     started = service.dispatch(
-        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"})
+        request(
+            "job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"}
+        )
     )
 
     assert started.ok and started.payload is not None
@@ -891,7 +1253,9 @@ def test_declared_service_dependency_supplies_lease_and_unblocks_when_bound(
     assert launch_environment["FIXTURE_HTTP_PORT"] == "41000"
     assert check_record.state["phase"] == "waiting-dependencies"
     dependency_id = check_record.spec.dependency_job_ids[0]
-    dependency_command, dependency_environment = jobs.store.declared_launch(dependency_id)
+    dependency_command, dependency_environment = jobs.store.declared_launch(
+        dependency_id
+    )
     assert dependency_command == ("fixture-env", "--command", "fixture-service")
     assert len(systemd.started) == 1
 
@@ -907,16 +1271,35 @@ def test_declared_service_dependency_supplies_lease_and_unblocks_when_bound(
     assert len(systemd.started) == 2
 
 
-def test_live_service_leases_never_share_a_port(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_live_service_leases_never_share_a_port(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Anti-vacuity: two live declared jobs must allocate different port slots from one range."""
     monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
     write_adapter(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
 
-    first = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
-    second = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    first = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
+    )
+    second = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
+    )
 
-    assert first.ok and second.ok and first.payload is not None and second.payload is not None
+    assert (
+        first.ok
+        and second.ok
+        and first.payload is not None
+        and second.payload is not None
+    )
     assert first.payload.inline["lease"]["ports"][0]["port"] == 41000
     assert second.payload.inline["lease"]["ports"][0]["port"] == 41001
 
@@ -943,17 +1326,27 @@ def test_non_cacheable_operation_coalesces_only_while_active(tmp_path: Path) -> 
     first = service.dispatch(request("job.start", "systemd-jobs", arguments))
     duplicate = service.dispatch(request("job.start", "systemd-jobs", arguments))
 
-    assert first.ok and duplicate.ok and first.payload is not None and duplicate.payload is not None
+    assert (
+        first.ok
+        and duplicate.ok
+        and first.payload is not None
+        and duplicate.payload is not None
+    )
     assert duplicate.payload.inline["job_id"] == first.payload.inline["job_id"]
     assert duplicate.payload.inline["coalesced"] is True
     assert duplicate.payload.inline["state"]["subscribers"] == 2
     assert len(systemd.started) == 1
 
     systemd.properties = {
-        "LoadState": "loaded", "ActiveState": "inactive", "Result": "success",
-        "ExecMainStatus": "0", "InvocationID": "fixture-invocation",
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "InvocationID": "fixture-invocation",
     }
-    service.dispatch(request("job.get", "systemd-jobs", {"job_id": first.payload.inline["job_id"]}))
+    service.dispatch(
+        request("job.get", "systemd-jobs", {"job_id": first.payload.inline["job_id"]})
+    )
     replacement = service.dispatch(request("job.start", "systemd-jobs", arguments))
 
     assert replacement.ok and replacement.payload is not None
@@ -971,13 +1364,26 @@ def test_tree_cached_service_coalesces_within_scope_and_retires_terminal_entries
     descriptor = tmp_path / ".agentctl" / "project.toml"
     descriptor.write_text(
         descriptor.read_text()
-        .replace('cache = "none"\n\n[operations.service.service]', 'cache = "tree+environment"\n\n[operations.service.service]')
+        .replace(
+            'cache = "none"\n\n[operations.service.service]',
+            'cache = "tree+environment"\n\n[operations.service.service]',
+        )
         .replace("range = [41000, 41001]", "range = [41000, 41003]")
     )
     initialize_git_checkout(tmp_path)
     other_checkout = tmp_path.parent / "other-checkout"
     subprocess.run(
-        ["git", "-C", str(tmp_path), "worktree", "add", "--quiet", "--detach", str(other_checkout), "HEAD"],
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "worktree",
+            "add",
+            "--quiet",
+            "--detach",
+            str(other_checkout),
+            "HEAD",
+        ],
         check=True,
     )
 
@@ -985,7 +1391,9 @@ def test_tree_cached_service_coalesces_within_scope_and_retires_terminal_entries
     project = catalog.get("fixture")
     default_checkout = catalog.checkout("fixture", "default")
     other_checkout_record = next(
-        checkout for checkout in catalog.checkouts("fixture") if checkout.path == other_checkout.resolve()
+        checkout
+        for checkout in catalog.checkouts("fixture")
+        if checkout.path == other_checkout.resolve()
     )
     jobs = generic_jobs(tmp_path.parent / "job-state")
     operation = project.operation("service")
@@ -1003,7 +1411,10 @@ def test_tree_cached_service_coalesces_within_scope_and_retires_terminal_entries
     root_first = start(None)
     root_record = jobs.store.load(root_first["job_id"])
     assert root_record.spec.cache_key is not None
-    assert jobs._admission_state()["active"][root_record.spec.cache_key] == root_first["job_id"]
+    assert (
+        jobs._admission_state()["active"][root_record.spec.cache_key]
+        == root_first["job_id"]
+    )
     root_duplicate = start(None)
     assert root_duplicate["job_id"] == root_first["job_id"]
     assert root_duplicate["coalesced"]
@@ -1018,12 +1429,17 @@ def test_tree_cached_service_coalesces_within_scope_and_retires_terminal_entries
     assert len(list(jobs.store.leases_root.glob("*.json"))) == 2
     other_started = start(other_checkout_record)
     assert default_started["job_id"] != root_first["job_id"]
-    assert other_started["job_id"] not in {root_first["job_id"], default_started["job_id"]}
+    assert other_started["job_id"] not in {
+        root_first["job_id"],
+        default_started["job_id"],
+    }
     default_record = jobs.store.load(default_started["job_id"])
     other_record = jobs.store.load(other_started["job_id"])
     assert default_record.spec.cache_key != other_record.spec.cache_key
     assert default_record.spec.lease is not None and other_record.spec.lease is not None
-    assert default_record.spec.lease.ports[0].port != other_record.spec.lease.ports[0].port
+    assert (
+        default_record.spec.lease.ports[0].port != other_record.spec.lease.ports[0].port
+    )
     assert len(list(jobs.store.leases_root.glob("*.json"))) == 3
 
     jobs.systemd.properties = {
@@ -1079,7 +1495,13 @@ def test_tree_cached_service_retires_after_cancellation(
     jobs = generic_jobs(tmp_path, systemd)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
 
-    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
+    )
     assert started.ok and started.payload is not None
     job_id = started.payload.inline["job_id"]
     record = jobs.store.load(job_id)
@@ -1087,7 +1509,9 @@ def test_tree_cached_service_retires_after_cancellation(
     cache_key = record.spec.cache_key
     assert jobs._admission_state()["active"][cache_key] == job_id
 
-    cancelled = service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": job_id}))
+    cancelled = service.dispatch(
+        request("job.cancel", "systemd-jobs", {"job_id": job_id})
+    )
     assert cancelled.ok and cancelled.payload is not None
     assert cancelled.payload.inline["state"]["phase"] == "cancelled"
     admission = jobs._admission_state()
@@ -1097,7 +1521,11 @@ def test_tree_cached_service_retires_after_cancellation(
     assert not (jobs.store.leases_root / f"{job_id}.json").exists()
 
     replacement = service.dispatch(
-        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"})
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
     )
     assert replacement.ok and replacement.payload is not None
     assert replacement.payload.inline["job_id"] != job_id
@@ -1143,7 +1571,13 @@ def test_tree_cached_service_retires_after_terminal_outcome_unknown(
     jobs = generic_jobs(tmp_path, systemd)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
 
-    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
+    )
     assert started.ok and started.payload is not None
     job_id = started.payload.inline["job_id"]
     record = jobs.store.load(job_id)
@@ -1151,11 +1585,19 @@ def test_tree_cached_service_retires_after_terminal_outcome_unknown(
     cache_key = record.spec.cache_key
     assert jobs._admission_state()["active"][cache_key] == job_id
 
-    cancelled = service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": job_id}))
+    cancelled = service.dispatch(
+        request("job.cancel", "systemd-jobs", {"job_id": job_id})
+    )
     assert cancelled.error is not None
-    jobs.store.save(replace(jobs.store.load(job_id), cancel_requested_at="2000-01-01T00:00:00+00:00"))
+    jobs.store.save(
+        replace(
+            jobs.store.load(job_id), cancel_requested_at="2000-01-01T00:00:00+00:00"
+        )
+    )
 
-    restarted = GenericJobs(systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.001)
+    restarted = GenericJobs(
+        systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.001
+    )
     reconciled = restarted.get(job_id)
     assert reconciled["state"]["phase"] == "outcome-unknown"
     assert reconciled["state"]["terminal"]
@@ -1167,7 +1609,11 @@ def test_tree_cached_service_retires_after_terminal_outcome_unknown(
     assert (restarted.store.leases_root / f"{job_id}.released").exists()
 
     replacement = SinnixdService(ProjectCatalog([tmp_path]), jobs=restarted).dispatch(
-        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"})
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
     )
     assert replacement.ok and replacement.payload is not None
     assert replacement.payload.inline["job_id"] != job_id
@@ -1196,7 +1642,9 @@ def test_tree_cached_services_isolate_distinct_project_roots_in_one_store(
 
     first_project = ProjectCatalog([roots[0]]).get("fixture")
     second_project = ProjectCatalog([roots[1]]).get("fixture")
-    assert GenericJobs._cache_tree(first_project.root) == GenericJobs._cache_tree(second_project.root)
+    assert GenericJobs._cache_tree(first_project.root) == GenericJobs._cache_tree(
+        second_project.root
+    )
     assert first_project.environment.values() == second_project.environment.values()
 
     systemd = FakeSystemdJobs()
@@ -1204,15 +1652,27 @@ def test_tree_cached_services_isolate_distinct_project_roots_in_one_store(
     first_service = SinnixdService(ProjectCatalog([roots[0]]), jobs=jobs)
     second_service = SinnixdService(ProjectCatalog([roots[1]]), jobs=jobs)
     start_arguments = {"project_id": "fixture", "operation": "service"}
-    first = first_service.dispatch(request("job.start", "systemd-jobs", start_arguments))
-    second = second_service.dispatch(request("job.start", "systemd-jobs", start_arguments))
-    assert first.ok and second.ok and first.payload is not None and second.payload is not None
+    first = first_service.dispatch(
+        request("job.start", "systemd-jobs", start_arguments)
+    )
+    second = second_service.dispatch(
+        request("job.start", "systemd-jobs", start_arguments)
+    )
+    assert (
+        first.ok
+        and second.ok
+        and first.payload is not None
+        and second.payload is not None
+    )
     first_id = first.payload.inline["job_id"]
     second_id = second.payload.inline["job_id"]
     assert first_id != second_id
     first_record = jobs.store.load(first_id)
     second_record = jobs.store.load(second_id)
-    assert first_record.spec.cache_key is not None and second_record.spec.cache_key is not None
+    assert (
+        first_record.spec.cache_key is not None
+        and second_record.spec.cache_key is not None
+    )
     assert first_record.spec.cache_key != second_record.spec.cache_key
     assert first_record.spec.lease is not None and second_record.spec.lease is not None
     assert first_record.spec.lease.ports[0].port == 41000
@@ -1222,8 +1682,12 @@ def test_tree_cached_services_isolate_distinct_project_roots_in_one_store(
         second_record.spec.cache_key: second_id,
     }
 
-    first_duplicate = first_service.dispatch(request("job.start", "systemd-jobs", start_arguments))
-    second_duplicate = second_service.dispatch(request("job.start", "systemd-jobs", start_arguments))
+    first_duplicate = first_service.dispatch(
+        request("job.start", "systemd-jobs", start_arguments)
+    )
+    second_duplicate = second_service.dispatch(
+        request("job.start", "systemd-jobs", start_arguments)
+    )
     assert first_duplicate.ok and second_duplicate.ok
     assert first_duplicate.payload is not None and second_duplicate.payload is not None
     assert first_duplicate.payload.inline["job_id"] == first_id
@@ -1233,53 +1697,120 @@ def test_tree_cached_services_isolate_distinct_project_roots_in_one_store(
     assert len(systemd.started) == 2
 
 
-def test_terminal_service_jobs_release_port_leases_for_success_failure_timeout_and_cancellation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_terminal_service_jobs_release_port_leases_for_success_failure_timeout_and_cancellation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Anti-vacuity: every terminal systemd outcome must make the port available to the next declared service."""
     monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
 
     for name, properties in (
-        ("success", {"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0", "InvocationID": "fixture-invocation"}),
-        ("failure", {"LoadState": "loaded", "ActiveState": "failed", "Result": "exit-code", "ExecMainStatus": "1", "InvocationID": "fixture-invocation"}),
-        ("timeout", {"LoadState": "loaded", "ActiveState": "failed", "Result": "timeout", "ExecMainStatus": "1", "InvocationID": "fixture-invocation"}),
+        (
+            "success",
+            {
+                "LoadState": "loaded",
+                "ActiveState": "inactive",
+                "Result": "success",
+                "ExecMainStatus": "0",
+                "InvocationID": "fixture-invocation",
+            },
+        ),
+        (
+            "failure",
+            {
+                "LoadState": "loaded",
+                "ActiveState": "failed",
+                "Result": "exit-code",
+                "ExecMainStatus": "1",
+                "InvocationID": "fixture-invocation",
+            },
+        ),
+        (
+            "timeout",
+            {
+                "LoadState": "loaded",
+                "ActiveState": "failed",
+                "Result": "timeout",
+                "ExecMainStatus": "1",
+                "InvocationID": "fixture-invocation",
+            },
+        ),
     ):
         case = tmp_path / name
         write_adapter(case)
         systemd = FakeSystemdJobs()
         jobs = generic_jobs(case, systemd)
         service = SinnixdService(ProjectCatalog([case]), jobs=jobs)
-        started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+        started = service.dispatch(
+            request(
+                "job.start",
+                "systemd-jobs",
+                {"project_id": "fixture", "operation": "service"},
+            )
+        )
         assert started.ok and started.payload is not None
         job_id = started.payload.inline["job_id"]
         systemd.properties = properties
-        terminal = service.dispatch(request("job.get", "systemd-jobs", {"job_id": job_id}))
+        terminal = service.dispatch(
+            request("job.get", "systemd-jobs", {"job_id": job_id})
+        )
         assert terminal.ok and terminal.payload is not None
         assert terminal.payload.inline["lease"]["state"] == "released"
         assert not (case / "state" / "leases" / f"{job_id}.json").exists()
 
     case = tmp_path / "cancelled"
     write_adapter(case)
-    systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"})
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "InvocationID": "fixture-invocation",
+        }
+    )
     jobs = generic_jobs(case, systemd)
     service = SinnixdService(ProjectCatalog([case]), jobs=jobs)
-    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
+    )
     assert started.ok and started.payload is not None
-    cancelled = service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": started.payload.inline["job_id"]}))
+    cancelled = service.dispatch(
+        request(
+            "job.cancel", "systemd-jobs", {"job_id": started.payload.inline["job_id"]}
+        )
+    )
     assert cancelled.ok and cancelled.payload is not None
     assert cancelled.payload.inline["state"]["phase"] == "cancelled"
     assert cancelled.payload.inline["lease"]["state"] == "released"
-    replacement = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    replacement = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
+    )
     assert replacement.ok and replacement.payload is not None
     assert replacement.payload.inline["lease"]["ports"][0]["port"] == 41000
 
 
-def test_service_lease_recovery_reconstructs_live_ownership_and_expires_missing_units(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_service_lease_recovery_reconstructs_live_ownership_and_expires_missing_units(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Anti-vacuity: restart must rebuild a valid active lease and discard one systemd proves stale."""
     monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
     write_adapter(tmp_path)
     systemd = FakeSystemdJobs()
     jobs = generic_jobs(tmp_path, systemd)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
-    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
+    )
     assert started.ok and started.payload is not None
     job_id = started.payload.inline["job_id"]
     lease_path = tmp_path / "state" / "leases" / f"{job_id}.json"
@@ -1323,31 +1854,50 @@ def test_cancelled_outcome_unknown_restart_releases_lease_index_and_reuses_port(
     systemd = StopTimesOutThenCollects()
     jobs = generic_jobs(tmp_path, systemd)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
-    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
+    )
     assert started.ok and started.payload is not None
     job_id = started.payload.inline["job_id"]
 
-    cancelled = service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": job_id}))
+    cancelled = service.dispatch(
+        request("job.cancel", "systemd-jobs", {"job_id": job_id})
+    )
     assert cancelled.error is not None
     record = jobs.store.load(job_id)
     jobs.store.save(replace(record, cancel_requested_at="2000-01-01T00:00:00+00:00"))
 
-    restarted = GenericJobs(systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.001)
+    restarted = GenericJobs(
+        systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.001
+    )
     reconciled = restarted.get(job_id)
     assert reconciled["state"]["phase"] == "outcome-unknown"
     assert reconciled["state"]["terminal"]
-    assert reconciled["state"]["outcome_evidence"] == "unit-collected-after-cancellation-grace"
+    assert (
+        reconciled["state"]["outcome_evidence"]
+        == "unit-collected-after-cancellation-grace"
+    )
     assert restarted.store.service_lease_records() == []
     assert not (tmp_path / "state" / "leases" / f"{job_id}.json").exists()
     assert (tmp_path / "state" / "leases" / f"{job_id}.released").exists()
 
     replacement_service = SinnixdService(ProjectCatalog([tmp_path]), jobs=restarted)
-    repeated = replacement_service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": job_id}))
+    repeated = replacement_service.dispatch(
+        request("job.cancel", "systemd-jobs", {"job_id": job_id})
+    )
     assert repeated.ok and repeated.payload is not None
     assert repeated.payload.inline["already_terminal"]
     assert systemd.stopped == [f"sinnixd-job-{job_id}.service"]
     replacement = replacement_service.dispatch(
-        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"})
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
     )
     assert replacement.ok and replacement.payload is not None
     assert replacement.payload.inline["lease"]["ports"][0]["port"] == 41000
@@ -1370,7 +1920,13 @@ def test_loaded_outcome_unknown_restart_keeps_uncertain_lease_reserved(
     )
     jobs = generic_jobs(tmp_path, systemd)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
-    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
+    )
     assert started.ok and started.payload is not None
     job_id = started.payload.inline["job_id"]
     record = jobs.store.load(job_id)
@@ -1382,7 +1938,10 @@ def test_loaded_outcome_unknown_restart_keeps_uncertain_lease_reserved(
                     "phase": "outcome-unknown",
                     "terminal": True,
                     "systemd": dict(systemd.properties),
-                    "cancellation": {"requested_at": "2000-01-01T00:00:00+00:00", "invocation_id": "fixture-invocation"},
+                    "cancellation": {
+                        "requested_at": "2000-01-01T00:00:00+00:00",
+                        "invocation_id": "fixture-invocation",
+                    },
                     "outcome_evidence": "unit-collected-after-cancellation-grace",
                     "observed_at": "fixture",
                 },
@@ -1401,9 +1960,17 @@ def test_loaded_outcome_unknown_restart_keeps_uncertain_lease_reserved(
     assert replacement.ports[0].port == 41001
 
 
-def test_restart_finalizes_admission_for_a_newly_terminal_active_record(tmp_path: Path) -> None:
+def test_restart_finalizes_admission_for_a_newly_terminal_active_record(
+    tmp_path: Path,
+) -> None:
     """A restart must retire only the active cache entry it observes terminal, not rescan historical jobs."""
-    systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"})
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "InvocationID": "fixture-invocation",
+        }
+    )
     store = GenericJobStore(tmp_path / "state")
     original = GenericJobs(systemd, store, wait_poll_seconds=0.001)
     record = store.create(
@@ -1418,8 +1985,19 @@ def test_restart_finalizes_admission_for_a_newly_terminal_active_record(tmp_path
             cache_key="a" * 64,
         )
     )
-    store.save(original._with_state(record, {"phase": "submitted", "terminal": False, "observed_at": "fixture"}))
-    original._save_admission_state({"schema_version": 1, "active": {record.spec.cache_key: record.job_id}, "cache": {}, "estimates": {}})
+    store.save(
+        original._with_state(
+            record, {"phase": "submitted", "terminal": False, "observed_at": "fixture"}
+        )
+    )
+    original._save_admission_state(
+        {
+            "schema_version": 1,
+            "active": {record.spec.cache_key: record.job_id},
+            "cache": {},
+            "estimates": {},
+        }
+    )
     systemd.properties = {
         "LoadState": "loaded",
         "ActiveState": "inactive",
@@ -1444,10 +2022,18 @@ def test_recovery_and_get_skip_historical_terminal_jobs_but_release_failed_loade
 
     class CountingSystemd(FakeSystemdJobs):
         def __init__(self) -> None:
-            super().__init__(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "active-invocation"})
+            super().__init__(
+                properties={
+                    "LoadState": "loaded",
+                    "ActiveState": "active",
+                    "InvocationID": "active-invocation",
+                }
+            )
             self.observed: list[str] = []
 
-        def show(self, unit: str, *, timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS) -> dict[str, str]:
+        def show(
+            self, unit: str, *, timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS
+        ) -> dict[str, str]:
             self.observed.append(unit)
             return super().show(unit, timeout_seconds=timeout_seconds)
 
@@ -1455,12 +2041,27 @@ def test_recovery_and_get_skip_historical_terminal_jobs_but_release_failed_loade
     terminal_ids: set[str] = set()
     for _ in range(128):
         record = store.create(
-            GenericJobSpec(kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={})
+            GenericJobSpec(
+                kind="foreground-command",
+                command=("fixture",),
+                working_directory=str(tmp_path),
+                environment={},
+            )
         )
         terminal_ids.add(record.job_id)
-        store.save(GenericJobs._with_state(record, {"phase": "succeeded", "terminal": True, "observed_at": "fixture"}))
+        store.save(
+            GenericJobs._with_state(
+                record,
+                {"phase": "succeeded", "terminal": True, "observed_at": "fixture"},
+            )
+        )
     active = store.create(
-        GenericJobSpec(kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={})
+        GenericJobSpec(
+            kind="foreground-command",
+            command=("fixture",),
+            working_directory=str(tmp_path),
+            environment={},
+        )
     )
     operation = ProjectCatalog([tmp_path]).get("fixture").operation("service")
     assert operation.service is not None
@@ -1497,12 +2098,18 @@ def test_recovery_and_get_skip_historical_terminal_jobs_but_release_failed_loade
             },
         )
     )
-    locks_before = {path.name for path in store.locks_root.glob("*.lock")} if store.locks_root.exists() else set()
+    locks_before = (
+        {path.name for path in store.locks_root.glob("*.lock")}
+        if store.locks_root.exists()
+        else set()
+    )
     systemd = CountingSystemd()
     monkeypatch.setattr(
         store,
         "list",
-        lambda: (_ for _ in ()).throw(AssertionError("startup must not scan the terminal corpus")),
+        lambda: (_ for _ in ()).throw(
+            AssertionError("startup must not scan the terminal corpus")
+        ),
     )
 
     recovered = GenericJobs(systemd, store, wait_poll_seconds=0.001)
@@ -1518,13 +2125,29 @@ def test_recovery_and_get_skip_historical_terminal_jobs_but_release_failed_loade
     assert not {f"{job_id}.lock" for job_id in terminal_ids}.intersection(locks_after)
 
 
-def test_service_lease_invocation_mismatch_keeps_the_reservation_active(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_service_lease_invocation_mismatch_keeps_the_reservation_active(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Anti-vacuity: a later unit invocation cannot inherit an earlier observation's release authority."""
     monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
     write_adapter(tmp_path)
-    systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "first-invocation"})
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
-    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "InvocationID": "first-invocation",
+        }
+    )
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd)
+    )
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
+    )
     assert started.ok and started.payload is not None
     job_id = started.payload.inline["job_id"]
     assert service.dispatch(request("job.get", "systemd-jobs", {"job_id": job_id})).ok
@@ -1536,7 +2159,9 @@ def test_service_lease_invocation_mismatch_keeps_the_reservation_active(tmp_path
         "ExecMainStatus": "1",
         "InvocationID": "newer-invocation",
     }
-    mismatched = service.dispatch(request("job.get", "systemd-jobs", {"job_id": job_id}))
+    mismatched = service.dispatch(
+        request("job.get", "systemd-jobs", {"job_id": job_id})
+    )
 
     assert mismatched.ok and mismatched.payload is not None
     assert mismatched.payload.inline["state"]["phase"] == "observation-unknown"
@@ -1544,7 +2169,9 @@ def test_service_lease_invocation_mismatch_keeps_the_reservation_active(tmp_path
     assert (tmp_path / "state" / "leases" / f"{job_id}.json").exists()
 
 
-def test_concurrent_start_and_get_do_not_take_historical_terminal_locks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_concurrent_start_and_get_do_not_take_historical_terminal_locks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Live failure harness: concurrent client routes finish without waiting on terminal-record lock files."""
     monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
     write_adapter(tmp_path)
@@ -1552,14 +2179,34 @@ def test_concurrent_start_and_get_do_not_take_historical_terminal_locks(tmp_path
     terminal_ids: set[str] = set()
     for _ in range(64):
         record = store.create(
-            GenericJobSpec(kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={})
+            GenericJobSpec(
+                kind="foreground-command",
+                command=("fixture",),
+                working_directory=str(tmp_path),
+                environment={},
+            )
         )
         terminal_ids.add(record.job_id)
-        store.save(GenericJobs._with_state(record, {"phase": "failed", "terminal": True, "observed_at": "fixture"}))
+        store.save(
+            GenericJobs._with_state(
+                record, {"phase": "failed", "terminal": True, "observed_at": "fixture"}
+            )
+        )
     active = store.create(
-        GenericJobSpec(kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={})
+        GenericJobSpec(
+            kind="foreground-command",
+            command=("fixture",),
+            working_directory=str(tmp_path),
+            environment={},
+        )
     )
-    systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"})
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "InvocationID": "fixture-invocation",
+        }
+    )
     jobs = GenericJobs(systemd, store, wait_poll_seconds=0.001)
     project = ProjectCatalog([tmp_path]).get("fixture")
     original_locked = store.locked
@@ -1576,14 +2223,23 @@ def test_concurrent_start_and_get_do_not_take_historical_terminal_locks(tmp_path
     monkeypatch.setattr(
         store,
         "list",
-        lambda: (_ for _ in ()).throw(AssertionError("start/get must not scan the terminal corpus")),
+        lambda: (_ for _ in ()).throw(
+            AssertionError("start/get must not scan the terminal corpus")
+        ),
     )
     started: list[dict[str, object]] = []
     failures: list[BaseException] = []
 
     def start_service() -> None:
         try:
-            started.append(jobs.start_declared(project=project, operation=project.operation("service"), correlation_id="concurrent", parameters={}))
+            started.append(
+                jobs.start_declared(
+                    project=project,
+                    operation=project.operation("service"),
+                    correlation_id="concurrent",
+                    parameters={},
+                )
+            )
         except BaseException as error:
             failures.append(error)
 
@@ -1601,13 +2257,19 @@ def test_concurrent_start_and_get_do_not_take_historical_terminal_locks(tmp_path
     monkeypatch.setattr(store, "list", original_list)
 
 
-def test_service_lease_creation_is_atomic_against_concurrent_recovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_service_lease_creation_is_atomic_against_concurrent_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A second daemon cannot collect an in-flight reservation and reallocate its port."""
     monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
     write_adapter(tmp_path)
     store = GenericJobStore(tmp_path / "state")
     first = GenericJobs(FakeSystemdJobs(), store, wait_poll_seconds=0.001)
-    entered, release, recovered = threading.Event(), threading.Event(), threading.Event()
+    entered, release, recovered = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+    )
     original_create = store.create
     adapter = ProjectCatalog([tmp_path]).get("fixture")
 
@@ -1620,7 +2282,12 @@ def test_service_lease_creation_is_atomic_against_concurrent_recovery(tmp_path: 
     first_result: list[dict[str, object]] = []
     first_thread = threading.Thread(
         target=lambda: first_result.append(
-            first.start_declared(project=adapter, operation=adapter.operation("service"), correlation_id="first", parameters={})
+            first.start_declared(
+                project=adapter,
+                operation=adapter.operation("service"),
+                correlation_id="first",
+                parameters={},
+            )
         )
     )
     first_thread.start()
@@ -1641,8 +2308,15 @@ def test_service_lease_creation_is_atomic_against_concurrent_recovery(tmp_path: 
     first_lease = first_result[0]["lease"]
     assert isinstance(first_lease, dict)
     assert first_lease["ports"][0]["port"] == 41000
-    second = GenericJobs(FakeSystemdJobs(), GenericJobStore(store.root), wait_poll_seconds=0.001)
-    replacement = second.start_declared(project=adapter, operation=adapter.operation("service"), correlation_id="second", parameters={})
+    second = GenericJobs(
+        FakeSystemdJobs(), GenericJobStore(store.root), wait_poll_seconds=0.001
+    )
+    replacement = second.start_declared(
+        project=adapter,
+        operation=adapter.operation("service"),
+        correlation_id="second",
+        parameters={},
+    )
     assert replacement["lease"]["ports"][0]["port"] == 41001
 
 
@@ -1666,7 +2340,9 @@ def test_orphaned_valid_service_lease_recovery_requires_authoritative_absence(
     write_adapter(tmp_path)
 
     class UnavailableSystemd(FakeSystemdJobs):
-        def show(self, unit: str, *, timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS) -> dict[str, str]:
+        def show(
+            self, unit: str, *, timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS
+        ) -> dict[str, str]:
             raise SystemdJobError("systemd unavailable")
 
     store = GenericJobStore(tmp_path / "state")
@@ -1677,7 +2353,11 @@ def test_orphaned_valid_service_lease_recovery_requires_authoritative_absence(
     if record_state == "malformed":
         record_path.parent.mkdir(parents=True)
         record_path.write_text("{")
-    systemd = UnavailableSystemd() if systemd_state is None else FakeSystemdJobs(properties=systemd_state)
+    systemd = (
+        UnavailableSystemd()
+        if systemd_state is None
+        else FakeSystemdJobs(properties=systemd_state)
+    )
     _ = GenericJobs(systemd, store, wait_poll_seconds=0.001)
 
     lease_path = store.leases_root / f"{lease.lease_id}.json"
@@ -1688,7 +2368,9 @@ def test_orphaned_valid_service_lease_recovery_requires_authoritative_absence(
     assert replacement.ports[0].port == (41001 if preserved else 41000)
 
 
-def test_failed_service_launch_releases_its_lease(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_failed_service_launch_releases_its_lease(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Anti-vacuity: a rejected transient service must not strand its reserved loopback port."""
     monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
 
@@ -1697,9 +2379,19 @@ def test_failed_service_launch_releases_its_lease(tmp_path: Path, monkeypatch: p
             raise SystemdJobError("fixture launch failure")
 
     write_adapter(tmp_path)
-    systemd = FailedStart(properties={"LoadState": "not-found", "ActiveState": "inactive"})
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
-    failed = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    systemd = FailedStart(
+        properties={"LoadState": "not-found", "ActiveState": "inactive"}
+    )
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd)
+    )
+    failed = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
+    )
 
     assert failed.ok and failed.payload is not None
     assert failed.payload.inline["state"]["phase"] == "launch-failed"
@@ -1707,15 +2399,29 @@ def test_failed_service_launch_releases_its_lease(tmp_path: Path, monkeypatch: p
     assert not list((tmp_path / "state" / "leases").glob("*.json"))
 
 
-def test_service_lease_claimed_between_allocation_and_launch_releases_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_service_lease_claimed_between_allocation_and_launch_releases_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Anti-vacuity: a port claimed after allocation cannot produce an active lease."""
     availability = iter((True, False))
-    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: next(availability))
+    monkeypatch.setattr(
+        "sinnixd.jobs._loopback_port_available", lambda _port: next(availability)
+    )
     write_adapter(tmp_path)
-    systemd = FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"})
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+    systemd = FakeSystemdJobs(
+        properties={"LoadState": "not-found", "ActiveState": "inactive"}
+    )
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd)
+    )
 
-    failed = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    failed = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
+    )
 
     assert failed.ok and failed.payload is not None
     assert failed.payload.inline["state"]["phase"] == "launch-failed"
@@ -1736,7 +2442,9 @@ def test_queued_service_cancellation_wins_the_admission_start_interleaving(
             'cache = "none"\nestimate_memory_bytes = 4294967296\n\n[operations.service.service]',
         )
     )
-    systemd = FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"})
+    systemd = FakeSystemdJobs(
+        properties={"LoadState": "not-found", "ActiveState": "inactive"}
+    )
     store = GenericJobStore(tmp_path / "state")
     jobs = GenericJobs(
         systemd,
@@ -1745,12 +2453,22 @@ def test_queued_service_cancellation_wins_the_admission_start_interleaving(
         pressure_probe=lambda: {"memory_full_avg10": 0.2},
     )
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
-    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"}))
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
+    )
     assert started.ok and started.payload is not None
     job_id = started.payload.inline["job_id"]
     assert started.payload.inline["state"]["phase"] == "queued"
 
-    before_start, resume_admission, cancellation_saved = threading.Event(), threading.Event(), threading.Event()
+    before_start, resume_admission, cancellation_saved = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+    )
     original_save = store.save
 
     def save_and_signal(record):
@@ -1766,6 +2484,7 @@ def test_queued_service_cancellation_wins_the_admission_start_interleaving(
     monkeypatch.setattr(store, "save", save_and_signal)
     jobs.before_admission_start = pause_before_start
     jobs.pressure_probe = lambda: {"memory_full_avg10": 0.0}
+
     def admit() -> None:
         with jobs._admission_lock:
             jobs._admit_locked()
@@ -1800,7 +2519,9 @@ def test_queued_declared_cancellation_survives_service_refresh_and_restart(
             'cache = "none"\nestimate_memory_bytes = 4294967296\n\n[operations.service.service]',
         )
     )
-    systemd = FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"})
+    systemd = FakeSystemdJobs(
+        properties={"LoadState": "not-found", "ActiveState": "inactive"}
+    )
     store = GenericJobStore(tmp_path / "state")
     jobs = GenericJobs(
         systemd,
@@ -1810,29 +2531,44 @@ def test_queued_declared_cancellation_survives_service_refresh_and_restart(
     )
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
     started = service.dispatch(
-        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "service"})
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "service"},
+        )
     )
     assert started.ok and started.payload is not None
     job_id = started.payload.inline["job_id"]
     assert started.payload.inline["state"]["phase"] == "queued"
 
-    cancelled = service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": job_id}))
+    cancelled = service.dispatch(
+        request("job.cancel", "systemd-jobs", {"job_id": job_id})
+    )
     assert cancelled.ok and cancelled.payload is not None
     assert cancelled.payload.inline["state"]["phase"] == "cancelled"
     assert cancelled.payload.inline["state"]["launch_evidence"] == "not-started"
 
     def assert_cancelled_truth(current: SinnixdService) -> None:
         for _ in range(2):
-            refreshed = current.dispatch(request("job.get", "systemd-jobs", {"job_id": job_id}))
+            refreshed = current.dispatch(
+                request("job.get", "systemd-jobs", {"job_id": job_id})
+            )
             assert refreshed.ok and refreshed.payload is not None
-            assert refreshed.payload.inline["state"] == cancelled.payload.inline["state"]
+            assert (
+                refreshed.payload.inline["state"] == cancelled.payload.inline["state"]
+            )
 
             listed = current.dispatch(request("job.list", "systemd-jobs", {}))
             assert listed.ok and listed.payload is not None
             assert listed.payload.inline["jobs"][0]["job_id"] == job_id
-            assert listed.payload.inline["jobs"][0]["state"] == cancelled.payload.inline["state"]
+            assert (
+                listed.payload.inline["jobs"][0]["state"]
+                == cancelled.payload.inline["state"]
+            )
 
-            result = current.dispatch(request("job.result", "systemd-jobs", {"job_id": job_id}))
+            result = current.dispatch(
+                request("job.result", "systemd-jobs", {"job_id": job_id})
+            )
             assert not result.ok
             assert result.error is not None
             assert result.error.code.value == "RESULT_INVALID"
@@ -1844,7 +2580,9 @@ def test_queued_declared_cancellation_survives_service_refresh_and_restart(
     restarted = SinnixdService(
         ProjectCatalog([tmp_path]),
         jobs=GenericJobs(
-            FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"}),
+            FakeSystemdJobs(
+                properties={"LoadState": "not-found", "ActiveState": "inactive"}
+            ),
             GenericJobStore(store.root),
             wait_poll_seconds=0.001,
             pressure_probe=lambda: {"memory_full_avg10": 0.0},
@@ -1858,11 +2596,17 @@ def test_declared_missing_unit_without_cancellation_evidence_stays_missing(
 ) -> None:
     """Anti-vacuity: an absent post-launch declared unit is not inferred cancelled."""
     write_adapter(tmp_path)
-    systemd = FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"})
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+    systemd = FakeSystemdJobs(
+        properties={"LoadState": "not-found", "ActiveState": "inactive"}
+    )
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd)
+    )
 
     started = service.dispatch(
-        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"})
+        request(
+            "job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"}
+        )
     )
     assert started.ok and started.payload is not None
     job_id = started.payload.inline["job_id"]
@@ -1884,7 +2628,9 @@ def test_declared_missing_unit_without_cancellation_evidence_stays_missing(
     assert result.error.message == "job exit result is unavailable"
 
 
-def test_dependency_admission_never_nests_candidate_and_dependency_job_locks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dependency_admission_never_nests_candidate_and_dependency_job_locks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Malformed durable dependency cycles cannot create a cross-process job-lock cycle during admission."""
     store = GenericJobStore(tmp_path / "state")
     jobs = GenericJobs(FakeSystemdJobs(), store, wait_poll_seconds=0.001)
@@ -1905,8 +2651,14 @@ def test_dependency_admission_never_nests_candidate_and_dependency_job_locks(tmp
             ),
             job_id,
         )
-        store.write_declared_launch(job_id, record.spec.command, record.spec.environment)
-        store.save(jobs._with_state(record, {"phase": "queued", "terminal": False, "observed_at": "fixture"}))
+        store.write_declared_launch(
+            job_id, record.spec.command, record.spec.environment
+        )
+        store.save(
+            jobs._with_state(
+                record, {"phase": "queued", "terminal": False, "observed_at": "fixture"}
+            )
+        )
 
     queued_record(first_id, second_id)
     queued_record(second_id, first_id)
@@ -1942,7 +2694,9 @@ def test_service_input_write_failure_terminalizes_the_record_and_removes_partial
     project = ProjectCatalog([tmp_path]).get("fixture")
     original_write = store.write_declared_launch
 
-    def partial_then_fail(job_id: str, command: tuple[str, ...], environment: dict[str, str]) -> None:
+    def partial_then_fail(
+        job_id: str, command: tuple[str, ...], environment: dict[str, str]
+    ) -> None:
         _ = command, environment
         store.inputs_root.mkdir(parents=True, exist_ok=True)
         (store.inputs_root / f"{job_id}.launch").write_text("{")
@@ -1950,7 +2704,12 @@ def test_service_input_write_failure_terminalizes_the_record_and_removes_partial
 
     monkeypatch.setattr(store, "write_declared_launch", partial_then_fail)
     with pytest.raises(OSError, match="fixture input persistence failure"):
-        jobs.start_declared(project=project, operation=project.operation("service"), correlation_id="write-failure", parameters={})
+        jobs.start_declared(
+            project=project,
+            operation=project.operation("service"),
+            correlation_id="write-failure",
+            parameters={},
+        )
     monkeypatch.setattr(store, "write_declared_launch", original_write)
 
     [record] = store.list()
@@ -1992,7 +2751,9 @@ def test_restart_terminalizes_truncated_unpublished_service_input_after_unit_abs
     (store.inputs_root).mkdir(parents=True, exist_ok=True)
     (store.inputs_root / f"{job_id}.launch").write_text("{")
     _ = GenericJobs(
-        FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"}),
+        FakeSystemdJobs(
+            properties={"LoadState": "not-found", "ActiveState": "inactive"}
+        ),
         store,
         wait_poll_seconds=0.001,
     )
@@ -2022,7 +2783,9 @@ def test_record_owns_ports_when_its_lease_artifact_is_missing_or_truncated(
             )
         )
     systemd = (
-        FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"})
+        FakeSystemdJobs(
+            properties={"LoadState": "not-found", "ActiveState": "inactive"}
+        )
         if phase == "queued"
         else FakeSystemdJobs()
     )
@@ -2033,13 +2796,21 @@ def test_record_owns_ports_when_its_lease_artifact_is_missing_or_truncated(
         pressure_probe=lambda: {"memory_full_avg10": 0.2 if phase == "queued" else 0.0},
     )
     project = ProjectCatalog([tmp_path]).get("fixture")
-    started = jobs.start_declared(project=project, operation=project.operation("service"), correlation_id=f"{phase}-{artifact}", parameters={})
+    started = jobs.start_declared(
+        project=project,
+        operation=project.operation("service"),
+        correlation_id=f"{phase}-{artifact}",
+        parameters={},
+    )
     assert started["state"]["phase"] == ("queued" if phase == "queued" else "submitted")
     job_id = started["job_id"]
     if phase == "terminal":
         record = jobs.store.load(job_id)
         jobs.store.save(
-            jobs._with_state(record, {"phase": "launch-failed", "terminal": True, "observed_at": "fixture"})
+            jobs._with_state(
+                record,
+                {"phase": "launch-failed", "terminal": True, "observed_at": "fixture"},
+            )
         )
     lease_path = jobs.store.leases_root / f"{job_id}.json"
     if artifact == "missing":
@@ -2049,19 +2820,27 @@ def test_record_owns_ports_when_its_lease_artifact_is_missing_or_truncated(
 
     operation = project.operation("service")
     assert operation.service is not None
-    second = GenericJobStore(jobs.store.root).allocate_service_lease(str(uuid4()), operation.service)
+    second = GenericJobStore(jobs.store.root).allocate_service_lease(
+        str(uuid4()), operation.service
+    )
     assert second.ports[0].port == 41001
 
     if phase != "terminal":
         jobs.cancel(job_id)
     systemd.properties = {"LoadState": "not-found", "ActiveState": "inactive"}
     jobs.get(job_id)
-    reclaimed = GenericJobStore(jobs.store.root).allocate_service_lease(str(uuid4()), operation.service)
+    reclaimed = GenericJobStore(jobs.store.root).allocate_service_lease(
+        str(uuid4()), operation.service
+    )
     assert reclaimed.ports[0].port == 41000
 
 
-def test_typed_runner_keeps_the_one_hour_timeout_identity_bound(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SINNIXD_TIMEOUT_SECONDS", str(MAX_DECLARED_OPERATION_TIMEOUT_SECONDS))
+def test_typed_runner_keeps_the_one_hour_timeout_identity_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "SINNIXD_TIMEOUT_SECONDS", str(MAX_DECLARED_OPERATION_TIMEOUT_SECONDS)
+    )
 
     with pytest.raises(RunnerError, match="typed-job timeout identity is invalid"):
         _require_environment(
@@ -2075,13 +2854,19 @@ def test_typed_runner_keeps_the_one_hour_timeout_identity_bound(monkeypatch: pyt
         )
 
 
-def test_project_operation_result_must_have_an_executable_declared_contract(tmp_path: Path) -> None:
+def test_project_operation_result_must_have_an_executable_declared_contract(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: descriptor result metadata cannot be accepted and ignored."""
     write_adapter(tmp_path)
     descriptor = tmp_path / ".agentctl" / "project.toml"
-    descriptor.write_text(descriptor.read_text().replace('result = "json"', 'result = "agent"'))
+    descriptor.write_text(
+        descriptor.read_text().replace('result = "json"', 'result = "agent"')
+    )
 
-    with pytest.raises(ProjectConfigError, match="operations.parameterized.result is invalid"):
+    with pytest.raises(
+        ProjectConfigError, match="operations.parameterized.result is invalid"
+    ):
         ProjectCatalog([tmp_path])
 
 
@@ -2163,22 +2948,42 @@ class FakeSystemdJobs:
 
 
 def generic_jobs(tmp_path: Path, systemd: FakeSystemdJobs | None = None) -> GenericJobs:
-    return GenericJobs(systemd or FakeSystemdJobs(), GenericJobStore(tmp_path / "state"), wait_poll_seconds=0.001)
+    return GenericJobs(
+        systemd or FakeSystemdJobs(),
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+    )
 
 
 def initialize_git_checkout(root: Path) -> None:
     for arguments in (
         ("git", "init", "--quiet", str(root)),
         ("git", "-C", str(root), "add", "."),
-        ("git", "-C", str(root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "--allow-empty", "-m", "fixture"),
+        (
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "fixture",
+        ),
     ):
         subprocess.run(arguments, check=True)
     subprocess.run(
-        ["git", "-C", str(root), "update-ref", "refs/remotes/origin/master", "HEAD"], check=True
+        ["git", "-C", str(root), "update-ref", "refs/remotes/origin/master", "HEAD"],
+        check=True,
     )
 
 
-def replace_worktree_gitfile_with_symlink(worktree: Path, target: Path | None = None) -> Path:
+def replace_worktree_gitfile_with_symlink(
+    worktree: Path, target: Path | None = None
+) -> Path:
     """Model the managed-worktree layout that Git refuses to remove directly."""
     gitfile = worktree / ".git"
     if target is None:
@@ -2192,7 +2997,9 @@ def replace_worktree_gitfile_with_symlink(worktree: Path, target: Path | None = 
 
 def test_worktree_porcelain_parser_accepts_flags_and_rejects_unknown_shapes() -> None:
     parsed = parse_worktree_records(
-        "worktree /repo\nHEAD " + "a" * 40 + "\ndetached\nlocked operator reason\nprunable stale\n\n"
+        "worktree /repo\nHEAD "
+        + "a" * 40
+        + "\ndetached\nlocked operator reason\nprunable stale\n\n"
     )
 
     assert parsed == (
@@ -2213,12 +3020,12 @@ def native_runner(path: Path) -> None:
         "#!/bin/sh\n"
         "set -eu\n"
         "last= prompt=\n"
-        "if [ -n \"${RUNNER_ARGS:-}\" ]; then printf '%s\\n' \"$@\" > \"$RUNNER_ARGS\"; fi\n"
+        'if [ -n "${RUNNER_ARGS:-}" ]; then printf \'%s\\n\' "$@" > "$RUNNER_ARGS"; fi\n'
         "while [ $# -gt 0 ]; do\n"
         "  case $1 in --last-file) last=$2; shift 2 ;; --prompt-file) prompt=$2; shift 2 ;; *) shift ;; esac\n"
         "done\n"
-        "test -f \"$prompt\"\n"
-        "printf native-fixture-result > \"$last\"\n"
+        'test -f "$prompt"\n'
+        'printf native-fixture-result > "$last"\n'
         "printf native-fixture-log\n"
     )
     path.chmod(0o700)
@@ -2255,7 +3062,15 @@ class FakeTaskBoundary:
     max_active: int = 0
     _guard: threading.Lock = field(default_factory=threading.Lock)
 
-    def run(self, *, argv: tuple[str, ...], cwd: Path, environment: dict[str, str], lock_path: Path | None = None, max_stdout_bytes: int | None = None) -> ExecutionResult:
+    def run(
+        self,
+        *,
+        argv: tuple[str, ...],
+        cwd: Path,
+        environment: dict[str, str],
+        lock_path: Path | None = None,
+        max_stdout_bytes: int | None = None,
+    ) -> ExecutionResult:
         self.calls.append((argv, cwd))
         self.lock_paths.append(lock_path)
         with self._guard:
@@ -2276,7 +3091,15 @@ class CanonicalTaskBoundary:
     calls: list[tuple[tuple[str, ...], Path]] = field(default_factory=list)
     databases: list[Path] = field(default_factory=list)
 
-    def run(self, *, argv: tuple[str, ...], cwd: Path, environment: dict[str, str], lock_path: Path | None = None, max_stdout_bytes: int | None = None) -> ExecutionResult:
+    def run(
+        self,
+        *,
+        argv: tuple[str, ...],
+        cwd: Path,
+        environment: dict[str, str],
+        lock_path: Path | None = None,
+        max_stdout_bytes: int | None = None,
+    ) -> ExecutionResult:
         self.calls.append((argv, cwd))
         database = Path(environment["BEADS_DIR"]) / "dolt"
         self.databases.append(database)
@@ -2336,7 +3159,9 @@ def activate_task_authority(
     return database
 
 
-def task_service(tmp_path: Path, boundary: FakeTaskBoundary | None = None) -> tuple[TaskService, FakeTaskBoundary]:
+def task_service(
+    tmp_path: Path, boundary: FakeTaskBoundary | None = None
+) -> tuple[TaskService, FakeTaskBoundary]:
     write_adapter(tmp_path)
     fake = boundary or FakeTaskBoundary([task_result({"ok": True})])
     task_state_root = tmp_path / "task-state"
@@ -2357,10 +3182,14 @@ def isolate_job_scratch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
     monkeypatch.setenv("SINNIXD_NVME_SCRATCH_ROOT", str(tmp_path / "nvme-scratch"))
 
 
-def test_task_reads_resolve_catalog_projects_and_use_readonly_fixed_argv(tmp_path: Path) -> None:
+def test_task_reads_resolve_catalog_projects_and_use_readonly_fixed_argv(
+    tmp_path: Path,
+) -> None:
     service, boundary = task_service(
         tmp_path,
-        FakeTaskBoundary([task_result([{"id": "fixture-1"}]), task_result([{"id": "fixture-1"}])]),
+        FakeTaskBoundary(
+            [task_result([{"id": "fixture-1"}]), task_result([{"id": "fixture-1"}])]
+        ),
     )
 
     listed = service.execute(
@@ -2380,18 +3209,37 @@ def test_task_reads_resolve_catalog_projects_and_use_readonly_fixed_argv(tmp_pat
     assert listed["result"]["coverage"]["total_exact"] is True
     assert fetched["result"] == {"id": "fixture-1"}
     authority_root = tmp_path / "task-state" / "fixture"
-    database = authority_root / ".beads" / "dolt"
+    authority_root / ".beads" / "dolt"
     prefix = ("--json", "--readonly")
     assert boundary.calls == [
-        ((*prefix, "list", "--flat", "--status", "open", "--limit", "0", "--max-rows", "100000"), tmp_path),
+        (
+            (
+                *prefix,
+                "list",
+                "--flat",
+                "--status",
+                "open",
+                "--limit",
+                "0",
+                "--max-rows",
+                "100000",
+            ),
+            tmp_path,
+        ),
         ((*prefix, "show", "fixture-1"), tmp_path),
     ]
 
 
-def test_task_list_traverses_real_pages_from_one_immutable_snapshot(tmp_path: Path) -> None:
+def test_task_list_traverses_real_pages_from_one_immutable_snapshot(
+    tmp_path: Path,
+) -> None:
     rows = [{"id": f"fixture-{index}", "status": "open"} for index in range(1, 6)]
     service, boundary = task_service(tmp_path, FakeTaskBoundary([task_result(rows)]))
-    arguments: dict[str, object] = {"project_id": "fixture", "status": "open", "limit": 2}
+    arguments: dict[str, object] = {
+        "project_id": "fixture",
+        "status": "open",
+        "limit": 2,
+    }
     seen: list[str] = []
     source_revision: str | None = None
     cursor: str | None = None
@@ -2400,7 +3248,9 @@ def test_task_list_traverses_real_pages_from_one_immutable_snapshot(tmp_path: Pa
         page_arguments = dict(arguments)
         if cursor is not None:
             page_arguments["cursor"] = cursor
-        page = service.execute(operation="task.list", arguments=page_arguments, principal="observer")
+        page = service.execute(
+            operation="task.list", arguments=page_arguments, principal="observer"
+        )
         result = page["result"]
         assert result["coverage"] == {
             "state": "complete",
@@ -2423,10 +3273,17 @@ def test_task_list_traverses_real_pages_from_one_immutable_snapshot(tmp_path: Pa
     assert boundary.calls[0][0][-4:] == ("--limit", "0", "--max-rows", "100000")
 
 
-def test_task_list_cursor_rejects_negative_cases_before_owner_dispatch(tmp_path: Path) -> None:
-    service, boundary = task_service(tmp_path, FakeTaskBoundary([task_result([{"id": "fixture-1"}, {"id": "fixture-2"}])]))
+def test_task_list_cursor_rejects_negative_cases_before_owner_dispatch(
+    tmp_path: Path,
+) -> None:
+    service, boundary = task_service(
+        tmp_path,
+        FakeTaskBoundary([task_result([{"id": "fixture-1"}, {"id": "fixture-2"}])]),
+    )
     first = service.execute(
-        operation="task.list", arguments={"project_id": "fixture", "limit": 1}, principal="observer"
+        operation="task.list",
+        arguments={"project_id": "fixture", "limit": 1},
+        principal="observer",
     )["result"]
     cursor = first["next_cursor"]
     assert isinstance(cursor, str)
@@ -2467,33 +3324,63 @@ def test_task_list_cursor_rejects_negative_cases_before_owner_dispatch(tmp_path:
     with pytest.raises(TaskError, match="query") as mismatched:
         service.execute(
             operation="task.list",
-            arguments={"project_id": "fixture", "status": "closed", "limit": 1, "cursor": cursor},
+            arguments={
+                "project_id": "fixture",
+                "status": "closed",
+                "limit": 1,
+                "cursor": cursor,
+            },
             principal="observer",
         )
     assert mismatched.value.code.value == "INVALID_ARGUMENT"
     assert len(boundary.calls) == owner_calls
 
-    snapshot = next((tmp_path / "task-state" / "fixture" / "sinnixd-task-list-snapshots").glob("*.json"))
+    snapshot = next(
+        (tmp_path / "task-state" / "fixture" / "sinnixd-task-list-snapshots").glob(
+            "*.json"
+        )
+    )
     snapshot.unlink()
     with pytest.raises(TaskError) as missing:
         service.execute(
-            operation="task.list", arguments={"project_id": "fixture", "limit": 1, "cursor": cursor}, principal="observer"
+            operation="task.list",
+            arguments={"project_id": "fixture", "limit": 1, "cursor": cursor},
+            principal="observer",
         )
     assert missing.value.code.value == "STALE_CURSOR"
     assert len(boundary.calls) == owner_calls
 
 
-def test_task_list_service_returns_structured_stale_cursor_error(tmp_path: Path) -> None:
-    service, _ = task_service(tmp_path, FakeTaskBoundary([task_result([{"id": "fixture-1"}, {"id": "fixture-2"}])]))
+def test_task_list_service_returns_structured_stale_cursor_error(
+    tmp_path: Path,
+) -> None:
+    service, _ = task_service(
+        tmp_path,
+        FakeTaskBoundary([task_result([{"id": "fixture-1"}, {"id": "fixture-2"}])]),
+    )
     daemon = SinnixdService(ProjectCatalog([tmp_path]), tasks=service)
     first = daemon.dispatch(
-        request("task.list", "task-backend", {"project_id": "fixture", "limit": 1}, "observer")
+        request(
+            "task.list",
+            "task-backend",
+            {"project_id": "fixture", "limit": 1},
+            "observer",
+        )
     )
     assert first.ok and first.payload is not None
     cursor = first.payload.inline["result"]["next_cursor"]
-    next((tmp_path / "task-state" / "fixture" / "sinnixd-task-list-snapshots").glob("*.json")).unlink()
+    next(
+        (tmp_path / "task-state" / "fixture" / "sinnixd-task-list-snapshots").glob(
+            "*.json"
+        )
+    ).unlink()
     response = daemon.dispatch(
-        request("task.list", "task-backend", {"project_id": "fixture", "limit": 1, "cursor": cursor}, "observer")
+        request(
+            "task.list",
+            "task-backend",
+            {"project_id": "fixture", "limit": 1, "cursor": cursor},
+            "observer",
+        )
     )
     assert response.error is not None
     assert response.error.code is ErrorCode.STALE_CURSOR
@@ -2503,17 +3390,39 @@ def test_task_list_service_returns_structured_stale_cursor_error(tmp_path: Path)
     ("operation", "arguments", "expected"),
     (
         ("task.claim", {"task_id": "fixture-1"}, ("update", "fixture-1", "--claim")),
-        ("task.note", {"task_id": "fixture-1", "text": "append this"}, ("note", "fixture-1", "append this")),
-        ("task.update", {"task_id": "fixture-1", "metadata": {"write_scope": '["pkgs/sinnixd/"]'}}, ("update", "fixture-1", "--set-metadata", 'write_scope=["pkgs/sinnixd/"]')),
-        ("task.relate", {"task_id": "fixture-1", "related_task_id": "fixture-2"}, ("dep", "relate", "fixture-1", "fixture-2")),
-        ("task.complete", {"task_id": "fixture-1", "merge_sha": "a" * 40, "reason": "verified"}, ("close", "fixture-1", "--reason", "verified")),
-        ("task.release", {"task_id": "fixture-1", "reason": "stopped", "if_assignee": "worker"}, ("unclaim", "fixture-1", "--reason", "stopped", "--if-assignee", "worker")),
+        (
+            "task.note",
+            {"task_id": "fixture-1", "text": "append this"},
+            ("note", "fixture-1", "append this"),
+        ),
+        (
+            "task.update",
+            {"task_id": "fixture-1", "metadata": {"write_scope": '["pkgs/sinnixd/"]'}},
+            ("update", "fixture-1", "--set-metadata", 'write_scope=["pkgs/sinnixd/"]'),
+        ),
+        (
+            "task.relate",
+            {"task_id": "fixture-1", "related_task_id": "fixture-2"},
+            ("dep", "relate", "fixture-1", "fixture-2"),
+        ),
+        (
+            "task.complete",
+            {"task_id": "fixture-1", "merge_sha": "a" * 40, "reason": "verified"},
+            ("close", "fixture-1", "--reason", "verified"),
+        ),
+        (
+            "task.release",
+            {"task_id": "fixture-1", "reason": "stopped", "if_assignee": "worker"},
+            ("unclaim", "fixture-1", "--reason", "stopped", "--if-assignee", "worker"),
+        ),
     ),
 )
 def test_task_mutations_map_to_fixed_beads_argv(
     tmp_path: Path, operation: str, arguments: dict[str, str], expected: tuple[str, ...]
 ) -> None:
-    service, boundary = task_service(tmp_path, FakeTaskBoundary([task_result({"ok": True})]))
+    service, boundary = task_service(
+        tmp_path, FakeTaskBoundary([task_result({"ok": True})])
+    )
 
     result = service.execute(
         operation=operation,
@@ -2525,18 +3434,22 @@ def test_task_mutations_map_to_fixed_beads_argv(
     assert result["project_id"] == "fixture"
     assert result["operation"] == operation
     assert result["result"]["state"] == "applied"
-    assert result["result"]["result"]["bytes"] == len(json.dumps({"ok": True}, sort_keys=True, separators=(",", ":")).encode())
+    assert result["result"]["result"]["bytes"] == len(
+        json.dumps({"ok": True}, sort_keys=True, separators=(",", ":")).encode()
+    )
     authority_root = tmp_path / "task-state" / "fixture"
-    database = authority_root / ".beads" / "dolt"
-    assert boundary.calls == [
-        (("--json", *expected), tmp_path)
-    ]
+    authority_root / ".beads" / "dolt"
+    assert boundary.calls == [(("--json", *expected), tmp_path)]
 
 
-def test_task_create_returns_a_replay_safe_canonical_ref_and_owner_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_task_create_returns_a_replay_safe_canonical_ref_and_owner_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Anti-vacuity: the replay reads the durable receipt, so a second backend create would fail this test."""
     isolate_job_scratch(monkeypatch, tmp_path)
-    boundary = FakeTaskBoundary([task_result({"id": "fixture-new", "title": "backend-only"})])
+    boundary = FakeTaskBoundary(
+        [task_result({"id": "fixture-new", "title": "backend-only"})]
+    )
     service, _ = task_service(tmp_path, boundary)
     arguments = {
         "project_id": "fixture",
@@ -2552,8 +3465,18 @@ def test_task_create_returns_a_replay_safe_canonical_ref_and_owner_evidence(tmp_
         ],
     }
 
-    first = service.execute(operation="task.create", arguments=arguments, principal="agent-control", mutation_id="request-1")
-    replayed = service.execute(operation="task.create", arguments=arguments, principal="agent-control", mutation_id="request-1")
+    first = service.execute(
+        operation="task.create",
+        arguments=arguments,
+        principal="agent-control",
+        mutation_id="request-1",
+    )
+    replayed = service.execute(
+        operation="task.create",
+        arguments=arguments,
+        principal="agent-control",
+        mutation_id="request-1",
+    )
 
     assert first == replayed
     assert first["task_ref"] == "sinnix://projects/fixture/beads/fixture-new"
@@ -2561,18 +3484,58 @@ def test_task_create_returns_a_replay_safe_canonical_ref_and_owner_evidence(tmp_
         "owner": "task-backend",
         "state": "applied",
         "attempts": 1,
-        "result": {"sha256": TaskMutationJournal(TaskAuthority.load(tmp_path / "task-state", "fixture").root / TASK_MUTATION_JOURNAL_DIRECTORY).records()[0].result["sha256"], "bytes": len(json.dumps({"id": "fixture-new", "title": "backend-only"}, sort_keys=True, separators=(",", ":")).encode()), "created_task_id": "fixture-new"},
+        "result": {
+            "sha256": TaskMutationJournal(
+                TaskAuthority.load(tmp_path / "task-state", "fixture").root
+                / TASK_MUTATION_JOURNAL_DIRECTORY
+            )
+            .records()[0]
+            .result["sha256"],
+            "bytes": len(
+                json.dumps(
+                    {"id": "fixture-new", "title": "backend-only"},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ),
+            "created_task_id": "fixture-new",
+        },
         "failure": None,
     }
     assert boundary.calls == [
-        (("--json", "create", "--title", "typed title", "--description", "private create description", "--type", "feature", "--priority", "1", "--labels", "area:agentctl,lane:agents", "--parent", "fixture-parent", "--deps", "depends-on:fixture-blocker,relates-to:fixture-peer"), tmp_path)
+        (
+            (
+                "--json",
+                "create",
+                "--title",
+                "typed title",
+                "--description",
+                "private create description",
+                "--type",
+                "feature",
+                "--priority",
+                "1",
+                "--labels",
+                "area:agentctl,lane:agents",
+                "--parent",
+                "fixture-parent",
+                "--deps",
+                "depends-on:fixture-blocker,relates-to:fixture-peer",
+            ),
+            tmp_path,
+        )
     ]
-    journal = TaskMutationJournal(TaskAuthority.load(tmp_path / "task-state", "fixture").root / TASK_MUTATION_JOURNAL_DIRECTORY)
+    journal = TaskMutationJournal(
+        TaskAuthority.load(tmp_path / "task-state", "fixture").root
+        / TASK_MUTATION_JOURNAL_DIRECTORY
+    )
     public_record = next(journal.records_root.glob("*.json"))
     assert "private create description" not in public_record.read_text()
 
 
-def test_task_create_uses_the_real_beads_result_shape_and_replays_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_task_create_uses_the_real_beads_result_shape_and_replays_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Production boundary: current bd emits one object for create, and replay must not create twice."""
     isolate_job_scratch(monkeypatch, tmp_path)
     project_root = tmp_path / "project"
@@ -2589,7 +3552,15 @@ def test_task_create_uses_the_real_beads_result_shape_and_replays_once(tmp_path:
         "XDG_STATE_HOME": str(authority_root / ".local" / "state"),
     }
     subprocess.run(
-        ["bd", "init", "--skip-agents", "--skip-hooks", "--non-interactive", "--prefix", "fixture"],
+        [
+            "bd",
+            "init",
+            "--skip-agents",
+            "--skip-hooks",
+            "--non-interactive",
+            "--prefix",
+            "fixture",
+        ],
         cwd=authority_root,
         check=True,
         capture_output=True,
@@ -2633,75 +3604,223 @@ def test_task_create_uses_the_real_beads_result_shape_and_replays_once(tmp_path:
 
     assert first == replayed
     assert first["task_ref"].startswith("sinnix://projects/fixture/beads/fixture-")
-    assert first["owner_evidence"]["result"]["created_task_id"] == first["task_ref"].rsplit("/", 1)[1]
+    assert (
+        first["owner_evidence"]["result"]["created_task_id"]
+        == first["task_ref"].rsplit("/", 1)[1]
+    )
     assert listed["result"]["total"] == 1
-    assert [issue["title"] for issue in listed["result"]["issues"]] == ["real boundary task"]
+    assert [issue["title"] for issue in listed["result"]["issues"]] == [
+        "real boundary task"
+    ]
 
 
-def test_task_create_outage_replays_without_dirtying_the_registered_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_task_create_outage_replays_without_dirtying_the_registered_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Anti-vacuity: creation stays pending across an outage, then replays once from the private intent."""
     isolate_job_scratch(monkeypatch, tmp_path)
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     task_state_root = tmp_path.parent / f"task-state-{tmp_path.name}"
-    source_database = tmp_path.parent / f"legacy-task-source-{tmp_path.name}" / ".beads" / "dolt"
+    source_database = (
+        tmp_path.parent / f"legacy-task-source-{tmp_path.name}" / ".beads" / "dolt"
+    )
     activate_task_authority(tmp_path, task_state_root, source_database=source_database)
-    arguments = {"project_id": "fixture", "title": "replayed task", "description": "private replay description", "issue_type": "task", "priority": 2, "labels": [], "dependencies": []}
-    unavailable = ExecutionResult(command=(), exit_status=None, stdout=b"", stderr=b"", failure_class="command_unavailable:FileNotFoundError")
+    arguments = {
+        "project_id": "fixture",
+        "title": "replayed task",
+        "description": "private replay description",
+        "issue_type": "task",
+        "priority": 2,
+        "labels": [],
+        "dependencies": [],
+    }
+    unavailable = ExecutionResult(
+        command=(),
+        exit_status=None,
+        stdout=b"",
+        stderr=b"",
+        failure_class="command_unavailable:FileNotFoundError",
+    )
     first_boundary = FakeTaskBoundary([unavailable])
-    first = TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path.parent / f"first-jobs-{tmp_path.name}"), first_boundary, task_state_root=task_state_root)
+    first = TaskService(
+        ProjectCatalog([tmp_path]),
+        generic_jobs(tmp_path.parent / f"first-jobs-{tmp_path.name}"),
+        first_boundary,
+        task_state_root=task_state_root,
+    )
 
-    pending = first.execute(operation="task.create", arguments=arguments, principal="agent-control", mutation_id="request-1")
+    pending = first.execute(
+        operation="task.create",
+        arguments=arguments,
+        principal="agent-control",
+        mutation_id="request-1",
+    )
 
-    assert pending["owner_evidence"] == {"owner": "task-backend", "state": "pending", "attempts": 1, "result": None, "failure": {"code": "OWNER_UNAVAILABLE"}}
+    assert pending["owner_evidence"] == {
+        "owner": "task-backend",
+        "state": "pending",
+        "attempts": 1,
+        "result": None,
+        "failure": {"code": "OWNER_UNAVAILABLE"},
+    }
     assert "task_ref" not in pending
     authority = TaskAuthority.load(task_state_root, "fixture")
     journal = TaskMutationJournal(authority.root / TASK_MUTATION_JOURNAL_DIRECTORY)
-    assert "private replay description" not in next(journal.records_root.glob("*.json")).read_text()
-    assert subprocess.run(["git", "-C", str(tmp_path), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout == ""
+    assert (
+        "private replay description"
+        not in next(journal.records_root.glob("*.json")).read_text()
+    )
+    assert (
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        == ""
+    )
 
     second_boundary = FakeTaskBoundary([task_result({"id": "fixture-replayed"})])
-    receipts = reconcile_task_mutations(journal=journal, authority=authority, cwd=tmp_path, boundary=second_boundary)
-    restarted = TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path.parent / f"second-jobs-{tmp_path.name}"), second_boundary, task_state_root=task_state_root)
-    replayed = restarted.execute(operation="task.create", arguments=arguments, principal="agent-control", mutation_id="request-1")
+    receipts = reconcile_task_mutations(
+        journal=journal, authority=authority, cwd=tmp_path, boundary=second_boundary
+    )
+    restarted = TaskService(
+        ProjectCatalog([tmp_path]),
+        generic_jobs(tmp_path.parent / f"second-jobs-{tmp_path.name}"),
+        second_boundary,
+        task_state_root=task_state_root,
+    )
+    replayed = restarted.execute(
+        operation="task.create",
+        arguments=arguments,
+        principal="agent-control",
+        mutation_id="request-1",
+    )
 
     assert receipts[0]["state"] == "applied"
     assert replayed["task_ref"] == "sinnix://projects/fixture/beads/fixture-replayed"
     assert len(first_boundary.calls) == 1
     assert len(second_boundary.calls) == 1
-    assert subprocess.run(["git", "-C", str(tmp_path), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout == ""
+    assert (
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        == ""
+    )
 
 
 @pytest.mark.parametrize(
     "arguments",
     (
-        {"project_id": "missing", "title": "title", "description": "body", "issue_type": "task", "priority": 2, "labels": [], "dependencies": []},
-        {"project_id": "fixture", "title": "title", "description": "body", "issue_type": "unknown", "priority": 2, "labels": [], "dependencies": []},
-        {"project_id": "fixture", "title": "title", "description": "body", "issue_type": "task", "priority": True, "labels": [], "dependencies": []},
-        {"project_id": "fixture", "title": "title", "description": "body", "issue_type": "task", "priority": 2, "labels": ["bad,label"], "dependencies": []},
-        {"project_id": "fixture", "title": "title", "description": "body", "issue_type": "task", "priority": 2, "labels": [], "parent_task_id": "--invalid", "dependencies": []},
-        {"project_id": "fixture", "title": "title", "description": "body", "issue_type": "task", "priority": 2, "labels": [], "dependencies": [{"relation": "not-a-relation", "task_id": "fixture-1"}]},
+        {
+            "project_id": "missing",
+            "title": "title",
+            "description": "body",
+            "issue_type": "task",
+            "priority": 2,
+            "labels": [],
+            "dependencies": [],
+        },
+        {
+            "project_id": "fixture",
+            "title": "title",
+            "description": "body",
+            "issue_type": "unknown",
+            "priority": 2,
+            "labels": [],
+            "dependencies": [],
+        },
+        {
+            "project_id": "fixture",
+            "title": "title",
+            "description": "body",
+            "issue_type": "task",
+            "priority": True,
+            "labels": [],
+            "dependencies": [],
+        },
+        {
+            "project_id": "fixture",
+            "title": "title",
+            "description": "body",
+            "issue_type": "task",
+            "priority": 2,
+            "labels": ["bad,label"],
+            "dependencies": [],
+        },
+        {
+            "project_id": "fixture",
+            "title": "title",
+            "description": "body",
+            "issue_type": "task",
+            "priority": 2,
+            "labels": [],
+            "parent_task_id": "--invalid",
+            "dependencies": [],
+        },
+        {
+            "project_id": "fixture",
+            "title": "title",
+            "description": "body",
+            "issue_type": "task",
+            "priority": 2,
+            "labels": [],
+            "dependencies": [{"relation": "not-a-relation", "task_id": "fixture-1"}],
+        },
     ),
 )
-def test_task_create_rejects_invalid_project_parent_and_typed_input(tmp_path: Path, arguments: dict[str, object], monkeypatch: pytest.MonkeyPatch) -> None:
+def test_task_create_rejects_invalid_project_parent_and_typed_input(
+    tmp_path: Path, arguments: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
     isolate_job_scratch(monkeypatch, tmp_path)
     service, boundary = task_service(tmp_path)
 
     with pytest.raises(TaskError) as error:
-        service.execute(operation="task.create", arguments=arguments, principal="agent-control", mutation_id="request-1")
+        service.execute(
+            operation="task.create",
+            arguments=arguments,
+            principal="agent-control",
+            mutation_id="request-1",
+        )
 
     assert error.value.code == ErrorCode.INVALID_ARGUMENT
     assert not boundary.calls
 
 
-def test_task_create_relation_failure_is_a_failed_journalled_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_task_create_relation_failure_is_a_failed_journalled_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     isolate_job_scratch(monkeypatch, tmp_path)
-    service, boundary = task_service(tmp_path, FakeTaskBoundary([ExecutionResult(command=(), exit_status=1, stdout=b"", stderr=b"parent missing")]))
+    service, boundary = task_service(
+        tmp_path,
+        FakeTaskBoundary(
+            [
+                ExecutionResult(
+                    command=(), exit_status=1, stdout=b"", stderr=b"parent missing"
+                )
+            ]
+        ),
+    )
     response = SinnixdService(ProjectCatalog([tmp_path]), tasks=service).dispatch(
         request(
             "task.create",
             "task-backend",
-            {"project_id": "fixture", "title": "relation failure", "description": "body", "issue_type": "task", "priority": 2, "labels": [], "parent_task_id": "fixture-parent", "dependencies": [{"relation": "depends-on", "task_id": "fixture-blocker"}]},
+            {
+                "project_id": "fixture",
+                "title": "relation failure",
+                "description": "body",
+                "issue_type": "task",
+                "priority": 2,
+                "labels": [],
+                "parent_task_id": "fixture-parent",
+                "dependencies": [
+                    {"relation": "depends-on", "task_id": "fixture-blocker"}
+                ],
+            },
             "agent-control",
             idempotency_key="request-1",
         )
@@ -2715,22 +3834,64 @@ def test_task_create_relation_failure_is_a_failed_journalled_receipt(tmp_path: P
     ).records()[0]
     assert record.state == "failed"
     assert record.failure == {"code": "OPERATION_FAILED"}
-    assert boundary.calls == [(("--json", "create", "--title", "relation failure", "--description", "body", "--type", "task", "--priority", "2", "--parent", "fixture-parent", "--deps", "depends-on:fixture-blocker"), tmp_path)]
+    assert boundary.calls == [
+        (
+            (
+                "--json",
+                "create",
+                "--title",
+                "relation failure",
+                "--description",
+                "body",
+                "--type",
+                "task",
+                "--priority",
+                "2",
+                "--parent",
+                "fixture-parent",
+                "--deps",
+                "depends-on:fixture-blocker",
+            ),
+            tmp_path,
+        )
+    ]
 
 
-def test_task_mutation_outage_survives_restart_and_reconciles_without_git_dirtying(tmp_path: Path) -> None:
+def test_task_mutation_outage_survives_restart_and_reconciles_without_git_dirtying(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: an unavailable command becomes pending, then a new service replays it exactly once."""
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     task_state_root = tmp_path.parent / "task-state"
     source_database = tmp_path.parent / "legacy-task-source" / ".beads" / "dolt"
     activate_task_authority(tmp_path, task_state_root, source_database=source_database)
-    unavailable = ExecutionResult(command=(), exit_status=None, stdout=b"", stderr=b"", failure_class="command_unavailable:FileNotFoundError")
+    unavailable = ExecutionResult(
+        command=(),
+        exit_status=None,
+        stdout=b"",
+        stderr=b"",
+        failure_class="command_unavailable:FileNotFoundError",
+    )
     first_boundary = FakeTaskBoundary([unavailable])
-    first = TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path.parent / "first-jobs"), first_boundary, task_state_root=task_state_root)
-    payload = {"project_id": "fixture", "task_id": "fixture-1", "text": "private replay payload"}
+    first = TaskService(
+        ProjectCatalog([tmp_path]),
+        generic_jobs(tmp_path.parent / "first-jobs"),
+        first_boundary,
+        task_state_root=task_state_root,
+    )
+    payload = {
+        "project_id": "fixture",
+        "task_id": "fixture-1",
+        "text": "private replay payload",
+    }
 
-    pending = first.execute(operation="task.note", arguments=payload, principal="agent-control", mutation_id="request-1")
+    pending = first.execute(
+        operation="task.note",
+        arguments=payload,
+        principal="agent-control",
+        mutation_id="request-1",
+    )
 
     assert pending["result"]["state"] == "pending"
     assert pending["result"]["failure"] == {"code": "OWNER_UNAVAILABLE"}
@@ -2739,27 +3900,74 @@ def test_task_mutation_outage_survives_restart_and_reconciles_without_git_dirtyi
     public_records = list(journal.records_root.glob("*.json"))
     assert len(public_records) == 1
     assert "private replay payload" not in public_records[0].read_text()
-    assert subprocess.run(["git", "-C", str(tmp_path), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout == ""
+    assert (
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        == ""
+    )
 
     second_boundary = FakeTaskBoundary([task_result({"reconciled": True})])
-    receipts = reconcile_task_mutations(journal=journal, authority=authority, cwd=tmp_path, boundary=second_boundary)
-    restarted = TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path.parent / "restart-jobs"), second_boundary, task_state_root=task_state_root)
-    replayed = restarted.execute(operation="task.note", arguments=payload, principal="agent-control", mutation_id="request-1")
+    receipts = reconcile_task_mutations(
+        journal=journal, authority=authority, cwd=tmp_path, boundary=second_boundary
+    )
+    restarted = TaskService(
+        ProjectCatalog([tmp_path]),
+        generic_jobs(tmp_path.parent / "restart-jobs"),
+        second_boundary,
+        task_state_root=task_state_root,
+    )
+    replayed = restarted.execute(
+        operation="task.note",
+        arguments=payload,
+        principal="agent-control",
+        mutation_id="request-1",
+    )
 
     assert receipts[0]["state"] == "applied"
     assert replayed["result"]["state"] == "applied"
     assert len(first_boundary.calls) == 1
     assert len(second_boundary.calls) == 1
     assert not list(journal.intents_root.glob("*.json"))
-    assert subprocess.run(["git", "-C", str(tmp_path), "status", "--porcelain"], capture_output=True, text=True, check=True).stdout == ""
+    assert (
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        == ""
+    )
 
 
-def test_task_completion_is_idempotent_by_project_task_and_merge_sha(tmp_path: Path) -> None:
-    service, boundary = task_service(tmp_path, FakeTaskBoundary([task_result({"closed": True})]))
-    arguments = {"project_id": "fixture", "task_id": "fixture-1", "merge_sha": "b" * 40, "reason": "merged"}
+def test_task_completion_is_idempotent_by_project_task_and_merge_sha(
+    tmp_path: Path,
+) -> None:
+    service, boundary = task_service(
+        tmp_path, FakeTaskBoundary([task_result({"closed": True})])
+    )
+    arguments = {
+        "project_id": "fixture",
+        "task_id": "fixture-1",
+        "merge_sha": "b" * 40,
+        "reason": "merged",
+    }
 
-    first = service.execute(operation="task.complete", arguments=arguments, principal="agent-control", mutation_id="request-1")
-    replayed = service.execute(operation="task.complete", arguments=arguments, principal="agent-control", mutation_id="request-2")
+    first = service.execute(
+        operation="task.complete",
+        arguments=arguments,
+        principal="agent-control",
+        mutation_id="request-1",
+    )
+    replayed = service.execute(
+        operation="task.complete",
+        arguments=arguments,
+        principal="agent-control",
+        mutation_id="request-2",
+    )
 
     assert first["result"]["state"] == "applied"
     assert replayed["result"]["state"] == "applied"
@@ -2805,7 +4013,9 @@ def test_task_reconcile_returns_a_durable_fixed_command_receipt(tmp_path: Path) 
     boundary = FakeTaskBoundary([task_result({"ok": True})])
     task_state_root = tmp_path / "task-state"
     activate_task_authority(tmp_path, task_state_root)
-    tasks = TaskService(ProjectCatalog([tmp_path]), jobs, boundary, task_state_root=task_state_root)
+    tasks = TaskService(
+        ProjectCatalog([tmp_path]), jobs, boundary, task_state_root=task_state_root
+    )
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs, tasks=tasks)
 
     claimed = tasks.execute(
@@ -2814,7 +4024,11 @@ def test_task_reconcile_returns_a_durable_fixed_command_receipt(tmp_path: Path) 
         principal="agent-control",
         mutation_id="request-1",
     )
-    response = service.dispatch(request("task.reconcile", "task-backend", {"project_id": "fixture"}, "agent-control"))
+    response = service.dispatch(
+        request(
+            "task.reconcile", "task-backend", {"project_id": "fixture"}, "agent-control"
+        )
+    )
 
     assert claimed["result"]["state"] == "applied"
     assert response.ok and response.payload is not None
@@ -2828,16 +4042,16 @@ def test_task_reconcile_returns_a_durable_fixed_command_receipt(tmp_path: Path) 
     lock_path = task_state_root / "fixture" / "sinnixd-task-mutations.lock"
     assert boundary.lock_paths == [None]
     authority_root = task_state_root / "fixture"
-    database = authority_root / ".beads" / "dolt"
+    authority_root / ".beads" / "dolt"
     assert boundary.calls == [
         (
             (
-                    "--json",
+                "--json",
                 "update",
                 "fixture-1",
                 "--claim",
             ),
-                tmp_path,
+            tmp_path,
         )
     ]
     assert len(systemd.started) == 1
@@ -2879,7 +4093,9 @@ def test_task_snapshot_parses_jsonl_without_writing_a_store(tmp_path: Path) -> N
     service, boundary = task_service(tmp_path, FakeTaskBoundary([snapshot]))
 
     result = service.execute(
-        operation="task.snapshot", arguments={"project_id": "fixture"}, principal="observer"
+        operation="task.snapshot",
+        arguments={"project_id": "fixture"},
+        principal="observer",
     )
 
     assert result == {
@@ -2888,11 +4104,11 @@ def test_task_snapshot_parses_jsonl_without_writing_a_store(tmp_path: Path) -> N
         "result": [{"id": "fixture-1"}, {"id": "fixture-2"}],
     }
     authority_root = tmp_path / "task-state" / "fixture"
-    database = authority_root / ".beads" / "dolt"
+    authority_root / ".beads" / "dolt"
     assert boundary.calls == [
         (
-                ("--json", "--readonly", "export"),
-                tmp_path,
+            ("--json", "--readonly", "export"),
+            tmp_path,
         )
     ]
 
@@ -2900,12 +4116,26 @@ def test_task_snapshot_parses_jsonl_without_writing_a_store(tmp_path: Path) -> N
 def test_task_mutations_are_serialized_per_project(tmp_path: Path) -> None:
     entered = threading.Event()
     release = threading.Event()
-    boundary = FakeTaskBoundary([task_result({"ok": 1}), task_result({"ok": 2})], entered=entered, release=release)
+    boundary = FakeTaskBoundary(
+        [task_result({"ok": 1}), task_result({"ok": 2})],
+        entered=entered,
+        release=release,
+    )
     write_adapter(tmp_path)
     task_state_root = tmp_path / "task-state"
     activate_task_authority(tmp_path, task_state_root)
-    first_service = TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path / "first-jobs"), boundary, task_state_root=task_state_root)
-    second_service = TaskService(ProjectCatalog([tmp_path]), generic_jobs(tmp_path / "second-jobs"), boundary, task_state_root=task_state_root)
+    first_service = TaskService(
+        ProjectCatalog([tmp_path]),
+        generic_jobs(tmp_path / "first-jobs"),
+        boundary,
+        task_state_root=task_state_root,
+    )
+    second_service = TaskService(
+        ProjectCatalog([tmp_path]),
+        generic_jobs(tmp_path / "second-jobs"),
+        boundary,
+        task_state_root=task_state_root,
+    )
     errors: list[BaseException] = []
 
     def mutate(service: TaskService, task_id: str) -> None:
@@ -2934,7 +4164,9 @@ def test_task_mutations_are_serialized_per_project(tmp_path: Path) -> None:
     assert len(boundary.calls) == 2
 
 
-def test_divergent_worktrees_share_canonical_authority_and_ignore_stale_jsonl(tmp_path: Path) -> None:
+def test_divergent_worktrees_share_canonical_authority_and_ignore_stale_jsonl(
+    tmp_path: Path,
+) -> None:
     repository = tmp_path / "repository"
     repository.mkdir()
     write_adapter(repository)
@@ -2943,9 +4175,13 @@ def test_divergent_worktrees_share_canonical_authority_and_ignore_stale_jsonl(tm
     snapshots.parent.mkdir()
     snapshots.write_text('{"id":"fixture-1","status":"open"}\n')
     initialize_git_checkout(repository)
-    subprocess.run(["git", "-C", str(repository), "branch", "stale-checkout"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "branch", "stale-checkout"], check=True
+    )
     snapshots.write_text('{"id":"fixture-1","status":"closed"}\n')
-    subprocess.run(["git", "-C", str(repository), "add", ".beads/issues.jsonl"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "add", ".beads/issues.jsonl"], check=True
+    )
     subprocess.run(
         [
             "git",
@@ -2964,14 +4200,28 @@ def test_divergent_worktrees_share_canonical_authority_and_ignore_stale_jsonl(tm
     )
     stale_checkout = tmp_path / "stale-checkout"
     subprocess.run(
-        ["git", "-C", str(repository), "worktree", "add", "--quiet", str(stale_checkout), "stale-checkout"],
+        [
+            "git",
+            "-C",
+            str(repository),
+            "worktree",
+            "add",
+            "--quiet",
+            str(stale_checkout),
+            "stale-checkout",
+        ],
         check=True,
     )
-    assert snapshots.read_text() != (stale_checkout / ".beads" / "issues.jsonl").read_text()
+    assert (
+        snapshots.read_text()
+        != (stale_checkout / ".beads" / "issues.jsonl").read_text()
+    )
 
     task_state_root = tmp_path / "task-state"
     database = activate_task_authority(repository, task_state_root)
-    boundary = CanonicalTaskBoundary({"fixture-1": {"id": "fixture-1", "status": "closed"}})
+    boundary = CanonicalTaskBoundary(
+        {"fixture-1": {"id": "fixture-1", "status": "closed"}}
+    )
     primary = TaskService(
         ProjectCatalog([repository]),
         generic_jobs(tmp_path / "primary-jobs"),
@@ -3000,7 +4250,10 @@ def test_divergent_worktrees_share_canonical_authority_and_ignore_stale_jsonl(tm
     assert observed["result"] == {"id": "fixture-1", "status": "claimed"}
     assert boundary.databases == [database, database]
     assert [cwd for _, cwd in boundary.calls] == [repository, stale_checkout]
-    assert json.loads((stale_checkout / ".beads" / "issues.jsonl").read_text())["status"] == "open"
+    assert (
+        json.loads((stale_checkout / ".beads" / "issues.jsonl").read_text())["status"]
+        == "open"
+    )
 
 
 def test_task_authority_refuses_unverified_or_dual_authority(tmp_path: Path) -> None:
@@ -3046,10 +4299,31 @@ def test_task_authority_refuses_unverified_or_dual_authority(tmp_path: Path) -> 
 @pytest.mark.parametrize(
     ("backend_result", "expected_code"),
     (
-        (ExecutionResult(command=(), exit_status=None, stdout=b"", stderr=b"", timed_out=True), "OWNER_UNAVAILABLE"),
-        (ExecutionResult(command=(), exit_status=0, stdout=b"x" * (MAX_TASK_OUTPUT_BYTES + 1), stderr=b""), "RESOURCE_EXHAUSTED"),
-        (ExecutionResult(command=(), exit_status=1, stdout=b"", stderr=b"private backend detail"), "OPERATION_FAILED"),
-        (ExecutionResult(command=(), exit_status=0, stdout=b"not-json", stderr=b""), "RESULT_INVALID"),
+        (
+            ExecutionResult(
+                command=(), exit_status=None, stdout=b"", stderr=b"", timed_out=True
+            ),
+            "OWNER_UNAVAILABLE",
+        ),
+        (
+            ExecutionResult(
+                command=(),
+                exit_status=0,
+                stdout=b"x" * (MAX_TASK_OUTPUT_BYTES + 1),
+                stderr=b"",
+            ),
+            "RESOURCE_EXHAUSTED",
+        ),
+        (
+            ExecutionResult(
+                command=(), exit_status=1, stdout=b"", stderr=b"private backend detail"
+            ),
+            "OPERATION_FAILED",
+        ),
+        (
+            ExecutionResult(command=(), exit_status=0, stdout=b"not-json", stderr=b""),
+            "RESULT_INVALID",
+        ),
     ),
 )
 def test_task_backend_failures_map_to_clean_error_envelopes(
@@ -3067,7 +4341,12 @@ def test_task_backend_failures_map_to_clean_error_envelopes(
     service = SinnixdService(ProjectCatalog([tmp_path]), tasks=tasks)
 
     response = service.dispatch(
-        request("task.get", "task-backend", {"project_id": "fixture", "task_id": "fixture-1"}, "observer")
+        request(
+            "task.get",
+            "task-backend",
+            {"project_id": "fixture", "task_id": "fixture-1"},
+            "observer",
+        )
     )
 
     assert response.error is not None
@@ -3075,7 +4354,9 @@ def test_task_backend_failures_map_to_clean_error_envelopes(
     assert "private backend detail" not in response.error.message
 
 
-def test_task_rejects_unauthorized_principals_and_invalid_arguments(tmp_path: Path) -> None:
+def test_task_rejects_unauthorized_principals_and_invalid_arguments(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     task_state_root = tmp_path / "task-state"
     activate_task_authority(tmp_path, task_state_root)
@@ -3088,13 +4369,28 @@ def test_task_rejects_unauthorized_principals_and_invalid_arguments(tmp_path: Pa
     service = SinnixdService(ProjectCatalog([tmp_path]), tasks=tasks)
 
     denied = service.dispatch(
-        request("task.claim", "task-backend", {"project_id": "fixture", "task_id": "fixture-1"}, "observer")
+        request(
+            "task.claim",
+            "task-backend",
+            {"project_id": "fixture", "task_id": "fixture-1"},
+            "observer",
+        )
     )
     invalid = service.dispatch(
-        request("task.get", "task-backend", {"project_id": "fixture", "task_id": "--bad", "extra": True}, "observer")
+        request(
+            "task.get",
+            "task-backend",
+            {"project_id": "fixture", "task_id": "--bad", "extra": True},
+            "observer",
+        )
     )
     missing_request_id = service.dispatch(
-        request("task.claim", "task-backend", {"project_id": "fixture", "task_id": "fixture-1"}, "agent-control")
+        request(
+            "task.claim",
+            "task-backend",
+            {"project_id": "fixture", "task_id": "fixture-1"},
+            "agent-control",
+        )
     )
     unknown = service.dispatch(
         request("task.list", "task-backend", {"project_id": "missing"}, "observer")
@@ -3102,7 +4398,10 @@ def test_task_rejects_unauthorized_principals_and_invalid_arguments(tmp_path: Pa
 
     assert denied.error is not None and denied.error.code.value == "POLICY_DENIED"
     assert invalid.error is not None and invalid.error.code.value == "INVALID_ARGUMENT"
-    assert missing_request_id.error is not None and missing_request_id.error.code.value == "INVALID_ARGUMENT"
+    assert (
+        missing_request_id.error is not None
+        and missing_request_id.error.code.value == "INVALID_ARGUMENT"
+    )
     assert unknown.error is not None and unknown.error.code.value == "INVALID_ARGUMENT"
     assert not tasks.boundary.calls
 
@@ -3142,11 +4441,15 @@ def start_rpc_reply_server(
     return thread
 
 
-def test_project_catalog_is_explicit_and_operation_catalog_is_bounded(tmp_path: Path) -> None:
+def test_project_catalog_is_explicit_and_operation_catalog_is_bounded(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]))
 
-    response = service.dispatch(request("project.operations", "project-adapters", {"project_id": "fixture"}))
+    response = service.dispatch(
+        request("project.operations", "project-adapters", {"project_id": "fixture"})
+    )
 
     assert response.ok
     assert response.payload is not None
@@ -3180,7 +4483,13 @@ def test_project_catalog_is_explicit_and_operation_catalog_is_bounded(tmp_path: 
             "max_length": 128,
             "grammar": "safe-token",
         },
-        {"name": "attempts", "type": "integer", "flag": "--attempts", "min": 1, "max": 16},
+        {
+            "name": "attempts",
+            "type": "integer",
+            "flag": "--attempts",
+            "min": 1,
+            "max": 16,
+        },
         {
             "name": "feature",
             "type": "string-list",
@@ -3243,7 +4552,9 @@ def test_project_operations_reports_descriptor_drift(tmp_path: Path) -> None:
     descriptor = tmp_path / ".agentctl" / "project.toml"
     descriptor.write_text(descriptor.read_text() + "\n# changed after daemon startup\n")
 
-    response = service.dispatch(request("project.operations", "project-adapters", {"project_id": "fixture"}))
+    response = service.dispatch(
+        request("project.operations", "project-adapters", {"project_id": "fixture"})
+    )
 
     assert response.ok
     assert response.payload is not None
@@ -3275,7 +4586,9 @@ def test_owner_mismatch_is_a_typed_error(tmp_path: Path) -> None:
     assert missing.error.code.value == "INVALID_ARGUMENT"
 
 
-def test_user_systemd_jobs_starts_a_retained_service_with_log_boundary(monkeypatch, tmp_path: Path) -> None:
+def test_user_systemd_jobs_starts_a_retained_service_with_log_boundary(
+    monkeypatch, tmp_path: Path
+) -> None:
     calls: list[tuple[list[str], dict[str, object]]] = []
 
     def fake_run(args, **kwargs):
@@ -3379,7 +4692,9 @@ def test_user_systemd_calls_use_finite_timeouts_and_redact_timeout_details(
         systemd.show("sinnixd-job-00000000-0000-0000-0000-000000000001.service")
 
 
-def test_user_systemd_os_error_reconciles_without_persisting_raw_error(monkeypatch, tmp_path: Path) -> None:
+def test_user_systemd_os_error_reconciles_without_persisting_raw_error(
+    monkeypatch, tmp_path: Path
+) -> None:
     """Anti-vacuity: raw subprocess OSErrors must enter the systemd reconciliation path."""
     secret = "systemd-run-os-error-do-not-persist"
     calls: list[str] = []
@@ -3388,12 +4703,18 @@ def test_user_systemd_os_error_reconciles_without_persisting_raw_error(monkeypat
         calls.append(args[0])
         if args[0] == "systemd-run":
             raise OSError(secret)
-        return SimpleNamespace(stdout="LoadState=loaded\nActiveState=active\nResult=success\n")
+        return SimpleNamespace(
+            stdout="LoadState=loaded\nActiveState=active\nResult=success\n"
+        )
 
     monkeypatch.setattr("sinnixd.jobs.subprocess.run", fake_run)
-    jobs = GenericJobs(UserSystemdJobs(), GenericJobStore(tmp_path / "state"), wait_poll_seconds=0.001)
+    jobs = GenericJobs(
+        UserSystemdJobs(), GenericJobStore(tmp_path / "state"), wait_poll_seconds=0.001
+    )
 
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     persisted = (tmp_path / "state" / "jobs" / f"{started['job_id']}.json").read_text()
 
     assert calls == ["systemd-run", "systemctl"]
@@ -3430,7 +4751,10 @@ def test_declared_and_foreground_jobs_share_the_generic_route(tmp_path: Path) ->
     assert systemd.started[0]["environment"]["SINNIXD_JOB_ID"] == launch["job_id"]
     assert systemd.started[0]["environment"]["SINNIXD_OPERATION"] == "check"
     assert systemd.started[0]["environment"]["SINNIXD_CHECKOUT_ID"] == "default"
-    assert systemd.started[0]["environment"]["SINNIXD_CHECKOUT_HEAD"] == launch["checkout"]["head"]
+    assert (
+        systemd.started[0]["environment"]["SINNIXD_CHECKOUT_HEAD"]
+        == launch["checkout"]["head"]
+    )
     assert launch["checkout"]["path"] == str(tmp_path.resolve())
 
     foreground = service.start_foreground(
@@ -3442,13 +4766,20 @@ def test_declared_and_foreground_jobs_share_the_generic_route(tmp_path: Path) ->
     assert foreground["kind"] == "foreground-command"
     assert len(systemd.started) == 2
     assert service.jobs.store.declared_launch(launch["job_id"])[0] == (
-        "fixture-env", "--command", "fixture-check"
+        "fixture-env",
+        "--command",
+        "fixture-check",
     )
     assert systemd.started[1]["command"] == ("fixture-foreground",)
     foreground_record = service.jobs.store.load(foreground["job_id"])
-    assert foreground_record.spec.to_dict()["environment_keys"] == ["EMPTY", "SINNIXD_JOB_ID"]
+    assert foreground_record.spec.to_dict()["environment_keys"] == [
+        "EMPTY",
+        "SINNIXD_JOB_ID",
+    ]
 
-    status = service.dispatch(request("job.get", "systemd-jobs", {"job_id": launch["job_id"]}))
+    status = service.dispatch(
+        request("job.get", "systemd-jobs", {"job_id": launch["job_id"]})
+    )
     cancelled = service.dispatch(
         request("job.cancel", "systemd-jobs", {"job_id": launch["job_id"]})
     )
@@ -3477,21 +4808,31 @@ timeout_seconds = 7200
 """
     )
     systemd = FakeSystemdJobs()
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd)
+    )
 
     started = service.dispatch(
-        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "long_running"})
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "long_running"},
+        )
     )
 
     assert started.ok and started.payload is not None
     assert started.payload.inline["timeout_seconds"] == 7200
     assert service.jobs.store.declared_launch(started.payload.inline["job_id"])[0] == (
-        "fixture-env", "--command", "fixture-long"
+        "fixture-env",
+        "--command",
+        "fixture-long",
     )
     assert systemd.started[0]["timeout_seconds"] == 7200
 
 
-def test_declared_parameters_canonicalize_argv_and_persist_only_the_digest(tmp_path: Path) -> None:
+def test_declared_parameters_canonicalize_argv_and_persist_only_the_digest(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: parameter ordering must affect neither argv identity nor durable record contents."""
     write_adapter(tmp_path)
     systemd = FakeSystemdJobs()
@@ -3514,7 +4855,14 @@ def test_declared_parameters_canonicalize_argv_and_persist_only_the_digest(tmp_p
     launch = started.payload.inline
     digest = hashlib.sha256(b'{"full":true,"package":["sinexd","xtask"]}').hexdigest()
     assert jobs.store.declared_launch(launch["job_id"])[0] == (
-        "fixture-env", "--command", "fixture-check", "--full", "--package", "sinexd", "--package", "xtask"
+        "fixture-env",
+        "--command",
+        "fixture-check",
+        "--full",
+        "--package",
+        "sinexd",
+        "--package",
+        "xtask",
     )
     assert launch["parameters"] == {"digest": digest}
     persisted = (jobs.store.records_root / f"{launch['job_id']}.json").read_text()
@@ -3538,13 +4886,19 @@ def test_declared_parameters_reject_unknown_malformed_and_unbounded_input(
 ) -> None:
     write_adapter(tmp_path)
     systemd = FakeSystemdJobs()
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd)
+    )
 
     response = service.dispatch(
         request(
             "job.start",
             "systemd-jobs",
-            {"project_id": "fixture", "operation": "parameterized", "parameters": parameters},
+            {
+                "project_id": "fixture",
+                "operation": "parameterized",
+                "parameters": parameters,
+            },
         )
     )
 
@@ -3570,13 +4924,19 @@ def test_generic_extended_parameters_reject_invalid_values_before_launch(
 ) -> None:
     write_adapter(tmp_path)
     systemd = FakeSystemdJobs()
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd)
+    )
 
     response = service.dispatch(
         request(
             "job.start",
             "systemd-jobs",
-            {"project_id": "fixture", "operation": "generic_extended_parameters", "parameters": parameters},
+            {
+                "project_id": "fixture",
+                "operation": "generic_extended_parameters",
+                "parameters": parameters,
+            },
         )
     )
 
@@ -3585,7 +4945,9 @@ def test_generic_extended_parameters_reject_invalid_values_before_launch(
     assert systemd.started == []
 
 
-def test_generic_extended_parameters_derive_canonical_argv_and_digest(tmp_path: Path) -> None:
+def test_generic_extended_parameters_derive_canonical_argv_and_digest(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     systemd = FakeSystemdJobs()
     jobs = generic_jobs(tmp_path, systemd)
@@ -3616,14 +4978,30 @@ def test_generic_extended_parameters_derive_canonical_argv_and_digest(tmp_path: 
         "profile": "strict",
     }
     assert jobs.store.declared_launch(started.payload.inline["job_id"])[0] == (
-        "fixture-env", "--command", "fixture-check",
-        "--profile", "strict", "--attempts", "4",
-        "--features", "serde", "--features", "tokio",
-        "--package", "sinexd", "--package", "xtask",
+        "fixture-env",
+        "--command",
+        "fixture-check",
+        "--profile",
+        "strict",
+        "--attempts",
+        "4",
+        "--features",
+        "serde",
+        "--features",
+        "tokio",
+        "--package",
+        "sinexd",
+        "--package",
+        "xtask",
     )
     assert started.payload.inline["parameters"] == {
         "digest": hashlib.sha256(
-            json.dumps(expected_canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+            json.dumps(
+                expected_canonical,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode()
         ).hexdigest()
     }
 
@@ -3643,13 +5021,19 @@ def test_sinex_all_sources_fixture_rejects_invalid_values_before_launch(
 ) -> None:
     write_adapter(tmp_path)
     systemd = FakeSystemdJobs()
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd)
+    )
 
     response = service.dispatch(
         request(
             "job.start",
             "systemd-jobs",
-            {"project_id": "fixture", "operation": "sinex_all_sources", "parameters": parameters},
+            {
+                "project_id": "fixture",
+                "operation": "sinex_all_sources",
+                "parameters": parameters,
+            },
         )
     )
 
@@ -3658,7 +5042,9 @@ def test_sinex_all_sources_fixture_rejects_invalid_values_before_launch(
     assert systemd.started == []
 
 
-def test_sinex_all_sources_fixture_derives_exact_argv_and_digest(tmp_path: Path) -> None:
+def test_sinex_all_sources_fixture_derives_exact_argv_and_digest(
+    tmp_path: Path,
+) -> None:
     """The fixture follows xtask run all-sources' current foreground flags."""
     write_adapter(tmp_path)
     systemd = FakeSystemdJobs()
@@ -3690,15 +5076,26 @@ def test_sinex_all_sources_fixture_derives_exact_argv_and_digest(tmp_path: Path)
         "service_name": "source-driver-browser.history-3",
     }
     assert jobs.store.declared_launch(started.payload.inline["job_id"])[0] == (
-        "fixture-env", "--command", "xtask", "run", "all-sources",
-        "--instance-id", "operator-source-driver-browser.history-3",
+        "fixture-env",
+        "--command",
+        "xtask",
+        "run",
+        "all-sources",
+        "--instance-id",
+        "operator-source-driver-browser.history-3",
         "--reconcile",
-        "--service-name", "source-driver-browser.history-3",
+        "--service-name",
+        "source-driver-browser.history-3",
         "--include-default-excluded",
     )
     assert started.payload.inline["parameters"] == {
         "digest": hashlib.sha256(
-            json.dumps(expected_canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+            json.dumps(
+                expected_canonical,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode()
         ).hexdigest()
     }
 
@@ -3726,10 +5123,19 @@ def test_required_positional_parameter_derives_before_optional_flags_and_contrib
 
     assert started.ok and started.payload is not None
     assert jobs.store.declared_launch(started.payload.inline["job_id"])[0] == (
-        "fixture-env", "--command", "xtask", "verify", "closure", "sinex-a1b2", "--json", "--dry-run",
+        "fixture-env",
+        "--command",
+        "xtask",
+        "verify",
+        "closure",
+        "sinex-a1b2",
+        "--json",
+        "--dry-run",
     )
     assert started.payload.inline["parameters"] == {
-        "digest": hashlib.sha256(b'{"bead_id":"sinex-a1b2","dry_run":true,"json":true}').hexdigest()
+        "digest": hashlib.sha256(
+            b'{"bead_id":"sinex-a1b2","dry_run":true,"json":true}'
+        ).hexdigest()
     }
 
 
@@ -3747,13 +5153,19 @@ def test_required_positional_parameter_rejects_missing_or_invalid_values_before_
     """Anti-vacuity: rejected required positionals must not create a systemd job."""
     write_adapter(tmp_path)
     systemd = FakeSystemdJobs()
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd)
+    )
 
     response = service.dispatch(
         request(
             "job.start",
             "systemd-jobs",
-            {"project_id": "fixture", "operation": "verify_closure", "parameters": parameters},
+            {
+                "project_id": "fixture",
+                "operation": "verify_closure",
+                "parameters": parameters,
+            },
         )
     )
 
@@ -3762,26 +5174,40 @@ def test_required_positional_parameter_rejects_missing_or_invalid_values_before_
     assert systemd.started == []
 
 
-def test_fixed_operation_rejects_parameters_and_retains_its_declared_argv(tmp_path: Path) -> None:
+def test_fixed_operation_rejects_parameters_and_retains_its_declared_argv(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: parameters must not create an argv authority for fixed operations."""
     write_adapter(tmp_path)
     systemd = FakeSystemdJobs()
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd)
+    )
 
     fixed = service.dispatch(
-        request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check", "parameters": {}})
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "check", "parameters": {}},
+        )
     )
     rejected = service.dispatch(
         request(
             "job.start",
             "systemd-jobs",
-            {"project_id": "fixture", "operation": "check", "parameters": {"full": True}},
+            {
+                "project_id": "fixture",
+                "operation": "check",
+                "parameters": {"full": True},
+            },
         )
     )
 
     assert fixed.ok and fixed.payload is not None
     assert service.jobs.store.declared_launch(fixed.payload.inline["job_id"])[0] == (
-        "fixture-env", "--command", "fixture-check"
+        "fixture-env",
+        "--command",
+        "fixture-check",
     )
     assert rejected.error is not None
     assert rejected.error.code.value == "INVALID_ARGUMENT"
@@ -3799,13 +5225,23 @@ def test_fixed_operation_rejects_parameters_and_retains_its_declared_argv(tmp_pa
     ),
 )
 def test_declared_json_results_are_bounded_and_validated(
-    tmp_path: Path, operation: str, content: bytes, overflowed: bool, expected: dict[str, str] | None
+    tmp_path: Path,
+    operation: str,
+    content: bytes,
+    overflowed: bool,
+    expected: dict[str, str] | None,
 ) -> None:
     """Anti-vacuity: result artifacts must reject injected, malformed, and overflowed JSON."""
     write_adapter(tmp_path)
     jobs = generic_jobs(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
-    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": operation}))
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": operation},
+        )
+    )
     assert started.ok and started.payload is not None
     job_id = started.payload.inline["job_id"]
     record = jobs.store.load(job_id)
@@ -3820,22 +5256,36 @@ def test_declared_json_results_are_bounded_and_validated(
             "job_id": job_id,
             "kind": kind,
             "value": expected,
-            "artifact": {"ref": f"sinnix://jobs/{job_id}/artifacts/result", "max_bytes": 64_000, "kind": kind},
+            "artifact": {
+                "ref": f"sinnix://jobs/{job_id}/artifacts/result",
+                "max_bytes": 64_000,
+                "kind": kind,
+            },
         }
     else:
         with pytest.raises(JobResultError):
             jobs.result(job_id)
-        response = service.dispatch(request("job.result", "systemd-jobs", {"job_id": job_id}))
+        response = service.dispatch(
+            request("job.result", "systemd-jobs", {"job_id": job_id})
+        )
         assert response.error is not None
         assert response.error.code.value == "RESULT_INVALID"
 
 
-def test_declared_json_result_respects_the_callers_response_budget(tmp_path: Path) -> None:
+def test_declared_json_result_respects_the_callers_response_budget(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: typed JSON must not bypass job.result's max_bytes contract."""
     write_adapter(tmp_path)
     jobs = generic_jobs(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
-    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "parameterized"}))
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "parameterized"},
+        )
+    )
     assert started.ok and started.payload is not None
     job_id = started.payload.inline["job_id"]
     record = jobs.store.load(job_id)
@@ -3844,7 +5294,9 @@ def test_declared_json_result_respects_the_callers_response_budget(tmp_path: Pat
 
     with pytest.raises(JobResultLimitError, match="requested response limit"):
         jobs.result(job_id, max_bytes=8)
-    response = service.dispatch(request("job.result", "systemd-jobs", {"job_id": job_id, "max_bytes": 8}))
+    response = service.dispatch(
+        request("job.result", "systemd-jobs", {"job_id": job_id, "max_bytes": 8})
+    )
     assert response.error is not None
     assert response.error.code.value == "RESOURCE_EXHAUSTED"
 
@@ -3853,13 +5305,27 @@ def test_capture_separates_json_stdout_from_logs(tmp_path: Path) -> None:
     log_path = tmp_path / "job.log"
     result_path = tmp_path / "job.result"
     log_path.touch(mode=0o600)
-    assert capture_main(
-        (
-            "--log-path", str(log_path), "--overflow-path", str(tmp_path / "job.overflow"), "--max-bytes", "64",
-            "--result-path", str(result_path), "--result-overflow-path", str(tmp_path / "result.overflow"),
-            "--", "/bin/sh", "-c", "printf '{\"receipt\":true}'; printf diagnostic >&2",
+    assert (
+        capture_main(
+            (
+                "--log-path",
+                str(log_path),
+                "--overflow-path",
+                str(tmp_path / "job.overflow"),
+                "--max-bytes",
+                "64",
+                "--result-path",
+                str(result_path),
+                "--result-overflow-path",
+                str(tmp_path / "result.overflow"),
+                "--",
+                "/bin/sh",
+                "-c",
+                "printf '{\"receipt\":true}'; printf diagnostic >&2",
+            )
         )
-    ) == 0
+        == 0
+    )
     assert json.loads(result_path.read_text()) == {"receipt": True}
     assert "diagnostic" in log_path.read_text()
 
@@ -3867,16 +5333,29 @@ def test_capture_separates_json_stdout_from_logs(tmp_path: Path) -> None:
 def test_capture_writes_to_the_store_preallocated_log_artifact(tmp_path: Path) -> None:
     """Anti-vacuity: the real GenericJobStore log reservation remains capturable."""
     jobs = generic_jobs(tmp_path)
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     record = jobs.store.load(started["job_id"])
     assert record.log_path.exists()
 
-    assert capture_main(
-        (
-            "--log-path", str(record.log_path), "--overflow-path", str(record.log_path.with_suffix(".overflow")),
-            "--max-bytes", "64", "--", "/bin/sh", "-c", "printf captured-log",
+    assert (
+        capture_main(
+            (
+                "--log-path",
+                str(record.log_path),
+                "--overflow-path",
+                str(record.log_path.with_suffix(".overflow")),
+                "--max-bytes",
+                "64",
+                "--",
+                "/bin/sh",
+                "-c",
+                "printf captured-log",
+            )
         )
-    ) == 0
+        == 0
+    )
     assert record.log_path.read_text() == "captured-log"
 
 
@@ -3892,24 +5371,45 @@ def test_capture_refuses_hostile_artifact_symlinks(tmp_path: Path) -> None:
     with pytest.raises(FileExistsError):
         capture_main(
             (
-                "--log-path", str(log_path), "--overflow-path", str(tmp_path / "job.overflow"), "--max-bytes", "64",
-                "--result-path", str(result_path), "--result-overflow-path", str(tmp_path / "result.overflow"),
-                "--", "/bin/true",
+                "--log-path",
+                str(log_path),
+                "--overflow-path",
+                str(tmp_path / "job.overflow"),
+                "--max-bytes",
+                "64",
+                "--result-path",
+                str(result_path),
+                "--result-overflow-path",
+                str(tmp_path / "result.overflow"),
+                "--",
+                "/bin/true",
             )
         )
     assert protected.read_text() == "keep"
 
 
-def test_job_reconciliation_marks_missing_units_without_daemon_owned_state(tmp_path: Path) -> None:
+def test_job_reconciliation_marks_missing_units_without_daemon_owned_state(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: deleting GenericJobs.get's systemd.show call loses the missing phase."""
     write_adapter(tmp_path)
-    systemd = FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"})
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
+    systemd = FakeSystemdJobs(
+        properties={"LoadState": "not-found", "ActiveState": "inactive"}
+    )
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd)
+    )
 
-    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"}))
+    started = service.dispatch(
+        request(
+            "job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"}
+        )
+    )
     assert started.payload is not None
 
-    response = service.dispatch(request("job.get", "systemd-jobs", {"job_id": started.payload.inline["job_id"]}))
+    response = service.dispatch(
+        request("job.get", "systemd-jobs", {"job_id": started.payload.inline["job_id"]})
+    )
 
     assert response.ok
     assert response.payload is not None
@@ -3952,7 +5452,9 @@ def test_declared_project_job_rejects_arbitrary_execution(tmp_path: Path) -> Non
     assert direct_argv.error.code.value == "INVALID_ARGUMENT"
 
 
-def test_workspace_create_is_git_derived_durable_and_restart_safe(tmp_path: Path) -> None:
+def test_workspace_create_is_git_derived_durable_and_restart_safe(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: create must reach Git worktree authority and survive service restart."""
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
@@ -3990,31 +5492,53 @@ def test_workspace_create_is_git_derived_durable_and_restart_safe(tmp_path: Path
 
     restarted = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
     recovered = restarted.dispatch(
-        request("workspace.get", "git-workspaces", {"workspace_id": workspace["workspace_id"]})
+        request(
+            "workspace.get",
+            "git-workspaces",
+            {"workspace_id": workspace["workspace_id"]},
+        )
     )
     assert recovered.ok and recovered.payload is not None
     assert recovered.payload.inline["head"] == workspace["head"]
     assert recovered.payload.inline["checkout_id"].startswith("worktree-")
 
 
-def test_workspace_adopt_uses_existing_linked_checkout_without_claiming_creation(tmp_path: Path) -> None:
+def test_workspace_adopt_uses_existing_linked_checkout_without_claiming_creation(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     linked = tmp_path / "external-linked"
     subprocess.run(
-        ["git", "-C", str(tmp_path), "worktree", "add", "-b", "feature/adopted", str(linked), "HEAD"],
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "worktree",
+            "add",
+            "-b",
+            "feature/adopted",
+            str(linked),
+            "HEAD",
+        ],
         check=True,
         capture_output=True,
     )
     catalog = ProjectCatalog([tmp_path])
-    checkout = next(item for item in catalog.checkouts("fixture") if item.path == linked)
+    checkout = next(
+        item for item in catalog.checkouts("fixture") if item.path == linked
+    )
     service = SinnixdService(catalog, jobs=generic_jobs(tmp_path))
 
     adopted = service.dispatch(
         request(
             "workspace.adopt",
             "git-workspaces",
-            {"project_id": "fixture", "checkout_id": checkout.checkout_id, "name": "adopted-lane"},
+            {
+                "project_id": "fixture",
+                "checkout_id": checkout.checkout_id,
+                "name": "adopted-lane",
+            },
             "operator",
         )
     )
@@ -4025,7 +5549,9 @@ def test_workspace_adopt_uses_existing_linked_checkout_without_claiming_creation
     assert adopted.payload.inline["current_branch"] == "feature/adopted"
 
 
-def test_workspace_mutations_reject_weak_principals_paths_refs_and_duplicates(tmp_path: Path) -> None:
+def test_workspace_mutations_reject_weak_principals_paths_refs_and_duplicates(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
@@ -4036,15 +5562,31 @@ def test_workspace_mutations_reject_weak_principals_paths_refs_and_duplicates(tm
         "base": "HEAD",
     }
 
-    weak = service.dispatch(request("workspace.create", "git-workspaces", arguments, "observer"))
+    weak = service.dispatch(
+        request("workspace.create", "git-workspaces", arguments, "observer")
+    )
     escaped = service.dispatch(
-        request("workspace.create", "git-workspaces", {**arguments, "name": "../escape"}, "agent-control")
+        request(
+            "workspace.create",
+            "git-workspaces",
+            {**arguments, "name": "../escape"},
+            "agent-control",
+        )
     )
     invalid_ref = service.dispatch(
-        request("workspace.create", "git-workspaces", {**arguments, "base": "missing-ref"}, "agent-control")
+        request(
+            "workspace.create",
+            "git-workspaces",
+            {**arguments, "base": "missing-ref"},
+            "agent-control",
+        )
     )
-    created = service.dispatch(request("workspace.create", "git-workspaces", arguments, "agent-control"))
-    duplicate = service.dispatch(request("workspace.create", "git-workspaces", arguments, "agent-control"))
+    created = service.dispatch(
+        request("workspace.create", "git-workspaces", arguments, "agent-control")
+    )
+    duplicate = service.dispatch(
+        request("workspace.create", "git-workspaces", arguments, "agent-control")
+    )
     adopt_root = service.dispatch(
         request(
             "workspace.adopt",
@@ -4065,11 +5607,16 @@ def test_workspace_status_exposes_branch_drift_and_dirty_state(tmp_path: Path) -
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
     created = service.workspaces.create(
-        project_id="fixture", name="drift-lane", branch="feature/drift-lane", base="HEAD"
+        project_id="fixture",
+        name="drift-lane",
+        branch="feature/drift-lane",
+        base="HEAD",
     )
     path = Path(created["path"])
     (path / "untracked.txt").write_text("operator work\n")
-    subprocess.run(["git", "-C", str(path), "switch", "--detach"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "switch", "--detach"], check=True, capture_output=True
+    )
 
     observed = service.workspaces.get(created["workspace_id"])
 
@@ -4078,12 +5625,17 @@ def test_workspace_status_exposes_branch_drift_and_dirty_state(tmp_path: Path) -
     assert not observed["identity_matches"]
 
 
-def test_workspace_reap_forgets_missing_and_removes_only_clean_contained_managed_worktrees(tmp_path: Path) -> None:
+def test_workspace_reap_forgets_missing_and_removes_only_clean_contained_managed_worktrees(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
     missing = service.workspaces.create(
-        project_id="fixture", name="missing-lane", branch="feature/missing-lane", base="HEAD"
+        project_id="fixture",
+        name="missing-lane",
+        branch="feature/missing-lane",
+        base="HEAD",
     )
     subprocess.run(
         ["git", "-C", str(tmp_path), "worktree", "remove", missing["path"]],
@@ -4100,7 +5652,10 @@ def test_workspace_reap_forgets_missing_and_removes_only_clean_contained_managed
         )
     )
     clean = service.workspaces.create(
-        project_id="fixture", name="clean-lane", branch="feature/clean-lane", base="HEAD"
+        project_id="fixture",
+        name="clean-lane",
+        branch="feature/clean-lane",
+        base="HEAD",
     )
     reaped = service.workspaces.reap(clean["workspace_id"])
 
@@ -4123,38 +5678,75 @@ def test_delivery_rejects_pending_hosted_checks() -> None:
     )
 
 
-def test_workspace_reap_preserves_dirty_divergent_and_adopted_worktrees(tmp_path: Path) -> None:
+def test_workspace_reap_preserves_dirty_divergent_and_adopted_worktrees(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
     dirty = service.workspaces.create(
-        project_id="fixture", name="dirty-lane", branch="feature/dirty-lane", base="HEAD"
+        project_id="fixture",
+        name="dirty-lane",
+        branch="feature/dirty-lane",
+        base="HEAD",
     )
     dirty_path = Path(dirty["path"])
     (dirty_path / "operator.txt").write_text("preserve\n")
     divergent = service.workspaces.create(
-        project_id="fixture", name="divergent-lane", branch="feature/divergent-lane", base="HEAD"
+        project_id="fixture",
+        name="divergent-lane",
+        branch="feature/divergent-lane",
+        base="HEAD",
     )
     divergent_path = Path(divergent["path"])
     (divergent_path / "committed.txt").write_text("unique\n")
-    subprocess.run(["git", "-C", str(divergent_path), "add", "committed.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(divergent_path), "add", "committed.txt"], check=True
+    )
     subprocess.run(
         [
-            "git", "-C", str(divergent_path), "-c", "user.name=Fixture", "-c",
-            "user.email=fixture@example.test", "commit", "--quiet", "-m", "diverge",
+            "git",
+            "-C",
+            str(divergent_path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "diverge",
         ],
         check=True,
     )
     external = tmp_path / "external-reap"
     subprocess.run(
-        ["git", "-C", str(tmp_path), "worktree", "add", "-b", "feature/external-reap", str(external), "HEAD"],
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "worktree",
+            "add",
+            "-b",
+            "feature/external-reap",
+            str(external),
+            "HEAD",
+        ],
         check=True,
         capture_output=True,
     )
-    checkout = next(item for item in service.projects.checkouts("fixture") if item.path == external)
-    adopted = service.workspaces.adopt(project_id="fixture", checkout_id=checkout.checkout_id, name="adopted-reap")
+    checkout = next(
+        item for item in service.projects.checkouts("fixture") if item.path == external
+    )
+    adopted = service.workspaces.adopt(
+        project_id="fixture", checkout_id=checkout.checkout_id, name="adopted-reap"
+    )
 
-    for workspace_id in (dirty["workspace_id"], divergent["workspace_id"], adopted["workspace_id"]):
+    for workspace_id in (
+        dirty["workspace_id"],
+        divergent["workspace_id"],
+        adopted["workspace_id"],
+    ):
         with pytest.raises(ValueError):
             service.workspaces.reap(workspace_id)
 
@@ -4163,13 +5755,18 @@ def test_workspace_reap_preserves_dirty_divergent_and_adopted_worktrees(tmp_path
     assert external.is_dir()
 
 
-def test_workspace_dispose_deletes_a_clean_no_pr_branch_without_checkpoint_content(tmp_path: Path) -> None:
+def test_workspace_dispose_deletes_a_clean_no_pr_branch_without_checkpoint_content(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: disposal must remove both Git objects, not just the workspace record."""
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
     workspace = service.workspaces.create(
-        project_id="fixture", name="verification-lane", branch="feature/verification-lane", base="HEAD"
+        project_id="fixture",
+        name="verification-lane",
+        branch="feature/verification-lane",
+        base="HEAD",
     )
     checkpoint = service.workspaces.checkpoint(workspace["workspace_id"])
     gitdir = replace_worktree_gitfile_with_symlink(Path(workspace["path"]))
@@ -4188,41 +5785,80 @@ def test_workspace_dispose_deletes_a_clean_no_pr_branch_without_checkpoint_conte
     assert disposed.payload.inline["disposed"]
     assert disposed.payload.inline["deleted_branch"] == workspace["branch"]
     assert not Path(workspace["path"]).exists()
-    assert not (service.workspaces.store.checkpoints_root / workspace["workspace_id"] / checkpoint["checkpoint_id"]).exists()
+    assert not (
+        service.workspaces.store.checkpoints_root
+        / workspace["workspace_id"]
+        / checkpoint["checkpoint_id"]
+    ).exists()
     assert service.workspaces.list("fixture") == {"workspaces": []}
 
 
-def test_workspace_finish_integrated_accepts_cherry_picked_tree_and_rejects_missing_change(tmp_path: Path) -> None:
+def test_workspace_finish_integrated_accepts_cherry_picked_tree_and_rejects_missing_change(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
-    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Fixture"], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "fixture@example.test"], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.name", "Fixture"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.email", "fixture@example.test"],
+        check=True,
+    )
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
     workspace = service.workspaces.create(
-        project_id="fixture", name="integrated", branch="feature/integrated", base="HEAD"
+        project_id="fixture",
+        name="integrated",
+        branch="feature/integrated",
+        base="HEAD",
     )
     workspace_path = Path(workspace["path"])
     (workspace_path / "integrated.txt").write_text("represented exactly\n")
-    subprocess.run(["git", "-C", str(workspace_path), "add", "integrated.txt"], check=True)
-    subprocess.run(["git", "-C", str(workspace_path), "commit", "--quiet", "-m", "integrated"], check=True)
+    subprocess.run(
+        ["git", "-C", str(workspace_path), "add", "integrated.txt"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(workspace_path), "commit", "--quiet", "-m", "integrated"],
+        check=True,
+    )
 
     with pytest.raises(WorkspaceError, match="not fully represented"):
         service.workspaces.finish_integrated(workspace["workspace_id"], "master")
 
     source_head = subprocess.run(
-        ["git", "-C", str(workspace_path), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
-    ).stdout.strip()
-    subprocess.run(["git", "-C", str(tmp_path), "cherry-pick", source_head], check=True, capture_output=True)
-    target_head = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ["git", "-C", str(workspace_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     subprocess.run(
-        ["git", "-C", str(tmp_path), "update-ref", "refs/remotes/origin/master", target_head], check=True
+        ["git", "-C", str(tmp_path), "cherry-pick", source_head],
+        check=True,
+        capture_output=True,
+    )
+    target_head = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "update-ref",
+            "refs/remotes/origin/master",
+            target_head,
+        ],
+        check=True,
     )
     gitdir = replace_worktree_gitfile_with_symlink(workspace_path)
     assert gitdir.is_dir()
 
-    finished = service.workspaces.finish_integrated(workspace["workspace_id"], target_head)
+    finished = service.workspaces.finish_integrated(
+        workspace["workspace_id"], target_head
+    )
 
     assert finished == {
         "workspace_id": workspace["workspace_id"],
@@ -4232,30 +5868,57 @@ def test_workspace_finish_integrated_accepts_cherry_picked_tree_and_rejects_miss
     }
     assert not workspace_path.exists()
     assert not service.workspaces.list()["workspaces"]
-    assert subprocess.run(
-        ["git", "-C", str(tmp_path), "show-ref", "--verify", "--quiet", f"refs/heads/{workspace['branch']}"]
-    ).returncode == 1
+    assert (
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(tmp_path),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{workspace['branch']}",
+            ]
+        ).returncode
+        == 1
+    )
 
 
-def test_workspace_gitfile_symlink_rejects_mismatched_and_outside_targets_without_mutation(tmp_path: Path) -> None:
+def test_workspace_gitfile_symlink_rejects_mismatched_and_outside_targets_without_mutation(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: only the exact registered administrative gitdir may be canonicalized."""
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
     first = service.workspaces.create(
-        project_id="fixture", name="symlink-first", branch="feature/symlink-first", base="HEAD"
+        project_id="fixture",
+        name="symlink-first",
+        branch="feature/symlink-first",
+        base="HEAD",
     )
     second = service.workspaces.create(
-        project_id="fixture", name="symlink-second", branch="feature/symlink-second", base="HEAD"
+        project_id="fixture",
+        name="symlink-second",
+        branch="feature/symlink-second",
+        base="HEAD",
     )
     first_path = Path(first["path"])
-    first_checkout = next(item for item in service.projects.checkouts("fixture") if item.path == first_path)
-    second_gitdir = Path((Path(second["path"]) / ".git").read_text().strip().removeprefix("gitdir: "))
+    first_checkout = next(
+        item
+        for item in service.projects.checkouts("fixture")
+        if item.path == first_path
+    )
+    second_gitdir = Path(
+        (Path(second["path"]) / ".git").read_text().strip().removeprefix("gitdir: ")
+    )
     first_gitfile = first_path / ".git"
     first_gitfile.unlink()
     first_gitfile.symlink_to(second_gitdir)
 
-    with pytest.raises(WorkspaceError, match="does not match its registered worktree gitdir"):
+    with pytest.raises(
+        WorkspaceError, match="does not match its registered worktree gitdir"
+    ):
         service.workspaces._canonicalize_gitfile_symlink(first_checkout)
     assert first_gitfile.is_symlink()
     assert first_gitfile.resolve(strict=True) == second_gitdir
@@ -4273,34 +5936,62 @@ def test_workspace_gitfile_symlink_rejects_mismatched_and_outside_targets_withou
     assert Path(second["path"]).is_dir()
 
 
-def test_workspace_dispose_refuses_dirty_divergent_unpublished_and_checkpoint_only_content(tmp_path: Path) -> None:
+def test_workspace_dispose_refuses_dirty_divergent_unpublished_and_checkpoint_only_content(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: each rejection leaves the managed worktree and branch available for recovery."""
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
     dirty = service.workspaces.create(
-        project_id="fixture", name="dispose-dirty", branch="feature/dispose-dirty", base="HEAD"
+        project_id="fixture",
+        name="dispose-dirty",
+        branch="feature/dispose-dirty",
+        base="HEAD",
     )
     (Path(dirty["path"]) / "operator.txt").write_text("preserve\n")
     divergent = service.workspaces.create(
-        project_id="fixture", name="dispose-divergent", branch="feature/dispose-divergent", base="HEAD"
+        project_id="fixture",
+        name="dispose-divergent",
+        branch="feature/dispose-divergent",
+        base="HEAD",
     )
-    subprocess.run(["git", "-C", divergent["path"], "switch", "-c", "feature/dispose-replaced"], check=True)
+    subprocess.run(
+        ["git", "-C", divergent["path"], "switch", "-c", "feature/dispose-replaced"],
+        check=True,
+    )
     unpublished = service.workspaces.create(
-        project_id="fixture", name="dispose-unpublished", branch="feature/dispose-unpublished", base="HEAD"
+        project_id="fixture",
+        name="dispose-unpublished",
+        branch="feature/dispose-unpublished",
+        base="HEAD",
     )
     unpublished_path = Path(unpublished["path"])
     (unpublished_path / "unpublished.txt").write_text("preserve\n")
-    subprocess.run(["git", "-C", str(unpublished_path), "add", "unpublished.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(unpublished_path), "add", "unpublished.txt"], check=True
+    )
     subprocess.run(
         [
-            "git", "-C", str(unpublished_path), "-c", "user.name=Fixture", "-c",
-            "user.email=fixture@example.test", "commit", "--quiet", "-m", "unpublished",
+            "git",
+            "-C",
+            str(unpublished_path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "unpublished",
         ],
         check=True,
     )
     checkpoint_only = service.workspaces.create(
-        project_id="fixture", name="dispose-checkpoint", branch="feature/dispose-checkpoint", base="HEAD"
+        project_id="fixture",
+        name="dispose-checkpoint",
+        branch="feature/dispose-checkpoint",
+        base="HEAD",
     )
     checkpoint_path = Path(checkpoint_only["path"])
     (checkpoint_path / "recoverable.txt").write_text("preserve\n")
@@ -4311,18 +6002,34 @@ def test_workspace_dispose_refuses_dirty_divergent_unpublished_and_checkpoint_on
         with pytest.raises(ValueError):
             service.workspaces.dispose(workspace["workspace_id"])
         assert Path(workspace["path"]).is_dir()
-        assert subprocess.run(
-            ["git", "-C", str(tmp_path), "show-ref", "--verify", "--quiet", f"refs/heads/{workspace['branch']}"]
-        ).returncode == 0
+        assert (
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(tmp_path),
+                    "show-ref",
+                    "--verify",
+                    "--quiet",
+                    f"refs/heads/{workspace['branch']}",
+                ]
+            ).returncode
+            == 0
+        )
 
 
-def test_workspace_checkpoint_restore_round_trips_index_worktree_and_untracked_state(tmp_path: Path) -> None:
+def test_workspace_checkpoint_restore_round_trips_index_worktree_and_untracked_state(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: dropping any artifact loses one of the three asserted Git states."""
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
     created = service.workspaces.create(
-        project_id="fixture", name="checkpoint-lane", branch="feature/checkpoint-lane", base="HEAD"
+        project_id="fixture",
+        name="checkpoint-lane",
+        branch="feature/checkpoint-lane",
+        base="HEAD",
     )
     path = Path(created["path"])
     (path / "flake.nix").write_text('{"staged": true}\n')
@@ -4332,19 +6039,34 @@ def test_workspace_checkpoint_restore_round_trips_index_worktree_and_untracked_s
     (path / "untracked.txt").write_text("untracked payload\n")
 
     checkpoint = service.workspaces.checkpoint(created["workspace_id"])
-    subprocess.run(["git", "-C", str(path), "reset", "--hard", "HEAD"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(path), "reset", "--hard", "HEAD"],
+        check=True,
+        capture_output=True,
+    )
     (path / "untracked.txt").unlink()
-    restored = service.workspaces.restore(created["workspace_id"], checkpoint["checkpoint_id"])
+    restored = service.workspaces.restore(
+        created["workspace_id"], checkpoint["checkpoint_id"]
+    )
 
     assert restored["restored"]
     assert (path / "flake.nix").read_text() == '{"staged": true}\nunstaged\n'
     assert (path / "untracked.txt").read_text() == "untracked payload\n"
-    assert "staged" in subprocess.run(
-        ["git", "-C", str(path), "diff", "--cached"], check=True, capture_output=True, text=True
-    ).stdout
-    assert "unstaged" in subprocess.run(
-        ["git", "-C", str(path), "diff"], check=True, capture_output=True, text=True
-    ).stdout
+    assert (
+        "staged"
+        in subprocess.run(
+            ["git", "-C", str(path), "diff", "--cached"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+    assert (
+        "unstaged"
+        in subprocess.run(
+            ["git", "-C", str(path), "diff"], check=True, capture_output=True, text=True
+        ).stdout
+    )
 
 
 def test_workspace_restore_rejects_dirty_or_stale_head_targets(tmp_path: Path) -> None:
@@ -4352,7 +6074,10 @@ def test_workspace_restore_rejects_dirty_or_stale_head_targets(tmp_path: Path) -
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
     created = service.workspaces.create(
-        project_id="fixture", name="restore-guards", branch="feature/restore-guards", base="HEAD"
+        project_id="fixture",
+        name="restore-guards",
+        branch="feature/restore-guards",
+        base="HEAD",
     )
     path = Path(created["path"])
     (path / "untracked.txt").write_text("checkpoint\n")
@@ -4366,8 +6091,17 @@ def test_workspace_restore_rejects_dirty_or_stale_head_targets(tmp_path: Path) -
     subprocess.run(["git", "-C", str(path), "add", "advance.txt"], check=True)
     subprocess.run(
         [
-            "git", "-C", str(path), "-c", "user.name=Fixture", "-c",
-            "user.email=fixture@example.test", "commit", "--quiet", "-m", "advance",
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "advance",
         ],
         check=True,
     )
@@ -4375,12 +6109,17 @@ def test_workspace_restore_rejects_dirty_or_stale_head_targets(tmp_path: Path) -
         service.workspaces.restore(created["workspace_id"], checkpoint["checkpoint_id"])
 
 
-def test_workspace_recover_recreates_missing_exact_head_and_restores_checkpoint(tmp_path: Path) -> None:
+def test_workspace_recover_recreates_missing_exact_head_and_restores_checkpoint(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
     created = service.workspaces.create(
-        project_id="fixture", name="recover-lane", branch="feature/recover-lane", base="HEAD"
+        project_id="fixture",
+        name="recover-lane",
+        branch="feature/recover-lane",
+        base="HEAD",
     )
     path = Path(created["path"])
     (path / "flake.nix").write_text('{"recovered": true}\n')
@@ -4392,44 +6131,88 @@ def test_workspace_recover_recreates_missing_exact_head_and_restores_checkpoint(
         check=True,
     )
 
-    recovered = service.workspaces.recover(created["workspace_id"], checkpoint["checkpoint_id"])
+    recovered = service.workspaces.recover(
+        created["workspace_id"], checkpoint["checkpoint_id"]
+    )
 
     assert recovered["recovered"] and recovered["path"] == str(path)
     assert (path / "flake.nix").read_text() == '{"recovered": true}\n'
     assert (path / "untracked.txt").read_text() == "preserved\n"
-    assert "recovered" in subprocess.run(
-        ["git", "-C", str(path), "diff", "--cached"], check=True, capture_output=True, text=True
-    ).stdout
+    assert (
+        "recovered"
+        in subprocess.run(
+            ["git", "-C", str(path), "diff", "--cached"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
 
 
-def test_workspace_stack_restacks_child_onto_parent_and_survives_restart(tmp_path: Path) -> None:
+def test_workspace_stack_restacks_child_onto_parent_and_survives_restart(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: the durable parent edge drives a real Git rebase after restart."""
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
-    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Fixture"], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "fixture@example.test"], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.name", "Fixture"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.email", "fixture@example.test"],
+        check=True,
+    )
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
     parent = service.workspaces.create(
         project_id="fixture", name="parent-lane", branch="feature/parent", base="HEAD"
     )
     child = service.workspaces.stack(
-        parent_workspace_id=parent["workspace_id"], name="child-lane", branch="feature/child"
+        parent_workspace_id=parent["workspace_id"],
+        name="child-lane",
+        branch="feature/child",
     )
     parent_path = Path(parent["path"])
     child_path = Path(child["path"])
     (child_path / "child.txt").write_text("child\n")
     subprocess.run(["git", "-C", str(child_path), "add", "child.txt"], check=True)
     subprocess.run(
-        ["git", "-C", str(child_path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "child"],
+        [
+            "git",
+            "-C",
+            str(child_path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "child",
+        ],
         check=True,
     )
     child_before = subprocess.run(
-        ["git", "-C", str(child_path), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ["git", "-C", str(child_path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     (parent_path / "parent.txt").write_text("parent\n")
     subprocess.run(["git", "-C", str(parent_path), "add", "parent.txt"], check=True)
     subprocess.run(
-        ["git", "-C", str(parent_path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "parent"],
+        [
+            "git",
+            "-C",
+            str(parent_path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "parent",
+        ],
         check=True,
     )
 
@@ -4444,35 +6227,69 @@ def test_workspace_stack_restacks_child_onto_parent_and_survives_restart(tmp_pat
         restarted.workspaces.reap(parent["workspace_id"])
 
 
-def test_workspace_restack_detaches_child_after_squash_equivalent_parent_disappears(tmp_path: Path) -> None:
+def test_workspace_restack_detaches_child_after_squash_equivalent_parent_disappears(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
-    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Fixture"], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "fixture@example.test"], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.name", "Fixture"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.email", "fixture@example.test"],
+        check=True,
+    )
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
     parent = service.workspaces.create(
-        project_id="fixture", name="merged-parent", branch="feature/merged-parent", base="HEAD"
+        project_id="fixture",
+        name="merged-parent",
+        branch="feature/merged-parent",
+        base="HEAD",
     )
     child = service.workspaces.stack(
-        parent_workspace_id=parent["workspace_id"], name="surviving-child", branch="feature/surviving-child"
+        parent_workspace_id=parent["workspace_id"],
+        name="surviving-child",
+        branch="feature/surviving-child",
     )
     child_path = Path(child["path"])
     (child_path / "child.txt").write_text("child\n")
     subprocess.run(["git", "-C", str(child_path), "add", "child.txt"], check=True)
-    subprocess.run(["git", "-C", str(child_path), "commit", "--quiet", "-m", "child"], check=True)
+    subprocess.run(
+        ["git", "-C", str(child_path), "commit", "--quiet", "-m", "child"], check=True
+    )
     parent_path = Path(parent["path"])
     (parent_path / "parent.txt").write_text("parent\n")
     subprocess.run(["git", "-C", str(parent_path), "add", "parent.txt"], check=True)
-    subprocess.run(["git", "-C", str(parent_path), "commit", "--quiet", "-m", "parent"], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "merge", "--squash", parent["branch"]], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(tmp_path), "commit", "--quiet", "-m", "merged parent"], check=True)
     subprocess.run(
-        ["git", "-C", str(tmp_path), "update-ref", "refs/remotes/origin/master", "HEAD"], check=True
+        ["git", "-C", str(parent_path), "commit", "--quiet", "-m", "parent"], check=True
     )
     subprocess.run(
-        ["git", "-C", str(tmp_path), "worktree", "remove", "--force", str(parent_path)], check=True
+        ["git", "-C", str(tmp_path), "merge", "--squash", parent["branch"]],
+        check=True,
+        capture_output=True,
     )
-    subprocess.run(["git", "-C", str(tmp_path), "branch", "-D", parent["branch"]], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "commit", "--quiet", "-m", "merged parent"],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "update-ref",
+            "refs/remotes/origin/master",
+            "HEAD",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "worktree", "remove", "--force", str(parent_path)],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "branch", "-D", parent["branch"]], check=True
+    )
 
     restacked = service.workspaces.restack(child["workspace_id"])
 
@@ -4485,7 +6302,11 @@ def test_workspace_restack_detaches_child_after_squash_equivalent_parent_disappe
 
 @pytest.mark.parametrize(
     ("conflict_path", "expected_class"),
-    [("fixture.lock", "exact-file"), ("generated.json", "generated-surface"), ("ordinary.txt", "hard")],
+    [
+        ("fixture.lock", "exact-file"),
+        ("generated.json", "generated-surface"),
+        ("ordinary.txt", "hard"),
+    ],
 )
 def test_workspace_restack_reports_declared_collision_without_mutating_child(
     tmp_path: Path, conflict_path: str, expected_class: str
@@ -4494,41 +6315,77 @@ def test_workspace_restack_reports_declared_collision_without_mutating_child(
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
     parent = service.workspaces.create(
-        project_id="fixture", name="collision-parent", branch="feature/collision-parent", base="HEAD"
+        project_id="fixture",
+        name="collision-parent",
+        branch="feature/collision-parent",
+        base="HEAD",
     )
     child = service.workspaces.stack(
-        parent_workspace_id=parent["workspace_id"], name="collision-child", branch="feature/collision-child"
+        parent_workspace_id=parent["workspace_id"],
+        name="collision-child",
+        branch="feature/collision-child",
     )
-    for workspace, content, message in ((parent, "parent\n", "parent lock"), (child, "child\n", "child lock")):
+    for workspace, content, message in (
+        (parent, "parent\n", "parent lock"),
+        (child, "child\n", "child lock"),
+    ):
         path = Path(workspace["path"])
         (path / conflict_path).write_text(content)
         subprocess.run(["git", "-C", str(path), "add", conflict_path], check=True)
         subprocess.run(
-            ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", message],
+            [
+                "git",
+                "-C",
+                str(path),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "commit",
+                "--quiet",
+                "-m",
+                message,
+            ],
             check=True,
         )
     child_head = subprocess.run(
-        ["git", "-C", child["path"], "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ["git", "-C", child["path"], "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
 
     result = service.workspaces.restack(child["workspace_id"])
 
     assert not result["restacked"]
     assert result["collisions"] == [{"path": conflict_path, "class": expected_class}]
-    assert subprocess.run(
-        ["git", "-C", child["path"], "rev-parse", "HEAD"], check=True, capture_output=True, text=True
-    ).stdout.strip() == child_head
+    assert (
+        subprocess.run(
+            ["git", "-C", child["path"], "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        == child_head
+    )
 
 
-def test_workspace_restack_reports_semantic_slot_collision_across_different_paths(tmp_path: Path) -> None:
+def test_workspace_restack_reports_semantic_slot_collision_across_different_paths(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
     parent = service.workspaces.create(
-        project_id="fixture", name="slot-parent", branch="feature/slot-parent", base="HEAD"
+        project_id="fixture",
+        name="slot-parent",
+        branch="feature/slot-parent",
+        base="HEAD",
     )
     child = service.workspaces.stack(
-        parent_workspace_id=parent["workspace_id"], name="slot-child", branch="feature/slot-child"
+        parent_workspace_id=parent["workspace_id"],
+        name="slot-child",
+        branch="feature/slot-child",
     )
     for workspace, relative, content in (
         (parent, "registry/parent.toml", "parent = true\n"),
@@ -4539,7 +6396,19 @@ def test_workspace_restack_reports_semantic_slot_collision_across_different_path
         (path / relative).write_text(content)
         subprocess.run(["git", "-C", str(path), "add", relative], check=True)
         subprocess.run(
-            ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", relative],
+            [
+                "git",
+                "-C",
+                str(path),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "commit",
+                "--quiet",
+                "-m",
+                relative,
+            ],
             check=True,
         )
 
@@ -4562,15 +6431,24 @@ def test_declared_job_binds_workspace_and_exact_head(tmp_path: Path) -> None:
     jobs = generic_jobs(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
     workspace = service.workspaces.create(
-        project_id="fixture", name="verify-lane", branch="feature/verify-lane", base="HEAD"
+        project_id="fixture",
+        name="verify-lane",
+        branch="feature/verify-lane",
+        base="HEAD",
     )
-    assert service.workspaces.resolve_checkout("fixture", workspace["checkout_id"]).path == Path(workspace["path"])
+    assert service.workspaces.resolve_checkout(
+        "fixture", workspace["checkout_id"]
+    ).path == Path(workspace["path"])
 
     started = service.dispatch(
         request(
             "job.start",
             "systemd-jobs",
-            {"project_id": "fixture", "operation": "check", "workspace_id": "verify-lane"},
+            {
+                "project_id": "fixture",
+                "operation": "check",
+                "workspace_id": "verify-lane",
+            },
         )
     )
 
@@ -4582,19 +6460,28 @@ def test_declared_job_binds_workspace_and_exact_head(tmp_path: Path) -> None:
     assert record.spec.checkout["head"] == workspace["head"]
 
 
-def test_forged_packet_completion_arguments_have_no_service_route(tmp_path: Path) -> None:
+def test_forged_packet_completion_arguments_have_no_service_route(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     jobs = generic_jobs(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
     workspace = service.workspaces.create(
-        project_id="fixture", name="packet-lane", branch="feature/packet-lane", base="HEAD"
+        project_id="fixture",
+        name="packet-lane",
+        branch="feature/packet-lane",
+        base="HEAD",
     )
     started = service.dispatch(
         request(
             "job.start",
             "systemd-jobs",
-            {"project_id": "fixture", "operation": "check", "workspace_id": workspace["workspace_id"]},
+            {
+                "project_id": "fixture",
+                "operation": "check",
+                "workspace_id": workspace["workspace_id"],
+            },
         )
     )
     assert started.ok and started.payload is not None
@@ -4626,30 +6513,77 @@ def test_forged_packet_completion_arguments_have_no_service_route(tmp_path: Path
     assert response.error.code.value == "INVALID_ARGUMENT"
 
 
-def test_delivery_snapshot_is_nul_safe_and_exact_file_scope_does_not_include_descendants(tmp_path: Path) -> None:
+def test_delivery_snapshot_is_nul_safe_and_exact_file_scope_does_not_include_descendants(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-    workspace = service.workspaces.create(project_id="fixture", name="snapshot-lane", branch="feature/snapshot", base="HEAD")
+    workspace = service.workspaces.create(
+        project_id="fixture",
+        name="snapshot-lane",
+        branch="feature/snapshot",
+        base="HEAD",
+    )
     path = Path(workspace["path"])
     (path / "dir").mkdir()
     (path / "dir" / "exact").write_text("old\n")
     (path / "dir" / "delete\nfile").write_text("delete\n")
     subprocess.run(["git", "-C", str(path), "add", "."], check=True)
-    subprocess.run(["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "seed"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "seed",
+        ],
+        check=True,
+    )
     start = service.workspaces.get(workspace["workspace_id"])["head"]
-    subprocess.run(["git", "-C", str(path), "mv", "dir/exact", "dir/renamed\nfile"], check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "mv", "dir/exact", "dir/renamed\nfile"], check=True
+    )
     (path / "dir" / "delete\nfile").unlink()
     (path / "dir" / "exact.child").write_text("outside exact-file scope\n")
     subprocess.run(["git", "-C", str(path), "add", "-A"], check=True)
-    subprocess.run(["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "paths"], check=True)
-    snapshot = service.workspaces.delivery_snapshot(workspace["workspace_id"], start, scope=("dir/exact",))
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "paths",
+        ],
+        check=True,
+    )
+    snapshot = service.workspaces.delivery_snapshot(
+        workspace["workspace_id"], start, scope=("dir/exact",)
+    )
     assert not snapshot["in_scope"]
     assert {change["status"][0] for change in snapshot["changes"]} >= {"D", "R", "A"}
-    assert any("\n" in item for change in snapshot["changes"] for item in change["paths"])
-    assert service.workspaces.delivery_snapshot(workspace["workspace_id"], start, scope=("dir/",))["in_scope"]
+    assert any(
+        "\n" in item for change in snapshot["changes"] for item in change["paths"]
+    )
+    assert service.workspaces.delivery_snapshot(
+        workspace["workspace_id"], start, scope=("dir/",)
+    )["in_scope"]
 
 
-def test_beads_bound_packet_and_exact_head_verifier_compose_into_delivery(tmp_path: Path) -> None:
+def test_beads_bound_packet_and_exact_head_verifier_compose_into_delivery(
+    tmp_path: Path,
+) -> None:
     """The accepting path joins two authoritative jobs; neither can substitute for the other."""
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
@@ -4657,9 +6591,14 @@ def test_beads_bound_packet_and_exact_head_verifier_compose_into_delivery(tmp_pa
     native_runner(native)
     systemd = FakeSystemdJobs()
     jobs = generic_jobs(tmp_path, systemd)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs, native_runner=native)
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=jobs, native_runner=native
+    )
     workspace = service.workspaces.create(
-        project_id="fixture", name="packet-delivery", branch="feature/packet-delivery", base="HEAD"
+        project_id="fixture",
+        name="packet-delivery",
+        branch="feature/packet-delivery",
+        base="HEAD",
     )
     checkout_id = workspace["checkout_id"]
     binding = {
@@ -4680,9 +6619,23 @@ def test_beads_bound_packet_and_exact_head_verifier_compose_into_delivery(tmp_pa
     path = Path(workspace["path"])
     (path / "obsolete.txt").write_text("remove me\n")
     (path / "prior.txt").write_text("already on the packet branch\n")
-    subprocess.run(["git", "-C", str(path), "add", "obsolete.txt", "prior.txt"], check=True)
     subprocess.run(
-        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "seed deletion"],
+        ["git", "-C", str(path), "add", "obsolete.txt", "prior.txt"], check=True
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "seed deletion",
+        ],
         check=True,
     )
     packet = service.dispatch(
@@ -4690,10 +6643,16 @@ def test_beads_bound_packet_and_exact_head_verifier_compose_into_delivery(tmp_pa
             "job.agent.start",
             "systemd-jobs",
             {
-                "project_id": "fixture", "checkout_id": checkout_id, "prompt": "return structured delivery",
-                "backend": "codex", "model": "fixture", "effort": "high",
-                "credential_profile": "subscription", "timeout_seconds": 60,
-                "result": "last-message", "bead_binding": binding,
+                "project_id": "fixture",
+                "checkout_id": checkout_id,
+                "prompt": "return structured delivery",
+                "backend": "codex",
+                "model": "fixture",
+                "effort": "high",
+                "credential_profile": "subscription",
+                "timeout_seconds": 60,
+                "result": "last-message",
+                "bead_binding": binding,
             },
             "agent-control",
         )
@@ -4706,11 +6665,26 @@ def test_beads_bound_packet_and_exact_head_verifier_compose_into_delivery(tmp_pa
     (path / "obsolete.txt").unlink()
     subprocess.run(["git", "-C", str(path), "add", "-A"], check=True)
     subprocess.run(
-        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "delivery"],
+        [
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "delivery",
+        ],
         check=True,
     )
     final_head = subprocess.run(
-        ["git", "-C", str(path), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
     worker_delivery = {
         "anti_vacuity": True,
@@ -4720,23 +6694,40 @@ def test_beads_bound_packet_and_exact_head_verifier_compose_into_delivery(tmp_pa
         "evidence_only": False,
     }
     assert packet_record.result_path is not None
-    packet_record.result_path.write_text(json.dumps({
-        "schema_version": 1, "job_id": packet_id, "start_head": start_head,
-        "final_head": final_head, "delivery": worker_delivery,
-    }))
-    jobs_module._write_private_marker(jobs_module._completion_marker_path(packet_record.log_path))
+    packet_record.result_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "job_id": packet_id,
+                "start_head": start_head,
+                "final_head": final_head,
+                "delivery": worker_delivery,
+            }
+        )
+    )
+    jobs_module._write_private_marker(
+        jobs_module._completion_marker_path(packet_record.log_path)
+    )
     systemd.properties = {
-        "LoadState": "loaded", "ActiveState": "inactive", "Result": "success",
-        "ExecMainStatus": "0", "InvocationID": "fixture-invocation",
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "InvocationID": "fixture-invocation",
     }
     assert jobs.get(packet_id)["state"]["phase"] == "succeeded"
-    verifier = service.dispatch(request(
-        "job.start", "systemd-jobs",
-        {
-            "project_id": "fixture", "operation": "check", "workspace_id": workspace["workspace_id"],
-            "bead_binding": binding,
-        },
-    ))
+    verifier = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "operation": "check",
+                "workspace_id": workspace["workspace_id"],
+                "bead_binding": binding,
+            },
+        )
+    )
     assert verifier.ok and verifier.payload is not None
     verifier_id = verifier.payload.inline["job_id"]
     assert jobs.get(verifier_id)["state"]["phase"] == "succeeded"
@@ -4757,99 +6748,185 @@ def test_beads_bound_packet_and_exact_head_verifier_compose_into_delivery(tmp_pa
     # branch at packet dispatch. The complete publication diff must still
     # prevent the packet from laundering it into the PR.
     bad_binding = {**binding, "write_scope": ["delivery.txt", "obsolete.txt"]}
-    jobs.store.save(replace(
-        packet_record,
-        spec=replace(packet_record.spec, contract={**packet_record.spec.contract, "bead_binding": bad_binding}),
-    ))
+    jobs.store.save(
+        replace(
+            packet_record,
+            spec=replace(
+                packet_record.spec,
+                contract={**packet_record.spec.contract, "bead_binding": bad_binding},
+            ),
+        )
+    )
     verifier_record = jobs.store.load(verifier_id)
-    jobs.store.save(replace(
-        verifier_record,
-        spec=replace(verifier_record.spec, contract={**verifier_record.spec.contract, "bead_binding": bad_binding}),
-    ))
+    jobs.store.save(
+        replace(
+            verifier_record,
+            spec=replace(
+                verifier_record.spec,
+                contract={**verifier_record.spec.contract, "bead_binding": bad_binding},
+            ),
+        )
+    )
     with pytest.raises(DeliveryError, match="write scope"):
         delivery._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
     jobs.store.save(packet_record)
     jobs.store.save(verifier_record)
 
     for evidence in ([], ["unrelated.txt"], ["obsolete.txt", "unrelated.txt"]):
-        packet_record.result_path.write_text(json.dumps({
-            "schema_version": 1, "job_id": packet_id, "start_head": start_head,
-            "final_head": final_head,
-            "delivery": {**worker_delivery, "deletion_evidence": evidence},
-        }))
+        packet_record.result_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "job_id": packet_id,
+                    "start_head": start_head,
+                    "final_head": final_head,
+                    "delivery": {**worker_delivery, "deletion_evidence": evidence},
+                }
+            )
+        )
         with pytest.raises(DeliveryError, match="deletion evidence"):
-            delivery._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
+            delivery._verified_workspace(
+                workspace["workspace_id"], verifier_id, packet_id
+            )
 
-    packet_record.result_path.write_text(json.dumps({
-        "schema_version": 1, "job_id": packet_id, "start_head": start_head,
-        "final_head": final_head,
-        "delivery": {**worker_delivery, "unresolved_work": ["still running"]},
-    }))
+    packet_record.result_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "job_id": packet_id,
+                "start_head": start_head,
+                "final_head": final_head,
+                "delivery": {**worker_delivery, "unresolved_work": ["still running"]},
+            }
+        )
+    )
     with pytest.raises(DeliveryError, match="incomplete"):
         delivery._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
-    packet_record.result_path.write_text(json.dumps({
-        "schema_version": 1, "job_id": packet_id, "start_head": start_head,
-        "final_head": final_head, "delivery": worker_delivery,
-    }))
+    packet_record.result_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "job_id": packet_id,
+                "start_head": start_head,
+                "final_head": final_head,
+                "delivery": worker_delivery,
+            }
+        )
+    )
 
-    packet_record.result_path.write_text(json.dumps({
-        "schema_version": 1, "job_id": packet_id, "start_head": start_head,
-        "final_head": final_head, "delivery": None,
-    }))
+    packet_record.result_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "job_id": packet_id,
+                "start_head": start_head,
+                "final_head": final_head,
+                "delivery": None,
+            }
+        )
+    )
     with pytest.raises(DeliveryError, match="malformed"):
         delivery._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
-    packet_record.result_path.write_text(json.dumps({
-        "schema_version": 1, "job_id": packet_id, "start_head": start_head,
-        "final_head": final_head, "delivery": worker_delivery,
-    }))
+    packet_record.result_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "job_id": packet_id,
+                "start_head": start_head,
+                "final_head": final_head,
+                "delivery": worker_delivery,
+            }
+        )
+    )
 
     for scope in (["../outside"], [f"entry-{index}" for index in range(129)]):
-        rejected = service.dispatch(request(
-            "job.start", "systemd-jobs",
-            {
-                "project_id": "fixture", "operation": "check", "workspace_id": workspace["workspace_id"],
-                "bead_binding": {**binding, "write_scope": scope},
-            },
-        ))
+        rejected = service.dispatch(
+            request(
+                "job.start",
+                "systemd-jobs",
+                {
+                    "project_id": "fixture",
+                    "operation": "check",
+                    "workspace_id": workspace["workspace_id"],
+                    "bead_binding": {**binding, "write_scope": scope},
+                },
+            )
+        )
         assert not rejected.ok
 
     (path / "later.txt").write_text("post-terminal\n")
     subprocess.run(["git", "-C", str(path), "add", "later.txt"], check=True)
     subprocess.run(
-        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "later"],
+        [
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "later",
+        ],
         check=True,
     )
     with pytest.raises(DeliveryError, match="exact HEAD"):
         delivery._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
 
 
-def test_packet_runner_seals_worker_report_to_runtime_observed_head(tmp_path: Path) -> None:
+def test_packet_runner_seals_worker_report_to_runtime_observed_head(
+    tmp_path: Path,
+) -> None:
     initialize_git_checkout(tmp_path)
     start_head = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
     (tmp_path / "change.txt").write_text("change\n")
     subprocess.run(["git", "-C", str(tmp_path), "add", "change.txt"], check=True)
     subprocess.run(
-        ["git", "-C", str(tmp_path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "change"],
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "change",
+        ],
         check=True,
     )
     final_head = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
     result_root = tmp_path / "private-results"
     result_root.mkdir(mode=0o700)
     result_path = result_root / "packet.result"
     result_path.touch(mode=0o600)
     delivery = {
-        "anti_vacuity": True, "unresolved_work": [],
+        "anti_vacuity": True,
+        "unresolved_work": [],
         "delegation": {"visibility": "unsupported", "pending": None},
-        "deletion_evidence": [], "evidence_only": False,
+        "deletion_evidence": [],
+        "evidence_only": False,
     }
     result_path.write_text(json.dumps(delivery))
 
     _seal_packet_result(
-        {"job_id": "packet-job", "checkout": {"head": start_head}}, tmp_path, result_path
+        {"job_id": "packet-job", "checkout": {"head": start_head}},
+        tmp_path,
+        result_path,
     )
 
     assert json.loads(result_path.read_text()) == {
@@ -4863,11 +6940,15 @@ def test_packet_runner_seals_worker_report_to_runtime_observed_head(tmp_path: Pa
     result_path.write_text("not-json")
     with pytest.raises(RunnerError, match="worker result"):
         _seal_packet_result(
-            {"job_id": "packet-job", "checkout": {"head": start_head}}, tmp_path, result_path
+            {"job_id": "packet-job", "checkout": {"head": start_head}},
+            tmp_path,
+            result_path,
         )
 
 
-def test_seal_output_composes_through_exact_head_into_delivery_validation(tmp_path: Path) -> None:
+def test_seal_output_composes_through_exact_head_into_delivery_validation(
+    tmp_path: Path,
+) -> None:
     """Composed: real runner seal output flows through exact-head evidence into delivery acceptance and tamper rejection."""
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
@@ -4875,9 +6956,14 @@ def test_seal_output_composes_through_exact_head_into_delivery_validation(tmp_pa
     native_runner(native)
     systemd = FakeSystemdJobs()
     jobs = generic_jobs(tmp_path, systemd)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs, native_runner=native)
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=jobs, native_runner=native
+    )
     workspace = service.workspaces.create(
-        project_id="fixture", name="seal-compose", branch="feature/seal-compose", base="HEAD"
+        project_id="fixture",
+        name="seal-compose",
+        branch="feature/seal-compose",
+        base="HEAD",
     )
     checkout_id = workspace["checkout_id"]
     path = Path(workspace["path"])
@@ -4886,8 +6972,19 @@ def test_seal_output_composes_through_exact_head_into_delivery_validation(tmp_pa
     (path / "seed.txt").write_text("to be removed\n")
     subprocess.run(["git", "-C", str(path), "add", "seed.txt"], check=True)
     subprocess.run(
-        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
-         "commit", "--quiet", "-m", "seed deletion target"],
+        [
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "seed deletion target",
+        ],
         check=True,
     )
 
@@ -4907,17 +7004,25 @@ def test_seal_output_composes_through_exact_head_into_delivery_validation(tmp_pa
         "write_scope": ["added.txt", "seed.txt"],
     }
 
-    packet_response = service.dispatch(request(
-        "job.agent.start", "systemd-jobs",
-        {
-            "project_id": "fixture", "checkout_id": checkout_id,
-            "prompt": "return structured delivery for seal composition test",
-            "backend": "codex", "model": "fixture", "effort": "high",
-            "credential_profile": "subscription", "timeout_seconds": 60,
-            "result": "last-message", "bead_binding": binding,
-        },
-        "agent-control",
-    ))
+    packet_response = service.dispatch(
+        request(
+            "job.agent.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "checkout_id": checkout_id,
+                "prompt": "return structured delivery for seal composition test",
+                "backend": "codex",
+                "model": "fixture",
+                "effort": "high",
+                "credential_profile": "subscription",
+                "timeout_seconds": 60,
+                "result": "last-message",
+                "bead_binding": binding,
+            },
+            "agent-control",
+        )
+    )
     assert packet_response.ok and packet_response.payload is not None
     packet_id = packet_response.payload.inline["job_id"]
     packet_record = jobs.store.load(packet_id)
@@ -4928,8 +7033,19 @@ def test_seal_output_composes_through_exact_head_into_delivery_validation(tmp_pa
     (path / "seed.txt").unlink()
     subprocess.run(["git", "-C", str(path), "add", "-A"], check=True)
     subprocess.run(
-        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
-         "commit", "--quiet", "-m", "packet range: add+delete"],
+        [
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "packet range: add+delete",
+        ],
         check=True,
     )
 
@@ -4946,27 +7062,39 @@ def test_seal_output_composes_through_exact_head_into_delivery_validation(tmp_pa
     }
     packet_record.result_path.write_text(json.dumps(worker_delivery))
     _seal_packet_result(
-        {"job_id": packet_id, "checkout": {"head": start_head}}, path, packet_record.result_path
+        {"job_id": packet_id, "checkout": {"head": start_head}},
+        path,
+        packet_record.result_path,
     )
     sealed = json.loads(packet_record.result_path.read_text())
     final_head = sealed["final_head"]
 
     # Worker result was sealed by the real runner; mark the job succeeded.
-    jobs_module._write_private_marker(jobs_module._completion_marker_path(packet_record.log_path))
+    jobs_module._write_private_marker(
+        jobs_module._completion_marker_path(packet_record.log_path)
+    )
     systemd.properties = {
-        "LoadState": "loaded", "ActiveState": "inactive", "Result": "success",
-        "ExecMainStatus": "0", "InvocationID": "seal-compose-invocation",
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "InvocationID": "seal-compose-invocation",
     }
     assert jobs.get(packet_id)["state"]["phase"] == "succeeded"
 
     # Verifier job runs at final_head with the same binding.
-    verifier_response = service.dispatch(request(
-        "job.start", "systemd-jobs",
-        {
-            "project_id": "fixture", "operation": "check",
-            "workspace_id": workspace["workspace_id"], "bead_binding": binding,
-        },
-    ))
+    verifier_response = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "operation": "check",
+                "workspace_id": workspace["workspace_id"],
+                "bead_binding": binding,
+            },
+        )
+    )
     assert verifier_response.ok and verifier_response.payload is not None
     verifier_id = verifier_response.payload.inline["job_id"]
     assert jobs.get(verifier_id)["state"]["phase"] == "succeeded"
@@ -4984,17 +7112,23 @@ def test_seal_output_composes_through_exact_head_into_delivery_validation(tmp_pa
     tampered = {**sealed, "final_head": "b" * 40}
     packet_record.result_path.write_text(json.dumps(tampered))
     with pytest.raises(DeliveryError):
-        delivery_gate._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
+        delivery_gate._verified_workspace(
+            workspace["workspace_id"], verifier_id, packet_id
+        )
 
     # Restore and verify deletion overclaim is now rejected.
     packet_record.result_path.write_text(json.dumps(sealed))
     overclaim = {**worker_delivery, "deletion_evidence": ["seed.txt", "unrelated.txt"]}
     packet_record.result_path.write_text(json.dumps({**sealed, "delivery": overclaim}))
     with pytest.raises(DeliveryError, match="deletion evidence"):
-        delivery_gate._verified_workspace(workspace["workspace_id"], verifier_id, packet_id)
+        delivery_gate._verified_workspace(
+            workspace["workspace_id"], verifier_id, packet_id
+        )
 
 
-def test_admission_revalidates_queued_declared_workspace_before_systemd_launch(tmp_path: Path) -> None:
+def test_admission_revalidates_queued_declared_workspace_before_systemd_launch(
+    tmp_path: Path,
+) -> None:
     """A queued declared service whose checkout HEAD moved must terminalize before it reaches systemd."""
     write_adapter(tmp_path)
     descriptor = tmp_path / ".agentctl" / "project.toml"
@@ -5005,7 +7139,9 @@ def test_admission_revalidates_queued_declared_workspace_before_systemd_launch(t
         )
     )
     initialize_git_checkout(tmp_path)
-    systemd = FakeSystemdJobs(properties={"LoadState": "not-found", "ActiveState": "inactive"})
+    systemd = FakeSystemdJobs(
+        properties={"LoadState": "not-found", "ActiveState": "inactive"}
+    )
     jobs = GenericJobs(
         systemd,
         GenericJobStore(tmp_path / "state"),
@@ -5014,13 +7150,20 @@ def test_admission_revalidates_queued_declared_workspace_before_systemd_launch(t
     )
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
     workspace = service.workspaces.create(
-        project_id="fixture", name="queued-drift", branch="feature/queued-drift", base="HEAD"
+        project_id="fixture",
+        name="queued-drift",
+        branch="feature/queued-drift",
+        base="HEAD",
     )
     started = service.dispatch(
         request(
             "job.start",
             "systemd-jobs",
-            {"project_id": "fixture", "operation": "service", "workspace_id": workspace["workspace_id"]},
+            {
+                "project_id": "fixture",
+                "operation": "service",
+                "workspace_id": workspace["workspace_id"],
+            },
         )
     )
     assert started.ok and started.payload is not None
@@ -5029,7 +7172,19 @@ def test_admission_revalidates_queued_declared_workspace_before_systemd_launch(t
     (path / "drift.txt").write_text("changed HEAD before admission\n")
     subprocess.run(["git", "-C", str(path), "add", "drift.txt"], check=True)
     subprocess.run(
-        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "drift"],
+        [
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "drift",
+        ],
         check=True,
     )
     jobs.pressure_probe = lambda: {"memory_full_avg10": 0.0}
@@ -5048,7 +7203,9 @@ def test_declared_runner_revalidates_bound_checkout_at_payload_exec_boundary(
     """A checkout mutation after systemd admission cannot reach the project payload."""
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
-    systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active"})
+    systemd = FakeSystemdJobs(
+        properties={"LoadState": "loaded", "ActiveState": "active"}
+    )
     jobs = generic_jobs(tmp_path, systemd)
     catalog = ProjectCatalog([tmp_path])
     project = catalog.get("fixture")
@@ -5064,7 +7221,19 @@ def test_declared_runner_revalidates_bound_checkout_at_payload_exec_boundary(
     _, launch_environment = jobs.store.declared_launch(record.job_id)
     assert systemd.started[0]["command"][1] == "--declared"
     subprocess.run(
-        ["git", "-C", str(tmp_path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--allow-empty", "-m", "moved"],
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "moved",
+        ],
         check=True,
         capture_output=True,
         text=True,
@@ -5081,32 +7250,59 @@ def test_declared_runner_revalidates_bound_checkout_at_payload_exec_boundary(
         _run_declared(jobs.store.root, record.job_id, record.unit)
 
 
-def test_exact_head_verified_workspace_publishes_lands_and_finishes_without_a_pr_ledger(tmp_path: Path) -> None:
+def test_exact_head_verified_workspace_publishes_lands_and_finishes_without_a_pr_ledger(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     systemd = FakeSystemdJobs()
     jobs = generic_jobs(tmp_path, systemd)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
     workspace = service.workspaces.create(
-        project_id="fixture", name="delivery-lane", branch="feature/delivery", base="HEAD"
+        project_id="fixture",
+        name="delivery-lane",
+        branch="feature/delivery",
+        base="HEAD",
     )
     path = Path(workspace["path"])
     (path / "delivery.txt").write_text("deliver\n")
     subprocess.run(["git", "-C", str(path), "add", "delivery.txt"], check=True)
     subprocess.run(
-        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "delivery"],
+        [
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "delivery",
+        ],
         check=True,
     )
     workspace = service.workspaces.get(workspace["workspace_id"])
     started = service.dispatch(
         request(
-            "job.start", "systemd-jobs",
-            {"project_id": "fixture", "operation": "check", "workspace_id": workspace["workspace_id"]},
+            "job.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "operation": "check",
+                "workspace_id": workspace["workspace_id"],
+            },
         )
     )
     assert started.ok and started.payload is not None
     job_id = started.payload.inline["job_id"]
-    systemd.properties = {"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+    }
     calls: list[list[str]] = []
     merged = False
     created = False
@@ -5121,11 +7317,16 @@ def test_exact_head_verified_workspace_publishes_lands_and_finishes_without_a_pr
             return subprocess.CompletedProcess(command, 0, "", "")
         if command[:3] == ["gh", "pr", "create"]:
             created = True
-            return subprocess.CompletedProcess(command, 0, "https://github.test/example/pull/17\n", "")
+            return subprocess.CompletedProcess(
+                command, 0, "https://github.test/example/pull/17\n", ""
+            )
         if command[:3] == ["gh", "pr", "view"]:
             if command[-1] == "url":
                 return subprocess.CompletedProcess(
-                    command, 0 if created else 1, json.dumps({"url": "https://github.test/example/pull/17"}), "missing"
+                    command,
+                    0 if created else 1,
+                    json.dumps({"url": "https://github.test/example/pull/17"}),
+                    "missing",
                 )
             review_reads += 1
             payload = {
@@ -5139,13 +7340,27 @@ def test_exact_head_verified_workspace_publishes_lands_and_finishes_without_a_pr
                 "statusCheckRollup": [],
             }
             return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
-        return subprocess.CompletedProcess(command, 0, "https://github.test/example/pull/17\n", "")
+        return subprocess.CompletedProcess(
+            command, 0, "https://github.test/example/pull/17\n", ""
+        )
 
     delivery = GitHubDelivery(service.projects, service.workspaces, jobs, run=fake_run)
     (path / "late.txt").write_text("late change\n")
     subprocess.run(["git", "-C", str(path), "add", "late.txt"], check=True)
     subprocess.run(
-        ["git", "-C", str(path), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "late"],
+        [
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "late",
+        ],
         check=True,
     )
     workspace = service.workspaces.get(workspace["workspace_id"])
@@ -5154,21 +7369,33 @@ def test_exact_head_verified_workspace_publishes_lands_and_finishes_without_a_pr
     assert calls == []
     replacement = service.dispatch(
         request(
-            "job.start", "systemd-jobs",
-            {"project_id": "fixture", "operation": "check", "workspace_id": workspace["workspace_id"]},
+            "job.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "operation": "check",
+                "workspace_id": workspace["workspace_id"],
+            },
         )
     )
     assert replacement.ok and replacement.payload is not None
     job_id = replacement.payload.inline["job_id"]
-    published = delivery.publish(workspace["workspace_id"], job_id, "Deliver fixture", "Verified body")
-    reconciled = delivery.publish(workspace["workspace_id"], job_id, "Deliver fixture", "Verified body")
+    published = delivery.publish(
+        workspace["workspace_id"], job_id, "Deliver fixture", "Verified body"
+    )
+    reconciled = delivery.publish(
+        workspace["workspace_id"], job_id, "Deliver fixture", "Verified body"
+    )
     landed = delivery.land(workspace["workspace_id"], job_id)
     finished = delivery.finish(workspace["workspace_id"])
 
     assert published["published"] and published["created"]
     assert reconciled["published"] and not reconciled["created"]
     assert landed["landed"] and finished["finished"]
-    assert any(command[-7:-4] == ["git", "-C", str(path)] and "push" in command for command in calls)
+    assert any(
+        command[-7:-4] == ["git", "-C", str(path)] and "push" in command
+        for command in calls
+    )
     assert any(command[:3] == ["gh", "pr", "create"] for command in calls)
     assert any(command[:3] == ["gh", "pr", "merge"] for command in calls)
     assert not path.exists()
@@ -5176,22 +7403,40 @@ def test_exact_head_verified_workspace_publishes_lands_and_finishes_without_a_pr
     assert service.workspaces.list("fixture") == {"workspaces": []}
 
 
-def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: Path) -> None:
+def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: typed contracts must reach GenericJobs, not a second controller."""
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     runner = tmp_path / "native-runner"
     native_runner(runner)
     systemd = FakeSystemdJobs(
-        properties={"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "Result": "success",
+            "ExecMainStatus": "0",
+        }
     )
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd), native_runner=runner)
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]),
+        jobs=generic_jobs(tmp_path, systemd),
+        native_runner=runner,
+    )
 
     shell = service.dispatch(
         request(
             "job.shell.start",
             "systemd-jobs",
-            {"project_id": "fixture", "checkout_id": "default", "argv": ["printf", "shell-secret"], "cwd": ".", "timeout_seconds": 60, "result": "exit-status"},
+            {
+                "project_id": "fixture",
+                "checkout_id": "default",
+                "argv": ["printf", "shell-secret"],
+                "cwd": ".",
+                "timeout_seconds": 60,
+                "result": "exit-status",
+            },
             "operator",
         )
     )
@@ -5199,7 +7444,31 @@ def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: P
         request(
             "job.agent.start",
             "systemd-jobs",
-            {"project_id": "fixture", "checkout_id": "default", "prompt": "private prompt", "backend": "codex", "model": "fixture", "effort": "high", "credential_profile": "subscription", "timeout_seconds": 60, "result": "last-message", "bead_binding": {"bead_ref": "sinnix://projects/fixture/beads/fixture-1", "project_ref": "sinnix://projects/fixture", "checkout_ref": "sinnix://projects/fixture/checkouts/default", "task_revision": "a" * 64, "task_etag": "b" * 64, "claim_ref": f"sinnix://projects/fixture/beads/fixture-1/claims/{'b' * 64}", "claim_receipt": {"ref": f"sinnix://projects/fixture/beads/fixture-1/claims/{'b' * 64}", "owner_route": "beads.cli"}, "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b", "assignment_ref": None}},
+            {
+                "project_id": "fixture",
+                "checkout_id": "default",
+                "prompt": "private prompt",
+                "backend": "codex",
+                "model": "fixture",
+                "effort": "high",
+                "credential_profile": "subscription",
+                "timeout_seconds": 60,
+                "result": "last-message",
+                "bead_binding": {
+                    "bead_ref": "sinnix://projects/fixture/beads/fixture-1",
+                    "project_ref": "sinnix://projects/fixture",
+                    "checkout_ref": "sinnix://projects/fixture/checkouts/default",
+                    "task_revision": "a" * 64,
+                    "task_etag": "b" * 64,
+                    "claim_ref": f"sinnix://projects/fixture/beads/fixture-1/claims/{'b' * 64}",
+                    "claim_receipt": {
+                        "ref": f"sinnix://projects/fixture/beads/fixture-1/claims/{'b' * 64}",
+                        "owner_route": "beads.cli",
+                    },
+                    "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b",
+                    "assignment_ref": None,
+                },
+            },
             "agent-control",
         )
     )
@@ -5207,27 +7476,51 @@ def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(tmp_path: P
         request(
             "job.agent.start",
             "systemd-jobs",
-            {"project_id": "fixture", "checkout_id": "default", "prompt": "operator prompt", "backend": "codex", "model": "fixture", "effort": "high", "credential_profile": "subscription", "timeout_seconds": 60, "result": "last-message"},
+            {
+                "project_id": "fixture",
+                "checkout_id": "default",
+                "prompt": "operator prompt",
+                "backend": "codex",
+                "model": "fixture",
+                "effort": "high",
+                "credential_profile": "subscription",
+                "timeout_seconds": 60,
+                "result": "last-message",
+            },
             "operator",
         )
     )
 
     assert shell.ok and agent.ok and operator_agent.ok
-    assert shell.payload is not None and agent.payload is not None and operator_agent.payload is not None
+    assert (
+        shell.payload is not None
+        and agent.payload is not None
+        and operator_agent.payload is not None
+    )
     shell_job = shell.payload.inline
     agent_job = agent.payload.inline
     assert shell_job["kind"] == "operator-shell"
     assert shell_job["principal"] == "operator"
     assert shell_job["contract"]["argv"]["executable"] == "printf"
-    shell_input = json.loads((tmp_path / "state" / "inputs" / f"{shell_job['job_id']}.json").read_text())
+    shell_input = json.loads(
+        (tmp_path / "state" / "inputs" / f"{shell_job['job_id']}.json").read_text()
+    )
     assert shell_input["environment_command"] == ["fixture-env", "--command"]
     assert agent_job["kind"] == "attested-agent"
     assert agent_job["principal"] == "agent-control"
     assert agent_job["contract"]["backend"] == "codex"
-    assert agent_job["contract"]["bead_binding"]["bead_ref"] == "sinnix://projects/fixture/beads/fixture-1"
-    assert agent_job["contract"]["bead_binding"]["request_id"] == "2e46daf5-e9b1-4c6e-b99d-bcd46631730b"
+    assert (
+        agent_job["contract"]["bead_binding"]["bead_ref"]
+        == "sinnix://projects/fixture/beads/fixture-1"
+    )
+    assert (
+        agent_job["contract"]["bead_binding"]["request_id"]
+        == "2e46daf5-e9b1-4c6e-b99d-bcd46631730b"
+    )
     assert agent_job["artifacts"]["result"]["max_bytes"] == 64_000
-    persisted = (tmp_path / "state" / "jobs" / f"{agent_job['job_id']}.json").read_text()
+    persisted = (
+        tmp_path / "state" / "jobs" / f"{agent_job['job_id']}.json"
+    ).read_text()
     assert "private prompt" not in persisted
     assert "shell-secret" not in persisted
     assert "display only" not in persisted
@@ -5272,46 +7565,160 @@ def test_typed_shell_runner_enters_the_registered_project_environment(
 
     assert observed["cwd"] == workdir
     assert observed["executable"] == "nix"
-    assert observed["argv"] == ["nix", "develop", "--command", "python", "-m", "fixture"]
+    assert observed["argv"] == [
+        "nix",
+        "develop",
+        "--command",
+        "python",
+        "-m",
+        "fixture",
+    ]
 
 
-def test_typed_contracts_refuse_spoofed_principals_checkout_backend_environment_and_results(tmp_path: Path) -> None:
+def test_typed_contracts_refuse_spoofed_principals_checkout_backend_environment_and_results(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     runner = tmp_path / "native-runner"
     native_runner(runner)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path), native_runner=runner)
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path), native_runner=runner
+    )
     shell_arguments = {
-        "project_id": "fixture", "checkout_id": "default", "argv": ["true"], "cwd": ".", "timeout_seconds": 60, "result": "exit-status"
+        "project_id": "fixture",
+        "checkout_id": "default",
+        "argv": ["true"],
+        "cwd": ".",
+        "timeout_seconds": 60,
+        "result": "exit-status",
     }
     agent_arguments = {
-        "project_id": "fixture", "checkout_id": "default", "prompt": "prompt", "backend": "codex", "model": "fixture", "effort": "high", "credential_profile": "subscription", "timeout_seconds": 60, "result": "last-message"
+        "project_id": "fixture",
+        "checkout_id": "default",
+        "prompt": "prompt",
+        "backend": "codex",
+        "model": "fixture",
+        "effort": "high",
+        "credential_profile": "subscription",
+        "timeout_seconds": 60,
+        "result": "last-message",
     }
-    invalid_principal = service.dispatch(request("job.shell.start", "systemd-jobs", shell_arguments, "observer"))
-    invalid_checkout = service.dispatch(request("job.shell.start", "systemd-jobs", {**shell_arguments, "checkout_id": "absent"}, "operator"))
-    invalid_backend = service.dispatch(request("job.agent.start", "systemd-jobs", {**agent_arguments, "backend": "unknown"}, "agent-control"))
-    invalid_bead_binding = service.dispatch(request("job.agent.start", "systemd-jobs", {**agent_arguments, "bead_binding": {"bead_ref": "sinnix://projects/fixture/beads/fixture-1", "project_ref": "sinnix://projects/fixture", "checkout_ref": "sinnix://projects/fixture/checkouts/default", "task_revision": "a" * 64, "task_etag": "b" * 64, "claim_ref": "sinnix://projects/fixture/beads/other/claims/receipt", "claim_receipt": {"ref": "sinnix://projects/fixture/beads/other/claims/receipt"}, "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b", "assignment_ref": None}}, "agent-control"))
-    legacy_work_item_binding = service.dispatch(request("job.agent.start", "systemd-jobs", {**agent_arguments, "bead_binding": {"bead_ref": "sinnix://projects/fixture/beads/fixture-1", "project_ref": "sinnix://projects/fixture", "checkout_ref": "sinnix://projects/fixture/checkouts/default", "task_revision": "a" * 64, "task_etag": "b" * 64, "claim_ref": None, "claim_receipt": None, "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b", "assignment_ref": None, "work_item": "private task prose"}}, "agent-control"))
-    invalid_environment = service.dispatch(request("job.shell.start", "systemd-jobs", {**shell_arguments, "environment": {"SINNIXD_JOB_ID": "spoof"}}, "operator"))
-    invalid_result = service.dispatch(request("job.agent.start", "systemd-jobs", {**agent_arguments, "result": "exit-status"}, "agent-control"))
+    invalid_principal = service.dispatch(
+        request("job.shell.start", "systemd-jobs", shell_arguments, "observer")
+    )
+    invalid_checkout = service.dispatch(
+        request(
+            "job.shell.start",
+            "systemd-jobs",
+            {**shell_arguments, "checkout_id": "absent"},
+            "operator",
+        )
+    )
+    invalid_backend = service.dispatch(
+        request(
+            "job.agent.start",
+            "systemd-jobs",
+            {**agent_arguments, "backend": "unknown"},
+            "agent-control",
+        )
+    )
+    invalid_bead_binding = service.dispatch(
+        request(
+            "job.agent.start",
+            "systemd-jobs",
+            {
+                **agent_arguments,
+                "bead_binding": {
+                    "bead_ref": "sinnix://projects/fixture/beads/fixture-1",
+                    "project_ref": "sinnix://projects/fixture",
+                    "checkout_ref": "sinnix://projects/fixture/checkouts/default",
+                    "task_revision": "a" * 64,
+                    "task_etag": "b" * 64,
+                    "claim_ref": "sinnix://projects/fixture/beads/other/claims/receipt",
+                    "claim_receipt": {
+                        "ref": "sinnix://projects/fixture/beads/other/claims/receipt"
+                    },
+                    "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b",
+                    "assignment_ref": None,
+                },
+            },
+            "agent-control",
+        )
+    )
+    legacy_work_item_binding = service.dispatch(
+        request(
+            "job.agent.start",
+            "systemd-jobs",
+            {
+                **agent_arguments,
+                "bead_binding": {
+                    "bead_ref": "sinnix://projects/fixture/beads/fixture-1",
+                    "project_ref": "sinnix://projects/fixture",
+                    "checkout_ref": "sinnix://projects/fixture/checkouts/default",
+                    "task_revision": "a" * 64,
+                    "task_etag": "b" * 64,
+                    "claim_ref": None,
+                    "claim_receipt": None,
+                    "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b",
+                    "assignment_ref": None,
+                    "work_item": "private task prose",
+                },
+            },
+            "agent-control",
+        )
+    )
+    invalid_environment = service.dispatch(
+        request(
+            "job.shell.start",
+            "systemd-jobs",
+            {**shell_arguments, "environment": {"SINNIXD_JOB_ID": "spoof"}},
+            "operator",
+        )
+    )
+    invalid_result = service.dispatch(
+        request(
+            "job.agent.start",
+            "systemd-jobs",
+            {**agent_arguments, "result": "exit-status"},
+            "agent-control",
+        )
+    )
 
-    for response in (invalid_principal, invalid_checkout, invalid_backend, invalid_bead_binding, legacy_work_item_binding, invalid_environment, invalid_result):
+    for response in (
+        invalid_principal,
+        invalid_checkout,
+        invalid_backend,
+        invalid_bead_binding,
+        legacy_work_item_binding,
+        invalid_environment,
+        invalid_result,
+    ):
         assert response.error is not None
         assert response.error.code.value == "INVALID_ARGUMENT"
 
 
-def test_failed_agent_launch_removes_private_prompt_and_contract_input(tmp_path: Path) -> None:
+def test_failed_agent_launch_removes_private_prompt_and_contract_input(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: a rejected launch cannot leave prompt material in durable state."""
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     runner = tmp_path / "native-runner"
     native_runner(runner)
+
     class ConfirmedAbsent(FakeSystemdJobs):
         def start(self, **kwargs) -> None:
             raise SystemdJobError("fixture launch rejected")
 
-    systemd = ConfirmedAbsent(properties={"LoadState": "not-found", "ActiveState": "inactive"})
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd), native_runner=runner)
+    systemd = ConfirmedAbsent(
+        properties={"LoadState": "not-found", "ActiveState": "inactive"}
+    )
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]),
+        jobs=generic_jobs(tmp_path, systemd),
+        native_runner=runner,
+    )
 
     response = service.dispatch(
         request(
@@ -5338,7 +7745,9 @@ def test_failed_agent_launch_removes_private_prompt_and_contract_input(tmp_path:
     assert not list((tmp_path / "state" / "inputs").iterdir())
 
 
-def test_runner_rejects_changed_or_unregistered_checkout_identities(tmp_path: Path) -> None:
+def test_runner_rejects_changed_or_unregistered_checkout_identities(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     checkout = ProjectCatalog([tmp_path]).checkout("fixture", "default").to_dict()
@@ -5361,7 +7770,9 @@ def test_runner_rejects_changed_or_unregistered_checkout_identities(tmp_path: Pa
         _revalidate_checkout({**checkout, "path": str(loop)})
 
 
-def test_agent_runner_revalidates_checkout_and_writes_a_bounded_result_fixture(tmp_path: Path) -> None:
+def test_agent_runner_revalidates_checkout_and_writes_a_bounded_result_fixture(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: the native runner only executes after Git identity and env checks pass."""
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
@@ -5402,7 +7813,21 @@ def test_agent_runner_revalidates_checkout_and_writes_a_bounded_result_fixture(t
         "RUNNER_ARGS": str(runner_arguments),
     }
     result = subprocess.run(
-        [sys.executable, "-m", "sinnixd.runner", "--input", str(input_path), "--job-id", payload["job_id"], "--unit", f"sinnixd-job-{payload['job_id']}.service", "--native-runner", str(runner), "--state-root", str(state)],
+        [
+            sys.executable,
+            "-m",
+            "sinnixd.runner",
+            "--input",
+            str(input_path),
+            "--job-id",
+            payload["job_id"],
+            "--unit",
+            f"sinnixd-job-{payload['job_id']}.service",
+            "--native-runner",
+            str(runner),
+            "--state-root",
+            str(state),
+        ],
         env=environment,
         capture_output=True,
         text=True,
@@ -5462,7 +7887,21 @@ def test_runner_rejects_forged_sinnix_environment(tmp_path: Path) -> None:
     }
 
     result = subprocess.run(
-        [sys.executable, "-m", "sinnixd.runner", "--input", str(input_path), "--job-id", job_id, "--unit", f"sinnixd-job-{job_id}.service", "--native-runner", str(runner), "--state-root", str(state)],
+        [
+            sys.executable,
+            "-m",
+            "sinnixd.runner",
+            "--input",
+            str(input_path),
+            "--job-id",
+            job_id,
+            "--unit",
+            f"sinnixd-job-{job_id}.service",
+            "--native-runner",
+            str(runner),
+            "--state-root",
+            str(state),
+        ],
         env=environment,
         capture_output=True,
         text=True,
@@ -5487,9 +7926,33 @@ def test_environment_builder_keeps_empty_values_distinct_from_unset() -> None:
 @pytest.mark.parametrize(
     ("properties", "expected"),
     [
-        ({"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}, "succeeded"),
-        ({"LoadState": "loaded", "ActiveState": "inactive", "Result": "timeout", "ExecMainStatus": "9"}, "timed_out"),
-        ({"LoadState": "loaded", "ActiveState": "failed", "Result": "exit-code", "ExecMainStatus": "1"}, "failed"),
+        (
+            {
+                "LoadState": "loaded",
+                "ActiveState": "inactive",
+                "Result": "success",
+                "ExecMainStatus": "0",
+            },
+            "succeeded",
+        ),
+        (
+            {
+                "LoadState": "loaded",
+                "ActiveState": "inactive",
+                "Result": "timeout",
+                "ExecMainStatus": "9",
+            },
+            "timed_out",
+        ),
+        (
+            {
+                "LoadState": "loaded",
+                "ActiveState": "failed",
+                "Result": "exit-code",
+                "ExecMainStatus": "1",
+            },
+            "failed",
+        ),
     ],
 )
 def test_terminal_result_classification_comes_from_systemd(
@@ -5510,10 +7973,17 @@ def test_terminal_result_classification_comes_from_systemd(
     assert status["state"]["terminal"]
 
 
-def test_logs_are_bounded_and_restart_reconciles_the_same_record(tmp_path: Path) -> None:
+def test_logs_are_bounded_and_restart_reconciles_the_same_record(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: deleting the persisted record or GenericJobs.logs breaks restart reads."""
     systemd = FakeSystemdJobs(
-        properties={"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "Result": "success",
+            "ExecMainStatus": "0",
+        }
     )
     jobs = generic_jobs(tmp_path, systemd)
     started = jobs.start_foreground(
@@ -5541,7 +8011,9 @@ def test_logs_are_bounded_and_restart_reconciles_the_same_record(tmp_path: Path)
     assert waited["state"]["phase"] == "succeeded"
 
 
-def test_capture_caps_persistent_artifacts_and_reports_producer_overflow(tmp_path: Path) -> None:
+def test_capture_caps_persistent_artifacts_and_reports_producer_overflow(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: delayed marker writes fail while the producer is still running."""
     log_path = tmp_path / "overflow.log"
     overflow_path = tmp_path / "overflow.overflow"
@@ -5552,7 +8024,18 @@ def test_capture_caps_persistent_artifacts_and_reports_producer_overflow(tmp_pat
     thread = threading.Thread(
         target=lambda: result.setdefault(
             "exit_code",
-            capture_main(("--log-path", str(log_path), "--overflow-path", str(overflow_path), "--max-bytes", "4", "--", *producer)),
+            capture_main(
+                (
+                    "--log-path",
+                    str(log_path),
+                    "--overflow-path",
+                    str(overflow_path),
+                    "--max-bytes",
+                    "4",
+                    "--",
+                    *producer,
+                )
+            ),
         ),
         daemon=True,
     )
@@ -5569,7 +8052,9 @@ def test_capture_caps_persistent_artifacts_and_reports_producer_overflow(tmp_pat
     assert log_path.stat().st_size == 4
 
     jobs = generic_jobs(tmp_path)
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     record = jobs.store.load(started["job_id"])
     record.log_path.write_bytes(b"0123")
     record.log_path.with_suffix(".overflow").touch()
@@ -5580,16 +8065,22 @@ def test_capture_caps_persistent_artifacts_and_reports_producer_overflow(tmp_pat
     assert log["artifact_truncated"]
 
 
-def test_logs_report_marker_created_during_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_logs_report_marker_created_during_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Anti-vacuity: sampling overflow before reading misses this interleaving."""
     jobs = generic_jobs(tmp_path)
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     record = jobs.store.load(started["job_id"])
     record.log_path.write_bytes(b"0123")
     overflow_path = record.log_path.with_suffix(".overflow")
     original_read = jobs_module._read_private_artifact
 
-    def marker_after_read(path: Path, max_bytes: int, *, offset: int = 0) -> bytes | None:
+    def marker_after_read(
+        path: Path, max_bytes: int, *, offset: int = 0
+    ) -> bytes | None:
         content = original_read(path, max_bytes, offset=offset)
         if path == record.log_path:
             overflow_path.touch()
@@ -5621,11 +8112,18 @@ def test_foreground_specs_redact_argv_and_environment_from_disk(tmp_path: Path) 
     assert len(persisted["spec"]["command"]["digest"]) == 64
 
 
-def test_job_store_fsyncs_parent_after_replacing_record(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_job_store_fsyncs_parent_after_replacing_record(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Anti-vacuity: a file fsync before rename cannot make the renamed entry crash-durable."""
     store = GenericJobStore(tmp_path / "state")
     record = store.create(
-        GenericJobSpec(kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={}),
+        GenericJobSpec(
+            kind="foreground-command",
+            command=("fixture",),
+            working_directory=str(tmp_path),
+            environment={},
+        ),
         "00000000-0000-0000-0000-000000000001",
     )
     directory_fd = 10_000
@@ -5641,7 +8139,12 @@ def test_job_store_fsyncs_parent_after_replacing_record(monkeypatch: pytest.Monk
         return original_open(path, flags, *args)
 
     def tracked_fsync(descriptor: int) -> None:
-        events.append(("fsync-directory" if descriptor == directory_fd else "fsync-file", descriptor))
+        events.append(
+            (
+                "fsync-directory" if descriptor == directory_fd else "fsync-file",
+                descriptor,
+            )
+        )
 
     def tracked_close(descriptor: int) -> None:
         if descriptor == directory_fd:
@@ -5660,12 +8163,21 @@ def test_job_store_fsyncs_parent_after_replacing_record(monkeypatch: pytest.Monk
 
     store.save(record)
 
-    replace_index = events.index(("replace", store.records_root / f"{record.job_id}.json"))
-    file_fsync_index = max(index for index, event in enumerate(events[:replace_index]) if event[0] == "fsync-file")
+    replace_index = events.index(
+        ("replace", store.records_root / f"{record.job_id}.json")
+    )
+    file_fsync_index = max(
+        index
+        for index, event in enumerate(events[:replace_index])
+        if event[0] == "fsync-file"
+    )
     directory_fsync_index = next(
         index
-        for index, event in enumerate(events[replace_index + 1 :], start=replace_index + 1)
-        if event == ("fsync-directory", directory_fd) and events[index - 1] == ("open-directory", store.records_root)
+        for index, event in enumerate(
+            events[replace_index + 1 :], start=replace_index + 1
+        )
+        if event == ("fsync-directory", directory_fd)
+        and events[index - 1] == ("open-directory", store.records_root)
     )
     assert file_fsync_index < replace_index < directory_fsync_index
     assert events[directory_fsync_index - 1] == ("open-directory", store.records_root)
@@ -5686,11 +8198,24 @@ def test_job_store_fsyncs_parents_when_creating_state_directories(
     store = GenericJobStore(tmp_path / "state")
 
     store.create(
-        GenericJobSpec(kind="foreground-command", command=("fixture",), working_directory=str(tmp_path), environment={}),
+        GenericJobSpec(
+            kind="foreground-command",
+            command=("fixture",),
+            working_directory=str(tmp_path),
+            environment={},
+        ),
         "00000000-0000-0000-0000-000000000002",
     )
 
-    assert synchronized == [tmp_path, store.root, store.root, store.logs_root, store.root, store.root, store.records_root]
+    assert synchronized == [
+        tmp_path,
+        store.root,
+        store.root,
+        store.logs_root,
+        store.root,
+        store.root,
+        store.records_root,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -5705,7 +8230,9 @@ def test_confirmed_absence_and_launch_failure_are_distinct_terminal_outcomes(
     """Anti-vacuity: post-launch loss, missing units, and launch failures have distinct terminal records."""
     systemd = FakeSystemdJobs(properties=properties or {})
     jobs = generic_jobs(tmp_path, systemd)
-    status = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    status = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     status = jobs.get(status["job_id"])
     cancelled = jobs.cancel(status["job_id"])
     waited = jobs.wait(status["job_id"], timeout_seconds=1)
@@ -5716,7 +8243,9 @@ def test_confirmed_absence_and_launch_failure_are_distinct_terminal_outcomes(
     assert waited["state"]["phase"] == expected
 
 
-def test_start_returns_systemd_state_when_accepted_reply_is_lost(tmp_path: Path) -> None:
+def test_start_returns_systemd_state_when_accepted_reply_is_lost(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: an accepted transient unit must not become launch-failed when its reply is lost."""
     secret = "accepted-but-reply-lost"
 
@@ -5727,7 +8256,9 @@ def test_start_returns_systemd_state_when_accepted_reply_is_lost(tmp_path: Path)
 
     jobs = generic_jobs(tmp_path, ReplyLostAfterAccept())
 
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     persisted = (tmp_path / "state" / "jobs" / f"{started['job_id']}.json").read_text()
 
     assert started["state"]["phase"] == "running"
@@ -5735,7 +8266,9 @@ def test_start_returns_systemd_state_when_accepted_reply_is_lost(tmp_path: Path)
     assert secret not in persisted
 
 
-def test_start_persists_launch_failed_only_when_systemd_confirms_absence(tmp_path: Path) -> None:
+def test_start_persists_launch_failed_only_when_systemd_confirms_absence(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: a launch error alone is insufficient evidence that systemd rejected the unit."""
     secret = "confirmed-absent-launch-error"
 
@@ -5743,9 +8276,16 @@ def test_start_persists_launch_failed_only_when_systemd_confirms_absence(tmp_pat
         def start(self, **kwargs) -> None:
             raise SystemdJobError(secret)
 
-    jobs = generic_jobs(tmp_path, ConfirmedAbsent(properties={"LoadState": "not-found", "ActiveState": "inactive"}))
+    jobs = generic_jobs(
+        tmp_path,
+        ConfirmedAbsent(
+            properties={"LoadState": "not-found", "ActiveState": "inactive"}
+        ),
+    )
 
-    result = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    result = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     record = jobs.store.load(result["job_id"])
     persisted = (tmp_path / "state" / "jobs" / f"{record.job_id}.json").read_text()
     assert result["unit"] == record.unit
@@ -5777,12 +8317,18 @@ def test_systemd_errors_persist_only_stable_codes(tmp_path: Path, mode: str) -> 
         tmp_path,
         FailingShow()
         if mode == "observation-unknown"
-        else FailingStart(properties={"LoadState": "not-found", "ActiveState": "inactive"}),
+        else FailingStart(
+            properties={"LoadState": "not-found", "ActiveState": "inactive"}
+        ),
     )
     if mode == "launch-failed":
-        status = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+        status = jobs.start_foreground(
+            command=("fixture",), working_directory=str(tmp_path), environment={}
+        )
     else:
-        started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+        started = jobs.start_foreground(
+            command=("fixture",), working_directory=str(tmp_path), environment={}
+        )
         status = jobs.get(started["job_id"])
 
     persisted = (tmp_path / "state" / "jobs" / f"{status['job_id']}.json").read_text()
@@ -5794,8 +8340,11 @@ def test_systemd_errors_persist_only_stable_codes(tmp_path: Path, mode: str) -> 
     assert '"message"' not in persisted
 
 
-def test_launch_unknown_reconciles_to_observed_success_through_get_and_wait(tmp_path: Path) -> None:
+def test_launch_unknown_reconciles_to_observed_success_through_get_and_wait(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: launch uncertainty must retain its identity until systemd later answers."""
+
     class ReplyAndFirstShowLost(FakeSystemdJobs):
         show_is_unavailable = True
 
@@ -5815,7 +8364,9 @@ def test_launch_unknown_reconciles_to_observed_success_through_get_and_wait(tmp_
 
     systemd = ReplyAndFirstShowLost()
     jobs = generic_jobs(tmp_path, systemd)
-    uncertain = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    uncertain = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     persisted = jobs.store.load(uncertain["job_id"])
 
     assert uncertain["unit"] == persisted.unit
@@ -5824,7 +8375,11 @@ def test_launch_unknown_reconciles_to_observed_success_through_get_and_wait(tmp_
     assert not uncertain["state"]["terminal"]
 
     systemd.show_is_unavailable = False
-    systemd.properties = {"LoadState": "loaded", "ActiveState": "active", "Result": "success"}
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "Result": "success",
+    }
     running = jobs.get(uncertain["job_id"])
     systemd.properties = {
         "LoadState": "loaded",
@@ -5845,6 +8400,7 @@ def test_launch_unknown_reconciles_to_launch_failed_when_systemd_confirms_absenc
     tmp_path: Path,
 ) -> None:
     """Anti-vacuity: unavailable reconciliation must not relabel confirmed absence as ordinary missing."""
+
     class ReplyAndFirstShowLost(FakeSystemdJobs):
         show_is_unavailable = True
 
@@ -5863,7 +8419,9 @@ def test_launch_unknown_reconciles_to_launch_failed_when_systemd_confirms_absenc
 
     systemd = ReplyAndFirstShowLost()
     jobs = generic_jobs(tmp_path, systemd)
-    uncertain = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    uncertain = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     systemd.show_is_unavailable = False
     systemd.properties = {"LoadState": "not-found", "ActiveState": "inactive"}
 
@@ -5877,6 +8435,7 @@ def test_launch_unknown_reconciles_to_launch_failed_when_systemd_confirms_absenc
 
 def test_launch_unknown_cancel_reconciles_the_same_job_id(tmp_path: Path) -> None:
     """Anti-vacuity: cancellation must operate on the durable uncertain launch record."""
+
     class ReplyAndFirstShowLost(FakeSystemdJobs):
         show_is_unavailable = True
 
@@ -5894,10 +8453,16 @@ def test_launch_unknown_cancel_reconciles_the_same_job_id(tmp_path: Path) -> Non
             return super().show(unit, timeout_seconds=timeout_seconds)
 
     systemd = ReplyAndFirstShowLost(
-        properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"}
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "InvocationID": "fixture-invocation",
+        }
     )
     jobs = generic_jobs(tmp_path, systemd)
-    uncertain = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    uncertain = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     systemd.show_is_unavailable = False
 
     cancelled = jobs.cancel(uncertain["job_id"])
@@ -5932,10 +8497,17 @@ def test_job_wait_caps_manager_calls_at_its_remaining_deadline(
             raise SystemdJobError("manager unavailable")
 
     monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
-    monkeypatch.setattr("sinnixd.jobs.time.sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    monkeypatch.setattr(
+        "sinnixd.jobs.time.sleep",
+        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
     systemd = UnavailableSystemd()
-    jobs = GenericJobs(systemd, GenericJobStore(tmp_path / "state"), wait_poll_seconds=0.1)
-    uncertain = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    jobs = GenericJobs(
+        systemd, GenericJobStore(tmp_path / "state"), wait_poll_seconds=0.1
+    )
+    uncertain = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     systemd.timeouts.clear()
     clock[0] = 0.0
 
@@ -5945,7 +8517,9 @@ def test_job_wait_caps_manager_calls_at_its_remaining_deadline(
     assert timed_out["state"]["phase"] == "observation-unknown"
     assert timed_out["wait_timed_out"]
     assert systemd.timeouts
-    assert all(0 < timeout <= SYSTEMD_COMMAND_TIMEOUT_SECONDS for timeout in systemd.timeouts)
+    assert all(
+        0 < timeout <= SYSTEMD_COMMAND_TIMEOUT_SECONDS for timeout in systemd.timeouts
+    )
     assert clock[0] == 1.0
 
 
@@ -5955,13 +8529,21 @@ def test_job_wait_caps_manager_calls_at_its_remaining_deadline(
         ({"Result": "success", "ExecMainStatus": "0"}, "succeeded"),
         ({"Result": "exit-code", "ExecMainStatus": "1"}, "failed"),
         ({"Result": "timeout", "ExecMainStatus": "9"}, "timed_out"),
-        ({"Result": "signal", "ExecMainStatus": "15", "InvocationID": "different-invocation"}, "failed"),
+        (
+            {
+                "Result": "signal",
+                "ExecMainStatus": "15",
+                "InvocationID": "different-invocation",
+            },
+            "failed",
+        ),
     ],
 )
 def test_cancel_persists_intent_and_preserves_systemd_exit_races(
     tmp_path: Path, terminal: dict[str, str], expected: str
 ) -> None:
     """Anti-vacuity: intent-only cancellation would relabel these terminal systemd results."""
+
     class TerminalDuringStop(FakeSystemdJobs):
         def stop(self, unit: str) -> None:
             self.stopped.append(unit)
@@ -5979,15 +8561,37 @@ def test_cancel_persists_intent_and_preserves_systemd_exit_races(
 
     terminal_jobs = generic_jobs(
         tmp_path / expected,
-        TerminalDuringStop(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"}),
+        TerminalDuringStop(
+            properties={
+                "LoadState": "loaded",
+                "ActiveState": "active",
+                "InvocationID": "fixture-invocation",
+            }
+        ),
     )
-    started = terminal_jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = terminal_jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     cancelled = terminal_jobs.cancel(started["job_id"])
     assert cancelled["state"]["phase"] == expected
-    assert terminal_jobs.store.load(started["job_id"]).cancel_stop_acknowledged_at is not None
+    assert (
+        terminal_jobs.store.load(started["job_id"]).cancel_stop_acknowledged_at
+        is not None
+    )
 
-    crashing = generic_jobs(tmp_path / "crash", StopFails(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"}))
-    started = crashing.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    crashing = generic_jobs(
+        tmp_path / "crash",
+        StopFails(
+            properties={
+                "LoadState": "loaded",
+                "ActiveState": "active",
+                "InvocationID": "fixture-invocation",
+            }
+        ),
+    )
+    started = crashing.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     with pytest.raises(SystemdJobError):
         crashing.cancel(started["job_id"])
     record = crashing.store.load(started["job_id"])
@@ -5995,29 +8599,46 @@ def test_cancel_persists_intent_and_preserves_systemd_exit_races(
     assert record.cancel_requested_invocation_id == "fixture-invocation"
 
 
-def test_cancelled_missing_unit_distinguishes_acknowledged_and_ambiguous_stop(tmp_path: Path) -> None:
+def test_cancelled_missing_unit_distinguishes_acknowledged_and_ambiguous_stop(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: cancellation intent alone must leave an absent unit retryable."""
+
     class CollectedDuringStop(FakeSystemdJobs):
         def stop(self, unit: str) -> None:
             self.stopped.append(unit)
             self.properties = {"LoadState": "not-found", "ActiveState": "inactive"}
 
     systemd = CollectedDuringStop(
-        properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"}
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "InvocationID": "fixture-invocation",
+        }
     )
     jobs = generic_jobs(tmp_path / "acknowledged", systemd)
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     cancelled = jobs.cancel(started["job_id"])
     assert cancelled["state"]["phase"] == "cancelled"
     assert cancelled["state"]["cancellation"]["invocation_id"] == "fixture-invocation"
 
     missing_systemd = FakeSystemdJobs(
-        properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"}
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "InvocationID": "fixture-invocation",
+        }
     )
     missing_jobs = generic_jobs(tmp_path / "intent-only", missing_systemd)
-    started = missing_jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = missing_jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     record = missing_jobs.store.load(started["job_id"])
-    missing_jobs.store.save(missing_jobs._with_cancel_intent(record, "fixture-invocation"))
+    missing_jobs.store.save(
+        missing_jobs._with_cancel_intent(record, "fixture-invocation")
+    )
     missing_systemd.properties = {"LoadState": "not-found", "ActiveState": "inactive"}
     intent_only = missing_jobs.get(started["job_id"])
     assert intent_only["state"]["phase"] == "outcome-unknown"
@@ -6027,16 +8648,27 @@ def test_cancelled_missing_unit_distinguishes_acknowledged_and_ambiguous_stop(tm
         crash_on_acknowledgement: bool = False
 
         def save(self, record) -> None:
-            if self.crash_on_acknowledgement and record.cancel_stop_acknowledged_at is not None:
+            if (
+                self.crash_on_acknowledgement
+                and record.cancel_stop_acknowledged_at is not None
+            ):
                 raise OSError("simulated daemon crash after systemd stop")
             super().save(record)
 
     crashing_systemd = CollectedDuringStop(
-        properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"}
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "InvocationID": "fixture-invocation",
+        }
     )
     crashing_store = CrashAfterStopStore(tmp_path / "ack-crash" / "state")
-    crashing_jobs = GenericJobs(crashing_systemd, crashing_store, wait_poll_seconds=0.001)
-    started = crashing_jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    crashing_jobs = GenericJobs(
+        crashing_systemd, crashing_store, wait_poll_seconds=0.001
+    )
+    started = crashing_jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     crashing_store.crash_on_acknowledgement = True
     with pytest.raises(OSError, match="simulated daemon crash"):
         crashing_jobs.cancel(started["job_id"])
@@ -6053,7 +8685,13 @@ def test_agentctl_wait_returns_a_timed_out_envelope_past_control_timeout(
 ) -> None:
     """Anti-vacuity: the CLI must decode a normal timed-out wait response after control framing has expired."""
     write_adapter(tmp_path)
-    systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"})
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "InvocationID": "fixture-invocation",
+        }
+    )
     jobs = generic_jobs(tmp_path, systemd)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
     socket_path = tmp_path / "sinnixd.sock"
@@ -6068,11 +8706,22 @@ def test_agentctl_wait_returns_a_timed_out_envelope_past_control_timeout(
 
     server._serve_wait_connection = observe_wait_connection  # type: ignore[method-assign]
     thread = start_server(server, stop_event=stop_event)
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     monkeypatch.setattr(
         sys,
         "argv",
-        ["agentctl", "--socket", str(socket_path), "job", "wait", started["job_id"], "--timeout-seconds", "1"],
+        [
+            "agentctl",
+            "--socket",
+            str(socket_path),
+            "job",
+            "wait",
+            started["job_id"],
+            "--timeout-seconds",
+            "1",
+        ],
     )
     try:
         assert cli_module.main() == 0
@@ -6098,9 +8747,17 @@ def test_delivery_operations_have_truthful_bounded_response_timeouts() -> None:
     }
     assert CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS == expected
     for operation, timeout in expected.items():
-        assert _response_timeout_seconds(request(operation, "git-workspaces")) == timeout
-    assert _response_timeout_seconds(request("workspace.get", "git-workspaces")) == CONNECTION_TIMEOUT_SECONDS
-    assert _response_timeout_seconds(request("unknown.slow-effect", "git-workspaces")) == CONNECTION_TIMEOUT_SECONDS
+        assert (
+            _response_timeout_seconds(request(operation, "git-workspaces")) == timeout
+        )
+    assert (
+        _response_timeout_seconds(request("workspace.get", "git-workspaces"))
+        == CONNECTION_TIMEOUT_SECONDS
+    )
+    assert (
+        _response_timeout_seconds(request("unknown.slow-effect", "git-workspaces"))
+        == CONNECTION_TIMEOUT_SECONDS
+    )
 
 
 def test_slow_delivery_response_outlives_the_ordinary_control_deadline(
@@ -6108,10 +8765,14 @@ def test_slow_delivery_response_outlives_the_ordinary_control_deadline(
 ) -> None:
     """A remote effect that is still running must not be reported as daemon loss."""
     write_adapter(tmp_path)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, FakeSystemdJobs()))
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, FakeSystemdJobs())
+    )
     assert service.delivery is not None
 
-    def slow_publish(_workspace_id: str, _job_id: str, _title: str, _body: str) -> dict[str, object]:
+    def slow_publish(
+        _workspace_id: str, _job_id: str, _title: str, _body: str
+    ) -> dict[str, object]:
         time.sleep(0.1)
         return {"published": True, "publication_output": "https://github.test/pull/17"}
 
@@ -6124,7 +8785,12 @@ def test_slow_delivery_response_outlives_the_ordinary_control_deadline(
     publication = request(
         "workspace.publish",
         "git-workspaces",
-        {"workspace_id": "fixture", "job_id": "verified", "title": "Fixture", "body": "body"},
+        {
+            "workspace_id": "fixture",
+            "job_id": "verified",
+            "title": "Fixture",
+            "body": "body",
+        },
         "agent-control",
     )
     try:
@@ -6146,7 +8812,13 @@ def test_agentctl_wait_reports_capacity_exhaustion_while_all_wait_workers_are_oc
 ) -> None:
     """Anti-vacuity: raw framing cannot cover the agentctl capacity-error path."""
     write_adapter(tmp_path)
-    systemd = FakeSystemdJobs(properties={"LoadState": "loaded", "ActiveState": "active", "InvocationID": "fixture-invocation"})
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "active",
+            "InvocationID": "fixture-invocation",
+        }
+    )
     jobs = generic_jobs(tmp_path, systemd)
     wait_started = threading.Event()
     wait_lock = threading.Lock()
@@ -6155,7 +8827,9 @@ def test_agentctl_wait_reports_capacity_exhaustion_while_all_wait_workers_are_oc
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
     socket_path = tmp_path / "sinnixd.sock"
     stop_event = threading.Event()
-    server = UnixSocketServer(socket_path, service, connection_timeout_seconds=0.05, max_workers=8)
+    server = UnixSocketServer(
+        socket_path, service, connection_timeout_seconds=0.05, max_workers=8
+    )
     wait_timeouts: list[float | None] = []
     original_wait_connection = server._serve_wait_connection
 
@@ -6174,25 +8848,48 @@ def test_agentctl_wait_reports_capacity_exhaustion_while_all_wait_workers_are_oc
     jobs.wait = counted_wait  # type: ignore[method-assign]
     server._serve_wait_connection = observe_wait_connection  # type: ignore[method-assign]
     thread = start_server(server, stop_event=stop_event)
-    started = jobs.start_foreground(command=("fixture",), working_directory=str(tmp_path), environment={})
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
     job_id = started["job_id"]
     wait_results: list[dict[str, object]] = []
     wait_errors: list[Exception] = []
 
     def run_wait() -> None:
         try:
-            wait_results.append(call(socket_path, request("job.wait", "systemd-jobs", {"job_id": job_id, "timeout_seconds": 1})))
+            wait_results.append(
+                call(
+                    socket_path,
+                    request(
+                        "job.wait",
+                        "systemd-jobs",
+                        {"job_id": job_id, "timeout_seconds": 1},
+                    ),
+                )
+            )
         except Exception as error:
             wait_errors.append(error)
 
-    waiters = [threading.Thread(target=run_wait, daemon=True) for _ in range(server.wait_worker_count)]
+    waiters = [
+        threading.Thread(target=run_wait, daemon=True)
+        for _ in range(server.wait_worker_count)
+    ]
     for waiter in waiters:
         waiter.start()
     assert wait_started.wait(timeout=1)
     monkeypatch.setattr(
         sys,
         "argv",
-        ["agentctl", "--socket", str(socket_path), "job", "wait", job_id, "--timeout-seconds", "1"],
+        [
+            "agentctl",
+            "--socket",
+            str(socket_path),
+            "job",
+            "wait",
+            job_id,
+            "--timeout-seconds",
+            "1",
+        ],
     )
     assert cli_module.main() == 1
     capacity = json.loads(capsys.readouterr().out)
@@ -6210,8 +8907,13 @@ def test_agentctl_wait_reports_capacity_exhaustion_while_all_wait_workers_are_oc
     assert all(not waiter.is_alive() for waiter in waiters)
     assert len(wait_results) == server.wait_worker_count
     assert not thread.is_alive()
-    assert wait_timeouts == [1 + WAIT_TRANSPORT_MARGIN_SECONDS] * server.wait_worker_count
-    assert all(result["payload"]["value"]["state"]["phase"] == "running" for result in wait_results)
+    assert (
+        wait_timeouts == [1 + WAIT_TRANSPORT_MARGIN_SECONDS] * server.wait_worker_count
+    )
+    assert all(
+        result["payload"]["value"]["state"]["phase"] == "running"
+        for result in wait_results
+    )
     assert all(result["payload"]["value"]["wait_timed_out"] for result in wait_results)
 
 
@@ -6219,18 +8921,35 @@ def test_job_rpc_get_list_wait_logs_and_cancel_share_one_record(tmp_path: Path) 
     """Anti-vacuity: deleting any RPC route prevents its shared job ID from resolving."""
     write_adapter(tmp_path)
     systemd = FakeSystemdJobs(
-        properties={"LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainStatus": "0"}
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "Result": "success",
+            "ExecMainStatus": "0",
+        }
     )
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd))
-    started = service.dispatch(request("job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"}))
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path, systemd)
+    )
+    started = service.dispatch(
+        request(
+            "job.start", "systemd-jobs", {"project_id": "fixture", "operation": "check"}
+        )
+    )
     assert started.payload is not None
     job_id = started.payload.inline["job_id"]
 
     get = service.dispatch(request("job.get", "systemd-jobs", {"job_id": job_id}))
     listed = service.dispatch(request("job.list", "systemd-jobs", {"limit": 1}))
-    waited = service.dispatch(request("job.wait", "systemd-jobs", {"job_id": job_id, "timeout_seconds": 1}))
-    logs = service.dispatch(request("job.logs", "systemd-jobs", {"job_id": job_id, "max_bytes": 10}))
-    cancelled = service.dispatch(request("job.cancel", "systemd-jobs", {"job_id": job_id}))
+    waited = service.dispatch(
+        request("job.wait", "systemd-jobs", {"job_id": job_id, "timeout_seconds": 1})
+    )
+    logs = service.dispatch(
+        request("job.logs", "systemd-jobs", {"job_id": job_id, "max_bytes": 10})
+    )
+    cancelled = service.dispatch(
+        request("job.cancel", "systemd-jobs", {"job_id": job_id})
+    )
 
     assert all(response.ok for response in (get, listed, waited, logs, cancelled))
     assert listed.payload is not None
@@ -6294,10 +9013,17 @@ def test_job_owner_boundary_filters_before_pagination_and_denies_cross_principal
     assert agent_list.ok and agent_list.payload is not None
     assert [row["job_id"] for row in agent_list.payload.inline["jobs"]] == [agent_job]
     assert service.dispatch(
-        request("job.get", "systemd-jobs", {"job_id": agent_job}, principal="agent-control")
+        request(
+            "job.get", "systemd-jobs", {"job_id": agent_job}, principal="agent-control"
+        )
     ).ok
     agent_denied = service.dispatch(
-        request("job.get", "systemd-jobs", {"job_id": operator_jobs[0]}, principal="agent-control")
+        request(
+            "job.get",
+            "systemd-jobs",
+            {"job_id": operator_jobs[0]},
+            principal="agent-control",
+        )
     )
     assert agent_denied.error is not None
     assert agent_denied.error.code is ErrorCode.POLICY_DENIED
@@ -6420,15 +9146,24 @@ def test_real_user_systemd_service_cgroup_cancels_descendants(tmp_path: Path) ->
     """Anti-vacuity: this enters systemd-run/systemctl; replacing the launcher with a subprocess leaves the child alive."""
     if shutil.which("systemd-run") is None or shutil.which("systemctl") is None:
         pytest.skip("systemd user tools are unavailable")
-    manager = subprocess.run(["systemctl", "--user", "show-environment"], capture_output=True, text=True, check=False)
+    manager = subprocess.run(
+        ["systemctl", "--user", "show-environment"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     if manager.returncode != 0:
         pytest.skip("a usable user systemd manager is unavailable")
 
     child_pid = tmp_path / "child.pid"
     script = tmp_path / "spawn-child.sh"
-    script.write_text("#!/bin/sh\nsleep 30 &\necho $! > \"$1\"\necho lifecycle-output\nwait\n")
+    script.write_text(
+        '#!/bin/sh\nsleep 30 &\necho $! > "$1"\necho lifecycle-output\nwait\n'
+    )
     script.chmod(0o700)
-    jobs = GenericJobs(UserSystemdJobs(), GenericJobStore(tmp_path / "state"), wait_poll_seconds=0.05)
+    jobs = GenericJobs(
+        UserSystemdJobs(), GenericJobStore(tmp_path / "state"), wait_poll_seconds=0.05
+    )
     started: dict[str, object] | None = None
     try:
         started = jobs.start_foreground(
@@ -6458,7 +9193,9 @@ def test_real_user_systemd_service_cgroup_cancels_descendants(tmp_path: Path) ->
                 pass
 
 
-def test_source_scoped_owner_adapter_is_registered_and_forwards_exact_response(tmp_path: Path) -> None:
+def test_source_scoped_owner_adapter_is_registered_and_forwards_exact_response(
+    tmp_path: Path,
+) -> None:
     write_owner_adapter(tmp_path)
     source = SourceBinding(
         source_ref=SinnixRef.parse("sinnix://polylogue/archive"),
@@ -6500,15 +9237,21 @@ def test_owner_adapters_reject_duplicate_authority_namespaces(tmp_path: Path) ->
     write_owner_adapter(first)
     write_owner_adapter(second)
     descriptor = second / ".agentctl" / "project.toml"
-    descriptor.write_text(descriptor.read_text().replace('id = "fixture"', 'id = "second"'))
+    descriptor.write_text(
+        descriptor.read_text().replace('id = "fixture"', 'id = "second"')
+    )
 
     with pytest.raises(ProjectConfigError, match="duplicate owner namespace"):
         SinnixdService(ProjectCatalog([first, second]))
 
 
-def test_declared_owner_adapter_runs_fixed_command_and_enforces_source_binding(tmp_path: Path) -> None:
+def test_declared_owner_adapter_runs_fixed_command_and_enforces_source_binding(
+    tmp_path: Path,
+) -> None:
     write_owner_adapter(tmp_path)
-    project, adapter = ProjectCatalog([tmp_path]).owner_adapter("polylogue.archive.status")
+    project, adapter = ProjectCatalog([tmp_path]).owner_adapter(
+        "polylogue.archive.status"
+    )
     source = SourceBinding(
         source_ref=SinnixRef.parse("sinnix://polylogue/archive"),
         generation="fixture-generation",
@@ -6618,10 +9361,14 @@ def test_unix_socket_server_round_trips_the_common_envelope(tmp_path: Path) -> N
     assert response["payload"]["value"]["projects"] == 1
 
 
-def test_unix_socket_server_returns_json_rpc_errors_without_crashing(tmp_path: Path) -> None:
+def test_unix_socket_server_returns_json_rpc_errors_without_crashing(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path / "project")
     socket_path = tmp_path / "sinnixd.sock"
-    server = UnixSocketServer(socket_path, SinnixdService(ProjectCatalog([tmp_path / "project"])))
+    server = UnixSocketServer(
+        socket_path, SinnixdService(ProjectCatalog([tmp_path / "project"]))
+    )
     thread = start_server(server, once=True)
 
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
@@ -6649,7 +9396,9 @@ def test_unix_socket_server_returns_json_rpc_errors_without_crashing(tmp_path: P
     }
 
 
-def test_unix_socket_server_continues_after_malformed_and_stalled_clients(tmp_path: Path) -> None:
+def test_unix_socket_server_continues_after_malformed_and_stalled_clients(
+    tmp_path: Path,
+) -> None:
     write_adapter(tmp_path / "project")
     socket_path = tmp_path / "sinnixd.sock"
     server = UnixSocketServer(

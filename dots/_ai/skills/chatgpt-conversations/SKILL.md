@@ -28,6 +28,7 @@ reads, and does not alter the browser.
    Use `--markdown` only when a human-readable handoff is preferable to the
    structured JSON record. Full reads are the normal choice when the agent must
    understand the conversation as a whole.
+
 3. Use `read` only to reduce context usage when a narrower range answers the
    task:
 

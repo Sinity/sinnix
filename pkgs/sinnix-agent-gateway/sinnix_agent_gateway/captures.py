@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from sinnix_mcp.execution import ExecutionProfile, OwnerExecution, OwnerRoute
+
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from sinnix_mcp.execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
 @dataclass(frozen=True)
@@ -114,7 +115,9 @@ class CaptureService:
         try:
             lane = self._available_lanes()[name]
         except KeyError as exc:
-            raise ValueError("capture lane is not declared by runtime inventory") from exc
+            raise ValueError(
+                "capture lane is not declared by runtime inventory"
+            ) from exc
         return {
             "ref": f"sinnix://captures/{name}",
             "name": lane.name,
@@ -136,7 +139,8 @@ class CaptureService:
             return {"records": [], "lanes_queried": [], "truncated": False}
 
         non_sidecar = [
-            name for name in effective_lanes
+            name
+            for name in effective_lanes
             if available[name].native_contract != "sinnix-capture-v1-sidecar"
         ]
         if non_sidecar:
@@ -205,7 +209,9 @@ class CaptureService:
                 }
 
             root_records = (
-                payload.get("records", payload) if isinstance(payload, dict) else payload
+                payload.get("records", payload)
+                if isinstance(payload, dict)
+                else payload
             )
             if not isinstance(root_records, list):
                 return {
