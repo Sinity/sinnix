@@ -1334,8 +1334,15 @@ def validate_agent_environment_descriptors(roots: Iterable[Path]) -> None:
             if isinstance(project, Mapping) and isinstance(project.get("id"), str):
                 project_name = project["id"]
             adapter = load_project_adapter(root)
-        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, ProjectConfigError) as error:
-            diagnostics.append(f"{project_name}: invalid descriptor {descriptor}: {error}")
+        except (
+            OSError,
+            UnicodeDecodeError,
+            tomllib.TOMLDecodeError,
+            ProjectConfigError,
+        ) as error:
+            diagnostics.append(
+                f"{project_name}: invalid descriptor {descriptor}: {error}"
+            )
             continue
         if adapter.workspace is None:
             continue
