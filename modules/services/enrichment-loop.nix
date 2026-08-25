@@ -81,12 +81,16 @@ mkServiceModule {
           # workspace makes that input fail rather than be absent.
           "/realm/project/steering"
         ]
-        ++ lib.sinnix.systemd.agentRuntimeWritePaths { home = homeDir; };
+        ++ lib.sinnix.systemd.agentRuntimeWritePaths {
+          home = homeDir;
+          polylogueDataDir = config.sinnix.services.polylogue.dataDir;
+        };
         # Clear of the observed run distribution (healthy passes run
         # 1-3min) but under the hourly interval, so a slow pass still
         # cannot overlap its successor.
         TimeoutStartSec = "600s";
       };
+      environment.POLYLOGUE_ARCHIVE_ROOT = config.sinnix.services.polylogue.dataDir;
       timer = {
         onBootSec = "5min";
         onUnitActiveSec = "${toString cfg.intervalMinutes}min";
