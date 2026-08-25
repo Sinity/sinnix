@@ -1,6 +1,6 @@
 # Agent hook parity
 
-This matrix records the current boundary between Claude Code and Codex hooks. It is reviewed against the generated Codex file at each configuration change.
+This matrix records the current boundary between Claude Code and Codex hooks. It is reviewed against the generated Codex file at each configuration change, including the configured primary Polylogue hooks spool shared by every writer.
 
 | Capability                 | Claude Code | Codex    | Evidence and action                                                                                                                      |
 | -------------------------- | ----------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
