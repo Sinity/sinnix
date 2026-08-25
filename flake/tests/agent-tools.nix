@@ -8,6 +8,7 @@ in
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
+      polylogueSentinelDataDir = "/tmp/sinnix-polylogue-agent-tools-sentinel";
       # The packaged binary, not a copy of the source with a hand-patched
       # shebang: the wrapper and the withPackages interpreter that discovery
       # builds are part of what these fixtures are testing, and a fixture that
@@ -95,6 +96,7 @@ in
             sinnix.features.dev.shell.enable = true;
             sinnix.features.dev.mcp-servers.enable = true;
             sinnix.services.clodex.enable = true;
+            sinnix.services.polylogue.dataDir = polylogueSentinelDataDir;
           })
         ];
         assertions =
@@ -181,6 +183,7 @@ in
           ".local/bin/agy-sinnix"
           ".local/bin/hermes"
           ".local/bin/mcp-firecrawl"
+          ".local/bin/sinnix-polylogue-hook"
           ".local/bin/mcp-chrome-devtools"
           ".local/bin/mcp-polylogue"
           ".local/bin/mcp-sinex"
@@ -258,6 +261,10 @@ in
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexLocalConfigSource;
       agentToolsCodexHooksSource =
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexHooksSource;
+      agentToolsPolylogueHookSource =
+        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.polylogueHookSource;
+      agentToolsMcpPolylogueSource =
+        agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.mcpPolylogueSource;
       agentToolsAntigravityMcpConfigSource =
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.antigravityMcpConfigSource;
       agentToolsHermesConfigSource =
@@ -469,6 +476,8 @@ in
             bash -n "$HOME/.local/bin/clodex"
             bash -n "$HOME/.local/bin/clodex-claude"
             bash -n "$HOME/.local/bin/sinnix-clodex-server"
+            test -x "$HOME/.local/bin/sinnix-polylogue-hook"
+            bash -n "$HOME/.local/bin/sinnix-polylogue-hook"
             for wrapper in \
               ${lib.concatMapStringsSep " \\\n              " (f: ''"$HOME/${f}"'') laneWrapperFiles} \
               "$HOME/.local/bin/gemini" \
@@ -484,8 +493,20 @@ in
               ([.hooks.SessionStart[].hooks[].command]
                 | any(contains("sessionstart-sinex-recall.sh"))) and
               ([.hooks.Stop[].hooks[].command]
-                | any(contains("polylogue-hook Stop --provider claude-code")))
+                | any(. == "sinnix-polylogue-hook Stop --provider claude-code"))
             ' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
+
+            # The live managed policy keeps its source in dots, while the
+            # executable it names is generated from the evaluated service
+            # option. The sentinel prevents a default-root wrapper from
+            # passing as a correctly derived one.
+            grep -F -- '${polylogueSentinelDataDir}/hooks' "$HOME/.local/bin/sinnix-polylogue-hook"
+            grep -F -- '${polylogueSentinelDataDir}' "${agentToolsPolylogueHookSource}/bin/sinnix-polylogue-hook"
+            grep -F -- '${polylogueSentinelDataDir}' "${agentToolsMcpPolylogueSource}/bin/mcp-polylogue"
+            if grep -F -e '/realm/state/polylogue' -e '/home/sinity/.local/share/polylogue' "${agentToolsPolylogueHookSource}/bin/sinnix-polylogue-hook" "${agentToolsMcpPolylogueSource}/bin/mcp-polylogue"; then
+              echo 'agent writer wrapper contains a default or legacy Polylogue root' >&2
+              exit 1
+            fi
 
             # Rendered profile configs must match the registry's own computed
             # selection -- membership is derived from mcp-registry.nix at eval
@@ -571,7 +592,7 @@ in
 
             jq -e '
               [.hooks.Stop[].hooks[].command]
-              | any(contains("polylogue-hook Stop --provider codex"))
+              | any(. == "sinnix-polylogue-hook Stop --provider codex")
             ' "$HOME/.codex/hooks.json" >/dev/null
             jq -e '
               [.hooks.SessionStart[].hooks[].command] | any(contains("sessionstart-sinex-recall.sh"))
