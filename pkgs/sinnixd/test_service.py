@@ -5301,6 +5301,39 @@ def test_workspace_create_is_git_derived_durable_and_restart_safe(
     assert recovered.payload.inline["checkout_id"].startswith("worktree-")
 
 
+def test_workspace_create_inherits_declared_seed_files_and_records_missing_sources(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: create copies a main-checkout seed while missing declarations become typed notes."""
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + '\n[workspace.provision]\ncopy = [".cache/testmon/testmondata", "missing.seed"]\n'
+    )
+    initialize_git_checkout(tmp_path)
+    seed = tmp_path / ".cache" / "testmon" / "testmondata"
+    seed.parent.mkdir(parents=True)
+    seed.write_text("seed\n")
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+
+    created = service.workspaces.create(
+        project_id="fixture",
+        name="seed-lane",
+        branch="feature/seed-lane",
+        base="HEAD",
+    )
+
+    copied = Path(created["path"]) / ".cache" / "testmon" / "testmondata"
+    assert copied.read_text() == "seed\n"
+    assert os.stat(copied).st_ino == os.stat(seed).st_ino
+    assert created["provision_notes"] == [
+        {"kind": "missing-source", "path": "missing.seed"}
+    ]
+    recovered = service.workspaces.get(created["workspace_id"])
+    assert recovered["provision_notes"] == created["provision_notes"]
+
+
 def test_workspace_adopt_uses_existing_linked_checkout_without_claiming_creation(
     tmp_path: Path,
 ) -> None:

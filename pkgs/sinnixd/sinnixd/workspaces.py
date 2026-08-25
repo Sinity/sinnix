@@ -43,6 +43,7 @@ class WorkspaceRecord:
     base: str
     created_at: str
     managed: bool
+    provision_notes: tuple[dict[str, str], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +56,7 @@ class WorkspaceRecord:
             "base": self.base,
             "created_at": self.created_at,
             "managed": self.managed,
+            "provision_notes": [dict(note) for note in self.provision_notes],
         }
 
     @classmethod
@@ -71,7 +73,7 @@ class WorkspaceRecord:
             "managed",
         }
         if (
-            set(value) != required
+            set(value) not in (required, required | {"provision_notes"})
             or value.get("schema_version") != WORKSPACE_SCHEMA_VERSION
         ):
             raise WorkspaceError("workspace record schema is invalid")
@@ -82,6 +84,14 @@ class WorkspaceRecord:
             not isinstance(item, str) or not item for item in strings.values()
         ) or not isinstance(value.get("managed"), bool):
             raise WorkspaceError("workspace record fields are invalid")
+        raw_notes = value.get("provision_notes", [])
+        if not isinstance(raw_notes, list) or any(
+            not isinstance(note, Mapping)
+            or set(note) != {"kind", "path"}
+            or any(not isinstance(item, str) or not item for item in note.values())
+            for note in raw_notes
+        ):
+            raise WorkspaceError("workspace provision notes are invalid")
         return cls(
             workspace_id=strings["workspace_id"],
             project_id=strings["project_id"],
@@ -91,6 +101,7 @@ class WorkspaceRecord:
             base=strings["base"],
             created_at=strings["created_at"],
             managed=value["managed"],
+            provision_notes=tuple(dict(note) for note in raw_notes),
         )
 
 
@@ -653,8 +664,22 @@ class GitWorkspaces:
         result = self._git(project.root, *arguments, check=False)
         if result.returncode != 0:
             raise WorkspaceError(result.stderr.strip() or "git worktree add failed")
-        checkout = self._checkout_by_path(project_id, path)
-        record = self._new_record(project, name, checkout, resolved_base, managed=True)
+        try:
+            checkout = self._checkout_by_path(project_id, path)
+            notes = self._provision(project, path)
+            record = self._new_record(
+                project,
+                name,
+                checkout,
+                resolved_base,
+                managed=True,
+                provision_notes=notes,
+            )
+        except BaseException:
+            self._git(project.root, "worktree", "remove", "--force", str(path), check=False)
+            if not branch_exists:
+                self._git(project.root, "branch", "-D", branch, check=False)
+            raise
         try:
             self.store.put(record)
         except BaseException:
@@ -1485,6 +1510,7 @@ class GitWorkspaces:
         *,
         managed: bool,
         branch: str | None = None,
+        provision_notes: tuple[dict[str, str], ...] = (),
     ) -> WorkspaceRecord:
         return WorkspaceRecord(
             workspace_id=str(uuid4()),
@@ -1495,7 +1521,43 @@ class GitWorkspaces:
             base=base,
             created_at=datetime.now(UTC).isoformat(),
             managed=managed,
+            provision_notes=provision_notes,
         )
+
+    @staticmethod
+    def _provision(
+        project: ProjectAdapter, target: Path
+    ) -> tuple[dict[str, str], ...]:
+        assert project.workspace is not None
+        notes: list[dict[str, str]] = []
+        for relative in project.workspace.provision_copy:
+            source = project.root / relative
+            destination = target / relative
+            if not source.exists():
+                notes.append({"kind": "missing-source", "path": relative})
+                continue
+            if source.is_symlink():
+                raise WorkspaceError(f"workspace provision source is a symlink: {relative}")
+            destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if source.is_file():
+                try:
+                    os.link(source, destination)
+                except FileExistsError:
+                    shutil.copy2(source, destination)
+                except OSError:
+                    shutil.copy2(source, destination)
+            elif source.is_dir():
+                try:
+                    shutil.copytree(source, destination, copy_function=os.link)
+                except OSError:
+                    if destination.exists():
+                        shutil.rmtree(destination)
+                    shutil.copytree(source, destination)
+            else:
+                raise WorkspaceError(
+                    f"workspace provision source is not a regular file or directory: {relative}"
+                )
+        return tuple(notes)
 
     @staticmethod
     def _validate_name(name: str) -> None:
