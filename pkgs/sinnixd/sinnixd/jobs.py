@@ -50,7 +50,8 @@ CANCEL_OUTCOME_RECONCILIATION_GRACE_SECONDS = 300
 MAX_LOG_BYTES = 64_000
 MAX_LOG_ARTIFACT_BYTES = 1_048_576
 MAX_RESULT_BYTES = 64_000
-JOB_SCHEMA_VERSION = 5
+MAX_HANDOFF_BYTES = 64_000
+JOB_SCHEMA_VERSION = 6
 JOB_UNIT_PREFIX = "sinnixd-job-"
 JOB_LIST_CURSOR_SCHEMA_VERSION = 1
 MAX_JOB_LIST_CURSOR_BYTES = 512
@@ -1031,6 +1032,7 @@ class GenericJobRecord:
     log_path: Path
     result_path: Path | None
     scratch_path: Path | None
+    handoff_path: Path | None
     created_at: str
     cancel_requested_at: str | None = None
     cancel_requested_invocation_id: str | None = None
@@ -1052,6 +1054,9 @@ class GenericJobRecord:
                 "scratch": (
                     str(self.scratch_path) if self.scratch_path is not None else None
                 ),
+                "handoff": (
+                    str(self.handoff_path) if self.handoff_path is not None else None
+                ),
             },
             "created_at": self.created_at,
             "cancel_requested_at": self.cancel_requested_at,
@@ -1067,7 +1072,7 @@ class GenericJobRecord:
         unit = value.get("unit")
         artifacts = value.get("artifacts")
         schema_version = value.get("schema_version")
-        if schema_version not in {2, 3, 4, JOB_SCHEMA_VERSION} or not isinstance(
+        if schema_version not in {2, 3, 4, 5, JOB_SCHEMA_VERSION} or not isinstance(
             job_id, str
         ):
             raise JobRecordError("job record schema or ID is invalid")
@@ -1096,6 +1101,15 @@ class GenericJobRecord:
             if not isinstance(raw_scratch, str):
                 raise JobRecordError("job scratch artifact is invalid")
             scratch_path = Path(raw_scratch).resolve()
+        raw_handoff = artifacts.get("handoff")
+        handoff_path: Path | None = None
+        if raw_handoff is not None:
+            if not isinstance(raw_handoff, str):
+                raise JobRecordError("job handoff artifact is invalid")
+            handoff_path = Path(raw_handoff).resolve()
+            handoffs_root = (root / "handoffs").resolve()
+            if handoffs_root not in handoff_path.parents:
+                raise JobRecordError("job handoff artifact escapes state root")
         spec = value.get("spec")
         state = value.get("state", {})
         if not isinstance(spec, Mapping) or not isinstance(state, Mapping):
@@ -1132,6 +1146,7 @@ class GenericJobRecord:
             log_path=log_path,
             result_path=result_path,
             scratch_path=scratch_path,
+            handoff_path=handoff_path,
             created_at=created_at,
             cancel_requested_at=cancelled,
             cancel_requested_invocation_id=invocation,
@@ -1160,6 +1175,10 @@ class GenericJobStore:
     @property
     def results_root(self) -> Path:
         return self.root / "results"
+
+    @property
+    def handoffs_root(self) -> Path:
+        return self.root / "handoffs"
 
     @property
     def readiness_root(self) -> Path:
@@ -1538,6 +1557,7 @@ class GenericJobStore:
     ) -> GenericJobRecord:
         _ensure_durable_directory(self.records_root)
         _ensure_durable_directory(self.logs_root)
+        _ensure_durable_directory(self.handoffs_root)
         if spec.result_kind in {"last-message", "json", "pytest"}:
             _ensure_durable_directory(self.results_root)
         candidates = (
@@ -1561,6 +1581,7 @@ class GenericJobStore:
                 else None
             )
             scratch_path = self._allocate_scratch(spec.scratch, candidate)
+            handoff_path = self.handoffs_root / f"{candidate}.json"
             record = GenericJobRecord(
                 job_id=candidate,
                 unit=job_unit_name(candidate),
@@ -1568,6 +1589,7 @@ class GenericJobStore:
                 log_path=log_path.resolve(),
                 result_path=result_path.resolve() if result_path is not None else None,
                 scratch_path=scratch_path,
+                handoff_path=handoff_path.resolve(),
                 created_at=_timestamp(),
                 state={
                     "phase": "launching",
@@ -2028,6 +2050,23 @@ class GenericJobStore:
             temporary.unlink(missing_ok=True)
         if record.state.get("terminal"):
             self._set_active_record(record.job_id, active=False)
+
+    def write_handoff(self, record: GenericJobRecord, payload: Mapping[str, Any]) -> None:
+        if record.handoff_path is None:
+            raise JobRecordError("job handoff artifact is unavailable")
+        if record.handoff_path.parent != self.handoffs_root.resolve():
+            raise JobRecordError("job handoff artifact escapes state root")
+        content = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        if len(content) > MAX_HANDOFF_BYTES:
+            raise JobRecordError("job handoff artifact exceeds its byte limit")
+        try:
+            with _open_private_artifact(record.handoff_path) as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except FileExistsError:
+            return
+        _fsync_directory(self.handoffs_root)
 
     def _record_path(self, job_id: str) -> Path:
         _ = job_unit_name(job_id)
@@ -2890,6 +2929,112 @@ class GenericJobs:
             self.store.cleanup_declared_launch(record.job_id)
         self.store.release_terminal_service_lease(record)
 
+    def _preserve_timeout(self, record: GenericJobRecord) -> dict[str, Any]:
+        checkout = record.spec.checkout
+        checkout_path: Path | None = None
+        error: str | None = None
+        diffstat = ""
+        wip_commit: str | None = None
+        dirty = False
+        if record.spec.kind == "attested-agent" and isinstance(checkout, Mapping):
+            try:
+                checkout_path = revalidate_registered_checkout(checkout)
+                status = subprocess.run(
+                    ["git", "status", "--porcelain", "--untracked-files=all"],
+                    cwd=checkout_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False,
+                )
+                if status.returncode != 0:
+                    raise OSError(status.stderr.strip() or "git status failed")
+                dirty = bool(status.stdout)
+                if dirty:
+                    staged = subprocess.run(
+                        ["git", "add", "-A"],
+                        cwd=checkout_path,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        check=False,
+                    )
+                    if staged.returncode != 0:
+                        raise OSError(staged.stderr.strip() or "git add failed")
+                diff = subprocess.run(
+                    ["git", "diff", "--stat", "--cached" if dirty else "HEAD"],
+                    cwd=checkout_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False,
+                )
+                if diff.returncode == 0:
+                    diffstat = diff.stdout.strip()
+                if dirty:
+                    committed = subprocess.run(
+                        [
+                            "git",
+                            "commit",
+                            "--quiet",
+                            "-m",
+                            f"wip: preserved at timeout {record.job_id}",
+                        ],
+                        cwd=checkout_path,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        check=False,
+                    )
+                    if committed.returncode != 0:
+                        raise OSError(
+                            committed.stderr.strip() or "git commit failed"
+                        )
+                    head = subprocess.run(
+                        ["git", "rev-parse", "HEAD"],
+                        cwd=checkout_path,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        check=False,
+                    )
+                    if head.returncode == 0:
+                        wip_commit = head.stdout.strip()
+            except (OSError, subprocess.SubprocessError) as caught:
+                error = str(caught)
+
+        content = _read_private_artifact(record.log_path, MAX_LOG_ARTIFACT_BYTES)
+        log_tail = (
+            content.decode(errors="replace").splitlines()[-100:]
+            if content is not None
+            else []
+        )
+        payload: dict[str, Any] = {
+            "schema_version": 1,
+            "job_id": record.job_id,
+            "dirty": dirty,
+            "wip_commit": wip_commit,
+            "diffstat": diffstat,
+            "log_tail": log_tail,
+        }
+        if error is not None:
+            payload["error"] = error
+        try:
+            self.store.write_handoff(record, payload)
+            handoff_written = record.handoff_path is not None
+        except (JobRecordError, OSError) as caught:
+            handoff_written = False
+            error = error or str(caught)
+        details = {
+            "dirty": dirty,
+            "wip_commit": wip_commit,
+            "diffstat": diffstat,
+            "handoff_written": handoff_written,
+        }
+        if error is not None:
+            details["error"] = error
+        return details
+
     @staticmethod
     def _memory_peak(properties: Any) -> int | None:
         if not isinstance(properties, Mapping):
@@ -3495,6 +3640,8 @@ class GenericJobs:
         if state.get("terminal"):
             state["resources"] = _terminal_resources(properties)
             state["usage"] = _terminal_usage(record)
+            if state.get("phase") == "timed_out":
+                state["timeout_wip"] = self._preserve_timeout(record)
         return state
 
     @staticmethod
@@ -3599,6 +3746,7 @@ class GenericJobs:
             log_path=record.log_path,
             result_path=record.result_path,
             scratch_path=record.scratch_path,
+            handoff_path=record.handoff_path,
             created_at=record.created_at,
             cancel_requested_at=record.cancel_requested_at,
             cancel_requested_invocation_id=record.cancel_requested_invocation_id,
@@ -3622,6 +3770,7 @@ class GenericJobs:
             log_path=record.log_path,
             result_path=record.result_path,
             scratch_path=record.scratch_path,
+            handoff_path=record.handoff_path,
             created_at=record.created_at,
             cancel_requested_at=record.cancel_requested_at or _timestamp(),
             cancel_requested_invocation_id=(
@@ -3648,6 +3797,7 @@ class GenericJobs:
             log_path=record.log_path,
             result_path=record.result_path,
             scratch_path=record.scratch_path,
+            handoff_path=record.handoff_path,
             created_at=record.created_at,
             cancel_requested_at=record.cancel_requested_at,
             cancel_requested_invocation_id=record.cancel_requested_invocation_id,
@@ -3752,6 +3902,14 @@ class GenericJobs:
                         "kind": record.spec.result_kind,
                     }
                     if record.result_path is not None
+                    else None
+                ),
+                "handoff": (
+                    {
+                        "ref": f"sinnix://jobs/{record.job_id}/artifacts/handoff",
+                        "max_bytes": MAX_HANDOFF_BYTES,
+                    }
+                    if record.handoff_path is not None
                     else None
                 ),
             },

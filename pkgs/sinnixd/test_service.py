@@ -8367,6 +8367,7 @@ def test_job_store_fsyncs_parents_when_creating_state_directories(
         tmp_path,
         store.root,
         store.root,
+        store.root,
         store.logs_root,
         store.root,
         store.root,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -565,6 +566,86 @@ def test_terminal_capture_leaves_unparseable_usage_as_null(
         "cached_tokens": None,
         "model": None,
     }
+
+
+def test_timeout_preserves_dirty_agent_work_and_writes_handoff(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Anti-vacuity: timeout terminalization must leave a WIP commit and machine handoff."""
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    subprocess.run(["git", "init", "--quiet", str(checkout)], check=True)
+    subprocess.run(
+        ["git", "-C", str(checkout), "config", "user.name", "Fixture"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(checkout), "config", "user.email", "fixture@example.test"],
+        check=True,
+    )
+    (checkout / "tracked.txt").write_text("base\n")
+    subprocess.run(["git", "-C", str(checkout), "add", "tracked.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(checkout), "commit", "--quiet", "-m", "base"], check=True
+    )
+    monkeypatch.setattr(jobs_module, "revalidate_registered_checkout", lambda _: checkout)
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "Result": "timeout",
+            "ExecMainStatus": "1",
+        }
+    )
+    jobs = generic_jobs(tmp_path, systemd)
+    identity = {
+        "project_id": "fixture",
+        "project_path": str(checkout),
+        "checkout_id": "lane",
+        "path": str(checkout),
+        "git_common_dir": str(checkout / ".git"),
+        "head": subprocess.run(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip(),
+    }
+    started = jobs.start(
+        GenericJobSpec(
+            kind="attested-agent",
+            command=("fixture-agent",),
+            working_directory=str(checkout),
+            environment={},
+            timeout_seconds=60,
+            principal="agent-control",
+            checkout=identity,
+            result_kind="last-message",
+        )
+    )
+    record = jobs.store.load(started["job_id"])
+    record.log_path.write_text("\n".join(f"log-{index}" for index in range(120)))
+    (checkout / "wip.txt").write_text("preserve me\n")
+
+    terminal = jobs.get(started["job_id"])
+
+    assert terminal["state"]["phase"] == "timed_out"
+    assert terminal["state"]["timeout_wip"]["wip_commit"]
+    assert not subprocess.run(
+        ["git", "-C", str(checkout), "status", "--porcelain"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    subject = subprocess.run(
+        ["git", "-C", str(checkout), "log", "-1", "--format=%s"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert subject == f"wip: preserved at timeout {started['job_id']}"
+    handoff = json.loads(record.handoff_path.read_text())
+    assert handoff["job_id"] == started["job_id"]
+    assert handoff["log_tail"] == [f"log-{index}" for index in range(20, 120)]
 
 
 @pytest.mark.parametrize(
