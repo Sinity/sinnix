@@ -8859,8 +8859,11 @@ def test_job_wait_caps_manager_calls_at_its_remaining_deadline(
 
     monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
     monkeypatch.setattr(
-        "sinnixd.jobs.time.sleep",
-        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+        "sinnixd.jobs.TerminalEvents.wait_terminal",
+        lambda self, job_ids, seconds: (
+            clock.__setitem__(0, clock[0] + seconds),
+            False,
+        )[1],
     )
     systemd = UnavailableSystemd()
     jobs = GenericJobs(

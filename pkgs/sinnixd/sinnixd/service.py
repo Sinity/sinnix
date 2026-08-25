@@ -630,17 +630,37 @@ class SinnixdService:
                 )
             )
         if operation == "job.wait":
-            job_id = self._authorize_job(
-                principal, self._job_argument(arguments, "job_id")
-            )
             timeout_seconds = arguments.get("timeout_seconds", 30)
-            if set(arguments) - {"job_id", "timeout_seconds"}:
-                raise ValueError("job.wait accepts job_id and optional timeout_seconds")
             if not isinstance(timeout_seconds, int) or isinstance(
                 timeout_seconds, bool
             ):
                 raise ValueError("job.wait timeout_seconds must be an integer")
+            if "job_ids" in arguments:
+                if set(arguments) - {"job_ids", "timeout_seconds"}:
+                    raise ValueError(
+                        "job.wait accepts job_ids and optional timeout_seconds"
+                    )
+                job_ids = arguments.get("job_ids")
+                if not isinstance(job_ids, list) or any(
+                    not isinstance(job_id, str) or not job_id for job_id in job_ids
+                ):
+                    raise ValueError("job.wait job_ids must be non-empty strings")
+                authorized = tuple(
+                    self._authorize_job(principal, job_id) for job_id in job_ids
+                )
+                return self._cleanup_terminal(
+                    self.jobs.wait_any(authorized, timeout_seconds)
+                )
+            job_id = self._authorize_job(
+                principal, self._job_argument(arguments, "job_id")
+            )
+            if set(arguments) - {"job_id", "timeout_seconds"}:
+                raise ValueError("job.wait accepts job_id and optional timeout_seconds")
             return self._cleanup_terminal(self.jobs.wait(job_id, timeout_seconds))
+        if operation == "job.notify-exit":
+            if set(arguments) - {"job_id", "exit_code"}:
+                raise ValueError("job.notify-exit accepts job_id and exit_code")
+            return self.jobs.notify_exit(self._job_argument(arguments, "job_id"))
         if operation == "job.logs":
             job_id = self._authorize_job(
                 principal, self._job_argument(arguments, "job_id")
