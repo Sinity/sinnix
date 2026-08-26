@@ -1,10 +1,27 @@
 #!/usr/bin/env bash
 # Coordinator helpers over agentctl's JSON envelopes.
-# actl result <job>    -> last-message content, plain
-# actl running         -> count of running+queued jobs
-# actl jobs [n]        -> compact fleet head
-# actl ws [pattern]    -> workspace list rows (id name state), optionally filtered
+# actl result <job|prefix>  -> last-message content, plain (accepts a job-id prefix)
+# actl branch <job|prefix>  -> the lane branch for a job
+# actl running              -> count of running+queued jobs
+# actl jobs [n]             -> compact fleet head
+# actl ws [pattern]         -> workspace list rows (id name state), optionally filtered
+# actl unharvested          -> lanes whose job succeeded but whose harvest never published
 set -u
+
+# Resolve a job-id prefix to the full UUID from the durable job store. The
+# event stream and fleet output both abbreviate ids, so every coordinator call
+# used to hand-roll this lookup.
+resolve_job() {
+  local want=$1
+  case "$want" in
+    *-*-*-*-*) printf '%s\n' "$want"; return 0 ;;
+  esac
+  local hit
+  hit=$(find "$HOME/.local/state/sinnixd/jobs" -maxdepth 1 -name "${want}*.json" 2>/dev/null | head -1)
+  [ -z "$hit" ] && { echo "no job matching prefix: $want" >&2; return 1; }
+  basename "$hit" .json
+}
+
 unwrap() { python3 -c "
 import json, sys
 d = json.load(sys.stdin)
@@ -23,7 +40,15 @@ if val is None:
 print(val if isinstance(val, str) else json.dumps(val, indent=1))
 "; }
 case "${1:?verb}" in
-  result) agentctl job result "$2" 2>&1 | unwrap content ;;
+  result) agentctl job result "$(resolve_job "$2")" 2>&1 | unwrap content ;;
+  branch) agentctl evidence "$(resolve_job "$2")" 2>/dev/null | awk '/^branch:/{print $2}' ;;
+  unharvested)
+    for lg in /realm/tmp/work/h-*.log; do
+      [ -e "$lg" ] || continue
+      tail -1 "$lg" 2>/dev/null | grep -q HARVEST-FAIL || continue
+      nm=$(basename "$lg" .log); nm=${nm#h-}
+      printf '%s\t%s\n' "$nm" "$(tail -1 "$lg")"
+    done ;;
   running) agentctl fleet 2>/dev/null | awk 'NR>1 && ($NF=="running" || $NF=="queued" || $NF=="submitted")' | wc -l ;;
   jobs) agentctl fleet 2>/dev/null | head -"${2:-12}" ;;
   ws) agentctl workspace list 2>&1 | python3 -c "
