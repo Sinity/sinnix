@@ -36,6 +36,7 @@ let
     runtimeInputs = [
       pkgs.systemd
       scriptPkgs.sinnix-ops-reducer
+      scriptPkgs.sinnixd
     ];
     text = ''
       umask 0002
@@ -45,7 +46,13 @@ let
       else
         result="$(systemctl show "$unit" -p Result --value 2>/dev/null || true)"
       fi
-      exec sinnix-ops-reducer emit-failure --unit "$unit" --result "''${result:-unknown}"
+      sinnix-ops-reducer emit-failure --unit "$unit" --result "''${result:-unknown}"
+      # Health transitions and the campaign reactor have distinct consumers,
+      # so preserve the same failure in the daemon's append-only event spool.
+      # The spool is advisory: a permission or storage failure must not hide
+      # the authoritative health transition above.
+      sinnixd-event --event-spool ${lib.escapeShellArg "${cfg.paths.stateRoot}/agentctl/events.jsonl"} \
+        --unit "$unit" --result "''${result:-unknown}" || true
     '';
   };
 

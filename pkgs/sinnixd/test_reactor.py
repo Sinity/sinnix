@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sinnixd.reactor import CampaignBoard, CampaignReactor, PullRequestRecord
+from sinnixd.reactor import CampaignBoard, CampaignReactor, PullRequestRecord, event_main
 
 
 class FakeBeadCloser:
@@ -154,6 +154,30 @@ def test_malformed_spool_line_is_recorded_and_does_not_block_following_events(
     append(spool, lane_event("lane-2"))
 
     assert reactor.run_once() == 2
+
+
     board = CampaignBoard.load(board_path)
     assert board.errors[0]["offset"] == "0"
     assert board.lanes["lane-2"].review_ready
+
+
+def test_failure_event_reaches_the_shared_spool(tmp_path: Path) -> None:
+    spool = tmp_path / "events.jsonl"
+
+    assert event_main(
+        [
+            "--event-spool",
+            str(spool),
+            "--unit",
+            "sinnixd-reactor.service",
+            "--result",
+            "exit-code",
+        ]
+    ) == 0
+
+    event = json.loads(spool.read_text().strip())
+    assert event["schema_version"] == 1
+    assert event["kind"] == "service_failure"
+    assert event["unit"] == "sinnixd-reactor.service"
+    assert event["result"] == "exit-code"
+    assert event["event_id"]
