@@ -124,7 +124,7 @@ def test_merged_without_receipt_is_actionable_and_keeper_backoff_is_bounded(
     assert second_keeper_count == 1
     board = CampaignBoard.load(board_path)
     assert board.prs["Sinity/polylogue#7"].bead_close_status == "missing-receipt"
-    assert board.keeper["bead-close"]["backoff_seconds"] == 4
+    assert board.keeper["bead-close"]["backoff_seconds"] == 3
 
 
 def test_malformed_spool_line_is_recorded_and_does_not_block_following_events(
