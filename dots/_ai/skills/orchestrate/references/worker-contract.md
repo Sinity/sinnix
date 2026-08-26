@@ -43,6 +43,16 @@ Every implementation dispatch carries, verbatim in the prompt:
    pipestatus (or capture to file) before claiming a gate passed.
 6. **No scope expansion**: discoveries become bd filings or report notes,
    never inline extra work.
+7. **Exit at current master** (2026-08-26, from a wave where every stale-base
+   branch cost a coordinator fix loop): before the final report, `git fetch`
+   and rebase the branch onto `origin/master`, rerun the repo's quick gate in
+   the REBASED state (gates added mid-wave — reachability, closure — only run
+   here), fix what it surfaces, and push. A conflict the lane cannot resolve
+   honestly is reported as such — never force-resolved to green.
+8. **Machine trailer**: end the report with exact lines
+   `LANE-BRANCH: <branch>` / `LANE-COMMIT: <sha>` / `LANE-QUICK: green|red|blocked-env`
+   / `LANE-CLASSIFICATION: <one line per finding for fix lanes>` so the
+   harvester parses state instead of prose.
 
 Verification economics in lanes (operator ruling, 2026-08-26): lanes run
 SELECTED verification from the seed inherited off the main checkout — never
