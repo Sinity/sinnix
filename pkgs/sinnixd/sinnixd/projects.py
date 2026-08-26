@@ -239,6 +239,7 @@ class ProjectEnvironment:
     preflight: tuple[str, ...] = ()
     declared: tuple[tuple[str, str], ...] = ()
     require: tuple[str, ...] = ()
+    preflight_timeout_seconds: int = 30
 
     def values(self) -> dict[str, str]:
         """Resolve the job environment; a missing required variable fails loudly.
@@ -280,7 +281,7 @@ class ProjectEnvironment:
         return ("env", *assignments, *self.command, *payload)
 
     def catalog_row(self, *, agent_capable: bool) -> dict[str, Any]:
-        return {
+        row = {
             "kind": self.kind,
             "command": list(self.command),
             "preflight": list(self.preflight),
@@ -288,6 +289,9 @@ class ProjectEnvironment:
             "declared": sorted(name for name, _value in self.declared),
             "require": list(self.require),
         }
+        if self.preflight_timeout_seconds != 30:
+            row["preflight_timeout_seconds"] = self.preflight_timeout_seconds
+        return row
 
 
 @dataclass(frozen=True)
@@ -1014,6 +1018,15 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         raise ProjectConfigError(
             f"{descriptor} environment.require must name uppercase non-SINNIX variables"
         )
+    preflight_timeout_seconds = environment.get("preflight_timeout_seconds", 30)
+    if (
+        not isinstance(preflight_timeout_seconds, int)
+        or isinstance(preflight_timeout_seconds, bool)
+        or not 1 <= preflight_timeout_seconds <= 3600
+    ):
+        raise ProjectConfigError(
+            f"{descriptor} environment.preflight_timeout_seconds must be an integer between 1 and 3600"
+        )
     execution_environment = ProjectEnvironment(
         kind=environment_kind,
         command=_string_list(environment.get("command"), "environment.command"),
@@ -1026,6 +1039,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             if "preflight" in environment
             else ()
         ),
+        preflight_timeout_seconds=preflight_timeout_seconds,
         declared=tuple(sorted(declared_values.items())),
         require=required_names,
     )
