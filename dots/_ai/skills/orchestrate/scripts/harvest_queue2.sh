@@ -108,11 +108,22 @@ GATED_AT=$(git rev-parse origin/master)
 # --- Phase A gate under a 4-slot semaphore -------------------------------
 QLOG="/realm/tmp/work/harvest-$(basename "$WT").quick.log"
 gate() { (cd "$WT" && "${DEV[@]}" devtools verify --quick >"$QLOG" 2>&1); }
+# Mechanical remedies applied once before declaring a gate failure. Generated
+# surfaces drifting out of sync accounted for 3 of 15 stuck harvests on
+# 2026-08-26 and are regenerable, not judgment.
+mechanical_render() {
+  grep -q "render all ... FAILED\|out of sync" "$QLOG" 2>/dev/null || return 1
+  (cd "$WT" && "${DEV[@]}" devtools render all >/dev/null 2>&1) || return 1
+  git -C "$WT" diff --quiet && return 1
+  git -C "$WT" add -A . && git -C "$WT" commit -q --amend --no-edit
+}
+
 run_gate() {
   if ! gate; then
     python3 /home/sinity/.claude/skills/review-land/scripts/rebase_baselines.py "$QLOG" &&
-      git add devtools/patterns/baselines/ && git -C "$WT" commit -q --amend --no-edit && gate ||
-      return 1
+      git add devtools/patterns/baselines/ && git -C "$WT" commit -q --amend --no-edit && gate && return 0
+    mechanical_render && gate && return 0
+    return 1
   fi
 }
 
