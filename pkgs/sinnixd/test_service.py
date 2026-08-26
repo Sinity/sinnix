@@ -2863,6 +2863,8 @@ def request(
 class FakeSystemdJobs:
     started: list[dict[str, object]] = field(default_factory=list)
     stopped: list[str] = field(default_factory=list)
+    scheduled: list[dict[str, object]] = field(default_factory=list)
+    timers: set[str] = field(default_factory=set)
     properties: dict[str, str] = field(
         default_factory=lambda: {
             "LoadState": "loaded",
@@ -2915,6 +2917,20 @@ class FakeSystemdJobs:
             "ExecMainStatus": "15",
             "InvocationID": self.properties.get("InvocationID", "fixture-invocation"),
         }
+
+    def schedule_timer(
+        self, *, unit: str, on_calendar: str, command: tuple[str, ...]
+    ) -> None:
+        self.scheduled.append(
+            {"unit": unit, "on_calendar": on_calendar, "command": command}
+        )
+        self.timers.add(unit)
+
+    def timer_exists(self, unit: str) -> bool:
+        return unit in self.timers
+
+    def unschedule_timer(self, unit: str) -> None:
+        self.timers.discard(unit)
 
 
 def generic_jobs(tmp_path: Path, systemd: FakeSystemdJobs | None = None) -> GenericJobs:
@@ -4352,6 +4368,58 @@ def test_project_catalog_is_explicit_and_operation_catalog_is_bounded(
     ]
     assert operations["parameterized"]["result"] == "json"
     assert operations["pytest_receipt"]["result"] == "pytest"
+
+
+def test_scheduled_operation_registers_restart_safe_timer_and_preserves_provenance(
+    tmp_path: Path,
+) -> None:
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            "[operations.check]\n", '[operations.check]\nschedule = "hourly"\n'
+        )
+    )
+    systemd = FakeSystemdJobs()
+    catalog = ProjectCatalog([tmp_path])
+    state_root = tmp_path.parent / "scheduled-job-state"
+    SinnixdService(
+        catalog,
+        jobs=GenericJobs(systemd, GenericJobStore(state_root), wait_poll_seconds=0.001),
+    )
+
+    assert len(systemd.scheduled) == 1
+    timer = systemd.scheduled[0]
+    assert timer["on_calendar"] == "hourly"
+    assert timer["command"][-2:] == ("--schedule-id", "fixture:check")
+    assert catalog.get("fixture").operation("check").schedule == "hourly"
+
+    restarted = SinnixdService(
+        catalog,
+        jobs=GenericJobs(systemd, GenericJobStore(state_root), wait_poll_seconds=0.001),
+    )
+    assert len(systemd.scheduled) == 1
+
+    response = restarted.dispatch(
+        request(
+            "job.fire",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "operation": "check",
+                "schedule_id": "fixture:check",
+            },
+        )
+    )
+    assert response.ok
+    record = GenericJobStore(state_root).load(response.payload.inline["job_id"])
+    assert record.spec.cache_key is None
+    assert record.spec.dimensions == {
+        "trigger": "systemd-timer",
+        "schedule_id": "fixture:check",
+        "schedule": "hourly",
+        "timer_unit": f"{timer['unit']}.timer",
+    }
 
 
 def test_project_operations_reports_descriptor_drift(tmp_path: Path) -> None:

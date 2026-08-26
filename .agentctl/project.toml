@@ -71,6 +71,16 @@ estimate_memory_bytes = 12884901888
 scratch = "nvme"
 timeout_seconds = 7200
 
+[operations.census]
+description = "Run the evidence-joined usage census"
+exec = ["sinnix-census", "--window-days", "90"]
+pool = "normal"
+result = "exit"
+cache = "none"
+exclusive_keys = ["sinnix:usage-census"]
+estimate_memory_bytes = 536870912
+schedule = "weekly"
+
 [conflicts]
 exact_files = ["flake.lock", "flake.nix"]
 generated_surfaces = ["docs/agent-environment.md", "docs/config-default-audit-features.md"]

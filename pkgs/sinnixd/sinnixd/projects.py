@@ -28,6 +28,7 @@ MAX_OPERATION_PARAMETERS = 32
 MAX_PARAMETER_LIST_ITEMS = 32
 MAX_PARAMETER_STRING_LENGTH = 128
 MAX_PARAMETER_ENUM_VALUES = 64
+MAX_OPERATION_SCHEDULE_LENGTH = 256
 MIN_PARAMETER_INTEGER = -(2**31)
 MAX_PARAMETER_INTEGER = 2**31 - 1
 MAX_SERVICE_PORT_SLOTS = 8
@@ -429,6 +430,7 @@ class ProjectOperation:
     parameters: tuple[OperationParameter, ...] = ()
     service: OperationService | None = None
     plan_node: bool = False
+    schedule: str | None = None
 
     def derive_argv(
         self, raw_parameters: Mapping[str, Any]
@@ -494,6 +496,7 @@ class ProjectOperation:
             "parameters": [parameter.catalog_row() for parameter in self.parameters],
             "service": self.service.catalog_row() if self.service is not None else None,
             "plan_node": self.plan_node,
+            "schedule": self.schedule,
         }
 
 
@@ -1177,6 +1180,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             "timeout_seconds",
             "service",
             "plan_node",
+            "schedule",
         }
         if set(definition) - allowed_operation:
             raise ProjectConfigError(
@@ -1228,6 +1232,19 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         plan_node = definition.get("plan_node", False)
         if not isinstance(plan_node, bool):
             raise ProjectConfigError(f"operations.{name}.plan_node is invalid")
+        schedule = definition.get("schedule")
+        if schedule is not None and (
+            not isinstance(schedule, str)
+            or not schedule
+            or len(schedule) > MAX_OPERATION_SCHEDULE_LENGTH
+            or any(
+                ord(character) < 0x20 or ord(character) == 0x7F
+                for character in schedule
+            )
+        ):
+            raise ProjectConfigError(
+                f"operations.{name}.schedule must be a non-empty OnCalendar expression"
+            )
         operations.append(
             ProjectOperation(
                 name=name,
@@ -1249,6 +1266,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 ),
                 service=service,
                 plan_node=plan_node,
+                schedule=schedule,
             )
         )
     operation_names = {operation.name for operation in operations}
@@ -1288,6 +1306,17 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         raise ProjectConfigError(
             f"{descriptor} operations with required parameters cannot declare dependencies: "
             + ", ".join(sorted(invalid_required_parameter_operations))
+        )
+    invalid_scheduled_operations = {
+        operation.name
+        for operation in operations
+        if operation.schedule is not None
+        and any(parameter.required for parameter in operation.parameters)
+    }
+    if invalid_scheduled_operations:
+        raise ProjectConfigError(
+            f"{descriptor} scheduled operations cannot have required parameters: "
+            + ", ".join(sorted(invalid_scheduled_operations))
         )
     if workspace is not None:
         unknown_verifiers = set(workspace.verification_operations) - operation_names
@@ -1331,6 +1360,16 @@ class ProjectCatalog:
             return self._adapters[project_id]
         except KeyError as error:
             raise KeyError(f"unknown project: {project_id}") from error
+
+    def scheduled_operations(
+        self,
+    ) -> tuple[tuple[ProjectAdapter, ProjectOperation], ...]:
+        return tuple(
+            (project, operation)
+            for project in self._adapters.values()
+            for operation in project.operations
+            if operation.schedule is not None
+        )
 
     @staticmethod
     def _git(path: Path, *arguments: str) -> str:

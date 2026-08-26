@@ -22,5 +22,13 @@
       eventDriven = true;
       staleAfterSeconds = 604800;
     }
+    {
+      # The weekly usage census is a declared Sinnixd operation rather than a
+      # service-owned timer. Its output remains a freshness-monitored lane.
+      name = "usage-census";
+      path = "${config.sinnix.paths.machineRoot}/usage-census.jsonl";
+      cadenceSeconds = 604800;
+      staleAfterSeconds = 1209600;
+    }
   ];
 }
