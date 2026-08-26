@@ -2390,6 +2390,11 @@ class GenericJobs:
             }
 
         state_path = self.store.root / "schedules.json"
+        if not desired and not state_path.exists():
+            # Nothing declared and nothing to retire: never touch the store
+            # root (service construction must not create state directories
+            # for projects that declare no schedules).
+            return
         previous: dict[str, dict[str, str]] = {}
         if state_path.exists():
             try:
