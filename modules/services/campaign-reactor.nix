@@ -161,7 +161,7 @@ mkServiceModule {
           manager = "user";
           resourceClass = "background-maintenance";
           execStart = "${scriptPkgs.sinnixd}/bin/sinnixd-planner --output ${lib.escapeShellArg plannerOutput} ${projectRootArgs}";
-          unit = {
+          serviceConfig = {
             ReadWritePaths = [ (builtins.dirOf plannerOutput) ];
           };
           timer = {
