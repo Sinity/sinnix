@@ -846,6 +846,7 @@ class SinnixdService:
                     "dimensions",
                     "exclusive_keys",
                     "reject_conflicts",
+                    "coordinator_label",
                 }
             ):
                 raise ValueError(
@@ -873,6 +874,7 @@ class SinnixdService:
                     dimensions=arguments.get("dimensions"),
                     exclusive_keys=arguments.get("exclusive_keys", ()),
                     reject_conflicts=arguments.get("reject_conflicts", False),
+                    coordinator_label=arguments.get("coordinator_label"),
                 )
             )
         if operation == "job.get":

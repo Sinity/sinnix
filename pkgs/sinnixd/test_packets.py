@@ -232,7 +232,13 @@ def test_launch_creates_then_dispatches_with_dimensions(
     )
     monkeypatch.setattr(cli_module, "SubprocessBdReader", lambda _root: reader)
     monkeypatch.setattr(cli_module, "call", fake_call)
-    monkeypatch.setattr(sys, "argv", ["agentctl", "packet", "launch", "leader"])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "agentctl", "packet", "launch", "leader", "--coordinator-label", "wave-a"
+        ],
+    )
 
     assert cli_module.main() == 0
     assert [request.operation for request in calls] == [
@@ -240,6 +246,7 @@ def test_launch_creates_then_dispatches_with_dimensions(
         "job.agent.start",
     ]
     assert calls[1].arguments["checkout_id"] == "worktree-abc"
+    assert calls[1].arguments["coordinator_label"] == "wave-a"
     assert calls[1].arguments["parameters"]["template_version"] == "v2"
     assert calls[1].arguments["parameters"]["dimensions"]["conflict_keys"] == [
         "area:parser",

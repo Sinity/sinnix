@@ -108,6 +108,13 @@ def _add_agent_launch_arguments(
     target.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     target.add_argument("--dimensions-json", default="{}")
     target.add_argument(
+        "--coordinator-label",
+        "--coordinator",
+        "--campaign-label",
+        dest="coordinator_label",
+        help="Optional campaign/coordinator label copied to terminal events.",
+    )
+    target.add_argument(
         "--bypass-admission",
         action="store_true",
         help="Start immediately for an emergency, bypassing agent admission.",
@@ -258,6 +265,13 @@ def parser() -> argparse.ArgumentParser:
     packet_launch.add_argument("--project")
     packet_launch.add_argument("--plan", action="store_true")
     packet_launch.add_argument("--credential-profile", default="subscription")
+    packet_launch.add_argument(
+        "--coordinator-label",
+        "--coordinator",
+        "--campaign-label",
+        dest="coordinator_label",
+        help="Optional campaign/coordinator label copied to terminal events.",
+    )
     packet_launch.add_argument(
         "--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS
     )
@@ -602,6 +616,11 @@ def main() -> int:
                 "timeout_seconds": arguments.timeout_seconds,
                 "result": "last-message",
                 "admission_bypass": arguments.bypass_admission,
+                **(
+                    {"coordinator_label": arguments.coordinator_label}
+                    if arguments.coordinator_label is not None
+                    else {}
+                ),
                 **({"dimensions": dimensions} if dimensions else {}),
             },
             "agent-control",
@@ -921,6 +940,7 @@ def main() -> int:
                         "effort": snapshot.dimensions.effort,
                         "credential_profile": arguments.credential_profile,
                         "timeout_seconds": arguments.timeout_seconds,
+                        "coordinator_label": arguments.coordinator_label,
                         "result": "last-message",
                         "parameters": {
                             "template_version": packet_config.template_version,
