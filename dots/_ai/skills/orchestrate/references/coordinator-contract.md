@@ -42,13 +42,23 @@ duplicate-bead launches are refused typed when a live job owns the workspace.
    inverted? A lane that papered over a real defect gets REJECTED with the
    reason recorded on the bead — never merged "to keep moving".
 4. Write the PR body AND the bead close-reason now (decision time), then
-   `harvest_queue.sh <wt> <title> <body> [<bead> <reason-file>]` — it
-   flock-serializes, clears stale locks, rebases, runs the quick gate (one
-   mechanical baseline pass), pushes, PRs, arms auto-merge + a watcher that
-   closes the bead on merge and updates the board. Long gates: run it
-   with run_in_background.
+   `harvest_queue2.sh <wt> <title> <body> [<bead> <reason-file>]` — two-phase:
+   the quick gate runs in PARALLEL across harvests (4-slot semaphore, one
+   mechanical baseline pass), only push/PR/auto-merge serialize behind the
+   repo flock (re-gating only if master moved). A bead-close receipt MUST
+   carry a literal `DISPOSITION: close` line — slice receipts (bead stays
+   open) queue WITHOUT bead args and the coordinator comments the bead
+   instead. Queue with run_in_background; nohup survives the tool shell.
+   (`harvest_queue.sh` is the retired serial v1 — same interface.)
 5. Dispose worktrees only after content-equality/merge verification
    (`git worktree remove` + branch delete); live-process check first.
+
+**Launch wedges** (sinnix-dn4c): packet launch is an accidental saga — a
+step failure is redacted to `OWNER_UNAVAILABLE "sinnixd is unavailable"` and
+each retry advances one step (worktree → record → job). Retry ~3x spaced;
+if a clean orphan worktree blocks recovery, `packet_unwedge <repo> <packet>`
+removes it (refuses dirty/unpublished/live-process trees — a live-process
+refusal means a provision is still running: wait, don't force).
 
 **Refill** (keeper tick): `board` first — if lanes ≥ target and nothing
 review-ready, say so and stop. Otherwise `bd ready` (repo cwd), plan with
