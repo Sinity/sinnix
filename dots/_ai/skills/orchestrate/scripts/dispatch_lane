@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Dispatch an ad-hoc lane with the standing worker contract injected by
 # reference — author only the task delta.
-# Usage: dispatch_lane <project> <delta-file> [model=gpt-5.6-luna] [effort=high]
+# Usage: dispatch_lane <project> <delta-file> [model=gpt-5.6-luna] [effort=high] [checkout=default]
+# checkout: "default" for a fresh workspace, or an existing worktree path for completion lanes.
 set -u
-PROJECT=$1; DELTA=$2; MODEL=${3:-gpt-5.6-luna}; EFFORT=${4:-high}
+PROJECT=$1; DELTA=$2; MODEL=${3:-gpt-5.6-luna}; EFFORT=${4:-high}; CHECKOUT=${5:-default}
 PROMPT=$(mktemp /realm/tmp/work/dispatch-XXXX.md)
 cat > "$PROMPT" <<HDR
 Read and follow the standing worker contract FIRST:
@@ -15,6 +16,6 @@ current origin/master with the quick gate green post-rebase, machine trailer).
 # Task
 HDR
 cat "$DELTA" >> "$PROMPT"
-agentctl agent launch --project "$PROJECT" --checkout default \
+agentctl agent launch --project "$PROJECT" --checkout "$CHECKOUT" \
   --prompt-file "$PROMPT" --backend codex --model "$MODEL" --effort "$EFFORT" 2>&1 \
   | grep -oE '"job_id": "[a-f0-9-]*"|"message": "[^"]*"' | head -1
