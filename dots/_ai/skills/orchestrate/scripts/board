@@ -3,6 +3,19 @@
 # compatibility command only asks it to drain once or reads its typed board.
 set -eu
 case "${1:-status}" in
+  plan)
+    python3 - <<'PYEOF'
+import json, pathlib
+path = pathlib.Path("/realm/tmp/work/dispatch-plan.json")
+try:
+    plan = json.loads(path.read_text())
+except Exception:
+    plan = {"groups": [], "generated_at": "never"}
+print(f"generated {plan.get('generated_at', 'never')} | generation {plan.get('generation', 'none')}")
+for row in plan.get("groups", []):
+    print(" group", row.get("order"), row.get("group"), "orbit:", row.get("orbit"), "gates:", ",".join(row.get("judgment_gate", [])) or "none")
+PYEOF
+    ;;
   sync)
     exec sinnixd-reactor --once
     ;;
