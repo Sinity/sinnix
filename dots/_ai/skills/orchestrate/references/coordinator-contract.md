@@ -25,6 +25,40 @@ tells you where state lives and what the loops are.
 - **History**: per-project memory (`~/.claude/projects/<p>/memory/MEMORY.md`)
   and the repo's `docs/atlas/`.
 
+## Capability map — READ BEFORE WRITING ANY PROCEDURE
+
+The substrate owns more than this document historically described, and a
+coordinator that does not know a verb exists will hand-roll a worse copy of it.
+That happened all through 2026-08-26: a ~200-line shell harvest pipeline was
+built and documented here as the sanctioned method while `agentctl workspace
+publish` already did exactly the same thing as a typed operation with a
+receipt; disposal was hand-scripted while `finish-integrated` already existed
+with the correct squash-proof check. Two independent agents reimplemented the
+same operation because neither had the verb in context. **That is a design
+defect in this document, not in the agents.**
+
+So: before scripting anything, look for the verb. `agentctl <noun> --help`.
+
+| Need | Verb (NOT a hand-rolled equivalent) |
+| --- | --- |
+| open a PR for a finished workspace | `agentctl workspace publish --job <j> --title T [--body F] [--wait]` |
+| land / integrate a workspace | `agentctl workspace land --job <j>` |
+| dispose after a GitHub merge | `agentctl workspace finish-merged` |
+| dispose when content is already in a ref | `agentctl workspace finish-integrated --target <ref>` (tree-contribution check; squash-proof) |
+| protect work before risky integration | `agentctl workspace checkpoint` / `restore` / `recover` |
+| stacked branches | `agentctl workspace stack` / `restack` |
+| review state of a workspace | `agentctl workspace review-status` |
+| complete a packet | `agentctl packet finalize --verification-job <j> --packet-job <j>` |
+| packet state | `agentctl packet status` |
+| task-backend mutations | `agentctl task create/claim/complete/note/update/relate/reconcile/snapshot` |
+| wait on work instead of polling | `agentctl job wait`, `agentctl agent wait`, `agentctl plan wait` |
+| all evidence for a job or workspace | `agentctl evidence <id>` |
+
+If a needed capability genuinely does not exist, that is a bead against the
+substrate — not a reason to grow the shell pile. If you find yourself writing
+git plumbing, gh calls, or bead mutations by hand, stop and check this table
+first.
+
 ## The loops
 
 **Dispatch**: prefer `agentctl packet launch <bead> --project <p>` (compiler
