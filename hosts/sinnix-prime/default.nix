@@ -291,8 +291,6 @@
     # (modules/services/ai-control.nix), so it coexists with a resident
     # ollama/koboldcpp session instead of making every retrieval turn
     # pay a GPU reload.
-    # Weekly evidence-joined usage census.
-    census.enable = true;
     llama-cpp = {
       enable = true;
       model = "qwen3-reranker-0.6b-q8_0.gguf";

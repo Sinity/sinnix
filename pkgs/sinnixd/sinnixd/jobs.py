@@ -56,6 +56,8 @@ JOB_UNIT_PREFIX = "sinnixd-job-"
 JOB_LIST_CURSOR_SCHEMA_VERSION = 1
 MAX_JOB_LIST_CURSOR_BYTES = 512
 SYSTEMD_ERROR_CODE = "systemd-job-error"
+SCHEDULE_STATE_SCHEMA_VERSION = 1
+SCHEDULE_UNIT_PREFIX = "sinnixd-schedule-"
 ADMISSION_SCHEMA_VERSION = 1
 CAPACITY_SCHEMA_VERSION = 1
 CAPACITY_RETRY_DELAYS_SECONDS = (5, 30, 120)
@@ -99,6 +101,14 @@ class SystemdJobError(RuntimeError):
 
 class SystemdJobTimeout(SystemdJobError):
     """Raised only when the bounded systemd subprocess times out."""
+
+
+def scheduled_operation_id(project_id: str, operation_name: str) -> str:
+    return f"{project_id}:{operation_name}"
+
+
+def scheduled_timer_unit(schedule_id: str) -> str:
+    return SCHEDULE_UNIT_PREFIX + hashlib.sha256(schedule_id.encode()).hexdigest()[:24]
 
 
 class JobRecordError(ValueError):
@@ -347,6 +357,14 @@ class SystemdJobs(Protocol):
 
     def stop(self, unit: str) -> None: ...
 
+    def schedule_timer(
+        self, *, unit: str, on_calendar: str, command: Sequence[str]
+    ) -> None: ...
+
+    def timer_exists(self, unit: str) -> bool: ...
+
+    def unschedule_timer(self, unit: str) -> None: ...
+
 
 @dataclass(frozen=True)
 class UserSystemdJobs:
@@ -447,6 +465,53 @@ class UserSystemdJobs:
 
     def stop(self, unit: str) -> None:
         self._run(["systemctl", "--user", "stop", unit])
+
+    def schedule_timer(
+        self, *, unit: str, on_calendar: str, command: Sequence[str]
+    ) -> None:
+        self._run(
+            [
+                "systemd-run",
+                "--user",
+                "--quiet",
+                f"--unit={unit}",
+                f"--on-calendar={on_calendar}",
+                "--timer-property=Persistent=true",
+                "--",
+                *command,
+            ]
+        )
+
+    def timer_exists(self, unit: str) -> bool:
+        try:
+            output = self._run(
+                [
+                    "systemctl",
+                    "--user",
+                    "show",
+                    f"{unit}.timer",
+                    "--property=LoadState",
+                ]
+            )
+        except SystemdJobError:
+            return False
+        return output.strip() == "LoadState=loaded"
+
+    def unschedule_timer(self, unit: str) -> None:
+        try:
+            self._run(
+                [
+                    "systemctl",
+                    "--user",
+                    "stop",
+                    f"{unit}.timer",
+                    f"{unit}.service",
+                ]
+            )
+        except SystemdJobError:
+            # Registration is reconciled from the durable schedule map. A
+            # missing transient unit is already the desired state.
+            return
 
     @staticmethod
     def _run(
@@ -2291,6 +2356,118 @@ class GenericJobs:
                     self._finish_admission(record, state)
         self.store.prune_terminal_records(retention_days=self.record_retention_days)
 
+    def register_schedules(
+        self,
+        schedules: Sequence[tuple[ProjectAdapter, ProjectOperation]],
+        *,
+        agentctl_executable: str = "/run/current-system/sw/bin/agentctl",
+    ) -> None:
+        """Reconcile declared OnCalendar operations with user-manager timers.
+
+        The timer is only a durable wake-up. Its command returns to the daemon,
+        which creates the ordinary declared-operation job and records the
+        firing provenance in the job spec. The schedule map is durable so a
+        daemon restart can remove retired or changed transient units.
+        """
+        desired: dict[str, dict[str, str]] = {}
+        for project, operation in schedules:
+            assert operation.schedule is not None
+            schedule_id = scheduled_operation_id(project.project_id, operation.name)
+            unit = scheduled_timer_unit(schedule_id)
+            desired[schedule_id] = {
+                "project_id": project.project_id,
+                "operation": operation.name,
+                "schedule": operation.schedule,
+                "unit": unit,
+                "descriptor_digest": project.digest,
+            }
+
+        state_path = self.store.root / "schedules.json"
+        previous: dict[str, dict[str, str]] = {}
+        if state_path.exists():
+            try:
+                raw = json.loads(state_path.read_text())
+                if not isinstance(raw, Mapping):
+                    raise ValueError("schedule state must be an object")
+                entries = raw.get("schedules")
+                if raw.get(
+                    "schema_version"
+                ) != SCHEDULE_STATE_SCHEMA_VERSION or not isinstance(entries, list):
+                    raise ValueError("schedule state has an unsupported schema")
+                for entry in entries:
+                    if not isinstance(entry, Mapping) or not isinstance(
+                        entry.get("id"), str
+                    ):
+                        raise ValueError("schedule state contains an invalid entry")
+                    value = {
+                        key: entry.get(key)
+                        for key in (
+                            "project_id",
+                            "operation",
+                            "schedule",
+                            "unit",
+                            "descriptor_digest",
+                        )
+                    }
+                    if any(
+                        not isinstance(item, str) or not item for item in value.values()
+                    ):
+                        raise ValueError("schedule state contains invalid metadata")
+                    previous[entry["id"]] = value
+            except (OSError, json.JSONDecodeError, ValueError) as error:
+                raise JobRecordError(
+                    f"could not read schedule state: {error}"
+                ) from error
+
+        for schedule_id, entry in previous.items():
+            if schedule_id not in desired:
+                self.systemd.unschedule_timer(entry["unit"])
+
+        for schedule_id, entry in desired.items():
+            prior = previous.get(schedule_id)
+            if prior == entry and self.systemd.timer_exists(entry["unit"]):
+                continue
+            self.systemd.unschedule_timer(entry["unit"])
+            self.systemd.schedule_timer(
+                unit=entry["unit"],
+                on_calendar=entry["schedule"],
+                command=(
+                    agentctl_executable,
+                    "job",
+                    "fire",
+                    entry["project_id"],
+                    entry["operation"],
+                    "--schedule-id",
+                    schedule_id,
+                ),
+            )
+
+        _ensure_durable_directory(self.store.root)
+        temporary = state_path.with_suffix(".json.tmp")
+        descriptor = os.open(
+            temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+        )
+        try:
+            with os.fdopen(descriptor, "w") as handle:
+                json.dump(
+                    {
+                        "schema_version": SCHEDULE_STATE_SCHEMA_VERSION,
+                        "schedules": [
+                            {"id": schedule_id, **entry}
+                            for schedule_id, entry in sorted(desired.items())
+                        ],
+                    },
+                    handle,
+                    sort_keys=True,
+                )
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, state_path)
+            _fsync_directory(self.store.root)
+        finally:
+            temporary.unlink(missing_ok=True)
+
     def _recover_unpublished_declared_locked(
         self, record: GenericJobRecord
     ) -> GenericJobRecord:
@@ -2645,6 +2822,9 @@ class GenericJobs:
         workdir = checkout.path if checkout is not None else project.root
         environment = project.environment.values()
         tree = self._cache_tree(workdir)
+        scheduled_firing = bool(
+            dimensions is not None and isinstance(dimensions.get("schedule_id"), str)
+        )
         coalesce_key = (
             self._operation_identity_key(
                 project,
@@ -2656,12 +2836,15 @@ class GenericJobs:
                 checkout,
             )
             if not plan_node
+            and not scheduled_firing
             and (operation.service is None or operation.cache == "tree+environment")
             else None
         )
         cache_key = (
             coalesce_key
-            if not plan_node and operation.cache == "tree+environment"
+            if not plan_node
+            and not scheduled_firing
+            and operation.cache == "tree+environment"
             else None
         )
         state = self._admission_state()

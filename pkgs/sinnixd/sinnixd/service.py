@@ -33,6 +33,8 @@ from .jobs import (
     SystemdJobError,
     UserSystemdJobs,
     default_state_dir,
+    scheduled_operation_id,
+    scheduled_timer_unit,
 )
 from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from .packet import PacketFinalizeSaga, PacketSagaError, PacketSagaStore
@@ -129,6 +131,7 @@ class SinnixdService:
                     PacketSagaStore(self.jobs.store.root),
                 ),
             )
+        self.jobs.register_schedules(self.projects.scheduled_operations())
         _ = self.owners
 
     @property
@@ -679,6 +682,42 @@ class SinnixdService:
                     checkout=checkout,
                     contract=packet_contract,
                     dimensions=dimensions,
+                )
+            )
+        if operation == "job.fire":
+            if principal != "operator":
+                raise JobAuthorizationError(
+                    "scheduled operation firing requires the operator principal"
+                )
+            if set(arguments) != {"project_id", "operation", "schedule_id"}:
+                raise ValueError(
+                    "job.fire requires project_id, operation, and schedule_id"
+                )
+            project_id = self._job_argument(arguments, "project_id")
+            operation_name = self._job_argument(arguments, "operation")
+            schedule_id = self._job_argument(arguments, "schedule_id")
+            project = self.projects.get(project_id)
+            declared = project.operation(operation_name)
+            expected_id = scheduled_operation_id(project_id, operation_name)
+            if declared.schedule is None or schedule_id != expected_id:
+                raise ValueError(
+                    "job.fire does not match a declared operation schedule"
+                )
+            checkout = self.projects.checkout(project_id, "default")
+            return self._cleanup_terminal(
+                self.jobs.start_declared(
+                    project=project,
+                    operation=declared,
+                    correlation_id=correlation_id,
+                    principal=principal,
+                    parameters={},
+                    checkout=checkout,
+                    dimensions={
+                        "trigger": "systemd-timer",
+                        "schedule_id": schedule_id,
+                        "schedule": declared.schedule,
+                        "timer_unit": scheduled_timer_unit(schedule_id) + ".timer",
+                    },
                 )
             )
         if operation == "job.shell.start":
