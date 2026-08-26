@@ -65,6 +65,17 @@ Every implementation dispatch carries, verbatim in the prompt:
    after the replacement actually ships. Bead authors: never name a live path
    as a deletion target (that authoring defect caused this one).
 
+10. **Purge, do not retain** (operator ruling, 2026-08-26): the codebase
+   shrinks without sacrificing functionality. Retiring a route means deleting
+   the module, its compatibility aliases and re-exports, its docs, and its
+   tests IN THE SAME CHANGE — not leaving a shim "for compatibility" or a
+   "historical symbol" import. If one symbol in a retired module still has a
+   real consumer, move that symbol to its true owner and delete the rest
+   rather than keeping the module alive around it. Do not add a test asserting
+   deleted code is gone; that is a fossil of the diff. `redflags` mechanically
+   flags legacy/compat wording introduced in production code, so retaining a
+   shim will be caught at review.
+
 Verification economics in lanes (operator ruling, 2026-08-26): lanes run
 SELECTED verification from the seed inherited off the main checkout — never
 the corpus, and never bootstrap-from-scratch; selected-run false negatives

@@ -20,6 +20,9 @@ echo "$DIFF" | grep -qE "^\+.*(xfail|skipif|pytest\.mark\.skip)" && flag "new xf
 echo "$DIFF" | grep -qE "^diff --git a/devtools/(consumer_reachability|verify|patterns/baselines)" && flag "verification gate or baseline edited"
 echo "$DIFF" | grep -qE "^diff --git a/polylogue/storage/sqlite/migrations/" && flag "durable migration touched"
 echo "$DIFF" | grep -qE "^diff --git a/.*(train\.json)" && flag "train sidecar touched"
+# Legacy/compat retained instead of purged (operator standing rule 2026-08-26:
+# the codebase shrinks; retiring a route deletes it, its aliases, and its tests)
+echo "$DIFF" | awk '/^diff --git a\/polylogue\//{f=1} /^diff --git a\/(tests|docs)\//{f=0} f && /^\+/' | grep -qiE "legacy|backward.?compat|for compatibility|deprecated|historical (symbol|alias)|kept for" && flag "legacy/compat retained or introduced in production code"
 # Deleted test files
 git diff --name-status --diff-filter=D "$BASE"..HEAD | grep -q "^D\s*tests/" && flag "test files deleted"
 # Size sanity
