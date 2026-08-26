@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# Watch one PR to terminal state; on MERGED, close the linked bead with the
-# receipt written at decision time and update the campaign board. Appends a
-# terminal event to the agentctl spool either way.
+# Watch one PR to terminal state and append a typed terminal event.  The
+# sinnixd campaign reactor owns bead closure and board persistence.  Capture
+# the decision-time receipt before waiting so a later mutable file is never
+# consulted by the reaction.
 # Usage: merge_close.sh <repo> <pr> [<bead-id> <reason-file>]
-set -u
+set -eu
 REPO=$1; PR=$2; BEAD=${3:-}; REASON_FILE=${4:-}
 SPOOL=/realm/state/agentctl/events.jsonl
-BOARD=/realm/tmp/work/campaign-board.json
+DECIDED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+REASON=
+if [ -n "$BEAD" ] && [ -f "$REASON_FILE" ]; then
+  REASON=$(<"$REASON_FILE")
+fi
 for _ in $(seq 1 240); do
   state=$(gh pr view "$PR" -R "$REPO" --json state --jq .state 2>/dev/null) || state=""
   case "$state" in
@@ -14,22 +19,32 @@ for _ in $(seq 1 240); do
     OPEN|"") sleep 30 ;;
   esac
 done
-if [ "$state" = "OPEN" ]; then state=TIMEOUT; fi
-if [ "$state" = "MERGED" ] && [ -n "$BEAD" ] && [ -f "$REASON_FILE" ]; then
-  (bd close "$BEAD" --force --actor claude-overseer --reason "$(cat "$REASON_FILE")") \
-    && closed=true || closed=false
-else
-  closed=skipped
-fi
-python3 - "$BOARD" "$PR" "$state" "$BEAD" "$closed" <<'PYEOF'
-import json, sys, time, pathlib
-board_path, pr, state, bead, closed = sys.argv[1:6]
-p = pathlib.Path(board_path)
-try: board = json.loads(p.read_text())
-except Exception: board = {"prs": {}, "lanes": {}, "updated": None}
-board.setdefault("prs", {})[pr] = {"state": state, "bead": bead or None, "bead_closed": closed}
-board["updated"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-p.write_text(json.dumps(board, indent=1, sort_keys=True))
+if [ "$state" != "MERGED" ] && [ "$state" != "CLOSED" ]; then state=TIMEOUT; fi
+python3 - "$SPOOL" "$REPO" "$PR" "$state" "$BEAD" "$REASON" "$DECIDED_AT" <<'PYEOF'
+import hashlib
+import json
+import pathlib
+import sys
+
+spool, repo, pr, state, bead, reason, decided_at = sys.argv[1:]
+receipt = None
+if bead and reason:
+    receipt_payload = {"bead_id": bead, "reason": reason, "decided_at": decided_at}
+    receipt_payload["receipt_id"] = hashlib.sha256(
+        json.dumps(receipt_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    receipt = receipt_payload
+event = {
+    "schema_version": 1,
+    "kind": "merge_close",
+    "repo": repo,
+    "pr": pr,
+    "state": state,
+    "decision_receipt": receipt,
+}
+with pathlib.Path(spool).open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n")
+    handle.flush()
+    import os
+    os.fsync(handle.fileno())
 PYEOF
-printf '{"kind":"merge_close","pr":"%s","state":"%s","bead":"%s","bead_closed":"%s","repo":"%s"}\n' \
-  "$PR" "$state" "$BEAD" "$closed" "$REPO" >> "$SPOOL"

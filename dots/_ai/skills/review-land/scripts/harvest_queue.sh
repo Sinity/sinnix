@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Mechanical harvest pipeline for a finished polylogue lane worktree.
 # Usage: harvest_queue.sh <worktree> <commit-title> <pr-body-file> [<bead-id> <close-reason-file>]
-# With bead args, the merge watcher closes the bead itself on merge (receipt
-# written at decision time) and updates /realm/tmp/work/campaign-board.json.
+# With bead args, the merge watcher records the decision-time receipt in the
+# event spool; sinnixd-reactor closes the bead and updates the board on merge.
 #
 # Does everything EXCEPT the adversarial diff review (do that before calling):
 #   flock-serialized against other harvests -> stale-lock hygiene ->
@@ -56,8 +56,8 @@ PR=$(gh pr create --title "$TITLE" --body-file "$BODY" 2>&1 | tail -1)
 NUM=${PR##*/}
 case "$NUM" in ''|*[!0-9]*) echo "HARVEST-FAIL pr-create: $PR"; exit 2;; esac
 gh pr merge "$NUM" --squash --auto >/dev/null 2>&1 || true
-# Reactor watcher: merges are reported to the spool; with bead args it also
-# closes the bead with the decision-time receipt and updates the board.
+# Reactor watcher: merges are reported to the spool with the decision-time
+# receipt; sinnixd-reactor performs the typed close and board reaction.
 nohup /home/sinity/.claude/skills/review-land/scripts/merge_close.sh \
   Sinity/polylogue "$NUM" $BEAD $REASON >"/realm/tmp/work/merge-$NUM.log" 2>&1 &
 echo "HARVEST-OK pr=$NUM branch=$(git rev-parse --abbrev-ref HEAD)"

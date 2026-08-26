@@ -12,6 +12,7 @@ dependencies = ["sinnix-mcp==0.1.0", "sinnix-lib==0.1.0"]
 [project.scripts]
 agentctl = "sinnixd.cli:main"
 sinnixd = "sinnixd.cli:daemon_main"
+sinnixd-reactor = "sinnixd.reactor:main"
 sinnixd-capture = "sinnixd.jobs:capture_cli"
 sinnixd-contract-runner = "sinnixd.runner:main"
 sinnixd-delivery-runner = "sinnixd.delivery_runner:cli"
