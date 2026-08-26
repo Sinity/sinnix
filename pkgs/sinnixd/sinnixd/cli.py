@@ -49,6 +49,30 @@ def _metadata_argument(value: str) -> tuple[str, str]:
     return key, metadata_value
 
 
+def _packet_notes(response: dict[str, object]) -> list[dict[str, object]]:
+    payload = response.get("payload")
+    value = payload.get("value") if isinstance(payload, dict) else None
+    notes = value.get("notes") if isinstance(value, dict) else None
+    if not isinstance(notes, list):
+        return []
+    return [dict(note) for note in notes if isinstance(note, dict)]
+
+
+def _attach_packet_notes(
+    response: dict[str, object], notes: list[dict[str, object]]
+) -> dict[str, object]:
+    if not notes:
+        return response
+    payload = response.get("payload")
+    value = payload.get("value") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict) or not isinstance(value, dict):
+        return response
+    return {
+        **response,
+        "payload": {**payload, "value": {**value, "notes": notes}},
+    }
+
+
 def _add_agent_launch_arguments(
     target: argparse.ArgumentParser, *, required: bool
 ) -> None:
@@ -778,6 +802,7 @@ def main() -> int:
                 "name": workspace_name,
                 "branch": branch,
                 "base": None,
+                "recover_dead": True,
             },
             "agent-control",
         )
@@ -789,6 +814,7 @@ def main() -> int:
             response = created
         else:
             response: dict[str, object] | None = None
+            packet_notes = _packet_notes(created)
             try:
                 checkout_id = checkout_id_from_workspace_response(created)
             except PacketError:
@@ -838,6 +864,7 @@ def main() -> int:
                                 "group": snapshot.group,
                                 "bead_ids": list(snapshot.bead_ids),
                             },
+                            **({"packet_notes": packet_notes} if packet_notes else {}),
                         },
                     },
                     "agent-control",
@@ -846,6 +873,7 @@ def main() -> int:
                     response = call(arguments.socket, agent_request)
                 except (OSError, ProtocolError, SinnixdClientError):
                     response = _unavailable_response(agent_request)
+                response = _attach_packet_notes(response, packet_notes)
     elif arguments.command == "job" and arguments.job_command == "start":
         try:
             parameters = json.loads(arguments.parameters_json)
