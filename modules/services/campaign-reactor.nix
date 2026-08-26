@@ -82,6 +82,16 @@ mkServiceModule {
       default = 600;
       description = "Initial delay between repeated keeper events for one action.";
     };
+    refillWidthTarget = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 3;
+      description = "Maximum active lanes targeted by automatic bead-close refill.";
+    };
+    refillSpacingSeconds = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 10;
+      description = "Minimum spacing used by automatic refill dispatches.";
+    };
   };
   configFn =
     { cfg, ... }:
@@ -118,7 +128,7 @@ mkServiceModule {
           })
           // {
             Type = "simple";
-            ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --board ${lib.escapeShellArg cfg.boardPath} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --keeper-backoff-seconds ${toString cfg.keeperBackoffSeconds} ${projectRootArgs}";
+            ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --board ${lib.escapeShellArg cfg.boardPath} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --keeper-backoff-seconds ${toString cfg.keeperBackoffSeconds} --refill-width-target ${toString cfg.refillWidthTarget} --refill-spacing-seconds ${toString cfg.refillSpacingSeconds} ${projectRootArgs}";
             Restart = "on-failure";
             RestartSec = "5s";
             NoNewPrivileges = true;
