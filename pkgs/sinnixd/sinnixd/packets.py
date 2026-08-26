@@ -74,6 +74,8 @@ class BdReader(Protocol):
 
     def list(self) -> Sequence[Mapping[str, Any]]: ...
 
+    def ready(self) -> Sequence[Mapping[str, Any]]: ...
+
 
 @dataclass(frozen=True)
 class SubprocessBdReader:
@@ -106,6 +108,14 @@ class SubprocessBdReader:
             not isinstance(item, Mapping) for item in value
         ):
             raise PacketError("bd list returned an invalid bead list")
+        return value
+
+    def ready(self) -> Sequence[Mapping[str, Any]]:
+        value = self._run(("ready", "--json"))
+        if not isinstance(value, list) or any(
+            not isinstance(item, Mapping) for item in value
+        ):
+            raise PacketError("bd ready returned an invalid bead list")
         return value
 
 

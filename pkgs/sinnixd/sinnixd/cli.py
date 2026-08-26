@@ -215,6 +215,16 @@ def parser() -> argparse.ArgumentParser:
     packet_launch.add_argument(
         "--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS
     )
+    campaign = subcommands.add_parser(
+        "campaign", help="Schedule a ready-Beads packet campaign wave."
+    )
+    campaign_subcommands = campaign.add_subparsers(
+        dest="campaign_command", required=True
+    )
+    campaign_run = campaign_subcommands.add_parser("run")
+    campaign_run.add_argument("--project", required=True)
+    campaign_run.add_argument("--limit", type=int)
+    campaign_run.add_argument("--dry-run", action="store_true")
     job = subcommands.add_parser("job")
     job_subcommands = job.add_subparsers(dest="job_command", required=True)
     start = job_subcommands.add_parser("start")
@@ -731,6 +741,17 @@ def main() -> int:
             {"saga_id": arguments.saga_id},
             "operator",
         )
+    elif arguments.command == "campaign" and arguments.campaign_command == "run":
+        request = _request(
+            "campaign.run",
+            "campaign-orchestrator",
+            {
+                "project_id": arguments.project,
+                "limit": arguments.limit,
+                "dry_run": arguments.dry_run,
+            },
+            "operator",
+        )
     elif arguments.command == "packet" and arguments.packet_command == "launch":
         try:
             project_root = resolve_project_root(arguments.project)
@@ -813,6 +834,10 @@ def main() -> int:
                         "parameters": {
                             "template_version": packet_config.template_version,
                             "dimensions": dimensions,
+                            "campaign": {
+                                "group": snapshot.group,
+                                "bead_ids": list(snapshot.bead_ids),
+                            },
                         },
                     },
                     "agent-control",

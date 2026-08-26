@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import RLock
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 from uuid import uuid4
 
 from .jobs import MAX_RESULT_BYTES, GenericJobs, JobRecordError, JobResultError
@@ -260,6 +260,171 @@ class ProjectPlanExecutor:
             self._materialize(
                 project, checkout, record, nodes, correlation_id, principal
             )
+            return self._public(record)
+
+    def submit_external(
+        self,
+        arguments: Mapping[str, Any],
+        *,
+        launcher: Callable[..., str],
+        correlation_id: str,
+        principal: str,
+        operation: str,
+    ) -> dict[str, Any]:
+        """Submit a plan whose jobs are supplied by an existing typed seam.
+
+        The plan manifest, graph validation, reconciliation, and result view
+        remain the normal plan implementation.  ``launcher`` only constructs
+        the domain job for one already-normalized node; it owns no state.
+        """
+        if principal not in {"operator", "agent-control"}:
+            raise ProjectPlanError(
+                "project plans require agent-control or operator principal"
+            )
+        normalized = self._validate_submission(arguments)
+        project = self.projects.get(normalized["project_id"])
+        checkout = self._checkout(project, normalized)
+        raw_nodes = normalized["nodes"]
+        if not isinstance(raw_nodes, list) or not 1 <= len(raw_nodes) <= MAX_PLAN_NODES:
+            raise ProjectPlanError(
+                f"external plan nodes must contain 1-{MAX_PLAN_NODES} entries"
+            )
+        nodes: list[dict[str, Any]] = []
+        ids: set[str] = set()
+        total_dependencies = 0
+        for index, raw in enumerate(raw_nodes):
+            if not isinstance(raw, Mapping) or set(raw) - {
+                "id",
+                "node_id",
+                "depends_on",
+                "dependencies",
+                "payload",
+                "input_generation",
+            }:
+                raise ProjectPlanError(f"external plan node {index} is invalid")
+            node_id = _safe_text(
+                raw.get("node_id", raw.get("id")),
+                f"nodes[{index}].node_id",
+                _PLAN_ID,
+                128,
+            )
+            if node_id in ids:
+                raise ProjectPlanError(f"plan node ID is duplicated: {node_id}")
+            ids.add(node_id)
+            dependencies = raw.get("depends_on", raw.get("dependencies", []))
+            if (
+                not isinstance(dependencies, list)
+                or any(
+                    not isinstance(item, str) or _PLAN_ID.fullmatch(item) is None
+                    for item in dependencies
+                )
+                or len(set(dependencies)) != len(dependencies)
+            ):
+                raise ProjectPlanError(f"plan node {node_id} dependencies are invalid")
+            total_dependencies += len(dependencies)
+            if total_dependencies > MAX_PLAN_DEPENDENCIES:
+                raise ProjectPlanError("plan dependency count exceeds its bound")
+            payload = raw.get("payload", {})
+            try:
+                encoded = json.dumps(
+                    payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+                ).encode()
+            except (TypeError, ValueError) as error:
+                raise ProjectPlanError(
+                    f"plan node {node_id} payload is invalid"
+                ) from error
+            if (
+                not isinstance(payload, Mapping)
+                or len(encoded) > MAX_NODE_PAYLOAD_BYTES
+            ):
+                raise ProjectPlanError(f"plan node {node_id} payload is invalid")
+            node_generation = _safe_text(
+                raw.get("input_generation", normalized["input_generation"]),
+                f"nodes[{index}].input_generation",
+                _GENERATION,
+                MAX_INPUT_GENERATION_BYTES,
+            )
+            nodes.append(
+                {
+                    "node_id": node_id,
+                    "operation": operation,
+                    "dependencies": list(dependencies),
+                    "parameter_digest": _digest(payload),
+                    "input_generation": node_generation,
+                    "payload": dict(payload),
+                }
+            )
+        self._validate_graph(nodes)
+        plan_id = str(uuid4())
+        plan_digest = _digest(
+            {
+                "project_id": project.project_id,
+                "checkout": checkout.to_dict(),
+                "input_generation": normalized["input_generation"],
+                "nodes": nodes,
+            }
+        )
+        record = {
+            "schema_version": 1,
+            "plan_id": plan_id,
+            "project_id": project.project_id,
+            "project_digest": project.digest,
+            "checkout": checkout.to_dict(),
+            "input_generation": normalized["input_generation"],
+            "plan_digest": plan_digest,
+            "nodes": [
+                {
+                    "node_id": node["node_id"],
+                    "operation": node["operation"],
+                    "dependencies": list(node["dependencies"]),
+                    "parameter_digest": node["parameter_digest"],
+                    "input_generation": node["input_generation"],
+                    "job_id": None,
+                    "reused": False,
+                }
+                for node in nodes
+            ],
+            "created_at": _timestamp(),
+            "state": {"phase": "submitting", "terminal": False},
+        }
+        with self._lock:
+            self.store.save(record)
+            manifest_by_id = {node["node_id"]: node for node in record["nodes"]}
+            pending = {node["node_id"]: node for node in nodes}
+            while pending:
+                ready = [
+                    node
+                    for node in pending.values()
+                    if all(
+                        isinstance(manifest_by_id[dependency]["job_id"], str)
+                        for dependency in node["dependencies"]
+                    )
+                ]
+                if not ready:
+                    raise ProjectPlanError(
+                        "validated external plan has no materializable node"
+                    )
+                for node in sorted(ready, key=lambda item: item["node_id"]):
+                    manifest = manifest_by_id[node["node_id"]]
+                    dependency_ids = tuple(
+                        manifest_by_id[dependency]["job_id"]
+                        for dependency in node["dependencies"]
+                    )
+                    manifest["job_id"] = launcher(
+                        node=node,
+                        checkout=checkout,
+                        dependency_job_ids=dependency_ids,
+                        correlation_id=correlation_id,
+                        principal=principal,
+                    )
+                    if (
+                        not isinstance(manifest["job_id"], str)
+                        or not manifest["job_id"]
+                    ):
+                        raise ProjectPlanError("external launcher returned no job ID")
+                    self.store.save(record)
+                    pending.pop(node["node_id"])
+            self._reconcile(record)
             return self._public(record)
 
     def get(self, plan_id: str) -> dict[str, Any]:
