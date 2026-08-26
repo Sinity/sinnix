@@ -41,6 +41,16 @@ cd "$WT" || {
   exit 2
 }
 
+# Exclusive per-worktree claim held for the whole harvest. dispatch_lane checks
+# this before launching, so a completion lane can no longer race a rebase/amend
+# /push on the same branch (2026-08-26).
+WTLOCK="/realm/tmp/work/.wt-$(basename "$WT").lock"
+exec 8>"$WTLOCK"
+flock -n 8 || {
+  echo "HARVEST-FAIL worktree busy (another harvest holds $WTLOCK)"
+  exit 6
+}
+
 fetch_locked() { flock -w 120 "$FETCHLOCK" git fetch -q origin; }
 fetch_locked || {
   echo "HARVEST-FAIL fetch"
