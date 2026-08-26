@@ -57,6 +57,10 @@ duplicate-bead launches are refused typed when a live job owns the workspace.
    (`harvest_queue.sh` is the retired serial v1 — same interface.)
 5. Dispose worktrees only after content-equality/merge verification
    (`git worktree remove` + branch delete); live-process check first.
+6. NEVER dispatch a completion lane into a worktree whose harvest is still
+   running (2026-08-26: doing so failed instantly with "checkout is no longer
+   a registered Git worktree", and would have raced the rebase/amend/push
+   anyway). Wait for `HARVEST-OK`/`HARVEST-FAIL`, then dispatch.
 
 **Launch wedges** (sinnix-dn4c): packet launch is an accidental saga — a
 step failure is redacted to `OWNER_UNAVAILABLE "sinnixd is unavailable"` and
