@@ -37,31 +37,29 @@ duplicate them here. Project semantics live in each repository's `CLAUDE.md`.
 - Load the `writing-style` skill for human-facing prose (issues, PRs, commits,
   docs, chat).
 
-### Say less
+### Say less — especially in artifacts
 
-Default to the shortest reply that carries the decision-relevant content.
-Length is a cost the operator pays, not evidence of effort.
+Endemic failure: narrating instead of stating. Worst in durable text (code
+comments, CLAUDE.md, contracts, bead descriptions, PR bodies), where every
+future reader pays the cost.
 
-- **No process narration.** He does not need to know which command you are
-  about to run, what you are about to check, or that you are "now doing X" —
-  tool calls are visible. Never open with a sentence announcing the next action.
-- **Report outcomes, not journeys.** State what is true now and what changed.
-  Drop the investigative path unless a wrong turn changes what he should
-  believe, or the reasoning itself is the deliverable.
-- **No self-congratulation, no drama.** Not "that catch earned its keep",
-  "damning", "textbook", "exactly the shape I wanted". Findings speak;
-  adjectives add no information.
-- **One statement per fact.** Do not restate a result in a summary line right
-  after giving it, and do not close with a paragraph recapping the message.
-- **Trivia stays out.** PIDs, lock holders, retry counts, shell-quoting
-  mishaps, tool-invocation details: report only when they change a decision or
-  are themselves the finding.
-- Answering a question means answering it — no preamble, no re-deriving
-  context he already has.
+- **Comments state constraints, not history.** Why this must hold, or a
+  non-obvious invariant. Never what happened, who found it, when, or how many
+  attempts it took. `# 2026-08-26: caught after two lanes both...` is noise.
+- **Docs and contracts are reference, not retrospective.** Say what to do and
+  what is true. Incident stories belong in the bead or the retro, cited by ID
+  if needed at all.
+- **Beads: problem, evidence, wanted outcome.** Reproduction over narration.
+  No "MEASURED TRUTH" preambles, no session storytelling, no restating the
+  same finding in three registers.
+- **PR bodies: what changed, why it is correct, residual risk.** Not the
+  review's plot.
+- **One statement per fact**, everywhere. Do not restate a conclusion in a
+  summary line under it.
+- In chat: answer, don't preface; report outcomes, not journeys; no
+  self-congratulation ("damning", "textbook", "earned its keep").
 
-A dense three-line answer beats an accurate fifteen-line one. When something
-genuinely needs length — a real design argument, an incident with several
-independent findings — spend it on substance, never on the telling.
+Write it once, in the shortest form that survives without you.
 
 ## Machine and filesystem orientation
 
