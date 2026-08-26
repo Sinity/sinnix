@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Campaign board: machinery-owned state so the coordinator context doesn't carry it.
+# board            -> compact status (running lanes, open PRs, recent merges, review-ready worktrees)
+# board sync       -> refresh lanes/prs sections from live sources
+set -u
+BOARD=/realm/tmp/work/campaign-board.json
+case "${1:-status}" in
+  sync)
+    python3 - <<'PYEOF'
+import json, subprocess, time, pathlib
+p = pathlib.Path("/realm/tmp/work/campaign-board.json")
+try: board = json.loads(p.read_text())
+except Exception: board = {}
+fleet = subprocess.run(["agentctl","fleet"],capture_output=True,text=True).stdout.splitlines()[1:]
+board["lanes"] = {l.split()[0]: l.split()[-1] for l in fleet if l.strip()}
+prs = subprocess.run(["gh","pr","list","-R","Sinity/polylogue","--state","open","--json","number,title"],capture_output=True,text=True).stdout
+try: board["open_prs"] = {str(x["number"]): x["title"] for x in json.loads(prs)}
+except Exception: pass
+wt = subprocess.run(["git","-C","/realm/project/polylogue","worktree","list"],capture_output=True,text=True).stdout
+board["worktrees"] = [l.split()[0] for l in wt.splitlines() if "/realm/worktrees/" in l]
+board["updated"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+p.write_text(json.dumps(board, indent=1, sort_keys=True))
+print("synced")
+PYEOF
+    ;;
+  status|*)
+    python3 - <<'PYEOF'
+import json, pathlib
+try: b = json.loads(pathlib.Path("/realm/tmp/work/campaign-board.json").read_text())
+except Exception: b = {}
+running = {k: v for k, v in b.get("lanes", {}).items() if v in ("running","queued","submitted")}
+print(f"updated {b.get('updated','never')} | lanes running {len(running)} | open PRs {len(b.get('open_prs',{}))} | worktrees {len(b.get('worktrees',[]))}")
+for k, v in list(running.items())[:12]: print(" lane", k[:8], v)
+for n, t in list(b.get("open_prs", {}).items())[:8]: print(" PR", n, t[:60])
+for pr, info in list(b.get("prs", {}).items())[-6:]: print(" done", pr, info.get("state"), "bead:", info.get("bead"), info.get("bead_closed"))
+PYEOF
+    ;;
+esac

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Deterministic review red-flag scanner for a lane branch.
+# Usage: redflags <worktree> [base=origin/master]
+# Flags exactly the patterns adversarial review keeps catching; exit 0 = no
+# flags (stat-level skim suffices), exit 1 = flags (full coordinator read).
+set -u
+WT=$1; BASE=${2:-origin/master}
+cd "$WT" || exit 2
+DIFF=$(git diff "$BASE"..HEAD)
+flags=0
+flag() { echo "FLAG: $1"; flags=1; }
+# Deleted production calls / removed non-test lines in polylogue/
+echo "$DIFF" | awk '/^diff --git a\/polylogue\//{f=1} /^diff --git a\/(tests|devtools|docs)\//{f=0} f && /^-[^-]/' | grep -qE "def |self\.|\(\)" && flag "production lines removed (polylogue/)"
+# Inverted or weakened assertions
+echo "$DIFF" | grep -qE "^\-\s*assert .*== 0\b|^\+\s*assert .*exit_code == 1|^\+.*pytest\.raises" && flag "assertion polarity change"
+echo "$DIFF" | awk '/^diff --git a\/tests\//{f=1} /^diff --git a\/(polylogue|devtools|docs)\//{f=0} f && /^-.*assert /' | grep -q . && flag "test assertions removed"
+# New xfail/skip
+echo "$DIFF" | grep -qE "^\+.*(xfail|skipif|pytest\.mark\.skip)" && flag "new xfail/skip"
+# Gate / baseline / migration surfaces
+echo "$DIFF" | grep -qE "^diff --git a/devtools/(consumer_reachability|verify|patterns/baselines)" && flag "verification gate or baseline edited"
+echo "$DIFF" | grep -qE "^diff --git a/polylogue/storage/sqlite/migrations/" && flag "durable migration touched"
+echo "$DIFF" | grep -qE "^diff --git a/.*(train\.json)" && flag "train sidecar touched"
+# Deleted test files
+git diff --name-status --diff-filter=D "$BASE"..HEAD | grep -q "^D\s*tests/" && flag "test files deleted"
+# Size sanity
+LINES=$(echo "$DIFF" | grep -cE "^[+-][^+-]")
+echo "diff lines: $LINES"
+[ "$LINES" -gt 1500 ] && flag "very large diff"
+exit $flags

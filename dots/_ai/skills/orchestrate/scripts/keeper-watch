@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Conditional keeper: every 10 min, sync the board and append ONE actionable
+# event to the agentctl spool only when the coordinator is needed. Silent
+# otherwise. Self-expires after 7 days.
+set -u
+SPOOL=/realm/state/agentctl/events.jsonl
+TARGET=${KEEPER_TARGET:-10}
+END=$(( $(date +%s) + 7*24*3600 ))
+while [ "$(date +%s)" -lt "$END" ]; do
+  board sync >/dev/null 2>&1
+  running=$(actl running 2>/dev/null || echo 0)
+  # review-ready: succeeded polylogue lane jobs younger than 1 day whose
+  # worktrees still exist (not yet harvested/disposed)
+  ready=$(python3 - <<'PYEOF' 2>/dev/null
+import json, os, subprocess
+out = subprocess.run(["agentctl","fleet"],capture_output=True,text=True).stdout.splitlines()[1:]
+count = 0
+for line in out:
+    parts = line.split()
+    if len(parts) >= 2 and parts[1] == "polylogue" and parts[-1] == "succeeded":
+        count += 1
+print(count)
+PYEOF
+)
+  wts=$(ls -d /realm/worktrees/packet-polylogue-* 2>/dev/null | wc -l)
+  reasons=""
+  [ "${running:-0}" -lt 3 ] && reasons="lanes_low($running)"
+  [ "${wts:-0}" -gt 0 ] && [ "${ready:-0}" -gt 0 ] && reasons="$reasons harvest_pending(wt=$wts)"
+  if [ -n "${reasons## }" ]; then
+    printf '{"kind":"keeper","project":"polylogue","phase":"actionable","job_id":"keeper","reasons":"%s"}\n' "${reasons## }" >> "$SPOOL"
+    sleep 1800  # back off after waking the coordinator
+  else
+    sleep 600
+  fi
+done

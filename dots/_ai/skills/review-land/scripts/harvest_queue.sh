@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Mechanical harvest pipeline for a finished polylogue lane worktree.
-# Usage: harvest_queue.sh <worktree> <commit-title> <pr-body-file>
+# Usage: harvest_queue.sh <worktree> <commit-title> <pr-body-file> [<bead-id> <close-reason-file>]
+# With bead args, the merge watcher closes the bead itself on merge (receipt
+# written at decision time) and updates /realm/tmp/work/campaign-board.json.
 #
 # Does everything EXCEPT the adversarial diff review (do that before calling):
 #   flock-serialized against other harvests -> stale-lock hygiene ->
@@ -10,7 +12,7 @@
 #   push -> PR -> gh auto-merge armed, merge_on_green fallback watcher.
 # Prints "HARVEST-OK pr=<num> branch=<branch>" on success; nonzero + reason otherwise.
 set -u
-WT=$1; TITLE=$2; BODY=$3
+WT=$1; TITLE=$2; BODY=$3; BEAD=${4:-}; REASON=${5:-}
 REPO=/realm/project/polylogue
 LOCK=/realm/tmp/work/.harvest-git.flock
 DEV=(nix develop --accept-flake-config --command)
@@ -54,8 +56,8 @@ PR=$(gh pr create --title "$TITLE" --body-file "$BODY" 2>&1 | tail -1)
 NUM=${PR##*/}
 case "$NUM" in ''|*[!0-9]*) echo "HARVEST-FAIL pr-create: $PR"; exit 2;; esac
 gh pr merge "$NUM" --squash --auto >/dev/null 2>&1 || true
-# One spool watcher: merges if auto-merge could not arm, and always reports
-# the terminal state into the events spool for the coordinator.
-nohup /home/sinity/.claude/skills/review-land/scripts/merge_on_green.sh \
-  Sinity/polylogue "$NUM" >"/realm/tmp/work/merge-$NUM.log" 2>&1 &
+# Reactor watcher: merges are reported to the spool; with bead args it also
+# closes the bead with the decision-time receipt and updates the board.
+nohup /home/sinity/.claude/skills/review-land/scripts/merge_close.sh \
+  Sinity/polylogue "$NUM" $BEAD $REASON >"/realm/tmp/work/merge-$NUM.log" 2>&1 &
 echo "HARVEST-OK pr=$NUM branch=$(git rev-parse --abbrev-ref HEAD)"

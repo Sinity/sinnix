@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Coordinator helpers over agentctl's JSON envelopes.
+# actl result <job>    -> last-message content, plain
+# actl running         -> count of running+queued jobs
+# actl jobs [n]        -> compact fleet head
+# actl ws [pattern]    -> workspace list rows (id name state), optionally filtered
+set -u
+unwrap() { python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+def walk(o, key):
+    if isinstance(o, dict):
+        if key in o: return o[key]
+        for v in o.values():
+            r = walk(v, key)
+            if r is not None: return r
+    return None
+val = walk(d, '$1')
+if val is None:
+    err = walk(d, 'error') or {}
+    print('ERROR:', (err.get('message') if isinstance(err, dict) else err) or 'no $1 in payload', file=sys.stderr)
+    sys.exit(1)
+print(val if isinstance(val, str) else json.dumps(val, indent=1))
+"; }
+case "${1:?verb}" in
+  result) agentctl job result "$2" 2>&1 | unwrap content ;;
+  running) agentctl fleet 2>/dev/null | awk 'NR>1 && ($NF=="running" || $NF=="queued" || $NF=="submitted")' | wc -l ;;
+  jobs) agentctl fleet 2>/dev/null | head -"${2:-12}" ;;
+  ws) agentctl workspace list 2>&1 | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+def walk(o):
+    if isinstance(o, dict):
+        if 'workspaces' in o: return o['workspaces']
+        for v in o.values():
+            r = walk(v)
+            if r is not None: return r
+    return None
+ws = walk(d)
+if ws is None:
+    err = d.get('error', {})
+    print('ERROR:', err.get('message', 'owner unavailable'), file=sys.stderr); sys.exit(1)
+import re
+pat = '${2:-}'
+for w in ws:
+    if not pat or re.search(pat, str(w.get('name',''))):
+        print(w['workspace_id'], w.get('name'), w.get('state'))
+" ;;
+  *) echo "unknown verb: $1" >&2; exit 2 ;;
+esac
