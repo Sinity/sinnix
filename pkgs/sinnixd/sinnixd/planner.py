@@ -22,7 +22,11 @@ PLAN_SCHEMA_VERSION = 1
 
 def _orbit(keys: tuple[str, ...]) -> str:
     """Return the stable subsystem orbit used to keep related work together."""
-    return sorted(key.split(":", 1)[0] for key in keys if ":" in key)[0] if keys else "unclassified"
+    return (
+        sorted(key.split(":", 1)[0] for key in keys if ":" in key)[0]
+        if keys
+        else "unclassified"
+    )
 
 
 def _judgment_gates(snapshot: Any) -> list[str]:
@@ -48,13 +52,21 @@ def build_dispatch_plan(
         config = PacketConfig.load(root)
         reader = SubprocessBdReader(root)
         ready = sorted(
-            (row for row in reader.ready() if isinstance(row.get("id"), str) and row["id"]),
+            (
+                row
+                for row in reader.ready()
+                if isinstance(row.get("id"), str) and row["id"]
+            ),
             key=lambda row: str(row["id"]),
         )
         for row in ready:
             bead_id = str(row["id"])
             snapshot = compile_launch_snapshot(
-                bead_id, project_root=root, project_id=project_id, reader=reader, config=config
+                bead_id,
+                project_root=root,
+                project_id=project_id,
+                reader=reader,
+                config=config,
             )
             workspace, branch = derived_workspace(snapshot, config)
             lane = CampaignLane(
@@ -99,8 +111,15 @@ def build_dispatch_plan(
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="sinnixd-planner")
-    result.add_argument("--project-root", action="append", required=True, metavar="PROJECT=/ABSOLUTE/PATH")
-    result.add_argument("--output", type=Path, default=Path("/realm/tmp/work/dispatch-plan.json"))
+    result.add_argument(
+        "--project-root",
+        action="append",
+        required=True,
+        metavar="PROJECT=/ABSOLUTE/PATH",
+    )
+    result.add_argument(
+        "--output", type=Path, default=Path("/realm/tmp/work/dispatch-plan.json")
+    )
     result.add_argument("--limit", type=int)
     return result
 

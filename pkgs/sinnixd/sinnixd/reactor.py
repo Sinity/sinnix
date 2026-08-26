@@ -310,9 +310,14 @@ class CampaignBoard:
             }:
                 raise ReactorError("campaign board error record is malformed")
             errors.append({key: str(error[key]) for key in ("offset", "message", "at")})
-        return cls(value["updated_at"], lanes, prs, keeper, errors, [
-            dict(item) for item in raw_judgment if isinstance(item, Mapping)
-        ])
+        return cls(
+            value["updated_at"],
+            lanes,
+            prs,
+            keeper,
+            errors,
+            [dict(item) for item in raw_judgment if isinstance(item, Mapping)],
+        )
 
     @classmethod
     def _migrate_legacy(cls, value: Mapping[str, Any]) -> CampaignBoard:
@@ -802,7 +807,9 @@ class CampaignReactor:
         active = _active_lane_count(self.jobs_state_dir, project)
         refill_key = f"refill:{project}"
         prior = self._board.keeper.get(refill_key)
-        if prior is not None and datetime.now(UTC) < _parse_time(str(prior["next_eligible_at"])):
+        if prior is not None and datetime.now(UTC) < _parse_time(
+            str(prior["next_eligible_at"])
+        ):
             return
         if active is not None:
             target = max(0, target - active)
@@ -817,19 +824,30 @@ class CampaignReactor:
                 if not isinstance(bead_id, str) or not bead_id:
                     continue
                 snapshot = compile_launch_snapshot(
-                    bead_id, project_root=root, project_id=project, reader=reader, config=config
+                    bead_id,
+                    project_root=root,
+                    project_id=project,
+                    reader=reader,
+                    config=config,
                 )
                 reason = _judgment_reason(row, snapshot)
                 if reason:
                     record = {
-                        "project": project, "group": snapshot.group,
-                        "bead_ids": list(snapshot.bead_ids), "reason": reason,
+                        "project": project,
+                        "group": snapshot.group,
+                        "bead_ids": list(snapshot.bead_ids),
+                        "reason": reason,
                         "queued_at": _now(),
                     }
-                    if not any(item.get("group") == snapshot.group for item in self._board.judgment_queue):
+                    if not any(
+                        item.get("group") == snapshot.group
+                        for item in self._board.judgment_queue
+                    ):
                         self._board.judgment_queue.append(record)
                     continue
-                candidates.append((bead_id, snapshot.bead_ids, snapshot.dimensions.conflict_keys))
+                candidates.append(
+                    (bead_id, snapshot.bead_ids, snapshot.dimensions.conflict_keys)
+                )
             selected: list[str] = []
             used: set[str] = set()
             for bead_id, group, keys in candidates:
@@ -844,10 +862,18 @@ class CampaignReactor:
             if self.refill_dispatcher is not None:
                 self.refill_dispatcher(project, tuple(selected))
             else:
-                command = [self.agentctl_executable, "campaign", "run", "--project", project]
+                command = [
+                    self.agentctl_executable,
+                    "campaign",
+                    "run",
+                    "--project",
+                    project,
+                ]
                 for bead_id in selected:
                     command.extend(("--bead", bead_id))
-                subprocess.run(command, check=True, capture_output=True, text=True, timeout=60)
+                subprocess.run(
+                    command, check=True, capture_output=True, text=True, timeout=60
+                )
             emitted_at = datetime.now(UTC)
             self._board.keeper[refill_key] = {
                 "emitted_at": emitted_at.isoformat(),
@@ -877,7 +903,9 @@ class CampaignReactor:
                     or event.get("kind") == "bead_close"
                     or closed
                 ):
-                    project = event.get("project") or _repo_name(str(event.get("repo", "")))
+                    project = event.get("project") or _repo_name(
+                        str(event.get("repo", ""))
+                    )
                     if isinstance(project, str) and project:
                         self._dispatch_refill(project)
             self._board.updated_at = _now()

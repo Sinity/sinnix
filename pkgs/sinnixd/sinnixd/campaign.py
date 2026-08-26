@@ -209,7 +209,8 @@ class CampaignRunner:
             (
                 row
                 for row in reader.ready()
-                if isinstance(row.get("id"), str) and row.get("id")
+                if isinstance(row.get("id"), str)
+                and row.get("id")
                 and (bead_ids is None or row["id"] in requested)
             ),
             key=lambda row: str(row["id"]),

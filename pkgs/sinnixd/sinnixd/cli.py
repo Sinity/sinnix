@@ -860,9 +860,7 @@ def main() -> int:
                     disposed = call(arguments.socket, dispose_request)
                 except (OSError, ProtocolError, SinnixdClientError):
                     disposed = _unavailable_response(dispose_request)
-                return _packet_step_failure(
-                    step_response, step, rollback=disposed
-                )
+                return _packet_step_failure(step_response, step, rollback=disposed)
 
             try:
                 checkout_id = checkout_id_from_workspace_response(created)

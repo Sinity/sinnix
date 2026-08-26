@@ -11,9 +11,14 @@ REPO=$1; PACKET=$2
 WT=/realm/worktrees/packet-$PACKET
 BR=feature/packet/$PACKET
 [ -d "$WT" ] || { echo "no worktree at $WT — nothing to unwedge"; exit 1; }
-if pgrep -f "$WT" >/dev/null 2>&1; then
-  echo "REFUSE: live process references $WT"; exit 2
-fi
+# live-process check: a process whose CWD is inside the worktree (pgrep -f
+# self-matches shell wrappers quoting the path, so scan /proc cwd instead).
+for cwdlink in /proc/[0-9]*/cwd; do
+  if [ "$(readlink "$cwdlink" 2>/dev/null)" != "${WT}" ] && [[ "$(readlink "$cwdlink" 2>/dev/null)" != ${WT}/* ]]; then continue; fi
+  pid=${cwdlink#/proc/}; pid=${pid%/cwd}
+  [ "$pid" = "$$" ] && continue
+  echo "REFUSE: live process $pid has CWD inside $WT"; exit 2
+done
 if [ -n "$(git -C "$WT" status --porcelain)" ]; then
   echo "REFUSE: dirty worktree $WT"; exit 3
 fi

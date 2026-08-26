@@ -4,18 +4,35 @@ import json
 from pathlib import Path
 
 import pytest
-
-from sinnixd.retrospective import RetrospectiveError, run_retrospective, validate_proposals
+from sinnixd.retrospective import (
+    RetrospectiveError,
+    run_retrospective,
+    validate_proposals,
+)
 
 
 def proposal() -> dict[str, object]:
-    return {"title": "Make fetch locking explicit", "description": "Repeated fetch collisions were observed.", "type": "task", "priority": 2, "labels": ["orchestration"], "evidence": ["events.jsonl:event-1"]}
+    return {
+        "title": "Make fetch locking explicit",
+        "description": "Repeated fetch collisions were observed.",
+        "type": "task",
+        "priority": 2,
+        "labels": ["orchestration"],
+        "evidence": ["events.jsonl:event-1"],
+    }
 
 
-def test_files_only_validated_model_proposals_and_advances_cursor(tmp_path: Path) -> None:
+def test_files_only_validated_model_proposals_and_advances_cursor(
+    tmp_path: Path,
+) -> None:
     created: list[dict[str, object]] = []
     result = run_retrospective(
-        evidence={"day": "2026-08-26", "events": ["event-1"], "harvest_logs": {}, "session_receipts": {}},
+        evidence={
+            "day": "2026-08-26",
+            "events": ["event-1"],
+            "harvest_logs": {},
+            "session_receipts": {},
+        },
         model_call=lambda _: json.dumps({"proposals": [proposal()]}),
         task_create=created.append,
         state_path=tmp_path / "state.json",

@@ -51,8 +51,10 @@ def _event_day(line: str, day: date) -> bool:
         parsed = datetime.fromisoformat(timestamp)
         if parsed.tzinfo is None:
             return False
-        return _day_start(day) <= parsed.astimezone(UTC) < _day_start(
-            day + timedelta(days=1)
+        return (
+            _day_start(day)
+            <= parsed.astimezone(UTC)
+            < _day_start(day + timedelta(days=1))
         )
     except (ValueError, TypeError, json.JSONDecodeError):
         return False
@@ -203,9 +205,7 @@ def run_retrospective(
                 "type": proposal["type"],
                 "priority": proposal["priority"],
                 "labels": ["process-retrospective", *proposal["labels"]],
-                "request_id": _digest(
-                    {"evidence": evidence_digest, "index": index}
-                ),
+                "request_id": _digest({"evidence": evidence_digest, "index": index}),
             }
         )
         filed += 1
@@ -288,19 +288,36 @@ def _command_model(
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sinnix-retrospective")
-    parser.add_argument("--day", type=date.fromisoformat, default=datetime.now(UTC).date() - timedelta(days=1))
-    parser.add_argument("--event-spool", type=Path, default=Path("/realm/state/agentctl/events.jsonl"))
+    parser.add_argument(
+        "--day",
+        type=date.fromisoformat,
+        default=datetime.now(UTC).date() - timedelta(days=1),
+    )
+    parser.add_argument(
+        "--event-spool", type=Path, default=Path("/realm/state/agentctl/events.jsonl")
+    )
     parser.add_argument("--harvest-root", type=Path, default=Path("/realm/tmp/work"))
     parser.add_argument("--harvest-glob", default="harvest-*.quick.log")
-    parser.add_argument("--receipt-root", type=Path, default=Path("/realm/state/agentctl/jobs"))
-    parser.add_argument("--state", type=Path, default=Path("/realm/state/agentctl/retrospective.json"))
+    parser.add_argument(
+        "--receipt-root", type=Path, default=Path("/realm/state/agentctl/jobs")
+    )
+    parser.add_argument(
+        "--state", type=Path, default=Path("/realm/state/agentctl/retrospective.json")
+    )
     parser.add_argument("--agentctl", default="agentctl")
     parser.add_argument("--project", default="sinnix")
     parser.add_argument("--checkout", default="default")
     parser.add_argument("--backend", default="codex")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     args = parser.parse_args(argv)
-    evidence = collect_evidence(day=args.day, event_spool=args.event_spool, harvest_root=args.harvest_root, harvest_glob=args.harvest_glob, receipt_root=args.receipt_root)
+    evidence = collect_evidence(
+        day=args.day,
+        event_spool=args.event_spool,
+        harvest_root=args.harvest_root,
+        harvest_glob=args.harvest_glob,
+        receipt_root=args.receipt_root,
+    )
+
     def create(proposal: dict[str, Any]) -> None:
         subprocess.run(
             [
@@ -315,9 +332,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 proposal["type"],
                 "--priority",
                 str(proposal["priority"]),
-                *sum(
-                    (["--label", label] for label in proposal["labels"]), []
-                ),
+                *sum((["--label", label] for label in proposal["labels"]), []),
                 "--request-id",
                 proposal["request_id"],
             ],
