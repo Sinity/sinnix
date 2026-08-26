@@ -5615,6 +5615,7 @@ def test_packet_workspace_create_refuses_live_collision(
         service.workspaces.store.records()[0].workspace_id == workspace["workspace_id"]
     )
 
+
 def _write_provision_exec_descriptor(
     root: Path, command: str, timeout: int = 600
 ) -> None:
@@ -6027,9 +6028,10 @@ def test_workspace_list_returns_mixed_records_without_git_revalidation(
     assert rows[dead["workspace_id"]]["head"] is None
     assert rows[invalid.workspace_id]["state"] == "invalid"
     assert rows[invalid.workspace_id]["identity_matches"] is None
-    assert {
-        record.workspace_id for record in service.workspaces.store.records()
-    } == {live["workspace_id"], invalid.workspace_id}
+    assert {record.workspace_id for record in service.workspaces.store.records()} == {
+        live["workspace_id"],
+        invalid.workspace_id,
+    }
 
 
 def test_workspace_list_gc_scales_with_many_dead_records(

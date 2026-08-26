@@ -7,7 +7,9 @@
 # Refuses (exit 3) when the gate still fails after the rebase pass — a human
 # decides then. Prints PR number on success.
 set -u
-WT=$1; TITLE=$2; BODY=$3
+WT=$1
+TITLE=$2
+BODY=$3
 DEV=(nix develop --accept-flake-config --command)
 cd "$WT" || exit 2
 
@@ -59,9 +61,15 @@ for (rule, path), new_lines in new.items():
     open(bl, 'w').write(text)
 print("rebased displaced baselines")
 EOF
-  [ $? -eq 0 ] || { echo "GATE FAILED (not pure displacement) — see $QLOG"; exit 3; }
+  [ $? -eq 0 ] || {
+    echo "GATE FAILED (not pure displacement) — see $QLOG"
+    exit 3
+  }
   git add devtools/patterns/baselines/ && git commit -q --amend --no-edit
-  gate || { echo "GATE STILL FAILED after rebase — see $QLOG"; exit 3; }
+  gate || {
+    echo "GATE STILL FAILED after rebase — see $QLOG"
+    exit 3
+  }
 fi
 
 git push -q -u origin HEAD || exit 2

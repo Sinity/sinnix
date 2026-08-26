@@ -30,6 +30,7 @@ reference. Launch packets SPACED (~30s, confirm fleet admission between);
 duplicate-bead launches are refused typed when a live job owns the workspace.
 
 **Harvest** (lane success event):
+
 1. `actl result <job>` — expect the machine trailer
    (LANE-BRANCH/COMMIT/QUICK/CLASSIFICATION).
 2. `redflags <worktree>` — deterministic scanner. No flags + small diff →

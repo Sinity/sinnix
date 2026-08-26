@@ -270,9 +270,7 @@ class WorkspaceStore:
             records = [WorkspaceRecord.from_dict(row) for row in rows]
             removed = tuple(record for record in records if record.workspace_id in ids)
             payload["workspaces"] = [
-                record.to_dict()
-                for record in records
-                if record.workspace_id not in ids
+                record.to_dict() for record in records if record.workspace_id not in ids
             ]
         for record in removed:
             shutil.rmtree(
@@ -1530,15 +1528,11 @@ class GitWorkspaces:
         self, records: Sequence[WorkspaceRecord]
     ) -> tuple[WorkspaceRecord, ...]:
         candidates = tuple(
-            record
-            for record in records
-            if self._path_state(record) == "missing"
+            record for record in records if self._path_state(record) == "missing"
         )
         if not candidates:
             return ()
-        parent_ids = {
-            stack.parent_workspace_id for stack in self.store.stack_records()
-        }
+        parent_ids = {stack.parent_workspace_id for stack in self.store.stack_records()}
         removed = tuple(
             record for record in candidates if record.workspace_id not in parent_ids
         )
@@ -1561,9 +1555,7 @@ class GitWorkspaces:
     def _status(self, record: WorkspaceRecord) -> dict[str, Any]:
         row = record.to_dict()
         if self._path_state(record) == "missing":
-            return self._unverified_status(
-                record, "missing", identity_matches=False
-            )
+            return self._unverified_status(record, "missing", identity_matches=False)
         try:
             checkout = self._checkout_by_path(record.project_id, record.path)
             branch = self._branch(checkout.path)
