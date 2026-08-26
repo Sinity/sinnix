@@ -9,6 +9,11 @@ tells you where state lives and what the loops are.
 - **Board**: `/realm/tmp/work/campaign-board.json` — lanes → PRs → beads →
   review state. `board` prints it; `board sync` refreshes from
   fleet/GitHub/worktrees. Maintained by the watchers; trust it over memory.
+- **Dispatch plan**: `/realm/tmp/work/dispatch-plan.json` — the scheduled
+  planner's ordered ready-set, orbit annotations, conflict serialization, and
+  judgment-gate flags. `board plan` prints it; refill executes this artifact
+  through the typed campaign runner rather than re-deriving strategy in the
+  coordinator session.
 - **Task authority**: external Beads per project (`bd` from the repo cwd —
   MIND YOUR CWD: `bd` resolves the DB from the working directory).
 - **Fleet truth**: `actl jobs` / `actl running` / `actl result <job>` /
@@ -61,10 +66,11 @@ removes it (refuses dirty/unpublished/live-process trees — a live-process
 refusal means a provision is still running: wait, don't force).
 
 **Refill** (keeper tick): `board` first — if lanes ≥ target and nothing
-review-ready, say so and stop. Otherwise `bd ready` (repo cwd), plan with
-`--plan` (shows declared + inferred conflict keys), launch disjoint spaced.
-Hold semantically-overlapping beads apart even when keys are textually
-disjoint (same subsystem orbit = same wave slot).
+review-ready, say so and stop. Otherwise consume the latest dispatch plan,
+execute its ordered ready-set through the typed campaign runner, and hold
+judgment-gated entries for the review desk. The live coordinator handles
+review escalations and operator conversation; frontier curation and dispatch
+ordering are scheduled planner responsibilities.
 
 **Verification economics**: lanes run selected/focused only; the full corpus
 runs at master boundaries (`agentctl job start polylogue verify_all`). Corpus
