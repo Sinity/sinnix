@@ -103,6 +103,21 @@ class SystemdJobTimeout(SystemdJobError):
     """Raised only when the bounded systemd subprocess times out."""
 
 
+class AdmissionConflictError(ValueError):
+    """A keyed packet lane overlaps a currently running keyed lane."""
+
+    code = "conflict-key-overlap"
+
+    def __init__(self, conflicts: Mapping[str, Sequence[str]]) -> None:
+        self.conflicts = {
+            key: tuple(sorted(job_ids)) for key, job_ids in sorted(conflicts.items())
+        }
+        details = ", ".join(
+            f"{key} ({'/'.join(job_ids)})" for key, job_ids in self.conflicts.items()
+        )
+        super().__init__(f"packet launch refused: {self.code}; overlap: {details}")
+
+
 def scheduled_operation_id(project_id: str, operation_name: str) -> str:
     return f"{project_id}:{operation_name}"
 
@@ -2685,10 +2700,46 @@ class GenericJobs:
         )
         return environment
 
-    def start(self, spec: GenericJobSpec, job_id: str | None = None) -> dict[str, Any]:
+    def _active_key_conflicts(self, keys: Sequence[str]) -> dict[str, tuple[str, ...]]:
+        requested = set(keys)
+        if not requested:
+            return {}
+        running_phases = {
+            "submitted",
+            "running",
+            "cancelling",
+            "stopping",
+            "launch-unknown",
+            "observation-unknown",
+            "outcome-unknown",
+        }
+        conflicts: dict[str, list[str]] = {}
+        for record in self.store.active_records():
+            if (
+                record.spec.kind != "attested-agent"
+                or record.state.get("phase") not in running_phases
+                or record.state.get("terminal")
+            ):
+                continue
+            for key in requested.intersection(record.spec.exclusive_keys):
+                conflicts.setdefault(key, []).append(record.job_id)
+        return {key: tuple(value) for key, value in conflicts.items()}
+
+    def start(
+        self,
+        spec: GenericJobSpec,
+        job_id: str | None = None,
+        *,
+        reject_conflicts: bool = False,
+    ) -> dict[str, Any]:
         candidate = job_id or str(uuid4())
         if spec.kind == "attested-agent" and not spec.admission_bypass:
             with self._admission_lock:
+                self._admit_locked()
+                if reject_conflicts:
+                    conflicts = self._active_key_conflicts(spec.exclusive_keys)
+                    if conflicts:
+                        raise AdmissionConflictError(conflicts)
                 with self.store.locked(candidate):
                     record = self.store.create(spec, candidate)
                     launch_path = self.store.inputs_root / f"{candidate}.agent-launch"

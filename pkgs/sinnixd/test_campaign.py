@@ -47,6 +47,17 @@ def test_active_workspace_and_bead_are_typed_skips() -> None:
     assert schedule.lanes == ()
 
 
+def test_running_lane_key_overlap_is_a_typed_skip_with_keys() -> None:
+    schedule = build_schedule(
+        [lane("candidate", "module:polylogue.cost", "table:jobs")],
+        active_conflict_keys={"table:jobs"},
+    )
+
+    assert schedule.lanes == ()
+    assert schedule.skipped[0].code == "conflict-key-overlap"
+    assert "table:jobs" in schedule.skipped[0].reason
+
+
 def test_failed_predecessor_frees_key_for_next_lane() -> None:
     schedule = build_schedule([lane("a", "shared"), lane("b", "shared")])
     assert runnable_groups(schedule, {"a": {"terminal": True, "phase": "failed"}}) == (

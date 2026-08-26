@@ -12,6 +12,7 @@ from .packets import (
     SubprocessBdReader,
     compile_launch_snapshot,
     derived_workspace,
+    runtime_dimensions,
 )
 
 if TYPE_CHECKING:
@@ -91,6 +92,7 @@ def build_schedule(
     *,
     active_workspace_names: set[str] | frozenset[str] = frozenset(),
     active_bead_ids: set[str] | frozenset[str] = frozenset(),
+    active_conflict_keys: set[str] | frozenset[str] = frozenset(),
     limit: int | None = None,
 ) -> CampaignSchedule:
     """Filter active lanes and serialize each shared conflict key.
@@ -121,6 +123,16 @@ def build_schedule(
                     lane.bead_ids,
                     "active-bead",
                     "a bead in this carrier group already has an active job",
+                )
+            )
+        elif set(lane.conflict_keys).intersection(active_conflict_keys):
+            overlap = sorted(set(lane.conflict_keys).intersection(active_conflict_keys))
+            skipped.append(
+                CampaignSkip(
+                    lane.group,
+                    lane.bead_ids,
+                    "conflict-key-overlap",
+                    "conflict keys overlap a running lane: " + ", ".join(overlap),
                 )
             )
         else:
@@ -226,6 +238,7 @@ class CampaignRunner:
                         "effort": snapshot.dimensions.effort,
                         "template_version": config.template_version,
                         "dimensions": snapshot.dimensions.to_dict(),
+                        "runtime_dimensions": runtime_dimensions(snapshot.dimensions),
                         "group": snapshot.group,
                         "bead_ids": list(snapshot.bead_ids),
                         "workspace_name": workspace_name,
@@ -239,6 +252,7 @@ class CampaignRunner:
             if record.project_id == project_id
         }
         active_beads: set[str] = set()
+        active_conflict_keys: set[str] = set()
         for record in self.jobs.store.list():
             if record.spec.project_id != project_id or record.state.get("terminal"):
                 continue
@@ -251,10 +265,21 @@ class CampaignRunner:
             )
             if isinstance(bead_ids, list):
                 active_beads.update(item for item in bead_ids if isinstance(item, str))
+            if record.spec.kind == "attested-agent" and record.state.get("phase") in {
+                "submitted",
+                "running",
+                "cancelling",
+                "stopping",
+                "launch-unknown",
+                "observation-unknown",
+                "outcome-unknown",
+            }:
+                active_conflict_keys.update(record.spec.exclusive_keys)
         schedule = build_schedule(
             lanes,
             active_workspace_names=active_workspaces,
             active_bead_ids=active_beads,
+            active_conflict_keys=active_conflict_keys,
         )
         wave_id = str(uuid.uuid4())
         result: dict[str, Any] = {
@@ -323,10 +348,11 @@ class CampaignRunner:
                     "template_version": payload["template_version"],
                     "dimensions": payload["dimensions"],
                 },
-                dimensions=payload["dimensions"],
+                dimensions=payload["runtime_dimensions"],
                 dependency_job_ids=dependency_job_ids,
                 exclusive_keys=tuple(payload["dimensions"]["conflict_keys"]),
                 allow_failed_dependencies=True,
+                reject_conflicts=True,
             )
             job_id = str(response["job_id"])
             self.jobs.spool_event(
