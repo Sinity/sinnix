@@ -27,6 +27,9 @@ WAIT_TRANSPORT_MARGIN_SECONDS = 5.0
 # job id immediately; only the remaining synchronous delivery reads keep a
 # longer control-response window covering their command deadlines.
 CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS = {
+    # Listing runs git identity checks per record; at fleet scale it exceeds
+    # the 5s default and was misreported as "sinnixd is unavailable" (dn4c).
+    "workspace.list": 60.0,
     "workspace.review-status": 65.0,
     "workspace.finish": 185.0,
     "packet.finalize": 420.0,
