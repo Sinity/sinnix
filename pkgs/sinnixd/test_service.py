@@ -5343,7 +5343,11 @@ def test_workspace_create_inherits_declared_seed_files_and_records_missing_sourc
 
     copied = Path(created["path"]) / ".cache" / "testmon" / "testmondata"
     assert copied.read_text() == "seed\n"
-    assert os.stat(copied).st_ino == os.stat(seed).st_ino
+    # The seed must own its bytes: a shared inode would let workspace writes
+    # (testmon updates its SQLite graph in place) mutate the main checkout.
+    assert os.stat(copied).st_ino != os.stat(seed).st_ino
+    copied.write_text("workspace-mutation\n")
+    assert seed.read_text() == "seed\n"
     assert created["provision_notes"] == [
         {"kind": "missing-source", "path": "missing.seed"}
     ]
