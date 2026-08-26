@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """Derived campaign truth: one lifecycle state per unit of work.
 
+SPEC WARNING (2026-08-26): this prototype's CLASSIFICATION is wrong and is kept
+only for its data-joining shape. It decides "unpublished" from PR existence,
+but worktree<->PR is not 1:1 — a branch ships a sequence of PRs, one PR carries
+many beads, and content can land without that branch's PR. That over-reported
+at-risk work 55 vs 5, and its gc would delete a worktree that shipped a slice
+and then accumulated unpublished commits. The shipped surface must classify by
+CONTENT: a unit holds unpublished work iff any file it introduces still differs
+from master. See sinnix-235w.
+
 Every stage of a lane's life already has an authoritative store — Beads for
 intent, sinnixd job records for execution, git for artifacts, GitHub for
 publication. Nothing joined them, so work fell through the gaps: finished
