@@ -135,32 +135,50 @@ run_gate() {
   fi
 }
 
-slot_fd=""
-while [ -z "$slot_fd" ]; do
-  for i in 1 2 3 4; do
-    exec {fd}>"/realm/tmp/work/.gate-slot-$i.lock"
-    if flock -n "$fd"; then
-      slot_fd=$fd
-      break
-    fi
-    exec {fd}>&-
+# CI is the gate authority, not this machine. CircleCI runs `devtools verify
+# --quick` -- the identical command -- on every PR, and auto-merge will not
+# merge until it passes. Running it locally too duplicated a 10-15 minute check
+# on a contended box and serialized publication behind it; the pre-flight only
+# earned its keep while lane venvs were broken, which the provisioning fix
+# settled. Set HARVEST_LOCAL_GATE=1 to force the local run (e.g. when CI is
+# unavailable, or for a change whose failure mode CI cannot see).
+if [ "${HARVEST_LOCAL_GATE:-0}" = "1" ]; then
+  slot_fd=""
+  while [ -z "$slot_fd" ]; do
+    for i in 1 2 3 4; do
+      exec {fd}>"/realm/tmp/work/.gate-slot-$i.lock"
+      if flock -n "$fd"; then
+        slot_fd=$fd
+        break
+      fi
+      exec {fd}>&-
+    done
+    [ -z "$slot_fd" ] && sleep 15
   done
-  [ -z "$slot_fd" ] && sleep 15
-done
-run_gate || {
-  emit_harvest_event failed 'HARVEST-FAIL quick gate — see $QLOG'
-  echo "HARVEST-FAIL quick gate — see $QLOG"
-  exit 3
-}
-exec {slot_fd}>&-
+  run_gate || {
+    emit_harvest_event failed "HARVEST-FAIL quick gate — see $QLOG"
+    echo "HARVEST-FAIL quick gate — see $QLOG"
+    exit 3
+  }
+  exec {slot_fd}>&-
+fi
 
 # --- Phase B publish under the repo flock --------------------------------
+# Phase A's gate already succeeded by this point, so losing the repo lock here
+# would discard a completed 10-15 minute verification run. Wait patiently and
+# retry rather than failing: contention is transient, the work is not.
+# (2026-08-26: six harvests were thrown away this way in one wave.)
 exec 9>"$LOCK"
-flock -w 900 9 || {
-  emit_harvest_event failed "HARVEST-FAIL flock timeout"
-  echo "HARVEST-FAIL flock timeout"
+_locked=0
+for _attempt in 1 2 3 4; do
+  if flock -w 1800 9; then _locked=1; break; fi
+  echo "harvest: repo lock busy after 30m (attempt $_attempt); still waiting"
+done
+if [ "$_locked" -ne 1 ]; then
+  emit_harvest_event failed "HARVEST-FAIL flock timeout after 2h"
+  echo "HARVEST-FAIL flock timeout after 2h"
   exit 4
-}
+fi
 
 for lockfile in "$REPO"/.git/index.lock "$REPO"/.git/worktrees/*/index.lock; do
   [ -f "$lockfile" ] || continue
@@ -177,12 +195,20 @@ if [ "$(git rev-parse origin/master)" != "$GATED_AT" ]; then
     echo "HARVEST-FAIL rebase conflict (human resolves)"
     exit 3
   fi
-  run_gate || {
-    emit_harvest_event failed 'HARVEST-FAIL quick gate after master moved — see $QLOG'
-    echo "HARVEST-FAIL quick gate after master moved — see $QLOG"
-    exit 3
-  }
+  if [ "${HARVEST_LOCAL_GATE:-0}" = "1" ]; then
+    run_gate || {
+      emit_harvest_event failed "HARVEST-FAIL quick gate after master moved"
+      echo "HARVEST-FAIL quick gate after master moved — see $QLOG"
+      exit 3
+    }
+  fi
 fi
+
+# Release the repo lock BEFORE pushing. The lock exists to serialize
+# fetch+rebase against master; push does not need it (each harvest pushes its
+# own branch) and the pre-push hook runs a multi-minute verification, which
+# inside the critical section stalled every queued harvest behind it.
+exec 9>&-
 
 git push -qf -u origin HEAD || {
   emit_harvest_event failed "HARVEST-FAIL push"
@@ -203,7 +229,10 @@ gh pr merge "$NUM" --squash --auto >/dev/null 2>&1 || true
 if [ "$(gh pr view "$NUM" --json autoMergeRequest -q '.autoMergeRequest != null' 2>/dev/null)" != "true" ]; then
   echo "HARVEST-WARN auto-merge did not arm for pr=$NUM (merge manually when checks pass)"
 fi
+# 9>&- : the watcher must NOT inherit the repo flock. It polls for up to two
+# hours, so an inherited FD held the lock that long and stalled every queued
+# harvest behind it.
 nohup /home/sinity/.claude/skills/review-land/scripts/merge_close.sh \
-  Sinity/polylogue "$NUM" $BEAD $REASON >"/realm/tmp/work/merge-$NUM.log" 2>&1 &
+  Sinity/polylogue "$NUM" $BEAD $REASON >"/realm/tmp/work/merge-$NUM.log" 2>&1 9>&- &
 emit_harvest_event published "pr=$NUM"
 echo "HARVEST-OK pr=$NUM branch=$(git rev-parse --abbrev-ref HEAD)"
