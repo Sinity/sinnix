@@ -33,6 +33,9 @@ CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS = {
     "workspace.review-status": 65.0,
     "workspace.finish": 185.0,
     "packet.finalize": 420.0,
+    # Launch compiles the packet AND provisions the workspace (file seeds plus
+    # the provision exec hook, e.g. uv sync) before answering.
+    "packet.launch": 300.0,
     # Wave scheduling compiles every ready bead's packet before answering.
     "campaign.run": 300.0,
 }
