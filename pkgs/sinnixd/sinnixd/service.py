@@ -695,22 +695,34 @@ class SinnixdService:
                     "workspace finish requires agent-control or operator principal"
                 )
             assert self.delivery is not None
-            return self.delivery.finish(
-                self._single_workspace_id(arguments, "workspace.finish")
-            )
+            allowed = {"workspace_id", "beads", "receipt", "partial_note"}
+            if set(arguments) - allowed:
+                raise ValueError("workspace.finish received unsupported arguments")
+            self._validate_workspace_settlement(arguments)
+            workspace_id = self._job_argument(arguments, "workspace_id")
+            project_id = self.workspaces.get(workspace_id)["project_id"]
+            result = self.delivery.finish(workspace_id)
+            return self._settle_workspace(result, arguments, project_id)
         if operation == "workspace.finish-integrated":
-            if principal not in {"agent-control", "operator"} or set(arguments) != {
+            if principal not in {"agent-control", "operator"}:
+                raise ValueError(
+                    "workspace.finish-integrated requires agent-control or operator"
+                )
+            allowed = {"workspace_id", "target_ref", "beads", "receipt", "partial_note"}
+            if set(arguments) - allowed or not {
                 "workspace_id",
                 "target_ref",
-            }:
-                raise ValueError(
-                    "workspace.finish-integrated requires agent-control or operator plus workspace_id and target_ref"
-                )
+            } <= set(arguments):
+                raise ValueError("workspace.finish-integrated requires workspace_id and target_ref")
+            self._validate_workspace_settlement(arguments)
             assert self.workspaces is not None
-            return self.workspaces.finish_integrated(
-                self._job_argument(arguments, "workspace_id"),
+            workspace_id = self._job_argument(arguments, "workspace_id")
+            project_id = self.workspaces.get(workspace_id)["project_id"]
+            result = self.workspaces.finish_integrated(
+                workspace_id,
                 self._job_argument(arguments, "target_ref"),
             )
+            return self._settle_workspace(result, arguments, project_id)
         if operation == "job.start":
             if principal not in {"agent-control", "operator"}:
                 raise JobAuthorizationError(
@@ -1129,6 +1141,95 @@ class SinnixdService:
         except BaseException:
             input_path.unlink(missing_ok=True)
             raise
+
+    def _settle_workspace(
+        self,
+        result: dict[str, Any],
+        arguments: Mapping[str, Any],
+        project_id: str,
+    ) -> dict[str, Any]:
+        """Apply an authored landing receipt and publish one completion event."""
+        self._validate_workspace_settlement(arguments)
+        beads = arguments.get("beads", [])
+        if not isinstance(beads, list) or not beads or any(
+            not isinstance(item, str) or not item for item in beads
+        ):
+            if "beads" in arguments:
+                raise ValueError("beads must be a non-empty list of IDs")
+            beads = []
+        receipt = arguments.get("receipt")
+        partial_note = arguments.get("partial_note")
+        if receipt is not None and not isinstance(receipt, Mapping):
+            raise ValueError("receipt must map bead IDs to authored close reasons")
+        if partial_note is not None and (
+            not isinstance(partial_note, str) or not partial_note.strip()
+        ):
+            raise ValueError("partial_note must be a non-empty string")
+        if beads and receipt is None and partial_note is None:
+            raise ValueError("each bead requires an authored receipt or partial note")
+        if receipt is not None and set(receipt) != set(beads):
+            raise ValueError("receipt must contain exactly the beads being settled")
+        settled: list[str] = []
+        if self.tasks is not None:
+            for bead_id in beads:
+                value = receipt[bead_id] if receipt is not None else partial_note
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(f"missing authored receipt for bead {bead_id}")
+                operation = "task.complete" if receipt is not None else "task.note"
+                task_args = (
+                    {
+                        "project_id": project_id,
+                        "task_id": bead_id,
+                        "reason": value,
+                        "merge_sha": result["head"],
+                    }
+                    if operation == "task.complete"
+                    else {"project_id": project_id, "task_id": bead_id, "text": value}
+                )
+                self.tasks.execute(
+                    operation=operation,
+                    arguments=task_args,
+                    principal="operator",
+                )
+                settled.append(bead_id)
+        disposition = (
+            "close" if receipt is not None else ("comment" if beads else "none")
+        )
+        event = {
+            "schema_version": 1,
+            "kind": "workspace_completion",
+            "workspace_id": result["workspace_id"],
+            "target_ref": arguments.get("target_ref", result.get("head")),
+            "beads_settled": settled,
+            "disposition": disposition,
+        }
+        self.jobs.spool_event(event)
+        return {
+            **result,
+            "beads_settled": settled,
+            "disposition": disposition,
+            "completion_event": event,
+        }
+
+    @staticmethod
+    def _validate_workspace_settlement(arguments: Mapping[str, Any]) -> None:
+        beads = arguments.get("beads", [])
+        if "beads" in arguments and (
+            not isinstance(beads, list) or not beads or any(
+                not isinstance(item, str) or not item for item in beads
+            )
+        ):
+            raise ValueError("beads must be a non-empty list of IDs")
+        receipt = arguments.get("receipt")
+        note = arguments.get("partial_note")
+        if receipt is not None and (
+            not isinstance(receipt, Mapping) or set(receipt) != set(beads)
+        ):
+            raise ValueError("receipt must contain exactly the beads being settled")
+        if note is not None and (not isinstance(note, str) or not note.strip()):
+            raise ValueError("partial_note must be a non-empty string")
+        if beads and receipt is None and note is None:
+            raise ValueError("each bead requires an authored receipt or partial note")
 
     def _cleanup_terminal(self, response: Mapping[str, Any]) -> dict[str, Any]:
         return self.job_contracts.cleanup_terminal(response)
