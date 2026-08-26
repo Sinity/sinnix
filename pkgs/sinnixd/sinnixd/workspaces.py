@@ -763,8 +763,6 @@ class GitWorkspaces:
             self._cleanup_created_worktree(project, staging_path)
             raise WorkspaceError(result.stderr.strip() or "git worktree add failed")
         try:
-            checkout = self._checkout_by_path(project_id, staging_path)
-            notes = self._provision(project, staging_path)
             if path.exists():
                 raise WorkspaceError("workspace target appeared during creation")
             moved = self._git(
@@ -779,6 +777,7 @@ class GitWorkspaces:
                 raise WorkspaceError(moved.stderr.strip() or "git worktree move failed")
             created_path = path
             checkout = self._checkout_by_path(project_id, path)
+            notes = self._provision(project, path)
             record = self._new_record(
                 project,
                 name,
@@ -939,17 +938,25 @@ class GitWorkspaces:
         """Best-effort rollback for a worktree created by this transaction."""
         if not path.exists() and self._worktree_record(project, path) is None:
             return
-        result = self._git(
-            project.root,
-            "worktree",
-            "remove",
-            "--force",
-            "--force",
-            str(path),
-            check=False,
-        )
+        try:
+            result = self._git(
+                project.root,
+                "worktree",
+                "remove",
+                "--force",
+                "--force",
+                str(path),
+                check=False,
+            )
+        except WorkspaceError:
+            # A provision hook may have left a descendant with the worktree as
+            # its cwd. Git can then time out while removing the entry; remove
+            # the path directly and let worktree prune discard the stale
+            # administrative record below.
+            result = None
         if (
-            result.returncode == 0
+            result is not None
+            and result.returncode == 0
             and not path.exists()
             and self._worktree_record(project, path) is None
         ):
@@ -962,7 +969,8 @@ class GitWorkspaces:
         self._git(project.root, "worktree", "prune", "--expire", "now", check=False)
         if path.exists() or self._worktree_record(project, path) is not None:
             raise WorkspaceError(
-                result.stderr.strip() or "created workspace rollback failed"
+                (result.stderr.strip() if result is not None else "")
+                or "created workspace rollback failed"
             )
 
     def adopt(self, *, project_id: str, checkout_id: str, name: str) -> dict[str, Any]:
