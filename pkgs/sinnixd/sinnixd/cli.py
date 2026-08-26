@@ -74,6 +74,27 @@ def _attach_packet_notes(
     }
 
 
+def _packet_step_failure(
+    response: dict[str, object],
+    step: str,
+    *,
+    rollback: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Identify the failed packet-launch step while retaining its error code."""
+    error = response.get("error")
+    error_value = dict(error) if isinstance(error, dict) else {}
+    message = error_value.get("message")
+    detail = message if isinstance(message, str) and message else "operation failed"
+    rollback_state = "completed"
+    if rollback is not None:
+        rollback_state = "completed" if rollback.get("ok") is True else "failed"
+    error_value["code"] = error_value.get("code", "OPERATION_FAILED")
+    error_value["message"] = (
+        f"packet launch step {step} failed ({rollback_state} rollback): {detail}"
+    )
+    return {**response, "ok": False, "error": error_value}
+
+
 def _add_agent_launch_arguments(
     target: argparse.ArgumentParser, *, required: bool
 ) -> None:
@@ -812,37 +833,80 @@ def main() -> int:
         except (OSError, ProtocolError, SinnixdClientError):
             created = _unavailable_response(create_request)
         if created.get("ok") is not True:
-            response = created
+            response = _packet_step_failure(created, "workspace.create")
         else:
             response: dict[str, object] | None = None
             packet_notes = _packet_notes(created)
-            try:
-                checkout_id = checkout_id_from_workspace_response(created)
-            except PacketError:
-                payload = created.get("payload")
-                value = payload.get("value") if isinstance(payload, dict) else None
-                workspace_id = (
-                    value.get("workspace_id") if isinstance(value, dict) else None
-                )
+            payload = created.get("payload")
+            value = payload.get("value") if isinstance(payload, dict) else None
+            workspace_id = (
+                value.get("workspace_id") if isinstance(value, dict) else None
+            )
+
+            def compensate(
+                step_response: dict[str, object], step: str
+            ) -> dict[str, object]:
                 if not isinstance(workspace_id, str) or not workspace_id:
-                    parser().error(
-                        "workspace.create did not return a workspace identity"
-                    )
-                get_request = _request(
-                    "workspace.get",
+                    return _packet_step_failure(step_response, step)
+                dispose_request = _request(
+                    "workspace.dispose",
                     "git-workspaces",
                     {"workspace_id": workspace_id},
                     "agent-control",
                 )
                 try:
-                    status = call(arguments.socket, get_request)
+                    disposed = call(arguments.socket, dispose_request)
                 except (OSError, ProtocolError, SinnixdClientError):
-                    status = _unavailable_response(get_request)
-                if status.get("ok") is not True:
-                    response = status
-                    checkout_id = ""
+                    disposed = _unavailable_response(dispose_request)
+                return _packet_step_failure(
+                    step_response, step, rollback=disposed
+                )
+
+            try:
+                checkout_id = checkout_id_from_workspace_response(created)
+            except PacketError:
+                if not isinstance(workspace_id, str) or not workspace_id:
+                    response = _packet_step_failure(
+                        {
+                            "ok": False,
+                            "error": {
+                                "code": "RESULT_INVALID",
+                                "message": (
+                                    "workspace.create did not return a workspace identity"
+                                ),
+                            },
+                        },
+                        "workspace.create",
+                    )
                 else:
-                    checkout_id = checkout_id_from_workspace_response(status)
+                    get_request = _request(
+                        "workspace.get",
+                        "git-workspaces",
+                        {"workspace_id": workspace_id},
+                        "agent-control",
+                    )
+                    try:
+                        status = call(arguments.socket, get_request)
+                    except (OSError, ProtocolError, SinnixdClientError):
+                        status = _unavailable_response(get_request)
+                    if status.get("ok") is not True:
+                        response = compensate(status, "workspace.get")
+                        checkout_id = ""
+                    else:
+                        try:
+                            checkout_id = checkout_id_from_workspace_response(status)
+                        except PacketError as error:
+                            response = compensate(
+                                {
+                                    "ok": False,
+                                    "error": {
+                                        "code": "RESULT_INVALID",
+                                        "message": str(error),
+                                    },
+                                },
+                                "workspace.get",
+                            )
+                            checkout_id = ""
             if response is None:
                 dimensions = snapshot.dimensions.to_dict()
                 agent_request = _request(
@@ -877,6 +941,8 @@ def main() -> int:
                     response = call(arguments.socket, agent_request)
                 except (OSError, ProtocolError, SinnixdClientError):
                     response = _unavailable_response(agent_request)
+                if response.get("ok") is not True:
+                    response = compensate(response, "job.agent.start")
                 response = _attach_packet_notes(response, packet_notes)
     elif arguments.command == "job" and arguments.job_command == "start":
         try:
