@@ -90,9 +90,19 @@ def pr_index(project: str) -> dict[str, tuple[int, str]]:
     if root is None:
         return {}
     raw = run(
-        ["gh", "pr", "list", "--state", "all", "--limit", "300",
-         "--json", "number,state,headRefName"],
-        cwd=root, timeout=60,
+        [
+            "gh",
+            "pr",
+            "list",
+            "--state",
+            "all",
+            "--limit",
+            "300",
+            "--json",
+            "number,state,headRefName",
+        ],
+        cwd=root,
+        timeout=60,
     )
     try:
         rows = json.loads(raw or "[]")
@@ -110,7 +120,9 @@ def closed_beads(project: str) -> set[str]:
     root = PROJECT_ROOTS.get(project)
     if root is None:
         return set()
-    raw = run(["bd", "list", "--status", "closed", "--limit", "4000"], cwd=root, timeout=60)
+    raw = run(
+        ["bd", "list", "--status", "closed", "--limit", "4000"], cwd=root, timeout=60
+    )
     found: set[str] = set()
     for line in raw.splitlines():
         for token in line.split():
@@ -130,10 +142,18 @@ def units() -> list[dict[str, object]]:
         if not path.is_dir():
             continue
         name = path.name
-        project = "polylogue" if "polylogue" in name else "sinnix" if "sinnix" in name else "?"
+        project = (
+            "polylogue"
+            if "polylogue" in name
+            else "sinnix"
+            if "sinnix" in name
+            else "?"
+        )
         branch = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
         base = run(["git", "merge-base", "HEAD", "origin/master"], cwd=path)
-        ahead_raw = run(["git", "log", "--oneline", f"{base}..HEAD"], cwd=path) if base else ""
+        ahead_raw = (
+            run(["git", "log", "--oneline", f"{base}..HEAD"], cwd=path) if base else ""
+        )
         ahead = len([line for line in ahead_raw.splitlines() if line.strip()])
         dirty = bool(run(["git", "status", "--porcelain"], cwd=path))
 
@@ -145,10 +165,12 @@ def units() -> list[dict[str, object]]:
         bead = None
         prefix = f"packet-{project}-"
         if name.startswith(prefix):
-            bead = f"{project}-{name[len(prefix):]}"
+            bead = f"{project}-{name[len(prefix) :]}"
 
         is_running = str(path) in running
-        has_live_cwd = any(c == str(path) or c.startswith(str(path) + "/") for c in live_cwds)
+        has_live_cwd = any(
+            c == str(path) or c.startswith(str(path) + "/") for c in live_cwds
+        )
 
         if is_running:
             state, reason = "running", "job in flight"
@@ -161,18 +183,30 @@ def units() -> list[dict[str, object]]:
         elif pr and pr[1] == "CLOSED":
             state, reason = "pr-closed", f"PR #{pr[0]} closed unmerged"
         elif ahead > 0:
-            state, reason = "UNPUBLISHED", f"{ahead} commit(s) with no PR — work at risk"
+            state, reason = (
+                "UNPUBLISHED",
+                f"{ahead} commit(s) with no PR — work at risk",
+            )
         elif bead and bead in closed_cache.get(project, set()):
             state, reason = "spent", "no commits; bead already closed"
         else:
             state, reason = "empty", "no commits, no PR"
 
-        rows.append({
-            "name": name, "project": project, "branch": branch, "ahead": ahead,
-            "dirty": dirty, "pr": f"#{pr[0]} {pr[1]}" if pr else "-",
-            "bead": bead or "-", "state": state, "reason": reason,
-            "live_cwd": has_live_cwd, "path": str(path),
-        })
+        rows.append(
+            {
+                "name": name,
+                "project": project,
+                "branch": branch,
+                "ahead": ahead,
+                "dirty": dirty,
+                "pr": f"#{pr[0]} {pr[1]}" if pr else "-",
+                "bead": bead or "-",
+                "state": state,
+                "reason": reason,
+                "live_cwd": has_live_cwd,
+                "path": str(path),
+            }
+        )
     return rows
 
 
@@ -193,20 +227,32 @@ def main() -> int:
         for row in rows:
             counts[str(row["state"])] = counts.get(str(row["state"]), 0) + 1
         for row in sorted(rows, key=lambda r: (str(r["state"]), str(r["name"]))):
-            print(f"{str(row['state']):<12} {str(row['name']):<42} {str(row['pr']):<14} {row['reason']}")
-        print("\n" + "  ".join(f"{k}={v}" for k, v in sorted(counts.items())) + f"  total={len(rows)}")
+            print(
+                f"{str(row['state']):<12} {str(row['name']):<42} {str(row['pr']):<14} {row['reason']}"
+            )
+        print(
+            "\n"
+            + "  ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+            + f"  total={len(rows)}"
+        )
         return 0
 
     if verb == "stuck":
         hits = [r for r in rows if r["state"] in ACTIONABLE]
         for row in sorted(hits, key=lambda r: str(r["state"])):
-            print(f"{str(row['state']):<12} {str(row['name']):<42} {str(row['bead']):<22} {row['reason']}")
+            print(
+                f"{str(row['state']):<12} {str(row['name']):<42} {str(row['bead']):<22} {row['reason']}"
+            )
         print(f"\n{len(hits)} unit(s) need action")
         return 1 if hits else 0
 
     if verb == "gc":
         apply = "--apply" in sys.argv
-        candidates = [r for r in rows if r["state"] in DISPOSABLE and not r["live_cwd"] and not r["dirty"]]
+        candidates = [
+            r
+            for r in rows
+            if r["state"] in DISPOSABLE and not r["live_cwd"] and not r["dirty"]
+        ]
         for row in candidates:
             if not apply:
                 print(f"WOULD DISPOSE {str(row['name']):<42} {row['reason']}")
@@ -214,10 +260,25 @@ def main() -> int:
             root = PROJECT_ROOTS.get(str(row["project"]))
             if root is None:
                 continue
-            removed = run(["git", "-C", str(root), "worktree", "remove", "--force", str(row["path"])], timeout=60)
-            run(["git", "-C", str(root), "branch", "-D", str(row["branch"])], timeout=30)
+            removed = run(
+                [
+                    "git",
+                    "-C",
+                    str(root),
+                    "worktree",
+                    "remove",
+                    "--force",
+                    str(row["path"]),
+                ],
+                timeout=60,
+            )
+            run(
+                ["git", "-C", str(root), "branch", "-D", str(row["branch"])], timeout=30
+            )
             print(f"DISPOSED {row['name']} {removed}")
-        print(f"\n{len(candidates)} disposable{' (dry run; pass --apply)' if not apply else ''}")
+        print(
+            f"\n{len(candidates)} disposable{' (dry run; pass --apply)' if not apply else ''}"
+        )
         return 0
 
     print(__doc__)

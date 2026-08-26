@@ -171,7 +171,10 @@ fi
 exec 9>"$LOCK"
 _locked=0
 for _attempt in 1 2 3 4; do
-  if flock -w 1800 9; then _locked=1; break; fi
+  if flock -w 1800 9; then
+    _locked=1
+    break
+  fi
   echo "harvest: repo lock busy after 30m (attempt $_attempt); still waiting"
 done
 if [ "$_locked" -ne 1 ]; then
