@@ -150,4 +150,29 @@ if echo "$CMD_NO_HEREDOC" | grep -qE "(^|[^'\"])/nix/store/[^[:space:]'\"]*[*?]"
   exit 0
 fi
 
+# Block bootloader RE-lock on the Redmi Note 11 (spes/spesn).
+#
+# The phone runs a custom ROM on an unlocked bootloader. Relocking tells the
+# bootloader to demand Xiaomi-signed vbmeta/boot; an Evolution X install fails
+# that check, so the device will not boot -- and, being locked again, it also
+# refuses unsigned flashes. No boot and no flash is a hard brick recoverable
+# only through EDL 9008 with an authorized Mi account, which this operator
+# does not have. Upstream states this plainly and it is not theoretical.
+#
+# Relock is legitimate in exactly one sequence: restore the full stock HyperOS
+# fastboot ROM, confirm it boots with verifiedbootstate green, THEN lock. That
+# path is deliberately not carved out here -- it is rare, deserves a human
+# reading this comment, and the override is to run the command outside an
+# agent session.
+#
+# 'flashing unlock' stays allowed; only the locking direction is blocked.
+# Heredocs are already stripped above so this hazard can be documented.
+# Anchored at a command position, with only known wrapper prefixes allowed
+# (sudo/doas/time/command/env) and an optional absolute path, so that prose
+# mentioning the command -- echo, a comment, a bd note -- is not caught.
+if echo "$CMD_NO_HEREDOC" | grep -qE '(^|[;&|]\s*)(sudo\s+|doas\s+|time\s+|command\s+|env\s+[^[:space:];&|]+\s+)*[^[:space:];&|]*\bfastboot\b[^;&|]*\b(flashing\s+lock(_critical)?|oem\s+lock)\b'; then
+  emit_deny "Bootloader relock blocked: this device runs a custom ROM on an unlocked bootloader, so locking makes it demand Xiaomi-signed boot images it does not have -- it will neither boot nor accept flashes, which is a hard brick needing EDL 9008 + an authorized Mi account. Relock is only safe after restoring the full stock HyperOS fastboot ROM and confirming it boots green. If that is genuinely what you are doing, run the lock command outside an agent session."
+  exit 0
+fi
+
 exit 0
