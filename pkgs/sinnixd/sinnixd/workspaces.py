@@ -46,6 +46,7 @@ class WorkspaceError(ValueError):
 
 
 DEAD_PACKET_COLLISION_NOTE = "packet-dead-collision-recovered"
+MISSING_WORKTREE_GC_NOTE = "workspace-missing-worktree-gc"
 
 
 @dataclass(frozen=True)
@@ -247,6 +248,15 @@ class WorkspaceStore:
             rows.append(record.to_dict())
 
     def remove(self, workspace_id: str) -> WorkspaceRecord:
+        removed = self.remove_many((workspace_id,))
+        if not removed:
+            raise KeyError(f"unknown workspace: {workspace_id}")
+        return removed[0]
+
+    def remove_many(self, workspace_ids: Sequence[str]) -> tuple[WorkspaceRecord, ...]:
+        ids = set(workspace_ids)
+        if not ids:
+            return ()
         default = {"schema_version": WORKSPACE_SCHEMA_VERSION, "workspaces": []}
         with modify_json(self.index, default, mode=0o600) as payload:
             if (
@@ -258,18 +268,16 @@ class WorkspaceStore:
             if not isinstance(rows, list):
                 raise WorkspaceError("workspace index rows are invalid")
             records = [WorkspaceRecord.from_dict(row) for row in rows]
-            removed = next(
-                (record for record in records if record.workspace_id == workspace_id),
-                None,
-            )
-            if removed is None:
-                raise KeyError(f"unknown workspace: {workspace_id}")
+            removed = tuple(record for record in records if record.workspace_id in ids)
             payload["workspaces"] = [
                 record.to_dict()
                 for record in records
-                if record.workspace_id != workspace_id
+                if record.workspace_id not in ids
             ]
-        shutil.rmtree(self.checkpoints_root / workspace_id, ignore_errors=True)
+        for record in removed:
+            shutil.rmtree(
+                self.checkpoints_root / record.workspace_id, ignore_errors=True
+            )
         return removed
 
     def checkpoint_path(self, workspace_id: str, checkpoint_id: str) -> Path:
@@ -309,6 +317,12 @@ class WorkspaceStore:
             rows.append(record.to_dict())
 
     def remove_stack_references(self, workspace_id: str) -> None:
+        self.remove_stack_references_many((workspace_id,))
+
+    def remove_stack_references_many(self, workspace_ids: Sequence[str]) -> None:
+        ids = set(workspace_ids)
+        if not ids:
+            return
         default = {"schema_version": STACK_SCHEMA_VERSION, "stacks": []}
         with modify_json(self.stacks, default, mode=0o600) as payload:
             rows = payload.get("stacks") if isinstance(payload, dict) else None
@@ -320,8 +334,8 @@ class WorkspaceStore:
                 row
                 for row in rows
                 if isinstance(row, Mapping)
-                and row.get("child_workspace_id") != workspace_id
-                and row.get("parent_workspace_id") != workspace_id
+                and row.get("child_workspace_id") not in ids
+                and row.get("parent_workspace_id") not in ids
             ]
 
     def update_stack_parent_head(
@@ -480,13 +494,16 @@ class GitWorkspaces:
         return self.store.root / "mutation.lock"
 
     def list(self, project_id: str | None = None) -> dict[str, Any]:
-        records = self.store.records()
-        if project_id is not None:
-            self.projects.get(project_id)
-            records = tuple(
-                record for record in records if record.project_id == project_id
-            )
-        return {"workspaces": [self._status(record) for record in records]}
+        with flock(self.mutation_lock):
+            records = self.store.records()
+            if project_id is not None:
+                self.projects.get(project_id)
+                records = tuple(
+                    record for record in records if record.project_id == project_id
+                )
+            statuses = [self._list_status(record) for record in records]
+            self._gc_missing_locked(records)
+            return {"workspaces": statuses}
 
     def get(self, workspace_id: str) -> dict[str, Any]:
         record = self._record(workspace_id)
@@ -969,7 +986,6 @@ class GitWorkspaces:
     def reap(self, workspace_id: str) -> dict[str, Any]:
         with flock(self.mutation_lock):
             record = self._record(workspace_id)
-            status = self._status(record)
             if any(
                 stack.parent_workspace_id == workspace_id
                 for stack in self.store.stack_records()
@@ -977,6 +993,16 @@ class GitWorkspaces:
                 raise WorkspaceError(
                     "workspace cannot be reaped while stacked children exist"
                 )
+            if self._path_state(record) == "missing":
+                self._gc_missing_locked((record,))
+                return {
+                    "workspace_id": workspace_id,
+                    "reaped": True,
+                    "relationship_only": True,
+                    "state": "missing",
+                    "note": MISSING_WORKTREE_GC_NOTE,
+                }
+            status = self._status(record)
             if status["state"] == "missing":
                 self.store.remove_stack_references(workspace_id)
                 self.store.remove(workspace_id)
@@ -1029,6 +1055,15 @@ class GitWorkspaces:
                 raise WorkspaceError(
                     "workspace cannot be disposed while stacked children exist"
                 )
+            if self._path_state(record) == "missing":
+                self._gc_missing_locked((record,))
+                return {
+                    "workspace_id": workspace_id,
+                    "disposed": True,
+                    "relationship_only": True,
+                    "state": "missing",
+                    "note": MISSING_WORKTREE_GC_NOTE,
+                }
             status = self._status(record)
             if status["state"] != "available" or not status["identity_matches"]:
                 raise WorkspaceError(
@@ -1454,8 +1489,81 @@ class GitWorkspaces:
                 raise
             return {**restored, "recovered": True, "path": str(record.path)}
 
+    @staticmethod
+    def _path_state(record: WorkspaceRecord) -> str:
+        """Classify a stored path without asking Git to inspect its identity."""
+        try:
+            if not record.path.is_absolute():
+                return "invalid"
+            if not record.path.exists():
+                return "missing"
+            if not record.path.is_dir():
+                return "invalid"
+        except (OSError, RuntimeError):
+            return "invalid"
+        return "present"
+
+    @staticmethod
+    def _unverified_status(
+        record: WorkspaceRecord, state: str, *, identity_matches: bool | None = None
+    ) -> dict[str, Any]:
+        row = record.to_dict()
+        row.update(
+            {
+                "state": state,
+                "checkout_id": None,
+                "head": None,
+                "current_branch": None,
+                "dirty": None,
+                "identity_matches": identity_matches,
+            }
+        )
+        return row
+
+    def _list_status(self, record: WorkspaceRecord) -> dict[str, Any]:
+        path_state = self._path_state(record)
+        return self._unverified_status(
+            record, "available" if path_state == "present" else path_state
+        )
+
+    def _gc_missing_locked(
+        self, records: Sequence[WorkspaceRecord]
+    ) -> tuple[WorkspaceRecord, ...]:
+        candidates = tuple(
+            record
+            for record in records
+            if self._path_state(record) == "missing"
+        )
+        if not candidates:
+            return ()
+        parent_ids = {
+            stack.parent_workspace_id for stack in self.store.stack_records()
+        }
+        removed = tuple(
+            record for record in candidates if record.workspace_id not in parent_ids
+        )
+        if not removed:
+            return ()
+        workspace_ids = tuple(record.workspace_id for record in removed)
+        self.store.remove_stack_references_many(workspace_ids)
+        removed = self.store.remove_many(workspace_ids)
+        if removed:
+            self.store.record_disposal_evidence(
+                {
+                    "kind": MISSING_WORKTREE_GC_NOTE,
+                    "reason": "worktree-path-missing",
+                    "workspace_ids": [record.workspace_id for record in removed],
+                    "paths": [str(record.path) for record in removed],
+                }
+            )
+        return removed
+
     def _status(self, record: WorkspaceRecord) -> dict[str, Any]:
         row = record.to_dict()
+        if self._path_state(record) == "missing":
+            return self._unverified_status(
+                record, "missing", identity_matches=False
+            )
         try:
             checkout = self._checkout_by_path(record.project_id, record.path)
             branch = self._branch(checkout.path)
@@ -1474,7 +1582,7 @@ class GitWorkspaces:
                     "identity_matches": branch == record.branch,
                 }
             )
-        except (FileNotFoundError, KeyError, WorkspaceError):
+        except (FileNotFoundError, KeyError, OSError, RuntimeError, WorkspaceError):
             row.update(
                 {
                     "state": "missing",

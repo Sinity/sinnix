@@ -92,7 +92,11 @@ from sinnixd.tasks import (
     TaskService,
     reconcile_task_mutations,
 )
-from sinnixd.workspaces import MAX_PROVISION_OUTPUT_BYTES, WorkspaceError
+from sinnixd.workspaces import (
+    MAX_PROVISION_OUTPUT_BYTES,
+    WorkspaceError,
+    WorkspaceRecord,
+)
 
 
 @pytest.mark.parametrize(("ok", "expected"), ((True, 0), (False, 1)))
@@ -5917,6 +5921,161 @@ def test_workspace_reap_forgets_missing_and_removes_only_clean_contained_managed
     assert reaped["reaped"] and not reaped["relationship_only"]
     assert not Path(clean["path"]).exists()
     assert service.workspaces.list("fixture") == {"workspaces": []}
+
+
+def test_workspace_dispose_and_reap_gc_missing_records_with_audit_notes(
+    tmp_path: Path,
+) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    dead_reap = service.workspaces.create(
+        project_id="fixture",
+        name="dead-reap",
+        branch="feature/dead-reap",
+        base="HEAD",
+    )
+    dead_dispose = service.workspaces.create(
+        project_id="fixture",
+        name="dead-dispose",
+        branch="feature/dead-dispose",
+        base="HEAD",
+    )
+    for workspace in (dead_reap, dead_dispose):
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "worktree", "remove", workspace["path"]],
+            check=True,
+            capture_output=True,
+        )
+
+    reaped = service.workspaces.reap(dead_reap["workspace_id"])
+    disposed = service.workspaces.dispose(dead_dispose["workspace_id"])
+
+    assert reaped == {
+        "workspace_id": dead_reap["workspace_id"],
+        "reaped": True,
+        "relationship_only": True,
+        "state": "missing",
+        "note": "workspace-missing-worktree-gc",
+    }
+    assert disposed == {
+        "workspace_id": dead_dispose["workspace_id"],
+        "disposed": True,
+        "relationship_only": True,
+        "state": "missing",
+        "note": "workspace-missing-worktree-gc",
+    }
+    notes = [
+        json.loads(line)
+        for line in service.workspaces.store.disposals.read_text().splitlines()
+    ]
+    assert [note["kind"] for note in notes] == [
+        "workspace-missing-worktree-gc",
+        "workspace-missing-worktree-gc",
+    ]
+    assert service.workspaces.store.records() == ()
+
+
+def test_workspace_list_returns_mixed_records_without_git_revalidation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    live = service.workspaces.create(
+        project_id="fixture",
+        name="list-live",
+        branch="feature/list-live",
+        base="HEAD",
+    )
+    dead = service.workspaces.create(
+        project_id="fixture",
+        name="list-dead",
+        branch="feature/list-dead",
+        base="HEAD",
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "worktree", "remove", dead["path"]],
+        check=True,
+        capture_output=True,
+    )
+    invalid_path = tmp_path / "not-a-worktree-directory"
+    invalid_path.write_text("invalid workspace target\n")
+    invalid = WorkspaceRecord(
+        workspace_id="invalid-workspace",
+        project_id="fixture",
+        name="invalid-workspace",
+        path=invalid_path,
+        branch="feature/invalid-workspace",
+        base="HEAD",
+        created_at="2026-08-26T00:00:00+00:00",
+        managed=True,
+    )
+    service.workspaces.store.put(invalid)
+
+    def no_git_revalidation(_project_id: str):
+        raise AssertionError("workspace.list must not inspect Git worktrees")
+
+    monkeypatch.setattr(service.projects, "checkouts", no_git_revalidation)
+    listed = service.workspaces.list("fixture")
+    rows = {row["workspace_id"]: row for row in listed["workspaces"]}
+
+    assert rows[live["workspace_id"]]["state"] == "available"
+    assert rows[live["workspace_id"]]["identity_matches"] is None
+    assert rows[dead["workspace_id"]]["state"] == "missing"
+    assert rows[dead["workspace_id"]]["identity_matches"] is None
+    assert rows[dead["workspace_id"]]["head"] is None
+    assert rows[invalid.workspace_id]["state"] == "invalid"
+    assert rows[invalid.workspace_id]["identity_matches"] is None
+    assert {
+        record.workspace_id for record in service.workspaces.store.records()
+    } == {live["workspace_id"], invalid.workspace_id}
+
+
+def test_workspace_list_gc_scales_with_many_dead_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    records = [
+        WorkspaceRecord(
+            workspace_id=f"dead-{index}",
+            project_id="fixture",
+            name=f"dead-{index}",
+            path=tmp_path / "missing-worktrees" / str(index),
+            branch=f"feature/dead-{index}",
+            base="HEAD",
+            created_at="2026-08-26T00:00:00+00:00",
+            managed=True,
+        )
+        for index in range(1000)
+    ]
+    service.workspaces.store.index.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    service.workspaces.store.index.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "workspaces": [record.to_dict() for record in records],
+            }
+        )
+    )
+    monkeypatch.setattr(
+        service.projects,
+        "checkouts",
+        lambda _project_id: (_ for _ in ()).throw(
+            AssertionError("dead records must not invoke Git")
+        ),
+    )
+
+    started = time.monotonic()
+    listed = service.workspaces.list("fixture")
+    elapsed = time.monotonic() - started
+
+    assert len(listed["workspaces"]) == len(records)
+    assert {row["state"] for row in listed["workspaces"]} == {"missing"}
+    assert service.workspaces.store.records() == ()
+    assert elapsed < 1.0
 
 
 def test_delivery_rejects_pending_hosted_checks() -> None:
