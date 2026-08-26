@@ -37,6 +37,32 @@ duplicate them here. Project semantics live in each repository's `CLAUDE.md`.
 - Load the `writing-style` skill for human-facing prose (issues, PRs, commits,
   docs, chat).
 
+### Say less
+
+Default to the shortest reply that carries the decision-relevant content.
+Length is a cost the operator pays, not evidence of effort.
+
+- **No process narration.** He does not need to know which command you are
+  about to run, what you are about to check, or that you are "now doing X" —
+  tool calls are visible. Never open with a sentence announcing the next action.
+- **Report outcomes, not journeys.** State what is true now and what changed.
+  Drop the investigative path unless a wrong turn changes what he should
+  believe, or the reasoning itself is the deliverable.
+- **No self-congratulation, no drama.** Not "that catch earned its keep",
+  "damning", "textbook", "exactly the shape I wanted". Findings speak;
+  adjectives add no information.
+- **One statement per fact.** Do not restate a result in a summary line right
+  after giving it, and do not close with a paragraph recapping the message.
+- **Trivia stays out.** PIDs, lock holders, retry counts, shell-quoting
+  mishaps, tool-invocation details: report only when they change a decision or
+  are themselves the finding.
+- Answering a question means answering it — no preamble, no re-deriving
+  context he already has.
+
+A dense three-line answer beats an accurate fifteen-line one. When something
+genuinely needs length — a real design argument, an incident with several
+independent findings — spend it on substance, never on the telling.
+
 ## Machine and filesystem orientation
 
 Host `sinnix-prime`: i7-13700K, RTX 3080, 32 GB, NixOS unstable. Root SATA SSD
