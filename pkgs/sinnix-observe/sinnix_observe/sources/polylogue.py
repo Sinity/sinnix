@@ -7,20 +7,43 @@ from pathlib import Path
 from typing import Any
 
 from .sqlite_util import sqlite_columns, sqlite_rows, table_exists
+from ..runtime_inventory import polylogue_archive
+
+POLYLOGUE_TIERS = ("index.db", "source.db", "embeddings.db", "ops.db", "audit.db", "user.db")
+
+
+def _archive_root() -> Path | None:
+    configured = polylogue_archive().get("archiveRoot")
+    return Path(configured) if isinstance(configured, str) and configured else None
+
+
+def polylogue_tiers() -> dict[str, Any]:
+    root = _archive_root()
+    rows: list[dict[str, str]] = []
+    if root is None:
+        return {"root": None, "tiers": rows}
+    for name in POLYLOGUE_TIERS:
+        path = root / name
+        try:
+            if path.is_symlink():
+                state = "compatibility" if path.exists() else "stale_compatibility"
+            elif path.is_file():
+                state = "active"
+            elif path.exists():
+                state = "inaccessible"
+            else:
+                state = "missing"
+        except OSError:
+            state = "inaccessible"
+        rows.append({"name": name, "path": str(path), "state": state})
+    return {"root": str(root), "tiers": rows}
 
 
 def polylogue_db() -> Path | None:
-    candidates = [
-        os.environ.get("SINNIX_OBSERVE_POLYLOGUE_DB"),
-        os.environ.get("POLYLOGUE_DB_PATH"),
-        str(Path.home() / ".local/share/polylogue/polylogue.db"),
-        str(Path.home() / ".local/share/polylogue/archive.db"),
-        str(Path.home() / ".local/share/polylogue/polylogue.sqlite"),
-        str(
-            Path(os.environ.get("POLYLOGUE_ROOT", "/realm/project/polylogue"))
-            / ".local/browser-capture/xdg-data/polylogue/polylogue.db"
-        ),
-    ]
+    candidates = [os.environ.get("SINNIX_OBSERVE_POLYLOGUE_DB")]
+    root = _archive_root()
+    if root is not None:
+        candidates.append(str(root / "index.db"))
     for candidate in candidates:
         if candidate and table_exists(Path(candidate), "live_ingest_attempt"):
             return Path(candidate)
@@ -33,6 +56,7 @@ def collect_polylogue_live_attempts(limit: int) -> dict[str, Any]:
         "db": str(db) if db else None,
         "available": False,
         "rows": [],
+        "archive": polylogue_tiers(),
     }
     if not db or not db.exists() or not table_exists(db, "live_ingest_attempt"):
         source["gaps"] = ["polylogue.live_attempts.unavailable"]

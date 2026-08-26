@@ -42,7 +42,7 @@ let
   # parked (acknowledged.down in modules/services/polylogue.nix) so these
   # jobs run against a quiescent tree today; both are written to work
   # unattended whenever ingestion resumes.
-  polylogueStateRoot = "${realmRoot}/state/polylogue";
+  polylogueStateRoot = config.sinnix.services.polylogue.dataDir;
   polylogueBackupRoot = "${realmRoot}/state/db-dumps/polylogue";
   machineTelemetryBackupRoot = "${realmRoot}/state/db-dumps/machine-telemetry";
   machineTelemetryBackupMarker = "${borgDrainStateRoot}/machine-telemetry-dumps.last-success";
