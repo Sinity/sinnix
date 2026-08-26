@@ -850,7 +850,7 @@ class CampaignReactor:
                 )
             selected: list[str] = []
             used: set[str] = set()
-            for bead_id, group, keys in candidates:
+            for bead_id, _group, keys in candidates:
                 if used.intersection(keys):
                     continue
                 selected.append(bead_id)
