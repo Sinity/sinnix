@@ -64,7 +64,7 @@ first.
 **Dispatch**: prefer `agentctl packet launch <bead> --project <p>` (compiler
 injects the worker contract; conflict keys declared + inferred). Ad-hoc work:
 `dispatch_lane <project> <delta-file>` — author only the task delta; the
-standing worker contract (worker-contract.md clauses 1–8) is injected by
+standing worker contract (worker-contract.md clauses 1–10) is injected by
 reference. Launch packets SPACED (~30s, confirm fleet admission between);
 duplicate-bead launches are refused typed when a live job owns the workspace.
 
@@ -81,20 +81,17 @@ duplicate-bead launches are refused typed when a live job owns the workspace.
    inverted? A lane that papered over a real defect gets REJECTED with the
    reason recorded on the bead — never merged "to keep moving".
 4. Write the PR body AND the bead close-reason now (decision time), then
-   `harvest_queue2.sh <wt> <title> <body> [<bead> <reason-file>]` — two-phase:
-   the quick gate runs in PARALLEL across harvests (4-slot semaphore, one
-   mechanical baseline pass), only push/PR/auto-merge serialize behind the
-   repo flock (re-gating only if master moved). A bead-close receipt MUST
-   carry a literal `DISPOSITION: close` line — slice receipts (bead stays
-   open) queue WITHOUT bead args and the coordinator comments the bead
-   instead. Queue with run_in_background; nohup survives the tool shell.
-   (`harvest_queue.sh` is the retired serial v1 — same interface.)
-5. Dispose worktrees only after content-equality/merge verification
-   (`git worktree remove` + branch delete); live-process check first.
-6. Dispatching into a worktree mid-harvest is MECHANICALLY refused, not left
-   to memory: the harvest holds an exclusive `/realm/tmp/work/.wt-<name>.lock`
-   for its whole run, and `dispatch_lane` exits 7 with `wt-busy` when that
-   lock is held. If you see that refusal, wait for `HARVEST-OK`/`HARVEST-FAIL`.
+   `harvest_queue2.sh <branch> <title> <body> [<bead> <reason-file>]` — the
+   lane has already rebased, gated, and pushed this branch. Harvest verifies
+   the remote ref, opens the PR, arms auto-merge, and is done; CI owns the
+   gate. A bead-close receipt MUST carry a literal `DISPOSITION: close` line —
+   slice receipts (bead stays open) queue WITHOUT bead args and the coordinator
+   comments the bead instead. Queue with run_in_background; nohup survives the
+   tool shell.
+5. Dispose the worktree at lane exit, after its successful push and terminal
+   report; no merge watcher or harvest checkout may retain it.
+6. A completion lane must not target a disposed checkout. If a lane needs to
+   continue, create a new workspace from the durable remote branch ref.
 
 **Launch wedges** (sinnix-dn4c): packet launch is an accidental saga — a
 step failure is redacted to `OWNER_UNAVAILABLE "sinnixd is unavailable"` and

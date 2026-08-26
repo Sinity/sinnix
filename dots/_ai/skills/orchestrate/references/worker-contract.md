@@ -47,8 +47,10 @@ Every implementation dispatch carries, verbatim in the prompt:
    branch cost a coordinator fix loop): before the final report, `git fetch`
    and rebase the branch onto `origin/master`, rerun the repo's quick gate in
    the REBASED state (gates added mid-wave — reachability, closure — only run
-   here), fix what it surfaces, and push. A conflict the lane cannot resolve
-   honestly is reported as such — never force-resolved to green.
+   here), fix what it surfaces, and push the branch to its remote as the final
+   act. The branch ref is the deliverable; publication consumes that ref and
+   does not need this checkout. A conflict the lane cannot resolve honestly is
+   reported as such — never force-resolved to green.
 8. **Machine trailer**: end the report with exact lines
    `LANE-BRANCH: <branch>` / `LANE-COMMIT: <sha>` / `LANE-QUICK: green|red|blocked-env`
    / `LANE-CLASSIFICATION: <one line per finding for fix lanes>` so the
