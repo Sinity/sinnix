@@ -91,7 +91,7 @@ live OUTSIDE your context — read them, never reconstruct:
   `worker-contract.md`.
 - **Live board**: `board` / `board sync` (`/realm/tmp/work/campaign-board.json`).
 - **Helpers**: `agentctl --format=brief` (coordinator output), `redflags
-  <worktree>` (review scanner), `dispatch_lane`, `harvest_queue.sh` + `merge_close.sh`
+<worktree>` (review scanner), `dispatch_lane`, `harvest_queue.sh` + `merge_close.sh`
   (`~/.claude/skills/review-land/scripts/`).
 - A fresh session resumes a campaign from these carriers plus the project's
   memory index; nothing campaign-critical may live only in a chat context.

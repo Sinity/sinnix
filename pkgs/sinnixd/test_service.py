@@ -167,7 +167,9 @@ def test_agentctl_brief_format_renders_jobs_and_workspaces() -> None:
         },
     }
 
-    assert cli_module._brief_response(jobs, "job.list") == "job-1 sinnix check running\n"
+    assert (
+        cli_module._brief_response(jobs, "job.list") == "job-1 sinnix check running\n"
+    )
     assert (
         cli_module._brief_response(workspaces, "workspace.list", "lane")
         == "ws-1 lane-a available\n"
