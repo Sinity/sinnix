@@ -32,21 +32,35 @@ done
 dispose_worktree_if_landed() {
   local wt=$1 repo=$2
   [ -d "$wt" ] || return 0
-  [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ] && { echo "dispose-skip dirty $wt"; return 0; }
+  [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ] && {
+    echo "dispose-skip dirty $wt"
+    return 0
+  }
   for c in /proc/[0-9]*/cwd; do
     t=$(readlink "$c" 2>/dev/null) || continue
-    case "$t" in "$wt"|"$wt"/*) echo "dispose-skip live-cwd $wt"; return 0 ;; esac
+    case "$t" in "$wt" | "$wt"/*)
+      echo "dispose-skip live-cwd $wt"
+      return 0
+      ;;
+    esac
   done
   git -C "$wt" fetch -q origin 2>/dev/null
   local files differing
   files=$(git -C "$wt" diff origin/master...HEAD --name-only 2>/dev/null)
   if [ -n "$files" ]; then
     differing=$(git -C "$wt" diff origin/master HEAD --name-only -- $files 2>/dev/null | grep -c .)
-    [ "$differing" -gt 0 ] && { echo "dispose-skip unpublished-content($differing) $wt"; return 0; }
+    [ "$differing" -gt 0 ] && {
+      echo "dispose-skip unpublished-content($differing) $wt"
+      return 0
+    }
   fi
-  local branch; branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)
+  local branch
+  branch=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)
   git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 &&
-    { [ -n "$branch" ] && [ "$branch" != master ] && git -C "$repo" branch -D "$branch" >/dev/null 2>&1; echo "disposed $wt"; }
+    {
+      [ -n "$branch" ] && [ "$branch" != master ] && git -C "$repo" branch -D "$branch" >/dev/null 2>&1
+      echo "disposed $wt"
+    }
 }
 
 if [ "$state" != "MERGED" ] && [ "$state" != "CLOSED" ]; then state=TIMEOUT; fi

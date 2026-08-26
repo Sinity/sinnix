@@ -39,20 +39,20 @@ defect in this document, not in the agents.**
 
 So: before scripting anything, look for the verb. `agentctl <noun> --help`.
 
-| Need | Verb (NOT a hand-rolled equivalent) |
-| --- | --- |
-| open a PR for a finished workspace | `agentctl workspace publish --job <j> --title T [--body F] [--wait]` |
-| land / integrate a workspace | `agentctl workspace land --job <j>` |
-| dispose after a GitHub merge | `agentctl workspace finish-merged` |
+| Need                                     | Verb (NOT a hand-rolled equivalent)                                                           |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------- |
+| open a PR for a finished workspace       | `agentctl workspace publish --job <j> --title T [--body F] [--wait]`                          |
+| land / integrate a workspace             | `agentctl workspace land --job <j>`                                                           |
+| dispose after a GitHub merge             | `agentctl workspace finish-merged`                                                            |
 | dispose when content is already in a ref | `agentctl workspace finish-integrated --target <ref>` (tree-contribution check; squash-proof) |
-| protect work before risky integration | `agentctl workspace checkpoint` / `restore` / `recover` |
-| stacked branches | `agentctl workspace stack` / `restack` |
-| review state of a workspace | `agentctl workspace review-status` |
-| complete a packet | `agentctl packet finalize --verification-job <j> --packet-job <j>` |
-| packet state | `agentctl packet status` |
-| task-backend mutations | `agentctl task create/claim/complete/note/update/relate/reconcile/snapshot` |
-| wait on work instead of polling | `agentctl job wait`, `agentctl agent wait`, `agentctl plan wait` |
-| all evidence for a job or workspace | `agentctl evidence <id>` |
+| protect work before risky integration    | `agentctl workspace checkpoint` / `restore` / `recover`                                       |
+| stacked branches                         | `agentctl workspace stack` / `restack`                                                        |
+| review state of a workspace              | `agentctl workspace review-status`                                                            |
+| complete a packet                        | `agentctl packet finalize --verification-job <j> --packet-job <j>`                            |
+| packet state                             | `agentctl packet status`                                                                      |
+| task-backend mutations                   | `agentctl task create/claim/complete/note/update/relate/reconcile/snapshot`                   |
+| wait on work instead of polling          | `agentctl job wait`, `agentctl agent wait`, `agentctl plan wait`                              |
+| all evidence for a job or workspace      | `agentctl evidence <id>`                                                                      |
 
 If a needed capability genuinely does not exist, that is a bead against the
 substrate — not a reason to grow the shell pile. If you find yourself writing
