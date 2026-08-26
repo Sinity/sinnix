@@ -287,6 +287,7 @@ class SinnixdService:
                 "capabilities": list(CAPABILITIES),
                 "owners": self.owners.catalog(),
                 "projects": len(self.projects.list()),
+                "backend_capacity": self.jobs.capacity_status(),
             }
         if operation == "project.list":
             return {"projects": self.projects.list()}
@@ -458,8 +459,18 @@ class SinnixdService:
                     "workspace disposal requires agent-control or operator principal"
                 )
             assert self.workspaces is not None
+            if set(arguments) - {"workspace_id", "acknowledge_published"}:
+                raise ValueError(
+                    "workspace.dispose accepts workspace_id and optional acknowledge_published"
+                )
+            acknowledge = arguments.get("acknowledge_published", False)
+            if not isinstance(acknowledge, bool):
+                raise ValueError(
+                    "workspace.dispose acknowledge_published must be boolean"
+                )
             return self.workspaces.dispose(
-                self._single_workspace_id(arguments, "workspace.dispose")
+                self._job_argument(arguments, "workspace_id"),
+                acknowledge_published=acknowledge,
             )
         if operation == "workspace.checkpoint":
             if principal not in {"agent-control", "operator"}:
@@ -622,6 +633,7 @@ class SinnixdService:
                 "workspace_id",
                 "parameters",
                 "bead_binding",
+                "dimensions",
             }:
                 raise ValueError(
                     "job.start accepts project_id, operation, optional workspace_id, optional parameters, and optional bead_binding"
@@ -629,6 +641,9 @@ class SinnixdService:
             parameters = arguments.get("parameters", {})
             if not isinstance(parameters, Mapping):
                 raise ValueError("job.start parameters must be an object")
+            dimensions = arguments.get("dimensions", {})
+            if not isinstance(dimensions, Mapping):
+                raise ValueError("job.start dimensions must be an object")
             project = self.projects.get(project_id)
             workspace_id = arguments.get("workspace_id")
             if workspace_id is not None and (
@@ -663,6 +678,7 @@ class SinnixdService:
                     parameters=parameters,
                     checkout=checkout,
                     contract=packet_contract,
+                    dimensions=dimensions,
                 )
             )
         if operation == "job.shell.start":
@@ -707,7 +723,8 @@ class SinnixdService:
                 "result",
             }
             if not required <= set(arguments) or set(arguments) - (
-                required | {"bead_binding", "parameters"}
+                required
+                | {"bead_binding", "parameters", "admission_bypass", "dimensions"}
             ):
                 raise ValueError(
                     "job.agent.start requires the complete typed agent contract"
@@ -730,6 +747,8 @@ class SinnixdService:
                     result=self._job_argument(arguments, "result"),
                     bead_binding=arguments.get("bead_binding"),
                     parameters=arguments.get("parameters"),
+                    admission_bypass=arguments.get("admission_bypass", False),
+                    dimensions=arguments.get("dimensions"),
                 )
             )
         if operation == "job.get":
@@ -738,6 +757,28 @@ class SinnixdService:
                     self._authorize_job(
                         principal, self._single_job_id(arguments, "job.get")
                     )
+                )
+            )
+        if operation == "job.retry":
+            if principal not in {"agent-control", "operator"}:
+                raise JobAuthorizationError(
+                    "job retry requires agent-control or operator principal"
+                )
+            if set(arguments) - {"job_id", "hint", "escalate"}:
+                raise ValueError("job.retry accepts job_id, hint, and escalate")
+            escalate = arguments.get("escalate", False)
+            if not isinstance(escalate, bool):
+                raise ValueError("job.retry escalate must be boolean")
+            hint = arguments.get("hint")
+            if hint is not None and not isinstance(hint, str):
+                raise ValueError("job.retry hint must be a string")
+            return self._cleanup_terminal(
+                self.job_contracts.retry_agent(
+                    job_id=self._authorize_job(
+                        principal, self._job_argument(arguments, "job_id")
+                    ),
+                    hint=hint,
+                    escalate=escalate,
                 )
             )
         if operation == "job.list":
@@ -814,9 +855,16 @@ class SinnixdService:
                 raise ValueError("job.wait accepts job_id and optional timeout_seconds")
             return self._cleanup_terminal(self.jobs.wait(job_id, timeout_seconds))
         if operation == "job.notify-exit":
-            if set(arguments) - {"job_id", "exit_code"}:
-                raise ValueError("job.notify-exit accepts job_id and exit_code")
-            return self.jobs.notify_exit(self._job_argument(arguments, "job_id"))
+            if set(arguments) - {"job_id", "exit_code", "dimensions"}:
+                raise ValueError(
+                    "job.notify-exit accepts job_id, exit_code, and optional dimensions"
+                )
+            dimensions = arguments.get("dimensions")
+            if dimensions is not None and not isinstance(dimensions, Mapping):
+                raise ValueError("job.notify-exit dimensions must be an object")
+            return self.jobs.notify_exit(
+                self._job_argument(arguments, "job_id"), dimensions
+            )
         if operation == "job.logs":
             job_id = self._authorize_job(
                 principal, self._job_argument(arguments, "job_id")

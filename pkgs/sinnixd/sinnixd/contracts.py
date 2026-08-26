@@ -17,6 +17,21 @@ from .projects import ProjectCatalog, RegisteredCheckout
 MAX_PROMPT_BYTES = 200_000
 AGENT_BACKENDS = frozenset({"claude", "codex", "gemini", "grok", "antigravity"})
 CREDENTIAL_PROFILES = frozenset({"subscription", "api"})
+MODEL_ESCALATION = {
+    "codex": {
+        "gpt-5.6-luna": "gpt-5.6-terra",
+        "gpt-5.6-terra": "gpt-5.6-sol",
+        "gpt-5.6-sol": "gpt-5.6-sol",
+    },
+    "claude": {
+        "claude-haiku-4-5": "claude-sonnet-4-5",
+        "claude-sonnet-4-5": "claude-opus-4-1",
+        "claude-opus-4-1": "claude-opus-4-1",
+        "haiku": "sonnet",
+        "sonnet": "opus",
+        "opus": "opus",
+    },
+}
 
 
 class ContractError(ValueError):
@@ -118,6 +133,8 @@ class TypedJobContracts:
         result: str,
         bead_binding: Mapping[str, Any] | None = None,
         parameters: Mapping[str, Any] | None = None,
+        admission_bypass: bool = False,
+        dimensions: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if principal not in {"agent-control", "operator"}:
             raise ContractError(
@@ -184,6 +201,7 @@ class TypedJobContracts:
             "checkout": checkout.to_dict(),
             "environment_command": list(project.environment.command),
             "environment_preflight": list(project.environment.preflight),
+            "preflight_timeout_seconds": project.environment.preflight_timeout_seconds,
             "backend": backend,
             "model": model,
             "effort": effort,
@@ -207,6 +225,8 @@ class TypedJobContracts:
                 private=private,
                 timeout_seconds=timeout_seconds,
                 result_kind=result,
+                admission_bypass=admission_bypass,
+                dimensions=dimensions,
             )
         except BaseException:
             prompt_path.unlink(missing_ok=True)
@@ -223,6 +243,8 @@ class TypedJobContracts:
         private: Mapping[str, Any],
         timeout_seconds: int,
         result_kind: str,
+        admission_bypass: bool = False,
+        dimensions: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         maximum_timeout = maximum_timeout_seconds(kind)
         if not valid_timeout_seconds(timeout_seconds, kind=kind):
@@ -260,6 +282,8 @@ class TypedJobContracts:
                 input_path,
                 json.dumps(private, sort_keys=True, separators=(",", ":")).encode(),
             )
+        if kind == "attested-agent":
+            self.jobs.store.write_agent_launch(job_id, command, environment)
         try:
             response = self.jobs.start(
                 GenericJobSpec(
@@ -273,21 +297,131 @@ class TypedJobContracts:
                     checkout=checkout.to_dict(),
                     contract=public_contract,
                     result_kind=result_kind,
+                    pool="agent",
+                    admission_bypass=admission_bypass,
+                    dimensions=dimensions or {},
                 ),
                 job_id,
             )
         except BaseException:
             input_path.unlink(missing_ok=True)
+            if kind == "attested-agent":
+                self.jobs.store.cleanup_agent_launch(job_id)
             prompt_path = private.get("prompt_path")
             if isinstance(prompt_path, str):
                 Path(prompt_path).unlink(missing_ok=True)
             raise
         if response["state"]["phase"] == "launch-failed":
             input_path.unlink(missing_ok=True)
+            if kind == "attested-agent":
+                self.jobs.store.cleanup_agent_launch(job_id)
             prompt_path = private.get("prompt_path")
             if isinstance(prompt_path, str):
                 Path(prompt_path).unlink(missing_ok=True)
         return response
+
+    def retry_agent(
+        self,
+        *,
+        job_id: str,
+        hint: str | None = None,
+        escalate: bool = False,
+    ) -> dict[str, Any]:
+        record = self.jobs.store.load(job_id)
+        if record.spec.kind != "attested-agent" or record.spec.checkout is None:
+            raise ContractError("only attested-agent jobs can be retried")
+        if hint is not None and (
+            not isinstance(hint, str) or not hint.strip() or len(hint.encode()) > 10_000
+        ):
+            raise ContractError("retry hint must be non-empty and at most 10000 bytes")
+        contract = dict(record.spec.contract)
+        backend = contract.get("backend")
+        model = contract.get("model")
+        if not isinstance(backend, str) or not isinstance(model, str):
+            raise ContractError("agent retry metadata is unavailable")
+        if escalate:
+            model = MODEL_ESCALATION.get(backend, {}).get(model)
+            if model is None:
+                raise ContractError(
+                    f"no escalation tier is defined for {backend}:{contract.get('model')}"
+                )
+        prompt = self._retry_prompt(record)
+        if hint is not None:
+            prompt = f"{hint.strip()}\n\n{prompt}"
+        if not prompt or len(prompt.encode()) > MAX_PROMPT_BYTES:
+            raise ContractError("retry prompt exceeds the configured bound")
+        checkout = RegisteredCheckout(
+            project_id=record.spec.checkout["project_id"],
+            project_path=Path(record.spec.checkout["project_path"]),
+            checkout_id=record.spec.checkout["checkout_id"],
+            path=Path(record.spec.checkout["path"]),
+            git_common_dir=Path(record.spec.checkout["git_common_dir"]),
+            head=record.spec.checkout["head"],
+        )
+        project = self.projects.get(checkout.project_id)
+        new_job_id = str(uuid4())
+        prompt_path = self.inputs_root / f"{new_job_id}.prompt"
+        binding = contract.get("bead_binding")
+        parameters = contract.get("parameters")
+        private: dict[str, Any] = {
+            "schema_version": 2,
+            "job_id": new_job_id,
+            "kind": "attested-agent",
+            "principal": record.spec.principal,
+            "checkout": checkout.to_dict(),
+            "environment_command": list(project.environment.command),
+            "environment_preflight": list(project.environment.preflight),
+            "preflight_timeout_seconds": project.environment.preflight_timeout_seconds,
+            "backend": backend,
+            "model": model,
+            "effort": contract.get("effort"),
+            "credential_profile": contract.get("credential_profile"),
+            "prompt_path": str(prompt_path),
+        }
+        if isinstance(binding, Mapping):
+            private["bead_binding"] = dict(binding)
+        if isinstance(parameters, Mapping):
+            private["parameters"] = dict(parameters)
+        public_contract = {
+            **contract,
+            "model": model,
+            "prompt": {
+                "sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+                "bytes": len(prompt.encode()),
+            },
+            "retry_of": job_id,
+            "escalated": escalate,
+        }
+        self._write_private(prompt_path, prompt.encode())
+        try:
+            return self._start(
+                job_id=new_job_id,
+                kind="attested-agent",
+                principal=record.spec.principal or "agent-control",
+                checkout=checkout,
+                public_contract=public_contract,
+                private=private,
+                timeout_seconds=record.spec.timeout_seconds,
+                result_kind="last-message",
+                dimensions=record.spec.dimensions,
+            )
+        except BaseException:
+            prompt_path.unlink(missing_ok=True)
+            raise
+
+    def _retry_prompt(self, record: Any) -> str:
+        candidates = (
+            self.inputs_root / f"{record.job_id}.prompt",
+            self.jobs.store.root / "retry-prompts" / f"{record.job_id}.prompt",
+        )
+        for path in candidates:
+            try:
+                content = path.read_bytes()
+            except OSError:
+                continue
+            if 1 <= len(content) <= MAX_PROMPT_BYTES:
+                return content.decode()
+        raise ContractError("the original agent prompt is unavailable for retry")
 
     @staticmethod
     def _agent_parameters(value: Mapping[str, Any] | None) -> dict[str, Any] | None:
