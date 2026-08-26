@@ -2,7 +2,6 @@
 # Campaign board status front door.  sinnixd-reactor is the sole writer; this
 # compatibility command only asks it to drain once or reads its typed board.
 set -eu
-BOARD=/realm/tmp/work/campaign-board.json
 case "${1:-status}" in
   sync)
     exec sinnixd-reactor --once
