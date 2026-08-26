@@ -405,6 +405,15 @@ class SystemdJobs(Protocol):
 class UserSystemdJobs:
     """Launch and inspect transient user services through the user manager."""
 
+    # Lane jobs may read operator tooling, configuration, and durable runtime
+    # state, but those paths must remain owned by the host and its services.
+    LANE_READ_ONLY_PATHS = (
+        "/home/sinity/.local/bin",
+        "/home/sinity/.claude",
+        "/home/sinity/.config",
+        "/realm/state",
+    )
+
     def start(
         self,
         *,
@@ -427,6 +436,7 @@ class UserSystemdJobs:
             f"--slice={POOL_SLICES[pool]}",
             f"--property=WorkingDirectory={working_directory}",
             f"--property=RuntimeMaxSec={timeout_seconds}s",
+            *(f"--property=ReadOnlyPaths={path}" for path in self.LANE_READ_ONLY_PATHS),
             "--property=StandardOutput=journal",
             "--property=StandardError=journal",
             "--",
