@@ -10515,6 +10515,32 @@ def test_agent_dispatch_and_launch_forms_send_the_same_contract(
     assert outbound.arguments["backend"] == "codex"
 
 
+def test_agent_dispatch_carries_coordinator_label(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("fixture prompt")
+    captured: dict[str, RequestEnvelope] = {}
+
+    def fake_call(socket_path, request_value):
+        captured["request"] = request_value
+        return {"schema": 1, "ok": True}
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "agentctl", "agent", "--project", "fixture", "--checkout", "default",
+            "--prompt-file", str(prompt_file), "--backend", "codex", "--model",
+            "fixture-model", "--effort", "high", "--coordinator-label", "wave-a",
+        ],
+    )
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    assert captured["request"].arguments["coordinator_label"] == "wave-a"
+
+
 def test_agent_dispatch_without_required_flags_names_the_alternatives(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

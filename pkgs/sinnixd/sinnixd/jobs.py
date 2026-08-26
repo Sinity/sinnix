@@ -1027,6 +1027,15 @@ class GenericJobSpec:
             not isinstance(key, str) or not key for key in self.contract
         ):
             raise ValueError("job contract is invalid")
+        coordinator_label = self.contract.get("coordinator_label")
+        if coordinator_label is not None and (
+            not isinstance(coordinator_label, str)
+            or not coordinator_label
+            or len(coordinator_label) > 128
+        ):
+            raise ValueError(
+                "job coordinator_label must be a non-empty string up to 128 characters"
+            )
         if self.result_kind not in {"exit-status", "last-message", "json", "pytest"}:
             raise ValueError("job result kind is invalid")
         if self.pool not in POOL_POLICIES:
@@ -3409,6 +3418,7 @@ class GenericJobs:
                 "checkout": checkout.get("checkout_id")
                 if isinstance(checkout, Mapping)
                 else None,
+                "coordinator_label": record.spec.contract.get("coordinator_label"),
             }
         )
         parameters = record.spec.contract.get("parameters")
@@ -3416,6 +3426,7 @@ class GenericJobs:
             parameters.get("campaign") if isinstance(parameters, Mapping) else None
         )
         if isinstance(campaign, Mapping):
+            coordinator_label = record.spec.contract.get("coordinator_label")
             self.spool_event(
                 {
                     "kind": "campaign",
@@ -3424,6 +3435,7 @@ class GenericJobs:
                     "group": campaign.get("group"),
                     "job_id": record.job_id,
                     "phase": record.state.get("phase"),
+                    "coordinator_label": coordinator_label,
                 }
             )
             wave_id = campaign.get("wave_id")
@@ -3449,6 +3461,7 @@ class GenericJobs:
                             "transition": "wave drained",
                             "wave_id": wave_id,
                             "project": record.spec.project_id,
+                            "coordinator_label": coordinator_label,
                         }
                     )
 

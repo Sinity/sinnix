@@ -1245,6 +1245,36 @@ def test_terminal_transition_spools_exactly_one_event_line(tmp_path: Path) -> No
     assert lines[0]["completed_at"]
 
 
+def test_terminal_event_carries_coordinator_label_from_job_spec(tmp_path: Path) -> None:
+    spool = tmp_path / "events.jsonl"
+    systemd = FakeSystemdJobs()
+    jobs = GenericJobs(
+        systemd, GenericJobStore(tmp_path / "state"), event_spool_path=spool
+    )
+    started = jobs.start_foreground(
+        command=("fixture",),
+        working_directory=str(tmp_path),
+        environment={},
+    )
+    record = jobs.store.load(started["job_id"])
+    jobs.store.save(
+        replace(
+            record,
+            spec=replace(record.spec, contract={"coordinator_label": "wave-a"}),
+        )
+    )
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+    }
+
+    assert jobs.get(started["job_id"])["state"]["terminal"]
+    event = json.loads(spool.read_text().splitlines()[0])
+    assert event["coordinator_label"] == "wave-a"
+
+
 def test_restart_reobservation_of_old_terminal_records_does_not_respool(
     tmp_path: Path,
 ) -> None:
