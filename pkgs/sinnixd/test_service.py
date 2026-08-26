@@ -5657,6 +5657,31 @@ def test_workspace_provision_exec_records_bounded_output_in_the_workspace_note(
     ]
 
 
+def test_workspace_provision_exec_scripts_keep_the_final_workspace_path(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: an absolute console-script shebang must survive atomic create."""
+    write_adapter(tmp_path)
+    _write_provision_exec_descriptor(
+        tmp_path,
+        r'''["/bin/sh", "-c", "printf '#!/bin/sh\\nprintf provisioned' > interpreter; chmod +x interpreter; printf '#!%s/interpreter\\n' \"$PWD\" > tool; chmod +x tool"]''',
+    )
+    initialize_git_checkout(tmp_path)
+
+    created = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path)
+    ).workspaces.create(
+        project_id="fixture",
+        name="shebang-lane",
+        branch="feature/shebang-lane",
+        base="HEAD",
+    )
+
+    tool = Path(created["path"]) / "tool"
+    result = subprocess.run([str(tool)], check=True, capture_output=True, text=True)
+    assert result.stdout == "provisioned"
+
+
 def test_workspace_provision_exec_failure_rolls_back_before_registration(
     tmp_path: Path,
 ) -> None:
