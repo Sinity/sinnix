@@ -33,7 +33,7 @@ if set(new) != set(stale) or any(len(new[k]) != len(stale[k]) for k in new):
 for (rule, path), new_lines in new.items():
     bl = f"devtools/patterns/baselines/{rule}.txt"
     text = open(bl).read()
-    for old, nw in zip(sorted(stale[(rule, path)]), sorted(new_lines)):
+    for old, nw in zip(sorted(stale[(rule, path)]), sorted(new_lines), strict=True):
         o = f"{path}:{old}\n"
         if o not in text:
             sys.exit(1)
