@@ -15,7 +15,7 @@ able to trust.
 
 - **Title names the artifact or behavior, never the ritual.** "Check X on
   the live archive after rebuild", not "acceptance: emit proof-carrying
-  receipt". Verbs beat nouns; jargon obeys [[vocabulary]].
+  receipt". Verbs beat nouns; on jargon see [[writing-for-agents]].
 - **Description is mission-first**: one paragraph of what outcome and why it
   matters, in ordinary language, before any mechanism. An id is a
   reference, never the mission.

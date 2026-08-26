@@ -70,8 +70,17 @@ Two cautions:
 
 - A coined word recruits no priors — you pay its definition everywhere. This
   is how the jargon debt (receipt ×8 meanings, authority ×3) accumulated.
-  Before coining, check the [[vocabulary]] glossary; never mint a new noun
-  for a mechanism that already has one.
+  Never mint a new noun for a mechanism that already has one, and name the
+  artifact or behaviour rather than the ritual: "run the checks and store the
+  result", not "emit a proof-carrying receipt". When a term genuinely earns
+  its place, introduce it in plain language at first use in any
+  operator-facing text — "run record (receipt)" — and never use it undefined
+  in another document.
+- **No new durable vocabulary for a one-shot operation** — no new table,
+  result class, or record type. Use one generic journal: run, drain, delete.
+- **Challenge an overload the moment it appears**: "does 'receipt' here mean
+  the verify run record or the backup manifest?" A second meaning attaching
+  quietly is how one word ends up naming eight mechanisms.
 - **Negation is weak**: "don't do X" drags X into context and half-reads as
   an instruction. State the positive target; keep prohibitions only as hard
   guardrails, paired with the positive.
