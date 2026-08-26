@@ -9,6 +9,9 @@ from sinnixd.packets import (
     PacketConfig,
     checkout_id_from_workspace_response,
     compile_launch_snapshot,
+    extract_references,
+    infer_conflict_keys,
+    plan_table,
     resolve_group,
 )
 
@@ -61,8 +64,7 @@ def project_fixture(tmp_path: Path) -> tuple[Path, PacketConfig]:
         / "worker-contract.md"
     )
     template.write_text("contract residue")
-    (root / ".agentctl" / "project.toml").write_text(
-        """
+    (root / ".agentctl" / "project.toml").write_text("""
 schema = 1
 [project]
 id = "fixture"
@@ -71,8 +73,7 @@ root_markers = [".agentctl"]
 [packets]
 template = "dots/_ai/skills/orchestrate/references/worker-contract.md"
 atlas_dir = "docs/atlas"
-"""
-    )
+""")
     return root, PacketConfig.load(root)
 
 
@@ -98,6 +99,61 @@ def test_snapshot_compiles_fixture_bead_json_and_group() -> None:
     assert snapshot.dimensions.conflict_keys == ("area:parser", "area:storage")
     assert "Description leader" in snapshot.prompt
     assert "Description member" in snapshot.prompt
+
+
+def test_reference_extraction_accepts_repo_references_and_rejects_noise() -> None:
+    references = extract_references("""
+        Change polylogue/cost/allocator.py and migrations/042_add_users.sql.
+        The package is `polylogue.cost`; use table `users` and 'audit_log'.
+        Ignore https://example.test/noise.py, /tmp/no.py, ../escape.py,
+        and ordinary and/or prose.
+        """)
+
+    assert references.paths == (
+        "migrations/042_add_users.sql",
+        "polylogue/cost/allocator.py",
+    )
+    assert references.modules == ("polylogue.cost",)
+    assert references.migrations == ("042",)
+    assert references.tables == ("audit_log", "users")
+    assert infer_conflict_keys(references) == (
+        "module:polylogue.cost",
+        "schema:042",
+        "table:audit_log",
+        "table:users",
+    )
+
+
+def test_snapshot_unions_inferred_keys_and_explicit_keys_win_source_label(
+    tmp_path: Path,
+) -> None:
+    root, _config = project_fixture(tmp_path)
+    row = bead("leader")
+    row["description"] = (
+        "Edit polylogue/cost/allocator.py, migrations/007_add_runs.sql, "
+        "and table `runs`."
+    )
+    row["design"] = "The module is `polylogue.cost`; use table `runs`."
+    row["metadata"]["conflict_keys"] = "module:polylogue.cost;table:runs;declared:lock"
+    snapshot = compile_launch_snapshot(
+        "leader",
+        project_root=root,
+        project_id="fixture",
+        reader=FixtureBd([row]),
+        config=_config,
+    )
+
+    assert snapshot.dimensions.conflict_keys == (
+        "declared:lock",
+        "module:polylogue.cost",
+        "schema:007",
+        "table:runs",
+    )
+    assert snapshot.dimensions.inferred_conflict_keys == ("schema:007",)
+    rendered = plan_table(snapshot, _config)
+    assert "schema:007 (inferred)" in rendered
+    assert "module:polylogue.cost (inferred)" not in rendered
+    assert snapshot.dimensions.to_dict()["inferred_conflict_keys"] == ["schema:007"]
 
 
 def test_resolve_group_queries_members_that_point_at_leader() -> None:
@@ -180,3 +236,11 @@ def test_launch_creates_then_dispatches_with_dimensions(
         "area:parser",
         "area:storage",
     ]
+    assert calls[1].arguments["exclusive_keys"] == [
+        "area:parser",
+        "area:storage",
+    ]
+    assert calls[1].arguments["reject_conflicts"] is True
+    assert calls[1].arguments["dimensions"]["conflict_keys"] == (
+        "area:parser;area:storage"
+    )

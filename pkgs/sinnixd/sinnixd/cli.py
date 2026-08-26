@@ -30,6 +30,7 @@ from .packets import (
     plan_table,
     project_id_from_descriptor,
     resolve_project_root,
+    runtime_dimensions,
 )
 from .projects import ProjectCatalog
 from .service import SinnixdService
@@ -839,6 +840,9 @@ def main() -> int:
                                 "bead_ids": list(snapshot.bead_ids),
                             },
                         },
+                        "dimensions": runtime_dimensions(snapshot.dimensions),
+                        "exclusive_keys": list(snapshot.dimensions.conflict_keys),
+                        "reject_conflicts": True,
                     },
                     "agent-control",
                 )
@@ -1095,9 +1099,9 @@ def _wait_for_delivery(
         "systemd-jobs",
         {
             "job_id": job_id,
-            "timeout_seconds": timeout_seconds + 10
-            if isinstance(timeout_seconds, int)
-            else 800,
+        "timeout_seconds": timeout_seconds + 10
+        if isinstance(timeout_seconds, int)
+        else 800,
         },
     )
     waited = call(socket_path, wait_request)

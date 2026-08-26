@@ -24,6 +24,7 @@ from .contracts import TypedJobContracts
 from .delivery import DeliveryError, GitHubDelivery
 from .delivery_runner import DELIVERY_INPUT_SCHEMA_VERSION, delivery_runner_executable
 from .jobs import (
+    AdmissionConflictError,
     GenericJobs,
     GenericJobSpec,
     GenericJobStore,
@@ -252,6 +253,10 @@ class SinnixdService:
             )
         except JobAuthorizationError as error:
             return self._error(request, owner_name, ErrorCode.POLICY_DENIED, str(error))
+        except AdmissionConflictError as error:
+            return self._error(
+                request, owner_name, ErrorCode.RESOURCE_DEFERRED, str(error)
+            )
         except JobPageCursorError as error:
             return self._error(
                 request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error)
@@ -818,7 +823,14 @@ class SinnixdService:
             }
             if not required <= set(arguments) or set(arguments) - (
                 required
-                | {"bead_binding", "parameters", "admission_bypass", "dimensions"}
+                | {
+                    "bead_binding",
+                    "parameters",
+                    "admission_bypass",
+                    "dimensions",
+                    "exclusive_keys",
+                    "reject_conflicts",
+                }
             ):
                 raise ValueError(
                     "job.agent.start requires the complete typed agent contract"
@@ -843,6 +855,8 @@ class SinnixdService:
                     parameters=arguments.get("parameters"),
                     admission_bypass=arguments.get("admission_bypass", False),
                     dimensions=arguments.get("dimensions"),
+                    exclusive_keys=arguments.get("exclusive_keys", ()),
+                    reject_conflicts=arguments.get("reject_conflicts", False),
                 )
             )
         if operation == "job.get":
