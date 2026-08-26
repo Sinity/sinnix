@@ -31,7 +31,16 @@ retry luna against the same failure. Multi-model redundancy runs only on a
 predeclared trigger — irreversible action, destructive-data risk, no
 executable oracle, or concrete disagreement after a first analysis; otherwise
 one accountable decision-maker decides (broad "run 2-3 models on anything
-that matters" recreates the review spiral). External evidence, current pricing, and supervision
+that matters" recreates the review spiral). Majority voting is NOT a
+substitute for a strong judge when errors are correlated: exp-008
+(2026-08-26) measured 3×luna majority at 4/6 vs opus 5/6 on adjudication
+rows — voting canceled the one correct minority verdict because two lunas
+made the SAME error. Known correlated biases: deletion-aversion (every
+judge, opus included, refused a gold DELETE whose justification lived in
+the replacement plan) and merge-aversion (MOVE chosen over MERGE without
+duplication evidence). For DELETE/MERGE-shaped decisions, supply the
+replacement/dedup context in the prompt or escalate to one strong judge;
+redundancy only buys anything against uncorrelated failure modes. External evidence, current pricing, and supervision
 economics: `references/model-landscape-2026-08.md`. The standard dispatch
 contract (self-verifying workers, no review chains, report-or-it-didn't-happen)
 and the measured process smells that killed the 2026-08 coordinator:
