@@ -204,6 +204,12 @@ if [ "$(git rev-parse origin/master)" != "$GATED_AT" ]; then
   fi
 fi
 
+# Release the repo lock BEFORE pushing. The lock exists to serialize
+# fetch+rebase against master; push does not need it (each harvest pushes its
+# own branch) and the pre-push hook runs a multi-minute verification, which
+# inside the critical section stalled every queued harvest behind it.
+exec 9>&-
+
 git push -qf -u origin HEAD || {
   emit_harvest_event failed "HARVEST-FAIL push"
   echo "HARVEST-FAIL push"
@@ -223,7 +229,10 @@ gh pr merge "$NUM" --squash --auto >/dev/null 2>&1 || true
 if [ "$(gh pr view "$NUM" --json autoMergeRequest -q '.autoMergeRequest != null' 2>/dev/null)" != "true" ]; then
   echo "HARVEST-WARN auto-merge did not arm for pr=$NUM (merge manually when checks pass)"
 fi
+# 9>&- : the watcher must NOT inherit the repo flock. It polls for up to two
+# hours, so an inherited FD held the lock that long and stalled every queued
+# harvest behind it.
 nohup /home/sinity/.claude/skills/review-land/scripts/merge_close.sh \
-  Sinity/polylogue "$NUM" $BEAD $REASON >"/realm/tmp/work/merge-$NUM.log" 2>&1 &
+  Sinity/polylogue "$NUM" $BEAD $REASON >"/realm/tmp/work/merge-$NUM.log" 2>&1 9>&- &
 emit_harvest_event published "pr=$NUM"
 echo "HARVEST-OK pr=$NUM branch=$(git rev-parse --abbrev-ref HEAD)"
