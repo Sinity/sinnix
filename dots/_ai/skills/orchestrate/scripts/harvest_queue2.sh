@@ -113,7 +113,15 @@ gate() { (cd "$WT" && "${DEV[@]}" devtools verify --quick >"$QLOG" 2>&1); }
 # 2026-08-26 and are regenerable, not judgment.
 mechanical_render() {
   grep -q "render all ... FAILED\|out of sync" "$QLOG" 2>/dev/null || return 1
-  (cd "$WT" && "${DEV[@]}" devtools render all >/dev/null 2>&1) || return 1
+  # Use the CHECKOUT's own venv, not the devshell: the devshell devtools cannot
+  # regenerate cli-reference (it shells out to live --help), while
+  # .venv/bin/python -m devtools does. Same hermetic-resolution lesson as the
+  # gate itself.
+  if [ -x "$WT/.venv/bin/python" ]; then
+    (cd "$WT" && ./.venv/bin/python -m devtools render all >/dev/null 2>&1) || return 1
+  else
+    (cd "$WT" && "${DEV[@]}" devtools render all >/dev/null 2>&1) || return 1
+  fi
   git -C "$WT" diff --quiet && return 1
   git -C "$WT" add -A . && git -C "$WT" commit -q --amend --no-edit
 }
