@@ -268,9 +268,15 @@ def parser() -> argparse.ArgumentParser:
     )
     workspace_finish = workspace_subcommands.add_parser("finish")
     workspace_finish.add_argument("workspace_id")
+    workspace_finish.add_argument("--bead", dest="beads", action="append")
+    workspace_finish.add_argument("--receipt", type=Path)
+    workspace_finish.add_argument("--partial-note")
     workspace_finish_integrated = workspace_subcommands.add_parser("finish-integrated")
     workspace_finish_integrated.add_argument("workspace_id")
     workspace_finish_integrated.add_argument("--target", required=True)
+    workspace_finish_integrated.add_argument("--bead", dest="beads", action="append")
+    workspace_finish_integrated.add_argument("--receipt", type=Path)
+    workspace_finish_integrated.add_argument("--partial-note")
     packet = subcommands.add_parser("packet")
     packet_subcommands = packet.add_subparsers(dest="packet_command", required=True)
     packet_finalize = packet_subcommands.add_parser("finalize")
@@ -864,17 +870,35 @@ def main() -> int:
         arguments.command == "workspace"
         and arguments.workspace_command == "finish-integrated"
     ):
+        settlement = {}
+        if arguments.beads:
+            settlement["beads"] = arguments.beads
+        if arguments.receipt:
+            settlement["receipt"] = json.loads(arguments.receipt.read_text())
+        if arguments.partial_note:
+            settlement["partial_note"] = arguments.partial_note
         request = _request(
             "workspace.finish-integrated",
             "git-workspaces",
-            {"workspace_id": arguments.workspace_id, "target_ref": arguments.target},
+            {
+                "workspace_id": arguments.workspace_id,
+                "target_ref": arguments.target,
+                **settlement,
+            },
             "agent-control",
         )
     elif arguments.command == "workspace":
+        settlement = {}
+        if arguments.beads:
+            settlement["beads"] = arguments.beads
+        if arguments.receipt:
+            settlement["receipt"] = json.loads(arguments.receipt.read_text())
+        if arguments.partial_note:
+            settlement["partial_note"] = arguments.partial_note
         request = _request(
             "workspace.finish",
             "git-workspaces",
-            {"workspace_id": arguments.workspace_id},
+            {"workspace_id": arguments.workspace_id, **settlement},
             "agent-control",
         )
     elif arguments.command == "packet" and arguments.packet_command == "finalize":

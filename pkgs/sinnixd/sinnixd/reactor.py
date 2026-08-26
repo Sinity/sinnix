@@ -480,6 +480,26 @@ def _receipt(event: Mapping[str, Any]) -> tuple[str, str, Mapping[str, Any]] | N
     return bead_id, reason, raw
 
 
+def _receipts(
+    event: Mapping[str, Any],
+) -> tuple[tuple[str, str, Mapping[str, Any]], ...]:
+    """Read either the legacy single receipt or an authored receipt set."""
+    raw = event.get("decision_receipts")
+    if raw is None:
+        one = _receipt(event)
+        return (one,) if one is not None else ()
+    if not isinstance(raw, list) or not raw:
+        raise ReactorError("merge decision receipts must be a non-empty list")
+    result = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            raise ReactorError("merge decision receipt must be an object")
+        one = _receipt({"decision_receipt": item})
+        assert one is not None
+        result.append(one)
+    return tuple(result)
+
+
 def _merge_reaction(event: Mapping[str, Any], context: ReactionContext) -> None:
     repo = _required_string(event, "repo")
     pr = _required_string(event, "pr")
@@ -487,8 +507,9 @@ def _merge_reaction(event: Mapping[str, Any], context: ReactionContext) -> None:
     key = f"{repo}#{pr}"
     prior = context.board.prs.get(key)
     receipt_value = event.get("decision_receipt")
+    receipts = _receipts(event)
     receipt = dict(receipt_value) if isinstance(receipt_value, Mapping) else None
-    bead_id = receipt.get("bead_id") if receipt is not None else None
+    bead_id = receipts[0][0] if receipts else None
     if bead_id is not None and (not isinstance(bead_id, str) or not bead_id):
         raise ReactorError("merge decision receipt bead_id must be a non-empty string")
     close_status = prior.bead_close_status if prior is not None else "not-attempted"
@@ -498,12 +519,10 @@ def _merge_reaction(event: Mapping[str, Any], context: ReactionContext) -> None:
             close_status = "missing-receipt"
             error = "merged PR has no decision-time receipt"
         else:
-            result = _receipt(event)
-            if result is None:
+            if not receipts:
                 close_status = "missing-receipt"
                 error = "merged PR has no decision-time receipt"
             else:
-                bead_id, reason, _ = result
                 root_name = event.get("project")
                 project_name = (
                     root_name
@@ -515,11 +534,15 @@ def _merge_reaction(event: Mapping[str, Any], context: ReactionContext) -> None:
                     close_status = "failed"
                     error = f"no configured project root for {project_name}"
                 else:
-                    closed, close_error = context.bead_closer.close(
-                        bead_id, reason, cwd=root
-                    )
-                    close_status = "closed" if closed else "failed"
-                    error = close_error
+                    failures = []
+                    for settled_bead_id, reason, _ in receipts:
+                        closed, close_error = context.bead_closer.close(
+                            settled_bead_id, reason, cwd=root
+                        )
+                        if not closed:
+                            failures.append(close_error or settled_bead_id)
+                    close_status = "failed" if failures else "closed"
+                    error = "; ".join(failures) if failures else None
     context.board.prs[key] = PullRequestRecord(
         repo=repo,
         pr=pr,
