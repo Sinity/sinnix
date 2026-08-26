@@ -63,19 +63,27 @@ back, so nothing publishes unreviewed.
 1. `agentctl job start <p> harvest --workspace <ws>` → a receipt carrying the
    lane trailer, the diffstat, the red-flag scan, and a ref to the full diff.
    `agentctl job result <job>` reads it.
-2. Judge the receipt. No flags plus a small diff → stat-level skim. Flags → read
+2. `sinnixd-review-route <worktree> --base origin/master` compiles the scan
+   into a typed route and never publishes. Docs/tests-only with a clean scan is
+   reactor auto-publish, no model at all; an ordinary production diff with a
+   clean scan goes to a cross-family review lane; migrations, gate or baseline
+   edits, security and excision work, large deletions, legacy shims, and
+   uncleared flags come to the coordinator. Review-lane prompts carry the
+   packet, trailer, and scan; the reviewer identity lands in the publication
+   body.
+3. Judge the receipt. No flags plus a small diff → stat-level skim. Flags → read
    the full diff. The flags mark deleted production lines, inverted or removed
    assertions, new xfail or skip, gate, baseline, migration or sidecar edits,
    and deleted test files. A lane that papered over a real defect is rejected
    with the reason recorded on the bead.
-3. Write the PR title, body, and bead close-reason to files at decision time,
+4. Write the PR title, body, and bead close-reason to files at decision time,
    then authorize:
    `agentctl job start <p> harvest --workspace <ws> --parameters-json
 '{"authorize":true,"receipt_ref":"<ref>","title_file":"…","body_file":"…",
 "bead_id":"…","close_reason_file":"…"}'`. Omit the bead parameters when the
    lane delivered a slice and the bead stays open. The operation holds the repo
    lock only across push and PR creation, so review phases run in parallel.
-4. Dispose after the content check: `agentctl workspace finish-integrated
+5. Dispose after the content check: `agentctl workspace finish-integrated
 --target <ref>` is squash-proof; `finish-merged` handles the merged case.
 
 **Launch wedges**: packet launch advances one step per attempt (worktree →
