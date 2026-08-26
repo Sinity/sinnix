@@ -43,10 +43,18 @@ duplicate-bead launches are refused typed when a live job owns the workspace.
    patterns that have actually caught dishonest lanes: deleted production
    lines, inverted/removed assertions, new xfail/skip, gate/baseline/
    migration/sidecar edits, deleted test files.
-3. Judgment: honest classifications? scope respected? semantics not
+3. `sinnixd-review-route <worktree> --base origin/master` — compile the
+   scanner output into a typed route. Docs/tests-only changes with clean
+   output are reactor-auto-publish; ordinary production changes with cleared
+   recipes go to a cross-family review lane; migrations, gates/baselines,
+   security/excision, large deletions, legacy shims, and uncleared recipes go
+   to the coordinator queue. The command is read-only and never publishes.
+   Review-lane prompts carry the packet, trailer, and scanner receipt; the
+   reviewer identity is included in the eventual publication body.
+4. Judgment: honest classifications? scope respected? semantics not
    inverted? A lane that papered over a real defect gets REJECTED with the
    reason recorded on the bead — never merged "to keep moving".
-4. Write the PR body AND the bead close-reason now (decision time), then
+5. Write the PR body AND the bead close-reason now (decision time), then
    `harvest_queue2.sh <wt> <title> <body> [<bead> <reason-file>]` — two-phase:
    the quick gate runs in PARALLEL across harvests (4-slot semaphore, one
    mechanical baseline pass), only push/PR/auto-merge serialize behind the

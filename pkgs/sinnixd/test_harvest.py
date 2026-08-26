@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 import sinnixd.harvest as harvest
+from sinnixd.review import route_review
 
 
 def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -223,3 +224,48 @@ def test_redflags_preserves_the_coordinator_scanner_contract() -> None:
     assert status == 1
     assert "FLAG: production lines removed (polylogue/)" in flags
     assert "FLAG: test assertions removed" in flags
+
+
+def test_review_route_auto_publishes_only_clean_docs_and_tests() -> None:
+    result = route_review(
+        changed_paths=("docs/review.md", "tests/test_review.py"),
+        scanner_output="diff lines: 4\n",
+    )
+
+    assert result.route == "auto-publish"
+    assert result.reviewer_model is None
+
+
+def test_review_route_dispatches_cross_family_for_ordinary_production() -> None:
+    result = route_review(
+        changed_paths=("polylogue/module.py",),
+        scanner_output="diff lines: 4\n",
+        implementation_backend="codex",
+    )
+
+    assert result.route == "review-lane"
+    assert (result.reviewer_backend, result.reviewer_model) == (
+        "claude",
+        "claude-opus-5",
+    )
+
+
+def test_review_route_escalates_uncleared_and_risky_flags() -> None:
+    result = route_review(
+        changed_paths=("polylogue/module.py",),
+        scanner_output=(
+            "FLAG: production lines removed (polylogue/)\n"
+            "EXPLAIN: production lines removed\n"
+        ),
+    )
+    assert result.route == "coordinator"
+    assert result.unresolved
+
+    risky = route_review(
+        changed_paths=("polylogue/module.py",),
+        scanner_output=(
+            "FLAG: durable migration touched\n"
+            "  VERDICT: migration metadata is present\n"
+        ),
+    )
+    assert risky.route == "coordinator"
