@@ -1027,6 +1027,15 @@ class GenericJobSpec:
             not isinstance(key, str) or not key for key in self.contract
         ):
             raise ValueError("job contract is invalid")
+        coordinator_label = self.contract.get("coordinator_label")
+        if coordinator_label is not None and (
+            not isinstance(coordinator_label, str)
+            or not coordinator_label
+            or len(coordinator_label) > 128
+        ):
+            raise ValueError(
+                "job coordinator_label must be a non-empty string up to 128 characters"
+            )
         if self.result_kind not in {"exit-status", "last-message", "json", "pytest"}:
             raise ValueError("job result kind is invalid")
         if self.pool not in POOL_POLICIES:
