@@ -2,11 +2,17 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from sinnixd import planner
 
 
-def snapshot(group: str, keys: tuple[str, ...], *, inferred: tuple[str, ...] = (), atlas=(), checks=("check",)):
+def snapshot(
+    group: str,
+    keys: tuple[str, ...],
+    *,
+    inferred: tuple[str, ...] = (),
+    atlas=(),
+    checks=("check",),
+):
     return SimpleNamespace(
         group=group,
         bead_ids=(group,),
@@ -19,7 +25,9 @@ def snapshot(group: str, keys: tuple[str, ...], *, inferred: tuple[str, ...] = (
     )
 
 
-def test_dispatch_plan_orders_groups_and_marks_review_gates(monkeypatch, tmp_path: Path):
+def test_dispatch_plan_orders_groups_and_marks_review_gates(
+    monkeypatch, tmp_path: Path
+):
     roots = {"sinnix": tmp_path}
     monkeypatch.setattr(planner.PacketConfig, "load", lambda root: object())
     monkeypatch.setattr(
@@ -28,11 +36,22 @@ def test_dispatch_plan_orders_groups_and_marks_review_gates(monkeypatch, tmp_pat
         lambda root: SimpleNamespace(ready=lambda: [{"id": "b"}, {"id": "a"}]),
     )
     snapshots = {
-        "a": snapshot("a", ("module:reactor",), inferred=("module:reactor",), atlas=("docs/atlas/x.md",)),
+        "a": snapshot(
+            "a",
+            ("module:reactor",),
+            inferred=("module:reactor",),
+            atlas=("docs/atlas/x.md",),
+        ),
         "b": snapshot("b", ("module:reactor",), checks=()),
     }
-    monkeypatch.setattr(planner, "compile_launch_snapshot", lambda bead_id, **_: snapshots[bead_id])
-    monkeypatch.setattr(planner, "derived_workspace", lambda snap, config: (f"packet-{snap.group}", f"feature/{snap.group}"))
+    monkeypatch.setattr(
+        planner, "compile_launch_snapshot", lambda bead_id, **_: snapshots[bead_id]
+    )
+    monkeypatch.setattr(
+        planner,
+        "derived_workspace",
+        lambda snap, config: (f"packet-{snap.group}", f"feature/{snap.group}"),
+    )
 
     plan = planner.build_dispatch_plan(roots)
 

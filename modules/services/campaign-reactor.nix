@@ -102,51 +102,51 @@ mkServiceModule {
     in
     lib.mkMerge [
       {
-      assertions = [
-        {
-          assertion = config.sinnix.services.sinnixd.enable;
-          message = "sinnix.services.campaign-reactor requires sinnix.services.sinnixd.enable";
-        }
-      ];
-      environment.systemPackages = [
-        scriptPkgs.sinnixd
-        scriptPkgs.beads
-      ];
-      systemd.tmpfiles.rules = [
-        "d ${cfg.stateDir} 0700 ${userName} users -"
-        "d ${boardDirectory} 0755 ${userName} users -"
-        "d ${spoolDirectory} 0700 ${userName} users -"
-      ];
-      home-manager.users.${userName}.systemd.user.services.sinnixd-reactor = {
-        Unit = {
-          Description = "Sinnix model-free campaign event reactor";
-          After = [ "sinnixd.service" ];
-          Requires = [ "sinnixd.service" ];
-        };
-        Service =
-          (lib.sinnix.mkRuntimeServiceConfig {
-            runtimeInventory = config.sinnix.runtime.inventory;
-            unit = "sinnixd-reactor.service";
-          })
-          // {
-            Type = "simple";
-            ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --board ${lib.escapeShellArg cfg.boardPath} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --keeper-backoff-seconds ${toString cfg.keeperBackoffSeconds} --refill-width-target ${toString cfg.refillWidthTarget} --refill-spacing-seconds ${toString cfg.refillSpacingSeconds} ${projectRootArgs}";
-            Restart = "on-failure";
-            RestartSec = "5s";
-            NoNewPrivileges = true;
-            ProtectSystem = "strict";
-            ProtectHome = "read-only";
-            ReadWritePaths = [
-              cfg.stateDir
-              boardDirectory
-              spoolDirectory
-              config.sinnix.services.sinnixd.taskStateRoot
-            ]
-            ++ map (project: project.value.path) (lib.attrsToList config.sinnix.projects.entries);
-            UMask = "0077";
+        assertions = [
+          {
+            assertion = config.sinnix.services.sinnixd.enable;
+            message = "sinnix.services.campaign-reactor requires sinnix.services.sinnixd.enable";
+          }
+        ];
+        environment.systemPackages = [
+          scriptPkgs.sinnixd
+          scriptPkgs.beads
+        ];
+        systemd.tmpfiles.rules = [
+          "d ${cfg.stateDir} 0700 ${userName} users -"
+          "d ${boardDirectory} 0755 ${userName} users -"
+          "d ${spoolDirectory} 0700 ${userName} users -"
+        ];
+        home-manager.users.${userName}.systemd.user.services.sinnixd-reactor = {
+          Unit = {
+            Description = "Sinnix model-free campaign event reactor";
+            After = [ "sinnixd.service" ];
+            Requires = [ "sinnixd.service" ];
           };
-        Install.WantedBy = [ "default.target" ];
-      };
+          Service =
+            (lib.sinnix.mkRuntimeServiceConfig {
+              runtimeInventory = config.sinnix.runtime.inventory;
+              unit = "sinnixd-reactor.service";
+            })
+            // {
+              Type = "simple";
+              ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --board ${lib.escapeShellArg cfg.boardPath} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --keeper-backoff-seconds ${toString cfg.keeperBackoffSeconds} --refill-width-target ${toString cfg.refillWidthTarget} --refill-spacing-seconds ${toString cfg.refillSpacingSeconds} ${projectRootArgs}";
+              Restart = "on-failure";
+              RestartSec = "5s";
+              NoNewPrivileges = true;
+              ProtectSystem = "strict";
+              ProtectHome = "read-only";
+              ReadWritePaths = [
+                cfg.stateDir
+                boardDirectory
+                spoolDirectory
+                config.sinnix.services.sinnixd.taskStateRoot
+              ]
+              ++ map (project: project.value.path) (lib.attrsToList config.sinnix.projects.entries);
+              UMask = "0077";
+            };
+          Install.WantedBy = [ "default.target" ];
+        };
       }
       # The planner is a scheduled, read-only snapshot producer.  It emits the
       # artifact consumed by refill; launching remains the campaign runner's
