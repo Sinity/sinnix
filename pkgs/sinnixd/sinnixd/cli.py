@@ -229,6 +229,12 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("--parameters-json", default="{}")
     start.add_argument("--bead-binding-json")
     start.add_argument("--dimensions-json", default="{}")
+    fire = job_subcommands.add_parser(
+        "fire", help="Fire one daemon-registered scheduled operation."
+    )
+    fire.add_argument("project_id")
+    fire.add_argument("operation")
+    fire.add_argument("--schedule-id", required=True)
     get = job_subcommands.add_parser("get")
     get.add_argument("job_id")
     retry = job_subcommands.add_parser("retry")
@@ -846,6 +852,16 @@ def main() -> int:
                 "parameters": parameters,
                 **({"dimensions": dimensions} if dimensions else {}),
                 **({"bead_binding": binding} if binding is not None else {}),
+            },
+        )
+    elif arguments.command == "job" and arguments.job_command == "fire":
+        request = _request(
+            "job.fire",
+            "systemd-jobs",
+            {
+                "project_id": arguments.project_id,
+                "operation": arguments.operation,
+                "schedule_id": arguments.schedule_id,
             },
         )
     elif arguments.command == "plan" and arguments.plan_command == "submit":
