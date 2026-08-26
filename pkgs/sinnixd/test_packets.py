@@ -235,9 +235,7 @@ def test_launch_creates_then_dispatches_with_dimensions(
     monkeypatch.setattr(
         sys,
         "argv",
-        [
-            "agentctl", "packet", "launch", "leader", "--coordinator-label", "wave-a"
-        ],
+        ["agentctl", "packet", "launch", "leader", "--coordinator-label", "wave-a"],
     )
 
     assert cli_module.main() == 0
