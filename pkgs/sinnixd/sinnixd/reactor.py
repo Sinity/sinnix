@@ -348,7 +348,7 @@ class CampaignBoard:
             "updated_at": self.updated_at,
             "lanes": {key: value.to_dict() for key, value in sorted(self.lanes.items())},
             "prs": {key: value.to_dict() for key, value in sorted(self.prs.items())},
-            "keeper": {key: value for key, value in sorted(self.keeper.items())},
+            "keeper": dict(sorted(self.keeper.items())),
             "errors": self.errors[-MAX_BOARD_ERRORS:],
         }
 
