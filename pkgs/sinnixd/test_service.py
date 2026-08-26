@@ -458,6 +458,33 @@ def test_agentctl_job_status_aliases_job_get(
     assert captured["request"].arguments == {"job_id": "job-1"}
 
 
+@pytest.mark.parametrize(
+    "argv",
+    (
+        ["agentctl", "agent", "resume", "job-1", "--session-id", "codex-session"],
+        ["agentctl", "job", "resume", "job-1", "--session-id", "codex-session"],
+    ),
+)
+def test_agentctl_resume_carries_the_native_session_id(
+    argv: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, RequestEnvelope] = {}
+
+    def fake_call(socket_path, request_value):
+        captured["request"] = request_value
+        return {"schema": 1, "ok": True}
+
+    monkeypatch.setattr(sys, "argv", argv)
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    assert captured["request"].operation == "job.resume"
+    assert captured["request"].arguments == {
+        "job_id": "job-1",
+        "native_session_id": "codex-session",
+    }
+
+
 def test_agentctl_task_mutations_require_a_stable_request_id() -> None:
     with pytest.raises(SystemExit):
         cli_module.parser().parse_args(["task", "claim", "fixture", "fixture-1"])
