@@ -155,12 +155,21 @@ run_gate || {
 exec {slot_fd}>&-
 
 # --- Phase B publish under the repo flock --------------------------------
+# Phase A's gate already succeeded by this point, so losing the repo lock here
+# would discard a completed 10-15 minute verification run. Wait patiently and
+# retry rather than failing: contention is transient, the work is not.
+# (2026-08-26: six harvests were thrown away this way in one wave.)
 exec 9>"$LOCK"
-flock -w 900 9 || {
-  emit_harvest_event failed "HARVEST-FAIL flock timeout"
-  echo "HARVEST-FAIL flock timeout"
+_locked=0
+for _attempt in 1 2 3 4; do
+  if flock -w 1800 9; then _locked=1; break; fi
+  echo "harvest: repo lock busy after 30m (attempt $_attempt); still waiting"
+done
+if [ "$_locked" -ne 1 ]; then
+  emit_harvest_event failed "HARVEST-FAIL flock timeout after 2h"
+  echo "HARVEST-FAIL flock timeout after 2h"
   exit 4
-}
+fi
 
 for lockfile in "$REPO"/.git/index.lock "$REPO"/.git/worktrees/*/index.lock; do
   [ -f "$lockfile" ] || continue
