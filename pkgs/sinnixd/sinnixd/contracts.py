@@ -135,6 +135,9 @@ class TypedJobContracts:
         parameters: Mapping[str, Any] | None = None,
         admission_bypass: bool = False,
         dimensions: Mapping[str, Any] | None = None,
+        dependency_job_ids: Sequence[str] = (),
+        exclusive_keys: Sequence[str] = (),
+        allow_failed_dependencies: bool = False,
     ) -> dict[str, Any]:
         if principal not in {"agent-control", "operator"}:
             raise ContractError(
@@ -227,6 +230,9 @@ class TypedJobContracts:
                 result_kind=result,
                 admission_bypass=admission_bypass,
                 dimensions=dimensions,
+                dependency_job_ids=dependency_job_ids,
+                exclusive_keys=exclusive_keys,
+                allow_failed_dependencies=allow_failed_dependencies,
             )
         except BaseException:
             prompt_path.unlink(missing_ok=True)
@@ -245,6 +251,9 @@ class TypedJobContracts:
         result_kind: str,
         admission_bypass: bool = False,
         dimensions: Mapping[str, Any] | None = None,
+        dependency_job_ids: Sequence[str] = (),
+        exclusive_keys: Sequence[str] = (),
+        allow_failed_dependencies: bool = False,
     ) -> dict[str, Any]:
         maximum_timeout = maximum_timeout_seconds(kind)
         if not valid_timeout_seconds(timeout_seconds, kind=kind):
@@ -298,6 +307,9 @@ class TypedJobContracts:
                     contract=public_contract,
                     result_kind=result_kind,
                     pool="agent",
+                    exclusive_keys=tuple(exclusive_keys),
+                    dependency_job_ids=tuple(dependency_job_ids),
+                    allow_failed_dependencies=allow_failed_dependencies,
                     admission_bypass=admission_bypass,
                     dimensions=dimensions or {},
                 ),
