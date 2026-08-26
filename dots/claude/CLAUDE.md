@@ -61,6 +61,23 @@ future reader pays the cost.
 
 Write it once, in the shortest form that survives without you.
 
+### Don't coin vocabulary
+
+These documents are agent-authored, so invented terms accrete: a phrase gets
+used twice, then cited, then treated as canonical, and every later reader pays
+to decode it. Use ordinary words.
+
+- Before naming a concept, check whether plain English already says it. "The
+  publication queue is invisible" beats coining a term for it.
+- A new term earns its place only if it names something real that is genuinely
+  awkward to say otherwise, AND it is defined where it is first used. Otherwise
+  write the idea out.
+- Never define a term in one document and use it undefined in another.
+- Domain words with outside meaning (worktree, squash-merge, cgroup,
+  idempotent, fail-closed) are not jargon — use them freely.
+- Deleting a coined term is not a loss of precision if the sentence still says
+  the same thing in plain words. It usually does.
+
 ## Machine and filesystem orientation
 
 Host `sinnix-prime`: i7-13700K, RTX 3080, 32 GB, NixOS unstable. Root SATA SSD
