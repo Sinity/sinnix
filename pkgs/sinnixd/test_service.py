@@ -7984,6 +7984,68 @@ def test_typed_shell_and_agent_contracts_share_generic_job_lifecycle(
     }
 
 
+def test_typed_shell_and_declared_operation_share_project_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: shell must use the declared project environment contract."""
+    monkeypatch.setenv("PROJECT_SECRET", "ambient-secret")
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        .replace('kind = "fixture"', 'kind = "nix-develop"')
+        .replace(
+            'command = ["fixture-env", "--command"]',
+            'command = ["nix", "develop", "--command"]',
+        )
+    )
+    initialize_git_checkout(tmp_path)
+    systemd = FakeSystemdJobs()
+    service = SinnixdService(
+        ProjectCatalog([tmp_path]),
+        jobs=generic_jobs(tmp_path, systemd),
+    )
+
+    declared = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {"project_id": "fixture", "operation": "check"},
+        )
+    )
+    shell = service.dispatch(
+        request(
+            "job.shell.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "checkout_id": "default",
+                "argv": ["python", "-m", "fixture"],
+                "cwd": ".",
+                "timeout_seconds": 60,
+                "result": "exit-status",
+            },
+        )
+    )
+
+    assert declared.ok and shell.ok
+    assert len(systemd.started) == 2
+    declared_environment = systemd.started[0]["environment"]
+    shell_environment = systemd.started[1]["environment"]
+    project_environment = ProjectCatalog([tmp_path]).get("fixture").environment.values()
+    assert {
+        key: shell_environment[key] for key in project_environment
+    } == project_environment
+    assert {
+        key: declared_environment[key] for key in project_environment
+    } == project_environment
+    assert shell_environment["PATH"] == declared_environment["PATH"]
+    assert "PROJECT_SECRET" not in shell_environment
+    assert "PROJECT_SECRET" not in declared_environment
+    assert "PYTHONPATH" not in shell_environment
+    assert "PYTHONPATH" not in declared_environment
+
+
 def test_typed_shell_runner_enters_the_registered_project_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
