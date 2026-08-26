@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -121,6 +122,16 @@ def _add_agent_launch_arguments(
     )
 
 
+def _add_format_argument(target: argparse.ArgumentParser) -> None:
+    target.add_argument(
+        "--format",
+        dest="output_format",
+        choices=("json", "brief"),
+        default=argparse.SUPPRESS,
+        help="Output format (JSON by default; brief is coordinator-friendly text).",
+    )
+
+
 def default_socket_path() -> Path:
     return (
         Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
@@ -131,6 +142,9 @@ def default_socket_path() -> Path:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="agentctl")
     result.add_argument("--socket", type=Path, default=default_socket_path())
+    result.add_argument(
+        "--format", dest="output_format", choices=("json", "brief"), default="json"
+    )
     subcommands = result.add_subparsers(dest="command", required=True)
     subcommands.add_parser("status")
     fleet = subcommands.add_parser(
@@ -145,6 +159,8 @@ def parser() -> argparse.ArgumentParser:
         "--gh-limit", type=int, choices=range(0, 33), default=DEFAULT_GH_LIMIT
     )
     fleet.add_argument("--json", action="store_true")
+    fleet.add_argument("--running-count", action="store_true")
+    _add_format_argument(fleet)
     evidence = subcommands.add_parser(
         "evidence", help="Show all locally available evidence for one job or workspace."
     )
@@ -171,6 +187,7 @@ def parser() -> argparse.ArgumentParser:
     agent_list.add_argument("--project")
     agent_list.add_argument("--phase", action="append", default=[])
     agent_list.add_argument("--active", action="store_true")
+    _add_format_argument(agent_list)
     agent_status = agent_subcommands.add_parser("status")
     agent_status.add_argument("job_id")
     agent_wait = agent_subcommands.add_parser("wait")
@@ -180,6 +197,7 @@ def parser() -> argparse.ArgumentParser:
     agent_result = agent_subcommands.add_parser("result")
     agent_result.add_argument("job_id")
     agent_result.add_argument("--max-bytes", type=int, default=64_000)
+    _add_format_argument(agent_result)
     project = subcommands.add_parser("project")
     project_subcommands = project.add_subparsers(dest="project_command", required=True)
     project_subcommands.add_parser("list")
@@ -193,6 +211,8 @@ def parser() -> argparse.ArgumentParser:
     )
     workspace_list = workspace_subcommands.add_parser("list")
     workspace_list.add_argument("--project")
+    workspace_list.add_argument("--pattern")
+    _add_format_argument(workspace_list)
     workspace_get = workspace_subcommands.add_parser("get")
     workspace_get.add_argument("workspace_id")
     workspace_create = workspace_subcommands.add_parser("create")
@@ -328,6 +348,7 @@ def parser() -> argparse.ArgumentParser:
     job_list.add_argument(
         "--active", "--active-only", dest="active", action="store_true"
     )
+    _add_format_argument(job_list)
     wait = job_subcommands.add_parser("wait")
     wait.add_argument("job_ids", nargs="+", metavar="job_id")
     wait.add_argument(
@@ -344,6 +365,7 @@ def parser() -> argparse.ArgumentParser:
     job_result = job_subcommands.add_parser("result")
     job_result.add_argument("job_id")
     job_result.add_argument("--max-bytes", type=int, default=64_000)
+    _add_format_argument(job_result)
     cancel = job_subcommands.add_parser("cancel")
     cancel.add_argument("job_id")
     plan = subcommands.add_parser("plan")
@@ -485,6 +507,54 @@ def _unavailable_response(request: RequestEnvelope) -> dict[str, object]:
     ).to_dict()
 
 
+def _payload_value(response: dict[str, object]) -> object:
+    payload = response.get("payload")
+    return payload.get("value") if isinstance(payload, dict) else None
+
+
+def _brief_response(
+    response: dict[str, object], operation: str, pattern: str | None = None
+) -> str:
+    if response.get("ok") is not True:
+        error = response.get("error")
+        message = error.get("message") if isinstance(error, dict) else None
+        return f"ERROR: {message or 'operation failed'}\n"
+    value = _payload_value(response)
+    if operation == "job.result":
+        content = value.get("content") if isinstance(value, dict) else None
+        return f"{content}\n" if isinstance(content, str) else "-\n"
+    if operation == "workspace.list":
+        workspaces = value.get("workspaces") if isinstance(value, dict) else None
+        if not isinstance(workspaces, list):
+            return "(no workspaces)\n"
+        compiled = re.compile(pattern) if pattern else None
+        rows = [
+            workspace
+            for workspace in workspaces
+            if isinstance(workspace, dict)
+            and (compiled is None or compiled.search(str(workspace.get("name", ""))))
+        ]
+        if not rows:
+            return "(no workspaces)\n"
+        return "".join(
+            f"{workspace.get('workspace_id', '-')} {workspace.get('name', '-')} "
+            f"{workspace.get('state', '-')}\n"
+            for workspace in rows
+        )
+    if operation == "job.list":
+        jobs = value.get("jobs") if isinstance(value, dict) else None
+        if not isinstance(jobs, list) or not jobs:
+            return "(no jobs)\n"
+        return "".join(
+            f"{job.get('job_id', '-')} {job.get('project_id', '-')} "
+            f"{job.get('operation', '-')} "
+            f"{job.get('state', {}).get('phase', '-') if isinstance(job, dict) and isinstance(job.get('state'), dict) else '-'}\n"
+            for job in jobs
+            if isinstance(job, dict)
+        )
+    return f"{json.dumps(value, sort_keys=True)}\n"
+
+
 def main() -> int:
     arguments = parser().parse_args()
     if arguments.command == "fleet":
@@ -494,11 +564,12 @@ def main() -> int:
             recent_hours=arguments.recent_hours,
             gh_limit=arguments.gh_limit,
         )
-        print(
-            json.dumps(payload, indent=2, sort_keys=True)
-            if arguments.json
-            else render_fleet(payload)
-        )
+        if arguments.running_count:
+            print(payload["counts"]["active"] + payload["counts"]["queued"])
+        elif arguments.output_format == "brief" or not arguments.json:
+            print(render_fleet(payload), end="")
+        else:
+            print(json.dumps(payload, indent=2, sort_keys=True))
         return 0
     if arguments.command == "evidence":
         payload = read_evidence(
@@ -1194,7 +1265,17 @@ def main() -> int:
                 response = _wait_for_delivery(arguments.socket, response)
         except (OSError, ProtocolError, SinnixdClientError):
             response = _unavailable_response(request)
-    print(json.dumps(response, indent=2, sort_keys=True))
+    if arguments.output_format == "brief":
+        print(
+            _brief_response(
+                response,
+                request.operation,
+                getattr(arguments, "pattern", None),
+            ),
+            end="",
+        )
+    else:
+        print(json.dumps(response, indent=2, sort_keys=True))
     return 0 if response.get("ok") is True else 1
 
 

@@ -114,6 +114,83 @@ def test_agentctl_exit_status_matches_response_envelope(
     assert json.loads(capsys.readouterr().out) == response
 
 
+def test_agentctl_brief_format_unwraps_result_content_and_accepts_suffix_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        sys, "argv", ["agentctl", "job", "result", "job-1", "--format=brief"]
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "call",
+        lambda socket_path, request: {
+            "schema": 1,
+            "ok": True,
+            "payload": {
+                "value": {"kind": "last-message", "content": "LANE-QUICK: green"}
+            },
+        },
+    )
+
+    assert cli_module.main() == 0
+    assert capsys.readouterr().out == "LANE-QUICK: green\n"
+
+
+def test_agentctl_brief_format_renders_jobs_and_workspaces() -> None:
+    jobs = {
+        "schema": 1,
+        "ok": True,
+        "payload": {
+            "value": {
+                "jobs": [
+                    {
+                        "job_id": "job-1",
+                        "project_id": "sinnix",
+                        "operation": "check",
+                        "state": {"phase": "running"},
+                    }
+                ]
+            }
+        },
+    }
+    workspaces = {
+        "schema": 1,
+        "ok": True,
+        "payload": {
+            "value": {
+                "workspaces": [
+                    {"workspace_id": "ws-1", "name": "lane-a", "state": "available"},
+                    {"workspace_id": "ws-2", "name": "other", "state": "busy"},
+                ]
+            }
+        },
+    }
+
+    assert cli_module._brief_response(jobs, "job.list") == "job-1 sinnix check running\n"
+    assert (
+        cli_module._brief_response(workspaces, "workspace.list", "lane")
+        == "ws-1 lane-a available\n"
+    )
+
+
+def test_agentctl_brief_format_reports_running_count(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        sys, "argv", ["agentctl", "fleet", "--format=brief", "--running-count"]
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "read_fleet",
+        lambda *args, **kwargs: {"counts": {"active": 2, "queued": 3}},
+    )
+
+    assert cli_module.main() == 0
+    assert capsys.readouterr().out == "5\n"
+
+
 def test_canonical_client_validates_typed_response_identity() -> None:
     request = RequestEnvelope(
         request_id=str(uuid4()),

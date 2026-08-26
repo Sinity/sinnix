@@ -16,8 +16,10 @@ tells you where state lives and what the loops are.
   coordinator session.
 - **Task authority**: external Beads per project (`bd` from the repo cwd —
   MIND YOUR CWD: `bd` resolves the DB from the working directory).
-- **Fleet truth**: `actl jobs` / `actl running` / `actl result <job>` /
-  `actl ws [pat]` (unwraps agentctl envelopes).
+- **Fleet truth**: `agentctl --format=brief fleet` /
+  `agentctl --format=brief fleet --running-count` /
+  `agentctl --format=brief job result <job>` /
+  `agentctl --format=brief workspace list [--pattern <regex>]`.
 - **Events**: one persistent Monitor on `/realm/state/agentctl/events.jsonl`
   filtered to lanes + polylogue + merge watches + failures (drop successful
   non-polylogue declared-operations — scheduled noise). Merge watchers
@@ -36,7 +38,7 @@ duplicate-bead launches are refused typed when a live job owns the workspace.
 
 **Harvest** (lane success event):
 
-1. `actl result <job>` — expect the machine trailer
+1. `agentctl --format=brief job result <job>` — expect the machine trailer
    (LANE-BRANCH/COMMIT/QUICK/CLASSIFICATION).
 2. `redflags <worktree>` — deterministic scanner. No flags + small diff →
    stat-level skim. Flags → full adversarial read. The flags are the

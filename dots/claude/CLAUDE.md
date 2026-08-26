@@ -90,8 +90,8 @@ live OUTSIDE your context — read them, never reconstruct:
   (loops, review pyramid, cost discipline); worker rules in its sibling
   `worker-contract.md`.
 - **Live board**: `board` / `board sync` (`/realm/tmp/work/campaign-board.json`).
-- **Helpers**: `actl` (agentctl envelopes), `redflags <worktree>` (review
-  scanner), `dispatch_lane`, `harvest_queue.sh` + `merge_close.sh`
+- **Helpers**: `agentctl --format=brief` (coordinator output), `redflags
+  <worktree>` (review scanner), `dispatch_lane`, `harvest_queue.sh` + `merge_close.sh`
   (`~/.claude/skills/review-land/scripts/`).
 - A fresh session resumes a campaign from these carriers plus the project's
   memory index; nothing campaign-critical may live only in a chat context.
