@@ -81,6 +81,18 @@ exclusive_keys = ["sinnix:usage-census"]
 estimate_memory_bytes = 536870912
 schedule = "weekly"
 
+[operations.retrospective]
+description = "Review the day's event, harvest, and session evidence and file bounded process-delta proposals"
+exec = ["sinnix-retrospective"]
+pool = "normal"
+result = "json"
+cache = "none"
+exclusive_keys = ["sinnix:process-retrospective"]
+estimate_memory_bytes = 536870912
+scratch = "tmpfs"
+timeout_seconds = 3600
+schedule = "*-*-* 03:15:00"
+
 [conflicts]
 exact_files = ["flake.lock", "flake.nix"]
 generated_surfaces = ["docs/agent-environment.md", "docs/config-default-audit-features.md"]
