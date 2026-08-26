@@ -3456,7 +3456,14 @@ class GenericJobs:
         """Append one bounded advisory event to the existing event spool."""
         if self.event_spool_path is None:
             return
-        line = json.dumps(dict(event), sort_keys=True, separators=(",", ":"))
+        # Every daemon-owned spool record carries the reactor event schema;
+        # legacy producers may omit it and are still accepted by the reactor
+        # during the one-way v0 migration.
+        line = json.dumps(
+            {"schema_version": 1, **dict(event)},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         try:
             _ensure_durable_directory(self.event_spool_path.parent)
             try:
