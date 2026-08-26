@@ -54,6 +54,17 @@ Every implementation dispatch carries, verbatim in the prompt:
    / `LANE-CLASSIFICATION: <one line per finding for fix lanes>` so the
    harvester parses state instead of prose.
 
+9. **Never mutate live operator state** (2026-08-26, from a lane that deleted
+   a coordinator tool out of `~/.local/bin` mid-campaign because its bead text
+   named that path): a lane's writes stop at its own worktree. No writes under
+   `$HOME`, no edits to installed tools or live service state, no
+   `switch`/`boot`/system or Home-Manager rebuild — a rebuild from a lane
+   worktree would deploy that BRANCH to the live machine. Retiring an
+   installed tool means deleting it from the source-of-truth tree and saying
+   so in the report; removing the live copy is a coordinator act, sequenced
+   after the replacement actually ships. Bead authors: never name a live path
+   as a deletion target (that authoring defect caused this one).
+
 Verification economics in lanes (operator ruling, 2026-08-26): lanes run
 SELECTED verification from the seed inherited off the main checkout — never
 the corpus, and never bootstrap-from-scratch; selected-run false negatives
