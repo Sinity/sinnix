@@ -81,6 +81,21 @@ runtime/workspace operations and `orchestrate` before multi-agent work.
   evidence and act at ~2x with a decision, never silent waiting. Completion
   notifications are authoritative; do not poll.
 
+## Campaign coordination (stateless takeover)
+
+When coordinating a lane campaign (any project), the protocol and live state
+live OUTSIDE your context — read them, never reconstruct:
+
+- **Protocol**: `/realm/project/sinnix/dots/_ai/skills/orchestrate/references/coordinator-contract.md`
+  (loops, review pyramid, cost discipline); worker rules in its sibling
+  `worker-contract.md`.
+- **Live board**: `board` / `board sync` (`/realm/tmp/work/campaign-board.json`).
+- **Helpers**: `actl` (agentctl envelopes), `redflags <worktree>` (review
+  scanner), `dispatch_lane`, `harvest_queue.sh` + `merge_close.sh`
+  (`~/.claude/skills/review-land/scripts/`).
+- A fresh session resumes a campaign from these carriers plus the project's
+  memory index; nothing campaign-critical may live only in a chat context.
+
 ## Ambient control (browser, desktop, terminal)
 
 One browser — the operator's Chrome, CDP on `127.0.0.1:9222`, shared profile.

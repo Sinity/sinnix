@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Dispatch an ad-hoc lane with the standing worker contract injected by
+# reference — author only the task delta.
+# Usage: dispatch_lane <project> <delta-file> [model=gpt-5.6-luna] [effort=high]
+set -u
+PROJECT=$1; DELTA=$2; MODEL=${3:-gpt-5.6-luna}; EFFORT=${4:-high}
+PROMPT=$(mktemp /realm/tmp/work/dispatch-XXXX.md)
+cat > "$PROMPT" <<HDR
+Read and follow the standing worker contract FIRST:
+/realm/project/sinnix/dots/_ai/skills/orchestrate/references/worker-contract.md
+(dispatch contract v2 clauses 1-8: launch snapshot, self-verification, red-first,
+managed commands, honest single report, no scope expansion, exit rebased on
+current origin/master with the quick gate green post-rebase, machine trailer).
+
+# Task
+HDR
+cat "$DELTA" >> "$PROMPT"
+agentctl agent launch --project "$PROJECT" --checkout default \
+  --prompt-file "$PROMPT" --backend codex --model "$MODEL" --effort "$EFFORT" 2>&1 \
+  | grep -oE '"job_id": "[a-f0-9-]*"|"message": "[^"]*"' | head -1
