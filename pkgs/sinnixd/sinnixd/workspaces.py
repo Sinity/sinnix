@@ -15,13 +15,19 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 from uuid import uuid4
 
 from sinnix_lib.atomic_json import modify_json, read_json, write_json_atomic
 from sinnix_lib.lock import flock
 
-from .projects import ProjectAdapter, ProjectCatalog, RegisteredCheckout
+from .projects import (
+    ProjectAdapter,
+    ProjectCatalog,
+    ProjectConfigError,
+    RegisteredCheckout,
+    parse_worktree_records,
+)
 
 WORKSPACE_SCHEMA_VERSION = 1
 CHECKPOINT_SCHEMA_VERSION = 1
@@ -34,6 +40,9 @@ _NAME = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?\Z")
 
 class WorkspaceError(ValueError):
     """A workspace request violates declared Git authority or preservation rules."""
+
+
+DEAD_PACKET_COLLISION_NOTE = "packet-dead-collision-recovered"
 
 
 @dataclass(frozen=True)
@@ -644,15 +653,34 @@ class GitWorkspaces:
             }
 
     def create(
-        self, *, project_id: str, name: str, branch: str, base: str | None
+        self,
+        *,
+        project_id: str,
+        name: str,
+        branch: str,
+        base: str | None,
+        recover_dead: bool = False,
+        is_live: Callable[[Path], bool] | None = None,
     ) -> dict[str, Any]:
         with flock(self.mutation_lock):
             return self._create_locked(
-                project_id=project_id, name=name, branch=branch, base=base
+                project_id=project_id,
+                name=name,
+                branch=branch,
+                base=base,
+                recover_dead=recover_dead,
+                is_live=is_live,
             )
 
     def _create_locked(
-        self, *, project_id: str, name: str, branch: str, base: str | None
+        self,
+        *,
+        project_id: str,
+        name: str,
+        branch: str,
+        base: str | None,
+        recover_dead: bool = False,
+        is_live: Callable[[Path], bool] | None = None,
     ) -> dict[str, Any]:
         project = self._project(project_id)
         policy = project.workspace
@@ -663,11 +691,29 @@ class GitWorkspaces:
         self._verify_ref(project.root, resolved_base, "base")
         path = policy.root / name
         self._validate_target(policy.root, path)
-        if path.exists() or any(
-            record.project_id == project_id and record.name == name
-            for record in self.store.records()
-        ):
-            raise WorkspaceError("workspace target or name already exists")
+        policy.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        existing = next(
+            (
+                record
+                for record in self.store.records()
+                if record.project_id == project_id
+                and (record.name == name or record.path == path)
+            ),
+            None,
+        )
+        recovery_note: dict[str, Any] | None = None
+        if path.exists() or existing is not None:
+            if not recover_dead:
+                raise WorkspaceError("workspace target or name already exists")
+            recovery_note = self._recover_dead_collision_locked(
+                project,
+                name=name,
+                branch=branch,
+                base=resolved_base,
+                path=path,
+                record=existing,
+                is_live=is_live,
+            )
         branch_exists = (
             self._git(
                 project.root,
@@ -679,17 +725,35 @@ class GitWorkspaces:
             ).returncode
             == 0
         )
+        staging_path = Path(tempfile.mkdtemp(prefix=f".{name}.", dir=policy.root))
+        staging_path.rmdir()
+        created_path = staging_path
         arguments = ["worktree", "add"]
         if not branch_exists:
             arguments.extend(["-b", branch])
-        arguments.append(str(path))
+        arguments.append(str(staging_path))
         arguments.append(branch if branch_exists else resolved_base)
         result = self._git(project.root, *arguments, check=False)
         if result.returncode != 0:
+            self._cleanup_created_worktree(project, staging_path)
             raise WorkspaceError(result.stderr.strip() or "git worktree add failed")
         try:
+            checkout = self._checkout_by_path(project_id, staging_path)
+            notes = self._provision(project, staging_path)
+            if path.exists():
+                raise WorkspaceError("workspace target appeared during creation")
+            moved = self._git(
+                project.root,
+                "worktree",
+                "move",
+                str(staging_path),
+                str(path),
+                check=False,
+            )
+            if moved.returncode != 0:
+                raise WorkspaceError(moved.stderr.strip() or "git worktree move failed")
+            created_path = path
             checkout = self._checkout_by_path(project_id, path)
-            notes = self._provision(project, path)
             record = self._new_record(
                 project,
                 name,
@@ -699,20 +763,182 @@ class GitWorkspaces:
                 provision_notes=notes,
             )
         except BaseException:
-            self._git(
-                project.root, "worktree", "remove", "--force", str(path), check=False
-            )
+            self._cleanup_created_worktree(project, created_path)
             if not branch_exists:
                 self._git(project.root, "branch", "-D", branch, check=False)
             raise
         try:
             self.store.put(record)
         except BaseException:
-            self._remove_worktree(project, record, checkout)
+            self._cleanup_created_worktree(project, path)
             if not branch_exists:
                 self._git(project.root, "branch", "-D", branch, check=False)
             raise
-        return self._status(record)
+        result = self._status(record)
+        if recovery_note is not None:
+            result["notes"] = [recovery_note]
+        return result
+
+    def _recover_dead_collision_locked(
+        self,
+        project: ProjectAdapter,
+        *,
+        name: str,
+        branch: str,
+        base: str,
+        path: Path,
+        record: WorkspaceRecord | None,
+        is_live: Callable[[Path], bool] | None,
+    ) -> dict[str, Any]:
+        """Remove one proven packet orphan while the create lock is held."""
+        if record is not None and (
+            record.name != name or record.path != path or record.branch != branch
+        ):
+            raise WorkspaceError("workspace target or name already exists")
+        if is_live is not None and is_live(path):
+            raise WorkspaceError("workspace collision has a live job")
+
+        if record is not None:
+            status = self._status(record)
+            if status["state"] == "available":
+                if status["dirty"] or not status["identity_matches"]:
+                    raise WorkspaceError("workspace collision contains work")
+                head = status["head"]
+                if not isinstance(head, str) or not self._head_is_contained_in_ref(
+                    project, head, base
+                ):
+                    raise WorkspaceError(
+                        "workspace collision contains unpublished work"
+                    )
+                removed = self._remove_worktree(project, record)
+                if removed.returncode != 0:
+                    raise WorkspaceError(
+                        removed.stderr.strip() or "dead workspace cleanup failed"
+                    )
+            elif status["state"] != "missing":
+                raise WorkspaceError("workspace collision cannot be inspected")
+            else:
+                worktree = self._worktree_record(project, path)
+                if path.exists() and worktree is None:
+                    raise WorkspaceError("workspace collision cannot be inspected")
+                if worktree is not None:
+                    self._cleanup_created_worktree(project, path)
+            self._delete_branch_if_present(project, record.branch)
+            self.store.remove(record.workspace_id)
+            return {
+                "kind": DEAD_PACKET_COLLISION_NOTE,
+                "workspace_id": record.workspace_id,
+                "name": name,
+                "branch": record.branch,
+            }
+
+        worktree = self._worktree_record(project, path)
+        if worktree is None:
+            raise WorkspaceError("workspace target or name already exists")
+        raw_branch = worktree.get("branch")
+        expected_branch = f"refs/heads/{branch}"
+        if raw_branch != expected_branch:
+            raise WorkspaceError("workspace collision branch identity changed")
+        if "locked" not in worktree:
+            try:
+                dirty = bool(
+                    self._git(
+                        path, "status", "--porcelain", "--untracked-files=all"
+                    ).stdout
+                )
+            except WorkspaceError:
+                raise WorkspaceError(
+                    "workspace collision cannot be inspected"
+                ) from None
+            if dirty:
+                raise WorkspaceError("workspace collision is still provisioning")
+        head = self._git(project.root, "rev-parse", branch, check=False)
+        if head.returncode != 0 or not self._head_is_contained_in_ref(
+            project, head.stdout.strip(), base
+        ):
+            raise WorkspaceError("workspace collision contains unpublished work")
+        self._cleanup_created_worktree(project, path)
+        self._delete_branch_if_present(project, branch)
+        return {
+            "kind": DEAD_PACKET_COLLISION_NOTE,
+            "workspace_id": None,
+            "name": name,
+            "branch": branch,
+        }
+
+    def _worktree_record(
+        self, project: ProjectAdapter, path: Path
+    ) -> dict[str, str] | None:
+        output = self._git(project.root, "worktree", "list", "--porcelain")
+        for record in parse_worktree_records(output.stdout):
+            if record.get("worktree") == str(path):
+                return record
+        return None
+
+    def _head_is_contained_in_ref(
+        self, project: ProjectAdapter, head: str, target_ref: str
+    ) -> bool:
+        if not head:
+            return False
+        return (
+            self._git(
+                project.root,
+                "merge-base",
+                "--is-ancestor",
+                head,
+                target_ref,
+                check=False,
+            ).returncode
+            == 0
+        )
+
+    def _delete_branch_if_present(self, project: ProjectAdapter, branch: str) -> None:
+        result = self._git(project.root, "branch", "-D", branch, check=False)
+        if (
+            result.returncode != 0
+            and self._git(
+                project.root,
+                "show-ref",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{branch}",
+                check=False,
+            ).returncode
+            == 0
+        ):
+            raise WorkspaceError(
+                result.stderr.strip() or "dead workspace branch cleanup failed"
+            )
+
+    def _cleanup_created_worktree(self, project: ProjectAdapter, path: Path) -> None:
+        """Best-effort rollback for a worktree created by this transaction."""
+        if not path.exists() and self._worktree_record(project, path) is None:
+            return
+        result = self._git(
+            project.root,
+            "worktree",
+            "remove",
+            "--force",
+            "--force",
+            str(path),
+            check=False,
+        )
+        if (
+            result.returncode == 0
+            and not path.exists()
+            and self._worktree_record(project, path) is None
+        ):
+            return
+        if path.exists():
+            try:
+                shutil.rmtree(path)
+            except OSError as error:
+                raise WorkspaceError("created workspace rollback failed") from error
+        self._git(project.root, "worktree", "prune", "--expire", "now", check=False)
+        if path.exists() or self._worktree_record(project, path) is not None:
+            raise WorkspaceError(
+                result.stderr.strip() or "created workspace rollback failed"
+            )
 
     def adopt(self, *, project_id: str, checkout_id: str, name: str) -> dict[str, Any]:
         project = self._project(project_id)
@@ -1594,7 +1820,11 @@ class GitWorkspaces:
 
     def _checkout_by_path(self, project_id: str, path: Path) -> RegisteredCheckout:
         resolved = path.resolve(strict=True)
-        for checkout in self.projects.checkouts(project_id):
+        try:
+            checkouts = self.projects.checkouts(project_id)
+        except ProjectConfigError as error:
+            raise WorkspaceError("registered worktrees cannot be inspected") from error
+        for checkout in checkouts:
             if checkout.path == resolved:
                 return checkout
         raise WorkspaceError("path is not a registered linked worktree")

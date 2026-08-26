@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -141,7 +142,9 @@ def test_checkout_resolution_uses_checkout_id_not_workspace_id() -> None:
 
 
 def test_launch_creates_then_dispatches_with_dimensions(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     root, _config = project_fixture(tmp_path)
     reader = FixtureBd([bead("leader")])
@@ -156,6 +159,12 @@ def test_launch_creates_then_dispatches_with_dimensions(
                     "value": {
                         "workspace_id": "workspace-1",
                         "checkout_id": "worktree-abc",
+                        "notes": [
+                            {
+                                "kind": "packet-dead-collision-recovered",
+                                "workspace_id": "workspace-old",
+                            }
+                        ],
                     }
                 },
             }
@@ -179,4 +188,14 @@ def test_launch_creates_then_dispatches_with_dimensions(
     assert calls[1].arguments["parameters"]["dimensions"]["conflict_keys"] == [
         "area:parser",
         "area:storage",
+    ]
+    assert calls[0].arguments["recover_dead"] is True
+    assert calls[1].arguments["parameters"]["packet_notes"][0]["kind"] == (
+        "packet-dead-collision-recovered"
+    )
+    assert json.loads(capsys.readouterr().out)["payload"]["value"]["notes"] == [
+        {
+            "kind": "packet-dead-collision-recovered",
+            "workspace_id": "workspace-old",
+        }
     ]
