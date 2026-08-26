@@ -92,7 +92,7 @@ from sinnixd.tasks import (
     TaskService,
     reconcile_task_mutations,
 )
-from sinnixd.workspaces import WorkspaceError
+from sinnixd.workspaces import MAX_PROVISION_OUTPUT_BYTES, WorkspaceError
 
 
 @pytest.mark.parametrize(("ok", "expected"), ((True, 0), (False, 1)))
@@ -5610,6 +5610,150 @@ def test_packet_workspace_create_refuses_live_collision(
     assert (
         service.workspaces.store.records()[0].workspace_id == workspace["workspace_id"]
     )
+
+def _write_provision_exec_descriptor(
+    root: Path, command: str, timeout: int = 600
+) -> None:
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'command = ["fixture-env", "--command"]', 'command = ["env"]'
+        )
+        + f"\n[workspace.provision]\nexec = {command}\nexec_timeout_seconds = {timeout}\n"
+    )
+
+
+def test_workspace_provision_exec_records_bounded_output_in_the_workspace_note(
+    tmp_path: Path,
+) -> None:
+    write_adapter(tmp_path)
+    _write_provision_exec_descriptor(
+        tmp_path,
+        '["/bin/sh", "-c", "printf provisioned > provisioned.txt; printf stdout; printf stderr >&2"]',
+    )
+    initialize_git_checkout(tmp_path)
+
+    created = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path)
+    ).workspaces.create(
+        project_id="fixture",
+        name="exec-lane",
+        branch="feature/exec-lane",
+        base="HEAD",
+    )
+
+    assert (Path(created["path"]) / "provisioned.txt").read_text() == "provisioned"
+    assert created["provision_notes"] == [
+        {
+            "kind": "exec",
+            "path": "/bin/sh -c printf provisioned > provisioned.txt; printf stdout; printf stderr >&2",
+            "output": "stdoutstderr",
+        }
+    ]
+
+
+def test_workspace_provision_exec_failure_rolls_back_before_registration(
+    tmp_path: Path,
+) -> None:
+    write_adapter(tmp_path)
+    _write_provision_exec_descriptor(
+        tmp_path,
+        '["/bin/sh", "-c", "printf partial > partial.txt; printf failed >&2; exit 23"]',
+    )
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+
+    with pytest.raises(WorkspaceError, match="exit status 23"):
+        service.workspaces.create(
+            project_id="fixture",
+            name="failed-lane",
+            branch="feature/failed-lane",
+            base="HEAD",
+        )
+
+    assert not (tmp_path / "worktrees" / "failed-lane").exists()
+    assert service.workspaces.list("fixture") == {"workspaces": []}
+    assert (
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(tmp_path),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                "refs/heads/feature/failed-lane",
+            ],
+            check=False,
+        ).returncode
+        != 0
+    )
+
+
+def test_workspace_provision_exec_timeout_kills_the_process_group(
+    tmp_path: Path,
+) -> None:
+    write_adapter(tmp_path)
+    marker = tmp_path / "child-survived"
+    _write_provision_exec_descriptor(
+        tmp_path,
+        f'["/bin/sh", "-c", "(sleep 30; printf survived > {marker}) & wait"]',
+        timeout=1,
+    )
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+
+    with pytest.raises(WorkspaceError, match="timed out after 1 seconds"):
+        service.workspaces.create(
+            project_id="fixture",
+            name="timeout-lane",
+            branch="feature/timeout-lane",
+            base="HEAD",
+        )
+
+    time.sleep(0.1)
+    assert not marker.exists()
+    assert not (tmp_path / "worktrees" / "timeout-lane").exists()
+
+
+def test_workspace_provision_exec_output_is_bounded(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    _write_provision_exec_descriptor(
+        tmp_path, '["/bin/sh", "-c", "head -c 100000 /dev/zero"]'
+    )
+    initialize_git_checkout(tmp_path)
+
+    created = SinnixdService(
+        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path)
+    ).workspaces.create(
+        project_id="fixture",
+        name="bounded-lane",
+        branch="feature/bounded-lane",
+        base="HEAD",
+    )
+
+    output = created["provision_notes"][0]["output"]
+    assert len(output.encode()) == MAX_PROVISION_OUTPUT_BYTES
+
+
+@pytest.mark.parametrize(
+    "provision",
+    (
+        "[workspace.provision]\nexec = []\n",
+        '[workspace.provision]\nexec = ["/bin/true"]\nexec_timeout_seconds = 0\n',
+        '[workspace.provision]\nexec = ["/bin/true"]\nexec_timeout_seconds = 3601\n',
+    ),
+)
+def test_workspace_provision_exec_schema_rejects_unbounded_values(
+    tmp_path: Path, provision: str
+) -> None:
+    write_adapter(tmp_path)
+    (tmp_path / ".agentctl" / "project.toml").write_text(
+        (tmp_path / ".agentctl" / "project.toml").read_text() + "\n" + provision
+    )
+
+    with pytest.raises(ProjectConfigError, match="workspace.provision"):
+        ProjectCatalog([tmp_path]).get("fixture")
 
 
 def test_workspace_adopt_uses_existing_linked_checkout_without_claiming_creation(

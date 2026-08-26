@@ -7,10 +7,12 @@ import json
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import tarfile
 import tempfile
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from fnmatch import fnmatch
@@ -34,6 +36,7 @@ CHECKPOINT_SCHEMA_VERSION = 1
 STACK_SCHEMA_VERSION = 2
 MAX_CHECKPOINT_BYTES = 64 * 1024 * 1024
 MAX_UNTRACKED_FILES = 4096
+MAX_PROVISION_OUTPUT_BYTES = 64 * 1024
 _FICLONE = 0x40049409  # linux/fs.h FICLONE: reflink clone on supporting filesystems
 _NAME = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?\Z")
 
@@ -99,8 +102,15 @@ class WorkspaceRecord:
         raw_notes = value.get("provision_notes", [])
         if not isinstance(raw_notes, list) or any(
             not isinstance(note, Mapping)
-            or set(note) != {"kind", "path"}
-            or any(not isinstance(item, str) or not item for item in note.values())
+            or set(note)
+            not in (
+                {"kind", "path"},
+                {"kind", "path", "output"},
+            )
+            or any(
+                not isinstance(item, str) or (not item and key != "output")
+                for key, item in note.items()
+            )
             for note in raw_notes
         ):
             raise WorkspaceError("workspace provision notes are invalid")
@@ -1866,6 +1876,93 @@ class GitWorkspaces:
         shutil.copystat(source, destination)
 
     @staticmethod
+    def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        try:
+            process.wait(timeout=1)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+    @staticmethod
+    def _run_provision_exec(project: ProjectAdapter, target: Path) -> dict[str, str]:
+        assert project.workspace is not None
+        command = project.environment.command_for(project.workspace.provision_exec)
+        environment = project.environment.values()
+        output = bytearray()
+
+        def drain(stream: Any) -> None:
+            while True:
+                chunk = stream.read(8192)
+                if not chunk:
+                    return
+                remaining = MAX_PROVISION_OUTPUT_BYTES - len(output)
+                if remaining > 0:
+                    output.extend(chunk[:remaining])
+
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=target,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        except OSError as error:
+            raise WorkspaceError("workspace provision exec could not start") from error
+        assert process.stdout is not None
+        reader = threading.Thread(target=drain, args=(process.stdout,), daemon=True)
+        reader.start()
+        timed_out = False
+        try:
+            try:
+                returncode = process.wait(
+                    timeout=project.workspace.provision_exec_timeout_seconds
+                )
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                GitWorkspaces._terminate_process_group(process)
+                returncode = process.returncode
+        except BaseException:
+            GitWorkspaces._terminate_process_group(process)
+            raise
+        finally:
+            reader.join(timeout=5)
+            if reader.is_alive():
+                process.stdout.close()
+                reader.join(timeout=1)
+        text = bytes(output).decode("utf-8", errors="replace")
+        if timed_out:
+            detail = f": {text}" if text else ""
+            raise WorkspaceError(
+                "workspace provision exec timed out after "
+                f"{project.workspace.provision_exec_timeout_seconds} seconds{detail}"
+            )
+        if returncode != 0:
+            detail = f": {text}" if text else ""
+            raise WorkspaceError(
+                f"workspace provision exec failed with exit status {returncode}{detail}"
+            )
+        return {
+            "kind": "exec",
+            "path": " ".join(project.workspace.provision_exec),
+            "output": text,
+        }
+
+    @staticmethod
     def _provision(project: ProjectAdapter, target: Path) -> tuple[dict[str, str], ...]:
         assert project.workspace is not None
         notes: list[dict[str, str]] = []
@@ -1892,6 +1989,8 @@ class GitWorkspaces:
                 raise WorkspaceError(
                     f"workspace provision source is not a regular file or directory: {relative}"
                 )
+        if project.workspace.provision_exec:
+            notes.append(GitWorkspaces._run_provision_exec(project, target))
         return tuple(notes)
 
     @staticmethod
