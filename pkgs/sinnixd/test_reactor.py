@@ -32,12 +32,16 @@ def lane_event(job_id: str = "lane-1") -> dict[str, object]:
     }
 
 
-def test_lane_success_is_externalized_as_review_ready_and_is_idempotent(tmp_path: Path) -> None:
+def test_lane_success_is_externalized_as_review_ready_and_is_idempotent(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: a failed success reaction must not wake review from board state."""
     spool = tmp_path / "events.jsonl"
     board_path = tmp_path / "campaign-board.json"
     closer = FakeBeadCloser()
-    reactor = CampaignReactor(spool, board_path, tmp_path / "reactor", bead_closer=closer)
+    reactor = CampaignReactor(
+        spool, board_path, tmp_path / "reactor", bead_closer=closer
+    )
     append(spool, lane_event())
 
     assert reactor.run_once() == 1
@@ -49,7 +53,16 @@ def test_lane_success_is_externalized_as_review_ready_and_is_idempotent(tmp_path
     assert board["schema_version"] == 1
     assert board["lanes"]["lane-1"]["review_ready"] is True
     assert board["lanes"]["lane-1"]["checkout"]["path"] == "/realm/worktrees/lane-1"
-    assert len([line for line in spool.read_text().splitlines() if '"kind":"keeper"' in line]) == 1
+    assert (
+        len(
+            [
+                line
+                for line in spool.read_text().splitlines()
+                if '"kind":"keeper"' in line
+            ]
+        )
+        == 1
+    )
 
 
 def test_merge_reaction_closes_from_immutable_decision_receipt(tmp_path: Path) -> None:
@@ -116,9 +129,13 @@ def test_merged_without_receipt_is_actionable_and_keeper_backoff_is_bounded(
     )
 
     reactor.run_once()
-    first_keeper_count = sum('"kind":"keeper"' in line for line in spool.read_text().splitlines())
+    first_keeper_count = sum(
+        '"kind":"keeper"' in line for line in spool.read_text().splitlines()
+    )
     reactor.run_once()
-    second_keeper_count = sum('"kind":"keeper"' in line for line in spool.read_text().splitlines())
+    second_keeper_count = sum(
+        '"kind":"keeper"' in line for line in spool.read_text().splitlines()
+    )
 
     assert first_keeper_count == 1
     assert second_keeper_count == 1

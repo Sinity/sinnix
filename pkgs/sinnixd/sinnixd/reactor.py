@@ -18,8 +18,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol
-
+from typing import Any, Mapping, Protocol
 
 BOARD_SCHEMA_VERSION = 1
 EVENT_SCHEMA_VERSION = 1
@@ -70,9 +69,7 @@ def _atomic_write(path: Path, value: Mapping[str, Any]) -> None:
     encoded = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
     temporary = path.with_name(f".{path.name}.tmp")
     try:
-        descriptor = os.open(
-            temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600
-        )
+        descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(encoded)
             handle.flush()
@@ -90,7 +87,9 @@ def _atomic_write(path: Path, value: Mapping[str, Any]) -> None:
 def append_event(path: Path, event: Mapping[str, Any]) -> None:
     """Append one complete, versioned event and make it visible durably."""
 
-    encoded = (json.dumps(dict(event), sort_keys=True, separators=(",", ":")) + "\n").encode()
+    encoded = (
+        json.dumps(dict(event), sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
     if len(encoded) > MAX_EVENT_BYTES:
         raise ReactorError("event exceeds the reactor event size bound")
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -223,7 +222,9 @@ class PullRequestRecord:
             "bead_id": self.bead_id,
             "bead_close_status": self.bead_close_status,
             "decision_receipt": (
-                dict(self.decision_receipt) if self.decision_receipt is not None else None
+                dict(self.decision_receipt)
+                if self.decision_receipt is not None
+                else None
             ),
             "error": self.error,
             "updated_at": self.updated_at,
@@ -295,7 +296,11 @@ class CampaignBoard:
             keeper[key] = dict(record)
         errors: list[dict[str, str]] = []
         for error in raw_errors[-MAX_BOARD_ERRORS:]:
-            if not isinstance(error, Mapping) or set(error) != {"offset", "message", "at"}:
+            if not isinstance(error, Mapping) or set(error) != {
+                "offset",
+                "message",
+                "at",
+            }:
                 raise ReactorError("campaign board error record is malformed")
             errors.append({key: str(error[key]) for key in ("offset", "message", "at")})
         return cls(value["updated_at"], lanes, prs, keeper, errors)
@@ -346,7 +351,9 @@ class CampaignBoard:
         return {
             "schema_version": BOARD_SCHEMA_VERSION,
             "updated_at": self.updated_at,
-            "lanes": {key: value.to_dict() for key, value in sorted(self.lanes.items())},
+            "lanes": {
+                key: value.to_dict() for key, value in sorted(self.lanes.items())
+            },
             "prs": {key: value.to_dict() for key, value in sorted(self.prs.items())},
             "keeper": dict(sorted(self.keeper.items())),
             "errors": self.errors[-MAX_BOARD_ERRORS:],
@@ -361,7 +368,9 @@ class CampaignBoard:
 
 
 class ReactionHandler(Protocol):
-    def __call__(self, event: Mapping[str, Any], context: "ReactionContext") -> None: ...
+    def __call__(
+        self, event: Mapping[str, Any], context: "ReactionContext"
+    ) -> None: ...
 
 
 @dataclass
@@ -372,7 +381,9 @@ class ReactionContext:
 
 
 class BeadCloser(Protocol):
-    def close(self, bead_id: str, reason: str, *, cwd: Path) -> tuple[bool, str | None]: ...
+    def close(
+        self, bead_id: str, reason: str, *, cwd: Path
+    ) -> tuple[bool, str | None]: ...
 
 
 @dataclass(frozen=True)
@@ -424,7 +435,12 @@ def _receipt(event: Mapping[str, Any]) -> tuple[str, str, Mapping[str, Any]] | N
         return None
     bead_id = raw.get("bead_id")
     reason = raw.get("reason")
-    if not isinstance(bead_id, str) or not bead_id or not isinstance(reason, str) or not reason:
+    if (
+        not isinstance(bead_id, str)
+        or not bead_id
+        or not isinstance(reason, str)
+        or not reason
+    ):
         raise ReactorError("merge decision receipt must contain bead_id and reason")
     receipt_id = raw.get("receipt_id")
     if receipt_id is not None and (not isinstance(receipt_id, str) or not receipt_id):
@@ -457,7 +473,11 @@ def _merge_reaction(event: Mapping[str, Any], context: ReactionContext) -> None:
             else:
                 bead_id, reason, _ = result
                 root_name = event.get("project")
-                project_name = root_name if isinstance(root_name, str) and root_name else _repo_name(repo)
+                project_name = (
+                    root_name
+                    if isinstance(root_name, str) and root_name
+                    else _repo_name(repo)
+                )
                 root = context.project_roots.get(project_name)
                 if root is None:
                     close_status = "failed"
@@ -534,7 +554,10 @@ class SpoolCursor:
             return cls()
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ReactorError(f"reactor cursor is unreadable: {error}") from error
-        if not isinstance(value, Mapping) or value.get("schema_version") != CURSOR_SCHEMA_VERSION:
+        if (
+            not isinstance(value, Mapping)
+            or value.get("schema_version") != CURSOR_SCHEMA_VERSION
+        ):
             raise ReactorError("reactor cursor has an unsupported schema version")
         offset = value.get("offset")
         device = value.get("device")
@@ -627,7 +650,11 @@ class CampaignReactor:
             stat = self.event_spool.stat()
         except FileNotFoundError:
             return []
-        if self._cursor.device != stat.st_dev or self._cursor.inode != stat.st_ino or stat.st_size < self._cursor.offset:
+        if (
+            self._cursor.device != stat.st_dev
+            or self._cursor.inode != stat.st_ino
+            or stat.st_size < self._cursor.offset
+        ):
             self._cursor.offset = 0
         self._cursor.device = stat.st_dev
         self._cursor.inode = stat.st_ino
@@ -640,12 +667,26 @@ class CampaignReactor:
                 if not line or not line.endswith(b"\n"):
                     break
                 if len(line) > MAX_EVENT_BYTES:
-                    events.append((offset, {"kind": "__invalid__", "error": "event line exceeds size bound"}))
+                    events.append(
+                        (
+                            offset,
+                            {
+                                "kind": "__invalid__",
+                                "error": "event line exceeds size bound",
+                            },
+                        )
+                    )
                     continue
                 try:
                     events.append((offset, _validate_event(json.loads(line))))
-                except (ReactorError, UnicodeDecodeError, json.JSONDecodeError) as error:
-                    events.append((offset, {"kind": "__invalid__", "error": str(error)}))
+                except (
+                    ReactorError,
+                    UnicodeDecodeError,
+                    json.JSONDecodeError,
+                ) as error:
+                    events.append(
+                        (offset, {"kind": "__invalid__", "error": str(error)})
+                    )
                 self._cursor.offset = handle.tell()
         return events
 
@@ -665,7 +706,9 @@ class CampaignReactor:
             actions.append(("bead-close", "close " + ",".join(close_pending[:12])))
         active = _active_lane_count(self.jobs_state_dir)
         if active is not None and self._board.lanes and active < self.min_active_lanes:
-            actions.append(("lanes-low", f"active lanes {active} < {self.min_active_lanes}"))
+            actions.append(
+                ("lanes-low", f"active lanes {active} < {self.min_active_lanes}")
+            )
         return actions
 
     def _emit_keeper(self) -> None:
@@ -685,9 +728,7 @@ class CampaignReactor:
                 else self.keeper_backoff_seconds
             )
             next_backoff = min(prior_backoff * 2, self.max_keeper_backoff_seconds)
-            event_id = hashlib.sha256(
-                f"{key}:{action}".encode()
-            ).hexdigest()[:32]
+            event_id = hashlib.sha256(f"{key}:{action}".encode()).hexdigest()[:32]
             append_event(
                 self.event_spool,
                 {
@@ -705,7 +746,9 @@ class CampaignReactor:
             self._board.keeper[key] = {
                 "emitted_at": emitted_at.isoformat(),
                 "backoff_seconds": next_backoff,
-                "next_eligible_at": (emitted_at + timedelta(seconds=next_backoff)).isoformat(),
+                "next_eligible_at": (
+                    emitted_at + timedelta(seconds=next_backoff)
+                ).isoformat(),
             }
 
     def run_once(self) -> int:
@@ -713,7 +756,9 @@ class CampaignReactor:
         context = ReactionContext(self._board, self.bead_closer, self.project_roots)
         for offset, event in self._available_events():
             if event.get("kind") == "__invalid__":
-                self._board.record_error(offset, str(event.get("error", "invalid event")))
+                self._board.record_error(
+                    offset, str(event.get("error", "invalid event"))
+                )
             else:
                 self.registry.dispatch(event, context)
             self._board.updated_at = _now()
@@ -744,15 +789,29 @@ def _project_root(value: str) -> tuple[str, Path]:
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="sinnixd-reactor")
-    result.add_argument("--event-spool", type=Path, default=Path("/realm/state/agentctl/events.jsonl"))
-    result.add_argument("--board", type=Path, default=Path("/realm/tmp/work/campaign-board.json"))
-    result.add_argument("--state-dir", type=Path, default=Path("/realm/state/sinnixd/reactor"))
+    result.add_argument(
+        "--event-spool", type=Path, default=Path("/realm/state/agentctl/events.jsonl")
+    )
+    result.add_argument(
+        "--board", type=Path, default=Path("/realm/tmp/work/campaign-board.json")
+    )
+    result.add_argument(
+        "--state-dir", type=Path, default=Path("/realm/state/sinnixd/reactor")
+    )
     result.add_argument("--jobs-state-dir", type=Path)
-    result.add_argument("--project-root", type=_project_root, action="append", default=[])
-    result.add_argument("--interval-seconds", type=int, default=DEFAULT_INTERVAL_SECONDS)
+    result.add_argument(
+        "--project-root", type=_project_root, action="append", default=[]
+    )
+    result.add_argument(
+        "--interval-seconds", type=int, default=DEFAULT_INTERVAL_SECONDS
+    )
     result.add_argument("--min-active-lanes", type=int, default=3)
-    result.add_argument("--keeper-backoff-seconds", type=int, default=DEFAULT_KEEPER_BACKOFF_SECONDS)
-    result.add_argument("--max-keeper-backoff-seconds", type=int, default=MAX_KEEPER_BACKOFF_SECONDS)
+    result.add_argument(
+        "--keeper-backoff-seconds", type=int, default=DEFAULT_KEEPER_BACKOFF_SECONDS
+    )
+    result.add_argument(
+        "--max-keeper-backoff-seconds", type=int, default=MAX_KEEPER_BACKOFF_SECONDS
+    )
     result.add_argument("--bd", default="bd")
     result.add_argument("--once", action="store_true")
     return result

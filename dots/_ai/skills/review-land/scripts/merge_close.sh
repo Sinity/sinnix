@@ -5,7 +5,10 @@
 # consulted by the reaction.
 # Usage: merge_close.sh <repo> <pr> [<bead-id> <reason-file>]
 set -eu
-REPO=$1; PR=$2; BEAD=${3:-}; REASON_FILE=${4:-}
+REPO=$1
+PR=$2
+BEAD=${3:-}
+REASON_FILE=${4:-}
 SPOOL=/realm/state/agentctl/events.jsonl
 DECIDED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 REASON=
@@ -15,8 +18,8 @@ fi
 for _ in $(seq 1 240); do
   state=$(gh pr view "$PR" -R "$REPO" --json state --jq .state 2>/dev/null) || state=""
   case "$state" in
-    MERGED|CLOSED) break ;;
-    OPEN|"") sleep 30 ;;
+  MERGED | CLOSED) break ;;
+  OPEN | "") sleep 30 ;;
   esac
 done
 if [ "$state" != "MERGED" ] && [ "$state" != "CLOSED" ]; then state=TIMEOUT; fi

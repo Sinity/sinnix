@@ -13,8 +13,7 @@ let
   userName = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   projectRootArgs = lib.concatMapStringsSep " " (
-    project:
-    "--project-root ${lib.escapeShellArg "${project.name}=${project.value.path}"}"
+    project: "--project-root ${lib.escapeShellArg "${project.name}=${project.value.path}"}"
   ) (lib.attrsToList config.sinnix.projects.entries);
 in
 mkServiceModule {
@@ -38,19 +37,34 @@ mkServiceModule {
     eventSpool = lib.mkOption {
       type = lib.types.str;
       default = "${config.sinnix.paths.stateRoot}/agentctl/events.jsonl";
-      apply = path: if lib.hasPrefix "/" path then path else throw "sinnix.services.campaign-reactor.eventSpool must be absolute";
+      apply =
+        path:
+        if lib.hasPrefix "/" path then
+          path
+        else
+          throw "sinnix.services.campaign-reactor.eventSpool must be absolute";
       description = "Append-only sinnixd event spool consumed by the reactor.";
     };
     boardPath = lib.mkOption {
       type = lib.types.str;
       default = "/realm/tmp/work/campaign-board.json";
-      apply = path: if lib.hasPrefix "/" path then path else throw "sinnix.services.campaign-reactor.boardPath must be absolute";
+      apply =
+        path:
+        if lib.hasPrefix "/" path then
+          path
+        else
+          throw "sinnix.services.campaign-reactor.boardPath must be absolute";
       description = "Versioned JSON campaign board maintained by the reactor.";
     };
     stateDir = lib.mkOption {
       type = lib.types.str;
       default = "${config.sinnix.paths.stateRoot}/sinnixd/reactor";
-      apply = path: if lib.hasPrefix "/" path then path else throw "sinnix.services.campaign-reactor.stateDir must be absolute";
+      apply =
+        path:
+        if lib.hasPrefix "/" path then
+          path
+        else
+          throw "sinnix.services.campaign-reactor.stateDir must be absolute";
       description = "Durable reactor cursor and backoff state.";
     };
     intervalSeconds = lib.mkOption {
@@ -82,7 +96,10 @@ mkServiceModule {
           message = "sinnix.services.campaign-reactor requires sinnix.services.sinnixd.enable";
         }
       ];
-      environment.systemPackages = [ scriptPkgs.sinnixd scriptPkgs.beads ];
+      environment.systemPackages = [
+        scriptPkgs.sinnixd
+        scriptPkgs.beads
+      ];
       systemd.tmpfiles.rules = [
         "d ${cfg.stateDir} 0700 ${userName} users -"
         "d ${boardDirectory} 0755 ${userName} users -"
@@ -112,7 +129,8 @@ mkServiceModule {
               boardDirectory
               spoolDirectory
               config.sinnix.services.sinnixd.taskStateRoot
-            ] ++ map (project: project.value.path) (lib.attrsToList config.sinnix.projects.entries);
+            ]
+            ++ map (project: project.value.path) (lib.attrsToList config.sinnix.projects.entries);
             UMask = "0077";
           };
         Install.WantedBy = [ "default.target" ];

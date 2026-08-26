@@ -1127,9 +1127,9 @@ def _wait_for_delivery(
         "systemd-jobs",
         {
             "job_id": job_id,
-        "timeout_seconds": timeout_seconds + 10
-        if isinstance(timeout_seconds, int)
-        else 800,
+            "timeout_seconds": timeout_seconds + 10
+            if isinstance(timeout_seconds, int)
+            else 800,
         },
     )
     waited = call(socket_path, wait_request)
