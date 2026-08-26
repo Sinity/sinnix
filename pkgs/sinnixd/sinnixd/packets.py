@@ -25,10 +25,210 @@ DEFAULT_POLICY_MAP: dict[str, tuple[str, str]] = {
     "provider-pinned-v1": ("codex", "gpt-5.6-luna"),
 }
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._/-]+")
+_PATH_TOKEN = re.compile(
+    r"(?<![A-Za-z0-9_./-])"
+    r"(?:[A-Za-z0-9_-]+/)+[A-Za-z0-9_.-]+"
+    r"|(?<![A-Za-z0-9_./-])[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"
+    r"(?![A-Za-z0-9_./-])"
+)
+_MIGRATION_FILE = re.compile(
+    r"(?<![A-Za-z0-9_])(?P<slot>[0-9]{3})_[A-Za-z0-9][A-Za-z0-9_.-]*\.sql"
+    r"(?![A-Za-z0-9_])"
+)
+_DOTTED_MODULE = re.compile(
+    r"(?<![A-Za-z0-9_.])"
+    r"(?P<module>[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)"
+    r"(?![A-Za-z0-9_.])"
+)
+_QUOTED_IDENTIFIER = re.compile(r"`([^`]+)`|\"([^\"]+)\"|'([^']+)'")
+_PATH_EXTENSIONS = frozenset(
+    {
+        "c",
+        "cc",
+        "cpp",
+        "h",
+        "hpp",
+        "js",
+        "json",
+        "md",
+        "mjs",
+        "nix",
+        "py",
+        "rs",
+        "sh",
+        "sql",
+        "toml",
+        "ts",
+        "tsx",
+        "yaml",
+        "yml",
+    }
+)
+_TABLE_CONTEXT = re.compile(
+    r"\b(?:table|tables|relation|query|select|insert|update|delete|from|into|join|"
+    r"alter|create|drop|index)\b",
+    re.IGNORECASE,
+)
+_TABLE_STOPWORDS = frozenset(
+    {
+        "a",
+        "and",
+        "file",
+        "hello",
+        "module",
+        "no",
+        "not",
+        "or",
+        "path",
+        "plain",
+        "table",
+        "text",
+        "the",
+        "this",
+        "that",
+        "with",
+    }
+)
 
 
 class PacketError(ValueError):
     """A packet cannot be compiled or dispatched safely."""
+
+
+@dataclass(frozen=True)
+class PacketReferences:
+    """Repository references found in one bead's human-authored text."""
+
+    paths: tuple[str, ...] = ()
+    modules: tuple[str, ...] = ()
+    migrations: tuple[str, ...] = ()
+    tables: tuple[str, ...] = ()
+
+
+def _valid_repo_path(value: str) -> bool:
+    if (
+        not value
+        or value.startswith(("/", "./", "../"))
+        or ".." in value
+        or "://" in value
+    ):
+        return False
+    parts = value.split("/")
+    if any(not part or part in {".", ".."} for part in parts):
+        return False
+    if any(re.fullmatch(r"[A-Za-z0-9_.-]+", part) is None for part in parts):
+        return False
+    suffix = parts[-1].rsplit(".", 1)[-1].lower() if "." in parts[-1] else ""
+    # A slash alone is not enough: prose contains many ``and/or``-shaped
+    # fragments. References are repository files, so require a known file
+    # suffix (migration slots are included by ``sql``).
+    return suffix in _PATH_EXTENSIONS
+
+
+def _module_from_path(path: str) -> str | None:
+    parts = path.split("/")[:-1]
+    if not parts:
+        return None
+    # Migration slots have their own schema namespace and should not also
+    # create an unrelated module:migrations lock.
+    if parts[-1].lower() in {"migration", "migrations"}:
+        return None
+    module_parts = [part for part in parts if re.fullmatch(r"[A-Za-z0-9_-]+", part)]
+    return ".".join(module_parts).lower() or None
+
+
+def _quoted_spans(text: str) -> tuple[tuple[int, int], ...]:
+    return tuple(match.span() for match in _QUOTED_IDENTIFIER.finditer(text))
+
+
+def _in_quoted_context(text: str, start: int, end: int) -> bool:
+    return any(left <= start and end <= right for left, right in _quoted_spans(text))
+
+
+def extract_references(text: str) -> PacketReferences:
+    """Extract conservative path, module, migration, and table references.
+
+    The input is deliberately treated as prose rather than executable syntax:
+    URLs, absolute paths, traversal paths, ordinary words, and unquoted table
+    names do not become conflict keys.
+    """
+    if not isinstance(text, str) or not text:
+        return PacketReferences()
+
+    paths: set[str] = set()
+    modules: set[str] = set()
+    migrations: set[str] = set()
+    for match in _PATH_TOKEN.finditer(text):
+        path = match.group(0).rstrip(".,;:)]}")
+        if not _valid_repo_path(path):
+            continue
+        paths.add(path)
+        migration = _MIGRATION_FILE.search(path)
+        if migration is not None:
+            migrations.add(migration.group("slot"))
+        module = _module_from_path(path)
+        if module is not None and migration is None:
+            modules.add(module)
+
+    for match in _DOTTED_MODULE.finditer(text):
+        module = match.group("module")
+        if module.split(".", 1)[0] in {"e", "g", "i"}:
+            continue
+        if _in_quoted_context(text, *match.span()) or re.search(
+            r"\b(?:module|package|import|from|namespace)\b",
+            text[max(0, match.start() - 40) : match.end() + 40],
+            re.IGNORECASE,
+        ):
+            modules.add(module)
+
+    tables: set[str] = set()
+    for match in _QUOTED_IDENTIFIER.finditer(text):
+        identifier = next((item for item in match.groups() if item is not None), "")
+        if (
+            re.fullmatch(
+                r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?", identifier
+            )
+            is None
+        ):
+            continue
+        if "." in identifier or identifier.lower() in _TABLE_STOPWORDS:
+            continue
+        context = text[max(0, match.start() - 48) : match.end() + 48]
+        if (
+            _TABLE_CONTEXT.search(context)
+            or "_" in identifier
+            or identifier.endswith("s")
+        ):
+            tables.add(identifier.lower())
+
+    return PacketReferences(
+        paths=tuple(sorted(paths)),
+        modules=tuple(sorted(modules)),
+        migrations=tuple(sorted(migrations)),
+        tables=tuple(sorted(tables)),
+    )
+
+
+def infer_conflict_keys(value: str | PacketReferences) -> tuple[str, ...]:
+    """Lower extracted references into stable conflict-key namespaces."""
+    references = extract_references(value) if isinstance(value, str) else value
+    modules = {
+        ".".join(parts[:depth])
+        for module in references.modules
+        for parts in [module.split(".")]
+        for depth in range(2, len(parts) + 1)
+    }
+    keys = {f"module:{module}" for module in modules}
+    keys.update(f"schema:{slot}" for slot in references.migrations)
+    keys.update(f"table:{table}" for table in references.tables)
+    return tuple(sorted(keys))
+
+
+def _bead_reference_text(bead: Mapping[str, Any]) -> str:
+    values = [bead.get("description"), bead.get("design")]
+    metadata = _metadata(bead)
+    values.append(metadata.get("design"))
+    return "\n\n".join(value for value in values if isinstance(value, str) and value)
 
 
 def resolve_project_root(project: str | None, *, cwd: Path | None = None) -> Path:
@@ -237,6 +437,7 @@ class PacketDimensions:
     conflict_keys: tuple[str, ...]
     affected_paths: tuple[str, ...]
     packet_intent: tuple[str, ...]
+    inferred_conflict_keys: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -247,9 +448,23 @@ class PacketDimensions:
             "model_policy": self.model_policy,
             "verification_commands": list(self.verification_commands),
             "conflict_keys": list(self.conflict_keys),
+            "inferred_conflict_keys": list(self.inferred_conflict_keys),
             "affected_paths": list(self.affected_paths),
             "packet_intent": list(self.packet_intent),
         }
+
+
+def runtime_dimensions(dimensions: PacketDimensions) -> dict[str, str | int]:
+    """Project packet dimensions into the scalar job-record metadata shape."""
+    return {
+        "template_version": dimensions.template_version,
+        "backend": dimensions.backend,
+        "model": dimensions.model,
+        "effort": dimensions.effort,
+        "model_policy": dimensions.model_policy,
+        "conflict_keys": ";".join(dimensions.conflict_keys),
+        "inferred_conflict_keys": ";".join(dimensions.inferred_conflict_keys),
+    }
 
 
 @dataclass(frozen=True)
@@ -327,6 +542,10 @@ def _policy_dimensions(
         for intent in [_metadata(bead).get("packet_intent")]
         if isinstance(intent, str) and intent
     )
+    declared_keys = set(values("conflict_keys"))
+    inferred_keys = {
+        key for bead in beads for key in infer_conflict_keys(_bead_reference_text(bead))
+    }
     return PacketDimensions(
         template_version=config.template_version,
         backend=backend,
@@ -334,9 +553,12 @@ def _policy_dimensions(
         effort=effort,
         model_policy=policy_name,
         verification_commands=values("verification_commands"),
-        conflict_keys=values("conflict_keys"),
+        conflict_keys=tuple(sorted(declared_keys | inferred_keys)),
         affected_paths=values("affected_paths"),
         packet_intent=intents,
+        # An explicit declaration owns the source label when it repeats an
+        # inferred key; this makes the plan's annotation useful for overrides.
+        inferred_conflict_keys=tuple(sorted(inferred_keys - declared_keys)),
     )
 
 
@@ -483,12 +705,17 @@ def load_envelope_aggregate(
 
 def plan_row(snapshot: PacketSnapshot, config: PacketConfig) -> dict[str, Any]:
     aggregate = load_envelope_aggregate(config, snapshot) or {}
+    inferred = set(snapshot.dimensions.inferred_conflict_keys)
+    rendered_keys = tuple(
+        f"{key} (inferred)" if key in inferred else key
+        for key in snapshot.dimensions.conflict_keys
+    )
     return {
         "beads": ",".join(snapshot.bead_ids),
         "group": snapshot.group,
         "model": snapshot.dimensions.model,
         "effort": snapshot.dimensions.effort,
-        "conflict_keys": ",".join(snapshot.dimensions.conflict_keys) or "-",
+        "conflict_keys": ",".join(rendered_keys) or "-",
         "predicted_duration": aggregate.get("duration_seconds", "?"),
         "predicted_rss": aggregate.get("rss_bytes", "?"),
     }

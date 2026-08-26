@@ -5,7 +5,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
-from sinnixd.jobs import GenericJobs, GenericJobSpec, GenericJobStore
+from sinnixd.jobs import (
+    AdmissionConflictError,
+    GenericJobs,
+    GenericJobSpec,
+    GenericJobStore,
+)
 from sinnixd.projects import (
     ConflictPolicy,
     ProjectAdapter,
@@ -94,6 +99,50 @@ def jobs(tmp_path: Path, systemd: FakeSystemd, pressure: float = 0.0) -> Generic
         wait_poll_seconds=0.001,
         pressure_probe=lambda: {"memory_full_avg10": pressure},
     )
+
+
+def agent_spec(keys: tuple[str, ...]) -> GenericJobSpec:
+    return GenericJobSpec(
+        kind="attested-agent",
+        command=("agent",),
+        working_directory="/fixture",
+        environment={"PATH": "/bin"},
+        project_id="fixture",
+        principal="agent-control",
+        checkout={
+            "project_id": "fixture",
+            "project_path": "/fixture",
+            "checkout_id": "checkout",
+            "path": "/fixture",
+            "git_common_dir": "/fixture/.git",
+            "head": "0" * 40,
+        },
+        contract={"parameters": {"campaign": {"group": "lane"}}},
+        result_kind="last-message",
+        pool="agent",
+        exclusive_keys=keys,
+    )
+
+
+def test_packet_admission_refuses_overlap_but_allows_disjoint_lane(
+    tmp_path: Path,
+) -> None:
+    systemd = FakeSystemd()
+    subject = jobs(tmp_path, systemd)
+    subject.start(agent_spec(("module:polylogue.cost",)))
+
+    subject.start(
+        agent_spec(("table:jobs",)),
+        reject_conflicts=True,
+    )
+    with pytest.raises(AdmissionConflictError, match="module:polylogue.cost") as error:
+        subject.start(
+            agent_spec(("module:polylogue.cost", "table:jobs")),
+            reject_conflicts=True,
+        )
+
+    assert tuple(error.value.conflicts) == ("module:polylogue.cost", "table:jobs")
+    assert all(len(job_ids) == 1 for job_ids in error.value.conflicts.values())
 
 
 def test_descriptor_loads_typed_admission_controls(tmp_path: Path) -> None:
