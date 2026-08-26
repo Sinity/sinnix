@@ -33,6 +33,7 @@ MIN_PARAMETER_INTEGER = -(2**31)
 MAX_PARAMETER_INTEGER = 2**31 - 1
 MAX_SERVICE_PORT_SLOTS = 8
 MAX_SERVICE_PORT_RANGE = 256
+DEFAULT_WORKSPACE_PROVISION_TIMEOUT_SECONDS = 600
 _PARAMETER_FLAG = re.compile(r"--[a-z][a-z0-9-]*\Z")
 _SERVICE_PORT_SLOT = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
 _SERVICE_ENVIRONMENT = re.compile(r"(?:[A-Z][A-Z0-9_]*_)?PORT\Z")
@@ -198,6 +199,8 @@ class WorkspacePolicy:
     checkpoint_untracked: bool
     verification_operations: tuple[str, ...]
     provision_copy: tuple[str, ...] = ()
+    provision_exec: tuple[str, ...] = ()
+    provision_exec_timeout_seconds: int = DEFAULT_WORKSPACE_PROVISION_TIMEOUT_SECONDS
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -207,7 +210,11 @@ class WorkspacePolicy:
             "identity_check": list(self.identity_check),
             "checkpoint_untracked": self.checkpoint_untracked,
             "verification_operations": list(self.verification_operations),
-            "provision": {"copy": list(self.provision_copy)},
+            "provision": {
+                "copy": list(self.provision_copy),
+                "exec": list(self.provision_exec),
+                "exec_timeout_seconds": self.provision_exec_timeout_seconds,
+            },
         }
 
 
@@ -1091,14 +1098,36 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         raw_provision = raw_workspace.get("provision")
         if raw_provision is None:
             provision_copy = ()
-        elif not isinstance(raw_provision, Mapping) or set(raw_provision) != {"copy"}:
+            provision_exec = ()
+            provision_exec_timeout_seconds = DEFAULT_WORKSPACE_PROVISION_TIMEOUT_SECONDS
+        elif not isinstance(raw_provision, Mapping) or set(raw_provision) - {
+            "copy",
+            "exec",
+            "exec_timeout_seconds",
+        }:
             raise ProjectConfigError(
-                f"{descriptor} [workspace.provision] must contain only copy"
+                f"{descriptor} [workspace.provision] contains unknown fields"
             )
         else:
             provision_copy = _optional_string_list(
                 raw_provision.get("copy"), "workspace.provision.copy"
             )
+            provision_exec = (
+                _string_list(raw_provision["exec"], "workspace.provision.exec")
+                if "exec" in raw_provision
+                else ()
+            )
+            provision_exec_timeout_seconds = raw_provision.get(
+                "exec_timeout_seconds", DEFAULT_WORKSPACE_PROVISION_TIMEOUT_SECONDS
+            )
+            if (
+                not isinstance(provision_exec_timeout_seconds, int)
+                or isinstance(provision_exec_timeout_seconds, bool)
+                or not 1 <= provision_exec_timeout_seconds <= DEFAULT_TIMEOUT_SECONDS
+            ):
+                raise ProjectConfigError(
+                    f"{descriptor} workspace.provision.exec_timeout_seconds must be an integer between 1 and {DEFAULT_TIMEOUT_SECONDS}"
+                )
             if any(
                 Path(path).is_absolute() or not path or ".." in Path(path).parts
                 for path in provision_copy
@@ -1119,6 +1148,8 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 "workspace.verification_operations",
             ),
             provision_copy=provision_copy,
+            provision_exec=provision_exec,
+            provision_exec_timeout_seconds=provision_exec_timeout_seconds,
         )
 
     raw_conflicts = raw.get("conflicts", {})
