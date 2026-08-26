@@ -51,7 +51,7 @@ PYEMIT
 
 if [ -n "$BEAD" ]; then
   [ -f "$REASON" ] || {
-    emit_harvest_event failed "HARVEST-FAIL no reason file for \$BEAD"
+    emit_harvest_event failed 'HARVEST-FAIL no reason file for $BEAD'
     echo "HARVEST-FAIL no reason file for $BEAD"
     exit 5
   }
@@ -74,7 +74,7 @@ cd "$WT" || {
 WTLOCK="/realm/tmp/work/.wt-$(basename "$WT").lock"
 exec 8>"$WTLOCK"
 flock -n 8 || {
-  emit_harvest_event failed "HARVEST-FAIL worktree busy (another harvest holds \$WTLOCK)"
+  emit_harvest_event failed 'HARVEST-FAIL worktree busy (another harvest holds $WTLOCK)'
   echo "HARVEST-FAIL worktree busy (another harvest holds $WTLOCK)"
   exit 6
 }
@@ -148,7 +148,7 @@ while [ -z "$slot_fd" ]; do
   [ -z "$slot_fd" ] && sleep 15
 done
 run_gate || {
-  emit_harvest_event failed "HARVEST-FAIL quick gate — see \$QLOG"
+  emit_harvest_event failed 'HARVEST-FAIL quick gate — see $QLOG'
   echo "HARVEST-FAIL quick gate — see $QLOG"
   exit 3
 }
@@ -178,7 +178,7 @@ if [ "$(git rev-parse origin/master)" != "$GATED_AT" ]; then
     exit 3
   fi
   run_gate || {
-    emit_harvest_event failed "HARVEST-FAIL quick gate after master moved — see \$QLOG"
+    emit_harvest_event failed 'HARVEST-FAIL quick gate after master moved — see $QLOG'
     echo "HARVEST-FAIL quick gate after master moved — see $QLOG"
     exit 3
   }
@@ -192,7 +192,7 @@ git push -qf -u origin HEAD || {
 PR=$(gh pr create --title "$TITLE" --body-file "$BODY" 2>&1 | tail -1)
 NUM=${PR##*/}
 case "$NUM" in '' | *[!0-9]*)
-  emit_harvest_event failed "HARVEST-FAIL pr-create: \$PR"
+  emit_harvest_event failed 'HARVEST-FAIL pr-create: $PR'
   echo "HARVEST-FAIL pr-create: $PR"
   exit 2
   ;;
