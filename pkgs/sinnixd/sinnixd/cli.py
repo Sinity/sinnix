@@ -270,6 +270,7 @@ def parser() -> argparse.ArgumentParser:
     campaign_run = campaign_subcommands.add_parser("run")
     campaign_run.add_argument("--project", required=True)
     campaign_run.add_argument("--limit", type=int)
+    campaign_run.add_argument("--bead", dest="bead_ids", action="append")
     campaign_run.add_argument("--dry-run", action="store_true")
     job = subcommands.add_parser("job")
     job_subcommands = job.add_subparsers(dest="job_command", required=True)
@@ -794,6 +795,7 @@ def main() -> int:
             {
                 "project_id": arguments.project,
                 "limit": arguments.limit,
+                "bead_ids": arguments.bead_ids,
                 "dry_run": arguments.dry_run,
             },
             "operator",
