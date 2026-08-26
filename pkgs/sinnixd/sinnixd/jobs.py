@@ -916,6 +916,7 @@ class GenericJobSpec:
     pool: str = "interactive"
     exclusive_keys: tuple[str, ...] = ()
     dependency_job_ids: tuple[str, ...] = ()
+    allow_failed_dependencies: bool = False
     coalesce_key: str | None = None
     cache_key: str | None = None
     estimate_key: str | None = None
@@ -1023,6 +1024,8 @@ class GenericJobSpec:
             not isinstance(value, str) or not value for value in self.dependency_job_ids
         ):
             raise ValueError("job dependency IDs are invalid")
+        if not isinstance(self.allow_failed_dependencies, bool):
+            raise ValueError("job allow_failed_dependencies must be boolean")
         for name, key in (("coalesce", self.coalesce_key), ("cache", self.cache_key)):
             if key is not None and (
                 len(key) != 64 or any(value not in "0123456789abcdef" for value in key)
@@ -1077,6 +1080,7 @@ class GenericJobSpec:
                 "pool": self.pool,
                 "exclusive_keys": list(self.exclusive_keys),
                 "dependencies": list(self.dependency_job_ids),
+                "allow_failed_dependencies": self.allow_failed_dependencies,
                 "coalesce_key": self.coalesce_key,
                 "cache_key": self.cache_key,
                 "estimate_key": self.estimate_key,
@@ -1159,6 +1163,9 @@ class GenericJobSpec:
                 pool=admission.get("pool", "interactive"),
                 exclusive_keys=tuple(admission.get("exclusive_keys", ())),
                 dependency_job_ids=tuple(admission.get("dependencies", ())),
+                allow_failed_dependencies=admission.get(
+                    "allow_failed_dependencies", False
+                ),
                 coalesce_key=admission.get("coalesce_key"),
                 cache_key=admission.get("cache_key"),
                 estimate_key=admission.get("estimate_key"),
@@ -3257,6 +3264,7 @@ class GenericJobs:
             if (
                 dependency["state"].get("terminal")
                 and dependency["state"].get("phase") != "succeeded"
+                and not record.spec.allow_failed_dependencies
             ):
                 return {
                     "phase": "dependency-failed",
@@ -3334,10 +3342,8 @@ class GenericJobs:
         self._terminal_cleanup(record)
 
     def _spool_terminal_event(self, record: GenericJobRecord) -> None:
-        if self.event_spool_path is None:
-            return
         checkout = record.spec.checkout
-        line = json.dumps(
+        self.spool_event(
             {
                 "job_id": record.job_id,
                 "kind": record.spec.kind,
@@ -3347,10 +3353,54 @@ class GenericJobs:
                 "checkout": checkout.get("checkout_id")
                 if isinstance(checkout, Mapping)
                 else None,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
+            }
         )
+        parameters = record.spec.contract.get("parameters")
+        campaign = (
+            parameters.get("campaign") if isinstance(parameters, Mapping) else None
+        )
+        if isinstance(campaign, Mapping):
+            self.spool_event(
+                {
+                    "kind": "campaign",
+                    "transition": "node terminal",
+                    "wave_id": campaign.get("wave_id"),
+                    "group": campaign.get("group"),
+                    "job_id": record.job_id,
+                    "phase": record.state.get("phase"),
+                }
+            )
+            wave_id = campaign.get("wave_id")
+            if isinstance(wave_id, str):
+                wave_jobs = [
+                    item
+                    for item in self.store.list()
+                    if not item.state.get("terminal")
+                    and isinstance(item.spec.contract.get("parameters"), Mapping)
+                    and isinstance(
+                        item.spec.contract["parameters"].get("campaign")
+                        if isinstance(item.spec.contract.get("parameters"), Mapping)
+                        else None,
+                        Mapping,
+                    )
+                    and item.spec.contract["parameters"]["campaign"].get("wave_id")
+                    == wave_id
+                ]
+                if not wave_jobs:
+                    self.spool_event(
+                        {
+                            "kind": "campaign",
+                            "transition": "wave drained",
+                            "wave_id": wave_id,
+                            "project": record.spec.project_id,
+                        }
+                    )
+
+    def spool_event(self, event: Mapping[str, Any]) -> None:
+        """Append one bounded advisory event to the existing event spool."""
+        if self.event_spool_path is None:
+            return
+        line = json.dumps(dict(event), sort_keys=True, separators=(",", ":"))
         try:
             _ensure_durable_directory(self.event_spool_path.parent)
             try:

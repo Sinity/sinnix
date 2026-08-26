@@ -19,6 +19,7 @@ from sinnix_mcp import (
 )
 from sinnix_mcp.execution import OwnerExecution
 
+from .campaign import CampaignRunner
 from .contracts import TypedJobContracts
 from .delivery import DeliveryError, GitHubDelivery
 from .delivery_runner import DELIVERY_INPUT_SCHEMA_VERSION, delivery_runner_executable
@@ -170,6 +171,14 @@ class SinnixdService:
                 documentation="Bounded generic project execution plans over declared operation jobs.",
             ),
             OwnerSpec(
+                namespace="campaign",
+                owner="campaign-orchestrator",
+                authority=Authority.SYSTEMD,
+                lifecycle=Lifecycle.DAEMON_OWNED,
+                versions=frozenset({1}),
+                documentation="Ready-Beads packet campaign waves over the plan and job seams.",
+            ),
+            OwnerSpec(
                 namespace="workspace",
                 owner="git-workspaces",
                 authority=Authority.OWNER,
@@ -319,6 +328,52 @@ class SinnixdService:
             assert self.plans is not None
             return self.plans.submit(
                 arguments, correlation_id=correlation_id, principal=principal
+            )
+        if operation == "campaign.run":
+            if principal not in {"agent-control", "operator"}:
+                raise JobAuthorizationError(
+                    "campaign waves require agent-control or operator principal"
+                )
+            allowed = {
+                "project_id",
+                "limit",
+                "dry_run",
+                "credential_profile",
+                "timeout_seconds",
+            }
+            if set(arguments) - allowed or not isinstance(
+                arguments.get("project_id"), str
+            ):
+                raise ValueError(
+                    "campaign.run requires project_id and accepts limit, dry_run, credential_profile, and timeout_seconds"
+                )
+            limit = arguments.get("limit")
+            if limit is not None and (
+                not isinstance(limit, int) or isinstance(limit, bool)
+            ):
+                raise ValueError("campaign.run limit must be an integer")
+            dry_run = arguments.get("dry_run", False)
+            if not isinstance(dry_run, bool):
+                raise ValueError("campaign.run dry_run must be boolean")
+            credential_profile = arguments.get("credential_profile", "subscription")
+            timeout_seconds = arguments.get("timeout_seconds", 3_600)
+            if not isinstance(credential_profile, str) or not isinstance(
+                timeout_seconds, int
+            ):
+                raise ValueError("campaign.run launch arguments are invalid")
+            assert self.workspaces is not None and self.plans is not None
+            return CampaignRunner(
+                self.projects,
+                self.jobs,
+                self.workspaces,
+                self.plans,
+                self.native_runner,
+            ).run(
+                arguments["project_id"],
+                limit=limit,
+                dry_run=dry_run,
+                credential_profile=credential_profile,
+                timeout_seconds=timeout_seconds,
             )
         if operation == "plan.get":
             if set(arguments) != {"plan_id"}:
