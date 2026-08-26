@@ -106,6 +106,32 @@ def append_event(path: Path, event: Mapping[str, Any]) -> None:
         os.fsync(handle.fileno())
 
 
+def event_main(argv: list[str] | None = None) -> int:
+    """Append one systemd failure event for the shared campaign spool."""
+
+    parser = argparse.ArgumentParser(prog="sinnixd-event")
+    parser.add_argument("--event-spool", type=Path, required=True)
+    parser.add_argument("--unit", required=True)
+    parser.add_argument("--result", default="unknown")
+    arguments = parser.parse_args(argv)
+    emitted_at = _now()
+    event_id = hashlib.sha256(
+        f"service-failure:{arguments.unit}:{arguments.result}:{emitted_at}".encode()
+    ).hexdigest()[:32]
+    append_event(
+        arguments.event_spool,
+        {
+            "schema_version": EVENT_SCHEMA_VERSION,
+            "event_id": event_id,
+            "kind": "service_failure",
+            "unit": arguments.unit,
+            "result": arguments.result,
+            "emitted_at": emitted_at,
+        },
+    )
+    return 0
+
+
 @dataclass(frozen=True)
 class LaneRecord:
     job_id: str
