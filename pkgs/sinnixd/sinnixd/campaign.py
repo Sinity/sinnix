@@ -194,6 +194,7 @@ class CampaignRunner:
         project_id: str,
         *,
         limit: int | None = None,
+        bead_ids: Sequence[str] | None = None,
         dry_run: bool = False,
         credential_profile: str = "subscription",
         timeout_seconds: int = 3_600,
@@ -201,11 +202,15 @@ class CampaignRunner:
         project = self.projects.get(project_id)
         config = PacketConfig.load(project.root)
         reader = SubprocessBdReader(project.root)
+        requested = set(bead_ids or ())
+        if bead_ids is not None and not requested:
+            raise ValueError("campaign bead_ids must not be empty")
         ready = sorted(
             (
                 row
                 for row in reader.ready()
                 if isinstance(row.get("id"), str) and row.get("id")
+                and (bead_ids is None or row["id"] in requested)
             ),
             key=lambda row: str(row["id"]),
         )
