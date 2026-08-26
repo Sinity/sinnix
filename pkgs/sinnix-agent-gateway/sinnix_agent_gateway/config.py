@@ -54,6 +54,7 @@ class GatewayConfig:
     projects: dict[str, ProjectConfig]
     runtime_inventory: Path = Path("/etc/sinnix/runtime-inventory.json")
     runtime_transitions: Path = Path("/run/sinnix/health-transitions.jsonl")
+    event_spool: Path = Path("/realm/state/agentctl/events.jsonl")
     capability_index: Path = Path("/etc/sinnix/capability-index.json")
     sinnixd_socket: Path = field(default_factory=default_sinnixd_socket_path)
     observe_command: str = "sinnix-observe"
@@ -183,6 +184,9 @@ class GatewayConfig:
             ),
             runtime_transitions=Path(
                 raw.get("runtimeTransitions", "/run/sinnix/health-transitions.jsonl")
+            ),
+            event_spool=Path(
+                raw.get("eventSpool", "/realm/state/agentctl/events.jsonl")
             ),
             capability_index=Path(
                 raw.get("capabilityIndex", "/etc/sinnix/capability-index.json")

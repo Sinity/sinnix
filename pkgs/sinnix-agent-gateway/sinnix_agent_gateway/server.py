@@ -37,7 +37,11 @@ from .runtime import (
     v2_tool_result,
 )
 from .schemas import V2ManifestEnvelope
-from .subscriptions import OwnerRevisionPublisher
+from .subscriptions import (
+    EVENTS_RESOURCE_URI,
+    EventSpoolPublisher,
+    OwnerRevisionPublisher,
+)
 
 
 def _bounded_resource_json(runtime: Runtime, payload: Any, kind: str) -> str:
@@ -417,11 +421,13 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     runtime = Runtime.create(config, principal_name)
     subscription_bus = InMemorySubscriptionBus()
     revision_publisher = OwnerRevisionPublisher(runtime, subscription_bus)
+    event_publisher = EventSpoolPublisher(config.event_spool, subscription_bus)
 
     @asynccontextmanager
     async def gateway_lifespan(_server: MCPServer):
         async with anyio.create_task_group() as task_group:
             task_group.start_soon(revision_publisher.run, 1.0)
+            task_group.start_soon(event_publisher.run, 1.0)
             yield {}
             task_group.cancel_scope.cancel()
 
@@ -438,6 +444,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         lifespan=gateway_lifespan,
     )
     mcp._sinnix_revision_publisher = revision_publisher
+    mcp._sinnix_event_publisher = event_publisher
 
     @mcp.resource("sinnix://gateway/instructions")
     def gateway_instructions() -> str:
@@ -466,6 +473,11 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         return _bounded_resource_json(
             runtime, legacy_parity_contract(REGISTRY), "legacy-parity"
         )
+
+    @mcp.resource(EVENTS_RESOURCE_URI)
+    def gateway_v2_events() -> str:
+        """Return the bounded event page signalled by completion pushes."""
+        return _bounded_resource_json(runtime, runtime.v2_events(100), "events")
 
     @mcp.resource("sinnix://gateway/v2/actions/{action_name}")
     def gateway_v2_action_schema(action_name: str) -> str:
