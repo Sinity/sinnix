@@ -30,6 +30,8 @@ CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS = {
     "workspace.review-status": 65.0,
     "workspace.finish": 185.0,
     "packet.finalize": 420.0,
+    # Wave scheduling compiles every ready bead's packet before answering.
+    "campaign.run": 300.0,
 }
 ACCEPT_POLL_SECONDS = 0.1
 RESERVED_CONTROL_WORKERS = 2
