@@ -135,24 +135,33 @@ run_gate() {
   fi
 }
 
-slot_fd=""
-while [ -z "$slot_fd" ]; do
-  for i in 1 2 3 4; do
-    exec {fd}>"/realm/tmp/work/.gate-slot-$i.lock"
-    if flock -n "$fd"; then
-      slot_fd=$fd
-      break
-    fi
-    exec {fd}>&-
+# CI is the gate authority, not this machine. CircleCI runs `devtools verify
+# --quick` -- the identical command -- on every PR, and auto-merge will not
+# merge until it passes. Running it locally too duplicated a 10-15 minute check
+# on a contended box and serialized publication behind it; the pre-flight only
+# earned its keep while lane venvs were broken, which the provisioning fix
+# settled. Set HARVEST_LOCAL_GATE=1 to force the local run (e.g. when CI is
+# unavailable, or for a change whose failure mode CI cannot see).
+if [ "${HARVEST_LOCAL_GATE:-0}" = "1" ]; then
+  slot_fd=""
+  while [ -z "$slot_fd" ]; do
+    for i in 1 2 3 4; do
+      exec {fd}>"/realm/tmp/work/.gate-slot-$i.lock"
+      if flock -n "$fd"; then
+        slot_fd=$fd
+        break
+      fi
+      exec {fd}>&-
+    done
+    [ -z "$slot_fd" ] && sleep 15
   done
-  [ -z "$slot_fd" ] && sleep 15
-done
-run_gate || {
-  emit_harvest_event failed 'HARVEST-FAIL quick gate — see $QLOG'
-  echo "HARVEST-FAIL quick gate — see $QLOG"
-  exit 3
-}
-exec {slot_fd}>&-
+  run_gate || {
+    emit_harvest_event failed "HARVEST-FAIL quick gate — see $QLOG"
+    echo "HARVEST-FAIL quick gate — see $QLOG"
+    exit 3
+  }
+  exec {slot_fd}>&-
+fi
 
 # --- Phase B publish under the repo flock --------------------------------
 # Phase A's gate already succeeded by this point, so losing the repo lock here
@@ -186,11 +195,13 @@ if [ "$(git rev-parse origin/master)" != "$GATED_AT" ]; then
     echo "HARVEST-FAIL rebase conflict (human resolves)"
     exit 3
   fi
-  run_gate || {
-    emit_harvest_event failed 'HARVEST-FAIL quick gate after master moved — see $QLOG'
-    echo "HARVEST-FAIL quick gate after master moved — see $QLOG"
-    exit 3
-  }
+  if [ "${HARVEST_LOCAL_GATE:-0}" = "1" ]; then
+    run_gate || {
+      emit_harvest_event failed "HARVEST-FAIL quick gate after master moved"
+      echo "HARVEST-FAIL quick gate after master moved — see $QLOG"
+      exit 3
+    }
+  fi
 fi
 
 git push -qf -u origin HEAD || {
