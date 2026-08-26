@@ -80,14 +80,14 @@ duplicate-bead launches are refused typed when a live job owns the workspace.
 3. Judgment: honest classifications? scope respected? semantics not
    inverted? A lane that papered over a real defect gets REJECTED with the
    reason recorded on the bead — never merged "to keep moving".
-4. Write the PR body AND the bead close-reason now (decision time), then
-   `harvest_queue2.sh <branch> <title> <body> [<bead> <reason-file>]` — the
-   lane has already rebased, gated, and pushed this branch. Harvest verifies
-   the remote ref, opens the PR, arms auto-merge, and is done; CI owns the
-   gate. A bead-close receipt MUST carry a literal `DISPOSITION: close` line —
-   slice receipts (bead stays open) queue WITHOUT bead args and the coordinator
-   comments the bead instead. Queue with run_in_background; nohup survives the
-   tool shell.
+4. Write the PR body AND the bead close-reason now (decision time), then use
+   `agentctl workspace publish --job <verification-job> [--packet-job <packet-job>] --title <title> --body <body> --wait <workspace-id>`.
+   The typed operation verifies the exact-head job, pushes the registered
+   workspace, and opens or reconciles the PR. CI owns the hosted gate. A
+   bead-close receipt MUST carry a literal `DISPOSITION: close` line. Slice
+   receipts (bead stays open) omit bead arguments and the coordinator comments
+   the bead instead. `harvest_queue2.sh` is only a compatibility adapter for
+   this typed command.
 5. Dispose the worktree at lane exit, after its successful push and terminal
    report; no merge watcher or harvest checkout may retain it.
 6. A completion lane must not target a disposed checkout. If a lane needs to
