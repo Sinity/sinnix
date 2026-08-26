@@ -5664,7 +5664,7 @@ def test_workspace_provision_exec_scripts_keep_the_final_workspace_path(
     write_adapter(tmp_path)
     _write_provision_exec_descriptor(
         tmp_path,
-        r'''["/bin/sh", "-c", "printf '#!/bin/sh\\nprintf provisioned' > interpreter; chmod +x interpreter; printf '#!%s/interpreter\\n' \"$PWD\" > tool; chmod +x tool"]''',
+        r"""["/bin/sh", "-c", "printf '#!/bin/sh\\nprintf provisioned' > interpreter; chmod +x interpreter; printf '#!%s/interpreter\\n' \"$PWD\" > tool; chmod +x tool"]""",
     )
     initialize_git_checkout(tmp_path)
 
