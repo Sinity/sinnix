@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import io
 import json
@@ -27,6 +28,7 @@ CHECKPOINT_SCHEMA_VERSION = 1
 STACK_SCHEMA_VERSION = 2
 MAX_CHECKPOINT_BYTES = 64 * 1024 * 1024
 MAX_UNTRACKED_FILES = 4096
+_FICLONE = 0x40049409  # linux/fs.h FICLONE: reflink clone on supporting filesystems
 _NAME = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?\Z")
 
 
@@ -1621,6 +1623,19 @@ class GitWorkspaces:
         )
 
     @staticmethod
+    def _clone_file(source: Path | str, destination: Path | str) -> None:
+        # Provisioned seeds must own their bytes: a hardlink shares the inode,
+        # so a workspace writing its seed (testmon's SQLite graph, caches)
+        # would mutate the main checkout's copy. Reflink when the filesystem
+        # supports it, otherwise pay for a real copy.
+        with open(source, "rb") as source_file, open(destination, "wb") as clone:
+            try:
+                fcntl.ioctl(clone.fileno(), _FICLONE, source_file.fileno())
+            except OSError:
+                shutil.copyfileobj(source_file, clone, 1024 * 1024)
+        shutil.copystat(source, destination)
+
+    @staticmethod
     def _provision(project: ProjectAdapter, target: Path) -> tuple[dict[str, str], ...]:
         assert project.workspace is not None
         notes: list[dict[str, str]] = []
@@ -1636,19 +1651,13 @@ class GitWorkspaces:
                 )
             destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             if source.is_file():
-                try:
-                    os.link(source, destination)
-                except FileExistsError:
-                    shutil.copy2(source, destination)
-                except OSError:
-                    shutil.copy2(source, destination)
+                GitWorkspaces._clone_file(source, destination)
             elif source.is_dir():
-                try:
-                    shutil.copytree(source, destination, copy_function=os.link)
-                except OSError:
-                    if destination.exists():
-                        shutil.rmtree(destination)
-                    shutil.copytree(source, destination)
+                if destination.exists():
+                    shutil.rmtree(destination)
+                shutil.copytree(
+                    source, destination, copy_function=GitWorkspaces._clone_file
+                )
             else:
                 raise WorkspaceError(
                     f"workspace provision source is not a regular file or directory: {relative}"
