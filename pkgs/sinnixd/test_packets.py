@@ -264,3 +264,104 @@ def test_launch_creates_then_dispatches_with_dimensions(
     assert calls[1].arguments["dimensions"]["conflict_keys"] == (
         "area:parser;area:storage"
     )
+
+
+def test_launch_agent_failure_disposes_created_workspace_and_labels_step(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root, _config = project_fixture(tmp_path)
+    reader = FixtureBd([bead("leader")])
+    calls = []
+
+    def fake_call(_socket: Path, request: object) -> dict:
+        calls.append(request)
+        if request.operation == "workspace.create":
+            return {
+                "ok": True,
+                "payload": {
+                    "value": {
+                        "workspace_id": "workspace-1",
+                        "checkout_id": "worktree-abc",
+                    }
+                },
+            }
+        if request.operation == "job.agent.start":
+            return {
+                "ok": False,
+                "error": {
+                    "code": "OWNER_UNAVAILABLE",
+                    "message": "sinnixd is unavailable",
+                },
+            }
+        assert request.operation == "workspace.dispose"
+        return {"ok": True, "payload": {"value": {"disposed": True}}}
+
+    monkeypatch.setattr(cli_module, "resolve_project_root", lambda _project: root)
+    monkeypatch.setattr(
+        cli_module, "project_id_from_descriptor", lambda _root: "fixture"
+    )
+    monkeypatch.setattr(cli_module, "SubprocessBdReader", lambda _root: reader)
+    monkeypatch.setattr(cli_module, "call", fake_call)
+    monkeypatch.setattr(sys, "argv", ["agentctl", "packet", "launch", "leader"])
+
+    assert cli_module.main() == 1
+    assert [request.operation for request in calls] == [
+        "workspace.create",
+        "job.agent.start",
+        "workspace.dispose",
+    ]
+    response = json.loads(capsys.readouterr().out)
+    assert response["error"] == {
+        "code": "OWNER_UNAVAILABLE",
+        "message": (
+            "packet launch step job.agent.start failed (completed rollback): "
+            "sinnixd is unavailable"
+        ),
+    }
+
+
+def test_launch_workspace_lookup_failure_disposes_created_workspace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root, _config = project_fixture(tmp_path)
+    reader = FixtureBd([bead("leader")])
+    calls = []
+
+    def fake_call(_socket: Path, request: object) -> dict:
+        calls.append(request)
+        if request.operation == "workspace.create":
+            return {
+                "ok": True,
+                "payload": {"value": {"workspace_id": "workspace-1"}},
+            }
+        if request.operation == "workspace.get":
+            return {
+                "ok": False,
+                "error": {"code": "OWNER_UNAVAILABLE", "message": "lookup lost"},
+            }
+        assert request.operation == "workspace.dispose"
+        return {"ok": True}
+
+    monkeypatch.setattr(cli_module, "resolve_project_root", lambda _project: root)
+    monkeypatch.setattr(
+        cli_module, "project_id_from_descriptor", lambda _root: "fixture"
+    )
+    monkeypatch.setattr(cli_module, "SubprocessBdReader", lambda _root: reader)
+    monkeypatch.setattr(cli_module, "call", fake_call)
+    monkeypatch.setattr(sys, "argv", ["agentctl", "packet", "launch", "leader"])
+
+    assert cli_module.main() == 1
+    assert [request.operation for request in calls] == [
+        "workspace.create",
+        "workspace.get",
+        "workspace.dispose",
+    ]
+    response = json.loads(capsys.readouterr().out)
+    assert response["error"]["code"] == "OWNER_UNAVAILABLE"
+    assert response["error"]["message"].startswith(
+        "packet launch step workspace.get failed (completed rollback):"
+    )
