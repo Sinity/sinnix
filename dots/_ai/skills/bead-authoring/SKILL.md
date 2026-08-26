@@ -5,7 +5,7 @@ description: Write or mature Beads tasks, specifications, acceptance criteria, d
 
 # Bead authoring
 
-The estate's doctrine is design-first: invest in beads until implementation
+The rule here is design-first: invest in beads until implementation
 is the easy part, executable by a cheaper model without re-deriving intent.
 A bead is a prompt for a future executor ([[prompting]]'s decision-
 completeness applies in full) AND a durable record a cold reader must be
@@ -30,7 +30,7 @@ able to trust.
   point? Include **non-goals** — scope substitution is the default failure.
 - **Notes carry dated facts**: measurements, disproved hypotheses, operator
   rulings. Never hand-frozen snapshots of other beads' status — derive
-  status from the graph (the estate's recorded trap: pasted "current open
+  status from the graph (a known trap: pasted "current open
   blockers" lists that silently rot).
 
 ## Slicing
@@ -42,7 +42,7 @@ able to trust.
   (add the new form beside the old, nothing breaks) → migrate call sites in
   batches sized by blast radius, each batch a bead blocked by the expand →
   contract (delete the old form) blocked by every batch. Maps directly onto
-  the estate's generated-surface and schema-slot conflict machinery.
+  the generated-surface and schema-slot conflict machinery.
 - **Blocking edges are the plan.** Wire them as real `bd` dependencies, not
   prose; the frontier (open, unblocked, unclaimed) is then queryable and
   the sequencing enforces itself. A bead with no blockers can start now.
@@ -60,7 +60,7 @@ decision bead is one sharply-stated question whose resolution is a recorded
 choice; blocking edges order them; the answer lands in the bead and closes
 it. **Fog discipline**: if you cannot state the question precisely yet,
 leave it as a named fog line in the parent epic — do not pre-slice fog into
-fake tickets. Graduate fog to a bead the moment it sharpens. (The estate's
+fake tickets. Graduate fog to a bead the moment it sharpens. (A known
 epic DESIGN/NOTES sections already carry fog lines; keep them there, not as
 placeholder children.)
 

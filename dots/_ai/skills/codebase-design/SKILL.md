@@ -32,7 +32,7 @@ language is the point.
 - **The interface is the test surface.** Wanting to test past it means the
   module is the wrong shape.
 - **One adapter is a hypothetical seam; two adapters is a real one.** Do not
-  introduce a seam nothing varies across — this is the estate's
+  introduce a seam nothing varies across — this is the
   no-compat-pre-adoption rule in module form.
 - **The deletion test** (for shape, not for license — see below): imagine
   deleting the module. Complexity vanishing = it was a pass-through;
@@ -40,13 +40,13 @@ language is the point.
 - **Prove the rules bite**: any boundary you mechanize (layering manifest,
   import lint, dependency rule) gets a red twin — a deliberate violation
   observed to fail — before you trust it. The polylogue layering ratchet
-  (baseline-exempt, growth-blocking) is the estate pattern for retrofitting
+  (baseline-exempt, growth-blocking) is the pattern for retrofitting
   a boundary onto an existing violation population.
 
 ## Deletion needs consent, not just a failed deletion test
 
 The deletion test judges a module's _shape_. Whether code should be REMOVED
-is a different question with its own doctrine, learned expensively (four
+is a different question with its own rules, learned expensively (four
 recorded wrong deletions from grep-level reasoning):
 
 - **Unfinished is not obsolete.** Wired-but-unused parsers, dead-looking
@@ -63,7 +63,7 @@ recorded wrong deletions from grep-level reasoning):
   automatically deletable.
 - **Declarations die with their implementations.** A deletion tranche that
   removes a module must remove its CommandSpec, hook registration, config
-  key, and doc line in the same change — the estate's recorded breakage
+  key, and doc line in the same change — a known breakage
   class is exactly the dangling declaration.
 - Fan-in before judging: a 415-line module imported by 126 files is small
   only in LOC. "Small says nothing about blast radius."
@@ -82,11 +82,11 @@ way the code does proves nothing).
 For a consequential interface, design it twice: spawn parallel subagents to
 draft the interface radically differently, then compare on depth, locality,
 and seam placement. Cheap relative to living with the wrong shape; matches
-the estate's judge-panel orchestration pattern.
+the judge-panel pattern in [[orchestrate]].
 
 ## Rejected framings
 
 - Depth as implementation/interface line ratio (rewards padding).
 - "Interface" as just the type signature.
 - "Boundary" (overloaded); say seam or interface.
-- Deletion-test-as-license (see consent doctrine above).
+- Deletion-test-as-license (see consent rules above).

@@ -30,7 +30,7 @@ anything else).
 4. **Operational safety**: durable-tier changes ride numbered migrations
    with consent; derived-tier changes declare their lifecycle class;
    deletions carry their declarations with them (no dangling CommandSpec,
-   hook, config key, or doc line — the estate's recorded breakage class).
+   hook, config key, or doc line — a known breakage class).
 5. **Verification authority**: what was actually RUN (exact commands, real
    output line), what was not run, and whether green means executed-green
    or selected/attested-green. A claim the evidence doesn't support is worse
@@ -53,7 +53,7 @@ five means the change should be split).
   commit. From a linked worktree, use `git -C /abs/path`.
 - AgentCTL workspace flow where registered: `workspace publish` →
   `review-status` → `land` / `finish-integrated` — exact-head results, no
-  parallel carrier or merge-ledger protocols.
+  parallel merge-ledger protocols.
 - A green hosted check is not test evidence where CI skips the heavy suite
   (recorded polylogue gotcha) — verify locally with the focused selector
   and say which tier ran.
@@ -66,7 +66,7 @@ five means the change should be split).
 Resolve by intent traced to each side's primary sources (commit messages,
 PRs, beads) — never by picking lines; preserve both intents where possible;
 never invent behavior mid-merge; never `--abort` as a resolution. Commit
-after every conflict-resolution edit (recorded estate lesson). Autostash
+after every conflict-resolution edit (learned the hard way). Autostash
 reapply can leave conflict markers — grep for them before continuing.
 
 ## After landing

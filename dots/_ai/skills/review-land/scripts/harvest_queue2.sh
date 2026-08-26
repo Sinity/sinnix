@@ -213,7 +213,7 @@ fi
 # inside the critical section stalled every queued harvest behind it.
 exec 9>&-
 
-git push -qf -u origin HEAD || {
+git push -q --force-with-lease -u origin HEAD || {
   emit_harvest_event failed "HARVEST-FAIL push"
   echo "HARVEST-FAIL push"
   exit 2

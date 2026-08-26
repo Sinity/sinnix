@@ -7,7 +7,7 @@ description: Write or revise skills, CLAUDE.md/AGENTS.md, memory files, and agen
 
 Reference for any document an agent consumes. The packaging differs (skill,
 CLAUDE.md, memory file, reference); the writing does not: the same levers make
-the agent take the same process every run. On this estate these documents are
+the agent take the same process every run. These documents are
 live infrastructure — dots-propagated instantly, loaded into every session —
 so every line has a per-session token cost and a drift risk.
 
@@ -36,7 +36,7 @@ Pointer rules (they pay rent every turn, so prune hardest here):
   it where judgment matters; remove it where it does not.
 
 Material behind a pointer escapes context load for the price of the pointer's
-line. The estate's instruction-reduction program (five CLAUDE.md files,
+line. The instruction-reduction program (five CLAUDE.md files,
 2,268 → ~1,000 lines) is this trade executed at scale.
 
 ## Information hierarchy
@@ -66,7 +66,7 @@ Estate examples of the standard: anti-vacuity statements in lane reports;
 A **leading word** is a compact pretrained concept the agent thinks with
 (tight loop, red twin, tracer bullet, frontier). Repeated as a token it
 anchors behavior cheaply. Hunt for restatements a leading word retires.
-Two cautions, both estate doctrine:
+Two cautions:
 
 - A coined word recruits no priors — you pay its definition everywhere. This
   is how the jargon debt (receipt ×8 meanings, authority ×3) accumulated.
@@ -78,12 +78,12 @@ Two cautions, both estate doctrine:
 
 ## Pruning
 
-- **Single source of truth** per meaning; duplication drifts. On this estate
+- **Single source of truth** per meaning; duplication drifts. Here
   AGENTS.md is a symlink to CLAUDE.md for exactly this reason.
 - **The environment is a source of truth**: `devtools --list-commands`,
   `agentctl --help`, `bd --help`, generated reference docs, `.agentctl/
 project.toml`. A document restating them is a cache that goes stale — the
-  estate's recorded failure class (six stale CLAUDE.md claims, skills
+  recorded failure class (six stale CLAUDE.md claims, skills
   teaching nonexistent verbs). Cache only what no lookup confesses: the
   unwritten convention, the reason, the gotcha.
 - **No-op test** (model-relative): does the sentence change behavior versus

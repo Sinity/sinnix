@@ -128,13 +128,15 @@ When coordinating a lane campaign (any project), the protocol and live state
 live OUTSIDE your context — read them, never reconstruct:
 
 - **Protocol**: `/realm/project/sinnix/dots/_ai/skills/orchestrate/references/coordinator-contract.md`
-  (loops, review pyramid, cost discipline); worker rules in its sibling
+  — start with its capability table, which names the `agentctl` verb for each
+  need so you do not hand-roll a worse copy. Worker rules in its sibling
   `worker-contract.md`.
 - **Live board**: `board` / `board sync` (`/realm/tmp/work/campaign-board.json`).
-- **Helpers**: `actl` (agentctl envelopes), `redflags <worktree>` (review
-  scanner), `dispatch_lane`, `harvest_queue.sh` + `merge_close.sh`
+- **Helpers**: `actl` (agentctl envelopes), `redflags --explain <worktree>`
+  (review scanner with per-flag verification), `launchable`, `dispatch_lane`,
+  `harvest_queue2.sh` + `merge_close.sh`
   (`~/.claude/skills/review-land/scripts/`).
-- A fresh session resumes a campaign from these carriers plus the project's
+- A fresh session resumes a campaign from those files plus the project's
   memory index; nothing campaign-critical may live only in a chat context.
 
 ## Ambient control (browser, desktop, terminal)

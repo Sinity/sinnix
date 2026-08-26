@@ -23,7 +23,7 @@ Polylogue when live) → external Beads state → snapshots and backups.
 
 **Phase 1 — build a feedback loop. This is the skill; everything else is
 mechanical.** A **tight** loop is one command that goes red on THIS bug:
-fast (seconds), deterministic, agent-runnable. On this estate the loop
+fast (seconds), deterministic, agent-runnable. Here the loop
 runner is `devtools test <selector>` — it carries the checkout guard,
 frozen clock, and isolated fixtures (`workspace_env`); bare pytest silently
 drops all three (`POLYLOGUE_ALLOW_BARE_PYTEST=1` exists for the genuine
@@ -60,7 +60,7 @@ code; fix what the data implicates, not what the hypothesis flags).
 **Phase 5 — fix + regression test at a production-reachable seam.** The
 test must exercise the real bug path as production reaches it — a test
 against a dead or parallel implementation certifies nothing (oracle-
-integrity doctrine; this repo has four recorded wrong deletions from
+integrity rules; this repo has four recorded wrong deletions from
 grep-level reasoning). Red before the fix, green after. Where the check has
 a registry home, give it a **red twin** — the mutation that proves the
 detector notices. **If no correct seam exists, that is the finding**: file
@@ -76,7 +76,7 @@ inherits it.
 Check the fact that decides the question, not a proxy. Preconditions
 inherited from notes or earlier passes are re-verified, not obeyed. Where
 beads or docs make measured claims, re-measure before relying on them;
-where they conflict with code, code wins and the stale carrier gets fixed
+where they conflict with code, code wins and the stale document gets fixed
 in the same change or a filed follow-up.
 
 ## Boundaries

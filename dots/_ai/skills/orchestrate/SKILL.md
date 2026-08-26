@@ -5,11 +5,11 @@ description: Orchestrate parallel agent implementation, research, or continuous 
 
 # Orchestrate
 
-Coordinator doctrine: the orchestrating session specifies and reviews; workers
+Coordinator rule: the orchestrating session specifies and reviews; workers
 execute self-sufficiently; mechanics route through AgentCTL. Token spend is
 judged per merged outcome (rough proxy, not a metric to game).
 
-## Model doctrine
+## Model selection
 
 | Role                                       | Route                            | Model            | Effort     |
 | ------------------------------------------ | -------------------------------- | ---------------- | ---------- |
