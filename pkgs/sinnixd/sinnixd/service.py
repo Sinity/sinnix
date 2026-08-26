@@ -342,6 +342,7 @@ class SinnixdService:
             allowed = {
                 "project_id",
                 "limit",
+                "bead_ids",
                 "dry_run",
                 "credential_profile",
                 "timeout_seconds",
@@ -357,6 +358,13 @@ class SinnixdService:
                 not isinstance(limit, int) or isinstance(limit, bool)
             ):
                 raise ValueError("campaign.run limit must be an integer")
+            bead_ids = arguments.get("bead_ids")
+            if bead_ids is not None and (
+                not isinstance(bead_ids, list)
+                or not bead_ids
+                or any(not isinstance(item, str) or not item for item in bead_ids)
+            ):
+                raise ValueError("campaign.run bead_ids must be a non-empty list")
             dry_run = arguments.get("dry_run", False)
             if not isinstance(dry_run, bool):
                 raise ValueError("campaign.run dry_run must be boolean")
@@ -376,6 +384,7 @@ class SinnixdService:
             ).run(
                 arguments["project_id"],
                 limit=limit,
+                bead_ids=bead_ids,
                 dry_run=dry_run,
                 credential_profile=credential_profile,
                 timeout_seconds=timeout_seconds,

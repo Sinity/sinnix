@@ -20,6 +20,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
+from .packets import PacketConfig, SubprocessBdReader, compile_launch_snapshot
+
 BOARD_SCHEMA_VERSION = 1
 EVENT_SCHEMA_VERSION = 1
 CURSOR_SCHEMA_VERSION = 1
@@ -30,6 +32,7 @@ MAX_BOARD_LANES = 2_000
 MAX_BOARD_PRS = 2_000
 MAX_BOARD_ERRORS = 100
 MAX_EVENT_BYTES = 1_000_000
+DEFAULT_REFILL_SPACING_SECONDS = 10
 
 
 class ReactorError(ValueError):
@@ -240,6 +243,7 @@ class CampaignBoard:
     prs: dict[str, PullRequestRecord] = field(default_factory=dict)
     keeper: dict[str, dict[str, Any]] = field(default_factory=dict)
     errors: list[dict[str, str]] = field(default_factory=list)
+    judgment_queue: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path) -> CampaignBoard:
@@ -262,10 +266,13 @@ class CampaignBoard:
         raw_prs = value.get("prs")
         raw_keeper = value.get("keeper")
         raw_errors = value.get("errors")
+        raw_judgment = value.get("judgment_queue", [])
         if not isinstance(raw_lanes, Mapping) or not isinstance(raw_prs, Mapping):
             raise ReactorError("campaign board lanes and prs must be objects")
         if not isinstance(raw_keeper, Mapping) or not isinstance(raw_errors, list):
             raise ReactorError("campaign board keeper and errors have invalid types")
+        if not isinstance(raw_judgment, list):
+            raise ReactorError("campaign board judgment queue must be a list")
         if len(raw_lanes) > MAX_BOARD_LANES or len(raw_prs) > MAX_BOARD_PRS:
             raise ReactorError("campaign board exceeds its bounded record count")
         lanes = {
@@ -303,7 +310,9 @@ class CampaignBoard:
             }:
                 raise ReactorError("campaign board error record is malformed")
             errors.append({key: str(error[key]) for key in ("offset", "message", "at")})
-        return cls(value["updated_at"], lanes, prs, keeper, errors)
+        return cls(value["updated_at"], lanes, prs, keeper, errors, [
+            dict(item) for item in raw_judgment if isinstance(item, Mapping)
+        ])
 
     @classmethod
     def _migrate_legacy(cls, value: Mapping[str, Any]) -> CampaignBoard:
@@ -357,6 +366,7 @@ class CampaignBoard:
             "prs": {key: value.to_dict() for key, value in sorted(self.prs.items())},
             "keeper": dict(sorted(self.keeper.items())),
             "errors": self.errors[-MAX_BOARD_ERRORS:],
+            "judgment_queue": self.judgment_queue[-MAX_BOARD_ERRORS:],
         }
 
     def save(self, path: Path) -> None:
@@ -384,6 +394,10 @@ class BeadCloser(Protocol):
     def close(
         self, bead_id: str, reason: str, *, cwd: Path
     ) -> tuple[bool, str | None]: ...
+
+
+class RefillDispatcher(Protocol):
+    def __call__(self, project: str, bead_ids: tuple[str, ...]) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -595,7 +609,7 @@ def _validate_event(value: Any) -> dict[str, Any]:
     return event
 
 
-def _active_lane_count(path: Path | None) -> int | None:
+def _active_lane_count(path: Path | None, project: str | None = None) -> int | None:
     if path is None or not path.is_dir():
         return None
     count = 0
@@ -611,11 +625,32 @@ def _active_lane_count(path: Path | None) -> int | None:
         if (
             isinstance(spec, Mapping)
             and spec.get("kind") == "attested-agent"
+            and (project is None or spec.get("project_id") == project)
             and isinstance(state, Mapping)
             and not state.get("terminal", False)
         ):
             count += 1
     return count
+
+
+def _judgment_reason(bead: Mapping[str, Any], snapshot: Any) -> str | None:
+    metadata = bead.get("metadata", {})
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    if not snapshot.dimensions.conflict_keys:
+        return "conflict metadata is incomplete"
+    if snapshot.dimensions.conflict_keys and any(
+        key.startswith("schema:") for key in snapshot.dimensions.conflict_keys
+    ):
+        return "touches durable schema or migration"
+    for marker in (
+        "operator_ruling",
+        "operator_ruling_marker",
+        "requires_operator_ruling",
+        "judgment_required",
+    ):
+        if metadata.get(marker):
+            return f"operator ruling marker: {marker}"
+    return None
 
 
 @dataclass
@@ -629,6 +664,10 @@ class CampaignReactor:
     min_active_lanes: int = 3
     keeper_backoff_seconds: int = DEFAULT_KEEPER_BACKOFF_SECONDS
     max_keeper_backoff_seconds: int = MAX_KEEPER_BACKOFF_SECONDS
+    refill_width_target: int | None = None
+    refill_spacing_seconds: int = DEFAULT_REFILL_SPACING_SECONDS
+    refill_dispatcher: RefillDispatcher | None = None
+    agentctl_executable: str = "agentctl"
     bead_closer: BeadCloser = field(default_factory=SubprocessBeadCloser)
     registry: ReactionRegistry = field(default_factory=default_reactions)
 
@@ -637,6 +676,10 @@ class CampaignReactor:
             raise ReactorError("reactor intervals and lane targets must be positive")
         if self.keeper_backoff_seconds < 1 or self.max_keeper_backoff_seconds < 1:
             raise ReactorError("keeper backoff values must be positive")
+        if self.refill_width_target is not None and self.refill_width_target < 1:
+            raise ReactorError("refill width target must be positive")
+        if self.refill_spacing_seconds < 1:
+            raise ReactorError("refill spacing must be positive")
         self.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._cursor = SpoolCursor.load(self.state_dir / "cursor.json")
         self._board = CampaignBoard.load(self.board_path)
@@ -715,7 +758,7 @@ class CampaignReactor:
         actions = self._pending_keeper_actions()
         active_keys = {key for key, _ in actions}
         for key in list(self._board.keeper):
-            if key not in active_keys:
+            if not key.startswith("refill:") and key not in active_keys:
                 del self._board.keeper[key]
         now = datetime.now(UTC)
         for key, action in actions:
@@ -751,6 +794,72 @@ class CampaignReactor:
                 ).isoformat(),
             }
 
+    def _dispatch_refill(self, project: str) -> None:
+        root = self.project_roots.get(project)
+        if root is None:
+            return
+        target = self.refill_width_target or self.min_active_lanes
+        active = _active_lane_count(self.jobs_state_dir, project)
+        refill_key = f"refill:{project}"
+        prior = self._board.keeper.get(refill_key)
+        if prior is not None and datetime.now(UTC) < _parse_time(str(prior["next_eligible_at"])):
+            return
+        if active is not None:
+            target = max(0, target - active)
+        if not target:
+            return
+        try:
+            reader = SubprocessBdReader(root)
+            config = PacketConfig.load(root)
+            candidates: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
+            for row in sorted(reader.ready(), key=lambda item: str(item.get("id", ""))):
+                bead_id = row.get("id")
+                if not isinstance(bead_id, str) or not bead_id:
+                    continue
+                snapshot = compile_launch_snapshot(
+                    bead_id, project_root=root, project_id=project, reader=reader, config=config
+                )
+                reason = _judgment_reason(row, snapshot)
+                if reason:
+                    record = {
+                        "project": project, "group": snapshot.group,
+                        "bead_ids": list(snapshot.bead_ids), "reason": reason,
+                        "queued_at": _now(),
+                    }
+                    if not any(item.get("group") == snapshot.group for item in self._board.judgment_queue):
+                        self._board.judgment_queue.append(record)
+                    continue
+                candidates.append((bead_id, snapshot.bead_ids, snapshot.dimensions.conflict_keys))
+            selected: list[str] = []
+            used: set[str] = set()
+            for bead_id, group, keys in candidates:
+                if used.intersection(keys):
+                    continue
+                selected.append(bead_id)
+                used.update(keys)
+                if len(selected) >= target:
+                    break
+            if not selected:
+                return
+            if self.refill_dispatcher is not None:
+                self.refill_dispatcher(project, tuple(selected))
+            else:
+                command = [self.agentctl_executable, "campaign", "run", "--project", project]
+                for bead_id in selected:
+                    command.extend(("--bead", bead_id))
+                subprocess.run(command, check=True, capture_output=True, text=True, timeout=60)
+            emitted_at = datetime.now(UTC)
+            self._board.keeper[refill_key] = {
+                "emitted_at": emitted_at.isoformat(),
+                "backoff_seconds": self.refill_spacing_seconds,
+                "next_eligible_at": (
+                    emitted_at + timedelta(seconds=self.refill_spacing_seconds)
+                ).isoformat(),
+            }
+            self._board.keeper.pop("lanes-low", None)
+        except (OSError, subprocess.SubprocessError, ReactorError, ValueError) as error:
+            self._board.record_error(-1, f"refill {project}: {error}")
+
     def run_once(self) -> int:
         processed = 0
         context = ReactionContext(self._board, self.bead_closer, self.project_roots)
@@ -761,6 +870,16 @@ class CampaignReactor:
                 )
             else:
                 self.registry.dispatch(event, context)
+                pr = self._board.prs.get(f"{event.get('repo')}#{event.get('pr')}")
+                closed = pr is not None and pr.bead_close_status == "closed"
+                if event.get("kind") in {"bead_close", "merge_close"} and (
+                    event.get("bead_closed") is True
+                    or event.get("kind") == "bead_close"
+                    or closed
+                ):
+                    project = event.get("project") or _repo_name(str(event.get("repo", "")))
+                    if isinstance(project, str) and project:
+                        self._dispatch_refill(project)
             self._board.updated_at = _now()
             self._board.save(self.board_path)
             self._cursor.save(self.cursor_path)
@@ -806,6 +925,10 @@ def parser() -> argparse.ArgumentParser:
         "--interval-seconds", type=int, default=DEFAULT_INTERVAL_SECONDS
     )
     result.add_argument("--min-active-lanes", type=int, default=3)
+    result.add_argument("--refill-width-target", type=int)
+    result.add_argument(
+        "--refill-spacing-seconds", type=int, default=DEFAULT_REFILL_SPACING_SECONDS
+    )
     result.add_argument(
         "--keeper-backoff-seconds", type=int, default=DEFAULT_KEEPER_BACKOFF_SECONDS
     )
@@ -828,6 +951,8 @@ def main(argv: list[str] | None = None) -> int:
         jobs_state_dir=arguments.jobs_state_dir,
         interval_seconds=arguments.interval_seconds,
         min_active_lanes=arguments.min_active_lanes,
+        refill_width_target=arguments.refill_width_target,
+        refill_spacing_seconds=arguments.refill_spacing_seconds,
         keeper_backoff_seconds=arguments.keeper_backoff_seconds,
         max_keeper_backoff_seconds=arguments.max_keeper_backoff_seconds,
         bead_closer=SubprocessBeadCloser(arguments.bd),
