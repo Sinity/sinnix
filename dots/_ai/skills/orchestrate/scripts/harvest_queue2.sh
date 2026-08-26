@@ -131,7 +131,12 @@ case "$NUM" in '' | *[!0-9]*)
   exit 2
   ;;
 esac
+# Arm auto-merge and VERIFY it armed: silent arming failures have left
+# green, CLEAN PRs sitting open (observed on #4280 and #4282).
 gh pr merge "$NUM" --squash --auto >/dev/null 2>&1 || true
+if [ "$(gh pr view "$NUM" --json autoMergeRequest -q '.autoMergeRequest != null' 2>/dev/null)" != "true" ]; then
+  echo "HARVEST-WARN auto-merge did not arm for pr=$NUM (merge manually when checks pass)"
+fi
 nohup /home/sinity/.claude/skills/review-land/scripts/merge_close.sh \
   Sinity/polylogue "$NUM" $BEAD $REASON >"/realm/tmp/work/merge-$NUM.log" 2>&1 &
 echo "HARVEST-OK pr=$NUM branch=$(git rev-parse --abbrev-ref HEAD)"
