@@ -9,6 +9,7 @@ root_markers = ["flake.nix", "modules", "dots"]
 kind = "nix-develop"
 command = ["nix", "develop", "--accept-flake-config", "--command"]
 preflight = ["true"]
+preflight_timeout_seconds = 180
 inherit = ["HOME", "USER", "LANG", "TERM", "SSH_AUTH_SOCK", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "WAYLAND_DISPLAY", "DISPLAY"]
 unset = ["PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "_PYTHON_SYSCONFIGDATA_NAME", "_PYTHON_HOST_PLATFORM", "PYTHONPYCACHEPREFIX"]
 

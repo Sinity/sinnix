@@ -83,6 +83,8 @@ def _require_environment(job_id: str, unit: str, value: Mapping[str, Any]) -> No
         "SINNIXD_PRINCIPAL": value["principal"],
         "SINNIXD_TIMEOUT_SECONDS": os.environ.get("SINNIXD_TIMEOUT_SECONDS", ""),
     }
+    if "SINNIXD_JOB_DIR" in os.environ:
+        expected["SINNIXD_JOB_DIR"] = os.environ["SINNIXD_JOB_DIR"]
     timeout_seconds = expected["SINNIXD_TIMEOUT_SECONDS"]
     if not timeout_seconds.isdecimal() or not valid_timeout_seconds(
         int(timeout_seconds), kind=value["kind"]
@@ -152,6 +154,34 @@ def _exec_shell(value: Mapping[str, Any], checkout: Path) -> None:
     os.execvpe(command[0], command, dict(os.environ))
 
 
+def _preserve_retry_prompt(value: Mapping[str, Any], state_root: Path) -> None:
+    prompt_path = value.get("prompt_path")
+    job_id = value.get("job_id")
+    if not isinstance(prompt_path, str) or not isinstance(job_id, str):
+        return
+    try:
+        prompt = Path(prompt_path).read_bytes()
+        if not 1 <= len(prompt) <= 200_000:
+            return
+        root = state_root / "retry-prompts"
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        target = root / f"{job_id}.prompt"
+        descriptor = os.open(
+            target,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+        )
+        try:
+            offset = 0
+            while offset < len(prompt):
+                offset += os.write(descriptor, prompt[offset:])
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    except (FileExistsError, OSError):
+        return
+
+
 def _run_agent(
     value: Mapping[str, Any],
     checkout: Path,
@@ -198,17 +228,26 @@ def _run_agent(
             "typed agent project environment is missing; declare a non-empty environment.preflight"
         )
     preflight_command = [*environment_command, *environment_preflight]
+    preflight_timeout = value.get(
+        "preflight_timeout_seconds", AGENT_PREFLIGHT_TIMEOUT_SECONDS
+    )
+    if (
+        not isinstance(preflight_timeout, int)
+        or isinstance(preflight_timeout, bool)
+        or not 1 <= preflight_timeout <= 3600
+    ):
+        raise RunnerError("attested agent preflight timeout is invalid")
     try:
         preflight = subprocess.run(
             preflight_command,
             cwd=checkout,
             check=False,
-            timeout=AGENT_PREFLIGHT_TIMEOUT_SECONDS,
+            timeout=preflight_timeout,
         )
     except subprocess.TimeoutExpired as error:
         raise RunnerError(
             "agent-preflight-timeout: project environment preflight exceeded "
-            f"{AGENT_PREFLIGHT_TIMEOUT_SECONDS} seconds before agent implementation; "
+            f"{preflight_timeout} seconds before agent implementation; "
             "inspect the declared preflight and retry"
         ) from error
     except OSError as error:
@@ -247,6 +286,7 @@ def _run_agent(
             result_path.write_bytes(result_path.read_bytes()[:MAX_RESULT_BYTES])
         return completed.returncode
     finally:
+        _preserve_retry_prompt(value, state_root)
         prompt_path.unlink(missing_ok=True)
 
 
@@ -317,6 +357,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         if value["kind"] == "operator-shell":
             args.input.unlink(missing_ok=True)
             _exec_shell(value, checkout)
+        _preserve_retry_prompt(value, args.state_root.resolve())
         args.input.unlink(missing_ok=True)
         return _run_agent(
             value,

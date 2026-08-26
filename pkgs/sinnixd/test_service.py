@@ -7702,6 +7702,45 @@ def test_agent_environment_preflight_timeout_is_distinct_and_prevents_native_run
     assert not (results / "fixture.result").exists()
 
 
+def test_agent_environment_preflight_uses_descriptor_timeout_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = tmp_path / "state"
+    inputs = state / "inputs"
+    results = state / "results"
+    inputs.mkdir(parents=True)
+    results.mkdir()
+    prompt = inputs / "fixture.prompt"
+    prompt.write_text("prompt")
+    runner = tmp_path / "native-runner"
+    native_runner(runner)
+    payload = {
+        "schema_version": 2,
+        "job_id": "11111111-1111-1111-1111-111111111111",
+        "kind": "attested-agent",
+        "principal": "agent-control",
+        "environment_command": ["fixture-environment"],
+        "environment_preflight": ["status"],
+        "preflight_timeout_seconds": 180,
+        "backend": "codex",
+        "model": "fixture",
+        "effort": "high",
+        "credential_profile": "subscription",
+        "prompt_path": str(prompt),
+        "result_path": str(results / "fixture.result"),
+    }
+    calls: list[dict[str, object]] = []
+
+    def run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(kwargs)
+        return subprocess.CompletedProcess([], 0)
+
+    monkeypatch.setattr(runner_module.subprocess, "run", run)
+    assert _run_agent(payload, tmp_path, native_runner=runner, state_root=state) == 0
+    assert calls[0]["timeout"] == 180
+    assert len(calls) == 2
+
+
 def test_pre_upgrade_attested_agent_input_fails_closed_with_stale_schema(
     tmp_path: Path,
 ) -> None:

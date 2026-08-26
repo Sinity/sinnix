@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import re
 import shutil
@@ -184,6 +185,7 @@ class WorkspaceStore:
         self.index = self.root / "index.json"
         self.checkpoints_root = self.root / "checkpoints"
         self.stacks = self.root / "stacks.json"
+        self.disposals = self.root / "disposals.jsonl"
 
     def records(self) -> tuple[WorkspaceRecord, ...]:
         payload = read_json(
@@ -341,6 +343,25 @@ class WorkspaceStore:
                 for row in rows
                 if row.get("child_workspace_id") != child_workspace_id
             ]
+
+    def record_disposal_evidence(self, value: Mapping[str, Any]) -> None:
+        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        descriptor = os.open(
+            self.disposals,
+            os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW,
+            0o600,
+        )
+        try:
+            os.write(
+                descriptor,
+                (
+                    json.dumps(dict(value), sort_keys=True, separators=(",", ":"))
+                    + "\n"
+                ).encode(),
+            )
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
     def put_checkpoint(
         self, record: CheckpointRecord, staged: bytes, unstaged: bytes, untracked: bytes
@@ -755,7 +776,9 @@ class GitWorkspaces:
                 "retained_branch": record.branch,
             }
 
-    def dispose(self, workspace_id: str) -> dict[str, Any]:
+    def dispose(
+        self, workspace_id: str, *, acknowledge_published: bool = False
+    ) -> dict[str, Any]:
         """Delete a clean no-review workspace only when every retained artifact is redundant."""
         with flock(self.mutation_lock):
             record = self._record(workspace_id)
@@ -776,9 +799,32 @@ class GitWorkspaces:
             if status["dirty"]:
                 raise WorkspaceError("workspace must be clean before disposal")
             checkout, project = self._available(record)
+            publication_evidence: dict[str, Any] | None = None
             if not self._head_is_contained_in_declared_base(project, checkout.head):
-                raise WorkspaceError("workspace has unpublished committed content")
+                if acknowledge_published:
+                    publication_evidence = {
+                        "kind": "operator-acknowledged",
+                        "default_base": project.workspace.default_base,
+                        "branch_head": checkout.head,
+                    }
+                else:
+                    publication_evidence = self._squash_equivalent_evidence(
+                        project, record, checkout.head
+                    )
+                    if publication_evidence is None:
+                        raise WorkspaceError(
+                            "workspace has unpublished committed content"
+                        )
             self._verify_disposable_checkpoints(workspace_id)
+            if publication_evidence is not None:
+                self.store.record_disposal_evidence(
+                    {
+                        "workspace_id": workspace_id,
+                        "branch": record.branch,
+                        "head": checkout.head,
+                        **publication_evidence,
+                    }
+                )
             removed = self._remove_worktree(project, record, checkout)
             if removed.returncode != 0:
                 raise WorkspaceError(
@@ -796,6 +842,11 @@ class GitWorkspaces:
                 "disposed": True,
                 "head": checkout.head,
                 "deleted_branch": record.branch,
+                **(
+                    {"publication_evidence": publication_evidence}
+                    if publication_evidence is not None
+                    else {}
+                ),
             }
 
     def stack(
@@ -986,6 +1037,49 @@ class GitWorkspaces:
             ).returncode
             == 0
         )
+
+    def _squash_equivalent_evidence(
+        self, project: ProjectAdapter, record: WorkspaceRecord, head: str
+    ) -> dict[str, Any] | None:
+        assert project.workspace is not None
+        changed = self._name_status(project.root, record.base, head)
+        paths = tuple(path for change in changed for path in change["paths"])
+        if not paths:
+            equivalent = (
+                self._git(
+                    project.root,
+                    "diff",
+                    "--quiet",
+                    project.workspace.default_base,
+                    head,
+                    "--",
+                    check=False,
+                ).returncode
+                == 0
+            )
+        else:
+            equivalent = all(
+                self._git(
+                    project.root,
+                    "diff",
+                    "--quiet",
+                    project.workspace.default_base,
+                    head,
+                    "--",
+                    path,
+                    check=False,
+                ).returncode
+                == 0
+                for path in paths
+            )
+        if not equivalent:
+            return None
+        return {
+            "kind": "content-equality",
+            "default_base": project.workspace.default_base,
+            "branch_head": head,
+            "branch_owned_paths": list(paths),
+        }
 
     def _verify_disposable_checkpoints(self, workspace_id: str) -> None:
         for checkpoint, root in self.store.checkpoints(workspace_id):

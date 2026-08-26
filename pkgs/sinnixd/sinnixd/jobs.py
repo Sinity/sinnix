@@ -57,6 +57,8 @@ JOB_LIST_CURSOR_SCHEMA_VERSION = 1
 MAX_JOB_LIST_CURSOR_BYTES = 512
 SYSTEMD_ERROR_CODE = "systemd-job-error"
 ADMISSION_SCHEMA_VERSION = 1
+CAPACITY_SCHEMA_VERSION = 1
+CAPACITY_RETRY_DELAYS_SECONDS = (5, 30, 120)
 MAX_ADMISSION_CACHE_ENTRIES = 128
 MAX_ADMISSION_ESTIMATES = 128
 MIB = 1024 * 1024
@@ -75,6 +77,11 @@ POOL_POLICIES = {
         "workers": 1,
         "memory_budget": 18 * 1024 * MIB,
         "default_estimate": 8 * 1024 * MIB,
+    },
+    "agent": {
+        "workers": 12,
+        "memory_budget": 48 * 1024 * MIB,
+        "default_estimate": 2 * 1024 * MIB,
     },
 }
 
@@ -112,6 +119,21 @@ class JobPageCursorError(ValueError):
 
 def _job_order_key(record: "GenericJobRecord") -> tuple[str, str]:
     return record.created_at, record.job_id
+
+
+def _dimensions(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("job dimensions must be an object")
+    allowed = (str, int, float, bool, type(None))
+    if any(
+        not isinstance(key, str)
+        or not key
+        or not isinstance(item, allowed)
+        or isinstance(item, (bytes, bytearray))
+        for key, item in value.items()
+    ):
+        raise ValueError("job dimensions must map names to scalar JSON values")
+    return dict(value)
 
 
 def _encode_job_list_cursor(
@@ -502,7 +524,12 @@ class TerminalEvents:
             return any(job_id in self._fired for job_id in job_ids)
 
 
-def notify_job_exit(socket_path: Path, job_id: str, exit_code: int) -> None:
+def notify_job_exit(
+    socket_path: Path,
+    job_id: str,
+    exit_code: int,
+    dimensions: Mapping[str, Any] | None = None,
+) -> None:
     """Best-effort daemon wake-up sent by the capture wrapper at process exit.
 
     Failure is silent by design: the daemon may be down or restarting, and the
@@ -520,7 +547,15 @@ def notify_job_exit(socket_path: Path, job_id: str, exit_code: int) -> None:
                 "operation": "job.notify-exit",
                 "owner": "systemd-jobs",
                 "principal": "agent-control",
-                "arguments": {"job_id": job_id, "exit_code": exit_code},
+                "arguments": {
+                    "job_id": job_id,
+                    "exit_code": exit_code,
+                    **(
+                        {"dimensions": dict(dimensions)}
+                        if dimensions is not None
+                        else {}
+                    ),
+                },
             },
         },
         sort_keys=True,
@@ -643,6 +678,44 @@ def parse_backend_usage(log: str) -> dict[str, int | str | None]:
             if match:
                 usage["model"] = match.group(1)
     return usage
+
+
+def backend_capacity_event(backend: str, log: str) -> str | None:
+    """Return a bounded capacity reason for known Codex and Claude failures."""
+    if backend not in {"codex", "claude"}:
+        return None
+    lowered = log.lower()
+    patterns = (
+        r"\b429\b",
+        r"\b529\b",
+        r"rate[_ -]?limit(?:ed|ing)?",
+        r"too many requests",
+        r"overloaded(?:_error| error)?",
+        r"server is busy",
+        r"server overloaded",
+        r"temporarily unavailable",
+        r"try again later",
+        r"usage limit",
+        r"quota exceeded",
+        r"out of credits",
+        r"capacity(?: exceeded| unavailable)?",
+        r"resource[_ -]?exhausted",
+    )
+    match = next(
+        (
+            found
+            for pattern in patterns
+            if (found := re.search(pattern, lowered)) is not None
+        ),
+        None,
+    )
+    if match is None:
+        return None
+    line = next(
+        (line.strip() for line in log.splitlines() if match.group(0) in line.lower()),
+        match.group(0),
+    )
+    return line[:512]
 
 
 def _terminal_usage(record: "GenericJobRecord") -> dict[str, int | str | None]:
@@ -784,6 +857,8 @@ class GenericJobSpec:
     estimate_memory_bytes: int | None = None
     scratch: str = "none"
     lease: ServiceLease | None = None
+    admission_bypass: bool = False
+    dimensions: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.kind not in {
@@ -898,6 +973,12 @@ class GenericJobSpec:
             or self.estimate_memory_bytes < 1
         ):
             raise ValueError("job memory estimate is invalid")
+        if not isinstance(self.admission_bypass, bool):
+            raise ValueError("job admission bypass is invalid")
+        try:
+            _dimensions(self.dimensions)
+        except ValueError as error:
+            raise ValueError(str(error)) from error
         if self.scratch not in {"none", "tmpfs", "nvme"}:
             raise ValueError("job scratch is invalid")
         if self.lease is not None and (
@@ -936,7 +1017,9 @@ class GenericJobSpec:
                 "estimate_key": self.estimate_key,
                 "estimate_memory_bytes": self.estimate_memory_bytes,
                 "scratch": self.scratch,
+                "bypass": self.admission_bypass,
             },
+            "dimensions": dict(self.dimensions),
         }
         if self.kind != "declared-operation":
             result["command"] = {
@@ -1016,6 +1099,8 @@ class GenericJobSpec:
                 estimate_key=admission.get("estimate_key"),
                 estimate_memory_bytes=admission.get("estimate_memory_bytes"),
                 scratch=admission.get("scratch", "none"),
+                admission_bypass=admission.get("bypass", False),
+                dimensions=_dimensions(value.get("dimensions", {})),
                 lease=(
                     ServiceLease.from_dict(raw_lease) if raw_lease is not None else None
                 ),
@@ -1181,6 +1266,10 @@ class GenericJobStore:
         return self.root / "handoffs"
 
     @property
+    def job_dirs_root(self) -> Path:
+        return self.root / "job-dirs"
+
+    @property
     def readiness_root(self) -> Path:
         return self.root / "readiness"
 
@@ -1197,6 +1286,10 @@ class GenericJobStore:
     @property
     def admission_path(self) -> Path:
         return self.root / "admission.json"
+
+    @property
+    def capacity_path(self) -> Path:
+        return self.root / "capacity.json"
 
     @property
     def inputs_root(self) -> Path:
@@ -1558,6 +1651,7 @@ class GenericJobStore:
         _ensure_durable_directory(self.records_root)
         _ensure_durable_directory(self.logs_root)
         _ensure_durable_directory(self.handoffs_root)
+        self.job_dirs_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         if spec.result_kind in {"last-message", "json", "pytest"}:
             _ensure_durable_directory(self.results_root)
         candidates = (
@@ -1581,6 +1675,11 @@ class GenericJobStore:
                 else None
             )
             scratch_path = self._allocate_scratch(spec.scratch, candidate)
+            job_dir = self.job_dirs_root / candidate
+            try:
+                job_dir.mkdir(mode=0o700)
+            except FileExistsError as error:
+                raise JobRecordError("job directory already exists") from error
             handoff_path = self.handoffs_root / f"{candidate}.json"
             record = GenericJobRecord(
                 job_id=candidate,
@@ -1762,9 +1861,10 @@ class GenericJobStore:
 
     def declared_launch(self, job_id: str) -> tuple[tuple[str, ...], dict[str, str]]:
         _ = job_unit_name(job_id)
-        content = _read_private_artifact(
-            self.inputs_root / f"{job_id}.launch", 128 * 1024
-        )
+        return self._launch_from_path(self.inputs_root / f"{job_id}.launch")
+
+    def _launch_from_path(self, path: Path) -> tuple[tuple[str, ...], dict[str, str]]:
+        content = _read_private_artifact(path, 128 * 1024)
         try:
             value = json.loads(content.decode()) if content is not None else None
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -1788,6 +1888,25 @@ class GenericJobStore:
 
     def cleanup_declared_launch(self, job_id: str) -> None:
         path = self.inputs_root / f"{job_id}.launch"
+        path.unlink(missing_ok=True)
+        if self.inputs_root.exists():
+            _fsync_directory(self.inputs_root)
+
+    def write_agent_launch(
+        self, job_id: str, command: Sequence[str], environment: Mapping[str, str]
+    ) -> None:
+        self.write_declared_launch(job_id, command, environment)
+        source = self.inputs_root / f"{job_id}.launch"
+        target = self.inputs_root / f"{job_id}.agent-launch"
+        os.replace(source, target)
+        _fsync_directory(self.inputs_root)
+
+    def agent_launch(self, job_id: str) -> tuple[tuple[str, ...], dict[str, str]]:
+        _ = job_unit_name(job_id)
+        return self._launch_from_path(self.inputs_root / f"{job_id}.agent-launch")
+
+    def cleanup_agent_launch(self, job_id: str) -> None:
+        path = self.inputs_root / f"{job_id}.agent-launch"
         path.unlink(missing_ok=True)
         if self.inputs_root.exists():
             _fsync_directory(self.inputs_root)
@@ -2278,6 +2397,81 @@ class GenericJobs:
         os.replace(temporary, path)
         _fsync_directory(path.parent)
 
+    def _capacity_state(self) -> dict[str, Any]:
+        path = self.store.capacity_path
+        if not path.exists():
+            return {"schema_version": CAPACITY_SCHEMA_VERSION, "backends": {}}
+        try:
+            value = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return {"schema_version": CAPACITY_SCHEMA_VERSION, "backends": {}}
+        if (
+            not isinstance(value, Mapping)
+            or value.get("schema_version") != CAPACITY_SCHEMA_VERSION
+            or not isinstance(value.get("backends"), Mapping)
+        ):
+            return {"schema_version": CAPACITY_SCHEMA_VERSION, "backends": {}}
+        return {
+            "schema_version": CAPACITY_SCHEMA_VERSION,
+            "backends": dict(value["backends"]),
+        }
+
+    def _save_capacity_state(self, value: Mapping[str, Any]) -> None:
+        path = self.store.capacity_path
+        _ensure_durable_directory(path.parent)
+        temporary = path.with_suffix(".json.tmp")
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
+
+    def capacity_status(self) -> dict[str, Any]:
+        return self._capacity_state()
+
+    def _record_capacity_event(
+        self, record: GenericJobRecord, reason: str, retry_at: str | None
+    ) -> None:
+        backend = record.spec.contract.get("backend")
+        if not isinstance(backend, str) or not backend:
+            return
+        state = self._capacity_state()
+        state["backends"][backend] = {
+            "last_event": _timestamp(),
+            "reason": reason,
+            "cooldown_until": retry_at,
+            "job_id": record.job_id,
+        }
+        self._save_capacity_state(state)
+
+    @staticmethod
+    def _capacity_retry_at(record: GenericJobRecord) -> datetime | None:
+        retry_at = record.state.get("capacity", {}).get("retry_at")
+        if not isinstance(retry_at, str):
+            return None
+        try:
+            return datetime.fromisoformat(retry_at)
+        except ValueError:
+            return None
+
+    def _prepare_capacity_retry(self, record: GenericJobRecord) -> GenericJobRecord:
+        retry_at = self._capacity_retry_at(record)
+        if retry_at is None or datetime.now(UTC) < retry_at:
+            return record
+        queued = self._with_state(
+            record,
+            {
+                **record.state,
+                "phase": "queued",
+                "terminal": False,
+                "observed_at": _timestamp(),
+            },
+        )
+        self.store.save(queued)
+        return queued
+
     @staticmethod
     def _bounded(mapping: Mapping[str, Any], limit: int) -> dict[str, Any]:
         return dict(
@@ -2291,8 +2485,47 @@ class GenericJobs:
             )[-limit:]
         )
 
+    def _job_environment(
+        self,
+        record: GenericJobRecord,
+        base: Mapping[str, str] | None = None,
+    ) -> dict[str, str]:
+        environment = dict(record.spec.environment if base is None else base)
+        environment["SINNIXD_JOB_DIR"] = str(
+            (self.store.job_dirs_root / record.job_id).resolve()
+        )
+        return environment
+
     def start(self, spec: GenericJobSpec, job_id: str | None = None) -> dict[str, Any]:
         candidate = job_id or str(uuid4())
+        if spec.kind == "attested-agent" and not spec.admission_bypass:
+            with self._admission_lock:
+                with self.store.locked(candidate):
+                    record = self.store.create(spec, candidate)
+                    launch_path = self.store.inputs_root / f"{candidate}.agent-launch"
+                    if not launch_path.exists():
+                        self.store.write_agent_launch(
+                            candidate, spec.command, spec.environment
+                        )
+                    queued = self._with_state(
+                        record,
+                        {
+                            "phase": "queued",
+                            "terminal": False,
+                            "observed_at": _timestamp(),
+                            "subscribers": 1,
+                            "admission": {
+                                "pool": spec.pool,
+                                "estimate_memory_bytes": self._estimate(
+                                    spec, self._admission_state()
+                                ),
+                            },
+                        },
+                    )
+                    self.store.save(queued)
+                self._admit_locked()
+                record = self.store.load(candidate)
+                return self._public(record, record.state)
         with self.store.locked(candidate):
             record = self.store.create(spec, candidate)
             try:
@@ -2304,7 +2537,7 @@ class GenericJobs:
                     unit=record.unit,
                     command=spec.command,
                     working_directory=spec.working_directory,
-                    environment=spec.environment,
+                    environment=self._job_environment(record),
                     timeout_seconds=spec.timeout_seconds,
                     log_path=record.log_path,
                     json_result_path=record.result_path
@@ -2333,6 +2566,7 @@ class GenericJobs:
         contract: Mapping[str, Any] | None = None,
         dependency_job_ids: Sequence[str] = (),
         input_generation: str | None = None,
+        dimensions: Mapping[str, Any] | None = None,
         plan_node: bool = False,
     ) -> dict[str, Any]:
         if principal not in {"agent-control", "operator"}:
@@ -2353,6 +2587,7 @@ class GenericJobs:
                 contract or {},
                 tuple(dependency_job_ids),
                 input_generation,
+                dimensions,
                 plan_node,
             )
 
@@ -2368,6 +2603,7 @@ class GenericJobs:
         contract: Mapping[str, Any],
         external_dependency_job_ids: tuple[str, ...] = (),
         input_generation: str | None = None,
+        dimensions: Mapping[str, Any] | None = None,
         plan_node: bool = False,
     ) -> dict[str, Any]:
         if operation.name in lineage:
@@ -2537,6 +2773,7 @@ class GenericJobs:
                 estimate_memory_bytes=estimate,
                 scratch=operation.scratch,
                 lease=lease,
+                dimensions=_dimensions(dimensions or {}) if not lineage else {},
             )
 
         spec = build_spec(None)
@@ -2651,10 +2888,18 @@ class GenericJobs:
     def _admit_locked(self) -> None:
         state = self._admission_state()
         records = self.store.active_records()
+        for snapshot in records:
+            if snapshot.state.get("phase") != "capacity":
+                continue
+            with self.store.locked(snapshot.job_id):
+                current = self.store.load(snapshot.job_id)
+                self._prepare_capacity_retry(current)
+        records = self.store.active_records()
         active: dict[str, list[GenericJobRecord]] = {pool: [] for pool in POOL_POLICIES}
         for record in records:
             if (
-                record.spec.kind == "declared-operation"
+                record.spec.kind in {"declared-operation", "attested-agent"}
+                and not record.spec.admission_bypass
                 and not record.state.get("terminal")
                 and record.state.get("phase")
                 in {
@@ -2670,7 +2915,9 @@ class GenericJobs:
                 active[record.spec.pool].append(record)
         pressure = self.pressure_probe()
         for snapshot in records:
-            if snapshot.spec.kind != "declared-operation":
+            if snapshot.spec.kind not in {"declared-operation", "attested-agent"}:
+                continue
+            if snapshot.spec.admission_bypass:
                 continue
             # Dependency observations acquire their own job locks.  Do them
             # before the candidate lock so admission never nests job locks in
@@ -2730,9 +2977,25 @@ class GenericJobs:
                         raise SystemdJobError(
                             "leased loopback port became unavailable before launch"
                         )
-                    command, environment = self.store.declared_launch(current.job_id)
+                    if current.spec.kind == "declared-operation":
+                        command, environment = self.store.declared_launch(
+                            current.job_id
+                        )
+                    else:
+                        command, environment = self.store.agent_launch(current.job_id)
                     self.store.prepare_scratch(current)
-                    if current.spec.checkout is not None:
+                    if current.spec.kind == "attested-agent" and current.result_path:
+                        current.result_path.unlink(missing_ok=True)
+                        current.result_path.with_suffix(".overflow").unlink(
+                            missing_ok=True
+                        )
+                        _completion_marker_path(current.log_path).unlink(
+                            missing_ok=True
+                        )
+                    if (
+                        current.spec.kind == "declared-operation"
+                        and current.spec.checkout is not None
+                    ):
                         revalidate_registered_checkout(current.spec.checkout)
                         # The contract runner repeats this proof in the unit
                         # before it execs the project command. Git worktrees
@@ -2755,7 +3018,7 @@ class GenericJobs:
                         unit=current.unit,
                         command=command,
                         working_directory=current.spec.working_directory,
-                        environment=environment,
+                        environment=self._job_environment(current, environment),
                         timeout_seconds=current.spec.timeout_seconds,
                         log_path=current.log_path,
                         json_result_path=current.result_path
@@ -2927,6 +3190,8 @@ class GenericJobs:
         self.store.cleanup_service_readiness(record.job_id)
         if record.spec.kind == "declared-operation":
             self.store.cleanup_declared_launch(record.job_id)
+        elif record.spec.kind == "attested-agent":
+            self.store.cleanup_agent_launch(record.job_id)
         self.store.release_terminal_service_lease(record)
 
     def _preserve_timeout(self, record: GenericJobRecord) -> dict[str, Any]:
@@ -3243,12 +3508,34 @@ class GenericJobs:
             return {}
         return {"notify_socket": self.notify_socket, "notify_job_id": job_id}
 
-    def notify_exit(self, job_id: str) -> dict[str, Any]:
+    def notify_exit(
+        self, job_id: str, dimensions: Mapping[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Record a capture-reported exit as a wake-up; observation stays authoritative."""
         _ = job_unit_name(job_id)
-        _ = self.store.load(job_id)
+        with self.store.locked(job_id):
+            record = self.store.load(job_id)
+            if dimensions is not None:
+                amended = _dimensions(dimensions)
+                self.store.save(
+                    self._with_state(
+                        record,
+                        {
+                            **record.state,
+                            "dimensions": {
+                                **record.spec.dimensions,
+                                **record.state.get("dimensions", {}),
+                                **amended,
+                            },
+                        },
+                    )
+                )
         self.events.fire(job_id)
-        return {"job_id": job_id, "notified": True}
+        return {
+            "job_id": job_id,
+            "notified": True,
+            **({"dimensions": dict(dimensions)} if dimensions is not None else {}),
+        }
 
     def cancel(self, job_id: str) -> dict[str, Any]:
         terminal: GenericJobRecord | None = None
@@ -3425,6 +3712,13 @@ class GenericJobs:
         wait_deadline: float | None = None,
     ) -> dict[str, Any]:
         record = self.store.load(job_id)
+        if record.state.get("phase") == "capacity":
+            retry_at = self._capacity_retry_at(record)
+            if retry_at is not None and datetime.now(UTC) < retry_at:
+                return self._public(record, record.state)
+            record = self._prepare_capacity_retry(record)
+            if record.state.get("phase") == "queued":
+                return self._public(record, record.state)
         if record.state.get("phase") in {"queued", "waiting-dependencies"}:
             return self._public(record, record.state)
         if record.state.get(
@@ -3444,6 +3738,11 @@ class GenericJobs:
             state = self._observation_unknown_state()
         else:
             state = self._classify(properties, record)
+        if isinstance(record.state.get("dimensions"), Mapping):
+            state["dimensions"] = {
+                **record.spec.dimensions,
+                **record.state["dimensions"],
+            }
         updated = self._with_state(record, state)
         if self._observation_unchanged(record, updated):
             return self._public(record, state)
@@ -3625,6 +3924,28 @@ class GenericJobs:
         else:
             phase = "failed"
             terminal = True
+        capacity_reason = None
+        capacity_attempt = int(record.state.get("capacity_attempt", 0))
+        if phase == "failed" and record.spec.kind == "attested-agent":
+            backend = record.spec.contract.get("backend")
+            content = _read_private_artifact(record.log_path, MAX_LOG_ARTIFACT_BYTES)
+            capacity_reason = backend_capacity_event(
+                backend if isinstance(backend, str) else "",
+                content.decode(errors="replace") if content is not None else "",
+            )
+            if capacity_reason is not None:
+                capacity_attempt += 1
+                terminal = capacity_attempt > len(CAPACITY_RETRY_DELAYS_SECONDS)
+                retry_at = None
+                if not terminal:
+                    retry_at = (
+                        datetime.now(UTC)
+                        + timedelta(
+                            seconds=CAPACITY_RETRY_DELAYS_SECONDS[capacity_attempt - 1]
+                        )
+                    ).isoformat()
+                self._record_capacity_event(record, capacity_reason, retry_at)
+                phase = "capacity"
         state = self._with_service_lease_invocation(
             record,
             properties,
@@ -3632,6 +3953,19 @@ class GenericJobs:
                 "phase": phase,
                 "terminal": terminal,
                 "systemd": dict(properties),
+                **(
+                    {
+                        "capacity_attempt": capacity_attempt,
+                        "capacity": {
+                            "backend": record.spec.contract.get("backend"),
+                            "reason": capacity_reason,
+                            "retry_at": retry_at,
+                            "exhausted": terminal,
+                        },
+                    }
+                    if capacity_reason is not None
+                    else {}
+                ),
                 "observed_at": _timestamp(),
             },
         )
@@ -3871,6 +4205,14 @@ class GenericJobs:
                 dict(record.spec.checkout) if record.spec.checkout is not None else None
             ),
             "contract": dict(record.spec.contract),
+            "dimensions": {
+                **record.spec.dimensions,
+                **(
+                    record.state.get("dimensions", {})
+                    if isinstance(record.state.get("dimensions"), Mapping)
+                    else {}
+                ),
+            },
             "created_at": record.created_at,
             "timeout_seconds": record.spec.timeout_seconds,
             "lease": (
@@ -3932,6 +4274,18 @@ def capture_executable() -> Path:
     if len(module_path.parents) > 4 and module_path.parents[3].name == "lib":
         return module_path.parents[4] / "bin" / "sinnixd-capture"
     return Path(sys.executable).with_name("sinnixd-capture")
+
+
+def _capture_dimensions() -> dict[str, Any] | None:
+    job_dir = os.environ.get("SINNIXD_JOB_DIR")
+    if not job_dir:
+        return None
+    path = Path(job_dir) / "dimensions.json"
+    try:
+        value = json.loads(path.read_text())
+        return _dimensions(value)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return None
 
 
 def capture_main(arguments: Sequence[str] | None = None) -> int:
@@ -4016,7 +4370,12 @@ def capture_main(arguments: Sequence[str] | None = None) -> int:
         _write_private_marker(_completion_marker_path(parsed.log_path))
     if parsed.notify_socket is not None and parsed.notify_job_id is not None:
         try:
-            notify_job_exit(parsed.notify_socket, parsed.notify_job_id, return_code)
+            notify_job_exit(
+                parsed.notify_socket,
+                parsed.notify_job_id,
+                return_code,
+                _capture_dimensions(),
+            )
         except (OSError, ValueError):
             pass
     return return_code

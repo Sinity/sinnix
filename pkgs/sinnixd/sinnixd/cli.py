@@ -60,6 +60,12 @@ def _add_agent_launch_arguments(
     target.add_argument("--effort", required=required)
     target.add_argument("--credential-profile", default="subscription")
     target.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    target.add_argument("--dimensions-json", default="{}")
+    target.add_argument(
+        "--bypass-admission",
+        action="store_true",
+        help="Start immediately for an emergency, bypassing agent admission.",
+    )
 
 
 def default_socket_path() -> Path:
@@ -149,6 +155,7 @@ def parser() -> argparse.ArgumentParser:
     workspace_reap.add_argument("workspace_id")
     workspace_dispose = workspace_subcommands.add_parser("dispose")
     workspace_dispose.add_argument("workspace_id")
+    workspace_dispose.add_argument("--acknowledge-published", action="store_true")
     workspace_checkpoint = workspace_subcommands.add_parser("checkpoint")
     workspace_checkpoint.add_argument("workspace_id")
     workspace_restore = workspace_subcommands.add_parser("restore")
@@ -221,8 +228,13 @@ def parser() -> argparse.ArgumentParser:
     )
     start.add_argument("--parameters-json", default="{}")
     start.add_argument("--bead-binding-json")
+    start.add_argument("--dimensions-json", default="{}")
     get = job_subcommands.add_parser("get")
     get.add_argument("job_id")
+    retry = job_subcommands.add_parser("retry")
+    retry.add_argument("job_id")
+    retry.add_argument("--hint")
+    retry.add_argument("--escalate", action="store_true")
     status = job_subcommands.add_parser("status")
     status.add_argument("job_id")
     status.add_argument(
@@ -507,6 +519,12 @@ def main() -> int:
             parser().error(f"could not read --prompt-file: {error}")
         if not prompt or len(prompt.encode()) > 200_000:
             parser().error("--prompt-file must contain at most 200000 non-empty bytes")
+        try:
+            dimensions = json.loads(arguments.dimensions_json)
+        except json.JSONDecodeError as error:
+            parser().error(f"--dimensions-json must be valid JSON: {error.msg}")
+        if not isinstance(dimensions, dict):
+            parser().error("--dimensions-json must be a JSON object")
         request = _request(
             "job.agent.start",
             "systemd-jobs",
@@ -520,6 +538,8 @@ def main() -> int:
                 "credential_profile": arguments.credential_profile,
                 "timeout_seconds": arguments.timeout_seconds,
                 "result": "last-message",
+                "admission_bypass": arguments.bypass_admission,
+                **({"dimensions": dimensions} if dimensions else {}),
             },
             "agent-control",
         )
@@ -573,10 +593,13 @@ def main() -> int:
             "agent-control",
         )
     elif arguments.command == "workspace" and arguments.workspace_command == "dispose":
+        payload = {"workspace_id": arguments.workspace_id}
+        if arguments.acknowledge_published:
+            payload["acknowledge_published"] = True
         request = _request(
             "workspace.dispose",
             "git-workspaces",
-            {"workspace_id": arguments.workspace_id},
+            payload,
             "agent-control",
         )
     elif (
@@ -807,6 +830,12 @@ def main() -> int:
                 parser().error(f"--bead-binding-json must be valid JSON: {error.msg}")
             if not isinstance(binding, dict):
                 parser().error("--bead-binding-json must be a JSON object")
+        try:
+            dimensions = json.loads(arguments.dimensions_json)
+        except json.JSONDecodeError as error:
+            parser().error(f"--dimensions-json must be valid JSON: {error.msg}")
+        if not isinstance(dimensions, dict):
+            parser().error("--dimensions-json must be a JSON object")
         request = _request(
             "job.start",
             "systemd-jobs",
@@ -815,6 +844,7 @@ def main() -> int:
                 "operation": arguments.operation,
                 "workspace_id": arguments.workspace,
                 "parameters": parameters,
+                **({"dimensions": dimensions} if dimensions else {}),
                 **({"bead_binding": binding} if binding is not None else {}),
             },
         )
@@ -870,6 +900,17 @@ def main() -> int:
         )
     elif arguments.command == "job" and arguments.job_command in {"get", "status"}:
         request = _request("job.get", "systemd-jobs", {"job_id": arguments.job_id})
+    elif arguments.command == "job" and arguments.job_command == "retry":
+        request = _request(
+            "job.retry",
+            "systemd-jobs",
+            {
+                "job_id": arguments.job_id,
+                **({"hint": arguments.hint} if arguments.hint is not None else {}),
+                "escalate": arguments.escalate,
+            },
+            "agent-control",
+        )
     elif arguments.command == "job" and arguments.job_command == "list":
         request = _request(
             "job.list",
