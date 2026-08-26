@@ -21,7 +21,7 @@ Discipline:
 - Supporting infrastructure gets built only when it has independent product
   value (usage capture, event spool — yes; a bespoke experiment harness — no).
 - Results are **directional engineering evidence**, not science: n=1 gets
-  "replicate before doctrine change" stamped on it, and doctrine updates —
+  "replicate before changing a rule" stamped on it, and doctrine updates —
   a changed default in this skill or its references — are the only durable
   output. An experiment whose result never touches doctrine was wasted;
   say so in its closing row.

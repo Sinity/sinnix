@@ -1,10 +1,10 @@
 # Coordinator contract (campaign overseer protocol)
 
 A fresh session must be able to take over a running campaign from THIS
-document plus the live carriers. Nothing here duplicates live state — it
+document plus the live state below. Nothing here duplicates live state — it
 tells you where state lives and what the loops are.
 
-## State carriers (read these, never reconstruct from context)
+## Where state lives (read these, never reconstruct from context)
 
 - **Board**: `/realm/tmp/work/campaign-board.json` — lanes → PRs → beads →
   review state. `board` prints it; `board sync` refreshes from

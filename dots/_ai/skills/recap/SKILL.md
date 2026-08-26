@@ -48,7 +48,7 @@ Prepare for session end:
 
 Before compaction or interruption, include active AgentCTL job and workspace
 IDs, Beads IDs and claims, exact Git state, changed files, verification already
-run, and the single next action. On re-entry, verify those carriers before
+run, and the single next action. On re-entry, verify those records before
 continuing instead of reconstructing state from prose alone.
 
 ---

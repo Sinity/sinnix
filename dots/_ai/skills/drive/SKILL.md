@@ -59,7 +59,7 @@ and state the reasoning in a sentence or two. Selection heuristics, in order:
 - **Falsification**: prefer the move most likely to overturn a current
   belief early; a direction that can only confirm what you already think is
   worth less than one that can surprise you.
-- **Durability**: prefer work whose output lands in carriers that outlive
+- **Durability**: prefer work whose output lands somewhere that outlives
   the session (tracker items, committed files, published reports).
 - **Momentum**: an in-flight thread with warm context beats a cold start of
   equal value.
@@ -104,7 +104,7 @@ the forged prompt).
 
 The session is ephemeral; the iteration is only as real as its externalized
 residue. Before closing the iteration, push results into their durable
-carriers:
+where it lands:
 
 - **Tracker first** (Beads where present): new findings become items or
   notes on the owning items; anything that would make a later executor

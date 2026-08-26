@@ -70,10 +70,10 @@ worktree`, `skills`, `memory`, `maxTurns`, hooks. Bake standing contracts
   `readlink -f` when unsure which regime a file is in).
 - Enabled here: fork subagents (settings env).
 
-## Dispatch doctrine (this machine)
+## Dispatch rules (this machine)
 
 - **Explicit model on every fresh Agent dispatch** — model/tier selection
-  doctrine lives in the [[orchestrate]] skill (model-landscape reference);
+  model selection lives in the [[orchestrate]] skill (model-landscape reference);
   this file owns only the mechanics. **Mechanically enforced, hard, for every dispatch
   type**: a global PreToolUse hook DENIES any Agent
   dispatch — bespoke-prompt or named agent definition —

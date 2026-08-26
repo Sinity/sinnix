@@ -70,7 +70,7 @@ originating bead, never held in session memory.
 
 `agentctl task reconcile` retries failed mutations; `task snapshot` produces
 the portable export. When bead claims disagree with code or receipts,
-re-verify and fix the carrier (see [[investigate]] §verifying claims) —
+re-verify and fix the document that states it (see [[investigate]] §verifying claims) —
 never propagate a stale measured claim into new work.
 
 ## Memory

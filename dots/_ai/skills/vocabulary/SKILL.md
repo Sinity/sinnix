@@ -5,7 +5,7 @@ description: Clarify disputed or overloaded terminology, maintain a repository g
 
 # Vocabulary
 
-The estate's measured failure mode is not missing terminology but overloaded
+The failure mode here is not missing terminology but overloaded
 and ritual terminology: one word naming many mechanisms (34 `*Receipt`
 classes; "authority" across three domains; "generation" naming two unrelated
 things), and tracker prose in a ceremonial register the operator cannot
