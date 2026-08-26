@@ -22,6 +22,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from .review import route_review
+
 HARVEST_OK = "HARVEST_OK"
 REBASE_CONFLICT = "REBASE_CONFLICT"
 GATE_RED = "GATE_RED"
@@ -418,6 +420,17 @@ def compile_packet(
         raise HarvestError("review diff exceeds its bounded artifact limit")
     diffstat = _git(run, context.worktree, "diff", "--stat", f"{context.base}...HEAD")
     redflag_status, redflags = _redflags(diff)
+    changed_paths = tuple(
+        path
+        for path in _git(
+            run, context.worktree, "diff", "--name-only", f"{context.base}...HEAD"
+        ).splitlines()
+        if path
+    )
+    review_route = route_review(
+        changed_paths=changed_paths,
+        scanner_output="\n".join(redflags),
+    )
     trailer = _lane_trailer(context, lane_job_id=lane_job_id)
     packet_id = _packet_id(context, head)
     diff_path = context.packet_root / f"{packet_id}.diff"
@@ -446,6 +459,7 @@ def compile_packet(
         "verification": _verification_evidence(context.worktree, head),
         "redflags": redflags,
         "redflag_status": redflag_status,
+        "review_route": review_route.to_dict(),
         "full_diff_ref": f"sinnix://jobs/{context.job_id}/artifacts/{packet_id}.diff",
         "worktree_unstaged_sha256": _digest(unstaged),
         "worktree_staged_sha256": _digest(staged),
