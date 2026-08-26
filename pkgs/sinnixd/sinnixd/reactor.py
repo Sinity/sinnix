@@ -1,9 +1,14 @@
-"""Model-free campaign reactor over the Sinnix event spool.
+"""Model-free campaign event consumer over the Sinnix event spool.
 
-The reactor is deliberately a small durable state machine.  The event spool is
-the input authority, the versioned board is the externalized campaign state,
-and reactions are registered by event kind rather than inferred from prose.
+The reactor is deliberately a small durable event consumer. The event spool
+is its input watch point and reactions are registered by event kind rather
+than inferred from prose.
 No harvester or strategist behavior belongs here.
+
+The campaign board is not reactor state.  It is rendered by
+``sinnixd.campaign_board`` from live AgentCTL/GitHub/Beads owners.  This
+consumer retains only its spool cursor; its in-memory reaction context exists
+only for the duration of one process and is never serialized.
 """
 
 from __future__ import annotations
@@ -687,7 +692,9 @@ class CampaignReactor:
             raise ReactorError("refill spacing must be positive")
         self.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._cursor = SpoolCursor.load(self.state_dir / "cursor.json")
-        self._board = CampaignBoard.load(self.board_path)
+        # Keep the compatibility argument, but deliberately do not read it:
+        # campaign-board.json is a derived cache owned by the board view.
+        self._board = CampaignBoard()
 
     @property
     def cursor_path(self) -> Path:
@@ -908,13 +915,10 @@ class CampaignReactor:
                     )
                     if isinstance(project, str) and project:
                         self._dispatch_refill(project)
-            self._board.updated_at = _now()
-            self._board.save(self.board_path)
             self._cursor.save(self.cursor_path)
             processed += 1
-        self._emit_keeper()
-        self._board.updated_at = _now()
-        self._board.save(self.board_path)
+        # Keeper notifications and the board are derived/read concerns.  The
+        # reactor's only durable output is the cursor below.
         self._cursor.save(self.cursor_path)
         return processed
 

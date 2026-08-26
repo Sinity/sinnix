@@ -6,9 +6,9 @@ tells you where state lives and what the loops are.
 
 ## State carriers (read these, never reconstruct from context)
 
-- **Board**: `/realm/tmp/work/campaign-board.json` — lanes → PRs → beads →
-  review state. `board` prints it; `board sync` refreshes from
-  fleet/GitHub/worktrees. Maintained by the watchers; trust it over memory.
+- **Board**: `/realm/tmp/work/campaign-board.json` — a 30-second cache of the
+  live AgentCTL/Git/GitHub/Beads join. `board` refreshes it when stale and
+  `board sync` forces a refresh. It is a view, not an authority.
 - **Dispatch plan**: `/realm/tmp/work/dispatch-plan.json` — the scheduled
   planner's ordered ready-set, orbit annotations, conflict serialization, and
   judgment-gate flags. `board plan` prints it; refill executes this artifact

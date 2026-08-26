@@ -1,5 +1,5 @@
-# Model-free campaign reactor.  It consumes the daemon event spool, owns the
-# externalized campaign board, and performs only typed mechanical reactions.
+# Model-free campaign reactor. It consumes the daemon event spool and retains
+# only its durable cursor; the campaign board is a live-source cache.
 # Harvester/reviewer and strategist wakes remain outside this service.
 {
   mkServiceModule,
@@ -30,7 +30,7 @@ mkServiceModule {
     };
     workload = {
       class = "protected";
-      rationale = "Typed campaign state and keeper event publisher owned by sinnixd.";
+      rationale = "Typed campaign event reactions owned by sinnixd; board is derived separately.";
       processMatchers = [ "sinnixd-reactor" ];
     };
   };
@@ -45,17 +45,6 @@ mkServiceModule {
         else
           throw "sinnix.services.campaign-reactor.eventSpool must be absolute";
       description = "Append-only sinnixd event spool consumed by the reactor.";
-    };
-    boardPath = lib.mkOption {
-      type = lib.types.str;
-      default = "/realm/tmp/work/campaign-board.json";
-      apply =
-        path:
-        if lib.hasPrefix "/" path then
-          path
-        else
-          throw "sinnix.services.campaign-reactor.boardPath must be absolute";
-      description = "Versioned JSON campaign board maintained by the reactor.";
     };
     stateDir = lib.mkOption {
       type = lib.types.str;
@@ -97,7 +86,6 @@ mkServiceModule {
   configFn =
     { cfg, ... }:
     let
-      boardDirectory = builtins.dirOf cfg.boardPath;
       spoolDirectory = builtins.dirOf cfg.eventSpool;
     in
     lib.mkMerge [
@@ -114,7 +102,6 @@ mkServiceModule {
         ];
         systemd.tmpfiles.rules = [
           "d ${cfg.stateDir} 0700 ${userName} users -"
-          "d ${boardDirectory} 0755 ${userName} users -"
           "d ${spoolDirectory} 0700 ${userName} users -"
         ];
         home-manager.users.${userName}.systemd.user.services.sinnixd-reactor = {
@@ -130,7 +117,7 @@ mkServiceModule {
             })
             // {
               Type = "simple";
-              ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --board ${lib.escapeShellArg cfg.boardPath} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --keeper-backoff-seconds ${toString cfg.keeperBackoffSeconds} --refill-width-target ${toString cfg.refillWidthTarget} --refill-spacing-seconds ${toString cfg.refillSpacingSeconds} ${projectRootArgs}";
+              ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --keeper-backoff-seconds ${toString cfg.keeperBackoffSeconds} --refill-width-target ${toString cfg.refillWidthTarget} --refill-spacing-seconds ${toString cfg.refillSpacingSeconds} ${projectRootArgs}";
               Restart = "on-failure";
               RestartSec = "5s";
               NoNewPrivileges = true;
@@ -138,7 +125,6 @@ mkServiceModule {
               ProtectHome = "read-only";
               ReadWritePaths = [
                 cfg.stateDir
-                boardDirectory
                 spoolDirectory
                 config.sinnix.services.sinnixd.taskStateRoot
               ]

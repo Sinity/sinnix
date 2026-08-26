@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Campaign board status front door.  sinnixd-reactor is the sole writer; this
-# compatibility command only asks it to drain once or reads its typed board.
+# Campaign board status front door. The board is a short-lived live-source cache.
 set -eu
 case "${1:-status}" in
   plan)
@@ -17,17 +16,47 @@ for row in plan.get("groups", []):
 PYEOF
     ;;
   sync)
-    exec sinnixd-reactor --once
+    python3 - <<'PYEOF'
+import os
+from pathlib import Path
+from sinnixd.campaign_board import load_or_refresh_campaign_board
+
+state_dir = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "sinnixd"
+project_roots = {
+    path.name: path for path in Path("/realm/project").iterdir()
+    if path.is_dir() and (path / ".agentctl" / "project.toml").is_file()
+}
+load_or_refresh_campaign_board(
+    Path("/realm/tmp/work/campaign-board.json"), force=True,
+    state_dir=state_dir,
+    project_roots=project_roots,
+)
+PYEOF
     ;;
   status|*)
     python3 - <<'PYEOF'
-import json, pathlib
-try: b = json.loads(pathlib.Path("/realm/tmp/work/campaign-board.json").read_text())
-except Exception: b = {}
+import json
+import os
+from pathlib import Path
+from sinnixd.campaign_board import load_or_refresh_campaign_board
+
+state_dir = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "sinnixd"
+project_roots = {
+    path.name: path for path in Path("/realm/project").iterdir()
+    if path.is_dir() and (path / ".agentctl" / "project.toml").is_file()
+}
+
+b = load_or_refresh_campaign_board(
+    Path("/realm/tmp/work/campaign-board.json"),
+    state_dir=state_dir,
+    project_roots=project_roots,
+)
 running = {k: v for k, v in b.get("lanes", {}).items() if isinstance(v, dict) and v.get("phase") not in ("succeeded", "failed", "cancelled", "timeout", "missing")}
 print(f"updated {b.get('updated_at','never')} | lanes active {len(running)} | prs {len(b.get('prs',{}))}")
 for k, v in list(running.items())[:12]: print(" lane", k[:8], v.get("phase"))
-for n, t in list(b.get("prs", {}).items())[:8]: print(" PR", n, t.get("state"), "bead:", t.get("bead_id"), t.get("bead_close_status"))
+for n, t in list(b.get("prs", {}).items())[:8]:
+    bead = t.get("bead_id")
+    print(" PR", n, t.get("state"), *( [f"bead: {bead}", t.get("bead_status")] if bead else [] ))
 PYEOF
     ;;
 esac
