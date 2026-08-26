@@ -3409,6 +3409,7 @@ class GenericJobs:
                 "checkout": checkout.get("checkout_id")
                 if isinstance(checkout, Mapping)
                 else None,
+                "coordinator_label": record.spec.contract.get("coordinator_label"),
             }
         )
         parameters = record.spec.contract.get("parameters")
@@ -3416,6 +3417,7 @@ class GenericJobs:
             parameters.get("campaign") if isinstance(parameters, Mapping) else None
         )
         if isinstance(campaign, Mapping):
+            coordinator_label = record.spec.contract.get("coordinator_label")
             self.spool_event(
                 {
                     "kind": "campaign",
@@ -3424,6 +3426,7 @@ class GenericJobs:
                     "group": campaign.get("group"),
                     "job_id": record.job_id,
                     "phase": record.state.get("phase"),
+                    "coordinator_label": coordinator_label,
                 }
             )
             wave_id = campaign.get("wave_id")
@@ -3449,6 +3452,7 @@ class GenericJobs:
                             "transition": "wave drained",
                             "wave_id": wave_id,
                             "project": record.spec.project_id,
+                            "coordinator_label": coordinator_label,
                         }
                     )
 

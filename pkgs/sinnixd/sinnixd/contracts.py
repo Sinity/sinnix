@@ -139,6 +139,7 @@ class TypedJobContracts:
         exclusive_keys: Sequence[str] = (),
         allow_failed_dependencies: bool = False,
         reject_conflicts: bool = False,
+        coordinator_label: str | None = None,
     ) -> dict[str, Any]:
         if principal not in {"agent-control", "operator"}:
             raise ContractError(
@@ -167,6 +168,14 @@ class TypedJobContracts:
             raise ContractError("agent reject_conflicts must be boolean")
         if result != "last-message":
             raise ContractError("attested agent jobs require a last-message result")
+        if coordinator_label is not None and (
+            not isinstance(coordinator_label, str)
+            or not coordinator_label
+            or len(coordinator_label) > 128
+        ):
+            raise ContractError(
+                "agent coordinator_label must be a non-empty string up to 128 characters"
+            )
         if (
             not isinstance(prompt, str)
             or not prompt
@@ -199,6 +208,11 @@ class TypedJobContracts:
                 "bytes": len(prompt.encode()),
             },
             "result": result,
+            **(
+                {"coordinator_label": coordinator_label}
+                if coordinator_label is not None
+                else {}
+            ),
             **({"bead_binding": binding} if binding is not None else {}),
             **(
                 {"parameters": launch_parameters}
@@ -219,6 +233,11 @@ class TypedJobContracts:
             "model": model,
             "effort": effort,
             "credential_profile": credential_profile,
+            **(
+                {"coordinator_label": coordinator_label}
+                if coordinator_label is not None
+                else {}
+            ),
             "prompt_path": str(prompt_path),
             **({"bead_binding": binding} if binding is not None else {}),
             **(
