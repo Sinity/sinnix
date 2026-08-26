@@ -5423,6 +5423,195 @@ def test_workspace_create_inherits_declared_seed_files_and_records_missing_sourc
     assert recovered["provision_notes"] == created["provision_notes"]
 
 
+def test_workspace_create_rolls_back_locked_provision_failure_without_orphans(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+
+    def fail_locked_provision(project: object, target: Path) -> None:
+        assert service.workspaces is not None
+        service.workspaces._git(project.root, "worktree", "lock", str(target))  # type: ignore[attr-defined]
+        raise RuntimeError("injected provision failure")
+
+    monkeypatch.setattr(
+        type(service.workspaces), "_provision", staticmethod(fail_locked_provision)
+    )
+    with pytest.raises(RuntimeError, match="injected provision failure"):
+        service.workspaces.create(
+            project_id="fixture",
+            name="rollback-lane",
+            branch="feature/rollback-lane",
+            base="HEAD",
+        )
+
+    assert service.workspaces.store.records() == ()
+    assert not (tmp_path / "worktrees" / "rollback-lane").exists()
+    assert (
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(tmp_path),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                "refs/heads/feature/rollback-lane",
+            ],
+            check=False,
+        ).returncode
+        != 0
+    )
+    assert (
+        len(
+            [
+                record
+                for record in subprocess.run(
+                    ["git", "-C", str(tmp_path), "worktree", "list", "--porcelain"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.split("\n\n")
+                if record
+            ]
+        )
+        == 1
+    )
+
+
+def test_rapid_sequential_workspace_creates_leave_no_collision_orphans(
+    tmp_path: Path,
+) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+
+    created = [
+        service.workspaces.create(
+            project_id="fixture",
+            name=f"rapid-{index}",
+            branch=f"feature/rapid-{index}",
+            base="HEAD",
+        )
+        for index in range(6)
+    ]
+
+    assert len(created) == 6
+    assert len(service.workspaces.store.records()) == 6
+    assert all(Path(item["path"]).is_dir() for item in created)
+    assert not list((tmp_path / "worktrees").glob(".rapid-*"))
+
+
+def test_packet_workspace_create_recovers_dead_registry_leftover_and_notes_it(
+    tmp_path: Path,
+) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    first = service.workspaces.create(
+        project_id="fixture",
+        name="packet-polylogue-jfeaz",
+        branch="feature/packet/polylogue-jfeaz",
+        base="HEAD",
+    )
+    shutil.rmtree(first["path"])
+
+    recovered = service.dispatch(
+        request(
+            "workspace.create",
+            "git-workspaces",
+            {
+                "project_id": "fixture",
+                "name": "packet-polylogue-jfeaz",
+                "branch": "feature/packet/polylogue-jfeaz",
+                "base": None,
+                "recover_dead": True,
+            },
+            "agent-control",
+        )
+    )
+
+    assert recovered.ok and recovered.payload is not None
+    value = recovered.payload.inline
+    assert value["workspace_id"] != first["workspace_id"]
+    assert value["notes"] == [
+        {
+            "kind": "packet-dead-collision-recovered",
+            "workspace_id": first["workspace_id"],
+            "name": "packet-polylogue-jfeaz",
+            "branch": "feature/packet/polylogue-jfeaz",
+        }
+    ]
+    assert (
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(tmp_path),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                "refs/heads/feature/packet/polylogue-jfeaz",
+            ],
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
+def test_packet_workspace_create_refuses_live_collision(
+    tmp_path: Path,
+) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    jobs = generic_jobs(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    workspace = service.workspaces.create(
+        project_id="fixture",
+        name="live-packet",
+        branch="feature/live-packet",
+        base="HEAD",
+    )
+    checkout = service.workspaces.checkout(workspace["workspace_id"])
+    jobs.start(
+        GenericJobSpec(
+            kind="attested-agent",
+            command=("true",),
+            working_directory=str(checkout.path),
+            environment={},
+            timeout_seconds=60,
+            project_id="fixture",
+            principal="agent-control",
+            checkout=checkout.to_dict(),
+            result_kind="last-message",
+        ),
+        str(uuid4()),
+    )
+
+    response = service.dispatch(
+        request(
+            "workspace.create",
+            "git-workspaces",
+            {
+                "project_id": "fixture",
+                "name": "live-packet",
+                "branch": "feature/live-packet",
+                "base": None,
+                "recover_dead": True,
+            },
+            "agent-control",
+        )
+    )
+
+    assert response.error is not None
+    assert response.error.code.value == "INVALID_ARGUMENT"
+    assert "live job" in response.error.message
+    assert (
+        service.workspaces.store.records()[0].workspace_id == workspace["workspace_id"]
+    )
+
+
 def test_workspace_adopt_uses_existing_linked_checkout_without_claiming_creation(
     tmp_path: Path,
 ) -> None:
