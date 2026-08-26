@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # Deterministic review red-flag scanner for a lane branch.
-# Usage: redflags <worktree> [base=origin/master]
+# Usage: redflags [--explain] <worktree> [base=origin/master]
 # Flags exactly the patterns adversarial review keeps catching; exit 0 = no
 # flags (stat-level skim suffices), exit 1 = flags (full coordinator read).
 set -u
-WT=$1; BASE=${2:-origin/master}
+EXPLAIN=0
+if [ "${1:-}" = "--explain" ]; then
+  EXPLAIN=1
+  shift
+fi
+WT=${1:?usage: redflags [--explain] <worktree> [base=origin/master]}
+BASE=${2:-origin/master}
 cd "$WT" || exit 2
 DIFF=$(git diff "$BASE"..HEAD)
 flags=0
@@ -12,10 +18,17 @@ flag() { echo "FLAG: $1"; flags=1; }
 # Deleted production calls / removed non-test lines in polylogue/
 echo "$DIFF" | awk '/^diff --git a\/polylogue\//{f=1} /^diff --git a\/(tests|devtools|docs)\//{f=0} f && /^-[^-]/' | grep -qE "def |self\.|\(\)" && flag "production lines removed (polylogue/)"
 # Inverted or weakened assertions
-echo "$DIFF" | grep -qE "^\-\s*assert .*== 0\b|^\+\s*assert .*exit_code == 1|^\+.*pytest\.raises" && flag "assertion polarity change"
+# An additions-only assertion change strengthens coverage; it is not a
+# polarity change.  Require both sides before raising this flag.
+ASSERT_REMOVED=$(echo "$DIFF" | grep -cE "^-[^-].*\bassert\b|^-[^-].*pytest\.raises" || true)
+ASSERT_ADDED=$(echo "$DIFF" | grep -cE "^\+[^+].*\bassert\b|^\+[^+].*pytest\.raises" || true)
+[ "$ASSERT_REMOVED" -gt 0 ] && [ "$ASSERT_ADDED" -gt 0 ] && \
+  flag "assertion polarity change"
 echo "$DIFF" | awk '/^diff --git a\/tests\//{f=1} /^diff --git a\/(polylogue|devtools|docs)\//{f=0} f && /^-.*assert /' | grep -q . && flag "test assertions removed"
 # New xfail/skip
-echo "$DIFF" | grep -qE "^\+.*(xfail|skipif|pytest\.mark\.skip)" && flag "new xfail/skip"
+# The explanation implementation contains these words as recipe patterns;
+# don't let the scanner report itself as a newly introduced skip.
+echo "$DIFF" | awk '/^diff --git a\//{f=($0 !~ /^diff --git a\/dots\/_ai\/skills\/orchestrate\/scripts\/redflags /)} f && /^\+.*(xfail|skipif|pytest\.mark\.skip)/' | grep -q . && flag "new xfail/skip"
 # Gate / baseline / migration surfaces
 echo "$DIFF" | grep -qE "^diff --git a/devtools/(consumer_reachability|verify|patterns/baselines)" && flag "verification gate or baseline edited"
 echo "$DIFF" | grep -qE "^diff --git a/polylogue/storage/sqlite/migrations/" && flag "durable migration touched"
@@ -29,4 +42,169 @@ git diff --name-status --diff-filter=D "$BASE"..HEAD | grep -q "^D\s*tests/" && 
 LINES=$(echo "$DIFF" | grep -cE "^[+-][^+-]")
 echo "diff lines: $LINES"
 [ "$LINES" -gt 1500 ] && flag "very large diff"
+
+if [ "$EXPLAIN" -eq 1 ]; then
+python3 - "$BASE" <<'PY'
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+
+base = sys.argv[1]
+diff = subprocess.check_output(["git", "diff", f"{base}..HEAD"], text=True)
+
+def sections():
+    path = None
+    body = []
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            if path is not None:
+                yield path, body
+            path = line.split(" b/", 1)[-1]
+            body = []
+        elif path is not None:
+            body.append(line)
+    if path is not None:
+        yield path, body
+
+def changed(lines, prefix):
+    return [line[1:] for line in lines
+            if line.startswith(prefix) and not line.startswith(prefix * 2)]
+
+all_sections = [(p, lines) for p, lines in sections()
+                if p != "dots/_ai/skills/orchestrate/scripts/redflags"]
+production = [(p, lines) for p, lines in all_sections if p.startswith("polylogue/")]
+test_sections = [(p, lines) for p, lines in all_sections if p.startswith("tests/")]
+
+deleted_symbols = []
+deleted_modules = []
+for path, lines in production:
+    if "deleted file mode" in lines:
+        deleted_modules.append(path)
+    for line in changed(lines, "-"):
+        match = re.search(r"\b(?:async\s+)?(?:def|class)\s+([A-Za-z_]\w*)", line)
+        if match:
+            deleted_symbols.append(match.group(1))
+if deleted_symbols or deleted_modules:
+    dangling = 0
+    details = []
+    for symbol in sorted(set(deleted_symbols)):
+        result = subprocess.run(
+            ["git", "grep", "-n", "-w", symbol, "HEAD"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        )
+        count = len(result.stdout.splitlines())
+        dangling += count
+        details.append(f"{symbol}={count}")
+    for module in deleted_modules:
+        stem = module.removeprefix("polylogue/").removesuffix(".py")
+        result = subprocess.run(
+            ["git", "grep", "-n", "-F", stem, "HEAD"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        )
+        count = len(result.stdout.splitlines())
+        dangling += count
+        details.append(f"{module}={count}")
+    print("EXPLAIN: production lines removed")
+    print(f"  deleted modules: {', '.join(deleted_modules) or 'none'}")
+    print(f"  deleted symbols: {', '.join(sorted(set(deleted_symbols))) or 'none'}")
+    print(f"  surviving branch references: {dangling} dangling refs ({', '.join(details)})")
+    print("  VERDICT: safe deletion" if dangling == 0 else "  VERDICT: read production diff")
+
+removed_assertions = []
+for path, lines in test_sections:
+    removed_assertions.extend((path, line) for line in changed(lines, "-")
+                              if re.search(r"\bassert\b|pytest\.raises", line))
+if removed_assertions:
+    production_names = set(deleted_symbols)
+    orphaned = []
+    for path, line in removed_assertions:
+        tokens = set(re.findall(r"\b[A-Za-z_]\w*\b", line))
+        if not tokens & production_names:
+            orphaned.append(f"{path}: {line.strip()}")
+    print("EXPLAIN: test assertions removed")
+    print(f"  removed assertions: {len(removed_assertions)}")
+    print(f"  removals without corresponding production deletion: {len(orphaned)}")
+    for line in orphaned:
+        print(f"    {line}")
+    print("  VERDICT: safe deletion" if not orphaned else "  VERDICT: read test and production diff")
+
+added_assertions = sum(bool(re.search(r"\bassert\b|pytest\.raises", line))
+                      for _, lines in test_sections for line in changed(lines, "+"))
+removed_assertion_count = sum(bool(re.search(r"\bassert\b|pytest\.raises", line))
+                             for _, lines in test_sections for line in changed(lines, "-"))
+if added_assertions or removed_assertion_count:
+    print("EXPLAIN: assertion polarity change")
+    print(f"  assertion counts: added={added_assertions} removed={removed_assertion_count}")
+    if added_assertions and removed_assertion_count:
+        print("  VERDICT: read assertion changes")
+    else:
+        print("  VERDICT: pure additions; not a polarity change" if added_assertions else
+              "  VERDICT: assertion removals require review")
+
+gate = [(p, lines) for p, lines in all_sections
+        if re.match(r"devtools/(consumer_reachability|verify|patterns/baselines)", p)]
+if gate:
+    added = sum(len(changed(lines, "+")) for _, lines in gate)
+    removed = sum(len(changed(lines, "-")) for _, lines in gate)
+    direction = ("SHRANK (allowed)" if removed > added else
+                 "GREW (needs justification)" if added > removed else "did not change")
+    print("EXPLAIN: verification gate or baseline edited")
+    print(f"  baseline delta: added={added} removed={removed}; {direction}")
+    print("  VERDICT: inspect justification" if added > removed else
+          "  VERDICT: mechanical baseline reduction")
+
+migrations = [(p, lines) for p, lines in all_sections
+              if p.startswith("polylogue/storage/sqlite/migrations/")]
+if migrations:
+    text = "\n".join(line for _, lines in migrations
+                      for line in changed(lines, "+") + changed(lines, "-"))
+    version = bool(re.search(r"version|schema", text, re.I))
+    lifecycle = bool(re.search(r"migrat|lifecycle|upgrade|downgrade", text, re.I))
+    print("EXPLAIN: durable migration touched")
+    print(f"  tier/schema version delta: {'present' if version else 'absent'}")
+    print(f"  migration/lifecycle delta: {'present' if lifecycle else 'absent'}")
+    print("  VERDICT: migration metadata is present" if version and lifecycle else
+          "  VERDICT: migration review required")
+
+legacy = []
+for path, lines in production:
+    legacy.extend((path, line) for line in changed(lines, "+")
+                  if re.search(r"legacy|backward.?compat|for compatibility|deprecated|historical (symbol|alias)|kept for", line, re.I))
+if legacy:
+    print("EXPLAIN: legacy/compat retained or introduced in production code")
+    for path, line in legacy:
+        print(f"  {path}: {line}")
+    print("  VERDICT: read and purge or justify the shim")
+
+deleted_tests = [p for p, lines in test_sections if "deleted file mode" in lines]
+if deleted_tests:
+    print("EXPLAIN: test files deleted")
+    print(f"  deleted files: {', '.join(deleted_tests)}")
+    print("  VERDICT: read replacement coverage")
+
+skips = [(p, line) for p, lines in all_sections for line in changed(lines, "+")
+         if re.search(r"xfail|skipif|pytest\.mark\.skip", line)]
+if skips:
+    print("EXPLAIN: new xfail/skip")
+    for path, line in skips:
+        print(f"  {path}: {line}")
+    print("  VERDICT: read why coverage is being suppressed")
+
+sidecars = [(p, line) for p, lines in all_sections if re.search(r"train\.json$", p)
+            for line in changed(lines, "+") + changed(lines, "-")]
+if sidecars:
+    print("EXPLAIN: train sidecar touched")
+    for path, line in sidecars:
+        print(f"  {path}: {line}")
+    print("  VERDICT: read sidecar change")
+
+diff_lines = sum(bool(re.match(r"^[+-][^+-]", line)) for line in diff.splitlines())
+if diff_lines > 1500:
+    print("EXPLAIN: very large diff")
+    print(f"  changed lines: {diff_lines} (threshold 1500)")
+    print("  VERDICT: read complete diff")
+PY
+fi
 exit $flags
