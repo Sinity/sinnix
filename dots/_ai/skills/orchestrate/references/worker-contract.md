@@ -54,16 +54,30 @@ Every implementation dispatch carries, verbatim in the prompt:
    / `LANE-CLASSIFICATION: <one line per finding for fix lanes>` so the
    harvester parses state instead of prose.
 
-9. **Never mutate live operator state** (2026-08-26, from a lane that deleted
-   a coordinator tool out of `~/.local/bin` mid-campaign because its bead text
-   named that path): a lane's writes stop at its own worktree. No writes under
-   `$HOME`, no edits to installed tools or live service state, no
-   `switch`/`boot`/system or Home-Manager rebuild — a rebuild from a lane
-   worktree would deploy that BRANCH to the live machine. Retiring an
-   installed tool means deleting it from the source-of-truth tree and saying
-   so in the report; removing the live copy is a coordinator act, sequenced
-   after the replacement actually ships. Bead authors: never name a live path
-   as a deletion target (that authoring defect caused this one).
+9. **Do not damage live operator state.** Scoped to the harm, not to the
+   surface — a lane is not a second-class citizen, it just must not break
+   things it does not own.
+
+   FORBIDDEN, always: deleting or overwriting installed tools, dotfiles, or
+   anything else under `$HOME` outside your own workspace; `switch`/`boot` or
+   any system/Home-Manager rebuild (a rebuild from a lane worktree deploys
+   THAT BRANCH to the live machine); stopping, masking, or reconfiguring live
+   services. Retiring an installed tool means deleting it from the
+   source-of-truth tree and saying so; removing the live copy is a
+   coordinator act, sequenced after the replacement ships. (2026-08-26: a
+   lane deleted a coordinator tool out of `~/.local/bin` mid-campaign because
+   its bead text named that path — bead authors, never name a live path as a
+   deletion target.)
+
+   ALLOWED without asking: read-only use of live evidence — query the
+   archive, read `/realm/state`, `sinnix-observe`, and drive the browser in
+   your own `sinnix-chrome-control agent-window` (navigate, read, screenshot).
+   Do not touch the operator's existing tabs or windows.
+
+   ALLOWED WHEN THE PACKET SAYS SO: writes to live state the bead explicitly
+   scopes — e.g. restoring spool entries, running a capture. The packet must
+   name the paths or services; absent that, report what you would have done
+   instead of doing it.
 
 10. **Purge, do not retain** (operator ruling, 2026-08-26): the codebase
     shrinks without sacrificing functionality. Retiring a route means deleting
