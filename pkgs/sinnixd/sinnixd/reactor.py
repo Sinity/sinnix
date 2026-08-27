@@ -688,7 +688,9 @@ class CampaignReactor:
     review_dispatcher: ReviewDispatcher | None = None
     integration_dispatcher: IntegrationDispatcher | None = None
     integrator_backend: str = "codex"
-    integrator_model: str = "gpt-5.6-luna"
+    # Workers default to luna, so the integrator is a sibling rather than the
+    # same model judging its own family's output.
+    integrator_model: str = "gpt-5.6-terra"
     integrator_effort: str = "high"
     agentctl_executable: str = "agentctl"
     bead_closer: BeadCloser = field(default_factory=SubprocessBeadCloser)
@@ -849,13 +851,72 @@ class CampaignReactor:
             return ""
         return PurePosixPath(path).name
 
-    def _dispatch_integration(self, event: Mapping[str, Any]) -> None:
-        """Hand one reviewed lane to an integrator agent.
+    def _publish(self, project: str, workspace: str, receipt: str, key: str) -> None:
+        """Publish a lane whose scan is clean, using the text the lane wrote."""
+        worktree = Path("/realm/worktrees") / workspace
+        parameters: dict[str, Any] = {
+            "authorize": True,
+            "receipt_ref": receipt.rsplit("/", 1)[-1],
+        }
+        title = worktree / ".lane/title"
+        body = worktree / ".lane/body.md"
+        if not title.is_file() or not body.is_file():
+            # Without publication text there is nothing to publish under; that
+            # is a lane defect, so it goes to a reader rather than to master.
+            self._board.record_error(-1, f"publish {workspace}: no .lane text")
+            return
+        parameters["title_file"] = str(title)
+        parameters["body_file"] = str(body)
+        try:
+            subprocess.run(
+                [
+                    self.agentctl_executable,
+                    "job",
+                    "start",
+                    project,
+                    "harvest",
+                    "--workspace",
+                    workspace,
+                    "--parameters-json",
+                    json.dumps(parameters, sort_keys=True),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            self._board.record_error(-1, f"publish {workspace}: {error}")
+            return
+        self._board.keeper[key] = {
+            "emitted_at": _now(),
+            "backoff_seconds": 0,
+            "next_eligible_at": _now(),
+        }
 
-        The review is deterministic and the substrate runs it. Judging the
-        result is not, and one coordinator judging every lane in sequence is
-        the queue this exists to remove.
+    @staticmethod
+    def _needs_judgment(event: Mapping[str, Any]) -> str | None:
+        """Why this lane cannot publish mechanically, or None if it can.
+
+        Hosted review and CI are the structural check on a published change.
+        A lane whose scan is clean and whose own gate is green adds nothing by
+        waiting for a reader, so judgment is spent on the exceptions instead.
         """
+        packet = event.get("packet")
+        if not isinstance(packet, Mapping):
+            return "no receipt"
+        if packet.get("redflag_status"):
+            flags = packet.get("redflags")
+            named = ", ".join(str(f) for f in flags) if isinstance(flags, list) else ""
+            return f"red flags: {named}" or "red flags"
+        trailer = packet.get("lane_trailer")
+        quick = trailer.get("LANE-QUICK") if isinstance(trailer, Mapping) else None
+        if quick != "green":
+            return f"lane gate {quick or 'unknown'}"
+        return None
+
+    def _dispatch_integration(self, event: Mapping[str, Any]) -> None:
+        """Route one reviewed lane: publish it, or hand it to an integrator."""
         project = event.get("project")
         workspace_id = event.get("workspace_id")
         receipt = event.get("receipt_ref") or event.get("packet_id")
@@ -866,6 +927,10 @@ class CampaignReactor:
             return
         root = self.project_roots.get(str(project))
         if root is None:
+            return
+        reason = self._needs_judgment(event)
+        if reason is None:
+            self._publish(str(project), str(workspace_id), str(receipt), key)
             return
         try:
             if self.integration_dispatcher is not None:

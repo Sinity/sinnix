@@ -303,3 +303,35 @@ def test_completed_review_dispatches_one_integrator(tmp_path: Path) -> None:
     assert calls == [
         ("polylogue", "worktree-abc", "sinnix://harvest/harvest-" + "0" * 32)
     ]
+
+
+def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
+    """Judgment is spent on exceptions, not on every lane that passed its scan.
+
+    Anti-vacuity: treating every review as needing judgment makes the first
+    assertion red; ignoring the red flags makes the second one red.
+    """
+    clean = {
+        "packet": {
+            "redflag_status": 0,
+            "redflags": ["diff lines: 12"],
+            "lane_trailer": {"LANE-QUICK": "green"},
+        }
+    }
+    assert CampaignReactor._needs_judgment(clean) is None
+
+    flagged = {
+        "packet": {
+            "redflag_status": 1,
+            "redflags": ["FLAG: production lines removed"],
+            "lane_trailer": {"LANE-QUICK": "green"},
+        }
+    }
+    assert "production lines removed" in (
+        CampaignReactor._needs_judgment(flagged) or ""
+    )
+
+    for quick in ("red", "blocked-env", None):
+        lane = {"packet": {"redflag_status": 0, "lane_trailer": {"LANE-QUICK": quick}}}
+        assert CampaignReactor._needs_judgment(lane) is not None
+    assert CampaignReactor._needs_judgment({}) is not None

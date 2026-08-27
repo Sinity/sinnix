@@ -34,24 +34,34 @@ prompt. Write only what the worker must do; coordinator material belongs in
    / `LANE-COMMIT: <sha>` / `LANE-QUICK: green|red|blocked-env` /
    `LANE-CLASSIFICATION: <one line per finding>`.
 
-9. **Do not damage live operator state** — scoped to the harm, not the surface.
+9. **Write the publication text.** You made the decisions, so you write them
+   up: a conventional squash subject of at most 72 characters, a body giving
+   Summary, Problem with its evidence, Solution, Verification with the exact
+   commands and the line that matters, and honest residual risk. Add a
+   close reason only when a bead genuinely closes. Write them to
+   `.lane/title`, `.lane/body.md` and `.lane/close-reason.md` in your
+   worktree. You do not publish; whoever integrates your lane judges the
+   change and decides. Prose that oversells what you did will be caught
+   against the diff.
 
-   Forbidden: deleting or overwriting installed tools, dotfiles, or anything
-   under `$HOME` outside your workspace; `switch`/`boot` or any system or
-   Home-Manager rebuild, which would deploy your branch to the live machine;
-   stopping, masking, or reconfiguring live services. Retiring an installed
-   tool means deleting it from the source tree and saying so; removing the live
-   copy is a coordinator act.
+10. **Do not damage live operator state** — scoped to the harm, not the surface.
 
-   Allowed without asking: read-only live evidence — query the archive, read
-   `/realm/state`, `sinnix-observe`, and drive the browser in your own
-   `sinnix-chrome-control agent-window`. Leave the operator's tabs alone.
+Forbidden: deleting or overwriting installed tools, dotfiles, or anything
+under `$HOME` outside your workspace; `switch`/`boot` or any system or
+Home-Manager rebuild, which would deploy your branch to the live machine;
+stopping, masking, or reconfiguring live services. Retiring an installed
+tool means deleting it from the source tree and saying so; removing the live
+copy is a coordinator act.
 
-   Allowed when the packet says so: writes to live state a bead explicitly
-   scopes, with the paths or services named. Absent that, report what you would
-   have done instead of doing it.
+Allowed without asking: read-only live evidence — query the archive, read
+`/realm/state`, `sinnix-observe`, and drive the browser in your own
+`sinnix-chrome-control agent-window`. Leave the operator's tabs alone.
 
-10. **Purge, do not retain.** The codebase shrinks without losing
+Allowed when the packet says so: writes to live state a bead explicitly
+scopes, with the paths or services named. Absent that, report what you would
+have done instead of doing it.
+
+11. **Purge, do not retain.** The codebase shrinks without losing
     functionality. Retiring a route deletes the module, its compatibility
     aliases and re-exports, its docs, and its tests in the same change. If one
     symbol still has a real consumer, move it to its true owner and delete the
