@@ -272,3 +272,34 @@ def test_keeper_prune_keeps_records_of_dispatched_work(tmp_path: Path) -> None:
 
     assert "review:job-1" in reactor._board.keeper
     assert "stale-action" not in reactor._board.keeper
+
+
+def test_completed_review_dispatches_one_integrator(tmp_path: Path) -> None:
+    """Judging a reviewed lane fans out instead of queueing on a coordinator.
+
+    Anti-vacuity: dropping the keeper record dispatches a second integrator for
+    the same review, and dropping the reaction dispatches none.
+    """
+    calls: list[tuple[str, str, str]] = []
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        project_roots={"polylogue": tmp_path / "repo"},
+        integration_dispatcher=lambda p, w, r: calls.append((p, w, r)),
+    )
+    event = {
+        "kind": "harvest",
+        "transition": "review-required",
+        "project": "polylogue",
+        "workspace_id": "worktree-abc",
+        "receipt_ref": "sinnix://harvest/harvest-" + "0" * 32,
+        "job_id": "job-9",
+    }
+
+    reactor._dispatch_integration(event)
+    reactor._dispatch_integration(event)
+
+    assert calls == [
+        ("polylogue", "worktree-abc", "sinnix://harvest/harvest-" + "0" * 32)
+    ]

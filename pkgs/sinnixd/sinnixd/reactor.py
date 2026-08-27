@@ -31,7 +31,7 @@ MAX_KEEPER_BACKOFF_SECONDS = 6 * 60 * 60
 MAX_BOARD_LANES = 2_000
 MAX_BOARD_PRS = 2_000
 MAX_BOARD_ERRORS = 100
-_DURABLE_KEEPER_PREFIXES = ("refill:", "review:")
+_DURABLE_KEEPER_PREFIXES = ("refill:", "review:", "integrate:")
 MAX_EVENT_BYTES = 1_000_000
 DEFAULT_REFILL_SPACING_SECONDS = 10
 
@@ -414,6 +414,10 @@ class ReviewDispatcher(Protocol):
     def __call__(self, project: str, workspace: str) -> None: ...
 
 
+class IntegrationDispatcher(Protocol):
+    def __call__(self, project: str, workspace: str, receipt_ref: str) -> None: ...
+
+
 @dataclass(frozen=True)
 class Reaction:
     event_kind: str
@@ -682,6 +686,10 @@ class CampaignReactor:
     refill_spacing_seconds: int = DEFAULT_REFILL_SPACING_SECONDS
     refill_dispatcher: RefillDispatcher | None = None
     review_dispatcher: ReviewDispatcher | None = None
+    integration_dispatcher: IntegrationDispatcher | None = None
+    integrator_backend: str = "codex"
+    integrator_model: str = "gpt-5.6-luna"
+    integrator_effort: str = "high"
     agentctl_executable: str = "agentctl"
     bead_closer: BeadCloser = field(default_factory=SubprocessBeadCloser)
     registry: ReactionRegistry = field(default_factory=default_reactions)
@@ -841,6 +849,91 @@ class CampaignReactor:
             return ""
         return PurePosixPath(path).name
 
+    def _dispatch_integration(self, event: Mapping[str, Any]) -> None:
+        """Hand one reviewed lane to an integrator agent.
+
+        The review is deterministic and the substrate runs it. Judging the
+        result is not, and one coordinator judging every lane in sequence is
+        the queue this exists to remove.
+        """
+        project = event.get("project")
+        workspace_id = event.get("workspace_id")
+        receipt = event.get("receipt_ref") or event.get("packet_id")
+        if not all(isinstance(v, str) and v for v in (project, workspace_id, receipt)):
+            return
+        key = f"integrate:{event.get('job_id')}"
+        if key in self._board.keeper:
+            return
+        root = self.project_roots.get(str(project))
+        if root is None:
+            return
+        try:
+            if self.integration_dispatcher is not None:
+                self.integration_dispatcher(
+                    str(project), str(workspace_id), str(receipt)
+                )
+            else:
+                prompt = self._integration_prompt(root, event)
+                prompt_path = self.state_dir / f"integrate-{event.get('job_id')}.md"
+                prompt_path.write_text(prompt, encoding="utf-8")
+                subprocess.run(
+                    [
+                        self.agentctl_executable,
+                        "agent",
+                        "launch",
+                        "--project",
+                        str(project),
+                        "--checkout",
+                        str(workspace_id),
+                        "--prompt-file",
+                        str(prompt_path),
+                        "--backend",
+                        self.integrator_backend,
+                        "--model",
+                        self.integrator_model,
+                        "--effort",
+                        self.integrator_effort,
+                        "--coordinator-label",
+                        "integrator",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+        except (OSError, subprocess.SubprocessError) as error:
+            self._board.record_error(-1, f"integrate {event.get('job_id')}: {error}")
+            return
+        self._board.keeper[key] = {
+            "emitted_at": _now(),
+            "backoff_seconds": 0,
+            "next_eligible_at": _now(),
+        }
+
+    def _integration_prompt(self, root: Path, event: Mapping[str, Any]) -> str:
+        contract = (
+            root / "dots/_ai/skills/orchestrate/references/integrator-contract.md"
+        )
+        try:
+            body = contract.read_text()
+        except OSError:
+            body = ""
+        packet = event.get("packet")
+        summary = (
+            json.dumps(packet, indent=1, sort_keys=True)[:20_000]
+            if isinstance(packet, Mapping)
+            else ""
+        )
+        return (
+            "# Integration packet\n\n"
+            f"project: {event.get('project')}\n"
+            f"workspace: {event.get('workspace_id')}\n"
+            f"receipt_ref: {event.get('receipt_ref')}\n\n"
+            "## Review receipt\n\n"
+            f"```json\n{summary}\n```\n\n"
+            f"## Operating rules\n\n{body}\n"
+        )
+
     def _dispatch_review(self, record: LaneRecord) -> None:
         """Start the read-mostly harvest review as soon as a lane succeeds.
 
@@ -993,6 +1086,11 @@ class CampaignReactor:
                     )
                     if lane is not None and lane.review_ready:
                         self._dispatch_review(lane)
+                if (
+                    event.get("kind") == "harvest"
+                    and event.get("transition") == "review-required"
+                ):
+                    self._dispatch_integration(event)
                 pr = self._board.prs.get(f"{event.get('repo')}#{event.get('pr')}")
                 closed = pr is not None and pr.bead_close_status == "closed"
                 if event.get("kind") in {"bead_close", "merge_close"} and (
