@@ -1,161 +1,66 @@
-# Worker contract template and process smells
+# Worker contract
 
-> Direction (operator, 2026-08-26): defaults should be AUTOMAGIC, not
-> contractual. Every mechanizable clause below migrates into machinery
-> (launch snapshot → packet-launch compiler; managed verification →
-> `lane verify`; report-once → `lane done`; seeds → workspace provisioning;
-> exit honesty → bounded.py). This document trends toward the machinery's
-> spec plus only the unmechanizable residue: red-first judgment, honest
-> report content, no scope expansion.
+Everything in this file is compiled verbatim into every dispatched lane's
+prompt. Write only what the worker must do; coordinator material belongs in
+`coordinator-contract.md`.
 
-## The dispatch contract (v2, 2026-08-25)
+## The dispatch contract
 
-Every implementation dispatch carries, verbatim in the prompt:
+1. **Implement from the launch snapshot.** The packet above carries the bead
+   descriptions and acceptance criteria as they stood at dispatch time, the
+   worktree and branch, and the files in scope. Where the packet names atlas
+   sheets, read them for orientation rather than re-deriving the area.
+2. **Verify your own work.** Fix, test, iterate until green inside this run.
+   You own your defects. Do not spawn review subagents — hosted PR review and
+   the test oracle are the structural check.
+3. **Red first for bug fixes.** Demonstrate the failure, then fix it, then show
+   green. Each new test names what mutation would make it red.
+4. **Managed commands only** — the repo's own runner (`devtools test <sel>`),
+   never bare pytest. Commit by path, push, never merge.
+5. **Report once, honestly.** Per-bead and per-acceptance-criterion
+   disposition, the exact commands and the result line that matters, diffstat,
+   residual risk. Refuting a finding needs evidence. The report is the
+   deliverable: going idle without one is a contract violation. Report in the
+   job result only — PR and bead comments duplicate it into a stale copy.
+   Piped exit codes lie (`cmd | tail` reports tail's status); use pipestatus or
+   capture to a file before claiming a gate passed.
+6. **No scope expansion.** Discoveries become filings or report notes, never
+   inline extra work.
+7. **Exit at current master.** Before reporting, fetch, rebase onto
+   `origin/master`, rerun the quick gate in the rebased state, fix what it
+   surfaces, and push. A conflict you cannot resolve honestly is reported as
+   such, never forced to green.
+8. **Machine trailer.** End the report with exact lines `LANE-BRANCH: <branch>`
+   / `LANE-COMMIT: <sha>` / `LANE-QUICK: green|red|blocked-env` /
+   `LANE-CLASSIFICATION: <one line per finding>`.
 
-1. **Task content as a launch snapshot**: the bead's description + AC
-   compiled into the prompt FROM the task authority at dispatch time (a
-   fresh `bd show` at prompt-build, or the worker running `bd show` as its
-   first act) — never a hand-copied paraphrase, and never "read bead X"
-   with no content when the worker may lack task-backend access. Exact
-   worktree/branch, files in scope. This reconciles the pointer rule with
-   content-carrying: the content travels, but only as a dispatch-time
-   snapshot of the authority, so no stale copy accumulates. Where the repo
-   has an atlas (`docs/atlas/`), the prompt names the relevant area sheet —
-   orientation comes from the atlas, not from the worker re-deriving it.
-2. **Self-verification loop**: the worker fixes → tests → iterates until
-   green _within its own run_. It owns its defects. It never spawns review
-   subagents, and no dispatcher builds review→fix→review chains around it —
-   hosted PR review (Codex/CodeRabbit) plus the test oracle are the
-   structural check.
-3. **Red-first for bug fixes**: demonstrate the failure, then fix, then show
-   green. Each new test names its anti-vacuity condition (what mutation
-   would make it red).
-4. **Managed commands only** (per repo contract, e.g. `devtools test <sel>`
-   never bare pytest), commit by path, push, one summary comment at the
-   destination (PR/bead), never merge.
-5. **Honest report, once**: per-finding/per-AC disposition, exact commands +
-   the result line that matters, diffstat, residual risk. Refuted findings
-   need evidence, not dismissal. Going idle without a report is a contract
-   violation — the report IS the deliverable. Report in ONE place (the job
-   result / final message); PR or bead comments only for information that
-   cannot live in the typed result — duplicated summaries become stale
-   copies. Piped exit codes lie: `cmd | tail` reports tail's status — use
-   pipestatus (or capture to file) before claiming a gate passed.
-6. **No scope expansion**: discoveries become bd filings or report notes,
-   never inline extra work.
-7. **Exit at current master** (2026-08-26, from a wave where every stale-base
-   branch cost a coordinator fix loop): before the final report, `git fetch`
-   and rebase the branch onto `origin/master`, rerun the repo's quick gate in
-   the REBASED state (gates added mid-wave — reachability, closure — only run
-   here), fix what it surfaces, and push. A conflict the lane cannot resolve
-   honestly is reported as such — never force-resolved to green.
-8. **Machine trailer**: end the report with exact lines
-   `LANE-BRANCH: <branch>` / `LANE-COMMIT: <sha>` / `LANE-QUICK: green|red|blocked-env`
-   / `LANE-CLASSIFICATION: <one line per finding for fix lanes>` so the
-   harvester parses state instead of prose.
+9. **Do not damage live operator state** — scoped to the harm, not the surface.
 
-9. **Do not damage live operator state.** Scoped to the harm, not to the
-   surface — a lane is not a second-class citizen, it just must not break
-   things it does not own.
+   Forbidden: deleting or overwriting installed tools, dotfiles, or anything
+   under `$HOME` outside your workspace; `switch`/`boot` or any system or
+   Home-Manager rebuild, which would deploy your branch to the live machine;
+   stopping, masking, or reconfiguring live services. Retiring an installed
+   tool means deleting it from the source tree and saying so; removing the live
+   copy is a coordinator act.
 
-   FORBIDDEN, always: deleting or overwriting installed tools, dotfiles, or
-   anything else under `$HOME` outside your own workspace; `switch`/`boot` or
-   any system/Home-Manager rebuild (a rebuild from a lane worktree deploys
-   THAT BRANCH to the live machine); stopping, masking, or reconfiguring live
-   services. Retiring an installed tool means deleting it from the
-   source-of-truth tree and saying so; removing the live copy is a
-   coordinator act, sequenced after the replacement ships. (2026-08-26: a
-   lane deleted a coordinator tool out of `~/.local/bin` mid-campaign because
-   its bead text named that path — bead authors, never name a live path as a
-   deletion target.)
+   Allowed without asking: read-only live evidence — query the archive, read
+   `/realm/state`, `sinnix-observe`, and drive the browser in your own
+   `sinnix-chrome-control agent-window`. Leave the operator's tabs alone.
 
-   ALLOWED without asking: read-only use of live evidence — query the
-   archive, read `/realm/state`, `sinnix-observe`, and drive the browser in
-   your own `sinnix-chrome-control agent-window` (navigate, read, screenshot).
-   Do not touch the operator's existing tabs or windows.
+   Allowed when the packet says so: writes to live state a bead explicitly
+   scopes, with the paths or services named. Absent that, report what you would
+   have done instead of doing it.
 
-   ALLOWED WHEN THE PACKET SAYS SO: writes to live state the bead explicitly
-   scopes — e.g. restoring spool entries, running a capture. The packet must
-   name the paths or services; absent that, report what you would have done
-   instead of doing it.
+10. **Purge, do not retain.** The codebase shrinks without losing
+    functionality. Retiring a route deletes the module, its compatibility
+    aliases and re-exports, its docs, and its tests in the same change. If one
+    symbol still has a real consumer, move it to its true owner and delete the
+    rest. Do not add a test asserting deleted code is gone — that is a fossil
+    of the diff.
 
-10. **Purge, do not retain** (operator ruling, 2026-08-26): the codebase
-    shrinks without sacrificing functionality. Retiring a route means deleting
-    the module, its compatibility aliases and re-exports, its docs, and its
-    tests IN THE SAME CHANGE — not leaving a shim "for compatibility" or a
-    "historical symbol" import. If one symbol in a retired module still has a
-    real consumer, move that symbol to its true owner and delete the rest
-    rather than keeping the module alive around it. Do not add a test asserting
-    deleted code is gone; that is a fossil of the diff. `redflags` mechanically
-    flags legacy/compat wording introduced in production code, so retaining a
-    shim will be caught at review.
+## Verification scope
 
-Verification economics in lanes (operator ruling, 2026-08-26): lanes run
-SELECTED verification from the seed inherited off the main checkout — never
-the corpus, and never bootstrap-from-scratch; selected-run false negatives
-are acceptable risk, caught by the full corpus at merge/master boundaries.
-A lane that finds no compatible seed refuses-and-reports rather than
-silently running broad.
-
-Escalation: a stuck lane gets a hint, a respecified bead, or a model switch —
-never an effort bump (see model-landscape reference). One flounder → escalate
-tier; never retry the same model against the same failure.
-
-## Process smells (from the 2026-08-25 coordinator postmortem)
-
-Watch these ratios in any long-running orchestration; each has a measured
-pathological baseline from the 30h coordinator session that ran the campaign
-into the ground:
-
-- **Graph-churn ratio**: task-tracker update/show calls vs closes. Pathology:
-  2170 bookkeeping : 43 closes (~50:1). Healthy: single-digit:1.
-- **Review share of dispatches**: majority-review dispatch rosters mean the
-  process is consuming itself (pathology: ~35 of 50 dispatches were
-  reviews/audits of other dispatches).
-- **Polling calls**: any status-poll loop is a substrate defect to fix, not
-  a cost to accept (pathology: ~730 polls for ~40 jobs).
-- **Meta-bead growth**: process/validator/calibration beads created faster
-  than leaves close. Finding product defects is GOOD growth; filing beads
-  about the campaign's own machinery is the disease.
-- **Coordinator context thrash**: re-reading the same help/task/doc content
-  after compaction (pathology: 64 compactions, 14 re-reads of one --help).
-  A coordinator that must be reminded of its own CLI belongs in a smaller,
-  fresher context — or replaced by the setup itself.
-
-The structural cure each time: move the mechanism into the substrate (typed
-readiness, completion events, validators), keep judgment above it, and spend
-tokens on merged outcomes.
-
-One more smell with its cure (2026-08-26, from three finished-unprocessed
-jobs): **orphan obligations** — anything async created without a delivery
-path back to the decider AT CREATION (a dispatch without a watcher, a
-watcher writing a log nobody is prompted to read). Cure: one event stream
-(everything terminal appends — jobs via the daemon, scripts via the append
-convention), one persistent consumer, and an acknowledgment cursor making
-"unprocessed backlog" a queryable fact (SessionStart prints it; the
-dispatch breaker refuses past a threshold) instead of a session memory.
-
-## Packet/bead authoring rules (from the 2026-08-25 quality audit of 44 beads)
-
-- **No dated note scrolls.** Consolidate on contact: one current-state note;
-  superseded amendments die. A fresh-context worker acts on what it reads —
-  several audited beads presented voided decisions as current.
-- **Readiness lives only in typed dependency edges.** Free-form
-  "blocked-on-X" strings in metadata went stale the day the graph changed
-  (13 of 42 audited beads). If the validator owns it, prose must not.
-- **Spec weight tracks work size, not completion speed** (corpus-measured,
-  n=956 closed): small bounded fixes close in days with light AC; heavy
-  AC/design marks big work, not dysfunction. Don't impose ceremony on small
-  fixes, and never read a heavy spec as a stalled one.
-- **Oracles must survive their neighbors.** An acceptance criterion binding
-  to a file another bead deletes manufactures false reds; name the invariant
-  and its owning surface, not a doomed path.
-- Bead state updates mechanically where possible: completion events →
-  task-note automation beats manual reconciliation.
-- **Co-execution via dispatch groups, never merges**: beads sharing a file,
-  area, fix pattern, or required context get `dispatch_group=<leader-id>`
-  metadata; the leader's notes list members; one lane executes the group
-  (packet-launch compiles it). Merging beads is NOT the mechanism — each
-  instance keeps its own verifiability and typed close. Utility-plus-adopters
-  is the canonical shape (kernel lands, batch adopts, ratchet closes behind),
-  but any shared-context cluster qualifies, related or not.
+Run selected verification from the seed inherited off the main checkout, never
+the corpus and never a bootstrap from scratch; false negatives are caught at
+the merge boundary. Finding no compatible seed is a refuse-and-report, not a
+reason to run broad.

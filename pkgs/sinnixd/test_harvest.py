@@ -95,7 +95,7 @@ def test_authorize_requires_receipt_and_runs_publish_pipeline(
     result = harvest.authorize(
         context,
         receipt_ref=packet,
-        title="Harvest lane",
+        title="fix: publish the harvested lane branch",
         body="Reviewed packet.",
         run=run,
         watch=False,
@@ -150,7 +150,7 @@ def test_authorize_watcher_closes_bead_from_receipt(
     result = harvest.authorize(
         context,
         receipt_ref=receipt,
-        title="Harvest lane",
+        title="fix: publish the harvested lane branch",
         body="Reviewed packet.",
         run=run,
         watch=True,
@@ -200,7 +200,7 @@ def test_gate_red_is_typed_and_never_pushes(
     result = harvest.authorize(
         context,
         receipt_ref=receipt,
-        title="Harvest lane",
+        title="fix: publish the harvested lane branch",
         body="Reviewed packet.",
         run=run,
         watch=False,
@@ -210,7 +210,7 @@ def test_gate_red_is_typed_and_never_pushes(
     assert pushed is False
 
 
-def test_redflags_preserves_the_coordinator_scanner_contract() -> None:
+def test_redflags_flags_removed_production_lines_and_assertions() -> None:
     status, flags = harvest._redflags(
         "diff --git a/polylogue/module.py b/polylogue/module.py\n"
         "-def removed():\n"
@@ -223,3 +223,16 @@ def test_redflags_preserves_the_coordinator_scanner_contract() -> None:
     assert status == 1
     assert "FLAG: production lines removed (polylogue/)" in flags
     assert "FLAG: test assertions removed" in flags
+
+
+def test_publication_title_must_be_a_squashable_conventional_subject() -> None:
+    """The title lands verbatim as the squash subject on the protected branch.
+
+    Anti-vacuity: dropping the shape or length check makes this red, since a
+    mangled caller expansion and a 73-character subject both pass otherwise.
+    """
+    harvest._require_publication_title("fix(daemon): stop dropping the lane trailer")
+
+    for rejected in ("", "   ", "fix: OPEN]", "fix: short", "add a thing", "fix: " + "x" * 80):
+        with pytest.raises(harvest.HarvestError):
+            harvest._require_publication_title(rejected)

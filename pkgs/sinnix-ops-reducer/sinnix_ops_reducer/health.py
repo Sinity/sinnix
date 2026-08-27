@@ -128,7 +128,7 @@ def describe(
 ) -> tuple[str, str]:
     """(title, body) a human can act on.
 
-    The raw evidence string is a debugging carrier -- "manager=user;
+    The raw evidence string is a debugging aid -- "manager=user;
     active_state=failed;type=oneshot;result=timeout;wanted_by=" tells you
     nothing at a glance about what broke or where to look -- so it stays in the
     JSONL ledger and out of the notification.
