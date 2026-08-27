@@ -103,3 +103,27 @@ per-change workspace. Two sessions working at once therefore share one dirty
 tree: on 2026-08-27 an unrelated commit appeared on both master and an active
 integration branch mid-rebase, and an earlier uncommitted change was swept into
 someone else's commit. Polylogue lanes get worktrees; sinnix work does not.
+
+## The coordinator is the unmetered workload
+
+On 2026-08-27 a coordinator dispatched seven integration agents at once. Each
+fanned out to per-lane subagents, and each of those started a verification gate:
+nineteen concurrent gates against a 24-core, 32 GB host. Swap reached 95.7% and
+the host entered the measured pre-freeze regime. Two of the coordinator's own
+shell commands were killed under the pressure it had created.
+
+Nothing metered any of it. Lane jobs launched through `agentctl` land in
+`sinnixd-work-*.slice` with real admission; work an agent starts from its own
+shell inherits the terminal's scope, where the only policy is `MemoryLow=4G`
+protecting it from reclaim. The scheduler saw none of the load it was supposed
+to govern.
+
+This is the same failure the freeze work addressed, reproduced from the other
+side: not a runaway job, but an orchestrator with no admission control over
+what it spawns. Contained coordinators would have queued those gates instead
+of stampeding, without any cap on how much work is in flight.
+
+Concurrency is not the lever. Nineteen gates is a reasonable amount of work for
+this machine to *want*; it is an unreasonable amount to run simultaneously. The
+missing piece is a queue, and the queue already exists — the work simply is not
+in it.
