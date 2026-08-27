@@ -66,8 +66,8 @@ five means the change should be split).
 Resolve by intent traced to each side's primary sources (commit messages,
 PRs, beads) — never by picking lines; preserve both intents where possible;
 never invent behavior mid-merge; never `--abort` as a resolution. Commit
-after every conflict-resolution edit (learned the hard way). Autostash
-reapply can leave conflict markers — grep for them before continuing.
+after every conflict-resolution edit. Autostash reapply can leave conflict
+markers — grep for them before continuing.
 
 ## After landing
 

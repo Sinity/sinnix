@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
+from typing import Any, Mapping
 from uuid import uuid4
 
 from sinnix_mcp import ErrorCode, ErrorEnvelope, RequestEnvelope, ResponseEnvelope
@@ -131,6 +133,11 @@ def default_socket_path() -> Path:
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="agentctl")
     result.add_argument("--socket", type=Path, default=default_socket_path())
+    result.add_argument(
+        "--plain",
+        action="store_true",
+        help="Print the payload value as text instead of the response envelope.",
+    )
     subcommands = result.add_subparsers(dest="command", required=True)
     subcommands.add_parser("status")
     fleet = subcommands.add_parser(
@@ -485,8 +492,49 @@ def _unavailable_response(request: RequestEnvelope) -> dict[str, object]:
     ).to_dict()
 
 
+_JOB_ID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
+
+
+def _expand_job_id(value: str) -> str:
+    """Accept the abbreviated job ids that fleet output and events print."""
+    if _JOB_ID_RE.fullmatch(value) or len(value) < 4:
+        return value
+    matches = sorted(
+        path.stem
+        for path in (default_state_dir() / "jobs").glob(f"{value}*.json")
+        if _JOB_ID_RE.fullmatch(path.stem)
+    )
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        parser().error(f"job id prefix {value!r} matches {len(matches)} jobs")
+    return value
+
+
+def _render_plain(response: Mapping[str, Any]) -> str:
+    """The payload value as text, for callers that want the answer not the envelope."""
+    if response.get("ok") is not True:
+        error = response.get("error")
+        message = error.get("message") if isinstance(error, Mapping) else None
+        return f"ERROR: {message or 'request failed'}"
+    payload = response.get("payload")
+    value = payload.get("value") if isinstance(payload, Mapping) else payload
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Mapping) and isinstance(value.get("content"), str):
+        return value["content"]
+    return json.dumps(value, indent=1, sort_keys=True)
+
+
 def main() -> int:
     arguments = parser().parse_args()
+    if isinstance(getattr(arguments, "job_id", None), str):
+        arguments.job_id = _expand_job_id(arguments.job_id)
+    if isinstance(getattr(arguments, "job_ids", None), list):
+        arguments.job_ids = [_expand_job_id(item) for item in arguments.job_ids]
+    for option in ("job", "packet_job", "verification_job"):
+        if isinstance(getattr(arguments, option, None), str):
+            setattr(arguments, option, _expand_job_id(getattr(arguments, option)))
     if arguments.command == "fleet":
         payload = read_fleet(
             GenericJobStore(arguments.state_dir),
@@ -1194,7 +1242,10 @@ def main() -> int:
                 response = _wait_for_delivery(arguments.socket, response)
         except (OSError, ProtocolError, SinnixdClientError):
             response = _unavailable_response(request)
-    print(json.dumps(response, indent=2, sort_keys=True))
+    if getattr(arguments, "plain", False):
+        print(_render_plain(response))
+    else:
+        print(json.dumps(response, indent=2, sort_keys=True))
     return 0 if response.get("ok") is True else 1
 
 

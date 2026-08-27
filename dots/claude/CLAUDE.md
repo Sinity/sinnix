@@ -56,6 +56,12 @@ future reader pays the cost.
   review's plot.
 - **One statement per fact**, everywhere. Do not restate a conclusion in a
   summary line under it.
+- **A fix leaves no scar.** Once a mistake is corrected, the correction is the
+  only thing worth writing: state what is true now. "Dispatch is a verb" —
+  never "a verb, not a script", never a warning against the retired route,
+  never a dated note about who got it wrong. Naming the wrong path keeps it
+  alive in every future reader's context and half-reads as an instruction.
+  Guardrails against genuine harm are the exception, and they are short.
 - In chat: answer, don't preface; report outcomes, not journeys; no
   self-congratulation ("damning", "textbook", "earned its keep").
 
@@ -131,11 +137,11 @@ live OUTSIDE your context — read them, never reconstruct:
   — start with its capability table, which names the `agentctl` verb for each
   need so you do not hand-roll a worse copy. Worker rules in its sibling
   `worker-contract.md`.
-- **Live board**: `board` / `board sync` (`/realm/tmp/work/campaign-board.json`).
-- **Dispatch and harvest are agentctl verbs**, not scripts: `campaign run`,
-  `packet launch`, and the declared `harvest` operation (review receipt, then
-  authorize to publish). `actl` unwraps agentctl's JSON envelopes; `board`
-  prints the campaign board.
+- **Live board**: `sinnixd-reactor` maintains `/realm/tmp/work/campaign-board.json`
+  from the event spool and emits keeper events.
+- **Dispatch**: `agentctl campaign run` for a wave, `packet launch` for one
+  bead. **Harvest**: the declared `harvest` operation — review receipt, then
+  authorize to publish. `agentctl --plain` prints payloads as text.
 - A fresh session resumes a campaign from those files plus the project's
   memory index; nothing campaign-critical may live only in a chat context.
 

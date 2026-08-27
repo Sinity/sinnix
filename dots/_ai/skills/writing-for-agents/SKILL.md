@@ -36,8 +36,7 @@ Pointer rules (they pay rent every turn, so prune hardest here):
   it where judgment matters; remove it where it does not.
 
 Material behind a pointer escapes context load for the price of the pointer's
-line. The instruction-reduction program (five CLAUDE.md files,
-2,268 → ~1,000 lines) is this trade executed at scale.
+line. Executed at scale, that trade is what keeps always-loaded files short.
 
 ## Information hierarchy
 
@@ -58,7 +57,7 @@ End every step on a condition the agent can check. Two levers:
   "every rule applied" binds flat reference exactly as "every step done"
   binds a sequence.
 
-Estate examples of the standard: anti-vacuity statements in lane reports;
+Examples of the standard here: anti-vacuity statements in lane reports;
 "cite the changed files, exact verification commands, and what was not run."
 
 ## Leading words
@@ -68,9 +67,8 @@ A **leading word** is a compact pretrained concept the agent thinks with
 anchors behavior cheaply. Hunt for restatements a leading word retires.
 Two cautions:
 
-- A coined word recruits no priors — you pay its definition everywhere. This
-  is how the jargon debt (receipt ×8 meanings, authority ×3) accumulated.
-  Never mint a new noun for a mechanism that already has one, and name the
+- A coined word recruits no priors — you pay its definition everywhere, and
+  one word quietly ends up naming eight mechanisms. Never mint a new noun for a mechanism that already has one, and name the
   artifact or behaviour rather than the ritual: "run the checks and store the
   result", not "emit a proof-carrying receipt". When a term genuinely earns
   its place, introduce it in plain language at first use in any
@@ -91,24 +89,23 @@ Two cautions:
   AGENTS.md is a symlink to CLAUDE.md for exactly this reason.
 - **The environment is a source of truth**: `devtools --list-commands`,
   `agentctl --help`, `bd --help`, generated reference docs, `.agentctl/
-project.toml`. A document restating them is a cache that goes stale — the
-  recorded failure class (six stale CLAUDE.md claims, skills
-  teaching nonexistent verbs). Cache only what no lookup confesses: the
-  unwritten convention, the reason, the gotcha.
+project.toml`. A document restating them is a cache that goes stale into
+  claims the environment no longer supports. Cache only what no lookup
+  confesses: the unwritten convention, the reason, the gotcha.
 - **No-op test** (model-relative): does the sentence change behavior versus
   the model's default? "Be thorough" fails; delete the sentence, or replace
   the weak word with a stronger one (relentless), not with emphasis.
 - **Sediment**: stale layers settle because adding feels safe and removing
   feels risky. Every instruction-file edit should delete at least as
   deliberately as it adds; a refresh that only appends is suspect.
-- **Transcription trivia** (recorded failure class, 2026-08-25): agents
-  distilling a source carry its color into durable surfaces — vendor
-  hosting details, benchmark numbers, narrative flourishes that decide
-  nothing. Test each fact: what decision changes if it's wrong or absent?
-  None → delete, don't caveat. (A wrong-but-cited detail is worse than
-  absent: it invites a correction cycle over a fact nobody needed.)
+- **Transcription trivia**: distilling a source carries its color into
+  durable surfaces — vendor hosting details, benchmark numbers, narrative
+  flourishes that decide nothing. Test each fact: what decision changes if
+  it is wrong or absent? None means delete it rather than caveat it. A
+  wrong-but-cited detail is worse than an absent one; it invites a
+  correction cycle over a fact nobody needed.
 
-## Estate specifics
+## Local conventions
 
 - Skills follow [[skill-authoring]] mechanics (frontmatter, validator,
   forward-probe routing tests). This skill owns the prose craft; that one
