@@ -407,7 +407,68 @@ class CampaignRunner:
                 "\0".join(lane.group for lane in schedule.lanes).encode()
             ).hexdigest()[:32]
         )
-        plan = self.plans.submit_external(
+        plan = self._submit_tolerating_conflicts(
+            schedule,
+            project_id,
+            generation,
+            launch,
+            wave_id,
+        )
+        result["plan"] = plan
+        result["schedule"] = schedule.to_dict()
+        return result
+
+    def _submit_tolerating_conflicts(
+        self,
+        schedule: CampaignSchedule,
+        project_id: str,
+        generation: str,
+        launch: Any,
+        wave_id: str,
+    ) -> dict[str, Any]:
+        self._wave_id = wave_id
+        """Drop a lane an admission race refuses, then submit the rest.
+
+        The reactor refills on its own schedule, so no pre-check can be exact:
+        a key can go active between scheduling and launching. Refusing the
+        whole wave for one raced lane would make concurrent scheduling useless.
+        """
+        from .jobs import AdmissionConflictError
+
+        lanes = list(schedule.lanes)
+        while lanes:
+            try:
+                return self._submit_plan(
+                    lanes, schedule, project_id, generation, launch
+                )
+            except AdmissionConflictError as error:
+                blocked = set(error.conflicts)
+                remaining = [
+                    lane for lane in lanes if not blocked.intersection(lane.conflict_keys)
+                ]
+                if len(remaining) == len(lanes):
+                    raise
+                self.jobs.spool_event(
+                    {
+                        "kind": "campaign",
+                        "transition": "lane deferred",
+                        "wave_id": wave_id,
+                        "project": project_id,
+                        "reason": str(error),
+                    }
+                )
+                lanes = remaining
+        raise AdmissionConflictError({})
+
+    def _submit_plan(
+        self,
+        lanes: list[CampaignLane],
+        schedule: CampaignSchedule,
+        project_id: str,
+        generation: str,
+        launch: Any,
+    ) -> dict[str, Any]:
+        return self.plans.submit_external(
             {
                 "project_id": project_id,
                 "input_generation": generation,
@@ -419,19 +480,18 @@ class CampaignRunner:
                             before
                             for before, after in schedule.edges
                             if after == lane.group
+                            and any(other.group == before for other in lanes)
                         ],
                         "payload": dict(lane.payload),
                     }
-                    for lane in schedule.lanes
+                    for lane in lanes
                 ],
             },
             launcher=launch,
-            correlation_id=wave_id,
+            correlation_id=self._wave_id,
             principal="agent-control",
             operation="packet-lane",
         )
-        result["plan"] = plan
-        return result
 
     @property
     def _job_contracts(self) -> Any:
