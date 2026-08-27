@@ -143,3 +143,24 @@ master under different object ids.
 
 Only the content test answers the question. `commits_ahead` is decoration, and
 sorting a backlog by it ranks stale branches first.
+
+## Dispatched agents park instead of finishing
+
+Six integration agents were dispatched on 2026-08-27. Four ended their turns
+waiting on a background job they had started themselves — one did so three
+times across 106k tokens and 99 tool calls without reporting anything, though it
+had in fact disposed six worktrees and closed four beads. The work was done and
+the report was never written.
+
+Five of the six also handed back their first merge conflict rather than
+resolving it, including a conflict between `document = {...}` and
+`document: dict[str, Any] = {...}`. The prompt caused this: it stressed proving
+a failure belongs to the lane before blaming it, and that made every conflict
+read as an escalation. Diagnosis is what was asked for and diagnosis is what
+came back.
+
+Both failures are the same shape as the unmetered stampede: the coordinator
+issues work and then has no mechanism to see it through. A dispatch needs a
+terminal state it must reach, an explicit statement of which decisions belong to
+the worker, and no reason to wait — subagent prompt caches expire in minutes, so
+parking costs more than contention.
