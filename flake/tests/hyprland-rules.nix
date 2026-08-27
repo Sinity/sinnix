@@ -110,5 +110,42 @@ in
             "Command Line: ${hyprland}/bin/Hyprland --config $PWD/home/.config/hypr/hyprland.lua"
           touch "$out"
         '';
+
+      checks.hyprland-navigation = pkgs.runCommand "sinnix-hyprland-navigation"
+        {
+          nativeBuildInputs = [ pkgs.bash ];
+        }
+        ''
+          mkdir bin
+          cat > bin/hyprctl <<'EOF_HYPRCTL'
+          #!${pkgs.runtimeShell}
+          printf '%s\n' "$*" >> "$HYPR_RECORD"
+          EOF_HYPRCTL
+          cat > bin/jq <<'EOF_JQ'
+          #!${pkgs.runtimeShell}
+          exit 1
+          EOF_JQ
+          chmod +x bin/hyprctl bin/jq
+          export HYPR_RECORD="$PWD/hyprctl-calls"
+          export PATH="$PWD/bin:$PATH"
+
+          nav=${../../scripts/kitty-hypr-nav}
+          ${pkgs.bash}/bin/bash "$nav" focus left
+          ${pkgs.bash}/bin/bash "$nav" focus right
+          ${pkgs.bash}/bin/bash "$nav" focus up
+          ${pkgs.bash}/bin/bash "$nav" focus down
+          ${pkgs.bash}/bin/bash "$nav" move up
+          ${pkgs.bash}/bin/bash "$nav" resize down
+
+          diff -u - "$HYPR_RECORD" <<'EOF_EXPECTED'
+          eval hl.dispatch(hl.dsp.focus({ direction = "left" }))
+          eval hl.dispatch(hl.dsp.focus({ direction = "right" }))
+          eval hl.dispatch(hl.dsp.focus({ direction = "up" }))
+          eval hl.dispatch(hl.dsp.focus({ direction = "down" }))
+          eval hl.dispatch(hl.dsp.window.move({ direction = "up" }))
+          eval hl.dispatch(hl.dsp.window.resize({ x = 0, y = 80, relative = true }))
+          EOF_EXPECTED
+          touch "$out"
+        '';
     };
 }
