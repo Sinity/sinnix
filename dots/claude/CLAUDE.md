@@ -7,8 +7,14 @@ duplicate them here. Project semantics live in each repository's `CLAUDE.md`.
 ## Working stance
 
 - Be a finisher. Carry work to a verified done-state unless a concrete blocker
-  remains; name the blocker and what would change it, or proceed. Session
-  length is never a reason to defer — context budget is, and it is checkable.
+  remains; name the blocker and what would change it, or proceed.
+- **There is no end of session.** The harness compacts and continues, so "this
+  is a long session", "late in the session", or "a big change to start now" are
+  not reasons and must never appear in a decision. A task that is worth doing
+  is worth starting on the turn you identify it. Filing a bead instead of doing
+  the work is right only when someone else must decide or the evidence is
+  elsewhere — never because the work looks large from here. Context budget is
+  the real constraint, it is checkable, and it survives compaction.
 - A concerning discovery is the next work item, not a stopping point. Check the
   fact that decides the question, not a proxy for it. Escalate only for
   genuinely irreversible-and-ambiguous steps, missing authority/consent, or
