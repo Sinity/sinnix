@@ -922,7 +922,16 @@ class CampaignReactor:
         receipt = event.get("receipt_ref") or event.get("packet_id")
         if not all(isinstance(v, str) and v for v in (project, workspace_id, receipt)):
             return
-        key = f"integrate:{event.get('job_id')}"
+        # One workspace is one unit of integration. Keying on the review job
+        # instead dispatches another agent for every re-review of the same
+        # lane, which is how one workspace collected seventeen integrators.
+        workspace = self._workspace_name(str(workspace_id))
+        if workspace is None:
+            self._board.record_error(
+                -1, f"integrate: no registered workspace for {workspace_id}"
+            )
+            return
+        key = f"integrate:{workspace}"
         if key in self._board.keeper:
             return
         root = self.project_roots.get(str(project))
@@ -930,15 +939,13 @@ class CampaignReactor:
             return
         reason = self._needs_judgment(event)
         if reason is None:
-            self._publish(str(project), str(workspace_id), str(receipt), key)
+            self._publish(str(project), workspace, str(receipt), key)
             return
         try:
             if self.integration_dispatcher is not None:
-                self.integration_dispatcher(
-                    str(project), str(workspace_id), str(receipt)
-                )
+                self.integration_dispatcher(str(project), workspace, str(receipt))
             else:
-                prompt = self._integration_prompt(root, event)
+                prompt = self._integration_prompt(root, event, workspace)
                 prompt_path = self.state_dir / f"integrate-{event.get('job_id')}.md"
                 prompt_path.write_text(prompt, encoding="utf-8")
                 subprocess.run(
@@ -975,7 +982,31 @@ class CampaignReactor:
             "next_eligible_at": _now(),
         }
 
-    def _integration_prompt(self, root: Path, event: Mapping[str, Any]) -> str:
+    @staticmethod
+    def _workspace_name(checkout_id: str) -> str | None:
+        """Map a checkout id back to the workspace name the verbs take.
+
+        Events carry the checkout id; `job start --workspace` and the harvest
+        operation address a workspace by name.
+        """
+        index = Path.home() / ".local/state/sinnixd/workspaces/index.json"
+        try:
+            records = json.loads(index.read_text()).get("workspaces", [])
+        except (OSError, json.JSONDecodeError, AttributeError):
+            return None
+        for record in records:
+            path = record.get("path")
+            name = record.get("name")
+            if not isinstance(path, str) or not isinstance(name, str):
+                continue
+            derived = "worktree-" + hashlib.sha256(path.encode()).hexdigest()[:16]
+            if derived == checkout_id:
+                return name
+        return None
+
+    def _integration_prompt(
+        self, root: Path, event: Mapping[str, Any], workspace: str
+    ) -> str:
         contract = (
             root / "dots/_ai/skills/orchestrate/references/integrator-contract.md"
         )
@@ -989,11 +1020,13 @@ class CampaignReactor:
             if isinstance(packet, Mapping)
             else ""
         )
+        receipt = str(event.get("receipt_ref") or event.get("packet_id") or "")
         return (
             "# Integration packet\n\n"
             f"project: {event.get('project')}\n"
-            f"workspace: {event.get('workspace_id')}\n"
-            f"receipt_ref: {event.get('receipt_ref')}\n\n"
+            f"workspace: {workspace}\n"
+            f"worktree: /realm/worktrees/{workspace}\n"
+            f"receipt_ref: {receipt.rsplit('/', 1)[-1]}\n\n"
             "## Review receipt\n\n"
             f"```json\n{summary}\n```\n\n"
             f"## Operating rules\n\n{body}\n"
