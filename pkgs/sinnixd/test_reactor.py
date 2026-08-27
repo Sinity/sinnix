@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sinnixd.reactor import CampaignBoard, CampaignReactor, LaneRecord, PullRequestRecord
+from sinnixd.reactor import (
+    CampaignBoard,
+    CampaignReactor,
+    LaneRecord,
+    PullRequestRecord,
+)
 
 
 class FakeBeadCloser:
@@ -172,9 +177,7 @@ def test_review_dispatch_uses_the_checkout_path_as_the_workspace(
         event_spool=tmp_path / "events.jsonl",
         board_path=tmp_path / "board.json",
         state_dir=tmp_path / "state",
-        review_dispatcher=lambda project, workspace: calls.append(
-            (project, workspace)
-        ),
+        review_dispatcher=lambda project, workspace: calls.append((project, workspace)),
     )
     record = LaneRecord(
         job_id="job-1",
@@ -222,9 +225,7 @@ def test_workspace_resolves_from_the_durable_job_record(tmp_path: Path) -> None:
     jobs = tmp_path / "jobs"
     jobs.mkdir()
     (jobs / "job-1.json").write_text(
-        json.dumps(
-            {"checkout": {"path": "/realm/worktrees/packet-polylogue-wxyz"}}
-        )
+        json.dumps({"checkout": {"path": "/realm/worktrees/packet-polylogue-wxyz"}})
     )
     reactor = CampaignReactor(
         event_spool=tmp_path / "events.jsonl",

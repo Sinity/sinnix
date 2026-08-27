@@ -444,7 +444,9 @@ class CampaignRunner:
             except AdmissionConflictError as error:
                 blocked = set(error.conflicts)
                 remaining = [
-                    lane for lane in lanes if not blocked.intersection(lane.conflict_keys)
+                    lane
+                    for lane in lanes
+                    if not blocked.intersection(lane.conflict_keys)
                 ]
                 if len(remaining) == len(lanes):
                     raise

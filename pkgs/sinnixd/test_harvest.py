@@ -233,6 +233,13 @@ def test_publication_title_must_be_a_squashable_conventional_subject() -> None:
     """
     harvest._require_publication_title("fix(daemon): stop dropping the lane trailer")
 
-    for rejected in ("", "   ", "fix: OPEN]", "fix: short", "add a thing", "fix: " + "x" * 80):
+    for rejected in (
+        "",
+        "   ",
+        "fix: OPEN]",
+        "fix: short",
+        "add a thing",
+        "fix: " + "x" * 80,
+    ):
         with pytest.raises(harvest.HarvestError):
             harvest._require_publication_title(rejected)

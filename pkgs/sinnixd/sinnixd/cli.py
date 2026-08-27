@@ -493,7 +493,9 @@ def _unavailable_response(request: RequestEnvelope) -> dict[str, object]:
     ).to_dict()
 
 
-_JOB_ID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
+_JOB_ID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z"
+)
 
 
 def _expand_job_id(value: str) -> str:
