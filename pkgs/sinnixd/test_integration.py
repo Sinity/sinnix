@@ -53,7 +53,14 @@ def test_landed_content_is_not_reported_as_unintegrated(tmp_path: Path) -> None:
     subprocess.run(
         ["git", "checkout", "-q", "lane"], cwd=repo, check=True, capture_output=True
     )
-    assert unintegrated_content(repo, "master") == ("feature.txt",)
+    base = tmp_path / "base"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", "--detach", str(base), "master"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    assert unintegrated_content(repo, "master", repo=base) == ("feature.txt",)
 
     # Land the same content on master the way a squash-merge does.
     subprocess.run(
@@ -63,7 +70,7 @@ def test_landed_content_is_not_reported_as_unintegrated(tmp_path: Path) -> None:
     subprocess.run(
         ["git", "checkout", "-q", "lane"], cwd=repo, check=True, capture_output=True
     )
-    assert unintegrated_content(repo, "master") == ()
+    assert unintegrated_content(repo, "master", repo=base) == ()
 
 
 def _unit(name: str, *files: str, dirty: bool = False) -> IntegrationUnit:
