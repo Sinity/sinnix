@@ -77,19 +77,36 @@ def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
         raise IntegrationError(f"git {' '.join(args)} failed in {cwd}") from error
 
 
-def unintegrated_content(path: Path, base: str = DEFAULT_BASE) -> tuple[str, ...]:
-    """Files this checkout introduces that still differ from the base.
+def unintegrated_content(
+    path: Path, base: str = DEFAULT_BASE, *, repo: Path | None = None
+) -> tuple[str, ...]:
+    """Files this checkout introduces whose content is not on the base yet.
 
-    The two-step check is squash-proof: a branch keeps its commits after its
-    content lands, so divergence alone would report finished work as pending.
-    Only a file that still differs from the base is genuinely unintegrated.
+    A branch keeps its commits after a squash-merge lands its content, so
+    divergence alone reports finished work as pending. Comparing the files
+    against the base is not enough either: once the base moves, any file the
+    lane touched differs for reasons that have nothing to do with this lane.
+
+    The patch itself is the evidence. If it reverse-applies to the base, the
+    base already contains it.
     """
     introduced = _git("diff", f"{base}...HEAD", "--name-only", cwd=path)
     names = [line for line in introduced.stdout.splitlines() if line.strip()]
     if not names:
         return ()
-    remaining = _git("diff", base, "HEAD", "--name-only", "--", *names, cwd=path)
-    return tuple(line for line in remaining.stdout.splitlines() if line.strip())
+    patch = _git("diff", f"{base}...HEAD", cwd=path).stdout
+    if patch.strip():
+        applied = subprocess.run(
+            ["git", "apply", "-R", "--check", "-"],
+            cwd=repo or path,
+            input=patch,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+        if applied.returncode == 0:
+            return ()
+    return tuple(names)
 
 
 def discover_units(
@@ -102,6 +119,10 @@ def discover_units(
     for path in sorted(worktree_root.iterdir()):
         if not path.is_dir() or not (path / ".git").exists():
             continue
+        branch_name = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=path).stdout.strip()
+        if branch_name.startswith("integration/"):
+            # An integration branch is an output of this process, not an input.
+            continue
         common = _git(
             "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=path
         )
@@ -109,7 +130,7 @@ def discover_units(
             continue
         if Path(common.stdout.strip()) != git_common_dir:
             continue
-        files = unintegrated_content(path, base)
+        files = unintegrated_content(path, base, repo=git_common_dir.parent)
         if not files:
             continue
         branch = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=path).stdout.strip()
