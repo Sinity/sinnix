@@ -310,8 +310,8 @@ rec {
         MemoryHigh = "24G";
         ManagedOOMSwap = "kill";
         ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "20%";
-        ManagedOOMMemoryPressureDurationSec = "10s";
+        ManagedOOMMemoryPressureLimit = "10%";
+        ManagedOOMMemoryPressureDurationSec = "5s";
       };
       sinnixd-work = {
         IOAccounting = true;

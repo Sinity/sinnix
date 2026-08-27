@@ -508,6 +508,27 @@ def test_terminal_capture_records_resources_at_the_observed_cgroup(
     }
 
 
+def test_host_pressure_reads_the_nested_managed_work_slice(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    uid = jobs_module.os.getuid()
+    managed = (
+        tmp_path
+        / "user.slice"
+        / f"user-{uid}.slice"
+        / f"user@{uid}.service"
+        / "sinnixd.slice"
+        / "sinnixd-work.slice"
+    )
+    managed.mkdir(parents=True)
+    (managed / "memory.current").write_text("123456\n")
+    monkeypatch.setattr(jobs_module, "CGROUP_ROOT", tmp_path)
+
+    pressure = jobs_module.host_pressure()
+
+    assert pressure["managed_memory_bytes"] == 123456.0
+
+
 def test_terminal_capture_records_explicit_backend_usage_fields(
     tmp_path: Path,
 ) -> None:
