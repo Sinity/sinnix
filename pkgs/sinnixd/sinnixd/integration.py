@@ -109,6 +109,31 @@ def unintegrated_content(
     return tuple(names)
 
 
+def _landed_integration_branches(repo: Path, base: str) -> tuple[str, ...]:
+    """Integration branches whose content is already on the base."""
+    listed = _git("branch", "--format=%(refname:short)", cwd=repo)
+    landed: list[str] = []
+    for name in listed.stdout.splitlines():
+        name = name.strip()
+        if not name.startswith("integration/"):
+            continue
+        patch = _git("diff", f"{base}...{name}", cwd=repo).stdout
+        if not patch.strip():
+            landed.append(name)
+            continue
+        applied = subprocess.run(
+            ["git", "apply", "-R", "--check", "-"],
+            cwd=repo,
+            input=patch,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+        if applied.returncode == 0:
+            landed.append(name)
+    return tuple(landed)
+
+
 def discover_units(
     worktree_root: Path, git_common_dir: Path, base: str = DEFAULT_BASE
 ) -> list[IntegrationUnit]:
@@ -116,6 +141,7 @@ def discover_units(
     units: list[IntegrationUnit] = []
     if not worktree_root.is_dir():
         return units
+    landed = set(_landed_integration_branches(git_common_dir.parent, base))
     for path in sorted(worktree_root.iterdir()):
         if not path.is_dir() or not (path / ".git").exists():
             continue
@@ -131,8 +157,25 @@ def discover_units(
         if Path(common.stdout.strip()) != git_common_dir:
             continue
         files = unintegrated_content(path, base, repo=git_common_dir.parent)
+        # Lane publication text is gitignored scratch; a branch differing only
+        # there carries no work.
+        files = tuple(name for name in files if not name.startswith(".lane/"))
         if not files:
             continue
+        # A lane repaired during integration lands as modified content, so its
+        # patch no longer reverse-applies. Containment in a landed integration
+        # branch says the work is in regardless of how it was adjusted.
+        head = _git("rev-parse", "HEAD", cwd=path).stdout.strip()
+        if head and landed:
+            containing = _git(
+                "branch",
+                "--format=%(refname:short)",
+                "--contains",
+                head,
+                cwd=git_common_dir.parent,
+            ).stdout.split()
+            if any(name in landed for name in containing):
+                continue
         branch = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=path).stdout.strip()
         dirty = bool(_git("status", "--porcelain", cwd=path).stdout.strip())
         units.append(IntegrationUnit(path.name, path, branch, files, dirty))

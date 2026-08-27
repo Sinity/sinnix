@@ -103,3 +103,40 @@ def test_pack_excludes_dirty_units_and_bounds_batch_size() -> None:
     assert "d" not in {u.workspace for b in batches for u in b.units}
     with pytest.raises(IntegrationError):
         pack(units, max_units=0)
+
+
+def test_a_branch_differing_only_in_lane_scratch_carries_no_work(
+    tmp_path: Path,
+) -> None:
+    """`.lane/*` is gitignored publication text, not a change to integrate.
+
+    Anti-vacuity: without the filter these branches pack into batches and each
+    merge re-adds files the repository ignores.
+    """
+    from sinnixd.integration import discover_units
+
+    repo = tmp_path / "repo"
+    _repo(repo)
+    _commit(repo, "base.txt", "base\n")
+    common = Path(
+        subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    )
+    worktrees = tmp_path / "worktrees"
+    worktrees.mkdir()
+    lane = worktrees / "lane"
+    subprocess.run(
+        ["git", "worktree", "add", "-q", str(lane), "-b", "lane", "master"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    (lane / ".lane").mkdir()
+    _commit(lane, ".lane/title", "fix: something\n")
+
+    assert discover_units(worktrees, common, "master") == []
