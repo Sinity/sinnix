@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from sinnixd.lanes import derive_units, disposable, stuck
+from sinnixd.lanes import derive_units, disposable, refresh_base, stuck
 
 
 def _run(argv: list[str], cwd: Path) -> None:
@@ -132,3 +132,15 @@ def test_uncommitted_changes_are_stuck_rather_than_collected(tmp_path: Path) -> 
     assert units["spent"].state == "dirty"
     assert units["spent"] in stuck(units.values())
     assert units["spent"] not in disposable(units.values())
+
+
+def test_refresh_base_only_fetches_a_remote_tracking_ref(tmp_path: Path) -> None:
+    """A local base has no remote to update, and must not be treated as one.
+
+    Anti-vacuity: without the split, a bare local branch name is handed to
+    `git fetch` as a remote and the derivation reports a failure that is not one.
+    """
+    repo, _trees = _fixture(tmp_path)
+
+    assert refresh_base(repo, "master") is False
+    assert refresh_base(repo, "./master") is False

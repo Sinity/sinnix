@@ -112,6 +112,18 @@ def _commits_ahead(path: Path, base: str) -> int:
         return 0
 
 
+def refresh_base(repo: Path, base: str) -> bool:
+    """Update the remote-tracking ref the classification is measured against.
+
+    Every state here is relative to `base`. A stale ref reports landed work as
+    held, so the fetch is part of deriving the answer, not a convenience.
+    """
+    remote, _, _branch = base.partition("/")
+    if not _branch or remote == ".":
+        return False
+    return _git("fetch", "--quiet", remote, cwd=repo).returncode == 0
+
+
 def derive_units(
     worktree_root: Path,
     git_common_dir: Path,
