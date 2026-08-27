@@ -913,6 +913,13 @@ class CampaignReactor:
         quick = trailer.get("LANE-QUICK") if isinstance(trailer, Mapping) else None
         if quick != "green":
             return f"lane gate {quick or 'unknown'}"
+        # The trailer is the lane's own prose. The receipt says what actually
+        # ran, so a lane claiming green with no test run of its own HEAD is an
+        # exception, not a clean publish.
+        evidence = packet.get("verification")
+        state = evidence.get("state") if isinstance(evidence, Mapping) else None
+        if state != "tests-run":
+            return f"no test evidence for this head ({state or 'missing'})"
         return None
 
     def _dispatch_integration(self, event: Mapping[str, Any]) -> None:

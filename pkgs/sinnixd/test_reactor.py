@@ -321,9 +321,15 @@ def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
             "redflag_status": 0,
             "redflags": ["diff lines: 12"],
             "lane_trailer": {"LANE-QUICK": "green"},
+            "verification": {"state": "tests-run"},
         }
     }
     assert CampaignReactor._needs_judgment(clean) is None
+
+    # A green trailer with no test run of this head is an exception: the
+    # trailer is the lane's own prose, the receipt is what ran.
+    unproven = {"packet": {**clean["packet"], "verification": {"state": "static-only"}}}
+    assert "no test evidence" in (CampaignReactor._needs_judgment(unproven) or "")
 
     flagged = {
         "packet": {
@@ -337,7 +343,13 @@ def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
     )
 
     for quick in ("red", "blocked-env", None):
-        lane = {"packet": {"redflag_status": 0, "lane_trailer": {"LANE-QUICK": quick}}}
+        lane = {
+            "packet": {
+                "redflag_status": 0,
+                "lane_trailer": {"LANE-QUICK": quick},
+                "verification": {"state": "tests-run"},
+            }
+        }
         assert CampaignReactor._needs_judgment(lane) is not None
     assert CampaignReactor._needs_judgment({}) is not None
 

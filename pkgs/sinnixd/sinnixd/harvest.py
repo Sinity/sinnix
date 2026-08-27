@@ -228,6 +228,54 @@ def _lane_trailer(
     return sorted(candidates, key=lambda item: item[0])[-1][1]
 
 
+def _verification_evidence(worktree: Path, head: str) -> dict[str, Any]:
+    """Read what the lane's own verification actually did.
+
+    `devtools` writes a receipt per run under `.cache/verify/runs/`. Reading it
+    replaces the lane's self-reported trailer with evidence: which command ran,
+    whether it passed, how many tests, and against which commit -- so a receipt
+    describing a different HEAD is visible as stale rather than counted.
+    """
+    runs = worktree / ".cache/verify/runs"
+    try:
+        records = sorted(runs.glob("*/run.json"))
+    except OSError:
+        return {"state": "unreadable"}
+    if not records:
+        return {"state": "absent"}
+    latest: dict[str, Any] = {}
+    for record in records:
+        try:
+            value = json.loads(record.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(value, Mapping):
+            continue
+        argv = value.get("argv")
+        command = " ".join(argv) if isinstance(argv, list) else "?"
+        entry = {
+            "status": value.get("status"),
+            "exit_code": value.get("exit_code"),
+            "git_head": value.get("git_head"),
+            "final_git_head": value.get("final_git_head"),
+            "git_dirty": value.get("git_dirty"),
+            "pytest": value.get("pytest_aggregate"),
+            "finished_at": value.get("finished_at"),
+            "stale": value.get("final_git_head") not in (None, head)
+            and value.get("git_head") != head,
+        }
+        latest[command] = entry
+    if not latest:
+        return {"state": "unreadable"}
+    tested = any(
+        isinstance(e.get("pytest"), Mapping) and not e["stale"] for e in latest.values()
+    )
+    return {
+        "state": "tests-run" if tested else "static-only",
+        "runs": latest,
+    }
+
+
 def _redflags(diff: str) -> tuple[int, list[str]]:
     """Port the deterministic coordinator red-flag scanner."""
     flags: list[str] = []
@@ -392,6 +440,7 @@ def compile_packet(
         "head": head,
         "diffstat": diffstat,
         "lane_trailer": trailer,
+        "verification": _verification_evidence(context.worktree, head),
         "redflags": redflags,
         "redflag_status": redflag_status,
         "full_diff_ref": f"sinnix://jobs/{context.job_id}/artifacts/{packet_id}.diff",
