@@ -928,7 +928,7 @@ def main() -> int:
             "operator",
         )
     elif arguments.command == "lane":
-        from .lanes import derive_units, disposable, stuck
+        from .lanes import derive_units, disposable, refresh_base, stuck
 
         root = resolve_project_root(arguments.project)
         common = Path(
@@ -940,6 +940,7 @@ def main() -> int:
                 timeout=30,
             ).stdout.strip()
         )
+        fetched = refresh_base(root, arguments.base)
         units = derive_units(Path("/realm/worktrees"), common, arguments.base)
         if arguments.lane_command == "status":
             selected, exit_code = units, 0
@@ -953,6 +954,8 @@ def main() -> int:
         payload = {
             "project_id": arguments.project,
             "command": arguments.lane_command,
+            "base": arguments.base,
+            "base_refreshed": fetched,
             "units": [unit.to_dict() for unit in selected],
         }
         if arguments.lane_command == "gc" and arguments.apply:
