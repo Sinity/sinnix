@@ -268,7 +268,10 @@ def _verification_evidence(worktree: Path, head: str) -> dict[str, Any]:
     if not latest:
         return {"state": "unreadable"}
     tested = any(
-        isinstance(e.get("pytest"), Mapping) and not e["stale"] for e in latest.values()
+        isinstance(e.get("pytest"), Mapping)
+        and not e["stale"]
+        and e.get("status") == "success"
+        for e in latest.values()
     )
     return {
         "state": "tests-run" if tested else "static-only",
