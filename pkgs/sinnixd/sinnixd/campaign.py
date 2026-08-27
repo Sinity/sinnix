@@ -189,6 +189,7 @@ class CampaignRunner:
     workspaces: "GitWorkspaces"
     plans: "ProjectPlanExecutor"
     native_runner: Any
+    _provisioning: str | None = None
 
     def run(
         self,
@@ -354,6 +355,7 @@ class CampaignRunner:
             principal: str,
         ) -> str:
             payload = node["payload"]
+            self._provisioning = str(payload["group"])
             self.workspaces.create(
                 project_id=project_id,
                 name=str(payload["workspace_name"]),
@@ -434,6 +436,7 @@ class CampaignRunner:
         whole wave for one raced lane would make concurrent scheduling useless.
         """
         from .jobs import AdmissionConflictError
+        from .workspaces import WorkspaceError
 
         lanes = list(schedule.lanes)
         while lanes:
@@ -441,6 +444,25 @@ class CampaignRunner:
                 return self._submit_plan(
                     lanes, schedule, project_id, generation, launch
                 )
+            except WorkspaceError as error:
+                # A workspace that will not provision costs one lane, not the
+                # wave. The lane being provisioned is the one that raised.
+                failed = self._provisioning
+                remaining = [lane for lane in lanes if lane.group != failed]
+                if failed is None or len(remaining) == len(lanes):
+                    raise
+                self.jobs.spool_event(
+                    {
+                        "kind": "campaign",
+                        "transition": "lane deferred",
+                        "wave_id": wave_id,
+                        "project": project_id,
+                        "group": failed,
+                        "reason": str(error)[:400],
+                    }
+                )
+                lanes = remaining
+                continue
             except AdmissionConflictError as error:
                 blocked = set(error.conflicts)
                 remaining = [
