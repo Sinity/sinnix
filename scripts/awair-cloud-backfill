@@ -49,6 +49,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sinnix_capture.writer import CaptureWriter
+from sinnix_lib.atomic_json import read_json, write_json_atomic
 
 API_BASE = "https://developer-apis.awair.is/v1"
 LANE = "environment"
@@ -167,20 +168,12 @@ def checkpoint_path(capture_root: Path) -> Path:
 
 
 def load_checkpoint(capture_root: Path) -> dict:
-    path = checkpoint_path(capture_root)
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return {}
+    value = read_json(checkpoint_path(capture_root), default={})
+    return value if isinstance(value, dict) else {}
 
 
 def save_checkpoint(capture_root: Path, state: dict) -> None:
-    path = checkpoint_path(capture_root)
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(state, indent=2, sort_keys=True))
-    os.replace(tmp, path)
+    write_json_atomic(checkpoint_path(capture_root), state)
 
 
 def cloud_record_to_payload(record: dict) -> dict:

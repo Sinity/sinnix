@@ -9,10 +9,11 @@ last_file=""
 model=""
 reasoning_effort=""
 credential_profile="subscription"
+resume_session_id=""
 
 usage() {
   cat <<'EOF'
-Usage: run_agent_prompt.sh --agent <backend> --workdir <path> --prompt-file <path> --last-file <path> --model <model> --reasoning-effort <effort> [--credential-profile subscription|api]
+Usage: run_agent_prompt.sh --agent <backend> --workdir <path> --prompt-file <path> --last-file <path> --model <model> --reasoning-effort <effort> [--credential-profile subscription|api] [--resume-session-id <id>]
 
 This is Sinnixd's private backend adapter. AgentCTL owns job identity, logs,
 results, cancellation, timeouts, workspaces, and durable records.
@@ -47,6 +48,10 @@ while [[ $# -gt 0 ]]; do
     ;;
   --credential-profile)
     credential_profile="${2:?missing credential profile}"
+    shift 2
+    ;;
+  --resume-session-id)
+    resume_session_id="${2:?missing native session id}"
     shift 2
     ;;
   -h | --help)
@@ -93,16 +98,24 @@ cd "$workdir"
 
 case "$agent" in
 codex)
-  exec "$agent_bin" exec -C "$workdir" --model "$model" --output-last-message "$last_file" \
+  codex_args=(exec -C "$workdir" --model "$model" --output-last-message "$last_file")
+  if [[ -n $resume_session_id ]]; then
+    codex_args+=(resume "$resume_session_id")
+  fi
+  exec "$agent_bin" "${codex_args[@]}" \
     -c "model_reasoning_effort=\"$reasoning_effort\"" \
     -c shell_environment_policy.inherit=all \
     - <"$prompt_file"
   ;;
 claude)
+  resume_args=()
+  if [[ -n $resume_session_id ]]; then
+    resume_args=(--resume "$resume_session_id")
+  fi
   if [[ $credential_profile == subscription ]]; then
-    env -u ANTHROPIC_API_KEY "$agent_bin" --print -p "$(<"$prompt_file")" --model "$model" --effort "$reasoning_effort" | tee "$last_file"
+    env -u ANTHROPIC_API_KEY "$agent_bin" "${resume_args[@]}" --print -p "$(<"$prompt_file")" --model "$model" --effort "$reasoning_effort" | tee "$last_file"
   else
-    "$agent_bin" --print -p "$(<"$prompt_file")" --model "$model" --effort "$reasoning_effort" | tee "$last_file"
+    "$agent_bin" "${resume_args[@]}" --print -p "$(<"$prompt_file")" --model "$model" --effort "$reasoning_effort" | tee "$last_file"
   fi
   ;;
 gemini)

@@ -59,11 +59,12 @@ not add a parallel ledger for any of them.
 
 ## Agent continuation
 
-`agentctl agent` is a single-shot launch. There is no resume verb. For work
-that cannot finish within its one-hour contract, checkpoint repository state,
-record load-bearing task facts in Beads, prepare a fresh prompt that names the
-checkpoint and next action, and dispatch another exact-workspace agent. Do not
-pretend this is session resume.
+`agentctl agent` is a single-shot launch. Use `agentctl agent resume <job-id>
+--session-id <native-id>` only when the backend returned a native session id
+and the source job is terminal; it creates a child job bound to that session.
+For work without native session continuity, checkpoint repository state, record
+load-bearing task facts in Beads, prepare a fresh prompt that names the
+checkpoint and next action, and dispatch another exact-workspace agent.
 
 Before context compaction, record current objective, completed evidence,
 active job/workspace/task IDs, changed files, blockers, and the exact next

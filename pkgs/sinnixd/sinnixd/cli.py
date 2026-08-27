@@ -188,6 +188,9 @@ def parser() -> argparse.ArgumentParser:
     agent_result = agent_subcommands.add_parser("result")
     agent_result.add_argument("job_id")
     agent_result.add_argument("--max-bytes", type=int, default=64_000)
+    agent_resume = agent_subcommands.add_parser("resume")
+    agent_resume.add_argument("job_id")
+    agent_resume.add_argument("--session-id", required=True)
     project = subcommands.add_parser("project")
     project_subcommands = project.add_subparsers(dest="project_command", required=True)
     project_subcommands.add_parser("list")
@@ -335,6 +338,9 @@ def parser() -> argparse.ArgumentParser:
     retry.add_argument("job_id")
     retry.add_argument("--hint")
     retry.add_argument("--escalate", action="store_true")
+    resume = job_subcommands.add_parser("resume")
+    resume.add_argument("job_id")
+    resume.add_argument("--session-id", required=True)
     status = job_subcommands.add_parser("status")
     status.add_argument("job_id")
     status.add_argument(
@@ -636,6 +642,13 @@ def main() -> int:
             "job.result",
             "systemd-jobs",
             {"job_id": arguments.job_id, "max_bytes": arguments.max_bytes},
+        )
+    elif arguments.command == "agent" and arguments.agent_command == "resume":
+        request = _request(
+            "job.resume",
+            "systemd-jobs",
+            {"job_id": arguments.job_id, "native_session_id": arguments.session_id},
+            "agent-control",
         )
     elif arguments.command == "agent":
         missing = [
@@ -1170,6 +1183,13 @@ def main() -> int:
                 **({"hint": arguments.hint} if arguments.hint is not None else {}),
                 "escalate": arguments.escalate,
             },
+            "agent-control",
+        )
+    elif arguments.command == "job" and arguments.job_command == "resume":
+        request = _request(
+            "job.resume",
+            "systemd-jobs",
+            {"job_id": arguments.job_id, "native_session_id": arguments.session_id},
             "agent-control",
         )
     elif arguments.command == "job" and arguments.job_command == "list":

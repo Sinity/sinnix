@@ -35,6 +35,7 @@ in
               stateRoot = "/var/lib/sinex/state";
               storage.blob.repositoryPath = "/var/lib/sinex/state/blob-repository";
             };
+            sinnix.services.polylogue.dataDir = "/tmp/sentinel-polylogue-root";
           })
         ];
         assertions = config: [
@@ -114,10 +115,11 @@ in
       polylogueStateBorgScriptChecked =
         let
           script = backupRuntimeEval.config.systemd.services.borgbackup-job-polylogue-state.script;
+          root = "tmp/sentinel-polylogue-root";
         in
-        assert lib.assertMsg (lib.hasInfix "--exclude realm/state/polylogue/source.db " script)
-          "Polylogue state Borg job must exclude the qualified source.db path, not a bare filename (excludes match the FULL walked path -- see mkBorgExcludeArgs in modules/backup.nix)";
-        assert lib.assertMsg (lib.hasInfix "--exclude realm/state/polylogue/source.db-wal " script)
+        assert lib.assertMsg (lib.hasInfix "--exclude ${root}/source.db " script)
+          "Polylogue state Borg job must exclude the configured source.db path, not a bare filename";
+        assert lib.assertMsg (lib.hasInfix "--exclude ${root}/source.db-wal " script)
           "Polylogue state Borg job must exclude source.db's WAL sidecar to avoid a torn copy";
         assert lib.assertMsg (!lib.hasInfix "embeddings.db.retired" script)
           "Polylogue state Borg job must not name retired database siblings in its exclude list -- they must stay covered by this direct-path job";
@@ -330,7 +332,7 @@ in
           to = "install -d -m 0755";
         }
         {
-          from = "/realm/state/polylogue";
+          from = "/tmp/sentinel-polylogue-root";
           to = "$TMPDIR/live-polylogue";
         }
       ];

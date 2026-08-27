@@ -229,13 +229,38 @@ let
     };
   };
 
-  runtimeInventory = runtimeDefaults.mkInventory {
-    hostname = config.networking.hostName;
-    inherit surfaces;
-    captures = config.sinnix.runtime.captures;
-    mounts = mountMonitoring;
-    backups = backupInventory;
-  };
+  runtimeInventory =
+    runtimeDefaults.mkInventory {
+      hostname = config.networking.hostName;
+      inherit surfaces;
+      captures = config.sinnix.runtime.captures;
+      mounts = mountMonitoring;
+      backups = backupInventory;
+    }
+    // {
+      # The archive root is configuration, not a guessed XDG sibling. Keep the
+      # six durable tier names beside it so read-only operators inspect the same
+      # topology as the daemon, backup jobs, and storage projections.
+      polylogue = {
+        archiveRoot = config.sinnix.services.polylogue.dataDir;
+        databaseTiers = [
+          "index.db"
+          "source.db"
+          "embeddings.db"
+          "ops.db"
+          "audit.db"
+          "user.db"
+        ];
+        projections = [
+          {
+            name = "home-xdg-data";
+            path = "${config.sinnix.paths.aiRoot}/polylogue";
+            kind = "compatibility";
+            source = config.sinnix.services.polylogue.dataDir;
+          }
+        ];
+      };
+    };
 in
 {
   options.sinnix.runtime.surfaces = lib.mkOption {

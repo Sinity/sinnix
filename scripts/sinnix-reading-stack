@@ -1,6 +1,7 @@
 # @sinnix-package
 # description: Bounded, visible reading-stack -- push/pop/list/peek over a small JSON state file, durable copy via sinnix-capture
 # runtimeInputs: python3 @sinnix-capture
+# pythonPackages: @sinnix-lib
 #!/usr/bin/env python3
 """sinnix-reading-stack: the replacement for "middle-click dumps a link into
 an ever-growing pile of background tabs."
@@ -45,6 +46,8 @@ import sys
 import time
 from pathlib import Path
 
+from sinnix_lib.atomic_json import read_json, write_json_atomic
+
 STATE_DIR = Path.home() / ".local/state/sinnix"
 STATE_FILE = STATE_DIR / "reading-stack.json"
 CAPTURE_ROOT = "/realm/data/activity"
@@ -52,19 +55,12 @@ SOFT_CAP = 20
 
 
 def _load() -> list[dict]:
-    if not STATE_FILE.exists():
-        return []
-    try:
-        return json.loads(STATE_FILE.read_text())
-    except json.JSONDecodeError:
-        return []
+    value = read_json(STATE_FILE, default=[])
+    return value if isinstance(value, list) else []
 
 
 def _save(items: list[dict]) -> None:
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = STATE_FILE.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(items, indent=0))
-    tmp.replace(STATE_FILE)
+    write_json_atomic(STATE_FILE, items)
 
 
 def _capture(event: str, payload: dict) -> None:

@@ -39,6 +39,11 @@ def surfaces() -> dict[str, dict[str, Any]]:
     return {str(name): value for name, value in raw.items() if isinstance(value, dict)}
 
 
+def polylogue_archive() -> dict[str, Any]:
+    value = load_inventory().get("polylogue", {})
+    return value if isinstance(value, dict) else {}
+
+
 def managed_units(manager: str) -> list[str]:
     rows: list[str] = []
     for surface in surfaces().values():

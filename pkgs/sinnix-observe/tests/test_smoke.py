@@ -174,6 +174,34 @@ def test_polylogue_missing_db_reports_gap() -> None:
     assert "gaps" in out or out.get("available") is True
 
 
+def test_polylogue_archive_inventory_reports_all_tier_states(
+    tmp_path, monkeypatch
+) -> None:
+    root = tmp_path / "archive"
+    root.mkdir()
+    (root / "index.db").touch()
+    (tmp_path / "source-target.db").touch()
+    (root / "source.db").symlink_to(tmp_path / "source-target.db")
+    (root / "ops.db").symlink_to(tmp_path / "missing.db")
+    inventory = tmp_path / "runtime-inventory.json"
+    inventory.write_text(json.dumps({"polylogue": {"archiveRoot": str(root)}}))
+    monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", str(inventory))
+
+    states = {row["name"]: row["state"] for row in polylogue.polylogue_tiers()["tiers"]}
+    assert list(states) == [
+        "index.db",
+        "source.db",
+        "embeddings.db",
+        "ops.db",
+        "audit.db",
+        "user.db",
+    ]
+    assert states["index.db"] == "active"
+    assert states["source.db"] == "compatibility"
+    assert states["ops.db"] == "stale_compatibility"
+    assert states["embeddings.db"] == "missing"
+
+
 def test_below_offline_reports_gap() -> None:
     out = below.collect_below("10 min ago", "10 min", 10, offline=True)
     assert out["gaps"] == ["below.history.unavailable_offline"]

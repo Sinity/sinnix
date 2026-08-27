@@ -79,6 +79,7 @@ in
       enrichmentEvaluated = evalTestSpec system enrichmentSpec;
       enrichmentService = enrichmentEvaluated.config.systemd.user.services.sinnix-enrichment-loop;
       polylogueTmpfiles = archiveRootEvaluated.config.systemd.tmpfiles.rules;
+      archiveInventory = archiveRootEvaluated.config.sinnix.runtime.inventory.polylogue;
       enrichmentReadWritePaths = enrichmentService.serviceConfig.ReadWritePaths;
       enrichmentArchiveRoot = enrichmentService.environment.POLYLOGUE_ARCHIVE_ROOT;
 
@@ -131,6 +132,21 @@ in
                 echo "enrichment hardening retained the default Polylogue hook root" >&2
                 exit 1
               fi
+              touch "$out"
+            '';
+        polylogue-runtime-inventory =
+          pkgs.runCommand "sinnix-polylogue-runtime-inventory-check"
+            {
+              inherit sentinelDataDir;
+              nativeBuildInputs = [ pkgs.jq ];
+              actual = builtins.toJSON archiveInventory;
+            }
+            ''
+              jq -e --arg root "$sentinelDataDir" '
+                .archiveRoot == $root and
+                (.databaseTiers == ["index.db", "source.db", "embeddings.db", "ops.db", "audit.db", "user.db"]) and
+                (.projections | any(.kind == "compatibility" and .source == $root))
+              ' <<<"$actual" >/dev/null
               touch "$out"
             '';
       };
