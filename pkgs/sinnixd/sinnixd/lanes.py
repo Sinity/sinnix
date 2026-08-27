@@ -149,11 +149,7 @@ def derive_units(
             continue
         branch = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=path).stdout.strip()
         dirty = bool(_git("status", "--porcelain", cwd=path).stdout.strip())
-        files = tuple(
-            name
-            for name in unintegrated_content(path, base, repo=git_common_dir.parent)
-            if not name.startswith(".lane/")
-        )
+        files = unintegrated_content(path, base, repo=git_common_dir.parent)
         ahead = _commits_ahead(path, base)
         phase = phases.get(str(path))
         running = phase is not None and phase not in _TERMINAL_PHASES

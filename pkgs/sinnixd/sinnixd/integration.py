@@ -64,6 +64,13 @@ class IntegrationBatch:
         }
 
 
+#: Gitignored lane publication scratch exists in no base; it is not content.
+IGNORED_PREFIXES = (".lane/",)
+
+#: How far back along the base to look for a file's content having landed.
+HISTORY_DEPTH = 200
+
+
 def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
@@ -77,36 +84,69 @@ def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
         raise IntegrationError(f"git {' '.join(args)} failed in {cwd}") from error
 
 
+def _blob(ref_path: str, cwd: Path) -> str | None:
+    """The object id of one path at one revision, or None if absent there."""
+    result = _git("rev-parse", "--verify", "--quiet", ref_path, cwd=cwd)
+    value = result.stdout.strip()
+    return value or None
+
+
+def _content_landed(name: str, base: str, path: Path, repo: Path, depth: int) -> bool:
+    """Whether this checkout's version of one file is already on the base.
+
+    Identical content settles it. Otherwise the base may have carried this exact
+    version earlier and moved on since, which still means the lane's
+    contribution landed, so the base's history for that path is searched for the
+    same blob.
+    """
+    lane = _blob(f"HEAD:{name}", path)
+    if lane is None:
+        # The lane deletes this path; the deletion landed iff the base lacks it.
+        return _blob(f"{base}:{name}", repo) is None
+    if _blob(f"{base}:{name}", repo) == lane:
+        return True
+    history = _git(
+        "log", f"--max-count={depth}", "--format=%H", base, "--", name, cwd=repo
+    )
+    for commit in history.stdout.split():
+        if _blob(f"{commit}:{name}", repo) == lane:
+            return True
+    return False
+
+
 def unintegrated_content(
-    path: Path, base: str = DEFAULT_BASE, *, repo: Path | None = None
+    path: Path,
+    base: str = DEFAULT_BASE,
+    *,
+    repo: Path | None = None,
+    ignore_prefixes: Sequence[str] = IGNORED_PREFIXES,
+    history_depth: int = HISTORY_DEPTH,
 ) -> tuple[str, ...]:
     """Files this checkout introduces whose content is not on the base yet.
 
     A branch keeps its commits after a squash-merge lands its content, so
-    divergence alone reports finished work as pending. Comparing the files
-    against the base is not enough either: once the base moves, any file the
+    divergence alone reports finished work as pending. Comparing against the
+    base's current files is not enough either: once the base moves, a file the
     lane touched differs for reasons that have nothing to do with this lane.
 
-    The patch itself is the evidence. If it reverse-applies to the base, the
-    base already contains it.
+    Each file is judged on its own. Judging the whole patch at once lets one
+    un-appliable file -- gitignored lane scratch, which exists in no base --
+    report every other file in the diff as held.
     """
     introduced = _git("diff", f"{base}...HEAD", "--name-only", cwd=path)
-    names = [line for line in introduced.stdout.splitlines() if line.strip()]
+    names = [
+        line
+        for line in introduced.stdout.splitlines()
+        if line.strip() and not line.startswith(tuple(ignore_prefixes))
+    ]
     if not names:
         return ()
-    patch = _git("diff", f"{base}...HEAD", cwd=path).stdout
-    if patch.strip():
-        applied = subprocess.run(
-            ["git", "apply", "-R", "--check", "-"],
-            cwd=repo or path,
-            input=patch,
-            capture_output=True,
-            text=True,
-            timeout=GIT_TIMEOUT_SECONDS,
-        )
-        if applied.returncode == 0:
-            return ()
-    return tuple(names)
+    against = repo or path
+    return tuple(
+        name
+        for name in names
+        if not _content_landed(name, base, path, against, history_depth)
+    )
 
 
 def _landed_integration_branches(repo: Path, base: str) -> tuple[str, ...]:
@@ -157,9 +197,6 @@ def discover_units(
         if Path(common.stdout.strip()) != git_common_dir:
             continue
         files = unintegrated_content(path, base, repo=git_common_dir.parent)
-        # Lane publication text is gitignored scratch; a branch differing only
-        # there carries no work.
-        files = tuple(name for name in files if not name.startswith(".lane/"))
         if not files:
             continue
         # A lane repaired during integration lands as modified content, so its

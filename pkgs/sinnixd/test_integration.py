@@ -178,3 +178,38 @@ def test_assemble_drops_a_lane_whose_merge_changes_nothing(tmp_path: Path) -> No
 
     assert result["already_integrated"] == ["lane"]
     assert result["merged"] == []
+
+
+def test_one_unappliable_file_does_not_hide_the_rest(tmp_path: Path) -> None:
+    """Gitignored lane scratch exists in no base and must not poison the verdict.
+
+    Anti-vacuity: judging the whole patch at once returns both files here,
+    reporting landed work as held for every batch carrying publication scratch.
+    """
+    repo = tmp_path / "repo"
+    _repo(repo)
+    _commit(repo, "base.txt", "base\n")
+    subprocess.run(
+        ["git", "checkout", "-qb", "lane"], cwd=repo, check=True, capture_output=True
+    )
+    _commit(repo, "feature.txt", "feature\n")
+    (repo / ".lane").mkdir()
+    _commit(repo, ".lane/title", "a title\n")
+    subprocess.run(
+        ["git", "checkout", "-q", "master"], cwd=repo, check=True, capture_output=True
+    )
+    (repo / "feature.txt").write_text("feature\n")
+    subprocess.run(
+        ["git", "add", "feature.txt"], cwd=repo, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "squash: feature"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "checkout", "-q", "lane"], cwd=repo, check=True, capture_output=True
+    )
+
+    assert unintegrated_content(repo, "master", repo=repo) == ()
