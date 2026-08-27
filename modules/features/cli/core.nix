@@ -175,8 +175,8 @@ mkFeatureModule {
               # Phone (Redmi Note 11) over the tailnet, Termux sshd. The user
               # is Termux's per-install Android UID, not a stable name.
               "phone" = {
-                HostName = "100.124.215.25";
-                User = "u0_a398";
+                HostName = "100.111.240.107";
+                User = "u0_a460";
                 Port = 8022;
                 ServerAliveInterval = 30;
               };

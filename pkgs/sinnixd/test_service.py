@@ -20,8 +20,8 @@ from uuid import uuid4
 import pytest
 import sinnixd.cli as cli_module
 import sinnixd.jobs as jobs_module
-import sinnixd.runner as runner_module
 import sinnixd.projects as projects
+import sinnixd.runner as runner_module
 from sinnix_mcp import (
     ErrorCode,
     OpaquePayload,
@@ -10926,7 +10926,15 @@ def test_path_grammar_accepts_files_and_refuses_traversal() -> None:
     for accepted in ("/realm/tmp/work/body.md", "body.md", "a/b/c.txt"):
         assert grammar.fullmatch(accepted) is not None, accepted
 
-    for refused in ("..", "../etc/passwd", "a/../b", "/realm/./x", "has space.md", "a//b", ""):
+    for refused in (
+        "..",
+        "../etc/passwd",
+        "a/../b",
+        "/realm/./x",
+        "has space.md",
+        "a//b",
+        "",
+    ):
         assert grammar.fullmatch(refused) is None, refused
 
 

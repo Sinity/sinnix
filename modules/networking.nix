@@ -95,10 +95,19 @@ in
     programs.mosh.enable = true;
 
     # sshd hardening handled by nixpkgs - custom seccomp filters break it.
-    systemd.services.sshd.serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
-      runtimeInventory = config.sinnix.runtime.inventory;
-      unit = "sshd.service";
-    };
+    systemd.services.sshd.serviceConfig =
+      (lib.sinnix.mkRuntimeServiceConfig {
+        runtimeInventory = config.sinnix.runtime.inventory;
+        unit = "sshd.service";
+      })
+      // {
+        # Remote access is the recovery path when the graphical session or a
+        # runaway user workload makes local input unusable. This survives the
+        # PAM move into a login scope because the adjustment is inherited by
+        # sshd's children; the system-critical slice already supplies the CPU,
+        # IO, and 2 GiB MemoryLow protection for accepting the connection.
+        OOMScoreAdjust = -900;
+      };
     # Bluetooth hardening handled by nixpkgs - it needs kernel module/tunable access
     systemd.services.bluetooth = lib.mkIf isDesktop {
       serviceConfig = lib.sinnix.systemd.mkRestartPolicy {

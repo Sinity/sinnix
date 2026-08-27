@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Reach the phone over the tailnet — status, shell, screen mirror, media pull, clipboard push
-# runtimeInputs: bash coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl @sinnix-phone-dispatcher
+# runtimeInputs: bash coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl tailscale @sinnix-phone-dispatcher
 
 #
-# The phone (Redmi Note 11, unrooted) is a tailnet peer with two control
+# The phone (Redmi Note 11, Evolution X with Magisk) is a tailnet peer with two control
 # surfaces: Termux sshd on :8022 for shell/file work, and adbd on :5555 for
 # device-level control (input, screencap, packages, settings). Both ride the
 # tailnet, so this works from anywhere the tailnet reaches — not just the LAN.
@@ -12,9 +12,9 @@
 # adbd over TCP does NOT survive a phone reboot; `sinnix-phone adb-restore`
 # re-enables it over USB. Everything else survives.
 #
-# Ambient audio is produced by the Sinnix Capture app (pkgs/sinnix-phone-app),
-# not by Termux. Termux remains the drain transport and the clipboard/wifi
-# surface, but it cannot hold the microphone: only an app declaring
+# Ambient audio and durable delivery are produced by the native Sinnix app,
+# not by Termux. Termux remains an emergency shell and clipboard surface, but
+# it cannot hold the microphone: only an app declaring
 # foregroundServiceType="microphone" keeps recording once the screen goes off,
 # which is why the Termux recorder truncated chunks and never came back after
 # a reboot (sinnix-hcjq). `app-install` retires Termux's runit `ambient`
@@ -36,9 +36,24 @@ set -euo pipefail
 # first (it works off-wifi, which the LAN paths cannot), then mDNS, then the
 # last address that worked, then a LAN sweep for a host answering on one of
 # the phone's ports. SINNIX_PHONE_IP still overrides everything.
-PHONE_TS_IP_DEFAULT="100.124.215.25"
+PHONE_TS_IP_DEFAULT="100.111.240.107"
 PHONE_MDNS_NAME="${SINNIX_PHONE_MDNS:-redmi-note-11.local}"
 PHONE_HOST_CACHE="${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}/last-host"
+
+# Re-enrolling the Android client creates a new Tailscale node identity and
+# therefore a new 100.64/10 address. Resolve the currently-online Android peer
+# by its stable device hostname before consulting any remembered address; the
+# numeric default is only the final diagnostic fallback when tailscaled is not
+# available locally.
+tailscale_phone_ip() {
+  tailscale status --json 2>/dev/null \
+    | jq -r '
+        [.Peer[]
+          | select(.Online == true and .OS == "android" and .HostName == "Redmi Note 11")
+          | .TailscaleIPs[]
+          | select(test("^[0-9]+\\."))][0] // empty
+      ' 2>/dev/null
+}
 
 # A host counts as the phone if it answers on adbd or Termux's sshd. Ping is
 # not enough: the tailnet address answered ICMP for a full day while every
@@ -53,13 +68,14 @@ phone_answers() {
 }
 
 resolve_phone_host() {
-  local candidate cached
+  local candidate cached tailnet
   if [ -n "${SINNIX_PHONE_IP:-}" ]; then
     echo "$SINNIX_PHONE_IP"
     return 0
   fi
   cached="$(cat "$PHONE_HOST_CACHE" 2>/dev/null || true)"
-  for candidate in "$PHONE_TS_IP_DEFAULT" "$PHONE_MDNS_NAME" $cached; do
+  tailnet="$(tailscale_phone_ip || true)"
+  for candidate in "$tailnet" "$PHONE_TS_IP_DEFAULT" "$PHONE_MDNS_NAME" $cached; do
     [ -n "$candidate" ] || continue
     if phone_answers "$candidate"; then
       mkdir -p "$(dirname "$PHONE_HOST_CACHE")" 2>/dev/null || true
@@ -92,7 +108,7 @@ resolve_phone_host() {
 
 PHONE_TS_IP="${SINNIX_PHONE_IP:-$(resolve_phone_host || true)}"
 PHONE_SSH_PORT="${SINNIX_PHONE_SSH_PORT:-8022}"
-PHONE_USER="${SINNIX_PHONE_USER:-u0_a398}"
+PHONE_USER="${SINNIX_PHONE_USER:-u0_a460}"
 ADB_TARGET="${PHONE_TS_IP}:5555"
 LAKE_ROOT="${SINNIX_PHONE_LAKE:-/realm/data/machine/phone}"
 PHONE_STATE="${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}"
