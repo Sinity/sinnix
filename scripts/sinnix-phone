@@ -391,6 +391,39 @@ drain_ambient_adb() {
   echo "ambient: drained $pulled new chunk(s) over adb, repaired $repaired truncated"
 }
 
+nix_userland_identity() {
+  NIX_APP_UID=$(adb_any shell pm list packages -U com.termux.nix 2>/dev/null \
+    | sed -n 's/.*uid:\([0-9][0-9]*\).*/\1/p' | tr -d '\r')
+  [ -n "$NIX_APP_UID" ] || {
+    echo "Nix-on-Droid is not installed" >&2
+    return 1
+  }
+  NIX_APP_CONTEXT=$(adb_any shell su "$NIX_APP_UID" -c \
+    '/system/bin/ls -Zd /data/data/com.termux.nix/files/home' 2>/dev/null \
+    | awk '{print $1}' | tr -d '\r')
+  case "$NIX_APP_CONTEXT" in
+    u:object_r:app_data_file:s0:c*) ;;
+    *)
+      echo "could not determine the Nix-on-Droid app-data context" >&2
+      return 1
+      ;;
+  esac
+}
+
+nix_userland_fix_labels() {
+  nix_userland_identity
+  local roots=(
+    /data/data/com.termux.nix/files/usr/nix/store
+    /data/data/com.termux.nix/files/home
+    /data/data/com.termux.nix/files/usr/bin
+    /data/data/com.termux.nix/files/usr/etc
+    /data/data/com.termux.nix/files/usr/usr
+    /data/data/com.termux.nix/files/usr/nix/var/nix/profiles
+  )
+  adb_any shell su "$NIX_APP_UID" -c "/system/bin/find ${roots[*]} -print0" \
+    | adb_any shell su -c "xargs -0 chcon -h '$NIX_APP_CONTEXT'"
+}
+
 
 usage() {
   cat <<'EOF'
@@ -406,6 +439,10 @@ sinnix-phone <command>
   app-grants    re-assert the shell-uid grants the app needs
   app-soak [s]  acceptance test: sample screen/foreground/mute state over a
                 window, then measure every chunk closed in it (default 1200s)
+  nix-switch [flake]
+                switch the Nix-on-Droid userland and repair Android 16 MCS
+                labels; defaults to the exact published Sinnix master revision
+  nix-fix-labels repair Nix-on-Droid app-data labels without switching
   shell [cmd]   Termux shell over the tailnet (interactive when no cmd)
   mirror        scrcpy screen mirror/control over the tailnet
   screenshot    grab the current screen to /realm/tmp/work/
@@ -679,6 +716,32 @@ app-start)
   fi
   sleep 4
   "$0" app-status
+  ;;
+nix-switch)
+  adb_resolve || {
+    echo "nix-switch: no adb transport" >&2
+    exit 1
+  }
+  nix_userland_identity
+  flake_ref="${1:-}"
+  if [ -z "$flake_ref" ]; then
+    sinnix_dir="${SINNIX_FLAKE_DIR:-/realm/project/sinnix}"
+    revision=$(git -C "$sinnix_dir" rev-parse origin/master)
+    flake_ref="github:Sinity/sinnix/$revision#redmi-note-11"
+  fi
+  printf -v quoted_flake '%q' "$flake_ref"
+  adb_any shell su "$NIX_APP_UID" -c \
+    "TMPDIR=/data/data/com.termux.nix/files/usr/tmp /data/data/com.termux.nix/files/usr/bin/login nix-on-droid switch --flake $quoted_flake"
+  nix_userland_fix_labels
+  adb_any shell su "$NIX_APP_UID" -c \
+    '/data/data/com.termux.nix/files/usr/bin/login nvim --version' | head -n 1
+  ;;
+nix-fix-labels)
+  adb_resolve || {
+    echo "nix-fix-labels: no adb transport" >&2
+    exit 1
+  }
+  nix_userland_fix_labels
   ;;
 app-soak)
   # Acceptance test for both hard cases at once: capture must survive the
