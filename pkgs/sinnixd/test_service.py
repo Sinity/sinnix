@@ -670,6 +670,66 @@ def test_agentctl_workspace_finish_integrated_maps_target_to_a_typed_envelope(
     }
 
 
+def test_agentctl_workspace_finish_carries_the_authored_bead_settlement(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, RequestEnvelope] = {}
+
+    def fake_call(socket_path, request_value):
+        captured["request"] = request_value
+        return {"schema": 1, "ok": True}
+
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(json.dumps({"sinnix-1": "landed as abc123"}))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "agentctl",
+            "workspace",
+            "finish",
+            "workspace-1",
+            "--bead",
+            "sinnix-1",
+            "--receipt",
+            str(receipt),
+        ],
+    )
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    outbound = captured["request"]
+    assert outbound.operation == "workspace.finish"
+    assert dict(outbound.arguments) == {
+        "workspace_id": "workspace-1",
+        "beads": ["sinnix-1"],
+        "receipt": {"sinnix-1": "landed as abc123"},
+    }
+
+
+def test_workspace_settlement_refuses_beads_without_an_authored_reason() -> None:
+    """A settled bead must carry a reason a person wrote, never an inferred one."""
+    service = SinnixdService.__new__(SinnixdService)
+
+    with pytest.raises(ValueError, match="authored receipt or partial note"):
+        service._settle_workspace(
+            {"workspace_id": "workspace-1"},
+            {"workspace_id": "workspace-1", "beads": ["sinnix-1"]},
+            "sinnix",
+        )
+
+    with pytest.raises(ValueError, match="exactly the beads being settled"):
+        service._settle_workspace(
+            {"workspace_id": "workspace-1"},
+            {
+                "workspace_id": "workspace-1",
+                "beads": ["sinnix-1"],
+                "receipt": {"sinnix-2": "wrong bead"},
+            },
+            "sinnix",
+        )
+
+
 def test_agentctl_job_start_maps_parameters_json_to_the_typed_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -887,7 +887,7 @@ def main() -> int:
             },
             "agent-control",
         )
-    elif arguments.command == "workspace":
+    elif arguments.command == "workspace" and arguments.workspace_command == "finish":
         settlement = {}
         if arguments.beads:
             settlement["beads"] = arguments.beads
