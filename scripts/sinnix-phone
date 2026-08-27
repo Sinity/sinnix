@@ -442,11 +442,14 @@ status)
     echo "ssh       : down — drain blocked; open Termux, run: sshd"
   fi
   "$0" app-status
-  ensure_adb
-  if ANDROID_SERIAL="$ADB_TARGET" adb get-state >/dev/null 2>&1; then
-    echo "adb       : up ($ADB_TARGET)"
-    lvl=$(adb_phone shell dumpsys battery 2>/dev/null | awk -F': ' '/ level/{print $2}' | tr -d '\r')
-    free=$(adb_phone shell df -h /sdcard 2>/dev/null | awk 'END{print $4}' | tr -d '\r')
+  if adb_resolve; then
+    case "$ADB_RESOLVED" in
+      *:*) adb_transport="tailnet" ;;
+      *) adb_transport="USB" ;;
+    esac
+    echo "adb       : up ($adb_transport, $ADB_RESOLVED)"
+    lvl=$(adb_any shell dumpsys battery 2>/dev/null | awk -F': ' '$1 ~ /^[[:space:]]*level$/ { print $2; exit }' | tr -d '\r')
+    free=$(adb_any shell df -h /sdcard 2>/dev/null | awk 'END{print $4}' | tr -d '\r')
     echo "battery   : ${lvl:-?}%"
     echo "sdcard    : ${free:-?} free"
   else
@@ -552,14 +555,16 @@ app-status)
   else
     # No closed chunk on the phone is the NORMAL state after a successful
     # drain, not a sign of trouble -- rotation removes each chunk once the
-    # lake holds it. Fall back to the lake's own measurement so this line
-    # keeps answering "is the audio real", which is what it is for.
-    ledger="$LAKE_ROOT/ambient-levels.jsonl"
-    last_measured=$(jq -rs 'group_by(.chunk) | map(last) | sort_by(.chunk) | last //
-      empty | "\(.chunk) (\(.duration_seconds // "?")s; mean \(.mean_db // "?") dB)"' \
-      "$ledger" 2>/dev/null)
-    if [ -n "$last_measured" ]; then
-      echo "last chunk: none on the phone (drained); newest in the lake: $last_measured"
+    # lake holds it. Measure the newest lake file directly. The audit ledger
+    # is intentionally asynchronous and can lag a fresh recovery by hours.
+    lake_chunk=""
+    for f in "$LAKE_ROOT"/ambient/ambient-*.m4a; do
+      [ -e "$f" ] && lake_chunk="$f"
+    done
+    if [ -n "$lake_chunk" ]; then
+      dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$lake_chunk" 2>/dev/null || true)
+      vol=$(ffmpeg -hide_banner -nostats -v info -i "$lake_chunk" -af volumedetect -f null - 2>&1 | awk -F': ' '/mean_volume/{print $2}')
+      echo "last chunk: none on the phone (drained); newest in the lake: $(basename "$lake_chunk") (${dur:-?}s; mean ${vol:-?})"
     else
       echo "last chunk: none closed yet"
     fi
