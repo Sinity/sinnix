@@ -66,6 +66,20 @@ def test_generated_state_is_served_without_a_file(isolated_state_dirs) -> None:
     assert not (isolated_state_dirs["inbox_dir"] / "glance.json").exists()
 
 
+def test_generated_hash_ignores_request_time(monkeypatch, isolated_state_dirs) -> None:
+    calls = iter(["2026-08-27T10:00:00Z", "2026-08-27T10:01:00Z"])
+    monkeypatch.setattr(
+        inbox_mod,
+        "GENERATED",
+        {"glance.json": lambda: {"generated_at": next(calls), "attention": []}},
+    )
+
+    _, first = inbox_mod.list_inbox()
+    _, second = inbox_mod.list_inbox()
+
+    assert first["files"][0]["sha256"] == second["files"][0]["sha256"]
+
+
 def test_a_half_written_receipt_is_not_offered(isolated_state_dirs) -> None:
     _write(isolated_state_dirs, "receipts", "r1.json.part", '{"title":"hal')
 
