@@ -482,6 +482,30 @@ class WorkspaceStore:
             Path(temporary).unlink(missing_ok=True)
 
 
+def _stop_type_daemon(worktree: Path) -> None:
+    """Shut down the workspace's mypy daemon before the worktree disappears.
+
+    dmypy holds a type cache worth well over a gigabyte and is reparented to
+    the user manager, so it outlives both the run that started it and the
+    directory it describes. Stopping it here is what makes keeping it cheap:
+    the cache stays warm for as long as the workspace is gated repeatedly, and
+    is released the moment the workspace is gone.
+    """
+    daemon = worktree / ".venv/bin/dmypy"
+    if not daemon.is_file():
+        return
+    try:
+        subprocess.run(
+            [str(daemon), "stop"],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 class GitWorkspaces:
     def __init__(self, projects: ProjectCatalog, store: WorkspaceStore) -> None:
         self.projects = projects
@@ -1720,6 +1744,7 @@ class GitWorkspaces:
         if checkout.path != record.path:
             raise WorkspaceError("registered checkout does not match workspace record")
         self._canonicalize_gitfile_symlink(checkout)
+        _stop_type_daemon(record.path)
         return self._git(
             project.root, "worktree", "remove", *flags, str(record.path), check=False
         )
