@@ -17,7 +17,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Protocol
 
 from .packets import PacketConfig, SubprocessBdReader, compile_launch_snapshot
@@ -812,8 +812,11 @@ class CampaignReactor:
         adds latency without adding a decision.
         """
         checkout = record.checkout or {}
-        workspace = checkout.get("name") or checkout.get("workspace_name")
-        if not isinstance(workspace, str) or not workspace:
+        # A lane checkout carries its path, not the workspace name; the
+        # workspace is the directory it was provisioned into.
+        path = checkout.get("path")
+        workspace = PurePosixPath(path).name if isinstance(path, str) and path else ""
+        if not workspace:
             return
         key = f"review:{record.job_id}"
         if key in self._board.keeper:
