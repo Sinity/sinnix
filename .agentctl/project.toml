@@ -57,7 +57,7 @@ pool = "bulk"
 result = "json"
 cache = "none"
 exclusive_keys = ["host:nixos-switch", "sinnix:nix-store-pressure"]
-estimate_memory_bytes = 12884901888
+estimate_memory_bytes = 6442450944
 scratch = "nvme"
 
 [operations.sinex_cache_prebuild]
