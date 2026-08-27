@@ -4498,6 +4498,8 @@ def test_user_systemd_jobs_starts_a_retained_service_with_log_boundary(
         return SimpleNamespace(stdout="")
 
     monkeypatch.setattr("sinnixd.jobs.subprocess.run", fake_run)
+    monkeypatch.setenv("HOME", "/operator-home")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
 
     UserSystemdJobs().start(
         unit="sinnixd-job-00000000-0000-0000-0000-000000000001.service",
@@ -4518,9 +4520,9 @@ def test_user_systemd_jobs_starts_a_retained_service_with_log_boundary(
             "--slice=sinnixd-work-normal.slice",
             "--property=WorkingDirectory=/work/project",
             "--property=RuntimeMaxSec=123s",
-            "--property=ReadOnlyPaths=/home/sinity/.local/bin",
-            "--property=ReadOnlyPaths=/home/sinity/.claude",
-            "--property=ReadOnlyPaths=/home/sinity/.config",
+            "--property=ReadOnlyPaths=/operator-home/.local/bin",
+            "--property=ReadOnlyPaths=/operator-home/.claude",
+            "--property=ReadOnlyPaths=/operator-home/.config",
             "--property=ReadOnlyPaths=/realm/state",
             "--property=StandardOutput=journal",
             "--property=StandardError=journal",

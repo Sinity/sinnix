@@ -407,12 +407,16 @@ class UserSystemdJobs:
 
     # Lane jobs may read operator tooling, configuration, and durable runtime
     # state, but those paths must remain owned by the host and its services.
-    LANE_READ_ONLY_PATHS = (
-        "/home/sinity/.local/bin",
-        "/home/sinity/.claude",
-        "/home/sinity/.config",
-        "/realm/state",
-    )
+    @staticmethod
+    def lane_read_only_paths() -> tuple[str, ...]:
+        home = Path.home()
+        config = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
+        return (
+            str(home / ".local" / "bin"),
+            str(home / ".claude"),
+            str(config),
+            "/realm/state",
+        )
 
     def start(
         self,
@@ -436,7 +440,10 @@ class UserSystemdJobs:
             f"--slice={POOL_SLICES[pool]}",
             f"--property=WorkingDirectory={working_directory}",
             f"--property=RuntimeMaxSec={timeout_seconds}s",
-            *(f"--property=ReadOnlyPaths={path}" for path in self.LANE_READ_ONLY_PATHS),
+            *(
+                f"--property=ReadOnlyPaths={path}"
+                for path in self.lane_read_only_paths()
+            ),
             "--property=StandardOutput=journal",
             "--property=StandardError=journal",
             "--",
