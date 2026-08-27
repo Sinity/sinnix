@@ -56,6 +56,8 @@ mkServiceModule {
         "d ${stateDir}/lib 0750 netdata netdata -"
       ];
 
-      networking.firewall.interfaces.${config.sinnix.services.tailscale.interfaceName}.allowedTCPPorts = [ port ];
+      networking.firewall.interfaces.${config.sinnix.services.tailscale.interfaceName}.allowedTCPPorts = [
+        port
+      ];
     };
 } args
