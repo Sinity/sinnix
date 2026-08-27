@@ -140,3 +140,41 @@ def test_a_branch_differing_only_in_lane_scratch_carries_no_work(
     _commit(lane, ".lane/title", "fix: something\n")
 
     assert discover_units(worktrees, common, "master") == []
+
+
+def test_assemble_drops_a_lane_whose_merge_changes_nothing(tmp_path: Path) -> None:
+    """Branch bookkeeping cannot always tell that a lane already landed.
+
+    An integration branch that merged and was then deleted leaves no ref to
+    check containment against, so the resulting tree is the only evidence.
+
+    Anti-vacuity: without the tree comparison this lane is reported as merged
+    and its empty merge commit ships in the batch.
+    """
+    from sinnixd.integration import IntegrationBatch, assemble
+
+    repo = tmp_path / "repo"
+    _repo(repo)
+    _commit(repo, "base.txt", "base\n")
+    subprocess.run(
+        ["git", "checkout", "-qb", "lane"], cwd=repo, check=True, capture_output=True
+    )
+    _commit(repo, "feature.txt", "feature\n")
+    subprocess.run(
+        ["git", "checkout", "-q", "master"], cwd=repo, check=True, capture_output=True
+    )
+    # Land identical content on master, the way a squash-merge does.
+    _commit(repo, "feature.txt", "feature\n")
+
+    batch = IntegrationBatch([_unit("lane", "feature.txt")], {"feature.txt"})
+    object.__setattr__(batch.units[0], "branch", "lane")
+    result = assemble(
+        batch,
+        repo=repo,
+        worktree=tmp_path / "integration",
+        branch="integration/probe",
+        base="master",
+    )
+
+    assert result["already_integrated"] == ["lane"]
+    assert result["merged"] == []

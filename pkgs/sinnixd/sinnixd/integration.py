@@ -234,18 +234,30 @@ def assemble(
         )
     merged: list[str] = []
     conflicted: list[str] = []
+    contributed_nothing: list[str] = []
     for unit in batch.units:
+        before = _git("rev-parse", "HEAD^{tree}", cwd=worktree).stdout.strip()
         result = _git("merge", "--no-ff", "--no-edit", unit.branch, cwd=worktree)
         if result.returncode != 0:
             _git("merge", "--abort", cwd=worktree)
             conflicted.append(unit.branch)
-        else:
-            merged.append(unit.branch)
+            continue
+        after = _git("rev-parse", "HEAD^{tree}", cwd=worktree).stdout.strip()
+        if before and after == before:
+            # The merge changed no content, so this lane is already in. Branch
+            # bookkeeping cannot always tell -- an integration branch that
+            # landed and was then deleted leaves no ref to check containment
+            # against -- but the resulting tree can.
+            _git("reset", "--hard", "HEAD~1", cwd=worktree)
+            contributed_nothing.append(unit.branch)
+            continue
+        merged.append(unit.branch)
     stat = _git("diff", "--shortstat", f"{base}...HEAD", cwd=worktree).stdout.strip()
     return {
         "branch": branch,
         "worktree": str(worktree),
         "merged": merged,
         "conflicted": conflicted,
+        "already_integrated": contributed_nothing,
         "diffstat": stat,
     }
