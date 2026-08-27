@@ -1,8 +1,9 @@
 # The phone
 
 `dev.sinnix.phone` — sinnix's phone-side member. Ambient capture,
-instruments, ingress, and a remote for prime, on a Redmi Note 11 (Android 13 /
-API 33, unrooted, bootloader locked, MIUI).
+instruments, ingress, and a remote for prime, on a Redmi Note 11 NFC running
+Android 16 (Evolution X). The app targets API 33; the device is bootloader-
+unlocked and rooted with Magisk.
 
 It began as an answer to one platform constraint and outgrew it. That history
 still matters in one place — the capture surfaces, where it is the reason they
@@ -61,12 +62,11 @@ build does not and cannot reach it.
 Three version pins, each for a stated reason:
 
 - **`targetSdk = 33`.** API 34 forbids starting a microphone foreground service
-  from a `BOOT_COMPLETED` receiver, and resuming capture after a reboot without
-  the operator touching anything is a standing acceptance criterion. Raising it
-  needs a Direct Boot design first, not a version bump.
-- **`compileSdk = 35`.** Current AndroidX refuses to be compiled against
+  from a boot receiver. Capture before first unlock is a standing acceptance
+  criterion, so raising the target requires another boot-safe launch mechanism.
+- **`compileSdk = 36`.** Current AndroidX refuses to be compiled against
   anything older. Unrelated to `targetSdk`, which is a behaviour opt-in.
-- **`buildToolsVersion = "35.0.0"`.** AGP 8.10's floor. Left unset, AGP picks
+- **`buildToolsVersion = "36.0.0"`.** Left unset, AGP picks
   its own default and the sandbox fails with a missing-component error that
   reads like a network problem.
 
@@ -93,11 +93,8 @@ sinnix phone pull-ambient   # rescue chunks the app's uploader could not ship
 sinnix phone health-sync    # drive Mi Fitness's Sync button on demand (UI automation)
 ```
 
-`app-install` needs adb over USB or the tailnet, **and the phone must be
-unlocked**. MIUI routes every adb install through its own
-`com.miui.permcenter.install.AdbInstallActivity` confirmation dialog, which
-cannot be shown over the keyguard; the install is then auto-cancelled with
-`INSTALL_FAILED_USER_RESTRICTED`. There is no desktop-side workaround.
+`app-install` needs adb over USB or the tailnet. Android still requires the
+phone to be unlocked for some package and permission operations.
 
 Grants applied by `app-grants`: `RECORD_AUDIO` and `POST_NOTIFICATIONS` as
 runtime permissions, `MANAGE_EXTERNAL_STORAGE` as an appop at **both** package
@@ -152,16 +149,9 @@ retried after losing an acknowledgement must be able to let go of the file.
 An event batch declares the offset it starts at and is written there, so
 re-sending one changes nothing.
 
-The persistent TCP channel remains, and it is not an intent plane at all: the
-phone's always-on speech push streams newline-delimited JSON into a tailscale0
-listener, demuxed by `kind` into `phone-<kind>` capture lanes. It used to be
-its own unit (`sinnix-phone-receiver`); as of 2026-08-17 it is a second server
-thread inside `sinnix-phone-dispatcher serve` (sinnix-tjqi). It also used to
-carry a live _mirror_ of the event log into `phone-event`; that lane is
-retired, because the events plane now arrives complete and within a heartbeat
-through the file it actually lives in, and two lanes carrying one subject is a
-dedup problem for every consumer downstream. See docs/speech.md for what the
-speech lane deliberately does and does not do.
+Speech regions are metadata derived on prime from uploaded ambient chunks.
+The phone records one canonical audio stream; it does not run another recorder
+or an on-device VAD pipeline.
 
 **Actions are the one thing never queued.** `start`/`stop`/`restart` on a live
 unit is a decision about right now; executing it half an hour later against a
@@ -399,13 +389,8 @@ internal differences.
 
 Beyond ambient audio and the passive light/motion sampler:
 
-- **Speech** — Silero VAD over a second recorder; on a speech region the
-  utterance streams to prime's dispatcher (the always-on telemetry channel
-  described under "The two planes" above), on any network. **On, and meant
-  to stay on**, like every other capture here: started at boot, revived by
-  the watchdog, restarted when the app is opened. The toggle exists because a
-  switch is useful, not because the default should be silence. See
-  docs/speech.md for what it deliberately does not do.
+- **Speech metadata** — prime derives speech regions from uploaded ambient
+  chunks. The source audio stays canonical and no second phone recorder runs.
 - **Location** — framework `LocationManager.FUSED_PROVIDER` with geofence
   transitions. No Play Services: Android 12 promoted the fused provider into
   the framework, which the design had assumed was a Google dependency.
@@ -421,26 +406,14 @@ Beyond ambient audio and the passive light/motion sampler:
 
 **Direct Boot**: a `directBootAware` service buffers into device-protected
 storage and migrates on unlock, so a phone rebooted and left locked captures
-instead of waiting for a human. Unverified — confirming it requires leaving the
-phone locked after a reboot and then checking the timeline without unlocking
-it, which is the condition under test.
+instead of waiting for a human. The implementation exists; locked-boot product
+output remains an explicit acceptance test.
 
 ## Known limits
 
-- **Reboot resumes at first unlock, not at power-on.** The device uses
-  file-based encryption with a screen lock, so `BOOT_COMPLETED` arrives after
-  the first unlock and `/sdcard` is not mounted before it. No app has to be
-  opened and nothing tapped, but a phone left locked after a reboot is not
-  capturing. Making this truly unattended needs Direct Boot handling: a
-  `directBootAware` service buffering into device-protected storage.
-- **MIUI background autostart has no adb assertion path.** The watchdog alarm
-  and `START_STICKY` cover process death; they do not cover MIUI refusing to
-  deliver the boot broadcast at all. The screen that owns it is driveable —
-  `com.miui.securitycenter/com.miui.permcenter.autostart.AutoStartManagementActivity`
-  — but `uiautomator dump` can return a **stale window**, so cross-check against
-  `dumpsys window | grep mCurrentFocus` and trust a screenshot over a dump when
-  they disagree; the list also re-sorts after every toggle, so coordinates must
-  be re-derived rather than reused.
+- **Locked-boot capture still needs product proof.** Process presence is not
+  enough: the acceptance test requires a chunk produced before first unlock,
+  then migrated and uploaded after unlock.
 - **Phone calls stop capture.** Platform decision since Android 10, not a
   configuration gap.
 - **The steering ready queue is approximated.** Until the steering store grows

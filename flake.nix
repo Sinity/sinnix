@@ -152,6 +152,14 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Declarative userland inside the Nix-on-Droid app. Termux remains the
+    # Android integration and SSH host; this input owns CLI package state.
+    nix-on-droid = {
+      url = "github:nix-community/nix-on-droid";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.home-manager.follows = "home-manager";
+    };
+
     # Code formatting (multi-formatter via flake-parts)
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
@@ -195,6 +203,7 @@
         ./flake/apps.nix
         ./flake/packages.nix
         ./flake/android.nix
+        ./flake/nix-on-droid.nix
         ./flake/treefmt.nix
         ./flake/nixos.nix
         ./flake/router.nix
