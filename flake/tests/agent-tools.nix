@@ -277,6 +277,8 @@ in
       agentResourcePolicy =
         let
           avoidPattern = runtimeDefaults.earlyoomEmergencyAvoidPattern;
+          userSlices = runtimeDefaults.slices.user;
+          managedWork = userSlices.sinnixd;
           forbiddenAvoidTokens = [
             "bash"
             "chrome"
@@ -293,6 +295,16 @@ in
         assert lib.assertMsg (lib.all (token: !(lib.hasInfix token avoidPattern))
           forbiddenAvoidTokens
         ) "the earlyoom fallback must not exempt agents, browsers, runtimes, or generic shells";
+        assert lib.assertMsg (
+          managedWork.CPUWeight < userSlices.app.CPUWeight
+          && managedWork.IOWeight < userSlices.app.IOWeight
+          && managedWork.MemoryHigh == "24G"
+          && !(managedWork ? MemoryMax)
+          && managedWork.ManagedOOMSwap == "kill"
+          && managedWork.ManagedOOMMemoryPressure == "kill"
+          && userSlices.app.MemoryLow == "4G"
+          && userSlices.session.MemoryLow == "4G"
+        ) "sinnixd work must yield to protected interactive slices without a hard CPU or memory cap";
         pkgs.runCommand "sinnix-agent-resource-policy-check" { } ''
           touch "$out"
         '';

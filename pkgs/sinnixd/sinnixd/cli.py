@@ -21,7 +21,13 @@ from .fleet import (
     render_evidence,
     render_fleet,
 )
-from .jobs import GenericJobs, GenericJobStore, UserSystemdJobs, default_state_dir
+from .jobs import (
+    GenericJobs,
+    GenericJobStore,
+    UserSystemdJobs,
+    default_state_dir,
+    host_pressure,
+)
 from .limits import DEFAULT_TIMEOUT_SECONDS
 from .packets import (
     PacketConfig,
@@ -1365,6 +1371,7 @@ def daemon_main() -> None:
         jobs=GenericJobs(
             UserSystemdJobs(),
             GenericJobStore(arguments.state_dir),
+            pressure_probe=host_pressure,
             notify_socket=arguments.socket,
             event_spool_path=arguments.event_spool,
         ),

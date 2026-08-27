@@ -156,6 +156,9 @@ rec {
       Slice = "desktop-shell.slice";
     };
     developer-build = mkClass "User-initiated builds, tests, and Nix work" { };
+    managed-runtime-work = mkClass "Daemon-managed transient work" {
+      Slice = "sinnixd-work.slice";
+    };
     background-maintenance = mkClass "Bulk maintenance that should yield to interaction" {
       Nice = 10;
       IOSchedulingClass = "idle";
@@ -261,11 +264,15 @@ rec {
       };
       app = {
         IOAccounting = true;
+        CPUWeight = 100;
         IOWeight = 300;
+        MemoryLow = "4G";
       };
       session = {
         IOAccounting = true;
+        CPUWeight = 100;
         IOWeight = 300;
+        MemoryLow = "4G";
       };
       desktop-shell = {
         IOAccounting = true;
@@ -293,6 +300,43 @@ rec {
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
+      };
+      # Slice names encode hierarchy. This outer slice is the direct sibling
+      # of app.slice and session.slice, so its weights govern host contention.
+      sinnixd = {
+        IOAccounting = true;
+        CPUWeight = 10;
+        IOWeight = 10;
+        MemoryHigh = "24G";
+        ManagedOOMSwap = "kill";
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "20%";
+        ManagedOOMMemoryPressureDurationSec = "10s";
+      };
+      sinnixd-work = {
+        IOAccounting = true;
+        CPUWeight = 100;
+        IOWeight = 100;
+      };
+      sinnixd-work-interactive = {
+        IOAccounting = true;
+        CPUWeight = 400;
+        IOWeight = 400;
+      };
+      sinnixd-work-agent = {
+        IOAccounting = true;
+        CPUWeight = 100;
+        IOWeight = 100;
+      };
+      sinnixd-work-normal = {
+        IOAccounting = true;
+        CPUWeight = 50;
+        IOWeight = 50;
+      };
+      sinnixd-work-bulk = {
+        IOAccounting = true;
+        CPUWeight = 10;
+        IOWeight = 10;
       };
       gpu-runtime = {
         IOAccounting = true;

@@ -64,6 +64,21 @@ CAPACITY_RETRY_DELAYS_SECONDS = (5, 30, 120)
 MAX_ADMISSION_CACHE_ENTRIES = 128
 MAX_ADMISSION_ESTIMATES = 128
 MIB = 1024 * 1024
+GIB = 1024 * MIB
+MIN_HOST_MEMORY_RESERVE_BYTES = 256 * MIB
+MAX_HOST_MEMORY_RESERVE_BYTES = 8 * GIB
+HOST_MEMORY_RESERVE_FRACTION = 0.25
+MIN_SWAP_FREE_FRACTION = 0.15
+MEMORY_FULL_BLOCK_THRESHOLD = 0.2
+IO_FULL_BLOCK_THRESHOLD = 5.0
+LEARNED_ESTIMATE_HEADROOM_NUMERATOR = 5
+LEARNED_ESTIMATE_HEADROOM_DENOMINATOR = 4
+POOL_SLICES = {
+    "interactive": "sinnixd-work-interactive.slice",
+    "normal": "sinnixd-work-normal.slice",
+    "bulk": "sinnixd-work-bulk.slice",
+    "agent": "sinnixd-work-agent.slice",
+}
 POOL_POLICIES = {
     "interactive": {
         "workers": 4,
@@ -361,6 +376,7 @@ class SystemdJobs(Protocol):
         json_result_path: Path | None = None,
         notify_socket: Path | None = None,
         notify_job_id: str | None = None,
+        pool: str,
     ) -> None: ...
 
     def show(
@@ -397,13 +413,14 @@ class UserSystemdJobs:
         json_result_path: Path | None = None,
         notify_socket: Path | None = None,
         notify_job_id: str | None = None,
+        pool: str,
     ) -> None:
         args = [
             "systemd-run",
             "--user",
             "--quiet",
             f"--unit={unit}",
-            "--slice=agent.slice",
+            f"--slice={POOL_SLICES[pool]}",
             f"--property=WorkingDirectory={working_directory}",
             f"--property=RuntimeMaxSec={timeout_seconds}s",
             "--property=StandardOutput=journal",
@@ -648,19 +665,67 @@ def notify_job_exit(
         connection.recv(4)
 
 
-def _host_pressure() -> Mapping[str, float]:
-    """Read only admission evidence; it never acts on existing cgroups."""
-    values: dict[str, float] = {"memory_full_avg10": 0.0}
-    try:
-        for line in Path("/proc/pressure/memory").read_text().splitlines():
-            if line.startswith("full "):
+def host_pressure() -> Mapping[str, float]:
+    """Read host capacity and stall evidence without acting on cgroups."""
+    values: dict[str, float] = {
+        "memory_full_avg10": 100.0,
+        "io_full_avg10": 100.0,
+        "memory_total_bytes": 0.0,
+        "memory_available_bytes": 0.0,
+        "swap_total_bytes": 0.0,
+        "swap_free_bytes": 0.0,
+        "managed_memory_bytes": 0.0,
+    }
+
+    def pressure_avg10(resource: str, kind: str) -> float:
+        for line in Path(f"/proc/pressure/{resource}").read_text().splitlines():
+            if line.startswith(f"{kind} "):
                 for item in line.split()[1:]:
                     key, _, value = item.partition("=")
                     if key == "avg10":
-                        values["memory_full_avg10"] = float(value)
+                        return float(value)
+        raise ValueError(f"{resource} PSI lacks {kind} avg10")
+
+    try:
+        values["memory_full_avg10"] = pressure_avg10("memory", "full")
+        values["io_full_avg10"] = pressure_avg10("io", "full")
     except (OSError, ValueError):
-        values["memory_full_avg10"] = 1.0
+        pass
+
+    try:
+        meminfo = {}
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            name, separator, raw = line.partition(":")
+            if separator and raw.strip().endswith(" kB"):
+                meminfo[name] = int(raw.strip().removesuffix(" kB")) * 1024
+        for source, target in (
+            ("MemTotal", "memory_total_bytes"),
+            ("MemAvailable", "memory_available_bytes"),
+            ("SwapTotal", "swap_total_bytes"),
+            ("SwapFree", "swap_free_bytes"),
+        ):
+            values[target] = float(meminfo[source])
+    except (KeyError, OSError, ValueError):
+        pass
+
+    uid = os.getuid()
+    managed_memory = (
+        CGROUP_ROOT
+        / "user.slice"
+        / f"user-{uid}.slice"
+        / f"user@{uid}.service"
+        / "sinnixd-work.slice"
+        / "memory.current"
+    )
+    try:
+        values["managed_memory_bytes"] = float(managed_memory.read_text().strip())
+    except (OSError, ValueError):
+        pass
     return values
+
+
+def _unmetered_pressure() -> Mapping[str, float]:
+    return {}
 
 
 def _terminal_resources(properties: Mapping[str, str]) -> dict[str, Any]:
@@ -2339,7 +2404,7 @@ class GenericJobs:
     systemd: SystemdJobs
     store: GenericJobStore
     wait_poll_seconds: float = 0.1
-    pressure_probe: Callable[[], Mapping[str, float]] = _host_pressure
+    pressure_probe: Callable[[], Mapping[str, float]] = _unmetered_pressure
     before_admission_start: Callable[[str], None] | None = None
     notify_socket: Path | None = None
     record_retention_days: int = 14
@@ -2789,6 +2854,7 @@ class GenericJobs:
                     environment=self._job_environment(record),
                     timeout_seconds=spec.timeout_seconds,
                     log_path=record.log_path,
+                    pool=spec.pool,
                     json_result_path=record.result_path
                     if spec.result_kind in {"json", "pytest"}
                     else None,
@@ -2979,13 +3045,6 @@ class GenericJobs:
                 }
             )
         estimate_key = f"{project.project_id}:{operation.name}"
-        learned = state["estimates"].get(estimate_key)
-        estimate = (
-            learned.get("bytes")
-            if isinstance(learned, Mapping)
-            else operation.estimate_memory_bytes
-        )
-
         def build_spec(lease: ServiceLease | None) -> GenericJobSpec:
             launch_environment = dict(environment)
             launch_environment.update(dependency_environment)
@@ -3025,7 +3084,7 @@ class GenericJobs:
                 coalesce_key=coalesce_key,
                 cache_key=cache_key,
                 estimate_key=estimate_key,
-                estimate_memory_bytes=estimate,
+                estimate_memory_bytes=operation.estimate_memory_bytes,
                 scratch=operation.scratch,
                 lease=lease,
                 dimensions=_dimensions(dimensions or {}) if not lineage else {},
@@ -3134,16 +3193,50 @@ class GenericJobs:
 
     @staticmethod
     def _estimate(spec: GenericJobSpec, state: Mapping[str, Any]) -> int:
-        estimate = (
+        baseline = (
             spec.estimate_memory_bytes
             if spec.estimate_memory_bytes is not None
             else POOL_POLICIES[spec.pool]["default_estimate"]
         )
-        # A pool budget governs concurrent accounting, not whether a lone job
-        # may ever run. Historical peaks can exceed that budget (the process is
-        # still contained by its systemd slice); without this cap such a job is
-        # permanently unadmittable even when the pool is empty.
-        return min(estimate, POOL_POLICIES[spec.pool]["memory_budget"])
+        learned = state.get("estimates", {}).get(spec.estimate_key)
+        learned_bytes = learned.get("bytes") if isinstance(learned, Mapping) else 0
+        return max(baseline, learned_bytes if isinstance(learned_bytes, int) else 0)
+
+    @staticmethod
+    def _host_memory_budget(pressure: Mapping[str, float]) -> int | None:
+        total = int(pressure.get("memory_total_bytes", 0.0))
+        available = int(pressure.get("memory_available_bytes", 0.0))
+        if total <= 0 or available < 0:
+            return None
+        managed = max(0, int(pressure.get("managed_memory_bytes", 0.0)))
+        reserve = min(
+            MAX_HOST_MEMORY_RESERVE_BYTES,
+            max(
+                MIN_HOST_MEMORY_RESERVE_BYTES,
+                int(total * HOST_MEMORY_RESERVE_FRACTION),
+            ),
+        )
+        return max(0, min(total - reserve, available + managed - reserve))
+
+    @staticmethod
+    def _host_pressure_blocks(
+        pressure: Mapping[str, float], *, has_active_managed_work: bool
+    ) -> bool:
+        swap_total = float(pressure.get("swap_total_bytes", 0.0))
+        swap_free = float(pressure.get("swap_free_bytes", 0.0))
+        swap_exhausted = (
+            swap_total > 0 and swap_free / swap_total < MIN_SWAP_FREE_FRACTION
+        )
+        return (
+            swap_exhausted
+            or float(pressure.get("memory_full_avg10", 0.0))
+            >= MEMORY_FULL_BLOCK_THRESHOLD
+            or (
+                has_active_managed_work
+                and float(pressure.get("io_full_avg10", 0.0))
+                >= IO_FULL_BLOCK_THRESHOLD
+            )
+        )
 
     def _admit_locked(self) -> None:
         state = self._admission_state()
@@ -3174,6 +3267,7 @@ class GenericJobs:
             ):
                 active[record.spec.pool].append(record)
         pressure = self.pressure_probe()
+        host_memory_budget = self._host_memory_budget(pressure)
         for snapshot in records:
             if snapshot.spec.kind not in {"declared-operation", "attested-agent"}:
                 continue
@@ -3203,23 +3297,87 @@ class GenericJobs:
                     self._estimate(item.spec, state)
                     for item in active[record.spec.pool]
                 )
+                host_occupied = sum(
+                    self._estimate(item.spec, state)
+                    for pool_records in active.values()
+                    for item in pool_records
+                )
                 exclusive = {
                     key
                     for pool_records in active.values()
                     for item in pool_records
                     for key in item.spec.exclusive_keys
                 }
+                pool_memory_blocked = (
+                    bool(active[record.spec.pool])
+                    and occupied + estimate > policy["memory_budget"]
+                )
+                host_memory_blocked = (
+                    host_memory_budget is not None
+                    and host_occupied + estimate > host_memory_budget
+                )
+                exclusive_blocked = bool(
+                    exclusive.intersection(record.spec.exclusive_keys)
+                )
                 pressure_blocked = (
                     record.spec.pool != "interactive"
-                    and estimate >= policy["memory_budget"] // 2
-                    and float(pressure.get("memory_full_avg10", 0.0)) >= 0.2
+                    and self._host_pressure_blocks(
+                        pressure, has_active_managed_work=host_occupied > 0
+                    )
                 )
-                if (
-                    len(active[record.spec.pool]) >= policy["workers"]
-                    or occupied + estimate > policy["memory_budget"]
-                    or bool(exclusive.intersection(record.spec.exclusive_keys))
-                    or pressure_blocked
-                ):
+                blocked_by = [
+                    reason
+                    for reason, blocked_now in (
+                        (
+                            "pool-workers",
+                            len(active[record.spec.pool]) >= policy["workers"],
+                        ),
+                        ("pool-memory", pool_memory_blocked),
+                        ("host-memory", host_memory_blocked),
+                        ("exclusive-key", exclusive_blocked),
+                        ("host-pressure", pressure_blocked),
+                    )
+                    if blocked_now
+                ]
+                if blocked_by:
+                    admission = {
+                        **(
+                            dict(record.state.get("admission", {}))
+                            if isinstance(record.state.get("admission"), Mapping)
+                            else {}
+                        ),
+                        "blocked_by": blocked_by,
+                        "host": {
+                            "budget_memory_bytes": host_memory_budget,
+                            "occupied_memory_bytes": host_occupied,
+                            "memory_available_bytes": int(
+                                pressure.get("memory_available_bytes", 0.0)
+                            ),
+                            "memory_full_avg10": float(
+                                pressure.get("memory_full_avg10", 0.0)
+                            ),
+                            "io_full_avg10": float(
+                                pressure.get("io_full_avg10", 0.0)
+                            ),
+                            "swap_free_bytes": int(
+                                pressure.get("swap_free_bytes", 0.0)
+                            ),
+                            "swap_total_bytes": int(
+                                pressure.get("swap_total_bytes", 0.0)
+                            ),
+                        },
+                    }
+                    if record.state.get("admission") != admission:
+                        self.store.save(
+                            self._with_state(
+                                record,
+                                {
+                                    **record.state,
+                                    "observed_at": _timestamp(),
+                                    "admission": admission,
+                                },
+                            )
+                        )
                     continue
             if self.before_admission_start is not None:
                 self.before_admission_start(record.job_id)
@@ -3281,6 +3439,7 @@ class GenericJobs:
                         environment=self._job_environment(current, environment),
                         timeout_seconds=current.spec.timeout_seconds,
                         log_path=current.log_path,
+                        pool=current.spec.pool,
                         json_result_path=current.result_path
                         if current.spec.result_kind in {"json", "pytest"}
                         else None,
@@ -3302,12 +3461,20 @@ class GenericJobs:
                     self.store.save(terminal)
                     self._finalize_terminal(terminal)
                 else:
+                    admission = (
+                        dict(current.state.get("admission", {}))
+                        if isinstance(current.state.get("admission"), Mapping)
+                        else {}
+                    )
+                    admission.pop("blocked_by", None)
+                    admission.pop("host", None)
                     submitted = self._with_state(
                         current,
                         {
                             **current.state,
                             "phase": "submitted",
                             "terminal": False,
+                            "admission": admission,
                             "admitted_at": _timestamp(),
                             "observed_at": _timestamp(),
                         },
@@ -3384,13 +3551,21 @@ class GenericJobs:
             }
             state["cache"] = self._bounded(state["cache"], MAX_ADMISSION_CACHE_ENTRIES)
         peak = self._memory_peak(record.state.get("systemd", {}))
-        if (
-            record.state.get("phase") == "succeeded"
-            and peak is not None
-            and record.spec.estimate_key is not None
-        ):
+        if peak is not None and record.spec.estimate_key is not None:
+            learned = (
+                peak * LEARNED_ESTIMATE_HEADROOM_NUMERATOR
+                + LEARNED_ESTIMATE_HEADROOM_DENOMINATOR
+                - 1
+            ) // LEARNED_ESTIMATE_HEADROOM_DENOMINATOR
+            previous = state["estimates"].get(record.spec.estimate_key)
+            previous_bytes = (
+                previous.get("bytes") if isinstance(previous, Mapping) else 0
+            )
             state["estimates"][record.spec.estimate_key] = {
-                "bytes": peak,
+                "bytes": max(
+                    learned,
+                    previous_bytes if isinstance(previous_bytes, int) else 0,
+                ),
                 "touched_at": _timestamp(),
             }
             state["estimates"] = self._bounded(
@@ -3685,10 +3860,13 @@ class GenericJobs:
         }
         with self._admission_lock:
             self._admit_locked()
+        source_records = (
+            self.store.active_records() if active_only else self.store.list()
+        )
         records = sorted(
             (
                 record
-                for record in self.store.list()
+                for record in source_records
                 if principal == "operator" or record.spec.principal == principal
                 if project_id is None or record.spec.project_id == project_id
                 if not query["phases"] or record.state.get("phase") in query["phases"]

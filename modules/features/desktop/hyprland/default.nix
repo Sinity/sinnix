@@ -169,7 +169,7 @@ in
                 # UWSM's packaged desktop entry launches Hyprland without a
                 # config argument. Lua is not its default discovery path, so
                 # pass the Home Manager-generated config explicitly.
-                exec uwsm start -e -D Hyprland ${hyprlandPkg}/bin/Hyprland --config "$HOME/.config/hypr/hyprland.lua"
+                exec uwsm start -e -D Hyprland -- ${hyprlandPkg}/bin/Hyprland --config "$HOME/.config/hypr/hyprland.lua"
               fi
             fi
           '';

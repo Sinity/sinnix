@@ -61,6 +61,13 @@ in
               message = "The user-mile profile must not start automata or Kitty integration.";
             }
             {
+              assertion =
+                !builtins.hasAttr "sinex-document-scan" config.systemd.services
+                && !builtins.hasAttr "sinex-document-scan" config.systemd.timers
+                && !builtins.hasAttr "sinex-document-scan" config.sinnix.runtime.surfaces;
+              message = "A disabled document source must not emit invalid document-scan units or inventory.";
+            }
+            {
               assertion = lib.elem "sinex-runtime.target" postgresPartOf;
               message = "Stopping the manual runtime target must also stop PostgreSQL's aggregate target.";
             }

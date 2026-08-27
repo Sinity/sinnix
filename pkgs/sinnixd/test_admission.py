@@ -261,9 +261,121 @@ def test_lone_job_larger_than_pool_budget_is_not_permanently_starved(
     assert started["state"]["admitted_at"]
     assert (
         started["state"]["admission"]["estimate_memory_bytes"]
-        == 18 * 1024 * 1024 * 1024
+        == 24 * 1024 * 1024 * 1024
     )
     assert [entry["command"] for entry in systemd.started] == [("env", "oversized")]
+
+
+def test_swap_exhaustion_queues_even_a_small_agent_job(tmp_path: Path) -> None:
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        pressure_probe=lambda: {
+            "memory_full_avg10": 0.0,
+            "io_full_avg10": 0.0,
+            "memory_total_bytes": 32 * 1024 * 1024 * 1024,
+            "memory_available_bytes": 2 * 1024 * 1024 * 1024,
+            "swap_total_bytes": 20 * 1024 * 1024 * 1024,
+            "swap_free_bytes": 0,
+            "managed_memory_bytes": 0,
+        },
+    )
+
+    queued = subject.start(agent_spec(("table:jobs",)))
+
+    assert queued["state"]["phase"] == "queued"
+    assert "host-pressure" in queued["state"]["admission"]["blocked_by"]
+    assert queued["state"]["admission"]["host"]["swap_free_bytes"] == 0
+    assert systemd.started == []
+
+
+def test_io_pressure_allows_one_low_priority_job_then_blocks_concurrency(
+    tmp_path: Path,
+) -> None:
+    adapter = project(
+        tmp_path / "project",
+        (operation("first"), operation("second")),
+    )
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        pressure_probe=lambda: {
+            "memory_full_avg10": 0.0,
+            "io_full_avg10": 6.0,
+        },
+    )
+
+    first = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("first"),
+        correlation_id="first",
+        parameters={},
+    )
+    second = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("second"),
+        correlation_id="second",
+        parameters={},
+    )
+
+    assert first["state"]["phase"] == "submitted"
+    assert second["state"]["phase"] == "queued"
+    assert second["state"]["admission"]["blocked_by"] == ["host-pressure"]
+    assert len(systemd.started) == 1
+
+
+def test_host_budget_accounts_for_active_jobs_across_pools(tmp_path: Path) -> None:
+    adapter = project(
+        tmp_path / "project",
+        (
+            operation(
+                "bulk", pool="bulk", estimate_memory_bytes=18 * 1024 * 1024 * 1024
+            ),
+        ),
+    )
+    systemd = FakeSystemd()
+    pressure = {
+        "memory_full_avg10": 0.0,
+        "io_full_avg10": 0.0,
+        "memory_total_bytes": 32 * 1024 * 1024 * 1024,
+        "memory_available_bytes": 32 * 1024 * 1024 * 1024,
+        "swap_total_bytes": 20 * 1024 * 1024 * 1024,
+        "swap_free_bytes": 20 * 1024 * 1024 * 1024,
+        "managed_memory_bytes": 0,
+    }
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        pressure_probe=lambda: pressure,
+    )
+    subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("bulk"),
+        correlation_id="bulk",
+        parameters={},
+    )
+    candidate = agent_spec(("table:jobs",))
+    candidate = GenericJobSpec(
+        **{
+            **candidate.__dict__,
+            "estimate_memory_bytes": 8 * 1024 * 1024 * 1024,
+        }
+    )
+
+    queued = subject.start(candidate)
+
+    assert queued["state"]["phase"] == "queued"
+    assert queued["state"]["admission"]["blocked_by"] == ["host-memory"]
+    assert (
+        queued["state"]["admission"]["host"]["occupied_memory_bytes"]
+        == 18 * 1024 * 1024 * 1024
+    )
+    assert len(systemd.started) == 1
 
 
 def test_failed_launch_peak_does_not_replace_declared_memory_estimate(
@@ -305,6 +417,69 @@ def test_failed_launch_peak_does_not_replace_declared_memory_estimate(
         repeated["state"]["admission"]["estimate_memory_bytes"]
         == 12 * 1024 * 1024 * 1024
     )
+
+
+def test_small_successful_peak_does_not_erase_declared_estimate(
+    tmp_path: Path,
+) -> None:
+    adapter = project(
+        tmp_path / "project",
+        (
+            operation(
+                "heavy", pool="bulk", estimate_memory_bytes=12 * 1024 * 1024 * 1024
+            ),
+        ),
+    )
+    systemd = FakeSystemd()
+    subject = jobs(tmp_path, systemd)
+    started = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("heavy"),
+        correlation_id="first",
+        parameters={},
+    )
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "MemoryPeak": str(32 * 1024 * 1024),
+    }
+    subject.get(started["job_id"])
+
+    repeated = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("heavy"),
+        correlation_id="second",
+        parameters={},
+    )
+
+    assert (
+        repeated["state"]["admission"]["estimate_memory_bytes"]
+        == 12 * 1024 * 1024 * 1024
+    )
+
+
+def test_agent_peak_increases_the_next_matching_agent_estimate(tmp_path: Path) -> None:
+    systemd = FakeSystemd()
+    subject = jobs(tmp_path, systemd)
+    first = agent_spec(("table:first",))
+    first = GenericJobSpec(**{**first.__dict__, "estimate_key": "agent:codex:model"})
+    started = subject.start(first)
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "MemoryPeak": str(4 * 1024 * 1024 * 1024),
+    }
+    subject.get(started["job_id"])
+    second = agent_spec(("table:second",))
+    second = GenericJobSpec(**{**second.__dict__, "estimate_key": "agent:codex:model"})
+
+    repeated = subject.start(second)
+
+    assert repeated["state"]["admission"]["estimate_memory_bytes"] > 4 * 1024 * 1024 * 1024
 
 
 def test_cache_and_coalescing_are_principal_isolated(tmp_path: Path) -> None:
@@ -471,7 +646,7 @@ def test_dependencies_exclusive_keys_learned_peaks_and_pressure_gate(
         "ActiveState": "inactive",
         "Result": "success",
         "ExecMainStatus": "0",
-        "MemoryPeak": str(777 * 1024 * 1024),
+        "MemoryPeak": str(2 * 1024 * 1024 * 1024),
     }
     subject.get(primary["job_id"])
     repeated = subject.start_declared(
@@ -480,7 +655,10 @@ def test_dependencies_exclusive_keys_learned_peaks_and_pressure_gate(
         correlation_id="again",
         parameters={},
     )
-    assert repeated["state"]["admission"]["estimate_memory_bytes"] == 777 * 1024 * 1024
+    assert (
+        repeated["state"]["admission"]["estimate_memory_bytes"]
+        == 2 * 1024 * 1024 * 1024 * 5 // 4
+    )
 
 
 @pytest.mark.parametrize("scratch", ("tmpfs", "nvme"))
