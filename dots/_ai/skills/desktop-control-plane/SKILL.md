@@ -84,8 +84,8 @@ sinnix-hypr-control send-shortcut CTRL V 'class:^(steam)$'
 # Paste text into a paste-aware GUI app and optionally press Enter
 sinnix-hypr-control paste 'class:^(steam)$' --text 'download_depot 427520 427523 3610450483505928345' --enter
 
-# Dispatch any Hyprland action
-sinnix-hypr-control dispatch workspace 3
+# Dispatch any Hyprland Lua action
+sinnix-hypr-control dispatch 'hl.dsp.focus({ workspace = 3 })'
 ```
 
 ### 3) Screenshot Color Lab (HDR)

@@ -137,10 +137,13 @@ config.bind(";y", "spawn --userscript yt-related")
 config.bind(";a", "spawn --userscript archive-both")
 config.bind(";r", "spawn --userscript research-capture")
 config.bind(";s", "spawn --userscript raindrop-save")
-config.bind("gt", "spawn --detach hyprctl dispatch changegroupactive f")
-config.bind("gT", "spawn --detach hyprctl dispatch changegroupactive b")
-config.bind("g`", "spawn --detach hyprctl dispatch togglegroup")
-config.bind("g.", "spawn --detach hyprctl dispatch lockactivegroup toggle")
+config.bind("gt", "spawn --detach hyprctl eval 'hl.dispatch(hl.dsp.group.next())'")
+config.bind("gT", "spawn --detach hyprctl eval 'hl.dispatch(hl.dsp.group.prev())'")
+config.bind("g`", "spawn --detach hyprctl eval 'hl.dispatch(hl.dsp.group.toggle())'")
+config.bind(
+    "g.",
+    "spawn --detach hyprctl eval 'hl.dispatch(hl.dsp.group.lock_active(\"toggle\"))'",
+)
 config.bind("xx", "config-cycle content.blocking.enabled ;; reload")
 
 

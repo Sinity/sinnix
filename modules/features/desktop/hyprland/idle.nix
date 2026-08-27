@@ -38,7 +38,7 @@ in
     enable = true;
     settings = {
       general = {
-        after_sleep_cmd = "hyprctl dispatch dpms on";
+        after_sleep_cmd = "hyprctl eval 'hl.dispatch(hl.dsp.dpms(\"on\"))'";
         ignore_dbus_inhibit = false;
         lock_cmd = "noctalia msg session lock";
       };
@@ -51,13 +51,13 @@ in
         }
         {
           timeout = 420;
-          on-timeout = "hyprctl dispatch dpms off";
-          on-resume = "hyprctl dispatch dpms on";
+          on-timeout = "hyprctl eval 'hl.dispatch(hl.dsp.dpms(\"off\"))'";
+          on-resume = "hyprctl eval 'hl.dispatch(hl.dsp.dpms(\"on\"))'";
         }
         {
           timeout = 1500;
           on-timeout = "noctalia msg session lock";
-          on-resume = "hyprctl dispatch dpms on";
+          on-resume = "hyprctl eval 'hl.dispatch(hl.dsp.dpms(\"on\"))'";
         }
       ];
     };

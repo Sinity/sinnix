@@ -50,6 +50,7 @@ in
     ./tests/quota.nix
     ./tests/noctalia.nix
     ./tests/hyprland-rules.nix
+    ./tests/hyprland-lua-tools.nix
     ./tests/memory-audit.nix
     ./tests/sinex-nats-security.nix
     ./tests/sinex-user-mile.nix

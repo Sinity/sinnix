@@ -12,7 +12,7 @@ Commands:
   workspaces
   binds [--json] [--grep <pattern>]
   focus-window <window>
-  dispatch <dispatcher> [args...]
+  dispatch <lua-dispatcher-expression>
   send-shortcut <mods> <key> [window]
   send-keystate <mods> <key> <down|repeat|up> <window>
   paste <window> [--text <text> | --text-file <path>] [--enter] [--paste-mods <mods>] [--paste-key <key>] [--enter-key <key>] [--no-focus] [--no-restore-clipboard]
@@ -36,31 +36,43 @@ need_cmd() {
 
 need_cmd hyprctl
 
-join_by() {
-  local sep="$1"
-  shift || true
-  local first=1
-  for item in "$@"; do
-    if [[ $first -eq 1 ]]; then
-      printf '%s' "$item"
-      first=0
-    else
-      printf '%s%s' "$sep" "$item"
-    fi
-  done
+lua_quote() {
+  need_cmd jq
+  jq -nr --arg value "$1" '$value | tojson'
+}
+
+hypr_dispatch() {
+  hyprctl eval "hl.dispatch($1)"
+}
+
+focus_window() {
+  local window_lua
+  window_lua=$(lua_quote "$1")
+  hypr_dispatch "hl.dsp.focus({ window = $window_lua })"
 }
 
 send_shortcut() {
   local mods="$1"
   local key="$2"
   local window="${3:-}"
-  local payload
+  local mods_lua key_lua window_lua args
+  mods_lua=$(lua_quote "$mods")
+  key_lua=$(lua_quote "$key")
+  args="mods = $mods_lua, key = $key_lua"
   if [[ -n $window ]]; then
-    payload="$(join_by ', ' "$mods" "$key" "$window")"
-  else
-    payload="$(join_by ', ' "$mods" "$key")"
+    window_lua=$(lua_quote "$window")
+    args="$args, window = $window_lua"
   fi
-  hyprctl dispatch sendshortcut "$payload"
+  hypr_dispatch "hl.dsp.send_shortcut({ $args })"
+}
+
+send_key_state() {
+  local mods_lua key_lua state_lua window_lua
+  mods_lua=$(lua_quote "$1")
+  key_lua=$(lua_quote "$2")
+  state_lua=$(lua_quote "$3")
+  window_lua=$(lua_quote "$4")
+  hypr_dispatch "hl.dsp.send_key_state({ mods = $mods_lua, key = $key_lua, state = $state_lua, window = $window_lua })"
 }
 
 cmd="${1:-}"
@@ -165,11 +177,11 @@ binds)
   ;;
 
 dispatch)
-  [[ $# -ge 1 ]] || {
-    echo "dispatch requires dispatcher name" >&2
+  [[ $# -eq 1 ]] || {
+    echo "dispatch requires one Lua dispatcher expression" >&2
     exit 2
   }
-  hyprctl dispatch "$@"
+  hypr_dispatch "$1"
   ;;
 
 focus-window)
@@ -177,7 +189,7 @@ focus-window)
     echo "focus-window requires one window selector" >&2
     exit 2
   }
-  hyprctl dispatch focuswindow "$1"
+  focus_window "$1"
   ;;
 
 send-shortcut)
@@ -196,8 +208,7 @@ send-keystate)
     echo "send-keystate requires mods, key, state, and window" >&2
     exit 2
   }
-  payload="$(join_by ', ' "$1" "$2" "$3" "$4")"
-  hyprctl dispatch sendkeystate "$payload"
+  send_key_state "$1" "$2" "$3" "$4"
   ;;
 
 paste)
@@ -295,7 +306,7 @@ paste)
   fi
 
   if [[ $do_focus -eq 1 ]]; then
-    hyprctl dispatch focuswindow "$window"
+    focus_window "$window"
     sleep 0.15
   fi
 

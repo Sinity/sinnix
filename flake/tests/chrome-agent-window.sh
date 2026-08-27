@@ -138,6 +138,10 @@ case "$1 $2" in
   printf '%s\n' '[{"instance":"fake-hyprland"}]'
   ;;
 eval\ *)
+  if [[ $* == *'hl.dsp.focus({ window = "address:0xoperator" })'* ]]; then
+    printf '%s\n' 0xoperator >"$state/active-window"
+    printf '%s\n' "$*" >>"$state/focus-workspace-actions"
+  fi
   if [[ $* == *hl.window_rule* ]]; then
     touch "$state/pre-map-rules"
   fi
@@ -398,7 +402,7 @@ final)
   test -e "$state/agent-target"
   test ! -s "$state/closed-targets"
   test "$(cat "$state/active-window")" = 0xoperator
-  test "$(cat "$state/focus-workspace-actions")" = 'dispatch focuswindow address:0xoperator'
+  test "$(cat "$state/focus-workspace-actions")" = 'eval hl.dispatch(hl.dsp.focus({ window = "address:0xoperator" }))'
   assert_rules_cleaned "$state"
   ;;
 *)
