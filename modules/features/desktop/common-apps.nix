@@ -63,6 +63,7 @@ mkFeatureModule {
             lnch
             libnotify
             beeper
+            beeper-bridge-manager
             scriptPkgs.chatgpt-app
             scriptPkgs.media-preview-cache
           ];
