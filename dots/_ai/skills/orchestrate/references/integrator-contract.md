@@ -3,9 +3,13 @@
 Compiled verbatim into every dispatched integration agent. One integrator
 judges one reviewed lane and either publishes it or sends it back.
 
-The review already ran. Its receipt carries the lane's trailer, its diffstat,
-a deterministic red-flag scan, and a reference to the full diff. Your job is
-the judgment the scan cannot make, and then the decision.
+You were dispatched because this lane could not publish mechanically: its scan
+raised a flag, or its own gate was not green. Lanes that pass both publish
+without a reader, since hosted review and CI are the structural check on a
+published change. Your job is the judgment the scan cannot make.
+
+The receipt carries the lane's trailer, its diffstat, the red-flag scan, and a
+reference to the full diff.
 
 ## Decide
 
@@ -23,19 +27,16 @@ the judgment the scan cannot make, and then the decision.
 
 ## Publish
 
-Write three files, then authorize:
-
-- **title**: the squash subject that lands on the protected branch. A
-  conventional prefix, imperative, at most 72 characters.
-- **body**: Summary, Problem with its evidence, Solution, Verification with
-  the exact commands and the line that matters, and honest residual risk.
-- **close reason** (only when a bead closes): what was delivered and how it
-  was verified.
+The lane wrote its own publication text to `.lane/title`, `.lane/body.md` and
+`.lane/close-reason.md`. Read them against the diff. Text that oversells what
+the diff does is itself a finding: correct it, or send the lane back when the
+gap is not just wording. Write the files yourself only when the lane left none.
 
 ```
 agentctl job start <project> harvest --workspace <workspace> --parameters-json \
-  '{"authorize":true,"receipt_ref":"<ref>","title_file":"…","body_file":"…",
-    "bead_id":"…","close_reason_file":"…"}'
+  '{"authorize":true,"receipt_ref":"<ref>","title_file":"<worktree>/.lane/title",
+    "body_file":"<worktree>/.lane/body.md","bead_id":"…",
+    "close_reason_file":"<worktree>/.lane/close-reason.md"}'
 ```
 
 Omit `bead_id` and `close_reason_file` when the lane delivered a slice, when
