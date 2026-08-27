@@ -71,6 +71,10 @@ HOST_MEMORY_RESERVE_FRACTION = 0.25
 MIN_SWAP_FREE_FRACTION = 0.15
 MEMORY_FULL_BLOCK_THRESHOLD = 0.2
 IO_FULL_BLOCK_THRESHOLD = 5.0
+MEMORY_FULL_PREEMPT_THRESHOLD = 5.0
+IO_FULL_PREEMPT_THRESHOLD = 20.0
+PREEMPT_SWAP_FREE_FRACTION = 0.10
+ACTIVE_PRESSURE_GRACE_SECONDS = 2.0
 LEARNED_ESTIMATE_HEADROOM_NUMERATOR = 5
 LEARNED_ESTIMATE_HEADROOM_DENOMINATOR = 4
 POOL_SLICES = {
@@ -478,7 +482,9 @@ class UserSystemdJobs:
                 "--property=ExecMainStatus",
                 "--property=ControlGroup",
                 "--property=InvocationID",
+                "--property=MemoryCurrent",
                 "--property=MemoryPeak",
+                "--property=MemorySwapCurrent",
                 "--property=CPUUsageNSec",
                 "--property=IOReadBytes",
                 "--property=IOWriteBytes",
@@ -714,6 +720,7 @@ def host_pressure() -> Mapping[str, float]:
         / "user.slice"
         / f"user-{uid}.slice"
         / f"user@{uid}.service"
+        / "sinnixd.slice"
         / "sinnixd-work.slice"
         / "memory.current"
     )
@@ -2422,6 +2429,7 @@ class GenericJobs:
     events: TerminalEvents = field(default_factory=TerminalEvents, repr=False)
     _admission_lock: RLock = field(default_factory=RLock, init=False, repr=False)
     _spooled: set[str] = field(default_factory=set, init=False, repr=False)
+    _active_pressure_since: float | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         # Recovery observes only the durable nonterminal set. Terminal lease
@@ -3054,6 +3062,7 @@ class GenericJobs:
                 }
             )
         estimate_key = f"{project.project_id}:{operation.name}"
+
         def build_spec(lease: ServiceLease | None) -> GenericJobSpec:
             launch_environment = dict(environment)
             launch_environment.update(dependency_environment)
@@ -3242,10 +3251,134 @@ class GenericJobs:
             >= MEMORY_FULL_BLOCK_THRESHOLD
             or (
                 has_active_managed_work
-                and float(pressure.get("io_full_avg10", 0.0))
-                >= IO_FULL_BLOCK_THRESHOLD
+                and float(pressure.get("io_full_avg10", 0.0)) >= IO_FULL_BLOCK_THRESHOLD
             )
         )
+
+    @staticmethod
+    def _active_pressure_reasons(pressure: Mapping[str, float]) -> list[str]:
+        memory_full = float(pressure.get("memory_full_avg10", 0.0))
+        io_full = float(pressure.get("io_full_avg10", 0.0))
+        swap_total = float(pressure.get("swap_total_bytes", 0.0))
+        swap_free = float(pressure.get("swap_free_bytes", 0.0))
+        reasons: list[str] = []
+        if memory_full >= MEMORY_FULL_PREEMPT_THRESHOLD:
+            reasons.append("memory-stall")
+        if io_full >= IO_FULL_PREEMPT_THRESHOLD:
+            reasons.append("io-stall")
+        if (
+            swap_total > 0
+            and swap_free / swap_total < PREEMPT_SWAP_FREE_FRACTION
+            and (memory_full >= 1.0 or io_full >= IO_FULL_BLOCK_THRESHOLD)
+        ):
+            reasons.append("swap-exhaustion")
+        return reasons
+
+    @staticmethod
+    def _systemd_memory(properties: Mapping[str, str]) -> int:
+        values: list[int] = []
+        for name in ("MemoryCurrent", "MemorySwapCurrent"):
+            try:
+                value = int(properties.get(name, ""))
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                values.append(value)
+        if values:
+            return sum(values)
+        peak = GenericJobs._memory_peak(properties)
+        return peak or 0
+
+    def _preempt_pressure_victim(
+        self, pressure: Mapping[str, float], reasons: Sequence[str]
+    ) -> str | None:
+        candidates: list[tuple[int, int, str, GenericJobRecord]] = []
+        admission = self._admission_state()
+        pool_priority = {"normal": 1, "agent": 2, "bulk": 3}
+        for record in self.store.active_records():
+            if (
+                record.spec.kind not in {"declared-operation", "attested-agent"}
+                or record.spec.admission_bypass
+                or record.spec.pool == "interactive"
+                or record.state.get("terminal")
+                or record.state.get("phase")
+                not in {
+                    "submitted",
+                    "running",
+                    "cancelling",
+                    "stopping",
+                    "launch-unknown",
+                    "observation-unknown",
+                    "outcome-unknown",
+                }
+            ):
+                continue
+            try:
+                properties = self.systemd.show(record.unit)
+            except SystemdJobError:
+                continue
+            if properties.get("ActiveState") not in {
+                "active",
+                "activating",
+                "reloading",
+            }:
+                continue
+            observed = self._systemd_memory(properties)
+            estimate = self._estimate(record.spec, admission)
+            candidates.append(
+                (
+                    observed or estimate,
+                    pool_priority.get(record.spec.pool, 0),
+                    record.created_at,
+                    record,
+                )
+            )
+        if not candidates:
+            return None
+        _, _, _, victim = max(candidates, key=lambda item: item[:3])
+        result = self.cancel(victim.job_id)
+        if result.get("already_terminal"):
+            return None
+        with self.store.locked(victim.job_id):
+            record = self.store.load(victim.job_id)
+            updated = self._with_state(
+                record,
+                {
+                    **record.state,
+                    "preemption": {
+                        "reason": list(reasons),
+                        "observed_at": _timestamp(),
+                        "host": {
+                            key: pressure.get(key, 0.0)
+                            for key in (
+                                "memory_available_bytes",
+                                "memory_full_avg10",
+                                "io_full_avg10",
+                                "swap_free_bytes",
+                                "swap_total_bytes",
+                                "managed_memory_bytes",
+                            )
+                        },
+                    },
+                },
+            )
+            self.store.save(updated)
+        return victim.job_id
+
+    def _relieve_active_pressure(self, pressure: Mapping[str, float]) -> str | None:
+        reasons = self._active_pressure_reasons(pressure)
+        if not reasons:
+            self._active_pressure_since = None
+            return None
+        now = time.monotonic()
+        if self._active_pressure_since is None:
+            self._active_pressure_since = now
+            return None
+        if now - self._active_pressure_since < ACTIVE_PRESSURE_GRACE_SECONDS:
+            return None
+        victim = self._preempt_pressure_victim(pressure, reasons)
+        self._active_pressure_since = now
+        return victim
 
     def _admit_locked(self) -> None:
         state = self._admission_state()
@@ -3365,9 +3498,7 @@ class GenericJobs:
                             "memory_full_avg10": float(
                                 pressure.get("memory_full_avg10", 0.0)
                             ),
-                            "io_full_avg10": float(
-                                pressure.get("io_full_avg10", 0.0)
-                            ),
+                            "io_full_avg10": float(pressure.get("io_full_avg10", 0.0)),
                             "swap_free_bytes": int(
                                 pressure.get("swap_free_bytes", 0.0)
                             ),
@@ -3502,8 +3633,9 @@ class GenericJobs:
                 active[submitted.spec.pool].append(submitted)
 
     def run_admission_scheduler(self, stop_event: Event) -> None:
-        """Retry queued admission independently of clients waiting on jobs."""
+        """Protect the host and retry queued admission independently of clients."""
         while not stop_event.is_set():
+            self._relieve_active_pressure(self.pressure_probe())
             with self._admission_lock:
                 self._admit_locked()
             stop_event.wait(self.admission_retry_seconds)
@@ -3572,7 +3704,17 @@ class GenericJobs:
                 "touched_at": _timestamp(),
             }
             state["cache"] = self._bounded(state["cache"], MAX_ADMISSION_CACHE_ENTRIES)
-        peak = self._memory_peak(record.state.get("systemd", {}))
+        peak = max(
+            (
+                value
+                for value in (
+                    self._memory_peak(record.state.get("systemd", {})),
+                    self._memory_peak(record.state.get("pre_stop_systemd", {})),
+                )
+                if value is not None
+            ),
+            default=None,
+        )
         if peak is not None and record.spec.estimate_key is not None:
             learned = (
                 peak * LEARNED_ESTIMATE_HEADROOM_NUMERATOR
@@ -4053,6 +4195,7 @@ class GenericJobs:
 
     def cancel(self, job_id: str) -> dict[str, Any]:
         terminal: GenericJobRecord | None = None
+        pre_stop_systemd: Mapping[str, str] | None = None
         with self.store.locked(job_id):
             status = self._get_locked(job_id)
             if status["state"]["terminal"]:
@@ -4076,6 +4219,11 @@ class GenericJobs:
                     "already_terminal": False,
                 }
             else:
+                observed = status["state"].get("systemd")
+                if isinstance(observed, Mapping):
+                    pre_stop_systemd = {
+                        str(key): str(value) for key, value in observed.items()
+                    }
                 intent = self._with_cancel_intent(
                     record, status["state"].get("systemd", {}).get("InvocationID")
                 )
@@ -4091,6 +4239,21 @@ class GenericJobs:
                     "cancel_requested": True,
                     "already_terminal": False,
                 }
+                if pre_stop_systemd is not None:
+                    observed_record = self.store.load(job_id)
+                    observed_record = self._with_state(
+                        observed_record,
+                        {
+                            **observed_record.state,
+                            "pre_stop_systemd": dict(pre_stop_systemd),
+                        },
+                    )
+                    self.store.save(observed_record)
+                    response = {
+                        **self._public(observed_record, observed_record.state),
+                        "cancel_requested": True,
+                        "already_terminal": False,
+                    }
         with self._admission_lock:
             if terminal is not None:
                 self._finalize_terminal(terminal)
@@ -4440,7 +4603,11 @@ class GenericJobs:
             terminal = True
         capacity_reason = None
         capacity_attempt = int(record.state.get("capacity_attempt", 0))
-        if phase == "failed" and record.spec.kind == "attested-agent":
+        if (
+            phase == "failed"
+            and record.spec.kind == "attested-agent"
+            and properties.get("Result") == "exit-code"
+        ):
             backend = record.spec.contract.get("backend")
             content = _read_private_artifact(record.log_path, MAX_LOG_ARTIFACT_BYTES)
             capacity_reason = backend_capacity_event(

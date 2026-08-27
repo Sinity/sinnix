@@ -25,6 +25,7 @@ from sinnixd.projects import (
 class FakeSystemd:
     started: list[dict[str, object]] = field(default_factory=list)
     stopped: list[str] = field(default_factory=list)
+    unit_properties: dict[str, dict[str, str]] = field(default_factory=dict)
     properties: dict[str, str] = field(
         default_factory=lambda: {
             "LoadState": "loaded",
@@ -40,17 +41,22 @@ class FakeSystemd:
 
     def show(self, unit: str, *, timeout_seconds: float = 0.25) -> dict[str, str]:
         assert unit.startswith("sinnixd-job-")
-        return dict(self.properties)
+        return dict(self.unit_properties.get(unit, self.properties))
 
     def stop(self, unit: str) -> None:
         self.stopped.append(unit)
-        self.properties = {
+        previous = self.unit_properties.get(unit, self.properties)
+        stopped = {
             "LoadState": "loaded",
             "ActiveState": "inactive",
             "Result": "signal",
             "ExecMainStatus": "15",
-            "InvocationID": "fixture",
+            "InvocationID": previous.get("InvocationID", "fixture"),
         }
+        if unit in self.unit_properties:
+            self.unit_properties[unit] = stopped
+        else:
+            self.properties = stopped
 
 
 def project(root: Path, operations: tuple[ProjectOperation, ...]) -> ProjectAdapter:
@@ -446,6 +452,132 @@ def test_scheduler_admits_queued_work_after_pressure_clears(tmp_path: Path) -> N
     assert len(systemd.started) == 1
 
 
+def test_sustained_pressure_preempts_largest_managed_job_and_learns_peak(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pressure = {
+        "memory_full_avg10": 0.0,
+        "io_full_avg10": 0.0,
+        "memory_total_bytes": 32 * 1024**3,
+        "memory_available_bytes": 24 * 1024**3,
+        "swap_total_bytes": 20 * 1024**3,
+        "swap_free_bytes": 20 * 1024**3,
+        "managed_memory_bytes": 0,
+    }
+    clock = [0.0]
+    monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        pressure_probe=lambda: pressure,
+    )
+    first_spec = agent_spec(("table:first",))
+    first_spec = GenericJobSpec(
+        **{**first_spec.__dict__, "estimate_key": "agent:codex:model"}
+    )
+    second_spec = agent_spec(("table:second",))
+    second_spec = GenericJobSpec(
+        **{**second_spec.__dict__, "estimate_key": "agent:codex:model"}
+    )
+    first = subject.start(first_spec)
+    second = subject.start(second_spec)
+    interactive = subject.start_foreground(
+        command=("terminal",), working_directory="/fixture", environment={}
+    )
+    base = {
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "Result": "success",
+        "ExecMainStatus": "0",
+    }
+    systemd.unit_properties[first["unit"]] = {
+        **base,
+        "InvocationID": "first",
+        "MemoryCurrent": str(1024**3),
+        "MemorySwapCurrent": "0",
+        "MemoryPeak": str(2 * 1024**3),
+    }
+    systemd.unit_properties[second["unit"]] = {
+        **base,
+        "InvocationID": "second",
+        "MemoryCurrent": str(5 * 1024**3),
+        "MemorySwapCurrent": str(1024**3),
+        "MemoryPeak": str(6 * 1024**3),
+    }
+    systemd.unit_properties[interactive["unit"]] = {
+        **base,
+        "InvocationID": "interactive",
+        "MemoryCurrent": str(8 * 1024**3),
+        "MemorySwapCurrent": "0",
+        "MemoryPeak": str(8 * 1024**3),
+    }
+
+    pressure.update(
+        memory_full_avg10=6.0,
+        memory_available_bytes=4 * 1024**3,
+        swap_free_bytes=4 * 1024**3,
+        managed_memory_bytes=7 * 1024**3,
+    )
+    assert subject._relieve_active_pressure(pressure) is None
+    clock[0] = 2.1
+    assert subject._relieve_active_pressure(pressure) == second["job_id"]
+
+    assert systemd.stopped == [second["unit"]]
+    preempted = subject.get(second["job_id"])
+    assert preempted["state"]["phase"] == "cancelled"
+    assert preempted["state"]["preemption"]["reason"] == ["memory-stall"]
+    assert preempted["state"]["pre_stop_systemd"]["MemoryPeak"] == str(6 * 1024**3)
+    learned = subject._admission_state()["estimates"]["agent:codex:model"]["bytes"]
+    assert learned > 6 * 1024**3
+    assert interactive["unit"] not in systemd.stopped
+
+
+def test_transient_pressure_does_not_preempt_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pressure = {"memory_full_avg10": 0.0}
+    clock = [0.0]
+    monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        pressure_probe=lambda: pressure,
+    )
+    subject.start(agent_spec(("table:first",)))
+
+    pressure["memory_full_avg10"] = 6.0
+    assert subject._relieve_active_pressure(pressure) is None
+    clock[0] = 1.0
+    pressure["memory_full_avg10"] = 0.0
+    assert subject._relieve_active_pressure(pressure) is None
+
+    assert systemd.stopped == []
+
+
+def test_oom_kill_is_terminal_even_when_log_mentions_backend_capacity(
+    tmp_path: Path,
+) -> None:
+    systemd = FakeSystemd()
+    subject = jobs(tmp_path, systemd)
+    started = subject.start(agent_spec(("table:first",)))
+    subject.store.load(started["job_id"]).log_path.write_text("capacity exceeded\n")
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "failed",
+        "Result": "oom-kill",
+        "ExecMainStatus": "9",
+        "MemoryPeak": str(14 * 1024**3),
+    }
+
+    observed = subject.get(started["job_id"])
+
+    assert observed["state"]["phase"] == "failed"
+    assert observed["state"]["terminal"] is True
+    assert "capacity" not in observed["state"]
+
+
 def test_wait_does_not_drive_admission_on_each_observation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -590,7 +722,9 @@ def test_agent_peak_increases_the_next_matching_agent_estimate(tmp_path: Path) -
 
     repeated = subject.start(second)
 
-    assert repeated["state"]["admission"]["estimate_memory_bytes"] > 4 * 1024 * 1024 * 1024
+    assert (
+        repeated["state"]["admission"]["estimate_memory_bytes"] > 4 * 1024 * 1024 * 1024
+    )
 
 
 def test_cache_and_coalescing_are_principal_isolated(tmp_path: Path) -> None:
