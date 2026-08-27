@@ -1,0 +1,6 @@
+id=sinnix_debian_chroot
+name=Sinnix Debian Chroot
+version=trixie
+versionCode=1
+author=Sinix
+description=Near-native Debian arm64 userland managed by Sinnix

@@ -91,10 +91,19 @@ sinnix phone app-soak [s]   # acceptance test: screen/foreground/mute + chunk me
 sinnix phone logcat         # pull the system log (adb; what the timer runs)
 sinnix phone pull-ambient   # rescue chunks the app's uploader could not ship
 sinnix phone health-sync    # drive Mi Fitness's Sync button on demand (UI automation)
+sinnix phone nix-switch     # activate the declared Nix-on-Droid profile
+sinnix phone chroot-verify  # verify the near-native Debian environment
 ```
 
 `app-install` needs adb over USB or the tailnet. Android still requires the
 phone to be unlocked for some package and permission operations.
+
+Nix-on-Droid owns the routine CLI profile. The separate
+`sinnix_debian_chroot` Magisk module provides Debian Trixie arm64 for native
+compilers and distro tooling. `sinnix phone chroot-build`,
+`chroot-install`, and `chroot-bootstrap` reproduce it; `chroot [cmd]`
+enters it in a private mount namespace. It starts no boot daemon. Termux
+continues to own SSH and Android integrations.
 
 Grants applied by `app-grants`: `RECORD_AUDIO` and `POST_NOTIFICATIONS` as
 runtime permissions, `MANAGE_EXTERNAL_STORAGE` as an appop at **both** package
