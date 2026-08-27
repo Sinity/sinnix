@@ -3118,6 +3118,11 @@ class GenericJobs:
             "tree": tree,
             "environment": dict(sorted(environment.items())),
         }
+        if checkout is not None:
+            # Two checkouts are different work even when their trees match, and
+            # empty lanes on the same base match often. Without this, the second
+            # request coalesces onto the first job and reports its result.
+            payload["checkout"] = checkout.to_dict()
         if operation.service is not None:
             payload["service_scope"] = {
                 "project_root": str(project.root.resolve()),

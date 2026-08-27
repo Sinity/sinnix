@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -10973,3 +10974,34 @@ def test_project_catalog_takes_one_bad_descriptor_out_of_service(
 
     with pytest.raises(projects.ProjectConfigError):
         projects.ProjectCatalog([good, bad])
+
+
+def test_operation_identity_separates_checkouts_with_equal_trees() -> None:
+    """Coalescing must not merge the same operation across two workspaces.
+
+    Anti-vacuity: dropping the checkout from the payload makes both keys equal,
+    which is how a harvest of one worktree returned another worktree's job.
+    """
+    project = types.SimpleNamespace(
+        project_id="fixture", root=Path("/realm/project/fixture")
+    )
+    operation = types.SimpleNamespace(name="harvest", service=None, cache="none")
+
+    def checkout(name: str):
+        return projects.RegisteredCheckout(
+            project_id="fixture",
+            project_path=Path("/realm/project/fixture"),
+            checkout_id=f"worktree-{name}",
+            path=Path(f"/realm/worktrees/{name}"),
+            git_common_dir=Path("/realm/project/fixture/.git"),
+            head="0" * 40,
+        )
+
+    def key(name: str) -> str | None:
+        return jobs_module.GenericJobs._operation_identity_key(
+            project, operation, "d" * 64, "operator", {}, "t" * 40, checkout(name)
+        )
+
+    assert key("alpha") is not None
+    assert key("alpha") != key("beta")
+    assert key("alpha") == key("alpha")
