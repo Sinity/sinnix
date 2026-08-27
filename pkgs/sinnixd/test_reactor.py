@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from sinnixd.reactor import (
     CampaignBoard,
     CampaignReactor,
@@ -274,13 +275,18 @@ def test_keeper_prune_keeps_records_of_dispatched_work(tmp_path: Path) -> None:
     assert "stale-action" not in reactor._board.keeper
 
 
-def test_completed_review_dispatches_one_integrator(tmp_path: Path) -> None:
+def test_completed_review_dispatches_one_integrator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Judging a reviewed lane fans out instead of queueing on a coordinator.
 
     Anti-vacuity: dropping the keeper record dispatches a second integrator for
     the same review, and dropping the reaction dispatches none.
     """
     calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
+    )
     reactor = CampaignReactor(
         event_spool=tmp_path / "events.jsonl",
         board_path=tmp_path / "board.json",
@@ -295,14 +301,13 @@ def test_completed_review_dispatches_one_integrator(tmp_path: Path) -> None:
         "workspace_id": "worktree-abc",
         "receipt_ref": "sinnix://harvest/harvest-" + "0" * 32,
         "job_id": "job-9",
+        "packet": {"redflag_status": 1, "lane_trailer": {"LANE-QUICK": "green"}},
     }
 
     reactor._dispatch_integration(event)
     reactor._dispatch_integration(event)
 
-    assert calls == [
-        ("polylogue", "worktree-abc", "sinnix://harvest/harvest-" + "0" * 32)
-    ]
+    assert [c[1] for c in calls] == ["packet-p-9"]
 
 
 def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
@@ -335,3 +340,40 @@ def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
         lane = {"packet": {"redflag_status": 0, "lane_trailer": {"LANE-QUICK": quick}}}
         assert CampaignReactor._needs_judgment(lane) is not None
     assert CampaignReactor._needs_judgment({}) is not None
+
+
+def test_integration_is_keyed_by_workspace_not_by_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Re-reviewing a lane must not dispatch another integrator for it.
+
+    Anti-vacuity: keying on the review job id makes the second call dispatch
+    again, which is how one workspace collected seventeen integrators.
+    """
+    calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-1")
+    )
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        project_roots={"polylogue": tmp_path / "repo"},
+        integration_dispatcher=lambda p, w, r: calls.append((p, w, r)),
+    )
+
+    def event(job_id: str) -> dict:
+        return {
+            "kind": "harvest",
+            "transition": "review-required",
+            "project": "polylogue",
+            "workspace_id": "worktree-abc",
+            "receipt_ref": "sinnix://harvest/harvest-" + "0" * 32,
+            "job_id": job_id,
+            "packet": {"redflag_status": 1, "lane_trailer": {"LANE-QUICK": "green"}},
+        }
+
+    reactor._dispatch_integration(event("review-1"))
+    reactor._dispatch_integration(event("review-2"))
+
+    assert [c[1] for c in calls] == ["packet-p-1"]
