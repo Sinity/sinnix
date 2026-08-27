@@ -11040,3 +11040,25 @@ def test_operation_identity_separates_checkouts_with_equal_trees() -> None:
     assert key("alpha") is not None
     assert key("alpha") != key("beta")
     assert key("alpha") == key("alpha")
+
+
+def test_worktree_removal_stops_the_type_daemon(tmp_path: Path) -> None:
+    """The daemon outlives its worktree unless something stops it.
+
+    Anti-vacuity: without the call the daemon survives the directory it
+    describes, which is how ten of them held 9.2 GB on this machine.
+    """
+    from sinnixd.workspaces import _stop_type_daemon
+
+    worktree = tmp_path / "ws"
+    (worktree / ".venv/bin").mkdir(parents=True)
+    marker = tmp_path / "called"
+    daemon = worktree / ".venv/bin/dmypy"
+    daemon.write_text(f'#!/bin/sh\necho "$1" > {marker}\n')
+    daemon.chmod(0o755)
+
+    _stop_type_daemon(worktree)
+    assert marker.read_text().strip() == "stop"
+
+    # A workspace without a provisioned venv must not raise.
+    _stop_type_daemon(tmp_path / "absent")
