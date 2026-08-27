@@ -312,3 +312,39 @@ def test_redflags_catches_a_new_module_that_no_test_touches() -> None:
     )
     _, flags = harvest._redflags(tested)
     assert not any("without a test" in f for f in flags)
+
+
+def test_a_failed_run_is_not_test_evidence(tmp_path: Path) -> None:
+    """Tests having run is not the same as tests having passed.
+
+    Anti-vacuity: without the status check a lane whose gate failed still reads
+    as `tests-run` and qualifies to publish mechanically.
+    """
+    runs = tmp_path / ".cache/verify/runs"
+    (runs / "a").mkdir(parents=True)
+    (runs / "a" / "run.json").write_text(
+        json.dumps(
+            {
+                "argv": ["devtools", "verify", "--quick"],
+                "status": "failed",
+                "git_head": "abc",
+                "final_git_head": "abc",
+                "pytest_aggregate": {"selected_union_count": 3},
+            }
+        )
+    )
+
+    assert harvest._verification_evidence(tmp_path, "abc")["state"] == "static-only"
+
+    (runs / "a" / "run.json").write_text(
+        json.dumps(
+            {
+                "argv": ["devtools", "verify", "--quick"],
+                "status": "success",
+                "git_head": "abc",
+                "final_git_head": "abc",
+                "pytest_aggregate": {"selected_union_count": 3},
+            }
+        )
+    )
+    assert harvest._verification_evidence(tmp_path, "abc")["state"] == "tests-run"
