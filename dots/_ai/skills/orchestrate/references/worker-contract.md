@@ -61,7 +61,15 @@ Allowed when the packet says so: writes to live state a bead explicitly
 scopes, with the paths or services named. Absent that, report what you would
 have done instead of doing it.
 
-11. **Purge, do not retain.** The codebase shrinks without losing
+11. **Ship the declaration with the change.** Most work rejected at
+    integration is not wrong logic — it is a change whose declaration was left
+    out, so a gate refuses it. A new insight needs its rigor contract and field
+    contracts; a new document needs its catalog entry; a durable-tier change
+    needs its numbered migration and a derived one its lifecycle class; a new
+    module needs a consumer that reaches it and a test that exercises it. The
+    gate that will refuse you is the one to run before reporting.
+
+12. **Purge, do not retain.** The codebase shrinks without losing
     functionality. Retiring a route deletes the module, its compatibility
     aliases and re-exports, its docs, and its tests in the same change. If one
     symbol still has a real consumer, move it to its true owner and delete the
