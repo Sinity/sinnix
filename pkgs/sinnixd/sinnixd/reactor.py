@@ -844,6 +844,11 @@ class CampaignReactor:
         """
         workspace = self._workspace_for(record)
         if not workspace:
+            # A silent skip here is indistinguishable from working, which is
+            # how auto-review looked healthy while dispatching nothing.
+            self._board.record_error(
+                -1, f"review {record.job_id}: no workspace path for {record.checkout}"
+            )
             return
         key = f"review:{record.job_id}"
         if key in self._board.keeper:
