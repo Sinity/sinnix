@@ -109,8 +109,13 @@ someone else's commit. Polylogue lanes get worktrees; sinnix work does not.
 On 2026-08-27 a coordinator dispatched seven integration agents at once. Each
 fanned out to per-lane subagents, and each of those started a verification gate:
 nineteen concurrent gates against a 24-core, 32 GB host. Swap reached 95.7% and
-the host entered the measured pre-freeze regime. Two of the coordinator's own
-shell commands were killed under the pressure it had created.
+the host entered the measured pre-freeze regime, at which point idle type daemons
+had to be reclaimed by hand to recover it.
+
+The pressure was real and measured. Two command failures blamed on it at the
+time were not: exit 144 is SIGPIPE from piping into `tail`, which is why the
+standing rule is to let output print or capture it to a file rather than
+truncating it by default. Truncating the output cost the diagnosis.
 
 Nothing metered any of it. Lane jobs launched through `agentctl` land in
 `sinnixd-work-*.slice` with real admission; work an agent starts from its own
@@ -127,3 +132,14 @@ Concurrency is not the lever. Nineteen gates is a reasonable amount of work for
 this machine to *want*; it is an unreasonable amount to run simultaneously. The
 missing piece is a queue, and the queue already exists — the work simply is not
 in it.
+
+## commits-ahead is not a measure of work
+
+Polylogue squash-merges, so a lane's original commits never appear on master. A
+branch that merged master in at some point therefore counts every unsquashed
+commit it carries as ahead of the base. Two lanes read as 33 and 25 commits and
+each held exactly one commit of real work; the rest were merged PRs already on
+master under different object ids.
+
+Only the content test answers the question. `commits_ahead` is decoration, and
+sorting a backlog by it ranks stale branches first.
