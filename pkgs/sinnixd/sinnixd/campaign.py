@@ -215,10 +215,8 @@ class CampaignRunner:
             ),
             key=lambda row: str(row["id"]),
         )
-        if limit is not None:
-            if isinstance(limit, bool) or limit < 1:
-                raise ValueError("campaign limit must be positive")
-            ready = ready[:limit]
+        if limit is not None and (isinstance(limit, bool) or limit < 1):
+            raise ValueError("campaign limit must be positive")
         lanes = []
         for row in ready:
             bead_id = str(row["id"])
@@ -287,6 +285,23 @@ class CampaignRunner:
             active_bead_ids=active_beads,
             active_conflict_keys=active_conflict_keys,
         )
+        if limit is not None and len(schedule.lanes) > limit:
+            # The limit bounds what this wave launches. Applying it to ready
+            # candidates instead would spend the whole budget on beads the
+            # skip filters were about to drop, and launch nothing.
+            bounded = build_schedule(
+                schedule.lanes[:limit],
+                active_workspace_names=active_workspaces,
+                active_bead_ids=active_beads,
+                active_conflict_keys=active_conflict_keys,
+            )
+            deferred = tuple(
+                CampaignSkip(lane.group, lane.bead_ids, "limit", "wave limit reached")
+                for lane in schedule.lanes[limit:]
+            )
+            schedule = CampaignSchedule(
+                bounded.lanes, bounded.edges, schedule.skipped + deferred
+            )
         wave_id = str(uuid.uuid4())
         result: dict[str, Any] = {
             "wave_id": wave_id,

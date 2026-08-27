@@ -1379,12 +1379,57 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
 class ProjectCatalog:
     """Discover explicit project roots without treating arbitrary directories as projects."""
 
-    def __init__(self, roots: Iterable[Path]) -> None:
-        adapters = [load_project_adapter(root) for root in roots]
-        by_id = {adapter.project_id: adapter for adapter in adapters}
-        if len(by_id) != len(adapters):
-            raise ProjectConfigError("project adapter IDs must be unique")
-        self._adapters = by_id
+    def __init__(self, roots: Iterable[Path], *, tolerant: bool = False) -> None:
+        # A caller validating one known descriptor wants the error raised. The
+        # daemon serves many repositories at once, so one bad descriptor must
+        # not decide whether the others are available: it asks for tolerance
+        # and the rejected project goes out of service alone.
+        self._roots = tuple(roots)
+        self._tolerant = tolerant
+        self._adapters, self._unavailable = self._read(self._roots, tolerant)
+
+    @staticmethod
+    def _read(
+        roots: Sequence[Path], tolerant: bool
+    ) -> tuple[dict[str, ProjectAdapter], dict[str, str]]:
+        adapters: list[ProjectAdapter] = []
+        unavailable: dict[str, str] = {}
+        for root in roots:
+            try:
+                adapters.append(load_project_adapter(root))
+            except (ProjectConfigError, OSError, ValueError) as error:
+                if not tolerant:
+                    raise
+                unavailable[str(root)] = str(error)
+        by_id: dict[str, ProjectAdapter] = {}
+        for adapter in adapters:
+            if adapter.project_id in by_id:
+                if not tolerant:
+                    raise ProjectConfigError("project adapter IDs must be unique")
+                unavailable[str(adapter.root)] = (
+                    f"duplicate project id: {adapter.project_id}"
+                )
+                continue
+            by_id[adapter.project_id] = adapter
+        return by_id, unavailable
+
+    def reload(self) -> dict[str, Any]:
+        """Re-read every descriptor in place, so existing holders see the result."""
+        adapters, unavailable = self._read(self._roots, self._tolerant)
+        self._adapters = adapters
+        self._unavailable = unavailable
+        return {
+            "projects": sorted(adapters),
+            "unavailable": [
+                {"root": root, "reason": reason}
+                for root, reason in sorted(unavailable.items())
+            ],
+        }
+
+    @property
+    def unavailable(self) -> Mapping[str, str]:
+        """Roots whose descriptor was rejected, mapped to the reason."""
+        return dict(self._unavailable)
 
     def list(self) -> list[dict[str, Any]]:
         return [
@@ -1396,6 +1441,11 @@ class ProjectCatalog:
         try:
             return self._adapters[project_id]
         except KeyError as error:
+            for root, reason in sorted(self._unavailable.items()):
+                if Path(root).name == project_id:
+                    raise KeyError(
+                        f"project {project_id} is out of service: {reason}"
+                    ) from error
             raise KeyError(f"unknown project: {project_id}") from error
 
     def scheduled_operations(

@@ -405,6 +405,10 @@ class RefillDispatcher(Protocol):
     def __call__(self, project: str, bead_ids: tuple[str, ...]) -> None: ...
 
 
+class ReviewDispatcher(Protocol):
+    def __call__(self, project: str, workspace: str) -> None: ...
+
+
 @dataclass(frozen=True)
 class Reaction:
     event_kind: str
@@ -672,6 +676,7 @@ class CampaignReactor:
     refill_width_target: int | None = None
     refill_spacing_seconds: int = DEFAULT_REFILL_SPACING_SECONDS
     refill_dispatcher: RefillDispatcher | None = None
+    review_dispatcher: ReviewDispatcher | None = None
     agentctl_executable: str = "agentctl"
     bead_closer: BeadCloser = field(default_factory=SubprocessBeadCloser)
     registry: ReactionRegistry = field(default_factory=default_reactions)
@@ -799,6 +804,48 @@ class CampaignReactor:
                 ).isoformat(),
             }
 
+    def _dispatch_review(self, record: LaneRecord) -> None:
+        """Start the read-mostly harvest review as soon as a lane succeeds.
+
+        The review phase is deterministic and produces a receipt; only
+        authorization needs judgment, so waiting for a coordinator to launch it
+        adds latency without adding a decision.
+        """
+        checkout = record.checkout or {}
+        workspace = checkout.get("name") or checkout.get("workspace_name")
+        if not isinstance(workspace, str) or not workspace:
+            return
+        key = f"review:{record.job_id}"
+        if key in self._board.keeper:
+            return
+        try:
+            if self.review_dispatcher is not None:
+                self.review_dispatcher(record.project, workspace)
+            else:
+                subprocess.run(
+                    [
+                        self.agentctl_executable,
+                        "job",
+                        "start",
+                        record.project,
+                        "harvest",
+                        "--workspace",
+                        workspace,
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+        except (OSError, subprocess.SubprocessError) as error:
+            self._board.record_error(-1, f"review {record.job_id}: {error}")
+            return
+        self._board.keeper[key] = {
+            "emitted_at": _now(),
+            "backoff_seconds": 0,
+            "next_eligible_at": _now(),
+        }
+
     def _dispatch_refill(self, project: str) -> None:
         root = self.project_roots.get(project)
         if root is None:
@@ -896,6 +943,15 @@ class CampaignReactor:
                 )
             else:
                 self.registry.dispatch(event, context)
+                if event.get("kind") == "attested-agent":
+                    job_id = event.get("job_id")
+                    lane = (
+                        self._board.lanes.get(job_id)
+                        if isinstance(job_id, str)
+                        else None
+                    )
+                    if lane is not None and lane.review_ready:
+                        self._dispatch_review(lane)
                 pr = self._board.prs.get(f"{event.get('repo')}#{event.get('pr')}")
                 closed = pr is not None and pr.bead_close_status == "closed"
                 if event.get("kind") in {"bead_close", "merge_close"} and (
