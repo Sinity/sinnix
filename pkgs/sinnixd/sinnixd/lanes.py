@@ -24,6 +24,10 @@ from .integration import DEFAULT_BASE, _git, _landed_integration_branches, unint
 
 WORKTREE_ROOT = Path("/realm/worktrees")
 
+#: Generated files a gate leaves behind. They are not work, so a checkout
+#: holding only these is disposable rather than dirty.
+GENERATED_PATHS = (".testmondata", ".lane/", ".cache/", ".venv/")
+
 #: Terminal job phases: a unit owned by one of these is not running.
 _TERMINAL_PHASES = frozenset(
     {"succeeded", "failed", "cancelled", "timeout", "terminal", "refused"}
@@ -104,6 +108,20 @@ def _job_phases(jobs_dir: Path) -> dict[str, str]:
     return {path: phase for path, (_created, phase) in phases.items()}
 
 
+def _has_uncommitted_work(path: Path) -> bool:
+    """Whether a checkout holds changes worth preserving.
+
+    A gate leaves generated files behind in every checkout it touches. Counting
+    those as work makes almost every gated checkout look dirty and blocks its
+    disposal forever.
+    """
+    for line in _git("status", "--porcelain", cwd=path).stdout.splitlines():
+        name = line[3:].strip()
+        if name and not name.startswith(GENERATED_PATHS):
+            return True
+    return False
+
+
 def _commits_ahead(path: Path, base: str) -> int:
     result = _git("rev-list", "--count", f"{base}..HEAD", cwd=path)
     try:
@@ -148,7 +166,7 @@ def derive_units(
         if common.returncode != 0 or Path(common.stdout.strip()) != git_common_dir:
             continue
         branch = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=path).stdout.strip()
-        dirty = bool(_git("status", "--porcelain", cwd=path).stdout.strip())
+        dirty = _has_uncommitted_work(path)
         files = unintegrated_content(path, base, repo=git_common_dir.parent)
         ahead = _commits_ahead(path, base)
         phase = phases.get(str(path))

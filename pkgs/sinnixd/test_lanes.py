@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from sinnixd.lanes import derive_units, disposable, refresh_base, stuck
+from sinnixd.lanes import GENERATED_PATHS, derive_units, disposable, refresh_base, stuck
 
 
 def _run(argv: list[str], cwd: Path) -> None:
@@ -111,6 +111,32 @@ def test_a_live_checkout_is_never_disposable(tmp_path: Path) -> None:
 
     assert units["spent"].state == "running"
     assert "spent" not in {unit.workspace for unit in disposable(units.values())}
+
+
+def test_gate_leftovers_are_not_uncommitted_work(tmp_path: Path) -> None:
+    """A checkout holding only generated files is disposable, not dirty.
+
+    Anti-vacuity: counting every untracked path makes this lane dirty, and every
+    checkout a gate has touched then blocks its own disposal forever.
+    """
+    repo, trees = _fixture(tmp_path)
+    for name in GENERATED_PATHS:
+        target = trees / "spent" / name.rstrip("/")
+        if name.endswith("/"):
+            target.mkdir(exist_ok=True)
+            (target / "leftover").write_text("generated\n")
+        else:
+            target.write_text("generated\n")
+
+    units = {
+        unit.workspace: unit
+        for unit in derive_units(
+            trees, _common_dir(repo), "master", jobs_dir=tmp_path / "none", live_cwds=()
+        )
+    }
+
+    assert units["spent"].state == "empty"
+    assert units["spent"] in disposable(units.values())
 
 
 def test_uncommitted_changes_are_stuck_rather_than_collected(tmp_path: Path) -> None:
