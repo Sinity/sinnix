@@ -164,3 +164,34 @@ issues work and then has no mechanism to see it through. A dispatch needs a
 terminal state it must reach, an explicit statement of which decisions belong to
 the worker, and no reason to wait — subagent prompt caches expire in minutes, so
 parking costs more than contention.
+
+## The leak was a lifetime, not a concurrency limit
+
+Every `devtools verify` starts a `dmypy` daemon holding a type cache well over a
+gigabyte. It is reparented to the user manager and never exits, so one
+accumulates per checkout and outlives every gate that started it. On 2026-08-27
+the host reached the measured pre-freeze regime twice; on the second the live
+daemons were 8,300-9,200 seconds old, from gates finished hours earlier.
+
+`dmypy start --timeout` fixes it. The idle clock resets on every connection, so
+a checkout under active gating keeps its warm daemon and concurrent gates are
+unaffected; only checkouts that stop being gated release. An active
+verification is about 1.5 GB, which this machine can run many of.
+
+Three things this rules out, each tested rather than argued:
+
+- Seeding `.cache/mypy` into new worktrees. Plain mypy against a warm 123 MB
+  disk cache takes 52.9s, no better than cold. Only the daemon's in-memory
+  state is fast.
+- One daemon serving several worktrees. Its file set is bound at start; running
+  it from another checkout silently re-checks the original tree, and passing the
+  other tree's files restarts it cold.
+- A shared arena whose contents are swapped per lane. It works, and it
+  serialises the one thing that must stay parallel.
+
+Two of those three were first measured wrong. The shared-daemon test showed a
+25s prime and 2s switches until a deliberately introduced type error went
+unreported, revealing it had re-checked the first tree throughout. The timeout
+test showed the daemon surviving its own deadline until the poll used to watch
+it turned out to be the connection resetting the clock. A cache measurement is
+worthless until a known error proves what was actually checked.
