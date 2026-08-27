@@ -3,6 +3,7 @@
 {
   mkServiceModule,
   lib,
+  pkgs,
   ...
 }@args:
 mkServiceModule {
@@ -26,6 +27,9 @@ mkServiceModule {
     {
       services.netdata = {
         enable = true;
+        # Nixpkgs' default GPL-only build intentionally omits the dashboard.
+        # This NCUL1 variant adds the free-to-use local UI; Cloud remains off.
+        package = pkgs.netdataCloud;
         enableAnalyticsReporting = false;
         config = {
           global = {
