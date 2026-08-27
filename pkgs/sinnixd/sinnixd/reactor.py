@@ -118,7 +118,11 @@ class LaneRecord:
         project = _required_string(event, "project")
         phase = _required_string(event, "phase")
         checkout = event.get("checkout")
-        if checkout is not None and not isinstance(checkout, Mapping):
+        # Lane terminals carry the checkout id as a string; older records
+        # carry the resolved object. Both identify the same checkout.
+        if isinstance(checkout, str) and checkout:
+            checkout = {"checkout_id": checkout}
+        elif checkout is not None and not isinstance(checkout, Mapping):
             raise ReactorError("lane checkout must be an object or null")
         completed_at = _optional_string(event, "completed_at")
         return cls(
@@ -804,6 +808,33 @@ class CampaignReactor:
                 ).isoformat(),
             }
 
+    def _workspace_for(self, record: LaneRecord) -> str:
+        """The directory a lane was provisioned into, whatever the event carried.
+
+        A lane terminal names its checkout by id, so the durable job record is
+        the only place the path is recorded.
+        """
+        checkout = record.checkout or {}
+        path = checkout.get("path")
+        if not isinstance(path, str) or not path:
+            if self.jobs_state_dir is None:
+                return ""
+            try:
+                stored = json.loads(
+                    (self.jobs_state_dir / f"{record.job_id}.json").read_text()
+                )
+            except (OSError, json.JSONDecodeError):
+                return ""
+            spec = stored.get("spec") if isinstance(stored, Mapping) else None
+            for source in (stored, spec):
+                value = source.get("checkout") if isinstance(source, Mapping) else None
+                if isinstance(value, Mapping) and isinstance(value.get("path"), str):
+                    path = value["path"]
+                    break
+        if not isinstance(path, str) or not path:
+            return ""
+        return PurePosixPath(path).name
+
     def _dispatch_review(self, record: LaneRecord) -> None:
         """Start the read-mostly harvest review as soon as a lane succeeds.
 
@@ -811,11 +842,7 @@ class CampaignReactor:
         authorization needs judgment, so waiting for a coordinator to launch it
         adds latency without adding a decision.
         """
-        checkout = record.checkout or {}
-        # A lane checkout carries its path, not the workspace name; the
-        # workspace is the directory it was provisioned into.
-        path = checkout.get("path")
-        workspace = PurePosixPath(path).name if isinstance(path, str) and path else ""
+        workspace = self._workspace_for(record)
         if not workspace:
             return
         key = f"review:{record.job_id}"
