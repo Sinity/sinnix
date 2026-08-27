@@ -81,6 +81,10 @@ def test_authorize_requires_receipt_and_runs_publish_pipeline(
     monkeypatch.setattr(harvest, "LOCK_PATH", tmp_path / "harvest.lock")
 
     def run(argv, **kwargs):
+        if argv[:2] == ["devtools", "verify"] and len(argv) == 2:
+            return subprocess.CompletedProcess(
+                argv, 0, "affected verification passed", ""
+            )
         if argv[:3] == ["devtools", "verify", "--quick"]:
             return subprocess.CompletedProcess(argv, 0, "quick gate passed", "")
         if argv[0] == "gh":
@@ -108,6 +112,7 @@ def test_authorize_requires_receipt_and_runs_publish_pipeline(
         "pr_url": "https://github.test/pull/42",
         "merge_state": "ARMED",
         "bead_id": None,
+        "affected_tests": "passed",
     }
     assert any(
         row["transition"] == "review-required"
@@ -132,6 +137,10 @@ def test_authorize_watcher_closes_bead_from_receipt(
     closed: list[list[str]] = []
 
     def run(argv, **kwargs):
+        if argv[:2] == ["devtools", "verify"] and len(argv) == 2:
+            return subprocess.CompletedProcess(
+                argv, 0, "affected verification passed", ""
+            )
         if argv[:3] == ["devtools", "verify", "--quick"]:
             return subprocess.CompletedProcess(argv, 0, "quick gate passed", "")
         if argv[:3] == ["gh", "pr", "create"]:
@@ -191,6 +200,10 @@ def test_gate_red_is_typed_and_never_pushes(
 
     def run(argv, **kwargs):
         nonlocal pushed
+        if argv[:2] == ["devtools", "verify"] and len(argv) == 2:
+            return subprocess.CompletedProcess(
+                argv, 0, "affected verification passed", ""
+            )
         if argv[:3] == ["devtools", "verify", "--quick"]:
             return subprocess.CompletedProcess(argv, 1, "gate failed", "")
         if argv[:2] == ["git", "push"]:
@@ -243,3 +256,31 @@ def test_publication_title_must_be_a_squashable_conventional_subject() -> None:
     ):
         with pytest.raises(harvest.HarvestError):
             harvest._require_publication_title(rejected)
+
+
+def test_affected_tests_separates_refusal_from_failure() -> None:
+    """A missing testmon graph is not a red test run, and must not read as one.
+
+    Anti-vacuity: collapsing the two makes an unavailable selection block
+    publication; dropping the check makes a real failure publish.
+    """
+    context = harvest.HarvestContext(
+        worktree=Path("/realm/worktrees/fixture"),
+        project_id="polylogue",
+        workspace_id="worktree-abc",
+        job_id="job-1",
+        state_root=Path("/realm/state/fixture"),
+    )
+
+    def run_with(returncode: int, stdout: str):
+        def run(argv, **kwargs):
+            return subprocess.CompletedProcess(argv, returncode, stdout, "")
+
+        return run
+
+    assert harvest._affected_tests(context, run_with(0, "ok"))[0] == "passed"
+    assert (
+        harvest._affected_tests(context, run_with(1, "failed 3 tests"))[0] == "failed"
+    )
+    refusal = "testmon graph is incompatible; refusing to run selected verification"
+    assert harvest._affected_tests(context, run_with(2, refusal))[0] == "unavailable"

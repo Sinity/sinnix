@@ -35,6 +35,7 @@ DEFAULT_SPOOL = Path("/realm/state/agentctl/events.jsonl")
 PACKET_DIRECTORY = "harvest-packets"
 LOCK_PATH = Path("/realm/tmp/work/.harvest-git.flock")
 PUSH_TIMEOUT_SECONDS = 2_400
+AFFECTED_TIMEOUT_SECONDS = 3_600
 _TRAILER_FIELDS = (
     "LANE-BRANCH",
     "LANE-COMMIT",
@@ -537,6 +538,33 @@ def _gate(context: HarvestContext, run: Run) -> tuple[bool, str]:
     return result.returncode == 0, result.stdout + result.stderr
 
 
+def _affected_tests(context: HarvestContext, run: Run) -> tuple[str, str]:
+    """Run the affected-test selection, outside the shared repository lock.
+
+    The quick gate is static: nothing between a lane's own claim of a green
+    test run and the protected branch actually executes tests. This does,
+    against the lane's worktree, so it needs no lock and does not serialize
+    other publications.
+
+    Selection needs a compatible testmon graph and refuses without one. That
+    refusal is reported as ``unavailable`` rather than treated as a failure,
+    so publication is never blocked by a missing accelerator -- but it is
+    named in the receipt instead of passing silently as if tests had run.
+    """
+    result = _command(
+        run,
+        ["devtools", "verify"],
+        cwd=context.worktree,
+        timeout=AFFECTED_TIMEOUT_SECONDS,
+    )
+    output = result.stdout + result.stderr
+    if result.returncode == 0:
+        return "passed", output
+    if "testmon" in output.lower() and "refus" in output.lower():
+        return "unavailable", output
+    return "failed", output
+
+
 def _watch_and_close(
     context: HarvestContext,
     *,
@@ -631,6 +659,20 @@ def authorize(
     _require_publication_title(title)
     if len(body.encode()) > 64_000:
         raise HarvestError("harvest publication body is outside bounds")
+
+    # Execute tests before contending for the shared repository: this is the
+    # only step in the chain that runs them, and it needs no lock.
+    tests, tests_output = _affected_tests(context, run)
+    if tests == "failed":
+        result = {
+            "outcome": GATE_RED,
+            "message": "harvest affected verification is red",
+            "gate_output": _bounded_text(tests_output, 64_000),
+        }
+        _append_event(
+            context.spool, {"kind": "harvest", **result, "job_id": context.job_id}
+        )
+        return result
 
     lock = _lock(LOCK_PATH)
     try:
@@ -783,6 +825,7 @@ def authorize(
             "pr_url": pr_url,
             "merge_state": state,
             "bead_id": bead_id,
+            "affected_tests": tests,
         }
         _append_event(
             context.spool, {"kind": "harvest", **result, "job_id": context.job_id}
