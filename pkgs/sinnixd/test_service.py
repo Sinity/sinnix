@@ -9923,6 +9923,34 @@ def test_active_job_list_does_not_scan_terminal_history(
     assert [item["job_id"] for item in listed["jobs"]] == [started["job_id"]]
 
 
+def test_nonterminal_save_does_not_rewrite_unchanged_indexes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jobs = generic_jobs(tmp_path, FakeSystemdJobs())
+    started = jobs.start(
+        GenericJobSpec(
+            kind="foreground-command",
+            command=("fixture",),
+            working_directory=str(tmp_path),
+            environment={},
+            timeout_seconds=60,
+            principal="operator",
+        )
+    )
+    record = jobs.store.load(started["job_id"])
+    active_writes: list[set[str]] = []
+    lease_writes: list[set[str]] = []
+    monkeypatch.setattr(jobs.store, "_write_active_record_ids", active_writes.append)
+    monkeypatch.setattr(
+        jobs.store, "_write_service_lease_record_ids", lease_writes.append
+    )
+
+    jobs.store.save(record)
+
+    assert active_writes == []
+    assert lease_writes == []
+
+
 def test_job_owner_boundary_filters_before_pagination_and_denies_cross_principal_access(
     tmp_path: Path,
 ) -> None:

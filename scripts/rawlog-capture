@@ -37,7 +37,10 @@ command -v gum >/dev/null 2>&1 || die "gum CLI not available (need pkg gum)"
 cancel_and_hide() {
   [ "${RAWLOG_NO_AUTOHIDE:-0}" = "1" ] && return
   if command -v hyprctl >/dev/null 2>&1; then
-    hyprctl dispatch togglespecialworkspace "$RAWLOG_SPECIAL_WORKSPACE" >/dev/null 2>&1 || true
+    case "$RAWLOG_SPECIAL_WORKSPACE" in
+      *[!A-Za-z0-9_.-]*) return ;;
+    esac
+    hyprctl eval "hl.dispatch(hl.dsp.workspace.toggle_special(\"$RAWLOG_SPECIAL_WORKSPACE\"))" >/dev/null 2>&1 || true
   fi
 }
 

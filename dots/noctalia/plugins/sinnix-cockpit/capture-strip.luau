@@ -1,7 +1,7 @@
 --!nonstrict
 -- Capture strip: the earned capture verbs as always-visible buttons. Each
--- click runs exactly what the matching F-key bind runs — dispatched through
--- Hyprland so the spawn path (uwsm scope, env) is identical to the keybind —
+-- click runs exactly what the matching F-key bind runs through uwsm, so the
+-- application scope and environment are identical to the keybind,
 -- and the button lights up while the scratchpad holds a window, so the strip
 -- doubles as presence state for all three live surfaces.
 
@@ -12,13 +12,13 @@ local VERBS = {
     name = "rawlog",
     glyph = "note",
     tooltip = "Raw-log scratchpad (F8)",
-    command = "hyprctl dispatch exec 'uwsm app -- " .. toggleScratch .. " rawlog'",
+    command = "uwsm app -- " .. toggleScratch .. " rawlog",
   },
   {
     name = "weechat",
     glyph = "messages",
     tooltip = "WeeChat scratchpad (F6)",
-    command = "hyprctl dispatch exec 'uwsm app -- " .. toggleScratch .. " weechat'",
+    command = "uwsm app -- " .. toggleScratch .. " weechat",
   },
   {
     name = "agentbrowser",
