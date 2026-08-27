@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Reach the phone over the tailnet — status, shell, screen mirror, media pull, clipboard push
-# runtimeInputs: bash coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl tailscale @sinnix-phone-dispatcher
+# runtimeInputs: bash coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl tailscale debootstrap zip @sinnix-phone-dispatcher
 
 #
 # The phone (Redmi Note 11, Evolution X with Magisk) is a tailnet peer with two control
@@ -424,6 +424,39 @@ nix_userland_fix_labels() {
     | adb_any shell su -c "xargs -0 chcon -h '$NIX_APP_CONTEXT'"
 }
 
+CHROOT_MODULE_ID=sinnix_debian_chroot
+CHROOT_MODULE_ROOT=/data/adb/modules/$CHROOT_MODULE_ID
+
+chroot_module_source() {
+  local sinnix_dir="${SINNIX_FLAKE_DIR:-/realm/project/sinnix}"
+  printf '%s\n' "$sinnix_dir/devices/android/magisk/sinnix-debian-chroot"
+}
+
+chroot_build() {
+  local output="${1:-/realm/tmp/work/sinnix-debian-chroot.zip}"
+  local work source
+  work=$(mktemp -d /realm/tmp/work/sinnix-debian-chroot.XXXXXX)
+  source=$(chroot_module_source)
+  [ -f "$source/module.prop" ] || {
+    echo "missing module source: $source" >&2
+    return 1
+  }
+  mkdir -p "$work/rootfs" "$work/module"
+  sudo debootstrap --foreign --arch=arm64 --variant=minbase +    trixie "$work/rootfs" http://deb.debian.org/debian
+  sudo tar --numeric-owner -C "$work/rootfs" -czf "$work/rootfs.tar.gz" .
+  cp -a "$source/." "$work/module/"
+  cp "$work/rootfs.tar.gz" "$work/module/rootfs.tar.gz"
+  chmod 0755 "$work/module/customize.sh" "$work/module/run.sh"
+  mkdir -p "$(dirname "$output")"
+  (cd "$work/module" && zip -q -r "$output" .)
+  sha256sum "$output"
+  echo "build workspace: $work"
+}
+
+chroot_root() {
+  adb_any shell su -c "$1"
+}
+
 
 usage() {
   cat <<'EOF'
@@ -443,6 +476,14 @@ sinnix-phone <command>
                 switch the Nix-on-Droid userland and repair Android 16 MCS
                 labels; defaults to the exact published Sinnix master revision
   nix-fix-labels repair Nix-on-Droid app-data labels without switching
+  chroot-build [zip]
+                build the Debian arm64 Magisk module (default: /realm/tmp/work/)
+  chroot-install [zip]
+                install the built module; one reboot is required
+  chroot-bootstrap
+                complete Debian and install the declared development baseline
+  chroot [cmd]  enter Debian or run a command in its private mount namespace
+  chroot-verify verify architecture, compiler, network, packages, and dpkg state
   shell [cmd]   Termux shell over the tailnet (interactive when no cmd)
   mirror        scrcpy screen mirror/control over the tailnet
   screenshot    grab the current screen to /realm/tmp/work/
@@ -742,6 +783,67 @@ nix-fix-labels)
     exit 1
   }
   nix_userland_fix_labels
+  ;;
+chroot-build)
+  chroot_build "${1:-}"
+  ;;
+chroot-install)
+  adb_resolve || {
+    echo "chroot-install: no adb transport" >&2
+    exit 1
+  }
+  module_zip="${1:-/realm/tmp/work/sinnix-debian-chroot.zip}"
+  [ -f "$module_zip" ] || {
+    echo "missing module archive: $module_zip" >&2
+    exit 1
+  }
+  adb_any push "$module_zip" /data/local/tmp/sinnix-debian-chroot.zip
+  chroot_root 'magisk --install-module /data/local/tmp/sinnix-debian-chroot.zip'
+  echo "reboot the phone, unlock it, then run: sinnix-phone chroot-bootstrap"
+  ;;
+chroot-bootstrap)
+  adb_resolve || {
+    echo "chroot-bootstrap: no adb transport" >&2
+    exit 1
+  }
+  run="$CHROOT_MODULE_ROOT/run.sh"
+  chroot_root "test -x $run"
+  chroot_root "test ! -x $CHROOT_MODULE_ROOT/rootfs/debootstrap/debootstrap || $run /debootstrap/debootstrap --second-stage"
+  chroot_root "$run /usr/bin/apt-get update"
+  chroot_root "$run /usr/bin/apt-get install -y --reinstall mawk coreutils dash debianutils findutils grep gzip hostname ncurses-bin sed"
+  chroot_root "$run /usr/bin/env DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get install -y --no-install-recommends build-essential ca-certificates curl git jq less locales openssh-client python3 python3-venv rsync sudo tmux vim-tiny"
+  chroot_root "$run /usr/bin/env DEBIAN_FRONTEND=noninteractive /usr/bin/dpkg --configure -a"
+  chroot_root "$run /usr/bin/dpkg --audit"
+  ;;
+chroot)
+  adb_resolve || {
+    echo "chroot: no adb transport" >&2
+    exit 1
+  }
+  if [ "$#" -eq 0 ]; then
+    adb_any shell -t su -c "$CHROOT_MODULE_ROOT/run.sh"
+  else
+    printf -v chroot_command '%q ' "$@"
+    adb_any shell -t su -c "$CHROOT_MODULE_ROOT/run.sh $chroot_command"
+  fi
+  ;;
+chroot-verify)
+  adb_resolve || {
+    echo "chroot-verify: no adb transport" >&2
+    exit 1
+  }
+  run="$CHROOT_MODULE_ROOT/run.sh"
+  architecture=$(chroot_root "$run /usr/bin/dpkg --print-architecture" | tr -d '\r')
+  [ "$architecture" = arm64 ]
+  audit=$(chroot_root "$run /usr/bin/dpkg --audit" | tr -d '\r')
+  [ -z "$audit" ]
+  for executable in cc git jq python3 rsync tmux; do
+    chroot_root "$run /usr/bin/test -x /usr/bin/$executable"
+  done
+  chroot_root "$run /usr/bin/getent hosts deb.debian.org" >/dev/null
+  debian=$(chroot_root "$run /bin/cat /etc/debian_version" | tr -d '\r')
+  python=$(chroot_root "$run /usr/bin/python3 --version" | tr -d '\r')
+  printf 'Debian %s, %s, %s\n' "$debian" "$architecture" "$python"
   ;;
 app-soak)
   # Acceptance test for both hard cases at once: capture must survive the
