@@ -49,6 +49,40 @@ need_cmd() {
   }
 }
 
+lua_quote() {
+  need_cmd jq
+  jq -nr --arg value "$1" '$value | tojson'
+}
+
+window_selector() {
+  case "$1" in
+    0x*) printf 'address:%s' "$1" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+hypr_dispatch() {
+  hyprctl eval "hl.dispatch($1)"
+}
+
+focus_window() {
+  local selector_lua
+  selector_lua=$(lua_quote "$(window_selector "$1")")
+  hypr_dispatch "hl.dsp.focus({ window = $selector_lua })"
+}
+
+send_shortcut() {
+  local mods_lua key_lua selector_lua args
+  mods_lua=$(lua_quote "$1")
+  key_lua=$(lua_quote "$2")
+  args="mods = $mods_lua, key = $key_lua"
+  if [[ -n ${3:-} ]]; then
+    selector_lua=$(lua_quote "$(window_selector "$3")")
+    args="$args, window = $selector_lua"
+  fi
+  hypr_dispatch "hl.dsp.send_shortcut({ $args })"
+}
+
 find_wtype() {
   # Try PATH first, then known nix store location
   if command -v wtype >/dev/null 2>&1; then
@@ -149,7 +183,7 @@ type)
   }
 
   if [[ -n $window ]]; then
-    hyprctl dispatch focuswindow "$window"
+    focus_window "$window"
     sleep 0.1
   fi
 
@@ -169,7 +203,7 @@ type)
     win_addr=$(hyprctl -j activewindow | jq -r '.address // ""')
     printf '%s' "$text" | wl-copy
     sleep 0.05
-    hyprctl dispatch sendshortcut "CTRL, V, $win_addr"
+    send_shortcut CTRL V "$win_addr"
     echo "typed via clipboard paste (wtype not available)"
   fi
   ;;
@@ -205,7 +239,7 @@ key)
   keyname=$(resolve_keyname "$keyname")
 
   if [[ -n $window ]]; then
-    hyprctl dispatch focuswindow "$window"
+    focus_window "$window"
     sleep 0.1
   fi
 
@@ -225,11 +259,10 @@ key)
     need_cmd jq
     combined_mods=""
     for m in "${mods[@]}"; do
-      combined_mods="${combined_mods}${m^^}, "
+      combined_mods="${combined_mods:+$combined_mods }${m^^}"
     done
-    combined_mods="${combined_mods}${keyname}"
     win_addr=$(hyprctl -j activewindow | jq -r '.address // ""')
-    hyprctl dispatch sendshortcut "$combined_mods, $win_addr"
+    send_shortcut "$combined_mods" "$keyname" "$win_addr"
   fi
   ;;
 
@@ -264,7 +297,7 @@ shortcut)
   keyname=$(resolve_keyname "$keyname")
 
   if [[ -n $window ]]; then
-    hyprctl dispatch focuswindow "$window"
+    focus_window "$window"
     sleep 0.1
   fi
 
@@ -283,11 +316,10 @@ shortcut)
     need_cmd jq
     payload=""
     for m in "${mods[@]}"; do
-      payload="${payload}${m^^}, "
+      payload="${payload:+$payload }${m^^}"
     done
-    payload="${payload}${keyname}"
     win_addr=$(hyprctl -j activewindow | jq -r '.address // ""')
-    hyprctl dispatch sendshortcut "$payload, $win_addr"
+    send_shortcut "$payload" "$keyname" "$win_addr"
   fi
   ;;
 

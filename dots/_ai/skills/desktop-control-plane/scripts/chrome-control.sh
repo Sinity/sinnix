@@ -344,7 +344,7 @@ assert_hyprland_compositor_state() {
 }
 
 restore_operator_focus_after_failed_agent_window() {
-  local current_state current_focus current_workspaces expected_workspaces
+  local current_state current_focus current_workspaces expected_workspaces focus_lua
   [[ -n ${focus_before:-} && -n ${compositor_state_before:-} ]] || return 0
   hyprctl_call clients -j 2>/dev/null | jq -e --arg address "$focus_before" \
     'any(.[]; .address == $address)' >/dev/null || return 0
@@ -354,7 +354,8 @@ restore_operator_focus_after_failed_agent_window() {
   current_workspaces=$(jq -c '.active_workspaces' <<<"$current_state")
   expected_workspaces=$(jq -c '.active_workspaces' <<<"$compositor_state_before")
   [[ $current_workspaces == "$expected_workspaces" ]] || return 0
-  hyprctl_call dispatch focuswindow "address:${focus_before}" >/dev/null
+  focus_lua=$(lua_quote "address:${focus_before}")
+  hyprctl_call eval "hl.dispatch(hl.dsp.focus({ window = $focus_lua }))" >/dev/null
   for _ in {1..10}; do
     current_focus=$(hyprctl_call activewindow -j 2>/dev/null | jq -r '.address // empty')
     [[ $current_focus == "$focus_before" ]] && return 0
@@ -657,10 +658,11 @@ toggle-agent-workspace)
   }
   active_workspace=$(hyprctl_call activeworkspace -j | jq -r '.name')
   if [[ $active_workspace == "$AGENT_WORKSPACE" ]]; then
-    hyprctl_call dispatch workspace previous
+    workspace_lua=$(lua_quote previous)
   else
-    hyprctl_call dispatch workspace "$AGENT_WORKSPACE_TARGET"
+    workspace_lua=$(lua_quote "$AGENT_WORKSPACE_TARGET")
   fi
+  hyprctl_call eval "hl.dispatch(hl.dsp.focus({ workspace = $workspace_lua }))"
   ;;
 
 list | list-tabs)

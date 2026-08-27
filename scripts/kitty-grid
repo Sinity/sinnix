@@ -53,10 +53,10 @@ def hyprctl_json(command: str, *command_args: str) -> Any:
         raise KittyGridError(f"failed to parse hyprctl {command} output: {exc}") from exc
 
 
-def hyprctl_dispatch(dispatcher: str, *dispatcher_args: str) -> None:
-    """Call `hyprctl dispatch`."""
+def hyprctl_dispatch(dispatcher: str) -> None:
+    """Evaluate and run a Hyprland Lua dispatcher."""
 
-    run(["hyprctl", "dispatch", dispatcher, *dispatcher_args])
+    run(["hyprctl", "eval", f"hl.dispatch({dispatcher})"])
 
 
 def kitty_remote(socket: str, *kitty_args: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
@@ -372,10 +372,20 @@ def apply_layout(
         addr = window.get("address")
         if not isinstance(addr, str):
             continue
-        hyprctl_dispatch("setfloating", f"address:{addr}")
-        hyprctl_dispatch("movetoworkspacesilent", f"{workspace},address:{addr}")
-        hyprctl_dispatch("resizewindowpixel", f"exact {width} {height},address:{addr}")
-        hyprctl_dispatch("movewindowpixel", f"exact {x} {y},address:{addr}")
+        selector = json.dumps(f"address:{addr}")
+        workspace_name = json.dumps(workspace)
+        hyprctl_dispatch(
+            f'hl.dsp.window.float({{ action = "set", window = {selector} }})'
+        )
+        hyprctl_dispatch(
+            f"hl.dsp.window.move({{ workspace = {workspace_name}, follow = false, window = {selector} }})"
+        )
+        hyprctl_dispatch(
+            f"hl.dsp.window.resize({{ x = {width}, y = {height}, window = {selector} }})"
+        )
+        hyprctl_dispatch(
+            f"hl.dsp.window.move({{ x = {x}, y = {y}, window = {selector} }})"
+        )
 
 
 def rename_windows(
