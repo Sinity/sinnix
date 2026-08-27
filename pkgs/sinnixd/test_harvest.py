@@ -284,3 +284,31 @@ def test_affected_tests_separates_refusal_from_failure() -> None:
     )
     refusal = "testmon graph is incompatible; refusing to run selected verification"
     assert harvest._affected_tests(context, run_with(2, refusal))[0] == "unavailable"
+
+
+def test_redflags_catches_a_new_module_that_no_test_touches() -> None:
+    """New production code passes every other gate: nothing removed, nothing to select.
+
+    Anti-vacuity: dropping the new-module check makes the first case clean,
+    and ignoring touched test files makes the second case flag spuriously.
+    """
+    untested = (
+        "diff --git a/polylogue/insights/widget_materializer.py "
+        "b/polylogue/insights/widget_materializer.py\n"
+        "new file mode 100644\n"
+        "+def materialize():\n"
+        "diff --git a/tests/unit/daemon/test_stages.py b/tests/unit/daemon/test_stages.py\n"
+        '+        "widget",\n'
+    )
+    status, flags = harvest._redflags(untested)
+    assert status == 1
+    assert any("widget_materializer.py" in f for f in flags)
+
+    tested = untested + (
+        "diff --git a/tests/unit/insights/test_widget_materializer.py "
+        "b/tests/unit/insights/test_widget_materializer.py\n"
+        "new file mode 100644\n"
+        "+def test_materialize():\n"
+    )
+    _, flags = harvest._redflags(tested)
+    assert not any("without a test" in f for f in flags)

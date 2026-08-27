@@ -13,6 +13,7 @@ import fcntl
 import hashlib
 import json
 import os
+import pathlib
 import re
 import subprocess
 import time
@@ -238,11 +239,25 @@ def _redflags(diff: str) -> tuple[int, list[str]]:
     tests = False
     production_removed = False
     test_assertion_removed = False
+    new_modules: list[str] = []
+    touched_tests: set[str] = set()
+    pending_new_file: str | None = None
     for line in diff.splitlines():
         if line.startswith("diff --git "):
             path = line.split(" b/", 1)[-1]
             production = path.startswith("polylogue/")
             tests = path.startswith("tests/")
+            pending_new_file = path
+            if tests:
+                touched_tests.add(pathlib.PurePosixPath(path).stem)
+        if (
+            line.startswith("new file mode ")
+            and pending_new_file
+            and pending_new_file.startswith("polylogue/")
+            and pending_new_file.endswith(".py")
+            and not pathlib.PurePosixPath(pending_new_file).name.startswith("__")
+        ):
+            new_modules.append(pending_new_file)
         if production and line.startswith("-") and not line.startswith("---"):
             if re.search(r"def |self\.|\(\)", line):
                 production_removed = True
@@ -252,6 +267,12 @@ def _redflags(diff: str) -> tuple[int, list[str]]:
             flag("test files deleted")
     if production_removed:
         flag("production lines removed (polylogue/)")
+    # A new module nothing tests passes every other gate: the scan looks for
+    # removals, and affected-test selection has nothing to select.
+    for module in new_modules:
+        stem = pathlib.PurePosixPath(module).stem
+        if not any(stem in name for name in touched_tests):
+            flag(f"new production module without a test: {module}")
     if re.search(
         r"^-\s*assert .*== 0\b|^\+\s*assert .*exit_code == 1|^\+.*pytest\.raises",
         diff,
