@@ -32,10 +32,10 @@ normalize_direction() {
 kitty_dir="$(normalize_direction "$direction")"
 
 case "$kitty_dir" in
-  left)  hypr_dir="l";  resize_axis="horizontal"; resize_inc="-2"; hypr_resize="-80 0" ;;
-  right) hypr_dir="r";  resize_axis="horizontal"; resize_inc="2";  hypr_resize="80 0" ;;
-  top)   hypr_dir="u";  resize_axis="vertical";   resize_inc="-2"; hypr_resize="0 -80" ;;
-  bottom)hypr_dir="d";  resize_axis="vertical";   resize_inc="2";  hypr_resize="0 80" ;;
+  left)  lua_dir="left";  resize_axis="horizontal"; resize_inc="-2"; hypr_resize="-80 0" ;;
+  right) lua_dir="right"; resize_axis="horizontal"; resize_inc="2";  hypr_resize="80 0" ;;
+  top)   lua_dir="up";    resize_axis="vertical";   resize_inc="-2"; hypr_resize="0 -80" ;;
+  bottom)lua_dir="down";  resize_axis="vertical";   resize_inc="2";  hypr_resize="0 80" ;;
 esac
 
 for bin in hyprctl jq; do
@@ -76,12 +76,13 @@ fi
 
 case "$action" in
   focus)
-    hyprctl dispatch movefocus "$hypr_dir"
+    hyprctl eval "hl.dispatch(hl.dsp.focus({ direction = \"$lua_dir\" }))"
     ;;
   move)
-    hyprctl dispatch movewindow "$hypr_dir"
+    hyprctl eval "hl.dispatch(hl.dsp.window.move({ direction = \"$lua_dir\" }))"
     ;;
   resize)
-    hyprctl dispatch resizeactive "$hypr_resize"
+    read -r resize_x resize_y <<<"$hypr_resize"
+    hyprctl eval "hl.dispatch(hl.dsp.window.resize({ x = $resize_x, y = $resize_y, relative = true }))"
     ;;
 esac
