@@ -274,6 +274,32 @@ def _redflags(diff: str) -> tuple[int, list[str]]:
     return (1 if flags else 0), [f"diff lines: {lines}", *flags]
 
 
+_CONVENTIONAL_SUBJECT = re.compile(
+    r"^(feat|fix|chore|docs|test|refactor|perf|build|ci|style|revert)"
+    r"(\([a-z0-9._/-]+\))?!?: \S.{9,}$"
+)
+
+
+def _require_publication_title(title: str) -> None:
+    """The title becomes the squash subject on the protected branch.
+
+    A caller's mangled expansion would otherwise be permanent history, so the
+    shape is enforced here rather than trusted from the caller.
+    """
+    subject = title.strip()
+    if not subject:
+        raise HarvestError("harvest publication title is empty")
+    if len(subject) > 72:
+        raise HarvestError(
+            f"harvest publication title is {len(subject)} characters, max 72"
+        )
+    if _CONVENTIONAL_SUBJECT.fullmatch(subject) is None:
+        raise HarvestError(
+            "harvest publication title must be a conventional subject with a "
+            f"description of at least ten characters: {subject!r}"
+        )
+
+
 def _packet_id(context: HarvestContext, head: str) -> str:
     digest = hashlib.sha256(
         "\0".join(
@@ -597,8 +623,9 @@ def authorize(
         bead_id = receipt["bead_id"]
     if close_reason is None and isinstance(receipt.get("close_reason"), str):
         close_reason = receipt["close_reason"]
-    if not title.strip() or len(title) > 256 or len(body.encode()) > 64_000:
-        raise HarvestError("harvest publication title or body is outside bounds")
+    _require_publication_title(title)
+    if len(body.encode()) > 64_000:
+        raise HarvestError("harvest publication body is outside bounds")
 
     lock = _lock(LOCK_PATH)
     try:

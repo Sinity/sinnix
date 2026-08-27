@@ -19,8 +19,8 @@ def lane(group: str, *keys: str, beads: tuple[str, ...] | None = None) -> Campai
     )
 
 
-def test_dedupe_compiled_beads_into_one_carrier_lane() -> None:
-    first = lane("carrier", "parser", beads=("carrier", "member"))
+def test_dedupe_compiled_beads_into_one_group_lane() -> None:
+    first = lane("leader", "parser", beads=("leader", "member"))
     assert dedupe_lanes([first, first]) == (first,)
 
 

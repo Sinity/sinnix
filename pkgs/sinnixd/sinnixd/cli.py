@@ -259,7 +259,7 @@ def parser() -> argparse.ArgumentParser:
     packet_status = packet_subcommands.add_parser("status")
     packet_status.add_argument("saga_id")
     packet_launch = packet_subcommands.add_parser(
-        "launch", help="Compile a Beads carrier group and dispatch one agent lane."
+        "launch", help="Compile a bead dispatch group and launch one agent lane."
     )
     packet_launch.add_argument("bead_id")
     packet_launch.add_argument("--project")

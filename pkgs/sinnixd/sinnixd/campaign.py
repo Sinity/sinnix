@@ -76,14 +76,14 @@ class CampaignSchedule:
 
 
 def dedupe_lanes(lanes: Sequence[CampaignLane]) -> tuple[CampaignLane, ...]:
-    """Keep one compiler result per carrier group, in deterministic order."""
+    """Keep one compiler result per dispatch group, in deterministic order."""
     by_group: dict[str, CampaignLane] = {}
     for lane in lanes:
         prior = by_group.get(lane.group)
         if prior is None:
             by_group[lane.group] = lane
         elif prior.bead_ids != lane.bead_ids:
-            raise ValueError(f"carrier group compiled inconsistently: {lane.group}")
+            raise ValueError(f"dispatch group compiled inconsistently: {lane.group}")
     return tuple(by_group[group] for group in sorted(by_group))
 
 
@@ -122,7 +122,7 @@ def build_schedule(
                     lane.group,
                     lane.bead_ids,
                     "active-bead",
-                    "a bead in this carrier group already has an active job",
+                    "a bead in this dispatch group already has an active job",
                 )
             )
         elif set(lane.conflict_keys).intersection(active_conflict_keys):

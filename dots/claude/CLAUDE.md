@@ -132,10 +132,10 @@ live OUTSIDE your context — read them, never reconstruct:
   need so you do not hand-roll a worse copy. Worker rules in its sibling
   `worker-contract.md`.
 - **Live board**: `board` / `board sync` (`/realm/tmp/work/campaign-board.json`).
-- **Helpers**: `actl` (agentctl envelopes), `redflags --explain <worktree>`
-  (review scanner with per-flag verification), `launchable`, `dispatch_lane`,
-  `harvest_queue2.sh` + `merge_close.sh`
-  (`~/.claude/skills/review-land/scripts/`).
+- **Dispatch and harvest are agentctl verbs**, not scripts: `campaign run`,
+  `packet launch`, and the declared `harvest` operation (review receipt, then
+  authorize to publish). `actl` unwraps agentctl's JSON envelopes; `board`
+  prints the campaign board.
 - A fresh session resumes a campaign from those files plus the project's
   memory index; nothing campaign-critical may live only in a chat context.
 

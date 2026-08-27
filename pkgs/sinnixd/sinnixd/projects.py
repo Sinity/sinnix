@@ -43,6 +43,12 @@ _PARAMETER_GRAMMARS = {
     "package-name": re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z"),
     "safe-token": re.compile(r"[A-Za-z0-9][A-Za-z0-9._:+@=-]*\Z"),
     "duration": re.compile(r"[1-9][0-9]{0,8}(?:ms|s|m|h)\Z"),
+    # Free text cannot cross this boundary, so operations that need it take a
+    # file instead. Absolute or relative, never a traversal component.
+    "path": re.compile(
+        r"/?(?!\.\.?(?:/|\Z))[A-Za-z0-9._+@=-]+"
+        r"(?:/(?!\.\.?(?:/|\Z))[A-Za-z0-9._+@=-]+)*\Z"
+    ),
 }
 DEFAULT_PARAMETER_GRAMMAR = "safe-token"
 

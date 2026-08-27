@@ -20,6 +20,7 @@ import pytest
 import sinnixd.cli as cli_module
 import sinnixd.jobs as jobs_module
 import sinnixd.runner as runner_module
+import sinnixd.projects as projects
 from sinnix_mcp import (
     ErrorCode,
     OpaquePayload,
@@ -10919,3 +10920,18 @@ def test_workspace_publish_wait_follows_the_delivery_job_to_its_receipt(
     assert requests[1].arguments["timeout_seconds"] == 800
     printed = json.loads(capsys.readouterr().out)
     assert printed["payload"]["value"]["value"] == {"ok": True, "receipt": {}}
+
+
+def test_path_grammar_accepts_files_and_refuses_traversal() -> None:
+    """Free text reaches a declared operation only as a file path.
+
+    Anti-vacuity: dropping the per-component traversal lookahead makes the
+    ``..`` cases pass, and widening the character class admits spaces.
+    """
+    grammar = projects._PARAMETER_GRAMMARS["path"]
+
+    for accepted in ("/realm/tmp/work/body.md", "body.md", "a/b/c.txt"):
+        assert grammar.fullmatch(accepted) is not None, accepted
+
+    for refused in ("..", "../etc/passwd", "a/../b", "/realm/./x", "has space.md", "a//b", ""):
+        assert grammar.fullmatch(refused) is None, refused

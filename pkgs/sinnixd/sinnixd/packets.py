@@ -1,4 +1,4 @@
-"""Compile Beads carriers into one dispatchable agent packet."""
+"""Compile a bead group into one dispatchable agent packet."""
 
 from __future__ import annotations
 
@@ -476,7 +476,7 @@ class PacketSnapshot:
     group: str
     dimensions: PacketDimensions
     atlas_refs: tuple[str, ...]
-    worker_contract_residue: str
+    worker_contract_path: str
     prompt: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -490,7 +490,7 @@ class PacketSnapshot:
             "beads": [dict(bead) for bead in self.beads],
             "dimensions": self.dimensions.to_dict(),
             "atlas_refs": list(self.atlas_refs),
-            "worker_contract_residue": self.worker_contract_residue,
+            "worker_contract_path": self.worker_contract_path,
         }
 
 
@@ -588,8 +588,7 @@ def _render_prompt(snapshot: PacketSnapshot, template: str) -> str:
         "run the listed verification commands, and report once with exact results.\n\n"
         "## Launch snapshot\n\n"
         f"```json\n{payload}\n```\n\n"
-        "## Worker-contract residue\n\n"
-        f"The residue is defined by `{snapshot.worker_contract_residue}`.\n\n"
+        f"## Operating rules (`{snapshot.worker_contract_path}`)\n\n"
         f"{template}\n"
     )
     if len(prompt.encode()) > 200_000:
@@ -622,7 +621,7 @@ def compile_launch_snapshot(
         raise PacketError(
             f"worker-contract template is unavailable: {config.template_path}"
         ) from error
-    residue = (
+    contract_path = (
         str(config.template_path.relative_to(project_root))
         if config.template_path.is_relative_to(project_root)
         else str(config.template_path)
@@ -635,7 +634,7 @@ def compile_launch_snapshot(
         group=leader_id,
         dimensions=dimensions,
         atlas_refs=atlas_refs,
-        worker_contract_residue=residue,
+        worker_contract_path=contract_path,
         prompt="",
     )
     return PacketSnapshot(
