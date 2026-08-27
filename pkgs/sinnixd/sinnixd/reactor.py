@@ -31,6 +31,7 @@ MAX_KEEPER_BACKOFF_SECONDS = 6 * 60 * 60
 MAX_BOARD_LANES = 2_000
 MAX_BOARD_PRS = 2_000
 MAX_BOARD_ERRORS = 100
+_DURABLE_KEEPER_PREFIXES = ("refill:", "review:")
 MAX_EVENT_BYTES = 1_000_000
 DEFAULT_REFILL_SPACING_SECONDS = 10
 
@@ -771,8 +772,13 @@ class CampaignReactor:
     def _emit_keeper(self) -> None:
         actions = self._pending_keeper_actions()
         active_keys = {key for key, _ in actions}
+        # Only pending-action entries are pruned here. Prefixed entries are
+        # durable records of work already dispatched; deleting one re-dispatches
+        # it on the next tick.
         for key in list(self._board.keeper):
-            if not key.startswith("refill:") and key not in active_keys:
+            if key.startswith(_DURABLE_KEEPER_PREFIXES):
+                continue
+            if key not in active_keys:
                 del self._board.keeper[key]
         now = datetime.now(UTC)
         for key, action in actions:

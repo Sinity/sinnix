@@ -244,3 +244,31 @@ def test_workspace_resolves_from_the_durable_job_record(tmp_path: Path) -> None:
     )
 
     assert reactor._workspace_for(record) == "packet-polylogue-wxyz"
+
+
+def test_keeper_prune_keeps_records_of_dispatched_work(tmp_path: Path) -> None:
+    """A dispatched-review record must outlive the keeper's pending-action prune.
+
+    Anti-vacuity: pruning every non-refill key deletes the dedupe entry on the
+    next tick, so the same lane is reviewed again on each restart.
+    """
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+    )
+    reactor._board.keeper["review:job-1"] = {
+        "emitted_at": "2026-08-27T00:00:00+00:00",
+        "backoff_seconds": 0,
+        "next_eligible_at": "2026-08-27T00:00:00+00:00",
+    }
+    reactor._board.keeper["stale-action"] = {
+        "emitted_at": "2026-08-27T00:00:00+00:00",
+        "backoff_seconds": 0,
+        "next_eligible_at": "2026-08-27T00:00:00+00:00",
+    }
+
+    reactor._emit_keeper()
+
+    assert "review:job-1" in reactor._board.keeper
+    assert "stale-action" not in reactor._board.keeper
