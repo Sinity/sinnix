@@ -42,7 +42,6 @@
 
     packages.disabled = [
       "com.android.axion.quicklook"
-      "com.google.android.apps.nexuslauncher"
       "com.google.android.glasses.core"
       "com.google.android.gms.supervision"
       "com.google.android.googlequicksearchbox"
