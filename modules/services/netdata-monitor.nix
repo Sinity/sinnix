@@ -43,8 +43,10 @@ mkServiceModule {
           ml.enabled = "yes";
           web = {
             "bind to" = "127.0.0.1:${toString port} ${tailscaleAddress}:${toString port}";
-            "allow connections from" = "localhost ${tailscaleAddress}";
-            "allow dashboard from" = "localhost ${tailscaleAddress}";
+            # Binding and the interface-scoped firewall are the security
+            # boundary; these patterns admit clients from the tailnet.
+            "allow connections from" = "localhost 100.*";
+            "allow dashboard from" = "localhost 100.*";
           };
           cloud.enabled = "no";
         };
@@ -55,6 +57,11 @@ mkServiceModule {
         "d ${stateDir}/cache 0750 netdata netdata -"
         "d ${stateDir}/lib 0750 netdata netdata -"
       ];
+
+      systemd.services.netdata.serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
+        runtimeInventory = config.sinnix.runtime.inventory;
+        unit = "netdata.service";
+      };
 
       networking.firewall.interfaces.${config.sinnix.services.tailscale.interfaceName}.allowedTCPPorts = [
         port
