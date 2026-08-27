@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from threading import Event, Thread
 from typing import Any, Mapping
 from uuid import uuid4
 
@@ -1366,6 +1367,8 @@ def _wait_for_delivery(
 
 def daemon_main() -> None:
     arguments = daemon_parser().parse_args()
+    stop_event = Event()
+    scheduler_errors: list[BaseException] = []
     service = SinnixdService(
         ProjectCatalog(arguments.project_root, tolerant=True),
         jobs=GenericJobs(
@@ -1377,4 +1380,24 @@ def daemon_main() -> None:
         ),
         native_runner=arguments.native_runner,
     )
-    UnixSocketServer(arguments.socket, service).serve_forever()
+
+    def schedule_admission() -> None:
+        try:
+            service.jobs.run_admission_scheduler(stop_event)
+        except BaseException as error:
+            scheduler_errors.append(error)
+            stop_event.set()
+
+    scheduler = Thread(
+        target=schedule_admission,
+        name="sinnixd-admission",
+        daemon=True,
+    )
+    scheduler.start()
+    try:
+        UnixSocketServer(arguments.socket, service).serve_forever(stop_event)
+    finally:
+        stop_event.set()
+        scheduler.join()
+    if scheduler_errors:
+        raise scheduler_errors[0]

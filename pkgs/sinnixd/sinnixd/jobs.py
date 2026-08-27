@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from threading import Condition, Lock, RLock
+from threading import Condition, Event, Lock, RLock
 from typing import Any, Iterator, Protocol
 from uuid import UUID, uuid4
 
@@ -2194,7 +2194,11 @@ class GenericJobStore:
     def _set_active_record(self, job_id: str, *, active: bool) -> None:
         _ = job_unit_name(job_id)
         with self.locked_active_records():
-            job_ids = self._active_record_ids() or set()
+            existing = self._active_record_ids()
+            job_ids = existing or set()
+            was_active = job_id in job_ids
+            if existing is not None and was_active == active:
+                return
             if active:
                 job_ids.add(job_id)
             else:
@@ -2277,7 +2281,11 @@ class GenericJobStore:
     def _set_service_lease_record(self, job_id: str, *, active: bool) -> None:
         _ = job_unit_name(job_id)
         with self.locked_service_lease_records():
-            job_ids = self._service_lease_record_ids() or set()
+            existing = self._service_lease_record_ids()
+            job_ids = existing or set()
+            was_active = job_id in job_ids
+            if existing is not None and was_active == active:
+                return
             if active:
                 job_ids.add(job_id)
             else:
@@ -2403,7 +2411,8 @@ class GenericJobs:
 
     systemd: SystemdJobs
     store: GenericJobStore
-    wait_poll_seconds: float = 0.1
+    wait_poll_seconds: float = 1.0
+    admission_retry_seconds: float = 1.0
     pressure_probe: Callable[[], Mapping[str, float]] = _unmetered_pressure
     before_admission_start: Callable[[str], None] | None = None
     notify_socket: Path | None = None
@@ -3367,7 +3376,13 @@ class GenericJobs:
                             ),
                         },
                     }
-                    if record.state.get("admission") != admission:
+                    previous_admission = record.state.get("admission")
+                    previous_blocked_by = (
+                        previous_admission.get("blocked_by")
+                        if isinstance(previous_admission, Mapping)
+                        else None
+                    )
+                    if previous_blocked_by != blocked_by:
                         self.store.save(
                             self._with_state(
                                 record,
@@ -3485,6 +3500,13 @@ class GenericJobs:
                 self._finish_admission(terminal, state)
             elif submitted is not None:
                 active[submitted.spec.pool].append(submitted)
+
+    def run_admission_scheduler(self, stop_event: Event) -> None:
+        """Retry queued admission independently of clients waiting on jobs."""
+        while not stop_event.is_set():
+            with self._admission_lock:
+                self._admit_locked()
+            stop_event.wait(self.admission_retry_seconds)
 
     def _dependency_block(self, record: GenericJobRecord) -> Mapping[str, Any] | None:
         for job_id in record.spec.dependency_job_ids:
@@ -3931,6 +3953,8 @@ class GenericJobs:
                 f"wait timeout_seconds must be between 1 and {MAX_WAIT_SECONDS}"
             )
         deadline = time.monotonic() + timeout_seconds
+        with self._admission_lock:
+            self._admit_locked()
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -3948,8 +3972,6 @@ class GenericJobs:
                     ),
                     wait_deadline=deadline,
                 )
-            with self._admission_lock:
-                self._admit_locked()
             if status["state"]["terminal"]:
                 return status
             if time.monotonic() >= deadline:
@@ -3976,13 +3998,13 @@ class GenericJobs:
                 f"wait_any requires 1-{MAX_WAIT_ANY_JOBS} distinct job ids"
             )
         deadline = time.monotonic() + timeout_seconds
+        with self._admission_lock:
+            self._admit_locked()
         while True:
             phases: dict[str, Any] = {}
             for job_id in job_ids:
                 with self.store.locked(job_id):
                     status = self._get_locked(job_id)
-                with self._admission_lock:
-                    self._admit_locked()
                 if status["state"]["terminal"]:
                     return {**status, "completed_job_id": job_id}
                 phases[job_id] = status["state"].get("phase")

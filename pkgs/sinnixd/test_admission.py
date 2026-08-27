@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -376,6 +377,116 @@ def test_host_budget_accounts_for_active_jobs_across_pools(tmp_path: Path) -> No
         == 18 * 1024 * 1024 * 1024
     )
     assert len(systemd.started) == 1
+
+
+def test_unchanged_admission_block_does_not_rewrite_job_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter = project(
+        tmp_path / "project",
+        (operation("heavy", pool="bulk", estimate_memory_bytes=1024),),
+    )
+    pressure = {"memory_full_avg10": 1.0}
+    subject = GenericJobs(
+        FakeSystemd(),
+        GenericJobStore(tmp_path / "state"),
+        pressure_probe=lambda: pressure,
+    )
+    queued = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("heavy"),
+        correlation_id="queued",
+        parameters={},
+    )
+    assert queued["state"]["admission"]["blocked_by"] == ["host-pressure"]
+    writes: list[object] = []
+    monkeypatch.setattr(subject.store, "save", writes.append)
+    pressure["memory_full_avg10"] = 2.0
+
+    subject._admit_locked()
+
+    assert writes == []
+
+
+def test_scheduler_admits_queued_work_after_pressure_clears(tmp_path: Path) -> None:
+    adapter = project(
+        tmp_path / "project",
+        (operation("heavy", pool="bulk", estimate_memory_bytes=1024),),
+    )
+    pressure = {"memory_full_avg10": 1.0}
+    admitted = threading.Event()
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        pressure_probe=lambda: pressure,
+        before_admission_start=lambda _job_id: admitted.set(),
+        admission_retry_seconds=0.001,
+    )
+    queued = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("heavy"),
+        correlation_id="queued",
+        parameters={},
+    )
+    assert queued["state"]["phase"] == "queued"
+    stop_event = threading.Event()
+    scheduler = threading.Thread(
+        target=subject.run_admission_scheduler, args=(stop_event,)
+    )
+    scheduler.start()
+    try:
+        pressure["memory_full_avg10"] = 0.0
+        assert admitted.wait(1)
+    finally:
+        stop_event.set()
+        scheduler.join(1)
+
+    assert not scheduler.is_alive()
+    assert len(systemd.started) == 1
+
+
+def test_wait_does_not_drive_admission_on_each_observation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter = project(
+        tmp_path / "project",
+        (operation("heavy", pool="bulk", estimate_memory_bytes=1024),),
+    )
+    probes = 0
+
+    def pressure_probe() -> dict[str, float]:
+        nonlocal probes
+        probes += 1
+        return {"memory_full_avg10": 1.0}
+
+    subject = GenericJobs(
+        FakeSystemd(),
+        GenericJobStore(tmp_path / "state"),
+        pressure_probe=pressure_probe,
+        wait_poll_seconds=0.1,
+    )
+    queued = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("heavy"),
+        correlation_id="queued",
+        parameters={},
+    )
+    clock = [0.0]
+    monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        "sinnixd.jobs.TerminalEvents.wait_terminal",
+        lambda self, job_ids, seconds: (
+            clock.__setitem__(0, clock[0] + seconds),
+            False,
+        )[1],
+    )
+    probes = 0
+
+    waited = subject.wait(queued["job_id"], timeout_seconds=1)
+
+    assert waited["wait_timed_out"]
+    assert probes == 1
 
 
 def test_failed_launch_peak_does_not_replace_declared_memory_estimate(

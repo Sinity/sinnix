@@ -9,9 +9,15 @@ command -v hyprctl >/dev/null 2>&1 || {
   exit 1
 }
 
-workspaces=$(hyprctl -j workspaces)
+monitors=$(hyprctl -j monitors)
 while IFS= read -r workspace; do
   case "$workspace" in
-    special:*) hyprctl dispatch togglespecialworkspace "${workspace#special:}" >/dev/null ;;
+    special:*)
+      name=${workspace#special:}
+      case "$name" in
+        *[!A-Za-z0-9_.-]*) continue ;;
+      esac
+      hyprctl eval "hl.dispatch(hl.dsp.workspace.toggle_special(\"$name\"))" >/dev/null
+      ;;
   esac
-done < <(printf '%s' "$workspaces" | jq -r '.[] | select(.visible == true and (.name | startswith("special:"))) | .name')
+done < <(printf '%s' "$monitors" | jq -r '.[] | (.specialWorkspace // .activeSpecialWorkspace // {}).name // empty | select(startswith("special:"))')

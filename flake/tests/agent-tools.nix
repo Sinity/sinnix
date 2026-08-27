@@ -979,16 +979,19 @@ in
               pkgs.bash
               pkgs.coreutils
               pkgs.jq
+              pkgs.python3
             ];
           }
           ''
             ocr="$TMPDIR/hyprland-ocr"
             dismiss="$TMPDIR/dismiss-scratchpads"
+            toggle="$TMPDIR/toggle-scratch"
             cp ${../../scripts/hyprland-ocr} "$ocr"
             cp ${../../scripts/dismiss-scratchpads} "$dismiss"
-            chmod +x "$ocr" "$dismiss"
-            patchShebangs "$ocr" "$dismiss"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/desktop-capture.sh} "$ocr" "$dismiss"
+            cp ${../../scripts/toggle-scratch} "$toggle"
+            chmod +x "$ocr" "$dismiss" "$toggle"
+            patchShebangs "$ocr" "$dismiss" "$toggle"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/desktop-capture.sh} "$ocr" "$dismiss" "$toggle"
             touch "$out"
           '';
       recoverySkillsFixture =

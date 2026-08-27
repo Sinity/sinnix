@@ -37,6 +37,17 @@ command -v hyprctl >/dev/null 2>&1 || {
   exit 1
 }
 
+case "$WORKSPACE" in
+  *[!A-Za-z0-9_.-]*)
+    echo "toggle-scratch: invalid workspace name: $WORKSPACE" >&2
+    exit 1
+    ;;
+esac
+
+hypr_dispatch() {
+  hyprctl eval "hl.dispatch($1)"
+}
+
 has_window() {
   local clients
   clients=$(hyprctl -j clients 2>/dev/null) || return 1
@@ -123,9 +134,9 @@ PY
 EOF
   if [ -n "${address:-}" ]; then
     LAST_WINDOW_ADDRESS="$address"
-    hyprctl dispatch focuswindow "$address" >/dev/null 2>&1 || true
+    hypr_dispatch "hl.dsp.focus({ window = \"address:${address}\" })" >/dev/null 2>&1 || true
     if [ -n "${cx:-}" ] && [ -n "${cy:-}" ]; then
-      hyprctl dispatch movecursor "$cx" "$cy" >/dev/null 2>&1 || true
+      hypr_dispatch "hl.dsp.cursor.move({ x = ${cx}, y = ${cy} })" >/dev/null 2>&1 || true
     fi
   fi
 }
@@ -162,7 +173,7 @@ print(width, height)
 PY
 )
 EOF
-  hyprctl dispatch resizewindowpixel exact "$width" "${height},address:${address}" >/dev/null 2>&1 || true
+  hypr_dispatch "hl.dsp.window.resize({ x = ${width}, y = ${height}, window = \"address:${address}\" })" >/dev/null 2>&1 || true
 }
 
 if ! has_window; then
@@ -170,11 +181,18 @@ if ! has_window; then
   wait_for_window || exit 1
 fi
 
-current_ws=$(hyprctl -j activeworkspace 2>/dev/null | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); print(d.get("name",""))' 2>/dev/null || true)
-hyprctl dispatch togglespecialworkspace "$WORKSPACE" >/dev/null
-if [ "special:${WORKSPACE}" != "${current_ws}" ]; then
-  pattern=${CLASS_PATTERN:-^${CLASS}$}
-  center_and_focus_window "$pattern"
-  resize_window_if_needed
-  center_and_focus_window "$pattern"
+visible_special=$(hyprctl -j monitors 2>/dev/null | python3 -c '
+import json, sys
+monitors = json.loads(sys.stdin.read() or "[]")
+focused = next((item for item in monitors if item.get("focused")), None)
+special = (focused or {}).get("specialWorkspace") or (focused or {}).get("activeSpecialWorkspace") or {}
+print(special.get("name", ""))
+' 2>/dev/null || true)
+hypr_dispatch "hl.dsp.workspace.toggle_special(\"${WORKSPACE}\")" >/dev/null
+if [ "special:${WORKSPACE}" = "$visible_special" ]; then
+  exit 0
 fi
+pattern=${CLASS_PATTERN:-^${CLASS}$}
+center_and_focus_window "$pattern"
+resize_window_if_needed
+center_and_focus_window "$pattern"
