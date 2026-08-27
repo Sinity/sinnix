@@ -14,7 +14,7 @@ import tomllib
 TEMPLATE_VERSION = "v2"
 # A compiled packet travels as a plan-node payload, so the prompt has to fit
 # inside that budget with room for the node's own fields.
-MAX_PROMPT_BYTES = 56_000
+MAX_PROMPT_BYTES = 200_000
 DEFAULT_BACKEND = "codex"
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_EFFORT = "medium"

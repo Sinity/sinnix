@@ -27,7 +27,9 @@ MAX_PLAN_DEPENDENCIES = 1_024
 MAX_PLAN_ID_BYTES = 64
 MAX_INPUT_GENERATION_BYTES = 256
 MAX_PLAN_RESULT_BYTES = 64_000
-MAX_NODE_PAYLOAD_BYTES = 64_000
+# A packet-lane node carries its whole compiled prompt, so this bound is
+# what decides whether a large bead can be dispatched at all.
+MAX_NODE_PAYLOAD_BYTES = 256_000
 MAX_PLAN_LIST = 100
 _PLAN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _GENERATION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:+@=-]{0,255}\Z")
