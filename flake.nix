@@ -146,6 +146,12 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Declarative Android state managed from the workstation over adb.
+    nix-android = {
+      url = "github:devindudeman/nix-android";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # Code formatting (multi-formatter via flake-parts)
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
@@ -188,6 +194,7 @@
         ./flake/dev-shell.nix
         ./flake/apps.nix
         ./flake/packages.nix
+        ./flake/android.nix
         ./flake/treefmt.nix
         ./flake/nixos.nix
         ./flake/router.nix

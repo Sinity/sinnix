@@ -274,6 +274,16 @@ ensure_app_grants() {
   # not this function's job -- see docs/phone.md.
 }
 
+require_unlocked_phone() {
+  local window_state
+  window_state=$(adb_any shell dumpsys window 2>/dev/null || true)
+  if printf '%s' "$window_state" \
+    | grep -Eq 'mDreamingLockscreen=true|mShowingLockscreen=true|isStatusBarKeyguard=true'; then
+    echo "phone screen is locked; unlock it before starting or upgrading the capture app" >&2
+    return 1
+  fi
+}
+
 # Device-level capture settings that are not app grants and do not survive a
 # reboot. Ring buffers ship at 256 KiB (~4h on this phone); 64 MiB is the most
 # the shell can set without root. `persist.logd.size` would persist it but is
@@ -568,6 +578,7 @@ app-install)
     echo "app-install: no adb transport — plug in USB or run adb-restore" >&2
     exit 1
   fi
+  require_unlocked_phone || exit 1
   # The TRANSPORT serial, not ro.serialno. Over the tailnet adb addresses the
   # phone as "<ip>:5555" and its hardware serial names no transport at all, so
   # passing the latter made every network install fail with "device not found"
@@ -650,6 +661,7 @@ app-start)
     echo "app-start: no adb transport" >&2
     exit 1
   fi
+  require_unlocked_phone || exit 1
   # NOT redirected to /dev/null. `am start` reports a missing activity in its
   # own output with exit status 0, so a silent launch turns a renamed activity
   # into a capture outage nobody is told about -- which is exactly what

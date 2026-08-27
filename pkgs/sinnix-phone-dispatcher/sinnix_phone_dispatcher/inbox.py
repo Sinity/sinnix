@@ -78,7 +78,12 @@ def _sha(body: bytes) -> str:
 
 
 def _generated_bytes(name: str) -> bytes:
-    return (json.dumps(GENERATED[name](), indent=2) + "\n").encode("utf-8")
+    payload = GENERATED[name]().copy()
+    # The fetch itself proves freshness. Including a request-time timestamp in
+    # the persisted body changes its hash on every poll and makes the phone
+    # download and rewrite otherwise identical state forever.
+    payload.pop("generated_at", None)
+    return (json.dumps(payload, indent=2) + "\n").encode("utf-8")
 
 
 def list_inbox() -> tuple[HTTPStatus, dict]:
