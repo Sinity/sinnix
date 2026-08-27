@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
@@ -296,6 +297,20 @@ def parser() -> argparse.ArgumentParser:
     campaign_run.add_argument("--limit", type=int)
     campaign_run.add_argument("--bead", dest="bead_ids", action="append")
     campaign_run.add_argument("--dry-run", action="store_true")
+    campaign_integrate = campaign_subcommands.add_parser(
+        "integrate",
+        help="Group lane branches holding unintegrated content into batches.",
+    )
+    campaign_integrate.add_argument("--project", required=True)
+    campaign_integrate.add_argument("--base", default="origin/master")
+    campaign_integrate.add_argument("--max-units", type=int, default=8)
+    campaign_integrate.add_argument(
+        "--assemble",
+        metavar="INDEX",
+        type=int,
+        help="Merge one batch onto a fresh branch instead of listing batches.",
+    )
+    campaign_integrate.add_argument("--name", default="batch")
     job = subcommands.add_parser("job")
     job_subcommands = job.add_subparsers(dest="job_command", required=True)
     start = job_subcommands.add_parser("start")
@@ -860,6 +875,40 @@ def main() -> int:
             {"saga_id": arguments.saga_id},
             "operator",
         )
+    elif arguments.command == "campaign" and arguments.campaign_command == "integrate":
+        from .integration import assemble, discover_units, pack
+
+        root = resolve_project_root(arguments.project)
+        common = Path(
+            subprocess.run(
+                ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ).stdout.strip()
+        )
+        units = discover_units(Path("/realm/worktrees"), common, arguments.base)
+        batches = pack(units, arguments.max_units)
+        if arguments.assemble is None:
+            payload = {
+                "project_id": arguments.project,
+                "units": len(units),
+                "batches": [batch.to_dict() for batch in batches],
+            }
+        else:
+            if not 0 <= arguments.assemble < len(batches):
+                parser().error(f"no batch at index {arguments.assemble}")
+            batch = batches[arguments.assemble]
+            payload = assemble(
+                batch,
+                repo=root,
+                worktree=Path("/realm/worktrees") / arguments.name,
+                branch=f"integration/{arguments.name}",
+                base=arguments.base,
+            )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
     elif arguments.command == "campaign" and arguments.campaign_command == "run":
         request = _request(
             "campaign.run",
