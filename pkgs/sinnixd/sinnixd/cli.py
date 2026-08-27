@@ -277,6 +277,14 @@ def parser() -> argparse.ArgumentParser:
     workspace_finish_integrated.add_argument("--bead", dest="beads", action="append")
     workspace_finish_integrated.add_argument("--receipt", type=Path)
     workspace_finish_integrated.add_argument("--partial-note")
+    lane = subcommands.add_parser("lane")
+    lane_subcommands = lane.add_subparsers(dest="lane_command", required=True)
+    for name in ("status", "stuck", "gc"):
+        lane_command = lane_subcommands.add_parser(name)
+        lane_command.add_argument("--project", required=True)
+        lane_command.add_argument("--base", default="origin/master")
+        if name == "gc":
+            lane_command.add_argument("--apply", action="store_true")
     packet = subcommands.add_parser("packet")
     packet_subcommands = packet.add_subparsers(dest="packet_command", required=True)
     packet_finalize = packet_subcommands.add_parser("finalize")
@@ -919,6 +927,50 @@ def main() -> int:
             {"saga_id": arguments.saga_id},
             "operator",
         )
+    elif arguments.command == "lane":
+        from .lanes import derive_units, disposable, stuck
+
+        root = resolve_project_root(arguments.project)
+        common = Path(
+            subprocess.run(
+                ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ).stdout.strip()
+        )
+        units = derive_units(Path("/realm/worktrees"), common, arguments.base)
+        if arguments.lane_command == "status":
+            selected, exit_code = units, 0
+        elif arguments.lane_command == "stuck":
+            selected = stuck(units)
+            # Non-zero so a keeper or CI step cannot quietly ignore held work.
+            exit_code = 1 if selected else 0
+        else:
+            selected = disposable(units)
+            exit_code = 0
+        payload = {
+            "project_id": arguments.project,
+            "command": arguments.lane_command,
+            "units": [unit.to_dict() for unit in selected],
+        }
+        if arguments.lane_command == "gc" and arguments.apply:
+            removed = []
+            for unit in selected:
+                result = subprocess.run(
+                    ["git", "worktree", "remove", "--force", str(unit.path)],
+                    cwd=root, capture_output=True, text=True, timeout=120,
+                )
+                if result.returncode == 0:
+                    subprocess.run(
+                        ["git", "branch", "-D", unit.branch],
+                        cwd=root, capture_output=True, text=True, timeout=60,
+                    )
+                    removed.append(unit.workspace)
+            payload["removed"] = removed
+        print(json.dumps(payload, indent=1, sort_keys=True))
+        return exit_code
     elif arguments.command == "campaign" and arguments.campaign_command == "integrate":
         from .integration import assemble, discover_units, pack
 
