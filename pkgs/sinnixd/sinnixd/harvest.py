@@ -34,6 +34,7 @@ DEFAULT_BASE = "origin/master"
 DEFAULT_SPOOL = Path("/realm/state/agentctl/events.jsonl")
 PACKET_DIRECTORY = "harvest-packets"
 LOCK_PATH = Path("/realm/tmp/work/.harvest-git.flock")
+PUSH_TIMEOUT_SECONDS = 2_400
 _TRAILER_FIELDS = (
     "LANE-BRANCH",
     "LANE-COMMIT",
@@ -92,8 +93,12 @@ def _command(
             timeout=timeout,
             check=check,
         )
+    except subprocess.TimeoutExpired as error:
+        raise HarvestError(
+            f"command timed out after {timeout:g}s: {' '.join(argv)}"
+        ) from error
     except (OSError, subprocess.SubprocessError) as error:
-        raise HarvestError(f"command unavailable: {argv[0]}") from error
+        raise HarvestError(f"command unavailable: {argv[0]} ({error})") from error
     return subprocess.CompletedProcess(
         result.args,
         result.returncode,
@@ -724,7 +729,9 @@ def authorize(
                 run,
                 ["git", "push", "-qf", "-u", "origin", "HEAD"],
                 cwd=context.worktree,
-                timeout=120,
+                # The push runs the repository's pre-push gate, which is a
+                # verification run, not a network round trip.
+                timeout=PUSH_TIMEOUT_SECONDS,
             ),
             "git push failed",
         )
@@ -751,6 +758,10 @@ def authorize(
             timeout=120,
         )
         _ = merge  # Auto-merge refusal is handled by the bounded watcher.
+        # The watcher polls GitHub and closes a bead; it touches nothing in the
+        # shared repository, so holding the lock through it would serialize
+        # every other publication behind one merge.
+        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
         state = (
             _watch_and_close(
                 context,
