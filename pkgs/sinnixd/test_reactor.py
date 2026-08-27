@@ -190,3 +190,56 @@ def test_review_dispatch_uses_the_checkout_path_as_the_workspace(
     reactor._dispatch_review(record)
 
     assert calls == [("polylogue", "packet-polylogue-abcd")]
+
+
+def test_lane_terminal_accepts_a_checkout_id_string(tmp_path: Path) -> None:
+    """Lane terminals name their checkout by id, not as an object.
+
+    Anti-vacuity: requiring a Mapping raises on every real lane terminal, which
+    is how review-ready stopped being set for any lane at all.
+    """
+    record = LaneRecord.from_event(
+        {
+            "kind": "attested-agent",
+            "job_id": "job-1",
+            "project": "polylogue",
+            "phase": "succeeded",
+            "checkout": "worktree-e6db0b7b054333fd",
+        },
+        updated_at="2026-08-27T00:00:00+00:00",
+    )
+
+    assert record.review_ready is True
+    assert record.checkout == {"checkout_id": "worktree-e6db0b7b054333fd"}
+
+
+def test_workspace_resolves_from_the_durable_job_record(tmp_path: Path) -> None:
+    """The path lives in the job record when the event carried only an id.
+
+    Anti-vacuity: dropping the record lookup returns "" and no review is ever
+    dispatched for a lane terminal.
+    """
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    (jobs / "job-1.json").write_text(
+        json.dumps(
+            {"checkout": {"path": "/realm/worktrees/packet-polylogue-wxyz"}}
+        )
+    )
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        jobs_state_dir=jobs,
+    )
+    record = LaneRecord(
+        job_id="job-1",
+        project="polylogue",
+        phase="succeeded",
+        checkout={"checkout_id": "worktree-abc"},
+        completed_at=None,
+        review_ready=True,
+        updated_at="2026-08-27T00:00:00+00:00",
+    )
+
+    assert reactor._workspace_for(record) == "packet-polylogue-wxyz"
