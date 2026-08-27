@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from .packets import (
     PacketConfig,
+    PacketError,
     SubprocessBdReader,
     compile_launch_snapshot,
     derived_workspace,
@@ -218,15 +219,24 @@ class CampaignRunner:
         if limit is not None and (isinstance(limit, bool) or limit < 1):
             raise ValueError("campaign limit must be positive")
         lanes = []
+        uncompilable: list[CampaignSkip] = []
         for row in ready:
             bead_id = str(row["id"])
-            snapshot = compile_launch_snapshot(
-                bead_id,
-                project_root=project.root,
-                project_id=project_id,
-                reader=reader,
-                config=config,
-            )
+            try:
+                snapshot = compile_launch_snapshot(
+                    bead_id,
+                    project_root=project.root,
+                    project_id=project_id,
+                    reader=reader,
+                    config=config,
+                )
+            except PacketError as error:
+                # One bead that cannot compile is one bead out of the wave, not
+                # a wave that refuses to launch.
+                uncompilable.append(
+                    CampaignSkip(bead_id, (bead_id,), "uncompilable", str(error))
+                )
+                continue
             workspace_name, branch = derived_workspace(snapshot, config)
             lanes.append(
                 CampaignLane(
@@ -285,6 +295,10 @@ class CampaignRunner:
             active_bead_ids=active_beads,
             active_conflict_keys=active_conflict_keys,
         )
+        if uncompilable:
+            schedule = CampaignSchedule(
+                schedule.lanes, schedule.edges, schedule.skipped + tuple(uncompilable)
+            )
         if limit is not None and len(schedule.lanes) > limit:
             # The limit bounds what this wave launches. Applying it to ready
             # candidates instead would spend the whole budget on beads the

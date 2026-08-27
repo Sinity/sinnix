@@ -12,6 +12,9 @@ from typing import Any, Mapping, Protocol, Sequence
 import tomllib
 
 TEMPLATE_VERSION = "v2"
+# A compiled packet travels as a plan-node payload, so the prompt has to fit
+# inside that budget with room for the node's own fields.
+MAX_PROMPT_BYTES = 56_000
 DEFAULT_BACKEND = "codex"
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_EFFORT = "medium"
@@ -591,8 +594,11 @@ def _render_prompt(snapshot: PacketSnapshot, template: str) -> str:
         f"## Operating rules (`{snapshot.worker_contract_path}`)\n\n"
         f"{template}\n"
     )
-    if len(prompt.encode()) > 200_000:
-        raise PacketError("compiled packet prompt exceeds the agent prompt limit")
+    if len(prompt.encode()) > MAX_PROMPT_BYTES:
+        raise PacketError(
+            f"compiled packet prompt is {len(prompt.encode())} bytes, "
+            f"over the {MAX_PROMPT_BYTES}-byte plan-node budget it travels in"
+        )
     return prompt
 
 
