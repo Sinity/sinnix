@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sinnixd.reactor import CampaignBoard, CampaignReactor, PullRequestRecord
+from sinnixd.reactor import CampaignBoard, CampaignReactor, LaneRecord, PullRequestRecord
 
 
 class FakeBeadCloser:
@@ -157,3 +157,36 @@ def test_malformed_spool_line_is_recorded_and_does_not_block_following_events(
     board = CampaignBoard.load(board_path)
     assert board.errors[0]["offset"] == "0"
     assert board.lanes["lane-2"].review_ready
+
+
+def test_review_dispatch_uses_the_checkout_path_as_the_workspace(
+    tmp_path: Path,
+) -> None:
+    """A lane checkout has no name field; the workspace is its directory.
+
+    Anti-vacuity: reading a "name" key instead leaves calls empty, which is how
+    auto-review silently did nothing for every lane.
+    """
+    calls: list[tuple[str, str]] = []
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        review_dispatcher=lambda project, workspace: calls.append(
+            (project, workspace)
+        ),
+    )
+    record = LaneRecord(
+        job_id="job-1",
+        project="polylogue",
+        phase="succeeded",
+        checkout={"path": "/realm/worktrees/packet-polylogue-abcd"},
+        completed_at=None,
+        review_ready=True,
+        updated_at="2026-08-27T00:00:00+00:00",
+    )
+
+    reactor._dispatch_review(record)
+    reactor._dispatch_review(record)
+
+    assert calls == [("polylogue", "packet-polylogue-abcd")]
