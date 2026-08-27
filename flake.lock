@@ -1236,11 +1236,11 @@
     "phone-app": {
       "flake": false,
       "locked": {
-        "lastModified": 1787827501,
-        "narHash": "sha256-3Rx4LUSTPp0KWa8BqqmMNmQFso3sUHiHCujAAKRLRqo=",
+        "lastModified": 1787828864,
+        "narHash": "sha256-/I7jRHrbMNyzndaTcXtVTrVw+BPt+avCwEL7b/CHcg8=",
         "owner": "Sinity",
         "repo": "sinnix-phone-app",
-        "rev": "8d6bcc11aed6188bbd9d251a2f001486278794bc",
+        "rev": "0e1e11ff4d31e0dd686cbdc018e022eabf3e3ec8",
         "type": "github"
       },
       "original": {
