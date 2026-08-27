@@ -692,6 +692,7 @@ class CampaignReactor:
     # same model judging its own family's output.
     integrator_model: str = "gpt-5.6-terra"
     integrator_effort: str = "high"
+    verify_timeout_seconds: int = 2_400
     agentctl_executable: str = "agentctl"
     bead_closer: BeadCloser = field(default_factory=SubprocessBeadCloser)
     registry: ReactionRegistry = field(default_factory=default_reactions)
@@ -867,6 +868,30 @@ class CampaignReactor:
             return
         parameters["title_file"] = str(title)
         parameters["body_file"] = str(body)
+        # Delivery requires a successful DECLARED verification at the exact
+        # HEAD. A lane runs devtools inside its own session, which leaves a
+        # local receipt but no job, so publication is refused however green the
+        # lane was. Running it here as an operation is what makes the evidence
+        # addressable.
+        verified = subprocess.run(
+            [
+                self.agentctl_executable,
+                "job",
+                "start",
+                project,
+                "verify_quick",
+                "--workspace",
+                workspace,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=self.verify_timeout_seconds,
+        )
+        if verified.returncode != 0:
+            self._board.record_error(
+                -1, f"publish {workspace}: declared verification refused"
+            )
+            return
         try:
             subprocess.run(
                 [
