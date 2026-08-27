@@ -190,6 +190,9 @@ def parser() -> argparse.ArgumentParser:
     project = subcommands.add_parser("project")
     project_subcommands = project.add_subparsers(dest="project_command", required=True)
     project_subcommands.add_parser("list")
+    project_subcommands.add_parser(
+        "reload", help="Re-read every project descriptor without restarting."
+    )
     get = project_subcommands.add_parser("get")
     get.add_argument("project_id")
     operations = project_subcommands.add_parser("operations")
@@ -300,9 +303,7 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("operation")
     start.add_argument(
         "--workspace",
-        "--checkout",
-        dest="workspace",
-        help="Managed workspace ID (the --checkout spelling is an equivalent convenience alias).",
+        help="Managed workspace name or ID.",
     )
     start.add_argument("--parameters-json", default="{}")
     start.add_argument("--bead-binding-json")
@@ -675,6 +676,8 @@ def main() -> int:
         )
     elif arguments.command == "project" and arguments.project_command == "list":
         request = _request("project.list", "project-adapters", {})
+    elif arguments.command == "project" and arguments.project_command == "reload":
+        request = _request("project.reload", "project-adapters", {})
     elif arguments.command == "project" and arguments.project_command == "get":
         request = _request(
             "project.get", "project-adapters", {"project_id": arguments.project_id}
@@ -1287,7 +1290,7 @@ def _wait_for_delivery(
 def daemon_main() -> None:
     arguments = daemon_parser().parse_args()
     service = SinnixdService(
-        ProjectCatalog(arguments.project_root),
+        ProjectCatalog(arguments.project_root, tolerant=True),
         jobs=GenericJobs(
             UserSystemdJobs(),
             GenericJobStore(arguments.state_dir),

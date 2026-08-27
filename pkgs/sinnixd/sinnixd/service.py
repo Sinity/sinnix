@@ -151,9 +151,9 @@ class SinnixdService:
                 namespace="project",
                 owner="project-adapters",
                 authority=Authority.OWNER,
-                lifecycle=Lifecycle.READ_ONLY,
+                lifecycle=Lifecycle.DAEMON_OWNED,
                 versions=frozenset({1}),
-                documentation="Declared project adapter discovery and operation catalog.",
+                documentation="Declared project adapter catalog; reload re-reads descriptors.",
             ),
             OwnerSpec(
                 namespace="job",
@@ -307,7 +307,19 @@ class SinnixdService:
                 "backend_capacity": self.jobs.capacity_status(),
             }
         if operation == "project.list":
-            return {"projects": self.projects.list()}
+            return {
+                "projects": self.projects.list(),
+                "unavailable": [
+                    {"root": root, "reason": reason}
+                    for root, reason in sorted(self.projects.unavailable.items())
+                ],
+            }
+        if operation == "project.reload":
+            if principal not in {"agent-control", "operator"}:
+                raise JobAuthorizationError(
+                    "project reload requires agent-control or operator principal"
+                )
+            return self.projects.reload()
         if operation == "project.get":
             project_id = arguments.get("project_id")
             if not isinstance(project_id, str) or not project_id:

@@ -535,14 +535,6 @@ def test_agentctl_task_note_requires_one_text_spelling(
         cli_module.main()
 
 
-def test_agentctl_job_start_accepts_checkout_as_workspace_alias() -> None:
-    arguments = cli_module.parser().parse_args(
-        ["job", "start", "fixture", "check", "--checkout", "workspace-1"]
-    )
-
-    assert arguments.workspace == "workspace-1"
-
-
 def test_agentctl_job_list_exposes_service_pagination(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -10935,3 +10927,49 @@ def test_path_grammar_accepts_files_and_refuses_traversal() -> None:
 
     for refused in ("..", "../etc/passwd", "a/../b", "/realm/./x", "has space.md", "a//b", ""):
         assert grammar.fullmatch(refused) is None, refused
+
+
+def test_agentctl_expands_an_unambiguous_job_id_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fleet output and events print abbreviated ids; the CLI must accept them.
+
+    Anti-vacuity: returning the input unchanged makes the first assertion red,
+    and dropping the ambiguity guard makes the second one pass instead of exit.
+    """
+    jobs = tmp_path / "jobs"
+    jobs.mkdir(parents=True)
+    full = "37843efb-0094-46ff-a8ab-974b54eff9d2"
+    (jobs / f"{full}.json").write_text("{}")
+    monkeypatch.setattr(cli_module, "default_state_dir", lambda: tmp_path)
+
+    assert cli_module._expand_job_id("37843efb") == full
+    assert cli_module._expand_job_id(full) == full
+
+    (jobs / "37843efb-0000-0000-0000-000000000000.json").write_text("{}")
+    with pytest.raises(SystemExit):
+        cli_module._expand_job_id("37843efb")
+
+
+def test_project_catalog_takes_one_bad_descriptor_out_of_service(
+    tmp_path: Path,
+) -> None:
+    """One repository's descriptor must not decide the daemon's availability.
+
+    Anti-vacuity: dropping the per-root try in the tolerant path makes the
+    good project unreachable, and dropping the re-raise makes the strict
+    construction silently succeed.
+    """
+    good = tmp_path / "good"
+    good.mkdir()
+    write_adapter(good, project_id="good")
+    bad = tmp_path / "bad"
+    (bad / ".agentctl").mkdir(parents=True)
+    (bad / ".agentctl" / "project.toml").write_text("schema = 1\n[project]\n")
+
+    catalog = projects.ProjectCatalog([good, bad], tolerant=True)
+    assert [row["id"] for row in catalog.list()] == ["good"]
+    assert str(bad) in catalog.unavailable
+
+    with pytest.raises(projects.ProjectConfigError):
+        projects.ProjectCatalog([good, bad])
