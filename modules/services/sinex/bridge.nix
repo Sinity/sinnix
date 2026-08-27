@@ -100,11 +100,12 @@ in
           };
         }
         .${cfg.activationProfile};
-      maintenanceTimerServiceNames = [
-        "sinex-blob-cas-fsck"
-        "sinex-blob-cas-sweep"
-        "sinex-document-scan"
-      ];
+      maintenanceTimerServiceNames =
+        [
+          "sinex-blob-cas-fsck"
+          "sinex-blob-cas-sweep"
+        ]
+        ++ lib.optional activationProfile.document "sinex-document-scan";
       # All source bindings run inside sinexd, so the ACL-granting
       # target-access services must complete before sinexd starts for it to
       # reach user-owned data paths and sockets.
@@ -583,6 +584,8 @@ in
             kind = "timer";
             resourceClass = "backup-maintenance";
           };
+        }
+        // lib.optionalAttrs activationProfile.document {
           sinex-document-scan = {
             unit = "sinex-document-scan.service";
             resourceClass = "background-maintenance";

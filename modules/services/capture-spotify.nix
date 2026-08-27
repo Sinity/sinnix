@@ -88,8 +88,7 @@ let
       elif [ -s "$refresh_token_file" ]; then
         refresh_token_source="$refresh_token_file"
       else
-        echo "capture-spotify: no refresh token yet -- run 'sinnix spotify-auth' once (prints an authorize URL + a browser step), then 'echo -n TOKEN | agenix -e secret/spotify-refresh-token.age'" >&2
-        exit 1
+        exit 0
       fi
 
       client_id="$(<"$client_id_file")"

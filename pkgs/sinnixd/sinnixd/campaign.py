@@ -268,7 +268,7 @@ class CampaignRunner:
         }
         active_beads: set[str] = set()
         active_conflict_keys: set[str] = set()
-        for record in self.jobs.store.list():
+        for record in self.jobs.store.active_records():
             if record.spec.project_id != project_id or record.state.get("terminal"):
                 continue
             parameters = record.spec.contract.get("parameters")

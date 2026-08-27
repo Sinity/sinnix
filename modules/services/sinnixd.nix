@@ -73,11 +73,11 @@ mkServiceModule {
         manager = "user";
         kind = "service";
         dynamic = true;
-        resourceClass = "interactive-agent";
+        resourceClass = "managed-runtime-work";
         observe.enable = true;
         workload = {
-          class = "protected";
-          rationale = "Typed daemon jobs with daemon-owned systemd lifecycle.";
+          class = "sacrificial";
+          rationale = "Transient work yields to interactive slices and is killed as a cgroup under sustained host exhaustion.";
           processMatchers = [ "sinnixd-job-" ];
         };
         captures = [

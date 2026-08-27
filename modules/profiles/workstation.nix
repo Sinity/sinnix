@@ -269,16 +269,10 @@ in
         # is not a containment boundary (per-scope MemoryHigh/Max is).
         "--avoid"
         earlyoomAvoidPattern
-        # PSI gate (sinnix earlyoom patch): kill only while memory PSI
-        # "full avg10" >= 20 — the "degraded" regime floor. Measured: 84% of
-        # post-2026-07-13 kills (122/145) fired at PSI < 10 while page cache
-        # and swap absorbed the burst as designed, including the 2026-08-16
-        # bwa-mem2 kill at PSI 3.0 (sinnix-miop). All genuine-stall kills in
-        # the record sat at PSI >= 20. Below the gate the kernel OOM killer
-        # remains the ultimate floor; the gate fails open if PSI data is
-        # unavailable.
+        # At the memory-and-swap emergency floor, sustained full-memory PSI
+        # above 10 already makes the graphical session unreliable.
         "--mem-psi-min"
-        "20"
+        "10"
       ];
     };
 
@@ -288,10 +282,8 @@ in
     };
 
     # systemd-oomd is the first-line kill policy: sacrificial slices
-    # (build/nix-build/background) carry ManagedOOMMemoryPressure=kill at
-    # 50%/30s (runtime-defaults.nix) so a wedged build dies as a cgroup
-    # while the desktop and agents never qualify; earlyoom stays the global
-    # emergency floor at -m3.
+    # Sacrificial workload slices carry their own pressure policy; earlyoom
+    # remains the global emergency floor at -m3.
     systemd.oomd.enable = true;
 
     # Devshell/agent scratch belongs on /realm NVMe, not the RAM-backed /tmp

@@ -39,7 +39,8 @@ in
       };
       evaluated = evalTestSpec system spec;
       hyprland = evaluated.config.programs.hyprland.package;
-      settings = (hmFor evaluated.config).wayland.windowManager.hyprland.settings;
+      hm = hmFor evaluated.config;
+      settings = hm.wayland.windowManager.hyprland.settings;
     in
     {
       checks.hyprland-rules = pkgs.runCommand "sinnix-hyprland-rules" { } ''
@@ -64,5 +65,50 @@ in
           Hyprland --verify-config --config "$XDG_CONFIG_HOME/hypr/hyprland.lua"
         '';
       };
+
+      checks.hyprland-login-launch = pkgs.runCommand "sinnix-hyprland-login-launch"
+        {
+          nativeBuildInputs = [ pkgs.zsh ];
+        }
+        ''
+          mkdir bin home runtime
+          cat > bin/tty <<'EOF_TTY'
+          #!/bin/sh
+          printf '/dev/tty1\n'
+          EOF_TTY
+          cat > bin/id <<'EOF_ID'
+          #!/bin/sh
+          test "$1" = -un
+          printf 'sinity\n'
+          EOF_ID
+          cat > bin/uwsm <<'EOF_UWSM'
+          #!/bin/sh
+          printf '%s\n' "$@" > "$HOME/uwsm-args"
+          EOF_UWSM
+          chmod +x bin/id bin/tty bin/uwsm
+          cat > login.zsh <<'EOF_LOGIN'
+          ${hm.programs.zsh.loginExtra}
+          EOF_LOGIN
+          HOME="$PWD/home" PATH="$PWD/bin:$PATH" zsh login.zsh
+          diff -u - "$PWD/home/uwsm-args" <<EOF_ARGS
+          start
+          -e
+          -D
+          Hyprland
+          --
+          ${hyprland}/bin/Hyprland
+          --config
+          $PWD/home/.config/hypr/hyprland.lua
+          EOF_ARGS
+          uwsm_parse=$(
+            HOME="$PWD/home" XDG_RUNTIME_DIR="$PWD/runtime" \
+              ${pkgs.uwsm}/bin/uwsm start -n -e -D Hyprland -- \
+                ${hyprland}/bin/Hyprland --config "$PWD/home/.config/hypr/hyprland.lua" \
+                2>&1 || true
+          )
+          printf '%s\n' "$uwsm_parse" | grep -F \
+            "Command Line: ${hyprland}/bin/Hyprland --config $PWD/home/.config/hypr/hyprland.lua"
+          touch "$out"
+        '';
     };
 }

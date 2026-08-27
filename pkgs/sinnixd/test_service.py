@@ -2910,6 +2910,7 @@ class FakeSystemdJobs:
         timeout_seconds: int,
         log_path: Path,
         json_result_path: Path | None = None,
+        pool: str,
     ) -> None:
         self.started.append(
             {
@@ -4505,6 +4506,7 @@ def test_user_systemd_jobs_starts_a_retained_service_with_log_boundary(
         environment={"HOME": "/home/sinity", "SINNIXD_JOB_ID": "job"},
         timeout_seconds=123,
         log_path=tmp_path / "job.log",
+        pool="normal",
     )
 
     assert [args for args, _kwargs in calls] == [
@@ -4513,7 +4515,7 @@ def test_user_systemd_jobs_starts_a_retained_service_with_log_boundary(
             "--user",
             "--quiet",
             "--unit=sinnixd-job-00000000-0000-0000-0000-000000000001.service",
-            "--slice=agent.slice",
+            "--slice=sinnixd-work-normal.slice",
             "--property=WorkingDirectory=/work/project",
             "--property=RuntimeMaxSec=123s",
             "--property=StandardOutput=journal",
@@ -4566,6 +4568,7 @@ def test_user_systemd_calls_use_finite_timeouts_and_redact_timeout_details(
         environment={},
         timeout_seconds=1,
         log_path=tmp_path / "job.log",
+        pool="interactive",
     )
     systemd.show("sinnixd-job-00000000-0000-0000-0000-000000000001.service")
     systemd.stop("sinnixd-job-00000000-0000-0000-0000-000000000001.service")
@@ -9891,6 +9894,33 @@ def test_job_rpc_get_list_wait_logs_and_cancel_share_one_record(tmp_path: Path) 
     assert not listed.payload.inline["truncated"]
     assert cancelled.payload is not None
     assert cancelled.payload.inline["already_terminal"]
+
+
+def test_active_job_list_does_not_scan_terminal_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jobs = generic_jobs(tmp_path, FakeSystemdJobs())
+    started = jobs.start(
+        GenericJobSpec(
+            kind="foreground-command",
+            command=("fixture",),
+            working_directory=str(tmp_path),
+            environment={},
+            timeout_seconds=60,
+            principal="operator",
+        )
+    )
+    monkeypatch.setattr(
+        jobs.store,
+        "list",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("active listing scanned terminal history")
+        ),
+    )
+
+    listed = jobs.list(active_only=True)
+
+    assert [item["job_id"] for item in listed["jobs"]] == [started["job_id"]]
 
 
 def test_job_owner_boundary_filters_before_pagination_and_denies_cross_principal_access(

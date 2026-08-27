@@ -10,19 +10,19 @@ local toggleScratch = noctalia.expandPath("~/.local/bin/toggle-scratch")
 local VERBS = {
   {
     name = "rawlog",
-    glyph = "edit_note",
+    glyph = "note",
     tooltip = "Raw-log scratchpad (F8)",
     command = "hyprctl dispatch exec 'uwsm app -- " .. toggleScratch .. " rawlog'",
   },
   {
     name = "weechat",
-    glyph = "forum",
+    glyph = "messages",
     tooltip = "WeeChat scratchpad (F6)",
     command = "hyprctl dispatch exec 'uwsm app -- " .. toggleScratch .. " weechat'",
   },
   {
     name = "agentbrowser",
-    glyph = "travel_explore",
+    glyph = "world-search",
     tooltip = "Agent browser (F7)",
     command = "sinnix-chrome-control toggle-agent-workspace",
   },

@@ -144,6 +144,8 @@ mkServiceModule {
         ];
 
         security.auditd.enable = cfg.kernelAudit;
+        # Hold the boot burst until auditd can open its /realm-backed log.
+        boot.kernelParams = lib.mkAfter [ "audit_backlog_limit=32768" ];
         security.audit = lib.mkIf cfg.kernelAudit {
           enable = true;
           rules = [

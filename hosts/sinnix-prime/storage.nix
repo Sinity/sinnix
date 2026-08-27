@@ -478,6 +478,13 @@ in
       script = ''
         dev=/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a
         tmp=$(mktemp -d)
+        cleanup() {
+          if mountpoint -q "$tmp"; then
+            umount -- "$tmp"
+          fi
+          rmdir -- "$tmp"
+        }
+        trap cleanup EXIT
         mount -o subvolid=5 "$dev" "$tmp"
         install -d "$tmp/state"
         root="$tmp/state/sinex"
@@ -496,8 +503,6 @@ in
         install -d -o sinex -g sinex -m 0750 \
           "$root/state/run" "$root/state/logs" "$root/state/blob-repository" \
           "$root/state/spool" "$root/state/spool/event_engine"
-        umount "$tmp"
-        rmdir "$tmp"
       '';
     };
 
