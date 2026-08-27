@@ -25,10 +25,10 @@ Look for the verb before writing any procedure: `agentctl <noun> --help`.
 
 | Need                                     | Verb                                                                                          |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------- |
-| schedule a dispatch wave                 | `agentctl campaign run --project <p> [--bead ID …] [--dry-run]`                                |
-| dispatch one bead                        | `agentctl packet launch <bead> --project <p>`                                                  |
-| review a finished lane                   | `agentctl job start <p> harvest --workspace <ws>` (receipt; read-mostly)                       |
-| publish a reviewed lane                  | the same operation with `authorize` + `receipt_ref`                                            |
+| schedule a dispatch wave                 | `agentctl campaign run --project <p> [--bead ID …] [--dry-run]`                               |
+| dispatch one bead                        | `agentctl packet launch <bead> --project <p>`                                                 |
+| review a finished lane                   | `agentctl job start <p> harvest --workspace <ws>` (receipt; read-mostly)                      |
+| publish a reviewed lane                  | the same operation with `authorize` + `receipt_ref`                                           |
 | open a PR outside the harvest flow       | `agentctl workspace publish --job <j> --title T [--body F] [--wait]`                          |
 | land / integrate a workspace             | `agentctl workspace land --job <j>`                                                           |
 | dispose after a GitHub merge             | `agentctl workspace finish-merged`                                                            |
@@ -51,10 +51,10 @@ restart.
 
 **Dispatch**: `agentctl campaign run --project <p>` resolves the ready set,
 dedupes dispatch groups, serializes on conflict keys, and skips beads whose
-workspace is already live. `--dry-run` shows the schedule. `--limit` bounds
-candidates before that filter, so name beads with `--bead` when the ready set
-is mostly in flight. For a single bead, `agentctl packet launch`. Both compile
-the worker contract into the prompt.
+workspace is already live. `--dry-run` shows the schedule; `--limit` bounds how
+many lanes the wave launches, and everything it defers is reported with a
+reason. For a single bead, `agentctl packet launch`. Both compile the worker
+contract into the prompt.
 
 **Harvest** is a declared two-phase operation. The review phase is read-mostly
 and produces a receipt; publication is reachable only by quoting that receipt
@@ -71,12 +71,12 @@ back, so nothing publishes unreviewed.
 3. Write the PR title, body, and bead close-reason to files at decision time,
    then authorize:
    `agentctl job start <p> harvest --workspace <ws> --parameters-json
-   '{"authorize":true,"receipt_ref":"<ref>","title_file":"…","body_file":"…",
-   "bead_id":"…","close_reason_file":"…"}'`. Omit the bead parameters when the
+'{"authorize":true,"receipt_ref":"<ref>","title_file":"…","body_file":"…",
+"bead_id":"…","close_reason_file":"…"}'`. Omit the bead parameters when the
    lane delivered a slice and the bead stays open. The operation holds the repo
    lock only across push and PR creation, so review phases run in parallel.
 4. Dispose after the content check: `agentctl workspace finish-integrated
-   --target <ref>` is squash-proof; `finish-merged` handles the merged case.
+--target <ref>` is squash-proof; `finish-merged` handles the merged case.
 
 **Launch wedges**: packet launch advances one step per attempt (worktree →
 record → job) and reports a step failure as a redacted `OWNER_UNAVAILABLE`.
