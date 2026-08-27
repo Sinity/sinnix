@@ -11,7 +11,6 @@
     htop
     jq
     mosh
-    neovim
     openssh
     ripgrep
     rsync
