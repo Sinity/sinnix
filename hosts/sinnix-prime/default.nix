@@ -129,6 +129,7 @@
     # address only, and its ports are opened on tailscale0 alone -- the LAN
     # never sees it. Depends on tailscale above (asserted in the module).
     hub.enable = true;
+    netdata-monitor.enable = true;
     # ── Capture machinery ───────────────────────────────────────────────────
     capture-notifications.enable = true;
     capture-mpris.enable = true;
