@@ -43,9 +43,8 @@ agents report patches or commit only by explicit instruction.
    (not the main checkout), and is on the expected branch before trusting
    any output — `isolation: "worktree"` can silently fail to create one, in
    which case the agent runs directly in the main checkout and its diff is
-   not isolated (confirmed incident, polylogue 2026-08-01: an agent's
-   unreviewed schema-regeneration output landed directly in the
-   coordinator's live tree). For AgentCTL-managed workspaces, use
+   not isolated, and its writes land in the live tree. For AgentCTL-managed
+   workspaces, use
    `agentctl workspace get <workspace-id>` and require `identity_matches`,
    the expected path and branch, and the exact reported HEAD.
 
@@ -99,10 +98,7 @@ clustering helper where the repo has one).
   affected-test selection and only surfaces when the merged result is tested
   as a whole. Schedule one full, non-affected-only suite run per heavy
   multi-merge session before declaring it done; per-PR CI deliberately
-  skipping the heavy suite means nothing else will catch this class
-  (confirmed incident, polylogue 2026-08-01: two master-red root causes
-  found only by an incidental full-suite run after ~15 PRs had already
-  merged clean).
+  skipping the heavy suite means nothing else will catch this class.
 - **Content-aware shapes**: mechanical sweeps (lint/docs/renames) batch
   hardest; schema/migration bumps must batch per tier/window; investigation
   items batch over a shared evidence pass; decision items batch into one
