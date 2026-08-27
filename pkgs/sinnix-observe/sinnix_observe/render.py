@@ -72,6 +72,13 @@ def render_human(report: dict[str, Any]) -> str:
             "  " + line for line in storage["iostat_xz"].rstrip().splitlines()[:40]
         )
 
+    archive = report.get("polylogue_live_attempts", {}).get("archive", {})
+    if archive:
+        section("polylogue archive")
+        lines.append(f"root={archive.get('root')}")
+        for tier in archive.get("tiers", []):
+            lines.append(f"  {tier.get('name'):<16} {tier.get('state')}")
+
     # Before the unit dump, so anyone reading top-down learns which of the
     # red lines below are already known about. The whole point is that a
     # fresh reader does not re-derive an intentional outage as an incident.

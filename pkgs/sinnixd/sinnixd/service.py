@@ -919,6 +919,24 @@ class SinnixdService:
                     escalate=escalate,
                 )
             )
+        if operation == "job.resume":
+            if principal not in {"agent-control", "operator"}:
+                raise JobAuthorizationError(
+                    "job resume requires agent-control or operator principal"
+                )
+            if set(arguments) != {"job_id", "native_session_id"}:
+                raise ValueError("job.resume requires job_id and native_session_id")
+            session_id = arguments["native_session_id"]
+            if not isinstance(session_id, str):
+                raise ValueError("job.resume native_session_id must be a string")
+            return self._cleanup_terminal(
+                self.job_contracts.resume_agent(
+                    job_id=self._authorize_job(
+                        principal, self._job_argument(arguments, "job_id")
+                    ),
+                    native_session_id=session_id,
+                )
+            )
         if operation == "job.list":
             if set(arguments) - {
                 "limit",

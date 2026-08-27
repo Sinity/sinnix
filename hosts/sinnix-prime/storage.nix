@@ -15,25 +15,19 @@ let
     ;
   username = config.sinnix.user.name;
   primaryGroupName = config.users.users.${username}.group;
-  # Moved off capturesRoot 2026-08-17 (system charter subject recut: "ai/
-  # absorbs ... captures/polylogue"). polylogued.service was not running at
-  # move time (confirmed: unit not found), so no live daemon held this open.
+  # The service option is the sole active archive authority. The existing
+  # XDG tree remains a compatibility projection; activation does not migrate
+  # or merge its non-database siblings into the canonical root.
   polylogueArchiveRoot = "${aiRoot}/polylogue";
-  polylogueDbRoot = "${realmRoot}/state/polylogue";
+  polylogueDbRoot = config.sinnix.services.polylogue.dataDir;
   polylogueDbFiles = [
     "index.db"
     "source.db"
     "embeddings.db"
-    "user.db"
     "ops.db"
-    # Empty since 2026-07-17 -- daemon events live in ops.db. Symlinked
-    # anyway so a future write lands on the subvol, but do not add it to a
-    # BACKUP tier: it archives as a ~71-byte artifact that reads as coverage
-    # while covering nothing. Confirmed 0 bytes on 2026-08-13.
-    "daemon_events.db"
+    "audit.db"
+    "user.db"
   ];
-  # Steady-state sanity check plus fresh-bootstrap symlink creation: each
-  # archive DB name must either be absent or already point at the subvol.
   polylogueDbLinkScript = lib.concatMapStringsSep "\n" (
     name:
     let
@@ -44,7 +38,7 @@ let
       if [ -L ${lib.escapeShellArg archivePath} ]; then
         current="$(readlink ${lib.escapeShellArg archivePath})"
         if [ "$current" != ${lib.escapeShellArg targetPath} ]; then
-          echo "Refusing to replace unexpected Polylogue DB symlink ${archivePath} -> $current" >&2
+          echo "Refusing to replace unexpected Polylogue compatibility link ${archivePath} -> $current" >&2
           exit 1
         fi
       elif [ ! -e ${lib.escapeShellArg archivePath} ] && [ -e ${lib.escapeShellArg targetPath} ]; then
@@ -559,9 +553,8 @@ in
     # default XDG path stable for CLI/MCP/service consumers, but place the
     # archive bytes on /realm's NVMe instead of the root/persist SATA SSD.
     # The six SQLite tier files are symlinked into a nested nodatacow subvolume
-    # at ${polylogueDbRoot}; SQLite creates WAL/SHM files beside the symlink
-    # target, so DB churn is excluded from /realm btrbk snapshots while blob/
-    # and inbox/ remain in the snapshotted archive root.
+    # at ${polylogueDbRoot}; hooks, inbox, blobs, and attachments in the
+    # canonical dataDir remain independent from this compatibility projection.
     mounts = [
       {
         what = polylogueArchiveRoot;

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from ..runtime_inventory import polylogue_archive
 from ..util import read_text, run_cmd
 from .systemd import systemctl_show
 
@@ -23,7 +24,7 @@ def collect_storage(offline: bool) -> dict[str, Any]:
         "/realm",
         "/var/lib/postgresql",
         "/var/lib/sinex",
-        str(Path.home() / ".local/share/polylogue"),
+        str(polylogue_archive().get("archiveRoot", "")),
     ]
     for path in paths:
         proc = run_cmd(

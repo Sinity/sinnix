@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..runtime_inventory import polylogue_archive
+
 
 def _json(path: Path, bound: int = 262_144) -> dict[str, Any] | None:
     try:
@@ -27,9 +29,9 @@ def _json(path: Path, bound: int = 262_144) -> dict[str, Any] | None:
 def _polylogue_sessions(
     job_ids: list[str],
 ) -> tuple[dict[str, dict[str, Any]], str | None]:
-    db = Path(
-        os.environ.get("SINNIX_POLYLOGUE_INDEX_DB", "/realm/data/ai/polylogue/index.db")
-    )
+    configured = polylogue_archive().get("archiveRoot")
+    default = str(Path(configured) / "index.db") if isinstance(configured, str) else ""
+    db = Path(os.environ.get("SINNIX_POLYLOGUE_INDEX_DB", default))
     if not db.is_file():
         return {}, "polylogue_archive_unavailable"
     found: dict[str, dict[str, Any]] = {}
