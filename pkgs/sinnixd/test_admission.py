@@ -370,7 +370,7 @@ def test_host_budget_accounts_for_active_jobs_across_pools(tmp_path: Path) -> No
     candidate = GenericJobSpec(
         **{
             **candidate.__dict__,
-            "estimate_memory_bytes": 8 * 1024 * 1024 * 1024,
+            "estimate_memory_bytes": 12 * 1024 * 1024 * 1024,
         }
     )
 
@@ -1293,3 +1293,48 @@ def test_memory_stall_keeps_the_short_grace(
     assert subject._relieve_active_pressure(pressure) is None
     clock[0] = 2.1
     assert subject._relieve_active_pressure(pressure) == second["job_id"]
+
+
+def test_lane_and_harvest_fit_the_host_budget_together(tmp_path: Path) -> None:
+    """A lane's peak reservation must leave room for the harvest that publishes it.
+
+    Sized from the 2026-08-28 wave: a 31 GiB host with ~14 GiB available, a lane
+    holding a 7 GiB reservation, and a 4.7 GiB harvest. A 25% reserve capped at
+    8 GiB queues the harvest behind the lane, which is what stalls publication.
+    """
+    gib = 1024 * 1024 * 1024
+    adapter = project(
+        tmp_path / "project",
+        (operation("harvest", pool="normal", estimate_memory_bytes=4700 * 1024 * 1024),),
+    )
+    systemd = FakeSystemd()
+    pressure = {
+        "memory_full_avg10": 0.0,
+        "io_full_avg10": 0.0,
+        "memory_total_bytes": 31 * gib,
+        "memory_available_bytes": 14 * gib,
+        "swap_total_bytes": 20 * gib,
+        "swap_free_bytes": 20 * gib,
+        "managed_memory_bytes": 3 * gib,
+    }
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        pressure_probe=lambda: pressure,
+    )
+    lane = GenericJobSpec(
+        **{**agent_spec(("table:jobs",)).__dict__, "estimate_memory_bytes": 7 * gib}
+    )
+    running = subject.start(lane)
+    assert running["state"]["phase"] == "submitted"
+
+    harvest = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("harvest"),
+        correlation_id="harvest",
+        parameters={},
+    )
+
+    assert harvest["state"]["phase"] == "submitted"
+    assert len(systemd.started) == 2

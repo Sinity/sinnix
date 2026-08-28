@@ -66,8 +66,12 @@ MAX_ADMISSION_ESTIMATES = 128
 MIB = 1024 * 1024
 GIB = 1024 * MIB
 MIN_HOST_MEMORY_RESERVE_BYTES = 256 * MIB
-MAX_HOST_MEMORY_RESERVE_BYTES = 8 * GIB
-HOST_MEMORY_RESERVE_FRACTION = 0.25
+# The budget is already computed against available memory, so what everything
+# outside the job plane uses is subtracted before the reserve applies. The
+# reserve is pure headroom on top of that; sized so a lane's peak reservation
+# and the harvest that publishes it fit on a 32 GiB host at once.
+MAX_HOST_MEMORY_RESERVE_BYTES = 6 * GIB
+HOST_MEMORY_RESERVE_FRACTION = 0.15
 MIN_SWAP_FREE_FRACTION = 0.15
 MEMORY_FULL_BLOCK_THRESHOLD = 0.2
 IO_FULL_BLOCK_THRESHOLD = 5.0
