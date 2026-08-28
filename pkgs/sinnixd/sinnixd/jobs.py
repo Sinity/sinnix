@@ -75,6 +75,11 @@ MEMORY_FULL_PREEMPT_THRESHOLD = 5.0
 IO_FULL_PREEMPT_THRESHOLD = 20.0
 PREEMPT_SWAP_FREE_FRACTION = 0.10
 ACTIVE_PRESSURE_GRACE_SECONDS = 2.0
+# io_full_avg10 is itself a ten-second average, so a two-second grace on top of
+# it preempts on the decaying tail of a burst that has already finished.
+# Workspace provisioning (uv sync, npm ci) produces exactly such bursts.
+# Memory and swap keep the short grace: those endanger the host.
+IO_STALL_GRACE_SECONDS = 45.0
 LEARNED_ESTIMATE_HEADROOM_NUMERATOR = 5
 LEARNED_ESTIMATE_HEADROOM_DENOMINATOR = 4
 POOL_SLICES = {
@@ -3398,7 +3403,10 @@ class GenericJobs:
         if self._active_pressure_since is None:
             self._active_pressure_since = now
             return None
-        if now - self._active_pressure_since < ACTIVE_PRESSURE_GRACE_SECONDS:
+        grace = ACTIVE_PRESSURE_GRACE_SECONDS
+        if reasons == ["io-stall"]:
+            grace = IO_STALL_GRACE_SECONDS
+        if now - self._active_pressure_since < grace:
             return None
         victim = self._preempt_pressure_victim(pressure, reasons)
         self._active_pressure_since = now
