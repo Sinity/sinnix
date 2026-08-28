@@ -446,3 +446,39 @@ def test_review_route_escalates_uncleared_and_risky_flags() -> None:
         ),
     )
     assert risky.route == "coordinator"
+
+
+def test_lane_artifacts_supply_the_publication_title_and_body(tmp_path: Path) -> None:
+    """The worker contract has the lane write these; harvest must read them.
+
+    Without this, every coordinator has to point --title-file at a path the
+    contract already fixed, and forgetting to fails the publication with
+    'harvest publication title is empty' after the gate has already run.
+    """
+    root, _remote = _repository(tmp_path)
+    lane = root / ".lane"
+    lane.mkdir()
+    (lane / "title").write_text("fix(storage): restore the sidecar blob owner\n")
+    (lane / "body.md").write_text("## Summary\n\nRestores the owner.\n")
+    (lane / "close-reason.md").write_text("Merged: owner restored.\n")
+    context = _context(root, tmp_path / "state")
+
+    assert (
+        harvest._lane_artifact(context, "title")
+        == "fix(storage): restore the sidecar blob owner"
+    )
+    assert harvest._lane_artifact(context, "body.md") == "## Summary\n\nRestores the owner."
+    assert harvest._lane_artifact(context, "close-reason.md") == "Merged: owner restored."
+
+
+def test_absent_or_blank_lane_artifacts_read_as_absent(tmp_path: Path) -> None:
+    """A missing or whitespace-only file must not become an empty title."""
+    root, _remote = _repository(tmp_path)
+    context = _context(root, tmp_path / "state")
+
+    assert harvest._lane_artifact(context, "title") is None
+
+    lane = root / ".lane"
+    lane.mkdir()
+    (lane / "title").write_text("   \n")
+    assert harvest._lane_artifact(context, "title") is None

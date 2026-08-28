@@ -136,6 +136,21 @@ def _read_text(path: Path, description: str) -> str:
         raise HarvestError(f"{description} is unavailable") from error
 
 
+def _lane_artifact(context: HarvestContext, name: str) -> str | None:
+    """Read one of the publication artifacts the worker contract has the lane write.
+
+    A lane writes .lane/title, .lane/body.md and .lane/close-reason.md at a known
+    path. Requiring the coordinator to point at those same files by hand makes
+    every caller restate what the contract already fixed, and omitting them
+    fails the publication for an empty title.
+    """
+    path = context.worktree / ".lane" / name
+    if not path.is_file():
+        return None
+    text = path.read_text().strip()
+    return text or None
+
+
 def _safe_json_write(path: Path, value: Mapping[str, Any]) -> None:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     if len(encoded) > MAX_RECEIPT_BYTES:
@@ -1044,14 +1059,20 @@ def main(arguments: Sequence[str] | None = None) -> int:
             title = parsed.title
             if parsed.title_file is not None:
                 title = _read_text(parsed.title_file, "publication title file")
+            elif title is None:
+                title = _lane_artifact(context, "title")
             body = parsed.body
             if parsed.body_file is not None:
                 body = _read_text(parsed.body_file, "publication body file")
+            elif body is None:
+                body = _lane_artifact(context, "body.md")
             close_reason = parsed.close_reason
             if parsed.close_reason_file is not None:
                 close_reason = _read_text(
                     parsed.close_reason_file, "bead close reason file"
                 )
+            elif close_reason is None:
+                close_reason = _lane_artifact(context, "close-reason.md")
             result = authorize(
                 context,
                 receipt_ref=parsed.receipt_ref,
