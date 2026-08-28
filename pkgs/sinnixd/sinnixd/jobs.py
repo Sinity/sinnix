@@ -86,6 +86,10 @@ ACTIVE_PRESSURE_GRACE_SECONDS = 2.0
 IO_STALL_GRACE_SECONDS = 45.0
 LEARNED_ESTIMATE_HEADROOM_NUMERATOR = 5
 LEARNED_ESTIMATE_HEADROOM_DENOMINATOR = 4
+# The estimate is the high-water mark of this many recent runs. A single
+# pathological peak would otherwise cap concurrency for that estimate key
+# forever, long after whatever caused it was fixed.
+LEARNED_ESTIMATE_WINDOW = 5
 POOL_SLICES = {
     "interactive": "sinnixd-work-interactive.slice",
     "normal": "sinnixd-work-normal.slice",
@@ -3799,14 +3803,25 @@ class GenericJobs:
                 - 1
             ) // LEARNED_ESTIMATE_HEADROOM_DENOMINATOR
             previous = state["estimates"].get(record.spec.estimate_key)
-            previous_bytes = (
-                previous.get("bytes") if isinstance(previous, Mapping) else 0
+            history = (
+                previous.get("recent") if isinstance(previous, Mapping) else None
             )
+            recent = [
+                value
+                for value in (history if isinstance(history, list) else [])
+                if isinstance(value, int) and value > 0
+            ]
+            if not recent and isinstance(previous, Mapping):
+                # An entry written before the window existed contributes its
+                # single high-water mark, which then ages out like any other.
+                carried = previous.get("bytes")
+                if isinstance(carried, int) and carried > 0:
+                    recent = [carried]
+            recent.append(learned)
+            recent = recent[-LEARNED_ESTIMATE_WINDOW:]
             state["estimates"][record.spec.estimate_key] = {
-                "bytes": max(
-                    learned,
-                    previous_bytes if isinstance(previous_bytes, int) else 0,
-                ),
+                "bytes": max(recent),
+                "recent": recent,
                 "touched_at": _timestamp(),
             }
             state["estimates"] = self._bounded(
