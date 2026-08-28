@@ -1188,3 +1188,108 @@ def test_swap_exhaustion_still_preempts_the_only_managed_job(
     preempted = subject.get(only["job_id"])
     assert preempted["state"]["phase"] == "cancelled"
     assert "swap-exhaustion" in preempted["state"]["preemption"]["reason"]
+
+
+def test_transient_io_stall_does_not_preempt_before_the_sustained_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A burst that clears inside the window costs nothing.
+
+    io_full_avg10 is a ten-second average, so workspace provisioning (uv sync,
+    npm ci) leaves it elevated well after the work is done. Preempting on that
+    tail destroyed three lanes of a sixteen-bead wave on 2026-08-28.
+    """
+    pressure = {
+        "memory_full_avg10": 0.0,
+        "io_full_avg10": 0.0,
+        "memory_total_bytes": 32 * 1024**3,
+        "memory_available_bytes": 24 * 1024**3,
+        "swap_total_bytes": 20 * 1024**3,
+        "swap_free_bytes": 20 * 1024**3,
+        "managed_memory_bytes": 0,
+    }
+    clock = [0.0]
+    monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        pressure_probe=lambda: pressure,
+    )
+    base = {
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "Result": "success",
+        "ExecMainStatus": "0",
+    }
+    first = subject.start(agent_spec(("table:first",)))
+    second = subject.start(agent_spec(("table:second",)))
+    systemd.unit_properties[first["unit"]] = {
+        **base, "InvocationID": "first",
+        "MemoryCurrent": str(1024**3), "MemorySwapCurrent": "0",
+        "MemoryPeak": str(1024**3),
+    }
+    systemd.unit_properties[second["unit"]] = {
+        **base, "InvocationID": "second",
+        "MemoryCurrent": str(5 * 1024**3), "MemorySwapCurrent": "0",
+        "MemoryPeak": str(5 * 1024**3),
+    }
+
+    pressure.update(io_full_avg10=22.2, managed_memory_bytes=6 * 1024**3)
+    assert subject._relieve_active_pressure(pressure) is None
+    clock[0] = 10.0
+    assert subject._relieve_active_pressure(pressure) is None
+    clock[0] = 30.0
+    assert subject._relieve_active_pressure(pressure) is None
+    assert systemd.stopped == []
+
+    # Still stalled well past the window: now it is real contention, not a burst.
+    clock[0] = 60.0
+    assert subject._relieve_active_pressure(pressure) == second["job_id"]
+    assert systemd.stopped == [second["unit"]]
+
+
+def test_memory_stall_keeps_the_short_grace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Memory endangers the host; it must not wait out the IO window."""
+    pressure = {
+        "memory_full_avg10": 0.0,
+        "io_full_avg10": 0.0,
+        "memory_total_bytes": 32 * 1024**3,
+        "memory_available_bytes": 24 * 1024**3,
+        "swap_total_bytes": 20 * 1024**3,
+        "swap_free_bytes": 20 * 1024**3,
+        "managed_memory_bytes": 0,
+    }
+    clock = [0.0]
+    monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        pressure_probe=lambda: pressure,
+    )
+    base = {
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "Result": "success",
+        "ExecMainStatus": "0",
+    }
+    first = subject.start(agent_spec(("table:first",)))
+    second = subject.start(agent_spec(("table:second",)))
+    systemd.unit_properties[first["unit"]] = {
+        **base, "InvocationID": "first",
+        "MemoryCurrent": str(1024**3), "MemorySwapCurrent": "0",
+        "MemoryPeak": str(1024**3),
+    }
+    systemd.unit_properties[second["unit"]] = {
+        **base, "InvocationID": "second",
+        "MemoryCurrent": str(5 * 1024**3), "MemorySwapCurrent": "0",
+        "MemoryPeak": str(5 * 1024**3),
+    }
+
+    pressure.update(memory_full_avg10=6.0, managed_memory_bytes=6 * 1024**3)
+    assert subject._relieve_active_pressure(pressure) is None
+    clock[0] = 2.1
+    assert subject._relieve_active_pressure(pressure) == second["job_id"]
