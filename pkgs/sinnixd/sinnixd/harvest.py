@@ -151,6 +151,33 @@ def _lane_artifact(context: HarvestContext, name: str) -> str | None:
     return text or None
 
 
+def _resolve_publication_text(
+    parsed: argparse.Namespace, context: HarvestContext
+) -> tuple[str, str, str | None]:
+    """Resolve the publication text, preferring what the caller named.
+
+    An explicit file wins, then an explicit value, then the artifact the lane
+    wrote. `--title` and `--body` default to the empty string rather than to
+    None, so absence is falsiness here, not identity.
+    """
+    title = parsed.title
+    if parsed.title_file is not None:
+        title = _read_text(parsed.title_file, "publication title file")
+    elif not title:
+        title = _lane_artifact(context, "title") or title
+    body = parsed.body
+    if parsed.body_file is not None:
+        body = _read_text(parsed.body_file, "publication body file")
+    elif not body:
+        body = _lane_artifact(context, "body.md") or body
+    close_reason = parsed.close_reason
+    if parsed.close_reason_file is not None:
+        close_reason = _read_text(parsed.close_reason_file, "bead close reason file")
+    elif not close_reason:
+        close_reason = _lane_artifact(context, "close-reason.md") or close_reason
+    return title, body, close_reason
+
+
 def _safe_json_write(path: Path, value: Mapping[str, Any]) -> None:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     if len(encoded) > MAX_RECEIPT_BYTES:
@@ -1056,23 +1083,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         else:
             if not parsed.receipt_ref:
                 raise HarvestError("--authorize requires --receipt-ref")
-            title = parsed.title
-            if parsed.title_file is not None:
-                title = _read_text(parsed.title_file, "publication title file")
-            elif title is None:
-                title = _lane_artifact(context, "title")
-            body = parsed.body
-            if parsed.body_file is not None:
-                body = _read_text(parsed.body_file, "publication body file")
-            elif body is None:
-                body = _lane_artifact(context, "body.md")
-            close_reason = parsed.close_reason
-            if parsed.close_reason_file is not None:
-                close_reason = _read_text(
-                    parsed.close_reason_file, "bead close reason file"
-                )
-            elif close_reason is None:
-                close_reason = _lane_artifact(context, "close-reason.md")
+            title, body, close_reason = _resolve_publication_text(parsed, context)
             result = authorize(
                 context,
                 receipt_ref=parsed.receipt_ref,
