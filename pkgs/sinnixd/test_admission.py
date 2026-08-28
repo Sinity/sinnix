@@ -298,6 +298,17 @@ def test_swap_exhaustion_queues_even_a_small_agent_job(tmp_path: Path) -> None:
     assert systemd.started == []
 
 
+def test_memory_psi_noise_does_not_block_admission(tmp_path: Path) -> None:
+    """0.39% full PSI is 39 ms of whole-system stall in the ten-second window."""
+    systemd = FakeSystemd()
+    subject = jobs(tmp_path, systemd, pressure=0.39)
+
+    started = subject.start(agent_spec(("table:jobs",)))
+
+    assert started["state"]["phase"] == "submitted"
+    assert len(systemd.started) == 1
+
+
 def test_io_pressure_allows_one_low_priority_job_then_blocks_concurrency(
     tmp_path: Path,
 ) -> None:
@@ -837,7 +848,7 @@ def test_dependencies_exclusive_keys_learned_peaks_and_pressure_gate(
         ),
     )
     systemd = FakeSystemd()
-    subject = jobs(tmp_path, systemd, pressure=0.5)
+    subject = jobs(tmp_path, systemd, pressure=1.0)
 
     heavy = subject.start_declared(
         project=adapter,
@@ -1438,3 +1449,42 @@ def test_an_old_outlier_peak_ages_out_of_the_learned_estimate(tmp_path: Path) ->
     admitted = subject.start(probe)
 
     assert admitted["state"]["admission"]["estimate_memory_bytes"] < 4 * gib
+
+
+def test_pre_window_estimate_starts_a_new_history(tmp_path: Path) -> None:
+    """A legacy high-water mark without recent samples must not be carried forever."""
+    systemd = FakeSystemd()
+    subject = jobs(tmp_path, systemd)
+    subject._save_admission_state(
+        {
+            "schema_version": 1,
+            "active": {},
+            "cache": {},
+            "estimates": {
+                "agent:codex:model": {
+                    "bytes": 7 * 1024**3,
+                    "touched_at": "legacy",
+                }
+            },
+        }
+    )
+    spec = GenericJobSpec(
+        **{
+            **agent_spec(("table:jobs",)).__dict__,
+            "estimate_key": "agent:codex:model",
+        }
+    )
+    started = subject.start(spec)
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "MemoryPeak": str(2 * 1024**3),
+    }
+
+    subject.get(started["job_id"])
+
+    estimate = subject._admission_state()["estimates"]["agent:codex:model"]
+    assert estimate["recent"] == [int(2 * 1024**3 * 5 / 4)]
+    assert estimate["bytes"] == estimate["recent"][0]

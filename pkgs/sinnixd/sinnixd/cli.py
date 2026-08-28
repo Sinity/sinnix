@@ -396,6 +396,10 @@ def parser() -> argparse.ArgumentParser:
     job_result.add_argument("--max-bytes", type=int, default=64_000)
     cancel = job_subcommands.add_parser("cancel")
     cancel.add_argument("job_id")
+    admission_reset = job_subcommands.add_parser(
+        "admission-reset", help="Forget learned memory estimates used by admission."
+    )
+    admission_reset.add_argument("estimate_key", nargs="?")
     plan = subcommands.add_parser("plan")
     plan_subcommands = plan.add_subparsers(dest="plan_command", required=True)
     plan_submit = plan_subcommands.add_parser("submit")
@@ -1321,6 +1325,16 @@ def main() -> int:
             "job.result",
             "systemd-jobs",
             {"job_id": arguments.job_id, "max_bytes": arguments.max_bytes},
+        )
+    elif arguments.command == "job" and arguments.job_command == "admission-reset":
+        request = _request(
+            "job.admission.reset",
+            "systemd-jobs",
+            (
+                {"estimate_key": arguments.estimate_key}
+                if arguments.estimate_key is not None
+                else {}
+            ),
         )
     elif arguments.command == "job":
         request = _request("job.cancel", "systemd-jobs", {"job_id": arguments.job_id})

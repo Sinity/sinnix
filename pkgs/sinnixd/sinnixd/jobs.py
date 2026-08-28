@@ -73,7 +73,10 @@ MIN_HOST_MEMORY_RESERVE_BYTES = 256 * MIB
 MAX_HOST_MEMORY_RESERVE_BYTES = 6 * GIB
 HOST_MEMORY_RESERVE_FRACTION = 0.15
 MIN_SWAP_FREE_FRACTION = 0.15
-MEMORY_FULL_BLOCK_THRESHOLD = 0.2
+# PSI avg10 is a percentage of the last ten seconds. 1% means 100 ms in which
+# every non-idle task was stalled, enough to defer new work while remaining
+# below the 5% sustained-stall threshold that triggers preemption.
+MEMORY_FULL_BLOCK_THRESHOLD = 1.0
 IO_FULL_BLOCK_THRESHOLD = 5.0
 MEMORY_FULL_PREEMPT_THRESHOLD = 5.0
 IO_FULL_PREEMPT_THRESHOLD = 20.0
@@ -2722,6 +2725,23 @@ class GenericJobs:
         os.replace(temporary, path)
         _fsync_directory(path.parent)
 
+    def reset_admission_estimates(
+        self, estimate_key: str | None = None
+    ) -> dict[str, Any]:
+        """Forget learned memory estimates without disturbing live admission."""
+        with self._admission_lock:
+            state = self._admission_state()
+            if estimate_key is None:
+                cleared = sorted(state["estimates"])
+                state["estimates"] = {}
+            else:
+                cleared = (
+                    [estimate_key] if estimate_key in state["estimates"] else []
+                )
+                state["estimates"].pop(estimate_key, None)
+            self._save_admission_state(state)
+        return {"cleared": cleared}
+
     def _capacity_state(self) -> dict[str, Any]:
         path = self.store.capacity_path
         if not path.exists():
@@ -3811,12 +3831,6 @@ class GenericJobs:
                 for value in (history if isinstance(history, list) else [])
                 if isinstance(value, int) and value > 0
             ]
-            if not recent and isinstance(previous, Mapping):
-                # An entry written before the window existed contributes its
-                # single high-water mark, which then ages out like any other.
-                carried = previous.get("bytes")
-                if isinstance(carried, int) and carried > 0:
-                    recent = [carried]
             recent.append(learned)
             recent = recent[-LEARNED_ESTIMATE_WINDOW:]
             state["estimates"][record.spec.estimate_key] = {
