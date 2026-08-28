@@ -35,6 +35,12 @@ class CampaignLane:
     payload: Mapping[str, Any]
 
 
+class WaveDrainedError(RuntimeError):
+    """Every lane in a wave was deferred; the message names the last reason."""
+
+    code = "wave-drained"
+
+
 @dataclass(frozen=True)
 class CampaignSkip:
     group: str
@@ -439,6 +445,7 @@ class CampaignRunner:
         from .workspaces import WorkspaceError
 
         lanes = list(schedule.lanes)
+        last_deferral: str | None = None
         while lanes:
             try:
                 return self._submit_plan(
@@ -461,6 +468,7 @@ class CampaignRunner:
                         "reason": str(error)[:400],
                     }
                 )
+                last_deferral = f"{failed}: {error}"
                 lanes = remaining
                 continue
             except AdmissionConflictError as error:
@@ -481,8 +489,12 @@ class CampaignRunner:
                         "reason": str(error),
                     }
                 )
+                last_deferral = str(error)
                 lanes = remaining
-        raise AdmissionConflictError({})
+        # Every lane was deferred. Reporting that as a conflict names the wrong
+        # cause when the real one was provisioning, so the last reason is what
+        # gets raised.
+        raise WaveDrainedError(last_deferral or "every lane in this wave was deferred")
 
     def _submit_plan(
         self,
