@@ -625,6 +625,57 @@ def _gate(context: HarvestContext, run: Run) -> tuple[bool, str]:
     return result.returncode == 0, result.stdout + result.stderr
 
 
+_UNAVAILABLE_DIAGNOSES = frozenset({"native_testmon_graph_unavailable"})
+
+
+def _affected_refusal(worktree: Path) -> str | None:
+    """Read the newest affected-run receipt and name a refusal to measure.
+
+    ``devtools verify`` refuses without a compatible testmon graph by exiting
+    non-zero and printing nothing, so the refusal is legible only in the typed
+    receipt it writes. Returns a human-readable description when the receipt
+    shows selection was unavailable, and ``None`` when tests genuinely ran.
+    """
+    runs = worktree / ".cache/verify/runs"
+    try:
+        records = sorted(runs.glob("*/run.json"))
+    except OSError:
+        return None
+    for record in reversed(records):
+        try:
+            value = json.loads(record.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(value, Mapping) or value.get("tier") != "affected":
+            continue
+        diagnosis = value.get("diagnosis")
+        selection = value.get("testmon_selection")
+        state_status = (
+            selection.get("state_status") if isinstance(selection, Mapping) else None
+        )
+        aggregate = value.get("pytest_aggregate")
+        selection_mode = (
+            aggregate.get("selection_mode") if isinstance(aggregate, Mapping) else None
+        )
+        unavailable = diagnosis in _UNAVAILABLE_DIAGNOSES or (
+            state_status == "absent" and selection_mode == "none"
+        )
+        if not unavailable:
+            return None
+        reason = (
+            selection.get("state_reason") if isinstance(selection, Mapping) else None
+        )
+        parts = [f"run {value.get('run_id')}: {diagnosis or 'selection unavailable'}"]
+        if isinstance(reason, str) and reason:
+            parts.append(reason)
+        parts.append(
+            "the affected selection did not run; this is a refusal to measure, "
+            "not a failing test"
+        )
+        return "\n".join(parts)
+    return None
+
+
 def _affected_tests(context: HarvestContext, run: Run) -> tuple[str, str]:
     """Run the affected-test selection, outside the shared repository lock.
 
@@ -637,6 +688,9 @@ def _affected_tests(context: HarvestContext, run: Run) -> tuple[str, str]:
     refusal is reported as ``unavailable`` rather than treated as a failure,
     so publication is never blocked by a missing accelerator -- but it is
     named in the receipt instead of passing silently as if tests had run.
+
+    The refusal is read from the typed run receipt, because the command that
+    refuses exits non-zero and writes nothing to either stream.
     """
     result = _command(
         run,
@@ -647,8 +701,16 @@ def _affected_tests(context: HarvestContext, run: Run) -> tuple[str, str]:
     output = result.stdout + result.stderr
     if result.returncode == 0:
         return "passed", output
+    refusal = _affected_refusal(context.worktree)
+    if refusal is not None:
+        return "unavailable", "\n".join(part for part in (output, refusal) if part)
     if "testmon" in output.lower() and "refus" in output.lower():
         return "unavailable", output
+    if not output.strip():
+        output = (
+            f"devtools verify exited {result.returncode} without output, and no "
+            "affected run receipt explained it"
+        )
     return "failed", output
 
 
@@ -914,6 +976,8 @@ def authorize(
             "bead_id": bead_id,
             "affected_tests": tests,
         }
+        if tests != "passed":
+            result["affected_tests_output"] = _bounded_text(tests_output, 8_000)
         _append_event(
             context.spool, {"kind": "harvest", **result, "job_id": context.job_id}
         )
