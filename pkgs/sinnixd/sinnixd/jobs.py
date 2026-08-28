@@ -3352,6 +3352,13 @@ class GenericJobs:
             )
         if not candidates:
             return None
+        # Preemption sheds contention. A single job is not contending with
+        # anything, so cancelling it cannot relieve the pressure it is itself
+        # producing -- it only destroys the work. Swap exhaustion is the
+        # exception: there the host is genuinely endangered and a lone job is
+        # still a valid victim.
+        if len(candidates) == 1 and "swap-exhaustion" not in reasons:
+            return None
         _, _, _, victim = max(candidates, key=lambda item: item[:3])
         result = self.cancel(victim.job_id)
         if result.get("already_terminal"):
