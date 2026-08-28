@@ -42,6 +42,7 @@ mkFeatureModule {
     }:
     let
       inherit (config) sinnix;
+      steamLibraryRoot = "${sinnix.paths.mediaRoot}/Steam";
       factorioTokenPath = sinnix.secrets.paths."factorio-token";
       factorioVersion = pkgs.factorio.version;
       factorioSha256 = pkgs.factorio.src.outputHash;
@@ -122,6 +123,13 @@ mkFeatureModule {
           gamescopeSession.enable = true;
         };
 
+        # Steam keeps its XDG data path, while the install and library live on
+        # the canonical re-acquirable media volume.
+        systemd.tmpfiles.rules = [
+          "d ${steamLibraryRoot} 0750 ${user} users -"
+          "L+ /home/${user}/.local/share/Steam - - - - ${steamLibraryRoot}"
+        ];
+
         home-manager.users.${user} = {
           home.packages = with pkgs; [
             mangohud
@@ -178,11 +186,9 @@ mkFeatureModule {
           '';
         };
 
-        # Persist shader caches and Proton GE across reboots
-        sinnix.persistence.home.directories = [
-          ".local/share/vulkan" # Vulkan pipeline caches
-          ".local/share/Steam/compatibilitytools.d" # Proton GE installs
-        ];
+        # Persist shader caches across reboots. Steam itself is rooted at
+        # steamLibraryRoot, so its compatibility tools are persisted with it.
+        sinnix.persistence.home.directories = [ ".local/share/vulkan" ];
       })
 
       # Gamemode: CPU governor + scheduler tuning for gaming sessions

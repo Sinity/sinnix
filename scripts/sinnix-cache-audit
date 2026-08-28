@@ -117,7 +117,7 @@ MARKER meanings:
   unmarked  neither marker
 
 "unmarked" does NOT prove a directory is archived: the exclude list in
-modules/backup.nix still drops some by path (media/Steam shows unmarked here
+modules/backup.nix still drops some by path (library/media/Steam shows unmarked here
 and is excluded anyway). This column reports markers only,
 because reimplementing borg's pattern matching would create a second source of
 truth. Run --dry-run when you need the authoritative answer.
