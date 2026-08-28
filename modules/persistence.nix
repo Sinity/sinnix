@@ -175,11 +175,6 @@ in
       # Large installs
       ".local/share/nvim" # Mason LSPs + treesitter
       ".local/state/nvim" # shada: recent files, marks, registers, search/cmd history, undo
-      {
-        directory = ".local/share/Steam";
-        mode = "0750";
-      } # game library
-
       # Nix user state
       ".local/share/nix" # trusted-settings.json (cachix substituters)
 

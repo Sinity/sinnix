@@ -162,10 +162,10 @@ let
   # normal.
   #
   # Measured 2026-08-16 in archive realm-realm.20260816T223000+0200:
-  # `cache` 73,805 entries present, `media/Steam/steamapps` 92,639 present,
+  # `cache` 73,805 entries present, `library/media/Steam/steamapps` 92,639 present,
   # while `**/node_modules`, `**/target` and `**/.venv` were each 0. Roughly
-  # 870G of explicitly-excluded regenerable data (cache 280G, media/model 120G,
-  # media/Steam 103G, stashbox caches 84G, genome cache 285G, container layers
+  # 870G of explicitly-excluded regenerable data (cache 280G, library/models 120G,
+  # library/media/Steam 103G, stashbox caches 84G, genome cache 285G, container layers
   # 23G) had been replicating into a 1.9T repository.
   #
   # Reproduced and fixed in a throwaway repo before landing: `--exclude cache`
@@ -423,9 +423,9 @@ let
     # regenerable members carry their own provenance. Precious-small media
     # (books, videos, substack, edu, music-audio-features, web-content)
     # deliberately stays in coverage.
-    # steamapps, not media/Steam: the games are 98G of the 103G and Steam
+    # steamapps, not library/media/Steam: the games are 98G of the 103G and Steam
     # re-downloads them, but the remaining ~5G is client state that CONTAINS
-    # media/Steam/userdata -- Steam Cloud save files and game recordings, which
+    # library/media/Steam/userdata -- Steam Cloud save files and game recordings, which
     # no reinstall recreates.
     #
     # While the plain-path patterns were inert, userdata was being backed up by
