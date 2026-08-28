@@ -448,6 +448,58 @@ def test_review_route_escalates_uncleared_and_risky_flags() -> None:
     assert risky.route == "coordinator"
 
 
+def _parsed(**overrides: object) -> object:
+    """The argparse defaults that matter: title and body are "", not None."""
+    import argparse
+
+    values = {
+        "title": "",
+        "title_file": None,
+        "body": "",
+        "body_file": None,
+        "close_reason": None,
+        "close_reason_file": None,
+    }
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
+def test_publication_text_falls_back_to_the_lane_artifacts(tmp_path: Path) -> None:
+    """The real call site, with the real argparse defaults.
+
+    --title and --body default to the empty string, so an `is None` guard never
+    fires and the publication dies with 'harvest publication title is empty'
+    after the gate has already run.
+    """
+    root, _remote = _repository(tmp_path)
+    lane = root / ".lane"
+    lane.mkdir()
+    (lane / "title").write_text("fix(storage): restore the sidecar blob owner\n")
+    (lane / "body.md").write_text("## Summary\n\nRestores the owner.\n")
+    (lane / "close-reason.md").write_text("Merged: owner restored.\n")
+    context = _context(root, tmp_path / "state")
+
+    title, body, close_reason = harvest._resolve_publication_text(_parsed(), context)
+
+    assert title == "fix(storage): restore the sidecar blob owner"
+    assert body == "## Summary\n\nRestores the owner."
+    assert close_reason == "Merged: owner restored."
+
+
+def test_an_explicit_title_still_wins_over_the_lane_artifact(tmp_path: Path) -> None:
+    root, _remote = _repository(tmp_path)
+    lane = root / ".lane"
+    lane.mkdir()
+    (lane / "title").write_text("fix(storage): the lane's own subject\n")
+    context = _context(root, tmp_path / "state")
+
+    title, _body, _reason = harvest._resolve_publication_text(
+        _parsed(title="fix(storage): the caller's subject"), context
+    )
+
+    assert title == "fix(storage): the caller's subject"
+
+
 def test_lane_artifacts_supply_the_publication_title_and_body(tmp_path: Path) -> None:
     """The worker contract has the lane write these; harvest must read them.
 
