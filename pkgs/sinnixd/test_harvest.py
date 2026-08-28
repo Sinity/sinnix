@@ -287,6 +287,60 @@ def test_affected_tests_separates_refusal_from_failure() -> None:
     assert harvest._affected_tests(context, run_with(2, refusal))[0] == "unavailable"
 
 
+def test_silent_refusal_is_unavailable_not_red(tmp_path: Path) -> None:
+    """The real refusal prints nothing, so only the receipt can name it.
+
+    ``devtools verify`` without a compatible testmon graph exits 2 and writes
+    to neither stream. Reading the prose is therefore not enough, and treating
+    the silence as a failure blocks publication for a lane whose tests are
+    fine.
+
+    Anti-vacuity: drop the receipt read and this returns "failed"; drop the
+    tier or diagnosis checks and a genuinely red run reports "unavailable".
+    """
+    run_dir = tmp_path / ".cache/verify/runs/20260828T034732Z-affected"
+    run_dir.mkdir(parents=True)
+    receipt = {
+        "run_id": "20260828T034732Z-affected",
+        "tier": "affected",
+        "status": "failed",
+        "exit_code": 2,
+        "diagnosis": "native_testmon_graph_unavailable",
+        "testmon_selection": {
+            "selection_mode": "affected",
+            "state_status": "absent",
+            "state_reason": "native environment 'polylogue-6c675d4d' is absent",
+        },
+        "pytest_aggregate": {"selection_mode": "none"},
+    }
+    (run_dir / "run.json").write_text(json.dumps(receipt))
+
+    context = harvest.HarvestContext(
+        worktree=tmp_path,
+        project_id="polylogue",
+        workspace_id="worktree-abc",
+        job_id="job-1",
+        state_root=tmp_path / "state",
+    )
+
+    def run_silent(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 2, "", "")
+
+    verdict, output = harvest._affected_tests(context, run_silent)
+    assert verdict == "unavailable"
+    assert "native_testmon_graph_unavailable" in output
+    assert "polylogue-6c675d4d" in output
+
+    red = dict(receipt)
+    red.pop("diagnosis")
+    red["testmon_selection"] = {"selection_mode": "affected", "state_status": "present"}
+    red["pytest_aggregate"] = {"selection_mode": "affected", "outcomes": {"failed": 3}}
+    (run_dir / "run.json").write_text(json.dumps(red))
+    verdict, output = harvest._affected_tests(context, run_silent)
+    assert verdict == "failed"
+    assert output.strip(), "a silent failure must still explain itself"
+
+
 def test_redflags_catches_a_new_module_that_no_test_touches() -> None:
     """New production code passes every other gate: nothing removed, nothing to select.
 
