@@ -28,6 +28,7 @@ HARVEST_OK = "HARVEST_OK"
 REBASE_CONFLICT = "REBASE_CONFLICT"
 GATE_RED = "GATE_RED"
 HARVEST_ERROR = "HARVEST_ERROR"
+HARVEST_EMPTY = "HARVEST_EMPTY"
 
 RECEIPT_SCHEMA_VERSION = 1
 MAX_RECEIPT_BYTES = 64_000
@@ -495,6 +496,23 @@ def compile_packet(
         f"{context.base}...HEAD",
         timeout=120,
     )
+    if not diff.strip():
+        # A lane that found its bead already satisfied on master has nothing to
+        # publish. Pushing it would open a pull request with no commits.
+        outcome = {
+            "outcome": HARVEST_EMPTY,
+            "phase": "nothing-to-publish",
+            "branch": branch,
+            "head": head,
+            "bead_id": bead_id,
+            "close_reason": close_reason,
+            "lane_trailer": _lane_trailer(context, lane_job_id=lane_job_id),
+        }
+        _append_event(
+            context.spool,
+            {"kind": "harvest", **outcome, "job_id": context.job_id},
+        )
+        return outcome
     if len(diff.encode()) > MAX_DIFF_BYTES:
         raise HarvestError("review diff exceeds its bounded artifact limit")
     diffstat = _git(run, context.worktree, "diff", "--stat", f"{context.base}...HEAD")
