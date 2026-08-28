@@ -1402,3 +1402,39 @@ def test_superseding_operation_cancels_its_own_queued_jobs(tmp_path: Path) -> No
     replaced = subject.get(str(first["job_id"]))
     assert replaced["state"]["phase"] == "cancelled"
     assert replaced["state"]["superseded"] is True
+
+
+def test_an_old_outlier_peak_ages_out_of_the_learned_estimate(tmp_path: Path) -> None:
+    """One pathological run must not cap concurrency forever.
+
+    The estimate was a monotonic high-water mark, so a peak recorded while the
+    host was thrashing kept every later lane queued behind a figure nothing
+    since had come close to.
+    """
+    gib = 1024 * 1024 * 1024
+    systemd = FakeSystemd()
+    subject = jobs(tmp_path, systemd)
+
+    def run_with_peak(key: str, peak_bytes: int) -> dict[str, object]:
+        spec = agent_spec((f"table:{peak_bytes}",))
+        spec = GenericJobSpec(**{**spec.__dict__, "estimate_key": "agent:codex:model"})
+        started = subject.start(spec)
+        systemd.properties = {
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "Result": "success",
+            "ExecMainStatus": "0",
+            "MemoryPeak": str(peak_bytes),
+        }
+        subject.get(started["job_id"])
+        return started
+
+    run_with_peak("outlier", 7 * gib)
+    for index in range(5):
+        run_with_peak(f"ordinary-{index}", 2 * gib + index)
+
+    probe = agent_spec(("table:probe",))
+    probe = GenericJobSpec(**{**probe.__dict__, "estimate_key": "agent:codex:model"})
+    admitted = subject.start(probe)
+
+    assert admitted["state"]["admission"]["estimate_memory_bytes"] < 4 * gib
