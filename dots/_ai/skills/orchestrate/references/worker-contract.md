@@ -40,8 +40,9 @@ prompt. Write only what the worker must do; coordinator material belongs in
    commands and the line that matters, and honest residual risk. Add a
    close reason only when a bead genuinely closes. Write them to
    `.lane/title`, `.lane/body.md` and `.lane/close-reason.md` in your
-   worktree. You do not publish; whoever integrates your lane judges the
-   change and decides. Prose that oversells what you did will be caught
+   worktree. They are worktree scratch that harvest reads: leave them
+   uncommitted, and never force-add a path the repository ignores. You do
+   not publish; whoever integrates your lane judges the change and decides. Prose that oversells what you did will be caught
    against the diff.
 
 10. **Do not damage live operator state** — scoped to the harm, not the surface.
