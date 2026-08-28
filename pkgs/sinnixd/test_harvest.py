@@ -581,3 +581,29 @@ def test_publication_does_not_adopt_a_closed_pull_request(tmp_path: Path) -> Non
         )
         is None
     )
+
+
+def test_a_lane_with_nothing_to_publish_reports_its_close_reason(
+    tmp_path: Path,
+) -> None:
+    """A bead already satisfied on master leaves the lane with no diff.
+
+    Compiling a review packet for it would send an empty branch to publication,
+    where `gh pr create` fails with no commits between the branches.
+    """
+    root, _remote = _repository(tmp_path)
+    state = tmp_path / "state"
+    _run_git(root, "reset", "--hard", "--quiet", "origin/master")
+    context = _context(root, state)
+
+    result = harvest.compile_packet(
+        context,
+        bead_id="polylogue-teyyg",
+        close_reason="Already satisfied on master.",
+    )
+
+    assert result["outcome"] == harvest.HARVEST_EMPTY
+    assert result["phase"] == "nothing-to-publish"
+    assert result["bead_id"] == "polylogue-teyyg"
+    assert result["close_reason"] == "Already satisfied on master."
+    assert "receipt_ref" not in result
