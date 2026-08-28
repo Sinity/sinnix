@@ -444,6 +444,10 @@ class ProjectOperation:
     service: OperationService | None = None
     plan_node: bool = False
     schedule: str | None = None
+    # "queued": starting this operation cancels its own earlier queued jobs.
+    # Correct only where a later run subsumes an earlier one, as for a cache
+    # prebuild whose input has moved on.
+    supersede: str = "none"
 
     def derive_argv(
         self, raw_parameters: Mapping[str, Any]
@@ -510,6 +514,7 @@ class ProjectOperation:
             "service": self.service.catalog_row() if self.service is not None else None,
             "plan_node": self.plan_node,
             "schedule": self.schedule,
+            "supersede": self.supersede,
         }
 
 
@@ -1218,6 +1223,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             "service",
             "plan_node",
             "schedule",
+            "supersede",
         }
         if set(definition) - allowed_operation:
             raise ProjectConfigError(
@@ -1269,6 +1275,9 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         plan_node = definition.get("plan_node", False)
         if not isinstance(plan_node, bool):
             raise ProjectConfigError(f"operations.{name}.plan_node is invalid")
+        supersede = definition.get("supersede", "none")
+        if supersede not in {"none", "queued"}:
+            raise ProjectConfigError(f"operations.{name}.supersede is invalid")
         schedule = definition.get("schedule")
         if schedule is not None and (
             not isinstance(schedule, str)
@@ -1303,6 +1312,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 ),
                 service=service,
                 plan_node=plan_node,
+                supersede=supersede,
                 schedule=schedule,
             )
         )

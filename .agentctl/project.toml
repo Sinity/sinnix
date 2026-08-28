@@ -68,6 +68,7 @@ result = "exit"
 cache = "none"
 exclusive_keys = ["sinnix:nix-store-pressure", "sinex:cache-prebuild"]
 estimate_memory_bytes = 12884901888
+supersede = "queued"
 scratch = "nvme"
 timeout_seconds = 7200
 

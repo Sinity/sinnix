@@ -534,3 +534,50 @@ def test_absent_or_blank_lane_artifacts_read_as_absent(tmp_path: Path) -> None:
     lane.mkdir()
     (lane / "title").write_text("   \n")
     assert harvest._lane_artifact(context, "title") is None
+
+
+def test_publication_adopts_the_open_pull_request_it_already_pushed(
+    tmp_path: Path,
+) -> None:
+    """A publication that failed after `gh pr create` must be re-runnable.
+
+    Without adoption the lane is stuck: the branch has an open pull request, so
+    creation fails forever and nothing merges it.
+    """
+    root, _remote = _repository(tmp_path)
+    context = _context(root, tmp_path / "state")
+    calls: list[list[str]] = []
+
+    def run(argv, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(list(argv))
+        if argv[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(
+                argv, 0, "https://github.com/o/r/pull/4387 OPEN", ""
+            )
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    url = harvest._adopt_open_pull_request(
+        context, run, title="fix(x): subject", body="## Summary\n"
+    )
+
+    assert url == "https://github.com/o/r/pull/4387"
+    assert ["gh", "pr", "edit", url, "--title", "fix(x): subject", "--body", "## Summary\n"] in calls
+
+
+def test_publication_does_not_adopt_a_closed_pull_request(tmp_path: Path) -> None:
+    root, _remote = _repository(tmp_path)
+    context = _context(root, tmp_path / "state")
+
+    def run(argv, **kwargs):  # type: ignore[no-untyped-def]
+        if argv[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(
+                argv, 0, "https://github.com/o/r/pull/4387 MERGED", ""
+            )
+        raise AssertionError("a merged pull request must not be edited")
+
+    assert (
+        harvest._adopt_open_pull_request(
+            context, run, title="fix(x): subject", body="b"
+        )
+        is None
+    )
