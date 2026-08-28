@@ -63,3 +63,40 @@ def test_failed_predecessor_frees_key_for_next_lane() -> None:
     assert runnable_groups(schedule, {"a": {"terminal": True, "phase": "failed"}}) == (
         "b",
     )
+
+
+def test_a_wave_drained_by_provisioning_names_provisioning() -> None:
+    """A wave whose every lane failed to provision must not report a conflict.
+
+    Reporting `conflict-key-overlap` with an empty overlap sends the reader
+    looking for a running lane that does not exist.
+    """
+    import pytest
+    from sinnixd.campaign import CampaignRunner, CampaignSchedule, WaveDrainedError
+    from sinnixd.workspaces import WorkspaceError
+
+    class FakeJobs:
+        def __init__(self) -> None:
+            self.events: list[dict[str, object]] = []
+
+        def spool_event(self, event: dict[str, object]) -> None:
+            self.events.append(event)
+
+    runner = CampaignRunner(
+        projects=None, jobs=FakeJobs(), workspaces=None, plans=None, native_runner=None
+    )
+    only = lane("solo", "table:jobs")
+    schedule = CampaignSchedule((only,), (), ())
+
+    def submit(*_args: object, **_kwargs: object) -> dict[str, object]:
+        runner._provisioning = only.group
+        raise WorkspaceError("uv sync failed")
+
+    runner._submit_plan = submit  # type: ignore[method-assign]
+
+    with pytest.raises(WaveDrainedError) as raised:
+        runner._submit_tolerating_conflicts(
+            schedule, "fixture", "generation", lambda **_kwargs: "job", "wave-1"
+        )
+
+    assert "uv sync failed" in str(raised.value)

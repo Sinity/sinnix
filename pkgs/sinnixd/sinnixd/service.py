@@ -19,7 +19,7 @@ from sinnix_mcp import (
 )
 from sinnix_mcp.execution import OwnerExecution
 
-from .campaign import CampaignRunner
+from .campaign import CampaignRunner, WaveDrainedError
 from .contracts import TypedJobContracts
 from .delivery import DeliveryError, GitHubDelivery
 from .delivery_runner import DELIVERY_INPUT_SCHEMA_VERSION, delivery_runner_executable
@@ -253,7 +253,7 @@ class SinnixdService:
             )
         except JobAuthorizationError as error:
             return self._error(request, owner_name, ErrorCode.POLICY_DENIED, str(error))
-        except AdmissionConflictError as error:
+        except (AdmissionConflictError, WaveDrainedError) as error:
             return self._error(
                 request, owner_name, ErrorCode.RESOURCE_DEFERRED, str(error)
             )
