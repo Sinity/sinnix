@@ -1109,3 +1109,82 @@ def test_exit_json_pytest_and_agent_result_parsers_are_contract_specific(
             assert result["content"] == "agent result"
         else:
             assert result["value"] == {"receipt": "ok"}
+
+
+def _lone_managed_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[GenericJobs, FakeSystemd, dict[str, object], dict[str, object], list[float]]:
+    """One managed job, active, holding 6 GiB. Nothing else is contending."""
+    pressure = {
+        "memory_full_avg10": 0.0,
+        "io_full_avg10": 0.0,
+        "memory_total_bytes": 32 * 1024**3,
+        "memory_available_bytes": 24 * 1024**3,
+        "swap_total_bytes": 20 * 1024**3,
+        "swap_free_bytes": 20 * 1024**3,
+        "managed_memory_bytes": 0,
+    }
+    clock = [0.0]
+    monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        pressure_probe=lambda: pressure,
+    )
+    only = subject.start(agent_spec(("table:only",)))
+    systemd.unit_properties[only["unit"]] = {
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "InvocationID": "only",
+        "MemoryCurrent": str(6 * 1024**3),
+        "MemorySwapCurrent": "0",
+        "MemoryPeak": str(6 * 1024**3),
+    }
+    return subject, systemd, only, pressure, clock
+
+
+def test_sustained_io_stall_does_not_preempt_the_only_managed_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A lone job's IO stall is its own work, not contention to shed.
+
+    Cancelling it cannot relieve pressure it is itself producing; it only
+    destroys the work. Observed on the polylogue harvest operation, whose quick
+    gate drove io_full_avg10 to 22.2 and was then preempted as the largest --
+    and only -- managed job, so no lane could publish.
+    """
+    subject, systemd, only, pressure, clock = _lone_managed_job(tmp_path, monkeypatch)
+
+    pressure.update(io_full_avg10=22.2, managed_memory_bytes=6 * 1024**3)
+    assert subject._relieve_active_pressure(pressure) is None
+    clock[0] = 2.1
+    assert subject._relieve_active_pressure(pressure) is None
+
+    assert systemd.stopped == []
+    assert subject.get(only["job_id"])["state"].get("phase") != "cancelled"
+
+
+def test_swap_exhaustion_still_preempts_the_only_managed_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Host endangerment is the exception: a lone job is still a valid victim."""
+    subject, systemd, only, pressure, clock = _lone_managed_job(tmp_path, monkeypatch)
+
+    pressure.update(
+        memory_full_avg10=6.0,
+        io_full_avg10=22.2,
+        memory_available_bytes=1024**3,
+        swap_free_bytes=1024**3,
+        managed_memory_bytes=6 * 1024**3,
+    )
+    assert subject._relieve_active_pressure(pressure) is None
+    clock[0] = 2.1
+    assert subject._relieve_active_pressure(pressure) == only["job_id"]
+
+    assert systemd.stopped == [only["unit"]]
+    preempted = subject.get(only["job_id"])
+    assert preempted["state"]["phase"] == "cancelled"
+    assert "swap-exhaustion" in preempted["state"]["preemption"]["reason"]
