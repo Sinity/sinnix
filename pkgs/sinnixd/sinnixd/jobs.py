@@ -15,7 +15,7 @@ import struct
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -3065,6 +3065,8 @@ class GenericJobs:
                         response = self._public(updated, updated.state)
                         response["coalesced"] = True
                         return response
+        if operation.supersede == "queued":
+            self._supersede_queued(project.project_id, operation.name, principal, state)
         job_id = str(uuid4())
         readiness_path = (
             self.store.prepare_service_readiness(job_id)
@@ -3175,6 +3177,45 @@ class GenericJobs:
         self._admit_locked()
         record = self.store.load(job_id)
         return self._public(record, record.state)
+
+    def _supersede_queued(
+        self,
+        project_id: str,
+        operation_name: str,
+        principal: str,
+        state: MutableMapping[str, Any],
+    ) -> None:
+        """Cancel this operation's own not-yet-started jobs.
+
+        A superseding operation's later run subsumes its earlier ones, so a
+        queue of them is waste that also holds admission capacity.
+        """
+        for record in self.store.active_records():
+            if record.state.get("phase") not in {"queued", "waiting-dependencies"}:
+                continue
+            if (
+                record.spec.project_id != project_id
+                or record.spec.operation != operation_name
+                or record.spec.principal != principal
+            ):
+                continue
+            with self.store.locked(record.job_id):
+                current = self.store.load(record.job_id)
+                if current.state.get("terminal"):
+                    continue
+                superseded = self._with_state(
+                    current,
+                    {
+                        "phase": "cancelled",
+                        "terminal": True,
+                        "launch_evidence": "not-started",
+                        "superseded": True,
+                        "observed_at": _timestamp(),
+                    },
+                )
+                self.store.save(superseded)
+            self._finalize_terminal(superseded)
+            self._finish_admission(superseded, state)
 
     @staticmethod
     def _cache_tree(path: Path) -> str | None:

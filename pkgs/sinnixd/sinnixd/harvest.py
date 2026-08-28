@@ -151,6 +151,43 @@ def _lane_artifact(context: HarvestContext, name: str) -> str | None:
     return text or None
 
 
+def _adopt_open_pull_request(
+    context: HarvestContext,
+    run: Run,
+    *,
+    title: str,
+    body: str,
+) -> str | None:
+    """Return the URL of this branch's open pull request, refreshed.
+
+    Returns None when the branch has none, which leaves the caller's original
+    creation failure as the reported cause.
+    """
+    view = _command(
+        run,
+        ["gh", "pr", "view", "--json", "url,state", "--jq", ".url + \" \" + .state"],
+        cwd=context.worktree,
+        timeout=120,
+    )
+    if view.returncode != 0:
+        return None
+    parts = view.stdout.strip().split()
+    if len(parts) != 2 or parts[1] != "OPEN":
+        return None
+    url = parts[0]
+    edited = _command(
+        run,
+        ["gh", "pr", "edit", url, "--title", title, "--body", body],
+        cwd=context.worktree,
+        timeout=120,
+    )
+    if edited.returncode != 0:
+        raise HarvestError(
+            edited.stderr.strip() or "GitHub pull request update failed"
+        )
+    return url
+
+
 def _resolve_publication_text(
     parsed: argparse.Namespace, context: HarvestContext
 ) -> tuple[str, str, str | None]:
@@ -975,12 +1012,18 @@ def authorize(
             timeout=120,
         )
         if created.returncode != 0:
-            raise HarvestError(
-                created.stderr.strip() or "GitHub pull request creation failed"
+            # A publication that failed after the push leaves an open pull
+            # request behind. Re-running must adopt it rather than refuse,
+            # otherwise the lane can never reach master.
+            pr_url = _adopt_open_pull_request(context, run, title=title, body=body)
+            if pr_url is None:
+                raise HarvestError(
+                    created.stderr.strip() or "GitHub pull request creation failed"
+                )
+        else:
+            pr_url = (
+                created.stdout.strip().splitlines()[-1] if created.stdout.strip() else ""
             )
-        pr_url = (
-            created.stdout.strip().splitlines()[-1] if created.stdout.strip() else ""
-        )
         pr = pr_url.rsplit("/", 1)[-1]
         if not pr.isdecimal():
             raise HarvestError("GitHub pull request number is malformed")

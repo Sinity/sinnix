@@ -1338,3 +1338,67 @@ def test_lane_and_harvest_fit_the_host_budget_together(tmp_path: Path) -> None:
 
     assert harvest["state"]["phase"] == "submitted"
     assert len(systemd.started) == 2
+
+
+def test_superseding_operation_cancels_its_own_queued_jobs(tmp_path: Path) -> None:
+    gib = 1024 * 1024 * 1024
+    adapter = project(
+        tmp_path / "project",
+        (
+            operation(
+                "prebuild",
+                pool="bulk",
+                estimate_memory_bytes=24 * gib,
+                supersede="queued",
+            ),
+        ),
+    )
+    systemd = FakeSystemd()
+    pressure = {
+        "memory_full_avg10": 0.0,
+        "io_full_avg10": 0.0,
+        "memory_total_bytes": 31 * gib,
+        "memory_available_bytes": 8 * gib,
+        "swap_total_bytes": 20 * gib,
+        "swap_free_bytes": 20 * gib,
+        "managed_memory_bytes": 0,
+    }
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        pressure_probe=lambda: pressure,
+    )
+
+    def start(correlation_id: str) -> dict[str, object]:
+        return subject.start_declared(
+            project=adapter,
+            operation=adapter.operation("prebuild"),
+            correlation_id=correlation_id,
+            parameters={},
+        )
+
+    def move_tree(marker: str) -> None:
+        (adapter.root / "tracked").write_text(marker + "\n")
+        subprocess.run(["git", "-C", str(adapter.root), "add", "tracked"], check=True)
+        subprocess.run(
+            [
+                "git", "-C", str(adapter.root),
+                "-c", "user.name=Fixture",
+                "-c", "user.email=fixture@example.test",
+                "commit", "--quiet", "-m", marker,
+            ],
+            check=True,
+        )
+
+    first = start("first")
+    assert first["state"]["phase"] == "queued"
+
+    move_tree("input moved")
+    second = start("second")
+
+    assert second["state"]["phase"] == "queued"
+    assert second["job_id"] != first["job_id"]
+    replaced = subject.get(str(first["job_id"]))
+    assert replaced["state"]["phase"] == "cancelled"
+    assert replaced["state"]["superseded"] is True
