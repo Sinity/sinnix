@@ -369,6 +369,44 @@ def test_redflags_catches_a_new_module_that_no_test_touches() -> None:
     assert not any("without a test" in f for f in flags)
 
 
+def test_redflags_catches_a_behaviour_change_with_no_test_in_the_diff() -> None:
+    """A modified production module with no test anywhere is invisible to every gate.
+
+    The lane's own green is a static run that selects nothing, so nothing
+    observes the change it just made, and the existing new-module check only
+    covers files added in this diff.
+
+    Anti-vacuity: drop the check and the first case reports no flag; count any
+    touched test file and the second case flags spuriously.
+    """
+    untested = (
+        "diff --git a/polylogue/mcp/server_cutover.py b/polylogue/mcp/server_cutover.py\n"
+        '+            if view == "messages":\n'
+    )
+    status, flags = harvest._redflags(untested)
+    assert status == 1
+    assert any("no test in the diff" in f for f in flags)
+    assert any("server_cutover.py" in f for f in flags)
+
+    tested = untested + (
+        "diff --git a/tests/unit/mcp/test_read_messages_view.py "
+        "b/tests/unit/mcp/test_read_messages_view.py\n"
+        "new file mode 100644\n"
+        "+def test_read_serves_the_messages_view():\n"
+    )
+    _, flags = harvest._redflags(tested)
+    assert not any("no test in the diff" in f for f in flags)
+
+
+def test_a_docs_only_change_is_not_flagged_for_missing_tests() -> None:
+    """The flag is about production behaviour, not every file in a repo."""
+    _, flags = harvest._redflags(
+        "diff --git a/docs/architecture.md b/docs/architecture.md\n+A sentence.\n"
+    )
+
+    assert not any("no test in the diff" in f for f in flags)
+
+
 def test_a_failed_run_is_not_test_evidence(tmp_path: Path) -> None:
     """Tests having run is not the same as tests having passed.
 
