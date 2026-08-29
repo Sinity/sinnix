@@ -1490,7 +1490,14 @@ class ProjectCatalog:
                 raise ProjectConfigError(
                     "git worktree record is missing worktree or HEAD"
                 )
-            path = Path(raw_path).resolve(strict=True)
+            try:
+                path = Path(raw_path).resolve(strict=True)
+            except OSError:
+                # A registration outliving its directory is ordinary — git
+                # calls it prunable, and Claude Code leaves them behind. It is
+                # not a usable checkout and says nothing about the others, so
+                # failing here would refuse every checkout in the project.
+                continue
             top_level = Path(
                 self._git(path, "rev-parse", "--show-toplevel").strip()
             ).resolve(strict=True)

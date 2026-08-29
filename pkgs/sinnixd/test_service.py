@@ -11407,3 +11407,43 @@ def test_a_timed_out_delivery_command_reports_the_command_and_its_budget() -> No
             ["git", "-C", "/fixture", "push", "origin", "lane"],
             timeout_seconds=PUSH_TIMEOUT_SECONDS,
         )
+
+
+def test_a_registration_outliving_its_directory_does_not_refuse_every_checkout(
+    tmp_path: Path,
+) -> None:
+    """A prunable worktree is not a usable checkout, and not a reason to refuse the rest.
+
+    Claude Code creates `.claude/worktrees/agent-*` locked and removes the
+    directory without pruning, so a repository accumulates these on its own.
+    Enumerating them with `resolve(strict=True)` raised a bare FileNotFoundError
+    that aborted the whole listing — which is what stopped `campaign run` for an
+    entire project.
+
+    Anti-vacuity: drop the guard and this raises instead of listing the
+    surviving checkouts.
+    """
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    catalog = ProjectCatalog([tmp_path])
+    service = SinnixdService(catalog, jobs=generic_jobs(tmp_path))
+    survivor = service.workspaces.create(
+        project_id="fixture",
+        name="survivor",
+        branch="feature/survivor",
+        base="HEAD",
+    )
+    doomed = service.workspaces.create(
+        project_id="fixture",
+        name="doomed",
+        branch="feature/doomed",
+        base="HEAD",
+    )
+    shutil.rmtree(doomed["path"])
+    assert not Path(doomed["path"]).exists()
+
+    paths = {item.path for item in catalog.checkouts("fixture")}
+
+    assert Path(survivor["path"]) in paths
+    assert Path(doomed["path"]) not in paths
+    assert tmp_path in paths
