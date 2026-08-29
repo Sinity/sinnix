@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from sinnixd.jobs import (
     GenericJobStore,
     MEMORY_FULL_BLOCK_THRESHOLD,
     MEMORY_FULL_PREEMPT_THRESHOLD,
+    SystemdJobTimeout,
+    UserSystemdJobs,
 )
 from sinnixd.projects import (
     ConflictPolicy,
@@ -1585,3 +1588,85 @@ def test_terminal_estimate_observation_is_idempotent_and_survives_reset(
     assert reset["cleared"] == ["agent:codex:model"]
     assert "agent:codex:model" not in subject._admission_state()["estimates"]
     assert after_reset["state"]["phase"] == "succeeded"
+
+
+def test_scheduler_survives_a_failing_pressure_sweep(tmp_path: Path) -> None:
+    """A raising pressure sweep must not end the thread that owns the active set.
+
+    A preemption whose ``systemctl stop`` times out raises out of the sweep;
+    the thread that dies is the only one holding the active set, which orphans
+    every running unit and wedges all later admission.
+
+    Anti-vacuity: remove the try/except around the pressure sweep in
+    ``run_admission_scheduler`` and the thread dies on the first raise, so the
+    queued job is never admitted and ``scheduler.is_alive()`` is false.
+    """
+    failures = []
+    armed = threading.Event()
+    adapter = project(
+        tmp_path / "project",
+        (operation("light", pool="bulk", estimate_memory_bytes=1024),),
+    )
+
+    pressure = {"memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD}
+
+    def probe() -> dict[str, float]:
+        if armed.is_set() and len(failures) < 3:
+            failures.append("raised")
+            raise SystemdJobTimeout("systemd command timed out")
+        return dict(pressure)
+
+    admitted = threading.Event()
+    subject = GenericJobs(
+        FakeSystemd(),
+        GenericJobStore(tmp_path / "state"),
+        pressure_probe=probe,
+        before_admission_start=lambda _job_id: admitted.set(),
+        admission_retry_seconds=0.001,
+    )
+    queued = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("light"),
+        correlation_id="queued",
+        parameters={},
+    )
+    assert queued["state"]["phase"] == "queued"
+
+    armed.set()
+    stop_event = threading.Event()
+    scheduler = threading.Thread(
+        target=subject.run_admission_scheduler, args=(stop_event,)
+    )
+    scheduler.start()
+    try:
+        # The sweep raises three times before the probe answers; the loop must
+        # still be alive to admit the queued job once pressure clears.
+        pressure["memory_full_avg60"] = 0.0
+        assert admitted.wait(5)
+    finally:
+        stop_event.set()
+        scheduler.join(2)
+
+    assert not scheduler.is_alive()
+    assert len(failures) == 3
+
+
+def test_stop_does_not_wait_for_the_unit_to_finish_shutting_down() -> None:
+    """Cancellation requests a stop; it never blocks on the unit's own shutdown.
+
+    Anti-vacuity: drop ``--no-block`` and the assertion fails. A blocking stop
+    runs until the agent unit exits, far past the shared command budget, and
+    every cancellation then raises ``SystemdJobTimeout``.
+    """
+    recorded: list[Sequence[str]] = []
+
+    class Recorder(UserSystemdJobs):
+        @staticmethod
+        def _run(args: Sequence[str], *, timeout_seconds: float = 0.0) -> str:
+            recorded.append(list(args))
+            return ""
+
+    Recorder().stop("sinnixd-job-fixture.service")
+    assert recorded == [
+        ["systemctl", "--user", "--no-block", "stop", "sinnixd-job-fixture.service"]
+    ]

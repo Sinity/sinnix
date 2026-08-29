@@ -15,6 +15,7 @@ import struct
 import subprocess
 import sys
 import time
+import traceback
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -535,7 +536,10 @@ class UserSystemdJobs:
         return properties
 
     def stop(self, unit: str) -> None:
-        self._run(["systemctl", "--user", "stop", unit])
+        # Stopping is a request, not a wait. A blocking stop runs until the
+        # unit's own shutdown finishes, which for an agent unit is seconds --
+        # far past the command budget every other systemd call is sized for.
+        self._run(["systemctl", "--user", "--no-block", "stop", unit])
 
     def schedule_timer(
         self, *, unit: str, on_calendar: str, command: Sequence[str]
@@ -3776,9 +3780,20 @@ class GenericJobs:
     def run_admission_scheduler(self, stop_event: Event) -> None:
         """Protect the host and retry queued admission independently of clients."""
         while not stop_event.is_set():
-            self._relieve_active_pressure(self.pressure_probe())
-            with self._admission_lock:
-                self._admit_locked()
+            # One failed sweep must not end the daemon. An exception escaping
+            # here kills the only thread that owns the active set, orphaning
+            # every running unit and wedging all later admission.
+            try:
+                self._relieve_active_pressure(self.pressure_probe())
+            except Exception:
+                print("admission scheduler: pressure sweep failed", file=sys.stderr)
+                traceback.print_exc()
+            try:
+                with self._admission_lock:
+                    self._admit_locked()
+            except Exception:
+                print("admission scheduler: admission sweep failed", file=sys.stderr)
+                traceback.print_exc()
             stop_event.wait(self.admission_retry_seconds)
 
     def _dependency_block(self, record: GenericJobRecord) -> Mapping[str, Any] | None:
