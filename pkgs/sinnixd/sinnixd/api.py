@@ -34,6 +34,11 @@ CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS = {
     "workspace.review-status": 65.0,
     "workspace.finish": 185.0,
     "packet.finalize": 420.0,
+    # Creation runs `git worktree add` and then the project's provision exec
+    # hook (e.g. uv sync) before answering. `packet launch` dispatches it as
+    # its own step, so it needs the budget in its own right and not only
+    # through the launch entry below.
+    "workspace.create": 300.0,
     # Launch compiles the packet AND provisions the workspace (file seeds plus
     # the provision exec hook, e.g. uv sync) before answering.
     "packet.launch": 300.0,
