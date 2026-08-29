@@ -113,6 +113,34 @@ def test_a_live_checkout_is_never_disposable(tmp_path: Path) -> None:
     assert "spent" not in {unit.workspace for unit in disposable(units.values())}
 
 
+def test_a_generated_path_that_is_not_a_directory_is_still_not_work(
+    tmp_path: Path,
+) -> None:
+    """`git status` omits the trailing separator for a symlink or a file.
+
+    Matching only the directory form leaves such a checkout dirty forever, and
+    dirty with an empty file list — a verdict naming nothing to rescue, which
+    is what stranded four polylogue worktrees.
+
+    Anti-vacuity: match the declared prefixes verbatim and this reports dirty.
+    """
+    repo, trees = _fixture(tmp_path)
+    elsewhere = tmp_path / "shared-venv"
+    elsewhere.mkdir()
+    (trees / "spent" / ".venv").symlink_to(elsewhere)
+
+    units = {
+        unit.workspace: unit
+        for unit in derive_units(
+            trees, _common_dir(repo), "master", jobs_dir=tmp_path / "none", live_cwds=()
+        )
+    }
+
+    assert units["spent"].dirty is False
+    assert units["spent"].state == "empty"
+    assert units["spent"] in disposable(units.values())
+
+
 def test_gate_leftovers_are_not_uncommitted_work(tmp_path: Path) -> None:
     """A checkout holding only generated files is disposable, not dirty.
 
