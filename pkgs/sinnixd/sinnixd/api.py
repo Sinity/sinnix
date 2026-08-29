@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import socket
 import struct
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -263,6 +264,7 @@ class UnixSocketServer:
     ) -> None:
         handed_off = False
         request_id: Any = None
+        request: RequestEnvelope | None = None
         try:
             connection.settimeout(self.connection_timeout_seconds)
             raw = receive_frame(connection)
@@ -300,6 +302,14 @@ class UnixSocketServer:
             TypeError,
             ValueError,
         ) as error:
+            # The client is told only that the daemon is unavailable, so this
+            # line is the operator's only account of a refused request.
+            print(
+                f"request failed: operation={request.operation if request is not None else 'unknown'} "
+                f"request_id={request_id}: {error!r}",
+                file=sys.stderr,
+                flush=True,
+            )
             try:
                 send_frame(
                     connection,

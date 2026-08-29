@@ -11,6 +11,13 @@ from .jobs import GenericJobs
 from .projects import ProjectCatalog
 from .workspaces import GitWorkspaces, WorkspaceError
 
+# GitHub calls answer in seconds. A push does not: it runs whatever pre-push
+# gate the repository installs, and that gate belongs to the project, not to
+# this daemon. Polylogue's runs its full static suite in over a minute, and
+# runs it again on a push with nothing to send.
+COMMAND_TIMEOUT_SECONDS = 60.0
+PUSH_TIMEOUT_SECONDS = 900.0
+
 
 class DeliveryError(ValueError):
     """Publication or landing preconditions do not match Git/GitHub authority."""
@@ -54,6 +61,7 @@ class GitHubDelivery:
                 branch,
             ],
             cwd=path,
+            timeout_seconds=PUSH_TIMEOUT_SECONDS,
         )
         workspace, project, receipt = self._verified_workspace(
             workspace_id, job_id, packet_job_id
@@ -413,17 +421,33 @@ class GitHubDelivery:
         return branch
 
     def _command(
-        self, argv: Sequence[str], *, cwd: str | None = None
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: str | None = None,
+        timeout_seconds: float = COMMAND_TIMEOUT_SECONDS,
     ) -> subprocess.CompletedProcess[str]:
         try:
             result = self.run(
-                argv, cwd=cwd, capture_output=True, text=True, timeout=60, check=False
+                argv,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                check=False,
             )
+        except subprocess.TimeoutExpired as error:
+            # Naming the command and its budget is the whole diagnosis: a bare
+            # failure here is indistinguishable from a non-zero exit with no
+            # stderr, and publication is the route an operator cannot inspect.
+            raise DeliveryError(
+                f"delivery command timed out after {timeout_seconds:g}s: {' '.join(argv)}"
+            ) from error
         except (OSError, subprocess.SubprocessError) as error:
-            raise DeliveryError("GitHub delivery command failed") from error
+            raise DeliveryError(f"delivery command failed: {' '.join(argv)}") from error
         if result.returncode != 0:
             raise DeliveryError(
-                result.stderr.strip() or "GitHub delivery command failed"
+                result.stderr.strip() or f"delivery command failed: {' '.join(argv)}"
             )
         return result
 
@@ -450,7 +474,10 @@ class GitHubDelivery:
             raise DeliveryError(
                 probe.stderr.strip() or "could not inspect remote branch"
             )
-        self._command(["git", "-C", path, "push", "origin", "--delete", branch])
+        self._command(
+            ["git", "-C", path, "push", "origin", "--delete", branch],
+            timeout_seconds=PUSH_TIMEOUT_SECONDS,
+        )
 
     @staticmethod
     def _checks_pass(checks: Any) -> bool:
