@@ -371,6 +371,7 @@ def _redflags(diff: str) -> tuple[int, list[str]]:
     production = False
     tests = False
     production_removed = False
+    touched_production_modules: set[str] = set()
     test_assertion_removed = False
     new_modules: list[str] = []
     touched_tests: set[str] = set()
@@ -381,6 +382,8 @@ def _redflags(diff: str) -> tuple[int, list[str]]:
             production = path.startswith("polylogue/")
             tests = path.startswith("tests/")
             pending_new_file = path
+            if production and path.endswith(".py"):
+                touched_production_modules.add(path)
             if tests:
                 touched_tests.add(pathlib.PurePosixPath(path).stem)
         if (
@@ -406,6 +409,14 @@ def _redflags(diff: str) -> tuple[int, list[str]]:
         stem = pathlib.PurePosixPath(module).stem
         if not any(stem in name for name in touched_tests):
             flag(f"new production module without a test: {module}")
+    # A behaviour change with no test anywhere in the diff passes every other
+    # gate too: the lane's own green is a static run that selects nothing, so
+    # nothing observes the change it just made.
+    if touched_production_modules and not touched_tests:
+        flag(
+            "production changed with no test in the diff: "
+            + ", ".join(sorted(touched_production_modules)[:5])
+        )
     if re.search(
         r"^-\s*assert .*== 0\b|^\+\s*assert .*exit_code == 1|^\+.*pytest\.raises",
         diff,
