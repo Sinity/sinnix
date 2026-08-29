@@ -901,6 +901,28 @@ class SinnixdService:
                     coordinator_label=arguments.get("coordinator_label"),
                 )
             )
+        if operation == "job.admission.reset":
+            if principal != "operator":
+                raise JobAuthorizationError(
+                    "admission estimate reset requires the operator principal"
+                )
+            if set(arguments) - {"estimate_key", "all"}:
+                raise ValueError("job.admission.reset accepts estimate_key or all")
+            estimate_key = arguments.get("estimate_key")
+            if estimate_key is not None and (
+                not isinstance(estimate_key, str) or not estimate_key
+            ):
+                raise ValueError("job.admission.reset estimate_key must be non-empty")
+            clear_all = arguments.get("all", False)
+            if not isinstance(clear_all, bool):
+                raise ValueError("job.admission.reset all must be a boolean")
+            if (estimate_key is None and not clear_all) or (
+                estimate_key is not None and clear_all
+            ):
+                raise ValueError(
+                    "job.admission.reset requires estimate_key or all=true"
+                )
+            return self.jobs.reset_admission_estimates(estimate_key)
         if operation == "job.get":
             return self._cleanup_terminal(
                 self.jobs.get(

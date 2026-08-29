@@ -73,9 +73,11 @@ MIN_HOST_MEMORY_RESERVE_BYTES = 256 * MIB
 MAX_HOST_MEMORY_RESERVE_BYTES = 6 * GIB
 HOST_MEMORY_RESERVE_FRACTION = 0.15
 MIN_SWAP_FREE_FRACTION = 0.15
-MEMORY_FULL_BLOCK_THRESHOLD = 0.2
+# PSI averages are percentages of elapsed time. A 10% full-memory signal means
+# the host is losing a tenth of its wall time to memory stalls.
+MEMORY_FULL_BLOCK_THRESHOLD = 10.0
 IO_FULL_BLOCK_THRESHOLD = 5.0
-MEMORY_FULL_PREEMPT_THRESHOLD = 5.0
+MEMORY_FULL_PREEMPT_THRESHOLD = 25.0
 IO_FULL_PREEMPT_THRESHOLD = 20.0
 PREEMPT_SWAP_FREE_FRACTION = 0.10
 ACTIVE_PRESSURE_GRACE_SECONDS = 2.0
@@ -84,6 +86,7 @@ ACTIVE_PRESSURE_GRACE_SECONDS = 2.0
 # Workspace provisioning (uv sync, npm ci) produces exactly such bursts.
 # Memory and swap keep the short grace: those endanger the host.
 IO_STALL_GRACE_SECONDS = 45.0
+MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES = 2
 LEARNED_ESTIMATE_HEADROOM_NUMERATOR = 5
 LEARNED_ESTIMATE_HEADROOM_DENOMINATOR = 4
 # The estimate is the high-water mark of this many recent runs. A single
@@ -705,6 +708,7 @@ def host_pressure() -> Mapping[str, float]:
     """Read host capacity and stall evidence without acting on cgroups."""
     values: dict[str, float] = {
         "memory_full_avg10": 100.0,
+        "memory_full_avg60": 100.0,
         "io_full_avg10": 100.0,
         "memory_total_bytes": 0.0,
         "memory_available_bytes": 0.0,
@@ -713,18 +717,25 @@ def host_pressure() -> Mapping[str, float]:
         "managed_memory_bytes": 0.0,
     }
 
-    def pressure_avg10(resource: str, kind: str) -> float:
+    def pressure_average(resource: str, kind: str, average: str) -> float:
         for line in Path(f"/proc/pressure/{resource}").read_text().splitlines():
             if line.startswith(f"{kind} "):
                 for item in line.split()[1:]:
                     key, _, value = item.partition("=")
-                    if key == "avg10":
+                    if key == average:
                         return float(value)
-        raise ValueError(f"{resource} PSI lacks {kind} avg10")
+        raise ValueError(f"{resource} PSI lacks {kind} {average}")
 
+    for average, key in (
+        ("avg10", "memory_full_avg10"),
+        ("avg60", "memory_full_avg60"),
+    ):
+        try:
+            values[key] = pressure_average("memory", "full", average)
+        except (OSError, ValueError):
+            pass
     try:
-        values["memory_full_avg10"] = pressure_avg10("memory", "full")
-        values["io_full_avg10"] = pressure_avg10("io", "full")
+        values["io_full_avg10"] = pressure_average("io", "full", "avg10")
     except (OSError, ValueError):
         pass
 
@@ -1321,6 +1332,7 @@ class GenericJobRecord:
     cancel_requested_invocation_id: str | None = None
     cancel_stop_acknowledged_at: str | None = None
     cancel_stop_acknowledged_invocation_id: str | None = None
+    admission_estimate_recorded: bool = False
     state: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -1346,6 +1358,7 @@ class GenericJobRecord:
             "cancel_requested_invocation_id": self.cancel_requested_invocation_id,
             "cancel_stop_acknowledged_at": self.cancel_stop_acknowledged_at,
             "cancel_stop_acknowledged_invocation_id": self.cancel_stop_acknowledged_invocation_id,
+            "admission_estimate_recorded": self.admission_estimate_recorded,
             "state": dict(self.state),
         }
 
@@ -1402,6 +1415,7 @@ class GenericJobRecord:
         invocation = value.get("cancel_requested_invocation_id")
         stop_acknowledged = value.get("cancel_stop_acknowledged_at")
         stop_invocation = value.get("cancel_stop_acknowledged_invocation_id")
+        admission_estimate_recorded = value.get("admission_estimate_recorded", False)
         if (
             not isinstance(created_at, str)
             or (cancelled is not None and not isinstance(cancelled, str))
@@ -1410,6 +1424,7 @@ class GenericJobRecord:
                 stop_acknowledged is not None and not isinstance(stop_acknowledged, str)
             )
             or (stop_invocation is not None and not isinstance(stop_invocation, str))
+            or not isinstance(admission_estimate_recorded, bool)
             or (stop_acknowledged is None) != (stop_invocation is None)
             or (
                 stop_acknowledged is not None
@@ -1435,6 +1450,7 @@ class GenericJobRecord:
             cancel_requested_invocation_id=invocation,
             cancel_stop_acknowledged_at=stop_acknowledged,
             cancel_stop_acknowledged_invocation_id=stop_invocation,
+            admission_estimate_recorded=admission_estimate_recorded,
             state=dict(state),
         )
 
@@ -2460,6 +2476,7 @@ class GenericJobs:
     _admission_lock: RLock = field(default_factory=RLock, init=False, repr=False)
     _spooled: set[str] = field(default_factory=set, init=False, repr=False)
     _active_pressure_since: float | None = field(default=None, init=False, repr=False)
+    _memory_full_block_probe_count: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         # Recovery observes only the durable nonterminal set. Terminal lease
@@ -2721,6 +2738,23 @@ class GenericJobs:
             os.fsync(handle.fileno())
         os.replace(temporary, path)
         _fsync_directory(path.parent)
+
+    def reset_admission_estimates(
+        self, estimate_key: str | None = None
+    ) -> dict[str, Any]:
+        """Forget learned memory estimates without disturbing live admission."""
+        with self._admission_lock:
+            state = self._admission_state()
+            if estimate_key is None:
+                cleared = sorted(state["estimates"])
+                state["estimates"] = {}
+            else:
+                cleared = (
+                    [estimate_key] if estimate_key in state["estimates"] else []
+                )
+                state["estimates"].pop(estimate_key, None)
+            self._save_admission_state(state)
+        return {"cleared": cleared}
 
     def _capacity_state(self) -> dict[str, Any]:
         path = self.store.capacity_path
@@ -3307,19 +3341,31 @@ class GenericJobs:
         )
         return max(0, min(total - reserve, available + managed - reserve))
 
-    @staticmethod
     def _host_pressure_blocks(
-        pressure: Mapping[str, float], *, has_active_managed_work: bool
+        self, pressure: Mapping[str, float], *, has_active_managed_work: bool
     ) -> bool:
         swap_total = float(pressure.get("swap_total_bytes", 0.0))
         swap_free = float(pressure.get("swap_free_bytes", 0.0))
         swap_exhausted = (
             swap_total > 0 and swap_free / swap_total < MIN_SWAP_FREE_FRACTION
         )
+        memory_full_avg10 = float(pressure.get("memory_full_avg10", 0.0))
+        memory_full_avg60 = float(pressure.get("memory_full_avg60", 0.0))
+        if memory_full_avg10 >= MEMORY_FULL_BLOCK_THRESHOLD:
+            self._memory_full_block_probe_count = min(
+                self._memory_full_block_probe_count + 1,
+                MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES,
+            )
+        else:
+            self._memory_full_block_probe_count = 0
+        memory_pressure_sustained = (
+            memory_full_avg60 >= MEMORY_FULL_BLOCK_THRESHOLD
+            or self._memory_full_block_probe_count
+            >= MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES
+        )
         return (
             swap_exhausted
-            or float(pressure.get("memory_full_avg10", 0.0))
-            >= MEMORY_FULL_BLOCK_THRESHOLD
+            or memory_pressure_sustained
             or (
                 has_active_managed_work
                 and float(pressure.get("io_full_avg10", 0.0)) >= IO_FULL_BLOCK_THRESHOLD
@@ -3340,7 +3386,10 @@ class GenericJobs:
         if (
             swap_total > 0
             and swap_free / swap_total < PREEMPT_SWAP_FREE_FRACTION
-            and (memory_full >= 1.0 or io_full >= IO_FULL_BLOCK_THRESHOLD)
+            and (
+                memory_full >= MEMORY_FULL_BLOCK_THRESHOLD
+                or io_full >= IO_FULL_BLOCK_THRESHOLD
+            )
         ):
             reasons.append("swap-exhaustion")
         return reasons
@@ -3491,6 +3540,9 @@ class GenericJobs:
                 active[record.spec.pool].append(record)
         pressure = self.pressure_probe()
         host_memory_budget = self._host_memory_budget(pressure)
+        host_pressure_blocked = self._host_pressure_blocks(
+            pressure, has_active_managed_work=any(active.values())
+        )
         for snapshot in records:
             if snapshot.spec.kind not in {"declared-operation", "attested-agent"}:
                 continue
@@ -3500,6 +3552,7 @@ class GenericJobs:
             # before the candidate lock so admission never nests job locks in
             # an order determined by the dependency graph.
             blocked = self._dependency_block(snapshot)
+            terminal_blocked: GenericJobRecord | None = None
             with self.store.locked(snapshot.job_id):
                 record = self.store.load(snapshot.job_id)
                 if record.state.get("terminal") or record.state.get("phase") not in {
@@ -3512,100 +3565,107 @@ class GenericJobs:
                     self.store.save(updated)
                     if blocked.get("terminal"):
                         self._finalize_terminal(updated)
-                        self._finish_admission(updated, state)
-                    continue
-                policy = POOL_POLICIES[record.spec.pool]
-                estimate = self._estimate(record.spec, state)
-                occupied = sum(
-                    self._estimate(item.spec, state)
-                    for item in active[record.spec.pool]
-                )
-                host_occupied = sum(
-                    self._estimate(item.spec, state)
-                    for pool_records in active.values()
-                    for item in pool_records
-                )
-                exclusive = {
-                    key
-                    for pool_records in active.values()
-                    for item in pool_records
-                    for key in item.spec.exclusive_keys
-                }
-                pool_memory_blocked = (
-                    bool(active[record.spec.pool])
-                    and occupied + estimate > policy["memory_budget"]
-                )
-                host_memory_blocked = (
-                    host_memory_budget is not None
-                    and host_occupied + estimate > host_memory_budget
-                )
-                exclusive_blocked = bool(
-                    exclusive.intersection(record.spec.exclusive_keys)
-                )
-                pressure_blocked = (
-                    record.spec.pool != "interactive"
-                    and self._host_pressure_blocks(
-                        pressure, has_active_managed_work=host_occupied > 0
+                        terminal_blocked = updated
+                else:
+                    policy = POOL_POLICIES[record.spec.pool]
+                    estimate = self._estimate(record.spec, state)
+                    occupied = sum(
+                        self._estimate(item.spec, state)
+                        for item in active[record.spec.pool]
                     )
-                )
-                blocked_by = [
-                    reason
-                    for reason, blocked_now in (
-                        (
-                            "pool-workers",
-                            len(active[record.spec.pool]) >= policy["workers"],
-                        ),
-                        ("pool-memory", pool_memory_blocked),
-                        ("host-memory", host_memory_blocked),
-                        ("exclusive-key", exclusive_blocked),
-                        ("host-pressure", pressure_blocked),
+                    host_occupied = sum(
+                        self._estimate(item.spec, state)
+                        for pool_records in active.values()
+                        for item in pool_records
                     )
-                    if blocked_now
-                ]
-                if blocked_by:
-                    admission = {
-                        **(
-                            dict(record.state.get("admission", {}))
-                            if isinstance(record.state.get("admission"), Mapping)
-                            else {}
-                        ),
-                        "blocked_by": blocked_by,
-                        "host": {
-                            "budget_memory_bytes": host_memory_budget,
-                            "occupied_memory_bytes": host_occupied,
-                            "memory_available_bytes": int(
-                                pressure.get("memory_available_bytes", 0.0)
-                            ),
-                            "memory_full_avg10": float(
-                                pressure.get("memory_full_avg10", 0.0)
-                            ),
-                            "io_full_avg10": float(pressure.get("io_full_avg10", 0.0)),
-                            "swap_free_bytes": int(
-                                pressure.get("swap_free_bytes", 0.0)
-                            ),
-                            "swap_total_bytes": int(
-                                pressure.get("swap_total_bytes", 0.0)
-                            ),
-                        },
+                    exclusive = {
+                        key
+                        for pool_records in active.values()
+                        for item in pool_records
+                        for key in item.spec.exclusive_keys
                     }
-                    previous_admission = record.state.get("admission")
-                    previous_blocked_by = (
-                        previous_admission.get("blocked_by")
-                        if isinstance(previous_admission, Mapping)
-                        else None
+                    pool_memory_blocked = (
+                        bool(active[record.spec.pool])
+                        and occupied + estimate > policy["memory_budget"]
                     )
-                    if previous_blocked_by != blocked_by:
-                        self.store.save(
-                            self._with_state(
-                                record,
-                                {
-                                    **record.state,
-                                    "observed_at": _timestamp(),
-                                    "admission": admission,
-                                },
-                            )
+                    host_memory_blocked = (
+                        host_memory_budget is not None
+                        and host_occupied + estimate > host_memory_budget
+                    )
+                    exclusive_blocked = bool(
+                        exclusive.intersection(record.spec.exclusive_keys)
+                    )
+                    pressure_blocked = (
+                        record.spec.pool != "interactive" and host_pressure_blocked
+                    )
+                    blocked_by = [
+                        reason
+                        for reason, blocked_now in (
+                            (
+                                "pool-workers",
+                                len(active[record.spec.pool]) >= policy["workers"],
+                            ),
+                            ("pool-memory", pool_memory_blocked),
+                            ("host-memory", host_memory_blocked),
+                            ("exclusive-key", exclusive_blocked),
+                            ("host-pressure", pressure_blocked),
                         )
-                    continue
+                        if blocked_now
+                    ]
+                    if blocked_by:
+                        admission = {
+                            **(
+                                dict(record.state.get("admission", {}))
+                                if isinstance(record.state.get("admission"), Mapping)
+                                else {}
+                            ),
+                            "blocked_by": blocked_by,
+                            "host": {
+                                "budget_memory_bytes": host_memory_budget,
+                                "occupied_memory_bytes": host_occupied,
+                                "memory_available_bytes": int(
+                                    pressure.get("memory_available_bytes", 0.0)
+                                ),
+                                "memory_full_avg10": float(
+                                    pressure.get("memory_full_avg10", 0.0)
+                                ),
+                                "memory_full_avg60": float(
+                                    pressure.get("memory_full_avg60", 0.0)
+                                ),
+                                "io_full_avg10": float(
+                                    pressure.get("io_full_avg10", 0.0)
+                                ),
+                                "swap_free_bytes": int(
+                                    pressure.get("swap_free_bytes", 0.0)
+                                ),
+                                "swap_total_bytes": int(
+                                    pressure.get("swap_total_bytes", 0.0)
+                                ),
+                            },
+                        }
+                        previous_admission = record.state.get("admission")
+                        previous_blocked_by = (
+                            previous_admission.get("blocked_by")
+                            if isinstance(previous_admission, Mapping)
+                            else None
+                        )
+                        if previous_blocked_by != blocked_by:
+                            self.store.save(
+                                self._with_state(
+                                    record,
+                                    {
+                                        **record.state,
+                                        "observed_at": _timestamp(),
+                                        "admission": admission,
+                                    },
+                                )
+                            )
+                        continue
+            if terminal_blocked is not None:
+                self._finish_admission(terminal_blocked, state)
+                continue
+            if blocked is not None:
+                continue
             if self.before_admission_start is not None:
                 self.before_admission_start(record.job_id)
             terminal: GenericJobRecord | None = None
@@ -3768,66 +3828,70 @@ class GenericJobs:
     def _finish_admission(
         self, record: GenericJobRecord, state: dict[str, Any]
     ) -> None:
-        active_key = record.spec.coalesce_key or record.spec.cache_key
-        if active_key is not None and state["active"].get(active_key) == record.job_id:
-            state["active"].pop(active_key, None)
-        if (
-            record.state.get("phase") == "succeeded"
-            and record.spec.lease is None
-            and record.spec.cache_key is not None
-            and (
-                record.spec.result_kind == "exit-status"
-                or self._has_authoritative_result(record)
-            )
-        ):
-            state["cache"][record.spec.cache_key] = {
-                "job_id": record.job_id,
-                "touched_at": _timestamp(),
-            }
-            state["cache"] = self._bounded(state["cache"], MAX_ADMISSION_CACHE_ENTRIES)
-        peak = max(
-            (
-                value
-                for value in (
-                    self._memory_peak(record.state.get("systemd", {})),
-                    self._memory_peak(record.state.get("pre_stop_systemd", {})),
+        with self.store.locked(record.job_id):
+            record = self.store.load(record.job_id)
+            if record.admission_estimate_recorded:
+                return
+            active_key = record.spec.coalesce_key or record.spec.cache_key
+            if (
+                active_key is not None
+                and state["active"].get(active_key) == record.job_id
+            ):
+                state["active"].pop(active_key, None)
+            if (
+                record.state.get("phase") == "succeeded"
+                and record.spec.lease is None
+                and record.spec.cache_key is not None
+                and (
+                    record.spec.result_kind == "exit-status"
+                    or self._has_authoritative_result(record)
                 )
-                if value is not None
-            ),
-            default=None,
-        )
-        if peak is not None and record.spec.estimate_key is not None:
-            learned = (
-                peak * LEARNED_ESTIMATE_HEADROOM_NUMERATOR
-                + LEARNED_ESTIMATE_HEADROOM_DENOMINATOR
-                - 1
-            ) // LEARNED_ESTIMATE_HEADROOM_DENOMINATOR
-            previous = state["estimates"].get(record.spec.estimate_key)
-            history = (
-                previous.get("recent") if isinstance(previous, Mapping) else None
+            ):
+                state["cache"][record.spec.cache_key] = {
+                    "job_id": record.job_id,
+                    "touched_at": _timestamp(),
+                }
+                state["cache"] = self._bounded(
+                    state["cache"], MAX_ADMISSION_CACHE_ENTRIES
+                )
+            peak = max(
+                (
+                    value
+                    for value in (
+                        self._memory_peak(record.state.get("systemd", {})),
+                        self._memory_peak(record.state.get("pre_stop_systemd", {})),
+                    )
+                    if value is not None
+                ),
+                default=None,
             )
-            recent = [
-                value
-                for value in (history if isinstance(history, list) else [])
-                if isinstance(value, int) and value > 0
-            ]
-            if not recent and isinstance(previous, Mapping):
-                # An entry written before the window existed contributes its
-                # single high-water mark, which then ages out like any other.
-                carried = previous.get("bytes")
-                if isinstance(carried, int) and carried > 0:
-                    recent = [carried]
-            recent.append(learned)
-            recent = recent[-LEARNED_ESTIMATE_WINDOW:]
-            state["estimates"][record.spec.estimate_key] = {
-                "bytes": max(recent),
-                "recent": recent,
-                "touched_at": _timestamp(),
-            }
-            state["estimates"] = self._bounded(
-                state["estimates"], MAX_ADMISSION_ESTIMATES
-            )
-        self._save_admission_state(state)
+            if peak is not None and record.spec.estimate_key is not None:
+                learned = (
+                    peak * LEARNED_ESTIMATE_HEADROOM_NUMERATOR
+                    + LEARNED_ESTIMATE_HEADROOM_DENOMINATOR
+                    - 1
+                ) // LEARNED_ESTIMATE_HEADROOM_DENOMINATOR
+                previous = state["estimates"].get(record.spec.estimate_key)
+                history = (
+                    previous.get("recent") if isinstance(previous, Mapping) else None
+                )
+                recent = [
+                    value
+                    for value in (history if isinstance(history, list) else [])
+                    if isinstance(value, int) and value > 0
+                ]
+                recent.append(learned)
+                recent = recent[-LEARNED_ESTIMATE_WINDOW:]
+                state["estimates"][record.spec.estimate_key] = {
+                    "bytes": max(recent),
+                    "recent": recent,
+                    "touched_at": _timestamp(),
+                }
+                state["estimates"] = self._bounded(
+                    state["estimates"], MAX_ADMISSION_ESTIMATES
+                )
+            self._save_admission_state(state)
+            self.store.save(replace(record, admission_estimate_recorded=True))
 
     def _finalize_terminal(self, record: GenericJobRecord) -> None:
         """Handle a just-observed terminal transition exactly once per process.
@@ -4856,7 +4920,10 @@ class GenericJobs:
             cancel_requested_at=record.cancel_requested_at,
             cancel_requested_invocation_id=record.cancel_requested_invocation_id,
             cancel_stop_acknowledged_at=record.cancel_stop_acknowledged_at,
-            cancel_stop_acknowledged_invocation_id=record.cancel_stop_acknowledged_invocation_id,
+            cancel_stop_acknowledged_invocation_id=(
+                record.cancel_stop_acknowledged_invocation_id
+            ),
+            admission_estimate_recorded=record.admission_estimate_recorded,
             state=dict(state),
         )
 
@@ -4884,7 +4951,10 @@ class GenericJobs:
                 else observed_invocation
             ),
             cancel_stop_acknowledged_at=record.cancel_stop_acknowledged_at,
-            cancel_stop_acknowledged_invocation_id=record.cancel_stop_acknowledged_invocation_id,
+            cancel_stop_acknowledged_invocation_id=(
+                record.cancel_stop_acknowledged_invocation_id
+            ),
+            admission_estimate_recorded=record.admission_estimate_recorded,
             state=dict(record.state),
         )
 
@@ -4908,6 +4978,7 @@ class GenericJobs:
             cancel_requested_invocation_id=record.cancel_requested_invocation_id,
             cancel_stop_acknowledged_at=_timestamp(),
             cancel_stop_acknowledged_invocation_id=invocation,
+            admission_estimate_recorded=record.admission_estimate_recorded,
             state=dict(record.state),
         )
 
