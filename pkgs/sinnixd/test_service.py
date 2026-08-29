@@ -57,6 +57,7 @@ from sinnixd.jobs import (
     JobRecordError,
     JobResultError,
     JobResultLimitError,
+    MEMORY_FULL_BLOCK_THRESHOLD,
     SystemdJobError,
     SystemdJobTimeout,
     UserSystemdJobs,
@@ -165,6 +166,80 @@ def test_runtime_status_lists_build_capabilities(tmp_path: Path) -> None:
         "usage_capture",
         "timeout_wip_preserve",
     ]
+
+
+def test_operator_can_reset_one_learned_admission_estimate(tmp_path: Path) -> None:
+    jobs = generic_jobs(tmp_path)
+    jobs._save_admission_state(
+        {
+            "schema_version": 1,
+            "active": {"active-key": "active-job"},
+            "cache": {
+                "cache-key": {"job_id": "cached-job", "touched_at": "fixture"}
+            },
+            "estimates": {
+                "agent:polylogue:codex:gpt-5.6-luna": {
+                    "bytes": 7590666240,
+                    "recent": [7590666240],
+                    "touched_at": "fixture",
+                },
+                "other": {
+                    "bytes": 1024,
+                    "recent": [1024],
+                    "touched_at": "fixture",
+                },
+            },
+        }
+    )
+    service = SinnixdService(ProjectCatalog([]), jobs=jobs)
+
+    response = service.dispatch(
+        request(
+            "job.admission.reset",
+            "systemd-jobs",
+            {"estimate_key": "agent:polylogue:codex:gpt-5.6-luna"},
+        )
+    )
+
+    assert response.ok and response.payload is not None
+    assert response.payload.inline == {
+        "cleared": ["agent:polylogue:codex:gpt-5.6-luna"]
+    }
+    admission = jobs._admission_state()
+    assert set(admission["estimates"]) == {"other"}
+    assert admission["active"] == {"active-key": "active-job"}
+    assert admission["cache"] == {
+        "cache-key": {"job_id": "cached-job", "touched_at": "fixture"}
+    }
+
+
+def test_admission_estimate_reset_is_operator_only(tmp_path: Path) -> None:
+    service = SinnixdService(ProjectCatalog([]), jobs=generic_jobs(tmp_path))
+
+    response = service.dispatch(
+        request(
+            "job.admission.reset",
+            "systemd-jobs",
+            {"estimate_key": "agent:fixture"},
+            principal="agent-control",
+        )
+    )
+
+    assert not response.ok
+    assert response.error is not None
+    assert response.error.code == ErrorCode.POLICY_DENIED
+
+
+def test_admission_estimate_reset_requires_explicit_all_for_fleet_clear(
+    tmp_path: Path,
+) -> None:
+    service = SinnixdService(ProjectCatalog([]), jobs=generic_jobs(tmp_path))
+
+    response = service.dispatch(request("job.admission.reset", "systemd-jobs"))
+
+    assert not response.ok
+    assert response.error is not None
+    assert response.error.code == ErrorCode.INVALID_ARGUMENT
 
 
 @pytest.mark.parametrize(
@@ -458,6 +533,48 @@ def test_agentctl_job_status_aliases_job_get(
     assert cli_module.main() == 0
     assert captured["request"].operation == "job.get"
     assert captured["request"].arguments == {"job_id": "job-1"}
+
+
+@pytest.mark.parametrize(
+    ("argv", "arguments"),
+    (
+        (["agentctl", "job", "admission-reset", "--all"], {"all": True}),
+        (
+            ["agentctl", "job", "admission-reset", "agent:fixture"],
+            {"estimate_key": "agent:fixture"},
+        ),
+    ),
+)
+def test_agentctl_admission_reset_maps_to_operator_job_verb(
+    argv: list[str],
+    arguments: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, RequestEnvelope] = {}
+
+    def fake_call(socket_path, request_value):
+        captured["request"] = request_value
+        return {"schema": 1, "ok": True}
+
+    monkeypatch.setattr(sys, "argv", argv)
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    assert captured["request"].operation == "job.admission.reset"
+    assert captured["request"].owner == "systemd-jobs"
+    assert captured["request"].principal == "operator"
+    assert dict(captured["request"].arguments) == arguments
+
+
+def test_agentctl_admission_reset_rejects_unscoped_clear_without_all(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        sys, "argv", ["agentctl", "job", "admission-reset"]
+    )
+
+    with pytest.raises(SystemExit):
+        cli_module.main()
 
 
 @pytest.mark.parametrize(
@@ -2505,7 +2622,10 @@ def test_queued_service_cancellation_wins_the_admission_start_interleaving(
         systemd,
         store,
         wait_poll_seconds=0.001,
-        pressure_probe=lambda: {"memory_full_avg10": 0.2},
+        pressure_probe=lambda: {
+            "memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD,
+            "memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD,
+        },
     )
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
     started = service.dispatch(
@@ -2582,7 +2702,10 @@ def test_queued_declared_cancellation_survives_service_refresh_and_restart(
         systemd,
         store,
         wait_poll_seconds=0.001,
-        pressure_probe=lambda: {"memory_full_avg10": 0.2},
+        pressure_probe=lambda: {
+            "memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD,
+            "memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD,
+        },
     )
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
     started = service.dispatch(
@@ -2848,7 +2971,14 @@ def test_record_owns_ports_when_its_lease_artifact_is_missing_or_truncated(
         systemd,
         GenericJobStore(tmp_path / "state"),
         wait_poll_seconds=0.001,
-        pressure_probe=lambda: {"memory_full_avg10": 0.2 if phase == "queued" else 0.0},
+        pressure_probe=lambda: {
+            "memory_full_avg10": (
+                MEMORY_FULL_BLOCK_THRESHOLD if phase == "queued" else 0.0
+            ),
+            "memory_full_avg60": (
+                MEMORY_FULL_BLOCK_THRESHOLD if phase == "queued" else 0.0
+            ),
+        },
     )
     project = ProjectCatalog([tmp_path]).get("fixture")
     started = jobs.start_declared(
@@ -7684,7 +7814,10 @@ def test_admission_revalidates_queued_declared_workspace_before_systemd_launch(
         systemd,
         GenericJobStore(tmp_path / "state"),
         wait_poll_seconds=0.001,
-        pressure_probe=lambda: {"memory_full_avg10": 0.2},
+        pressure_probe=lambda: {
+            "memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD,
+            "memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD,
+        },
     )
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
     workspace = service.workspaces.create(
