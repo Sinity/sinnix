@@ -9907,6 +9907,11 @@ def test_delivery_operations_have_truthful_bounded_response_timeouts() -> None:
         "campaign.run": 300.0,
         "workspace.list": 60.0,
         "packet.launch": 300.0,
+        # `packet launch` dispatches creation as its own step, so provisioning
+        # must fit the client budget here and not only under packet.launch.
+        # Without it the socket closes mid-provision and the daemon logs a
+        # BrokenPipeError while the caller is told it is unavailable.
+        "workspace.create": 300.0,
     }
     assert CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS == expected
     for operation, timeout in expected.items():
