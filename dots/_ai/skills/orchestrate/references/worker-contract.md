@@ -29,7 +29,10 @@ prompt. Write only what the worker must do; coordinator material belongs in
 7. **Exit at current master.** Before reporting, fetch, rebase onto
    `origin/master`, rerun the quick gate in the rebased state, fix what it
    surfaces, and push. A conflict you cannot resolve honestly is reported as
-   such, never forced to green.
+   such, never forced to green. A failure you attribute to master is a claim
+   that needs a command: run that gate against a clean `origin/master` checkout
+   and quote its exit code, or own the failure. Host load is the other
+   explanation and is yours to distinguish, not to assume.
 8. **Machine trailer.** End the report with exact lines `LANE-BRANCH: <branch>`
    / `LANE-COMMIT: <sha>` / `LANE-QUICK: green|red|blocked-env` /
    `LANE-CLASSIFICATION: <one line per finding>`.
