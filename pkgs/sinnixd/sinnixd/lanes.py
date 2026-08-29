@@ -117,9 +117,24 @@ def _has_uncommitted_work(path: Path) -> bool:
     """
     for line in _git("status", "--porcelain", cwd=path).stdout.splitlines():
         name = line[3:].strip()
-        if name and not name.startswith(GENERATED_PATHS):
+        if name and not _is_generated(name):
             return True
     return False
+
+
+def _is_generated(name: str) -> bool:
+    """Whether a reported path is generated output rather than work.
+
+    `git status` reports an untracked directory with a trailing separator and
+    a symlink or file without one, so matching the directory form alone leaves
+    a checkout permanently dirty over a path that is not work -- and it says
+    so while naming no file the operator could rescue.
+    """
+    candidate = name.rstrip("/")
+    return any(
+        candidate == prefix.rstrip("/") or name.startswith(prefix)
+        for prefix in GENERATED_PATHS
+    )
 
 
 def _commits_ahead(path: Path, base: str) -> int:
