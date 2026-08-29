@@ -10,11 +10,12 @@ import sys
 import threading
 import time
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -45,11 +46,17 @@ from sinnixd.api import (
     receive_frame,
     send_frame,
 )
-from sinnixd.delivery import DeliveryError, GitHubDelivery
+from sinnixd.delivery import (
+    COMMAND_TIMEOUT_SECONDS,
+    PUSH_TIMEOUT_SECONDS,
+    DeliveryError,
+    GitHubDelivery,
+)
 from sinnixd.environment import build_environment
 from sinnixd.jobs import (
     DEFAULT_TIMEOUT_SECONDS,
     MAX_LOG_ARTIFACT_BYTES,
+    MEMORY_FULL_BLOCK_THRESHOLD,
     SYSTEMD_COMMAND_TIMEOUT_SECONDS,
     GenericJobs,
     GenericJobSpec,
@@ -57,7 +64,6 @@ from sinnixd.jobs import (
     JobRecordError,
     JobResultError,
     JobResultLimitError,
-    MEMORY_FULL_BLOCK_THRESHOLD,
     SystemdJobError,
     SystemdJobTimeout,
     UserSystemdJobs,
@@ -307,6 +313,36 @@ def test_canonical_client_redacts_unrecognized_json_rpc_errors(tmp_path: Path) -
 
     thread.join(timeout=1)
     assert not thread.is_alive()
+
+
+def test_a_refused_request_is_reported_to_the_daemon_log(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """The client is told only that the daemon is unavailable, by design.
+
+    That confidentiality is deliberate (the test above proves a server message
+    must not escape), so the daemon's own log is the operator's only account of
+    a refused request. Without it a refusal leaves nothing to act on anywhere.
+
+    Anti-vacuity: remove the stderr report from the connection handler and the
+    failing request appears in no reachable place at all.
+    """
+    service = SinnixdService(ProjectCatalog([]), jobs=generic_jobs(tmp_path))
+    socket_path = tmp_path / "sinnixd.sock"
+    stop_event = threading.Event()
+    server = UnixSocketServer(socket_path, service, connection_timeout_seconds=1.0)
+    thread = start_server(server, stop_event=stop_event)
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(5)
+            connection.connect(str(socket_path))
+            send_frame(connection, {"jsonrpc": "2.0", "id": "x", "method": "not-dispatch"})
+            receive_frame(connection)
+    finally:
+        stop_event.set()
+        thread.join(timeout=5)
+
+    assert "request failed:" in capfd.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -11319,3 +11355,55 @@ def test_worktree_removal_stops_the_type_daemon(tmp_path: Path) -> None:
 
     # A workspace without a provisioned venv must not raise.
     _stop_type_daemon(tmp_path / "absent")
+
+
+def _delivery_with_run(run: object) -> GitHubDelivery:
+    """A delivery bound only to its command runner.
+
+    `_delete_remote_branch` and `_command` touch neither the project catalog
+    nor the workspace store, so a delivery constructed without them exercises
+    the real command path.
+    """
+    return GitHubDelivery(
+        cast(Any, None), cast(Any, None), cast(Any, None), run=cast(Any, run)
+    )
+
+
+def test_a_push_gets_the_repository_gate_budget_not_the_github_one() -> None:
+    """A push runs whatever pre-push gate the repository installs.
+
+    Anti-vacuity: drop `timeout_seconds=PUSH_TIMEOUT_SECONDS` from the push
+    call site and the recorded budget is 60, so no repository whose gate runs
+    longer than a minute can ever be published.
+    """
+    budgets: list[float] = []
+
+    def fake_run(
+        argv: Sequence[str], **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
+        budgets.append(kwargs["timeout"])
+        returncode = 0 if "ls-remote" in argv else 0
+        return subprocess.CompletedProcess(list(argv), returncode, "", "")
+
+    _delivery_with_run(fake_run)._delete_remote_branch("/fixture", "lane")
+
+    assert budgets == [60, PUSH_TIMEOUT_SECONDS]
+    assert PUSH_TIMEOUT_SECONDS > COMMAND_TIMEOUT_SECONDS
+
+
+def test_a_timed_out_delivery_command_reports_the_command_and_its_budget() -> None:
+    """Publication is a route an operator cannot inspect after the fact.
+
+    Anti-vacuity: fold the timeout back into the generic handler and the
+    message no longer distinguishes a timeout from a non-zero exit with empty
+    stderr, which is how this failure hid.
+    """
+
+    def fake_run(argv: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(list(argv), kwargs["timeout"])
+
+    with pytest.raises(DeliveryError, match=r"timed out after 900s: git -C /fixture push"):
+        _delivery_with_run(fake_run)._command(
+            ["git", "-C", "/fixture", "push", "origin", "lane"],
+            timeout_seconds=PUSH_TIMEOUT_SECONDS,
+        )
