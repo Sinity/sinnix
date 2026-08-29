@@ -11,6 +11,8 @@ from sinnixd.jobs import (
     GenericJobs,
     GenericJobSpec,
     GenericJobStore,
+    MEMORY_FULL_BLOCK_THRESHOLD,
+    MEMORY_FULL_PREEMPT_THRESHOLD,
 )
 from sinnixd.projects import (
     ConflictPolicy,
@@ -104,7 +106,10 @@ def jobs(tmp_path: Path, systemd: FakeSystemd, pressure: float = 0.0) -> Generic
         systemd,
         GenericJobStore(tmp_path / "state"),
         wait_poll_seconds=0.001,
-        pressure_probe=lambda: {"memory_full_avg10": pressure},
+        pressure_probe=lambda: {
+            "memory_full_avg10": pressure,
+            "memory_full_avg60": pressure,
+        },
     )
 
 
@@ -309,6 +314,50 @@ def test_memory_psi_noise_does_not_block_admission(tmp_path: Path) -> None:
     assert len(systemd.started) == 1
 
 
+def test_memory_psi_block_requires_two_avg10_probes(tmp_path: Path) -> None:
+    pressure = {"memory_full_avg10": 0.0}
+    probes = iter(
+        (
+            {"memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD},
+            {"memory_full_avg10": 0.0},
+            {"memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD},
+            {"memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD},
+        )
+    )
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        pressure_probe=lambda: next(probes),
+    )
+
+    first = subject.start(agent_spec(("table:first",)))
+    second = subject.start(agent_spec(("table:second",)))
+
+    assert first["state"]["phase"] == "submitted"
+    assert second["state"]["phase"] == "queued"
+
+
+def test_memory_psi_avg60_blocks_on_the_first_probe(tmp_path: Path) -> None:
+    pressure = {
+        "memory_full_avg10": 0.0,
+        "memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD,
+    }
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        pressure_probe=lambda: pressure,
+    )
+
+    queued = subject.start(agent_spec(("table:jobs",)))
+
+    assert queued["state"]["phase"] == "queued"
+    assert systemd.started == []
+
+
 def test_io_pressure_allows_one_low_priority_job_then_blocks_concurrency(
     tmp_path: Path,
 ) -> None:
@@ -403,7 +452,10 @@ def test_unchanged_admission_block_does_not_rewrite_job_record(
         tmp_path / "project",
         (operation("heavy", pool="bulk", estimate_memory_bytes=1024),),
     )
-    pressure = {"memory_full_avg10": 1.0}
+    pressure = {
+        "memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD,
+        "memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD,
+    }
     subject = GenericJobs(
         FakeSystemd(),
         GenericJobStore(tmp_path / "state"),
@@ -430,7 +482,10 @@ def test_scheduler_admits_queued_work_after_pressure_clears(tmp_path: Path) -> N
         tmp_path / "project",
         (operation("heavy", pool="bulk", estimate_memory_bytes=1024),),
     )
-    pressure = {"memory_full_avg10": 1.0}
+    pressure = {
+        "memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD,
+        "memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD,
+    }
     admitted = threading.Event()
     systemd = FakeSystemd()
     subject = GenericJobs(
@@ -454,6 +509,7 @@ def test_scheduler_admits_queued_work_after_pressure_clears(tmp_path: Path) -> N
     scheduler.start()
     try:
         pressure["memory_full_avg10"] = 0.0
+        pressure["memory_full_avg60"] = 0.0
         assert admitted.wait(1)
     finally:
         stop_event.set()
@@ -525,7 +581,7 @@ def test_sustained_pressure_preempts_largest_managed_job_and_learns_peak(
     }
 
     pressure.update(
-        memory_full_avg10=6.0,
+        memory_full_avg10=MEMORY_FULL_PREEMPT_THRESHOLD,
         memory_available_bytes=4 * 1024**3,
         swap_free_bytes=4 * 1024**3,
         managed_memory_bytes=7 * 1024**3,
@@ -558,7 +614,7 @@ def test_transient_pressure_does_not_preempt_work(
     )
     subject.start(agent_spec(("table:first",)))
 
-    pressure["memory_full_avg10"] = 6.0
+    pressure["memory_full_avg10"] = MEMORY_FULL_PREEMPT_THRESHOLD
     assert subject._relieve_active_pressure(pressure) is None
     clock[0] = 1.0
     pressure["memory_full_avg10"] = 0.0
@@ -601,7 +657,10 @@ def test_wait_does_not_drive_admission_on_each_observation(
     def pressure_probe() -> dict[str, float]:
         nonlocal probes
         probes += 1
-        return {"memory_full_avg10": 1.0}
+        return {
+            "memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD,
+            "memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD,
+        }
 
     subject = GenericJobs(
         FakeSystemd(),
@@ -848,7 +907,7 @@ def test_dependencies_exclusive_keys_learned_peaks_and_pressure_gate(
         ),
     )
     systemd = FakeSystemd()
-    subject = jobs(tmp_path, systemd, pressure=1.0)
+    subject = jobs(tmp_path, systemd, pressure=MEMORY_FULL_BLOCK_THRESHOLD)
 
     heavy = subject.start_declared(
         project=adapter,
@@ -1185,7 +1244,7 @@ def test_swap_exhaustion_still_preempts_the_only_managed_job(
     subject, systemd, only, pressure, clock = _lone_managed_job(tmp_path, monkeypatch)
 
     pressure.update(
-        memory_full_avg10=6.0,
+        memory_full_avg10=MEMORY_FULL_PREEMPT_THRESHOLD,
         io_full_avg10=22.2,
         memory_available_bytes=1024**3,
         swap_free_bytes=1024**3,
@@ -1300,7 +1359,10 @@ def test_memory_stall_keeps_the_short_grace(
         "MemoryPeak": str(5 * 1024**3),
     }
 
-    pressure.update(memory_full_avg10=6.0, managed_memory_bytes=6 * 1024**3)
+    pressure.update(
+        memory_full_avg10=MEMORY_FULL_PREEMPT_THRESHOLD,
+        managed_memory_bytes=6 * 1024**3,
+    )
     assert subject._relieve_active_pressure(pressure) is None
     clock[0] = 2.1
     assert subject._relieve_active_pressure(pressure) == second["job_id"]
@@ -1488,3 +1550,38 @@ def test_pre_window_estimate_starts_a_new_history(tmp_path: Path) -> None:
     estimate = subject._admission_state()["estimates"]["agent:codex:model"]
     assert estimate["recent"] == [int(2 * 1024**3 * 5 / 4)]
     assert estimate["bytes"] == estimate["recent"][0]
+
+
+def test_terminal_estimate_observation_is_idempotent_and_survives_reset(
+    tmp_path: Path,
+) -> None:
+    systemd = FakeSystemd()
+    subject = jobs(tmp_path, systemd)
+    spec = GenericJobSpec(
+        **{
+            **agent_spec(("table:jobs",)).__dict__,
+            "estimate_key": "agent:codex:model",
+        }
+    )
+    started = subject.start(spec)
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "MemoryPeak": str(6 * 1024**3),
+    }
+
+    first = subject.get(started["job_id"])
+    first_estimate = subject._admission_state()["estimates"]["agent:codex:model"]
+    subject.get(started["job_id"])
+    repeated_estimate = subject._admission_state()["estimates"]["agent:codex:model"]
+    reset = subject.reset_admission_estimates("agent:codex:model")
+    after_reset = subject.get(started["job_id"])
+
+    assert first["state"]["phase"] == "succeeded"
+    assert first_estimate["recent"] == [int(6 * 1024**3 * 5 / 4)]
+    assert repeated_estimate == first_estimate
+    assert reset["cleared"] == ["agent:codex:model"]
+    assert "agent:codex:model" not in subject._admission_state()["estimates"]
+    assert after_reset["state"]["phase"] == "succeeded"

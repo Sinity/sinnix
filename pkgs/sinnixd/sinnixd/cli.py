@@ -400,6 +400,9 @@ def parser() -> argparse.ArgumentParser:
         "admission-reset", help="Forget learned memory estimates used by admission."
     )
     admission_reset.add_argument("estimate_key", nargs="?")
+    admission_reset.add_argument(
+        "--all", action="store_true", help="Forget every learned memory estimate."
+    )
     plan = subcommands.add_parser("plan")
     plan_subcommands = plan.add_subparsers(dest="plan_command", required=True)
     plan_submit = plan_subcommands.add_parser("submit")
@@ -1327,14 +1330,16 @@ def main() -> int:
             {"job_id": arguments.job_id, "max_bytes": arguments.max_bytes},
         )
     elif arguments.command == "job" and arguments.job_command == "admission-reset":
+        if arguments.estimate_key is None and not arguments.all:
+            parser().error("admission-reset without an estimate key requires --all")
+        if arguments.estimate_key is not None and arguments.all:
+            parser().error("admission-reset --all cannot name an estimate key")
         request = _request(
             "job.admission.reset",
             "systemd-jobs",
-            (
-                {"estimate_key": arguments.estimate_key}
-                if arguments.estimate_key is not None
-                else {}
-            ),
+            {"estimate_key": arguments.estimate_key}
+            if arguments.estimate_key is not None
+            else {"all": True},
         )
     elif arguments.command == "job":
         request = _request("job.cancel", "systemd-jobs", {"job_id": arguments.job_id})
