@@ -98,6 +98,11 @@ mkServiceModule {
       default = 10;
       description = "Minimum spacing used by automatic refill dispatches.";
     };
+    verifyAllFailureThreshold = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 3;
+      description = "Consecutive verify_all failures required for a corpus alert.";
+    };
   };
   configFn =
     { cfg, ... }:
@@ -136,6 +141,7 @@ mkServiceModule {
             // {
               Type = "simple";
               ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --board ${lib.escapeShellArg cfg.boardPath} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --keeper-backoff-seconds ${toString cfg.keeperBackoffSeconds} --pr-age-threshold-seconds ${toString cfg.prAgeThresholdSeconds} --refill-width-target ${toString cfg.refillWidthTarget} --refill-spacing-seconds ${toString cfg.refillSpacingSeconds} ${projectRootArgs}";
+              ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --board ${lib.escapeShellArg cfg.boardPath} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --keeper-backoff-seconds ${toString cfg.keeperBackoffSeconds} --refill-width-target ${toString cfg.refillWidthTarget} --refill-spacing-seconds ${toString cfg.refillSpacingSeconds} --verify-all-failure-threshold ${toString cfg.verifyAllFailureThreshold} ${projectRootArgs}";
               Restart = "on-failure";
               RestartSec = "5s";
               NoNewPrivileges = true;

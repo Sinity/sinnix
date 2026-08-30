@@ -386,6 +386,79 @@ def test_keeper_prune_keeps_records_of_dispatched_work(tmp_path: Path) -> None:
     assert "stale-action" not in reactor._board.keeper
 
 
+def test_verify_all_failure_streak_alerts_once_and_preserves_typed_reasons(
+    tmp_path: Path,
+) -> None:
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    phases = ("failed", "cancelled", "timed_out")
+    for index, phase in enumerate(phases):
+        state: dict[str, object] = {
+            "phase": phase,
+            "terminal": True,
+            "observed_at": f"2026-08-2{index + 7}T00:00:00+00:00",
+        }
+        if phase == "cancelled":
+            state["cancellation"] = {
+                "reason": "operator-request",
+                "invocation_id": "invocation-2",
+            }
+        (jobs / f"verify-{index}.json").write_text(
+            json.dumps(
+                {
+                    "job_id": f"verify-{index}",
+                    "created_at": f"2026-08-2{index + 7}T00:00:00+00:00",
+                    "spec": {
+                        "kind": "declared-operation",
+                        "project_id": "polylogue",
+                        "operation": "verify_all",
+                    },
+                    "state": state,
+                }
+            )
+        )
+    spool = tmp_path / "events.jsonl"
+    board_path = tmp_path / "campaign-board.json"
+    reactor = CampaignReactor(
+        spool,
+        board_path,
+        tmp_path / "reactor",
+        jobs_state_dir=jobs,
+    )
+
+    reactor.run_once()
+    events = [json.loads(line) for line in spool.read_text().splitlines()]
+    alerts = [event for event in events if event.get("kind") == "corpus-health-alert"]
+    assert len(alerts) == 1
+    assert alerts[0]["consecutive_failures"] == 3
+    assert [item["phase"] for item in alerts[0]["failures"]] == list(phases)
+    assert alerts[0]["failures"][1]["cancellation"]["reason"] == "operator-request"
+    board = CampaignBoard.load(board_path)
+    assert board.corpus_health["status"] == "alerting"
+    assert board.corpus_health["alert_event_id"] == alerts[0]["event_id"]
+
+    reactor.run_once()
+    events = [json.loads(line) for line in spool.read_text().splitlines()]
+    assert len([event for event in events if event.get("kind") == "corpus-health-alert"]) == 1
+
+    (jobs / "verify-success.json").write_text(
+        json.dumps(
+            {
+                "job_id": "verify-success",
+                "created_at": "2026-08-30T00:00:00+00:00",
+                "spec": {
+                    "kind": "declared-operation",
+                    "project_id": "polylogue",
+                    "operation": "verify_all",
+                },
+                "state": {"phase": "succeeded", "terminal": True},
+            }
+        )
+    )
+    reactor.run_once()
+    assert CampaignBoard.load(board_path).corpus_health["status"] == "healthy"
+
+
 def test_completed_review_dispatches_one_integrator(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
