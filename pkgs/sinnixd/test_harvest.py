@@ -166,6 +166,61 @@ def test_cancelled_harvest_restores_rebased_workspace(
     assert not (root / ".git" / "rebase-merge").exists()
 
 
+def test_authorize_returns_after_pr_creation_and_emits_merge_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _remote = _repository(tmp_path)
+    state = tmp_path / "state"
+    context = _context(root, state, "handoff-job")
+    receipt = harvest.compile_packet(
+        context, bead_id="sinnix-handoff", close_reason="merged by reactor"
+    )["receipt_ref"]
+    monkeypatch.setattr(harvest, "LOCK_PATH", tmp_path / "harvest.lock")
+    viewed = False
+
+    def run(argv, **kwargs):
+        nonlocal viewed
+        if argv[:2] == ["devtools", "verify"] and len(argv) == 2:
+            return subprocess.CompletedProcess(
+                argv, 0, "affected verification passed", ""
+            )
+        if argv[:3] == ["devtools", "verify", "--quick"]:
+            return subprocess.CompletedProcess(argv, 0, "quick gate passed", "")
+        if argv[:3] == ["gh", "pr", "create"]:
+            return subprocess.CompletedProcess(
+                argv, 0, "https://github.test/pull/43\n", ""
+            )
+        if argv[:3] == ["gh", "pr", "merge"]:
+            return subprocess.CompletedProcess(argv, 1, "", "auto-merge unavailable")
+        if argv[:3] == ["gh", "pr", "view"]:
+            viewed = True
+        return subprocess.run(argv, **kwargs)
+
+    result = harvest.authorize(
+        context,
+        receipt_ref=receipt,
+        title="fix: publish the harvested lane branch",
+        body="Reviewed packet.",
+        run=run,
+    )
+
+    assert result["merge_state"] == "NEEDS-MERGE"
+    assert viewed is False
+    events = [
+        json.loads(row) for row in (state / "events.jsonl").read_text().splitlines()
+    ]
+    handoff = next(event for event in events if event["kind"] == "needs-merge")
+    assert handoff["pr"] == "43"
+    packet_id = receipt.rsplit("/", 1)[-1]
+    assert handoff["decision_receipt"] == {
+        "receipt_id": json.loads(
+            (state / "harvest-packets" / f"{packet_id}.json").read_text()
+        )["packet_id"],
+        "bead_id": "sinnix-handoff",
+        "reason": "merged by reactor",
+    }
+
+
 def test_authorize_watcher_closes_bead_from_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
