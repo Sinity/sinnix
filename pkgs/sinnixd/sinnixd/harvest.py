@@ -15,6 +15,7 @@ import json
 import os
 import pathlib
 import re
+import signal
 import subprocess
 import time
 from dataclasses import dataclass
@@ -739,6 +740,35 @@ def _lock(path: Path, timeout: float = 900):
             time.sleep(0.1)
 
 
+def _restore_pre_harvest_state(
+    worktree: Path,
+    run: Run,
+    *,
+    branch: str,
+    head: str,
+) -> None:
+    """Restore the checkout after a harvest mutation did not publish."""
+    _command(run, ["git", "rebase", "--abort"], cwd=worktree)
+    if branch:
+        _require_success(
+            _command(run, ["git", "switch", "--detach", head], cwd=worktree),
+            "detach before restoring harvest branch",
+        )
+        _require_success(
+            _command(run, ["git", "branch", "--force", branch, head], cwd=worktree),
+            "restore harvest branch ref",
+        )
+        _require_success(
+            _command(run, ["git", "switch", branch], cwd=worktree),
+            "restore harvest branch checkout",
+        )
+    else:
+        _require_success(
+            _command(run, ["git", "reset", "--hard", head], cwd=worktree),
+            "restore detached harvest checkout",
+        )
+
+
 def _mechanical_baseline_rebase(worktree: Path, output: str) -> bool:
     """Apply the one pure baseline displacement allowed by the reference flow."""
     start = output.find('"new_matches"')
@@ -1006,7 +1036,25 @@ def authorize(
         )
         return result
 
+    pre_harvest_head = current_head
+    pre_harvest_branch = _git(run, context.worktree, "branch", "--show-current")
     lock = _lock(LOCK_PATH)
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+    previous_sigint = signal.getsignal(signal.SIGINT)
+
+    def cancel(_signum: int, _frame: Any) -> None:
+        raise HarvestError("harvest cancelled")
+
+    signal_handlers_installed = False
+    try:
+        signal.signal(signal.SIGTERM, cancel)
+        signal.signal(signal.SIGINT, cancel)
+        signal_handlers_installed = True
+    except ValueError:
+        # Tests and library callers may invoke authorize outside the main
+        # thread. Exception cleanup still restores state in that case.
+        pass
+    published = False
     try:
         _stale_lock_hygiene(context.worktree)
         _require_success(
@@ -1165,6 +1213,7 @@ def authorize(
             "bead_id": bead_id,
             "affected_tests": tests,
         }
+        published = True
         if tests != "passed":
             result["affected_tests_output"] = _bounded_text(tests_output, 8_000)
         _append_event(
@@ -1172,6 +1221,16 @@ def authorize(
         )
         return result
     finally:
+        if signal_handlers_installed:
+            signal.signal(signal.SIGTERM, previous_sigterm)
+            signal.signal(signal.SIGINT, previous_sigint)
+        if not published:
+            _restore_pre_harvest_state(
+                context.worktree,
+                run,
+                branch=pre_harvest_branch,
+                head=pre_harvest_head,
+            )
         fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
         lock.close()
 

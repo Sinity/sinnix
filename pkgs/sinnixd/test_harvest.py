@@ -125,6 +125,47 @@ def test_authorize_requires_receipt_and_runs_publish_pipeline(
     )
 
 
+def test_cancelled_harvest_restores_rebased_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancellation after rebase leaves the managed checkout unchanged."""
+    root, _remote = _repository(tmp_path)
+    state = tmp_path / "state"
+    context = _context(root, state, "cancel-job")
+    receipt = harvest.compile_packet(context)["receipt_ref"]
+
+    assert _run_git(root, "switch", "master").returncode == 0
+    (root / "polylogue" / "base.py").write_text("BASE = 2\n")
+    _run_git(root, "add", ".")
+    assert _run_git(root, "commit", "--quiet", "-m", "advance base").returncode == 0
+    assert _run_git(root, "push", "--quiet", "origin", "master").returncode == 0
+    assert _run_git(root, "switch", "feature/fixture").returncode == 0
+    original_head = _run_git(root, "rev-parse", "HEAD").stdout.strip()
+    monkeypatch.setattr(harvest, "LOCK_PATH", tmp_path / "harvest.lock")
+
+    def run(argv, **kwargs):
+        if argv[:2] == ["devtools", "verify"] and len(argv) == 2:
+            return subprocess.CompletedProcess(argv, 0, "affected verification passed", "")
+        if argv[:3] == ["devtools", "verify", "--quick"]:
+            raise KeyboardInterrupt
+        return subprocess.run(argv, **kwargs)
+
+    with pytest.raises(KeyboardInterrupt):
+        harvest.authorize(
+            context,
+            receipt_ref=receipt,
+            title="fix: restore cancelled harvest workspaces",
+            body="Reviewed packet.",
+            run=run,
+            watch=False,
+        )
+
+    assert _run_git(root, "rev-parse", "HEAD").stdout.strip() == original_head
+    assert _run_git(root, "branch", "--show-current").stdout.strip() == "feature/fixture"
+    assert _run_git(root, "status", "--porcelain", "--untracked-files=all").stdout == ""
+    assert not (root / ".git" / "rebase-merge").exists()
+
+
 def test_authorize_watcher_closes_bead_from_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
