@@ -279,6 +279,13 @@ def parser() -> argparse.ArgumentParser:
     workspace_finish_integrated.add_argument("--partial-note")
     lane = subcommands.add_parser("lane")
     lane_subcommands = lane.add_subparsers(dest="lane_command", required=True)
+    lane_publish = lane_subcommands.add_parser(
+        "publish",
+        help="Mint a receipt and authorize it in one pass, deriving identity from records.",
+    )
+    lane_publish.add_argument("workspace")
+    lane_publish.add_argument("--close", action="store_true")
+    lane_publish.add_argument("--timeout-seconds", type=int, default=7200)
     for name in ("status", "stuck", "gc"):
         lane_command = lane_subcommands.add_parser(name)
         lane_command.add_argument("--project", required=True)
@@ -937,6 +944,77 @@ def main() -> int:
             {"saga_id": arguments.saga_id},
             "operator",
         )
+    elif arguments.command == "lane" and arguments.lane_command == "publish":
+        list_request = _request("workspace.list", "git-workspaces", {})
+        try:
+            listing = call(arguments.socket, list_request)
+        except OSError:
+            listing = _unavailable_response(list_request)
+        workspaces = (
+            listing.get("payload", {}).get("value", {}).get("workspaces", [])
+            if isinstance(listing, dict)
+            else []
+        )
+        record = next(
+            (
+                item
+                for item in workspaces
+                if arguments.workspace
+                in {item.get("name"), item.get("workspace_id")}
+            ),
+            None,
+        )
+        if record is None:
+            print(json.dumps({"ok": False, "error": {"code": "INVALID_ARGUMENT", "message": f"unknown workspace: {arguments.workspace}"}}, indent=1))
+            return 1
+        start_request = _request(
+            "job.start",
+            "systemd-jobs",
+            {
+                "project_id": record["project_id"],
+                "operation": "harvest",
+                "workspace_id": record["name"],
+                "parameters": {
+                    "publish": True,
+                    **({"close": True} if arguments.close else {}),
+                },
+            },
+        )
+        try:
+            started = call(arguments.socket, start_request)
+        except OSError:
+            started = _unavailable_response(start_request)
+        job_id = (
+            started.get("payload", {}).get("value", {}).get("job_id")
+            if isinstance(started, dict)
+            else None
+        )
+        if not isinstance(job_id, str):
+            print(json.dumps(started, indent=1, sort_keys=True))
+            return 1
+        wait_request = _request(
+            "job.wait",
+            "systemd-jobs",
+            {"job_id": job_id, "timeout_seconds": arguments.timeout_seconds},
+        )
+        try:
+            call(arguments.socket, wait_request)
+        except OSError:
+            pass
+        result_request = _request("job.result", "systemd-jobs", {"job_id": job_id})
+        try:
+            response = call(arguments.socket, result_request)
+        except OSError:
+            response = _unavailable_response(result_request)
+        print(json.dumps(response, indent=1, sort_keys=True))
+        payload_value = (
+            response.get("payload", {}).get("value", {})
+            if isinstance(response, dict)
+            else {}
+        )
+        inner = payload_value.get("value") if isinstance(payload_value, dict) else None
+        outcome = inner.get("outcome") if isinstance(inner, dict) else None
+        return 0 if outcome in {"HARVEST_OK", "HARVEST_EMPTY"} else 1
     elif arguments.command == "lane":
         from .lanes import derive_units, disposable, refresh_base, stuck
 

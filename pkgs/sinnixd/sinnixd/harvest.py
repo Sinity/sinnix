@@ -131,6 +131,55 @@ def _digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def _repo_slug(run: Run, worktree: Path) -> str:
+    """Derive the GitHub owner/name slug from the worktree's origin remote."""
+    url = _git(run, worktree, "remote", "get-url", "origin").strip()
+    match = re.search(r"github\.com[:/]+([^/]+)/([^/\s]+?)(?:\.git)?/?$", url)
+    if match is not None:
+        return f"{match.group(1)}/{match.group(2)}"
+    # A filesystem remote (fixtures, mirrors) has no hosted slug; label it
+    # honestly rather than refusing the whole publication.
+    return f"local/{Path(url).name or 'origin'}"
+
+
+def _latest_lane_job(context: HarvestContext) -> tuple[str | None, str | None]:
+    """Find the newest succeeded attested-agent job for this checkout.
+
+    Returns (job_id, bead_id). Publication needs the lane identity for the
+    trailer and the bead for closure; requiring the coordinator to restate
+    either repeats what the job records already hold.
+    """
+    best: tuple[str, str, str | None] | None = None
+    records_root = context.state_root / "jobs"
+    try:
+        candidates = list(records_root.glob("*.json"))
+    except OSError:
+        return None, None
+    for path in candidates:
+        try:
+            record = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        spec = record.get("spec") or {}
+        checkout = spec.get("checkout") or {}
+        state = record.get("state") or {}
+        if (
+            spec.get("kind") != "attested-agent"
+            or checkout.get("checkout_id") != context.workspace_id
+            or state.get("phase") != "succeeded"
+        ):
+            continue
+        created = str(record.get("created_at") or "")
+        contract = spec.get("contract") or {}
+        binding = contract.get("bead_binding") or {}
+        bead = binding.get("bead_id") if isinstance(binding, dict) else None
+        if best is None or created > best[0]:
+            best = (created, str(record.get("job_id")), bead if isinstance(bead, str) else None)
+    if best is None:
+        return None, None
+    return best[1], best[2]
+
+
 def _read_text(path: Path, description: str) -> str:
     try:
         return path.read_text()
@@ -984,51 +1033,6 @@ def _watch_and_close(
     return state or "TIMEOUT"
 
 
-def _pull_request_tracking(
-    run: Run, *, pr: str, cwd: Path, fallback_opened_at: str
-) -> tuple[str, list[str], bool]:
-    """Read bounded PR metadata used by the campaign reactor's keeper."""
-    try:
-        result = _command(
-            run,
-            [
-                "gh",
-                "pr",
-                "view",
-                pr,
-                "-R",
-                "Sinity/polylogue",
-                "--json",
-                "createdAt,statusCheckRollup,autoMergeRequest",
-            ],
-            cwd=cwd,
-        )
-    except HarvestError:
-        return fallback_opened_at, [], False
-    if result.returncode != 0:
-        return fallback_opened_at, [], False
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return fallback_opened_at, [], False
-    if not isinstance(payload, Mapping):
-        return fallback_opened_at, [], False
-    opened_at = payload.get("createdAt")
-    if not isinstance(opened_at, str) or not opened_at:
-        opened_at = fallback_opened_at
-    checks: list[str] = []
-    raw_checks = payload.get("statusCheckRollup")
-    if isinstance(raw_checks, list):
-        for check in raw_checks[:32]:
-            if not isinstance(check, Mapping):
-                continue
-            name = check.get("name") or check.get("context") or "check"
-            state = check.get("conclusion") or check.get("state") or "UNKNOWN"
-            if isinstance(name, str) and isinstance(state, str):
-                checks.append(f"{name}={state}")
-    return opened_at, checks, isinstance(payload.get("autoMergeRequest"), Mapping)
-
-
 def authorize(
     context: HarvestContext,
     *,
@@ -1070,6 +1074,20 @@ def authorize(
     # Execute tests before contending for the shared repository: this is the
     # only step in the chain that runs them, and it needs no lock.
     tests, tests_output = _affected_tests(context, run)
+    if tests == "unavailable":
+        # polylogue lanes have shipped static-only green for days because this
+        # classification stayed inside the job result. The reactor and the
+        # coordinator see it as a spool event from here on.
+        _append_event(
+            context.spool,
+            {
+                "kind": "verification-unavailable",
+                "project": context.project_id,
+                "workspace": context.workspace_id,
+                "detail": _bounded_text(tests_output, 4_000),
+                "job_id": context.job_id,
+            },
+        )
     if tests == "failed":
         result = {
             "outcome": GATE_RED,
@@ -1081,6 +1099,7 @@ def authorize(
         )
         return result
 
+    repo = _repo_slug(run, context.worktree)
     pre_harvest_head = current_head
     pre_harvest_branch = _git(run, context.worktree, "branch", "--show-current")
     lock = _lock(LOCK_PATH)
@@ -1251,7 +1270,7 @@ def authorize(
             {
                 "kind": "needs-merge",
                 "project": context.project_id,
-                "repo": "Sinity/polylogue",
+                "repo": repo,
                 "pr": pr,
                 "state": merge_state,
                 "opened_at": opened_at,
@@ -1272,7 +1291,7 @@ def authorize(
         state = (
             _watch_and_close(
                 context,
-                repo="Sinity/polylogue",
+                repo=repo,
                 pr=pr,
                 bead_id=bead_id,
                 close_reason=close_reason,
@@ -1314,6 +1333,47 @@ def authorize(
         lock.close()
 
 
+def publish(
+    context: HarvestContext,
+    *,
+    close: bool,
+    run: Run = subprocess.run,
+) -> dict[str, Any]:
+    """Mint a fresh receipt and authorize it in one pass.
+
+    The invocation itself is the review decision: the coordinator (or the
+    reactor's clean-scan route) has decided to publish, so requiring a second
+    job to restate receipt_ref, lane_job_id, bead_id, and publication text
+    only re-keys facts the records already hold. Scanner flags are still
+    computed and recorded on the receipt for audit.
+    """
+    lane_job_id, bead_id = _latest_lane_job(context)
+    packet = compile_packet(
+        context,
+        lane_job_id=lane_job_id,
+        bead_id=bead_id,
+        run=run,
+    )
+    if packet.get("outcome") != HARVEST_OK:
+        return packet
+    title = _lane_artifact(context, "title") or ""
+    body = _lane_artifact(context, "body.md") or ""
+    close_reason = _lane_artifact(context, "close-reason.md") if close else None
+    if close and not close_reason:
+        raise HarvestError(
+            "publish --close requires .lane/close-reason.md in the worktree"
+        )
+    return authorize(
+        context,
+        receipt_ref=packet["packet"]["packet_id"],
+        title=title,
+        body=body,
+        bead_id=bead_id,
+        close_reason=close_reason,
+        run=run,
+    )
+
+
 def _context_from_environment(
     worktree: Path, *, base: str, spool: Path
 ) -> HarvestContext:
@@ -1341,6 +1401,8 @@ def _context_from_environment(
 def main(arguments: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sinnixd-harvest")
     parser.add_argument("--authorize", action="store_true")
+    parser.add_argument("--publish", action="store_true")
+    parser.add_argument("--close", action="store_true")
     parser.add_argument("--receipt-ref")
     parser.add_argument("--lane-job-id")
     parser.add_argument("--title", default="")
@@ -1358,7 +1420,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
         context = _context_from_environment(
             Path.cwd(), base=parsed.base, spool=parsed.event_spool
         )
-        if not parsed.authorize:
+        if parsed.publish:
+            result = publish(context, close=parsed.close)
+        elif not parsed.authorize:
             result = compile_packet(
                 context,
                 lane_job_id=parsed.lane_job_id,
