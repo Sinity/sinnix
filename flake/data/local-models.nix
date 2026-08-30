@@ -110,6 +110,65 @@ let
       '';
     }
     {
+      ollamaTag = "qwen3.8:27b";
+      litellmName = "local-qwen38";
+      role = "general-flagship-offload";
+      expectedBytes = null;
+      notes = ''
+        Qwen3.8 27B (2026-08 release, 28B dense, hybrid attention, vision +
+        multi-token prediction, 262K native ctx). Official Q4_K_M build,
+        18 GB — partial RAM offload like qwen3-coder:30b. Hybrid attention
+        caches only 16 of 64 layers (~64 KB/token), so long contexts stay
+        affordable despite the dense parameter count.
+      '';
+    }
+    {
+      ollamaTag = "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-IQ2_S";
+      litellmName = "local-qwen38-vram";
+      role = "general-flagship-vram";
+      expectedBytes = null;
+      notes = ''
+        Qwen3.8 27B Unsloth UD-IQ2_S (8.37 GB per the HF tree API) — the
+        quant chosen to sit fully resident in the 3080's 10 GB with KV
+        headroom. hf.co GGUF import does not attach the mmproj, so this
+        tier is text-only; use local-qwen38 or the VLM tiers for images.
+        Confirm full residency with `ollama ps` (100% GPU); drop to
+        UD-IQ2_XXS (7.27 GB) if it partially offloads.
+      '';
+    }
+    {
+      ollamaTag = "huihui_ai/qwen3-vl-abliterated:4b";
+      litellmName = "local-qwen3-vl-abliterated-4b";
+      role = "uncensored-vlm-bulk";
+      expectedBytes = null;
+      notes = ''
+        Qwen3-VL abliterated 4B (3.3 GB, dense) — bulk frame-captioning
+        tier for library-scale passes where per-image cost dominates.
+      '';
+    }
+    {
+      ollamaTag = "huihui_ai/qwen3-vl-abliterated:8b";
+      litellmName = "local-qwen3-vl-abliterated-8b";
+      role = "uncensored-vlm";
+      expectedBytes = null;
+      notes = ''
+        Qwen3-VL abliterated 8B (6.1 GB, dense, fully VRAM-resident) — the
+        default uncensored vision lane. Supplants stashbox's private
+        llama.cpp/koboldcpp endpoint on :8899 and the JoyCaption GGUFs;
+        stashbox consumes this through LiteLLM (bead stashbox-1mx).
+      '';
+    }
+    {
+      ollamaTag = "huihui_ai/qwen3-vl-abliterated:30b-a3b";
+      litellmName = "local-qwen3-vl-abliterated-30b";
+      role = "uncensored-vlm-moe";
+      expectedBytes = null;
+      notes = ''
+        Qwen3-VL abliterated 30B-A3B (20 GB, MoE, ~3B active) — quality
+        tier via partial RAM offload, same fit story as qwen3-coder:30b.
+      '';
+    }
+    {
       ollamaTag = null;
       litellmName = "local-glimmer";
       role = "general-reasoning-hybrid-dense";
@@ -182,10 +241,15 @@ let
     "local-coder-moe"
     "local-reasoner"
     "local-thinker"
+    "local-qwen38"
+    "local-qwen38-vram"
     "local-glimmer"
     "local-reader"
     "local-multimodal-moe"
     "local-gemma4-26b-abliterated"
+    "local-qwen3-vl-abliterated-4b"
+    "local-qwen3-vl-abliterated-8b"
+    "local-qwen3-vl-abliterated-30b"
   ];
 
   byLitellmName = lib.listToAttrs (
