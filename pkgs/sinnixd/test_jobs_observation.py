@@ -373,6 +373,54 @@ def test_natural_success_requires_a_loaded_systemd_result(
     assert terminal["state"]["terminal"]
 
 
+def test_list_reconciles_queued_job_with_disposed_checkout(
+    tmp_path: Path,
+) -> None:
+    """A disposed checkout is one terminal row, not a failed job-list query."""
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    missing_checkout = {
+        "project_id": "fixture",
+        "project_path": str(tmp_path / "project"),
+        "checkout_id": "worktree-disposed",
+        "path": str(tmp_path / "disposed"),
+        "git_common_dir": str(tmp_path / "project" / ".git"),
+        "head": "a" * 40,
+    }
+    record = jobs.store.create(
+        GenericJobSpec(
+            kind="declared-operation",
+            command=("fixture",),
+            working_directory=missing_checkout["path"],
+            environment={},
+            project_id="fixture",
+            operation="check",
+            parameter_digest="0" * 64,
+            checkout=missing_checkout,
+        ),
+        "00000000-0000-4000-8000-000000000001",
+    )
+    jobs.store.write_declared_launch(record.job_id, record.spec.command, {})
+    jobs.store.save(
+        jobs._with_state(
+            record,
+            {"phase": "queued", "terminal": False, "observed_at": "now"},
+        )
+    )
+
+    listed = jobs.list(project_id="fixture")
+
+    assert len(listed["jobs"]) == 1
+    job = listed["jobs"][0]
+    assert job["state"]["phase"] == "checkout-missing"
+    assert job["state"]["terminal"]
+    assert job["checkout_status"] == {
+        "state": "missing",
+        "path": missing_checkout["path"],
+    }
+    assert jobs.store.load(record.job_id).state["phase"] == "checkout-missing"
+
+
 @pytest.mark.parametrize(
     ("content", "completed", "expected"),
     [
