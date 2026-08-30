@@ -128,18 +128,6 @@ def _valid_repo_path(value: str) -> bool:
     return suffix in _PATH_EXTENSIONS
 
 
-def _module_from_path(path: str) -> str | None:
-    parts = path.split("/")[:-1]
-    if not parts:
-        return None
-    # Migration slots have their own schema namespace and should not also
-    # create an unrelated module:migrations lock.
-    if parts[-1].lower() in {"migration", "migrations"}:
-        return None
-    module_parts = [part for part in parts if re.fullmatch(r"[A-Za-z0-9_-]+", part)]
-    return ".".join(module_parts).lower() or None
-
-
 def _quoted_spans(text: str) -> tuple[tuple[int, int], ...]:
     return tuple(match.span() for match in _QUOTED_IDENTIFIER.finditer(text))
 
@@ -169,9 +157,6 @@ def extract_references(text: str) -> PacketReferences:
         migration = _MIGRATION_FILE.search(path)
         if migration is not None:
             migrations.add(migration.group("slot"))
-        module = _module_from_path(path)
-        if module is not None and migration is None:
-            modules.add(module)
 
     for match in _DOTTED_MODULE.finditer(text):
         module = match.group("module")
@@ -213,15 +198,18 @@ def extract_references(text: str) -> PacketReferences:
 
 
 def infer_conflict_keys(value: str | PacketReferences) -> tuple[str, ...]:
-    """Lower extracted references into stable conflict-key namespaces."""
+    """Lower extracted references into stable, specific conflict keys."""
     references = extract_references(value) if isinstance(value, str) else value
-    modules = {
-        ".".join(parts[:depth])
-        for module in references.modules
-        for parts in [module.split(".")]
-        for depth in range(2, len(parts) + 1)
+    # A path identifies the file that can be changed. Inferring its containing
+    # directory as a module serializes unrelated files in shared test trees.
+    keys = {
+        f"file:{path}"
+        for path in references.paths
+        if not _MIGRATION_FILE.search(path)
     }
-    keys = {f"module:{module}" for module in modules}
+    # A dotted reference already names the leaf module. Ancestor prefixes are
+    # too broad: ``tests.unit`` should not lock every test in that directory.
+    keys.update(f"module:{module}" for module in references.modules)
     keys.update(f"schema:{slot}" for slot in references.migrations)
     keys.update(f"table:{table}" for table in references.tables)
     return tuple(sorted(keys))
