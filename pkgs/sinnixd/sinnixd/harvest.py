@@ -310,6 +310,48 @@ def _lane_trailer(
     return sorted(candidates, key=lambda item: item[0])[-1][1]
 
 
+def _lane_write_scope(
+    context: HarvestContext, *, lane_job_id: str | None
+) -> tuple[str, ...]:
+    """Read the declared scope from the successful lane packet binding."""
+    records_root = context.state_root / "jobs"
+    paths = (
+        [records_root / f"{lane_job_id}.json"]
+        if lane_job_id
+        else sorted(records_root.glob("*.json"))
+    )
+    candidates: list[tuple[str, tuple[str, ...]]] = []
+    for record_path in paths:
+        try:
+            record = json.loads(record_path.read_text())
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(record, Mapping):
+            continue
+        spec = record.get("spec")
+        state = record.get("state")
+        checkout = spec.get("checkout") if isinstance(spec, Mapping) else None
+        contract = spec.get("contract") if isinstance(spec, Mapping) else None
+        binding = contract.get("bead_binding") if isinstance(contract, Mapping) else None
+        scope = binding.get("write_scope") if isinstance(binding, Mapping) else None
+        if (
+            not isinstance(spec, Mapping)
+            or spec.get("kind") != "attested-agent"
+            or not isinstance(checkout, Mapping)
+            or checkout.get("checkout_id") != context.workspace_id
+            or not isinstance(state, Mapping)
+            or state.get("phase") != "succeeded"
+            or not isinstance(scope, list)
+            or not scope
+            or not all(isinstance(path, str) and path for path in scope)
+        ):
+            continue
+        candidates.append(
+            (str(record.get("created_at", "")), tuple(scope))
+        )
+    return sorted(candidates, key=lambda item: item[0])[-1][1] if candidates else ()
+
+
 def _verification_evidence(worktree: Path, head: str) -> dict[str, Any]:
     """Read what the lane's own verification actually did.
 
@@ -361,7 +403,12 @@ def _verification_evidence(worktree: Path, head: str) -> dict[str, Any]:
     }
 
 
-def _redflags(diff: str) -> tuple[int, list[str]]:
+def _redflags(
+    diff: str,
+    write_scope: Sequence[str] = (),
+    *,
+    changed_paths: Sequence[str] | None = None,
+) -> tuple[int, list[str]]:
     """Port the deterministic coordinator red-flag scanner."""
     flags: list[str] = []
 
@@ -439,6 +486,30 @@ def _redflags(diff: str) -> tuple[int, list[str]]:
         flag("durable migration touched")
     if re.search(r"^diff --git a/.*train\.json", diff, re.MULTILINE):
         flag("train sidecar touched")
+    if write_scope:
+        paths = (
+            tuple(changed_paths)
+            if changed_paths is not None
+            else tuple(
+                line.split(" b/", 1)[-1]
+                for line in diff.splitlines()
+                if line.startswith("diff --git ") and " b/" in line
+            )
+        )
+        outside_scope = sorted(
+            path
+            for path in paths
+            if not any(
+                path == entry
+                or entry.endswith("/") and path.startswith(entry)
+                for entry in write_scope
+            )
+        )
+        if outside_scope:
+            flag(
+                "changed paths outside declared write scope: "
+                + ", ".join(outside_scope[:20])
+            )
     lines = sum(1 for line in diff.splitlines() if re.match(r"^[+-][^+-]", line))
     if lines > 1500:
         flag("very large diff")
@@ -526,14 +597,17 @@ def compile_packet(
         return outcome
     if len(diff.encode()) > MAX_DIFF_BYTES:
         raise HarvestError("review diff exceeds its bounded artifact limit")
-    diffstat = _git(run, context.worktree, "diff", "--stat", f"{context.base}...HEAD")
-    redflag_status, redflags = _redflags(diff)
     changed_paths = tuple(
         path
         for path in _git(
             run, context.worktree, "diff", "--name-only", f"{context.base}...HEAD"
         ).splitlines()
         if path
+    )
+    write_scope = _lane_write_scope(context, lane_job_id=lane_job_id)
+    diffstat = _git(run, context.worktree, "diff", "--stat", f"{context.base}...HEAD")
+    redflag_status, redflags = _redflags(
+        diff, write_scope=write_scope, changed_paths=changed_paths
     )
     review_route = route_review(
         changed_paths=changed_paths,
@@ -564,6 +638,7 @@ def compile_packet(
         "head": head,
         "diffstat": diffstat,
         "lane_trailer": trailer,
+        "write_scope": list(write_scope),
         "verification": _verification_evidence(context.worktree, head),
         "redflags": redflags,
         "redflag_status": redflag_status,
