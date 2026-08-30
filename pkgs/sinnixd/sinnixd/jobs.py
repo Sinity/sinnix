@@ -59,7 +59,7 @@ MAX_JOB_LIST_CURSOR_BYTES = 512
 SYSTEMD_ERROR_CODE = "systemd-job-error"
 SCHEDULE_STATE_SCHEMA_VERSION = 1
 SCHEDULE_UNIT_PREFIX = "sinnixd-schedule-"
-ADMISSION_SCHEMA_VERSION = 1
+ADMISSION_SCHEMA_VERSION = 2
 CAPACITY_SCHEMA_VERSION = 1
 CAPACITY_RETRY_DELAYS_SECONDS = (5, 30, 120)
 MAX_ADMISSION_CACHE_ENTRIES = 128
@@ -2694,6 +2694,7 @@ class GenericJobs:
                 "active": {},
                 "cache": {},
                 "estimates": {},
+                "claims": {},
             }
         try:
             value = json.loads(path.read_text())
@@ -2705,16 +2706,18 @@ class GenericJobs:
                 "active": {},
                 "cache": {},
                 "estimates": {},
+                "claims": {},
             }
-        if (
-            not isinstance(value, Mapping)
-            or value.get("schema_version") != ADMISSION_SCHEMA_VERSION
-        ):
+        if not isinstance(value, Mapping) or value.get("schema_version") not in {
+            1,
+            ADMISSION_SCHEMA_VERSION,
+        }:
             return {
                 "schema_version": ADMISSION_SCHEMA_VERSION,
                 "active": {},
                 "cache": {},
                 "estimates": {},
+                "claims": {},
             }
         if not all(
             isinstance(value.get(key), Mapping)
@@ -2729,7 +2732,147 @@ class GenericJobs:
         return {
             "schema_version": ADMISSION_SCHEMA_VERSION,
             **{key: dict(value[key]) for key in ("active", "cache", "estimates")},
+            "claims": (
+                dict(value["claims"])
+                if isinstance(value.get("claims"), Mapping)
+                else {}
+            ),
         }
+
+    @staticmethod
+    def _admission_claim(
+        record: GenericJobRecord, estimate: int
+    ) -> dict[str, Any]:
+        return {
+            "job_id": record.job_id,
+            "pool": record.spec.pool,
+            "estimate_memory_bytes": estimate,
+            "exclusive_keys": list(record.spec.exclusive_keys),
+            "created_at": record.created_at,
+            "project_id": record.spec.project_id,
+            "operation": record.spec.operation,
+        }
+
+    def admission_ledger(self) -> dict[str, Any]:
+        """Return the durable admission claims and their current arithmetic."""
+        with self._admission_lock:
+            self._admit_locked()
+            state = self._admission_state()
+            records = self.store.active_records()
+            managed = [
+                record
+                for record in records
+                if record.spec.kind in {"declared-operation", "attested-agent"}
+                and not record.spec.admission_bypass
+                and not record.state.get("terminal")
+            ]
+            active = [
+                record
+                for record in managed
+                if record.state.get("phase")
+                in {
+                    "submitted",
+                    "running",
+                    "cancelling",
+                    "stopping",
+                    "launch-unknown",
+                    "observation-unknown",
+                    "outcome-unknown",
+                }
+            ]
+            queued = [
+                record
+                for record in managed
+                if record.state.get("phase") in {"queued", "waiting-dependencies"}
+            ]
+            pressure = self.pressure_probe()
+            host_budget = self._host_memory_budget(pressure)
+            host_occupied = sum(
+                self._estimate(record.spec, state) for record in active
+            )
+            holders = [
+                {
+                    **dict(state["claims"].get(record.job_id, {})),
+                    "phase": record.state.get("phase"),
+                }
+                for record in sorted(active, key=_job_order_key)
+            ]
+            queue = []
+            for position, record in enumerate(
+                sorted(queued, key=lambda item: (item.created_at, item.job_id)), 1
+            ):
+                estimate = self._estimate(record.spec, state)
+                pool_active = [
+                    item for item in active if item.spec.pool == record.spec.pool
+                ]
+                pool_occupied = sum(
+                    self._estimate(item.spec, state) for item in pool_active
+                )
+                policy = POOL_POLICIES[record.spec.pool]
+                exclusive = sorted(
+                    {
+                        key
+                        for item in active
+                        for key in item.spec.exclusive_keys
+                        if key in record.spec.exclusive_keys
+                    }
+                )
+                blocked_by = record.state.get("admission", {}).get("blocked_by", [])
+                queue.append(
+                    {
+                        "position": position,
+                        "job_id": record.job_id,
+                        "phase": record.state.get("phase"),
+                        "pool": record.spec.pool,
+                        "estimate_memory_bytes": estimate,
+                        "blocked_by": list(blocked_by)
+                        if isinstance(blocked_by, list)
+                        else [],
+                        "arithmetic": {
+                            "pool_workers": {
+                                "occupied": len(pool_active),
+                                "limit": policy["workers"],
+                            },
+                            "pool_memory": {
+                                "occupied_bytes": pool_occupied,
+                                "requested_bytes": estimate,
+                                "budget_bytes": policy["memory_budget"],
+                                "after_bytes": pool_occupied + estimate,
+                            },
+                            "host_memory": {
+                                "occupied_bytes": host_occupied,
+                                "requested_bytes": estimate,
+                                "budget_bytes": host_budget,
+                                "after_bytes": host_occupied + estimate,
+                            },
+                            "exclusive_keys": exclusive,
+                        },
+                    }
+                )
+            return {
+                "schema_version": ADMISSION_SCHEMA_VERSION,
+                "pools": {
+                    name: {
+                        "workers": policy["workers"],
+                        "memory_budget_bytes": policy["memory_budget"],
+                        "holders": [
+                            holder
+                            for holder in holders
+                            if holder.get("pool") == name
+                        ],
+                    }
+                    for name, policy in POOL_POLICIES.items()
+                },
+                "host": {
+                    "budget_memory_bytes": host_budget,
+                    "occupied_memory_bytes": host_occupied,
+                    "memory_available_bytes": int(
+                        pressure.get("memory_available_bytes", 0.0)
+                    ),
+                },
+                "claims": dict(state["claims"]),
+                "queue": queue,
+            }
 
     def _save_admission_state(self, value: Mapping[str, Any]) -> None:
         path = self.store.admission_path
@@ -3542,6 +3685,14 @@ class GenericJobs:
                 }
             ):
                 active[record.spec.pool].append(record)
+        state["claims"] = {
+            record.job_id: self._admission_claim(
+                record, self._estimate(record.spec, state)
+            )
+            for pool_records in active.values()
+            for record in pool_records
+        }
+        self._save_admission_state(state)
         pressure = self.pressure_probe()
         host_memory_budget = self._host_memory_budget(pressure)
         host_pressure_blocked = self._host_pressure_blocks(
@@ -3790,6 +3941,14 @@ class GenericJobs:
                 self._finish_admission(terminal, state)
             elif submitted is not None:
                 active[submitted.spec.pool].append(submitted)
+        state["claims"] = {
+            record.job_id: self._admission_claim(
+                record, self._estimate(record.spec, state)
+            )
+            for pool_records in active.values()
+            for record in pool_records
+        }
+        self._save_admission_state(state)
 
     def run_admission_scheduler(self, stop_event: Event) -> None:
         """Protect the host and retry queued admission independently of clients."""

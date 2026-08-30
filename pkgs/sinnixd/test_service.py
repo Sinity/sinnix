@@ -236,6 +236,28 @@ def test_admission_estimate_reset_is_operator_only(tmp_path: Path) -> None:
     assert response.error.code == ErrorCode.POLICY_DENIED
 
 
+def test_admission_ledger_is_operator_only_and_has_empty_shape(tmp_path: Path) -> None:
+    service = SinnixdService(ProjectCatalog([]), jobs=generic_jobs(tmp_path))
+
+    response = service.dispatch(request("job.admission", "systemd-jobs"))
+
+    assert response.ok and response.payload is not None
+    assert response.payload.inline["claims"] == {}
+    assert response.payload.inline["queue"] == []
+    assert set(response.payload.inline["pools"]) == {
+        "interactive",
+        "normal",
+        "bulk",
+        "agent",
+    }
+    denied = service.dispatch(
+        request("job.admission", "systemd-jobs", principal="agent-control")
+    )
+    assert not denied.ok
+    assert denied.error is not None
+    assert denied.error.code == ErrorCode.POLICY_DENIED
+
+
 def test_admission_estimate_reset_requires_explicit_all_for_fleet_clear(
     tmp_path: Path,
 ) -> None:
@@ -600,6 +622,25 @@ def test_agentctl_admission_reset_maps_to_operator_job_verb(
     assert captured["request"].owner == "systemd-jobs"
     assert captured["request"].principal == "operator"
     assert dict(captured["request"].arguments) == arguments
+
+
+def test_agentctl_admission_maps_to_read_only_job_verb(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, RequestEnvelope] = {}
+
+    def fake_call(socket_path, request_value):
+        captured["request"] = request_value
+        return {"schema": 1, "ok": True}
+
+    monkeypatch.setattr(sys, "argv", ["agentctl", "job", "admission"])
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    assert captured["request"].operation == "job.admission"
+    assert captured["request"].owner == "systemd-jobs"
+    assert captured["request"].principal == "operator"
+    assert captured["request"].arguments == {}
 
 
 def test_agentctl_admission_reset_rejects_unscoped_clear_without_all(

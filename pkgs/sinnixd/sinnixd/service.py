@@ -923,6 +923,14 @@ class SinnixdService:
                     "job.admission.reset requires estimate_key or all=true"
                 )
             return self.jobs.reset_admission_estimates(estimate_key)
+        if operation == "job.admission":
+            if principal != "operator":
+                raise JobAuthorizationError(
+                    "job admission ledger requires the operator principal"
+                )
+            if arguments:
+                raise ValueError("job.admission accepts no arguments")
+            return self.jobs.admission_ledger()
         if operation == "job.get":
             return self._cleanup_terminal(
                 self.jobs.get(
