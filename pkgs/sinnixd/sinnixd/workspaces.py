@@ -739,6 +739,9 @@ class GitWorkspaces:
         self._validate_branch(project.root, branch)
         resolved_base = base or policy.default_base
         self._verify_ref(project.root, resolved_base, "base")
+        resolved_base = self._git(
+            project.root, "rev-parse", f"{resolved_base}^{{commit}}"
+        ).stdout.strip()
         path = policy.root / name
         self._validate_target(policy.root, path)
         policy.root.mkdir(mode=0o700, parents=True, exist_ok=True)
