@@ -6527,6 +6527,92 @@ def test_workspace_dispose_deletes_a_clean_no_pr_branch_without_checkpoint_conte
     assert service.workspaces.list("fixture") == {"workspaces": []}
 
 
+def test_workspace_dispose_squash_equivalence_uses_creation_base_after_unrelated_landing(
+    tmp_path: Path,
+) -> None:
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+    workspace = service.workspaces.create(
+        project_id="fixture",
+        name="dispose-after-later-landing",
+        branch="feature/dispose-after-later-landing",
+        base="origin/master",
+    )
+    workspace_path = Path(workspace["path"])
+    (workspace_path / "branch.txt").write_text("branch\n")
+    subprocess.run(
+        ["git", "-C", str(workspace_path), "add", "branch.txt"], check=True
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace_path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "branch",
+        ],
+        check=True,
+    )
+    (tmp_path / "branch.txt").write_text("branch\n")
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", "branch.txt"], check=True
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "squash branch",
+        ],
+        check=True,
+    )
+    (tmp_path / "unrelated.txt").write_text("unrelated\n")
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", "unrelated.txt"], check=True
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--quiet",
+            "-m",
+            "unrelated landing",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "update-ref", "refs/remotes/origin/master", "HEAD"],
+        check=True,
+    )
+
+    disposed = service.workspaces.dispose(workspace["workspace_id"])
+
+    assert disposed["disposed"]
+    assert disposed["publication_evidence"]["branch_owned_paths"] == ["branch.txt"]
+    assert not workspace_path.exists()
+    assert not service.workspaces.list()["workspaces"]
+
+
 def test_workspace_finish_integrated_accepts_cherry_picked_tree_and_rejects_missing_change(
     tmp_path: Path,
 ) -> None:
