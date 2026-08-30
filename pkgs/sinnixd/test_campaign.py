@@ -58,6 +58,21 @@ def test_running_lane_key_overlap_is_a_typed_skip_with_keys() -> None:
     assert "table:jobs" in schedule.skipped[0].reason
 
 
+def test_distinct_files_in_one_test_tree_are_not_serialized() -> None:
+    from sinnixd.packets import infer_conflict_keys
+
+    first = infer_conflict_keys("Fix tests/unit/test_pipeline.py")
+    second = infer_conflict_keys("Fix tests/unit/test_lineage.py")
+    schedule = build_schedule(
+        [lane("pipeline", *first), lane("lineage", *second)],
+        active_conflict_keys=set(first),
+    )
+
+    assert schedule.node_ids() == ("lineage",)
+    assert schedule.skipped[0].group == "pipeline"
+    assert schedule.skipped[0].code == "conflict-key-overlap"
+
+
 def test_failed_predecessor_frees_key_for_next_lane() -> None:
     schedule = build_schedule([lane("a", "shared"), lane("b", "shared")])
     assert runnable_groups(schedule, {"a": {"terminal": True, "phase": "failed"}}) == (

@@ -118,6 +118,7 @@ def test_reference_extraction_accepts_repo_references_and_rejects_noise() -> Non
     assert references.migrations == ("042",)
     assert references.tables == ("audit_log", "users")
     assert infer_conflict_keys(references) == (
+        "file:polylogue/cost/allocator.py",
         "module:polylogue.cost",
         "schema:042",
         "table:audit_log",
@@ -146,15 +147,23 @@ def test_snapshot_unions_inferred_keys_and_explicit_keys_win_source_label(
 
     assert snapshot.dimensions.conflict_keys == (
         "declared:lock",
+        "file:polylogue/cost/allocator.py",
         "module:polylogue.cost",
         "schema:007",
         "table:runs",
     )
-    assert snapshot.dimensions.inferred_conflict_keys == ("schema:007",)
+    assert snapshot.dimensions.inferred_conflict_keys == (
+        "file:polylogue/cost/allocator.py",
+        "schema:007",
+    )
     rendered = plan_table(snapshot, _config)
     assert "schema:007 (inferred)" in rendered
+    assert "file:polylogue/cost/allocator.py (inferred)" in rendered
     assert "module:polylogue.cost (inferred)" not in rendered
-    assert snapshot.dimensions.to_dict()["inferred_conflict_keys"] == ["schema:007"]
+    assert snapshot.dimensions.to_dict()["inferred_conflict_keys"] == [
+        "file:polylogue/cost/allocator.py",
+        "schema:007",
+    ]
 
 
 def test_resolve_group_queries_members_that_point_at_leader() -> None:
