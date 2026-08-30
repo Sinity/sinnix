@@ -625,3 +625,75 @@ def test_closed_bead_disposes_its_packet_workspace(tmp_path: Path) -> None:
     )
     reactor.run_once()
     assert disposed == ["packet-polylogue-zzz9"]
+
+
+def test_scope_drift_flags_route_to_coordinator_not_integrator(tmp_path: Path) -> None:
+    """A write-scope flag parks a judgment keeper entry instead of an agent."""
+    spool = tmp_path / "events.jsonl"
+    board_path = tmp_path / "campaign-board.json"
+    dispatched: list[tuple[str, str, str]] = []
+    reactor = CampaignReactor(
+        spool,
+        board_path,
+        tmp_path / "reactor",
+        bead_closer=FakeBeadCloser(),
+        integration_dispatcher=lambda *a: dispatched.append(a),
+    )
+    reactor._workspace_name = lambda checkout: "packet-polylogue-x"  # type: ignore[method-assign]
+    reactor.project_roots = {"polylogue": tmp_path}
+    append(
+        spool,
+        {
+            "kind": "harvest",
+            "transition": "review-required",
+            "project": "polylogue",
+            "workspace_id": "worktree-0000000000000001",
+            "receipt_ref": "harvest-" + "0" * 32,
+            "job_id": "job-x",
+            "packet": {
+                "redflag_status": 1,
+                "redflags": ["touches path outside declared write_scope"],
+                "lane_trailer": {"LANE-QUICK": "green"},
+                "verification": {"state": "tests-run"},
+            },
+        },
+    )
+    reactor.run_once()
+    assert dispatched == []
+    board = json.loads(board_path.read_text())
+    judgment = board["keeper"].get("judgment:packet-polylogue-x")
+    assert judgment is not None and "write_scope" in judgment["reason"]
+
+
+def test_plain_flags_still_dispatch_an_integrator(tmp_path: Path) -> None:
+    spool = tmp_path / "events.jsonl"
+    board_path = tmp_path / "campaign-board.json"
+    dispatched: list[tuple[str, str, str]] = []
+    reactor = CampaignReactor(
+        spool,
+        board_path,
+        tmp_path / "reactor",
+        bead_closer=FakeBeadCloser(),
+        integration_dispatcher=lambda *a: dispatched.append(a),
+    )
+    reactor._workspace_name = lambda checkout: "packet-polylogue-y"  # type: ignore[method-assign]
+    reactor.project_roots = {"polylogue": tmp_path}
+    append(
+        spool,
+        {
+            "kind": "harvest",
+            "transition": "review-required",
+            "project": "polylogue",
+            "workspace_id": "worktree-0000000000000002",
+            "receipt_ref": "harvest-" + "1" * 32,
+            "job_id": "job-y",
+            "packet": {
+                "redflag_status": 1,
+                "redflags": ["diff lines: 500"],
+                "lane_trailer": {"LANE-QUICK": "green"},
+                "verification": {"state": "tests-run"},
+            },
+        },
+    )
+    reactor.run_once()
+    assert dispatched == [("polylogue", "packet-polylogue-y", "harvest-" + "1" * 32)]
