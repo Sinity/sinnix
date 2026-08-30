@@ -1718,3 +1718,121 @@ def test_stop_does_not_wait_for_the_unit_to_finish_shutting_down() -> None:
     assert recorded == [
         ["systemctl", "--user", "--no-block", "stop", "sinnixd-job-fixture.service"]
     ]
+
+
+def test_memory_blocked_head_of_line_reserves_its_claim(tmp_path: Path) -> None:
+    """Younger small jobs cannot slip past a memory-blocked older job forever."""
+    gib = 1024 * 1024 * 1024
+    adapter = project(
+        tmp_path / "project",
+        (
+            operation("seed", pool="bulk", estimate_memory_bytes=10 * gib),
+            operation("large", pool="normal", estimate_memory_bytes=7 * gib),
+            operation("small", pool="normal", estimate_memory_bytes=3 * gib),
+        ),
+    )
+    systemd = FakeSystemd()
+    pressure = {
+        "memory_full_avg10": 0.0,
+        "io_full_avg10": 0.0,
+        "memory_total_bytes": 16 * gib,
+        "memory_available_bytes": 16 * gib,
+        "swap_total_bytes": 20 * gib,
+        "swap_free_bytes": 20 * gib,
+        "managed_memory_bytes": 0,
+    }
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        pressure_probe=lambda: pressure,
+    )
+    subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("seed"),
+        correlation_id="seed",
+        parameters={},
+    )
+    blocked = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("large"),
+        correlation_id="large",
+        parameters={},
+    )
+    assert blocked["state"]["admission"]["blocked_by"] == ["host-memory"]
+    younger = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("small"),
+        correlation_id="small",
+        parameters={},
+    )
+    # 10 (seed) + 3 (small) fits the raw budget, but the blocked 7GiB head
+    # reserves its claim: the younger job queues instead of starving it.
+    assert younger["state"]["phase"] == "queued"
+    assert "host-memory" in younger["state"]["admission"]["blocked_by"]
+
+
+def test_learned_estimate_is_capped_at_twice_the_declaration(tmp_path: Path) -> None:
+    from sinnixd.jobs import _unmetered_pressure
+
+    gib = 1024 * 1024 * 1024
+    adapter = project(
+        tmp_path / "project",
+        (operation("op", pool="bulk", estimate_memory_bytes=2 * gib),),
+    )
+    subject = GenericJobs(
+        FakeSystemd(),
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        pressure_probe=_unmetered_pressure,
+    )
+    started = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("op"),
+        correlation_id="cap",
+        parameters={},
+    )
+    record = subject.store.load(started["job_id"])
+    state = subject._admission_state()
+    state["estimates"][record.spec.estimate_key] = {
+        "bytes": 30 * gib,
+        "recent": [30 * gib],
+        "touched_at": "2026-08-31T00:00:00+00:00",
+    }
+    assert subject._estimate(record.spec, state) == 4 * gib
+
+
+def test_cancel_records_a_typed_reason(tmp_path: Path) -> None:
+    gib = 1024 * 1024 * 1024
+    adapter = project(
+        tmp_path / "project",
+        (operation("op", pool="bulk", estimate_memory_bytes=14 * gib),),
+    )
+    pressure = {
+        "memory_full_avg10": 0.0,
+        "io_full_avg10": 0.0,
+        "memory_total_bytes": 8 * gib,
+        "memory_available_bytes": 8 * gib,
+        "swap_total_bytes": 8 * gib,
+        "swap_free_bytes": 8 * gib,
+        "managed_memory_bytes": 0,
+    }
+    subject = GenericJobs(
+        FakeSystemd(),
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        pressure_probe=lambda: pressure,
+    )
+    started = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("op"),
+        correlation_id="why",
+        parameters={},
+    )
+    assert started["state"]["phase"] == "queued"
+    subject.cancel(started["job_id"], reason="pressure-preemption:memory-stall")
+    record = subject.store.load(started["job_id"])
+    assert (
+        record.state["cancellation"]["reason"]
+        == "pressure-preemption:memory-stall"
+    )

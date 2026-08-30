@@ -780,6 +780,27 @@ def _unmetered_pressure() -> Mapping[str, float]:
     return {}
 
 
+def _cgroup_inactive_file(properties: Mapping[str, str]) -> int:
+    """Reclaimable page cache charged to the unit; 0 when unobservable."""
+    control_group = properties.get("ControlGroup")
+    if not (isinstance(control_group, str) and control_group.startswith("/")):
+        return 0
+    relative = Path(control_group.lstrip("/"))
+    if ".." in relative.parts:
+        return 0
+    try:
+        stat = (CGROUP_ROOT / relative / "memory.stat").read_text()
+    except OSError:
+        return 0
+    for line in stat.splitlines():
+        if line.startswith("inactive_file "):
+            try:
+                return max(0, int(line.split()[1]))
+            except (IndexError, ValueError):
+                return 0
+    return 0
+
+
 def _terminal_resources(properties: Mapping[str, str]) -> dict[str, Any]:
     """Capture bounded terminal resource evidence without making it authoritative."""
     pressure: str | None = None
@@ -3470,7 +3491,16 @@ class GenericJobs:
         )
         learned = state.get("estimates", {}).get(spec.estimate_key)
         learned_bytes = learned.get("bytes") if isinstance(learned, Mapping) else 0
-        return max(baseline, learned_bytes if isinstance(learned_bytes, int) else 0)
+        if not isinstance(learned_bytes, int):
+            learned_bytes = 0
+        if spec.estimate_memory_bytes is not None:
+            # An explicit declaration is a contract: one cache-inflated run
+            # must not dominate it without bound. Past 2x, the declaration is
+            # what needs fixing and the ledger shows the divergence. Undeclared
+            # estimates keep uncapped windowed learning -- the pool default is
+            # a floor guess, not a contract.
+            learned_bytes = min(learned_bytes, 2 * baseline)
+        return max(baseline, learned_bytes)
 
     @staticmethod
     def _host_memory_budget(pressure: Mapping[str, float]) -> int | None:
@@ -3552,7 +3582,10 @@ class GenericJobs:
             if value > 0:
                 values.append(value)
         if values:
-            return sum(values)
+            # Page cache is reclaimed under pressure, not held; counting it
+            # picked IO-heavy jobs as preemption victims and taught inflated
+            # estimates for them.
+            return max(0, sum(values) - _cgroup_inactive_file(properties))
         peak = GenericJobs._memory_peak(properties)
         return peak or 0
 
@@ -3610,7 +3643,9 @@ class GenericJobs:
         if len(candidates) == 1 and "swap-exhaustion" not in reasons:
             return None
         _, _, _, victim = max(candidates, key=lambda item: item[:3])
-        result = self.cancel(victim.job_id)
+        result = self.cancel(
+            victim.job_id, reason="pressure-preemption:" + ",".join(reasons)
+        )
         if result.get("already_terminal"):
             return None
         with self.store.locked(victim.job_id):
@@ -3666,7 +3701,7 @@ class GenericJobs:
             with self.store.locked(snapshot.job_id):
                 current = self.store.load(snapshot.job_id)
                 self._prepare_capacity_retry(current)
-        records = self.store.active_records()
+        records = sorted(self.store.active_records(), key=_job_order_key)
         active: dict[str, list[GenericJobRecord]] = {pool: [] for pool in POOL_POLICIES}
         for record in records:
             if (
@@ -3698,6 +3733,11 @@ class GenericJobs:
         host_pressure_blocked = self._host_pressure_blocks(
             pressure, has_active_managed_work=any(active.values())
         )
+        # Head-of-line reservation: once the oldest queued job is blocked on
+        # memory, younger jobs may only use what remains AFTER its claim.
+        # Without this, a stream of small jobs starves a large one forever --
+        # each admission re-fills the budget the big job was waiting for.
+        head_of_line_reserved = 0
         for snapshot in records:
             if snapshot.spec.kind not in {"declared-operation", "attested-agent"}:
                 continue
@@ -3745,7 +3785,8 @@ class GenericJobs:
                     )
                     host_memory_blocked = (
                         host_memory_budget is not None
-                        and host_occupied + estimate > host_memory_budget
+                        and host_occupied + estimate + head_of_line_reserved
+                        > host_memory_budget
                     )
                     exclusive_blocked = bool(
                         exclusive.intersection(record.spec.exclusive_keys)
@@ -3767,6 +3808,8 @@ class GenericJobs:
                         )
                         if blocked_now
                     ]
+                    if "host-memory" in blocked_by and not head_of_line_reserved:
+                        head_of_line_reserved = estimate
                     if blocked_by:
                         admission = {
                             **(
@@ -4537,7 +4580,7 @@ class GenericJobs:
             **({"dimensions": dict(dimensions)} if dimensions is not None else {}),
         }
 
-    def cancel(self, job_id: str) -> dict[str, Any]:
+    def cancel(self, job_id: str, *, reason: str = "operator-cancel") -> dict[str, Any]:
         terminal: GenericJobRecord | None = None
         pre_stop_systemd: Mapping[str, str] | None = None
         with self.store.locked(job_id):
@@ -4552,6 +4595,7 @@ class GenericJobs:
                         "phase": "cancelled",
                         "terminal": True,
                         "launch_evidence": "not-started",
+                        "cancellation": {"reason": reason, "requested_at": _timestamp()},
                         "observed_at": _timestamp(),
                     },
                 )
@@ -4569,7 +4613,9 @@ class GenericJobs:
                         str(key): str(value) for key, value in observed.items()
                     }
                 intent = self._with_cancel_intent(
-                    record, status["state"].get("systemd", {}).get("InvocationID")
+                    record,
+                    status["state"].get("systemd", {}).get("InvocationID"),
+                    reason=reason,
                 )
                 self.store.save(intent)
                 self.systemd.stop(intent.unit)
@@ -4834,6 +4880,14 @@ class GenericJobs:
     def _classify(
         self, properties: Mapping[str, str], record: GenericJobRecord
     ) -> dict[str, Any]:
+        # Observation rebuilds phase state from systemd truth, but the
+        # cancellation/preemption blocks are decision evidence recorded by the
+        # actor that stopped the job; rebuilding must not erase them.
+        forensic = {
+            key: dict(record.state[key])
+            for key in ("cancellation", "preemption")
+            if isinstance(record.state.get(key), Mapping)
+        }
         if self._is_authoritative_not_started_cancellation(record):
             return dict(record.state)
         if properties.get("LoadState") != "loaded":
@@ -4844,14 +4898,14 @@ class GenericJobs:
                 "queued",
                 "waiting-dependencies",
             }:
-                return {
+                return {**forensic, 
                     "phase": record.state["phase"],
                     "terminal": False,
                     "systemd": dict(properties),
                     "observed_at": _timestamp(),
                 }
             if record.state.get("phase") == "launch-unknown":
-                return {
+                return {**forensic, 
                     "phase": "launch-failed",
                     "error": {"code": SYSTEMD_ERROR_CODE},
                     "terminal": True,
@@ -4859,7 +4913,7 @@ class GenericJobs:
                     "observed_at": _timestamp(),
                 }
             if self._has_authoritative_result(record):
-                return {
+                return {**forensic, 
                     "phase": "succeeded",
                     "terminal": True,
                     "systemd": dict(properties),
@@ -4867,7 +4921,7 @@ class GenericJobs:
                     "observed_at": _timestamp(),
                 }
             if self._stop_acknowledgement_matches(record):
-                return {
+                return {**forensic, 
                     "phase": "cancelled",
                     "terminal": True,
                     "systemd": dict(properties),
@@ -4876,7 +4930,7 @@ class GenericJobs:
                 }
             if record.cancel_requested_at is not None:
                 terminal = self._cancellation_reconciliation_grace_expired(record)
-                return {
+                return {**forensic, 
                     "phase": "outcome-unknown",
                     "terminal": terminal,
                     "systemd": dict(properties),
@@ -4888,7 +4942,7 @@ class GenericJobs:
                     ),
                     "observed_at": _timestamp(),
                 }
-            return {
+            return {**forensic, 
                 "phase": "missing",
                 "terminal": True,
                 "systemd": dict(properties),
@@ -4898,7 +4952,7 @@ class GenericJobs:
             bound = record.state.get("lease_invocation_id")
             invocation = properties.get("InvocationID")
             if isinstance(bound, str) and bound and bound != invocation:
-                return {
+                return {**forensic, 
                     "phase": "observation-unknown",
                     "error": {"code": SYSTEMD_ERROR_CODE},
                     "terminal": False,
@@ -5117,9 +5171,30 @@ class GenericJobs:
 
     @staticmethod
     def _with_cancel_intent(
-        record: GenericJobRecord, invocation_id: Any
+        record: GenericJobRecord, invocation_id: Any, *, reason: str = "operator-cancel"
     ) -> GenericJobRecord:
         existing_intent = record.cancel_requested_at is not None
+        record = GenericJobs._with_state(
+            record,
+            {
+                **record.state,
+                "cancellation": {
+                    **(
+                        dict(record.state.get("cancellation", {}))
+                        if isinstance(record.state.get("cancellation"), Mapping)
+                        else {}
+                    ),
+                    "reason": (
+                        dict(record.state.get("cancellation", {})).get("reason")
+                        if existing_intent
+                        and isinstance(record.state.get("cancellation"), Mapping)
+                        and dict(record.state.get("cancellation", {})).get("reason")
+                        else reason
+                    ),
+                    "requested_at": record.cancel_requested_at or _timestamp(),
+                },
+            },
+        )
         observed_invocation = (
             invocation_id if isinstance(invocation_id, str) and invocation_id else None
         )
