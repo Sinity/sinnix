@@ -160,6 +160,54 @@ def test_packet_admission_refuses_overlap_but_allows_disjoint_lane(
     assert all(len(job_ids) == 1 for job_ids in error.value.conflicts.values())
 
 
+def test_admission_claims_are_durable_and_ledger_explains_queue(
+    tmp_path: Path,
+) -> None:
+    adapter = project(
+        tmp_path / "project",
+        (
+            operation("hold", exclusive_keys=("fixture:store",)),
+            operation("wait", exclusive_keys=("fixture:store",)),
+        ),
+    )
+    systemd = FakeSystemd()
+    subject = jobs(tmp_path, systemd)
+
+    holder = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("hold"),
+        correlation_id="holder",
+        parameters={},
+    )
+    queued = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("wait"),
+        correlation_id="queued",
+        parameters={},
+    )
+
+    persisted = subject._admission_state()
+    assert persisted["claims"][holder["job_id"]] == {
+        "job_id": holder["job_id"],
+        "pool": "normal",
+        "estimate_memory_bytes": 1024 * 1024 * 1024,
+        "exclusive_keys": ["fixture:store"],
+        "created_at": persisted["claims"][holder["job_id"]]["created_at"],
+        "project_id": "fixture",
+        "operation": "hold",
+    }
+    ledger = subject.admission_ledger()
+    assert ledger["claims"][holder["job_id"]]["exclusive_keys"] == [
+        "fixture:store"
+    ]
+    assert ledger["queue"][0]["job_id"] == queued["job_id"]
+    assert ledger["queue"][0]["blocked_by"] == ["exclusive-key"]
+    assert (
+        ledger["queue"][0]["arithmetic"]["pool_memory"]["after_bytes"]
+        == 2 * 1024 * 1024 * 1024
+    )
+
+
 def test_descriptor_loads_typed_admission_controls(tmp_path: Path) -> None:
     root = tmp_path / "descriptor"
     root.mkdir()
