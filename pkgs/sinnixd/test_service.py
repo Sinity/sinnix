@@ -5683,6 +5683,45 @@ def test_workspace_create_inherits_declared_seed_files_and_records_missing_sourc
     assert recovered["provision_notes"] == created["provision_notes"]
 
 
+def test_workspace_create_records_missing_compatible_testmon_seed(
+    tmp_path: Path,
+) -> None:
+    """An incompatible native graph is visible as a workspace warning."""
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'command = ["fixture-env", "--command"]', 'command = ["env"]'
+        )
+        + '\n[workspace.provision]\ncopy = [".cache/testmon/testmondata"]\n'
+        + 'exec = ["sh", "-c", "printf \'testmon provision: absent: incompatible environment\\n\'"]\n'
+    )
+    initialize_git_checkout(tmp_path)
+    seed = tmp_path / ".cache" / "testmon" / "testmondata"
+    seed.parent.mkdir(parents=True)
+    seed.write_text("incompatible\n")
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+
+    created = service.workspaces.create(
+        project_id="fixture",
+        name="incompatible-seed",
+        branch="feature/incompatible-seed",
+        base="HEAD",
+    )
+
+    assert {note["kind"] for note in created["provision_notes"]} == {
+        "exec",
+        "missing-compatible-seed",
+    }
+    assert {
+        "kind": "missing-compatible-seed",
+        "path": ".cache/testmon/testmondata",
+    } in created["provision_notes"]
+    assert service.workspaces.get(created["workspace_id"])["provision_notes"] == created[
+        "provision_notes"
+    ]
+
+
 def test_workspace_create_rolls_back_locked_provision_failure_without_orphans(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
