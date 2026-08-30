@@ -37,6 +37,7 @@ STACK_SCHEMA_VERSION = 2
 MAX_CHECKPOINT_BYTES = 64 * 1024 * 1024
 MAX_UNTRACKED_FILES = 4096
 MAX_PROVISION_OUTPUT_BYTES = 64 * 1024
+TESTMON_SEED_PATH = ".cache/testmon/testmondata"
 _FICLONE = 0x40049409  # linux/fs.h FICLONE: reflink clone on supporting filesystems
 _NAME = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?\Z")
 
@@ -2123,7 +2124,21 @@ class GitWorkspaces:
                     f"workspace provision source is not a regular file or directory: {relative}"
                 )
         if project.workspace.provision_exec:
-            notes.append(GitWorkspaces._run_provision_exec(project, target))
+            exec_note = GitWorkspaces._run_provision_exec(project, target)
+            notes.append(exec_note)
+            if TESTMON_SEED_PATH in project.workspace.provision_copy and any(
+                marker in exec_note["output"]
+                for marker in (
+                    "testmon provision: absent",
+                    "testmon provision: invalid",
+                )
+            ):
+                notes.append(
+                    {
+                        "kind": "missing-compatible-seed",
+                        "path": TESTMON_SEED_PATH,
+                    }
+                )
         return tuple(notes)
 
     @staticmethod
