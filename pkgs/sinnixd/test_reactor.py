@@ -150,6 +150,66 @@ def test_merged_without_receipt_is_actionable_and_keeper_backoff_is_bounded(
     assert board.keeper["bead-close"]["backoff_seconds"] == 3
 
 
+def test_old_open_pr_emits_needs_merge_with_checks_and_auto_merge_state(
+    tmp_path: Path,
+) -> None:
+    spool = tmp_path / "events.jsonl"
+    reactor = CampaignReactor(
+        spool,
+        tmp_path / "campaign-board.json",
+        tmp_path / "reactor",
+        pr_age_threshold_seconds=60,
+    )
+    append(
+        spool,
+        {
+            "kind": "merge_close",
+            "repo": "Sinity/polylogue",
+            "pr": "4447",
+            "state": "OPEN",
+            "opened_at": "2026-08-30T18:00:00+00:00",
+            "check_states": ["ci/failing", "lint/queued"],
+            "auto_merge": False,
+        },
+    )
+
+    reactor.run_once()
+    events = [json.loads(line) for line in spool.read_text().splitlines()]
+    keeper = [event for event in events if event.get("kind") == "keeper"]
+
+    assert len(keeper) == 1
+    assert keeper[0]["reasons"] == ["needs-merge"]
+    assert keeper[0]["actions"] == [
+        "needs-merge Sinity/polylogue#4447 checks=ci/failing,lint/queued auto-merge=unarmed"
+    ]
+
+
+def test_recent_open_pr_does_not_emit_needs_merge(tmp_path: Path) -> None:
+    spool = tmp_path / "events.jsonl"
+    reactor = CampaignReactor(
+        spool,
+        tmp_path / "campaign-board.json",
+        tmp_path / "reactor",
+        pr_age_threshold_seconds=60 * 60,
+    )
+    append(
+        spool,
+        {
+            "kind": "merge_close",
+            "repo": "Sinity/polylogue",
+            "pr": "4448",
+            "state": "OPEN",
+            "opened_at": "2999-01-01T00:00:00+00:00",
+            "check_states": [],
+            "auto_merge": True,
+        },
+    )
+
+    reactor.run_once()
+
+    assert '"kind":"keeper"' not in spool.read_text()
+
+
 def test_malformed_spool_line_is_recorded_and_does_not_block_following_events(
     tmp_path: Path,
 ) -> None:

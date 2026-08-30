@@ -34,6 +34,7 @@ MAX_BOARD_ERRORS = 100
 _DURABLE_KEEPER_PREFIXES = ("refill:", "review:", "integrate:")
 MAX_EVENT_BYTES = 1_000_000
 DEFAULT_REFILL_SPACING_SECONDS = 10
+DEFAULT_PR_AGE_THRESHOLD_SECONDS = 60 * 60
 
 
 class ReactorError(ValueError):
@@ -191,6 +192,9 @@ class PullRequestRecord:
     decision_receipt: Mapping[str, Any] | None
     error: str | None
     updated_at: str
+    opened_at: str | None = None
+    check_states: tuple[str, ...] = ()
+    auto_merge: bool = False
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> PullRequestRecord:
@@ -204,11 +208,25 @@ class PullRequestRecord:
             "error",
             "updated_at",
         }
-        if set(value) != required:
+        optional = {"opened_at", "check_states", "auto_merge"}
+        if set(value) - required - optional or not required <= set(value):
             raise ReactorError("board pull request record has an invalid shape")
         receipt = value["decision_receipt"]
         if receipt is not None and not isinstance(receipt, Mapping):
             raise ReactorError("board decision receipt must be an object or null")
+        opened_at = value.get("opened_at")
+        if opened_at is not None and (not isinstance(opened_at, str) or not opened_at):
+            raise ReactorError("board pull request opened_at must be a timestamp or null")
+        if opened_at is not None:
+            _parse_time(opened_at)
+        raw_checks = value.get("check_states", [])
+        if not isinstance(raw_checks, list) or any(
+            not isinstance(check, str) or not check for check in raw_checks
+        ):
+            raise ReactorError("board pull request check_states must be strings")
+        auto_merge = value.get("auto_merge", False)
+        if not isinstance(auto_merge, bool):
+            raise ReactorError("board pull request auto_merge must be boolean")
         result = cls(
             repo=_required_string(value, "repo"),
             pr=_required_string(value, "pr"),
@@ -218,6 +236,9 @@ class PullRequestRecord:
             decision_receipt=dict(receipt) if receipt is not None else None,
             error=_optional_string(value, "error"),
             updated_at=_required_string(value, "updated_at"),
+            opened_at=opened_at,
+            check_states=tuple(raw_checks),
+            auto_merge=auto_merge,
         )
         _parse_time(result.updated_at)
         return result
@@ -236,6 +257,9 @@ class PullRequestRecord:
             ),
             "error": self.error,
             "updated_at": self.updated_at,
+            "opened_at": self.opened_at,
+            "check_states": list(self.check_states),
+            "auto_merge": self.auto_merge,
         }
 
 
@@ -514,6 +538,27 @@ def _merge_reaction(event: Mapping[str, Any], context: ReactionContext) -> None:
         raise ReactorError("merge decision receipt bead_id must be a non-empty string")
     close_status = prior.bead_close_status if prior is not None else "not-attempted"
     error = prior.error if prior is not None else None
+    opened_at = _optional_string(event, "opened_at") or (
+        prior.opened_at if prior is not None else None
+    )
+    if opened_at is not None:
+        _parse_time(opened_at)
+    raw_checks = event.get("check_states")
+    if raw_checks is None:
+        check_states = prior.check_states if prior is not None else ()
+    elif isinstance(raw_checks, list) and all(
+        isinstance(check, str) and check for check in raw_checks
+    ):
+        check_states = tuple(raw_checks)
+    else:
+        raise ReactorError("merge event check_states must be strings")
+    raw_auto_merge = event.get("auto_merge")
+    if raw_auto_merge is None:
+        auto_merge = prior.auto_merge if prior is not None else False
+    elif isinstance(raw_auto_merge, bool):
+        auto_merge = raw_auto_merge
+    else:
+        raise ReactorError("merge event auto_merge must be boolean")
     if state == "MERGED" and close_status not in {"closed", "missing-receipt"}:
         if receipt is None:
             close_status = "missing-receipt"
@@ -552,6 +597,9 @@ def _merge_reaction(event: Mapping[str, Any], context: ReactionContext) -> None:
         decision_receipt=receipt,
         error=error,
         updated_at=_now(),
+        opened_at=opened_at,
+        check_states=check_states,
+        auto_merge=auto_merge,
     )
     context.board.updated_at = _now()
 
@@ -705,6 +753,7 @@ class CampaignReactor:
     min_active_lanes: int = 3
     keeper_backoff_seconds: int = DEFAULT_KEEPER_BACKOFF_SECONDS
     max_keeper_backoff_seconds: int = MAX_KEEPER_BACKOFF_SECONDS
+    pr_age_threshold_seconds: int = DEFAULT_PR_AGE_THRESHOLD_SECONDS
     refill_width_target: int | None = None
     refill_spacing_seconds: int = DEFAULT_REFILL_SPACING_SECONDS
     refill_dispatcher: RefillDispatcher | None = None
@@ -725,6 +774,8 @@ class CampaignReactor:
             raise ReactorError("reactor intervals and lane targets must be positive")
         if self.keeper_backoff_seconds < 1 or self.max_keeper_backoff_seconds < 1:
             raise ReactorError("keeper backoff values must be positive")
+        if self.pr_age_threshold_seconds < 1:
+            raise ReactorError("PR age threshold must be positive")
         if self.refill_width_target is not None and self.refill_width_target < 1:
             raise ReactorError("refill width target must be positive")
         if self.refill_spacing_seconds < 1:
@@ -796,6 +847,20 @@ class CampaignReactor:
         )
         if close_pending:
             actions.append(("bead-close", "close " + ",".join(close_pending[:12])))
+        needs_merge: list[str] = []
+        now = datetime.now(UTC)
+        for key, pr in sorted(self._board.prs.items()):
+            if pr.state != "OPEN" or pr.opened_at is None:
+                continue
+            if (now - _parse_time(pr.opened_at)).total_seconds() < self.pr_age_threshold_seconds:
+                continue
+            checks = ",".join(pr.check_states) or "none"
+            merge_state = "armed" if pr.auto_merge else "unarmed"
+            needs_merge.append(
+                f"{key} checks={checks} auto-merge={merge_state}"
+            )
+        if needs_merge:
+            actions.append(("needs-merge", "needs-merge " + "; ".join(needs_merge[:12])))
         active = _active_lane_count(self.jobs_state_dir)
         if active is not None and self._board.lanes and active < self.min_active_lanes:
             actions.append(
@@ -1311,6 +1376,11 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--max-keeper-backoff-seconds", type=int, default=MAX_KEEPER_BACKOFF_SECONDS
     )
+    result.add_argument(
+        "--pr-age-threshold-seconds",
+        type=int,
+        default=DEFAULT_PR_AGE_THRESHOLD_SECONDS,
+    )
     result.add_argument("--bd", default="bd")
     result.add_argument("--once", action="store_true")
     return result
@@ -1331,6 +1401,7 @@ def main(argv: list[str] | None = None) -> int:
         refill_spacing_seconds=arguments.refill_spacing_seconds,
         keeper_backoff_seconds=arguments.keeper_backoff_seconds,
         max_keeper_backoff_seconds=arguments.max_keeper_backoff_seconds,
+        pr_age_threshold_seconds=arguments.pr_age_threshold_seconds,
         bead_closer=SubprocessBeadCloser(arguments.bd),
     )
     if arguments.once:
