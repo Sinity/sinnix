@@ -112,6 +112,57 @@ def test_merge_reaction_closes_from_immutable_decision_receipt(tmp_path: Path) -
     assert pr.decision_receipt["receipt_id"] == "receipt-42"
 
 
+def test_merge_reaction_uses_needs_merge_receipt_when_merge_event_has_none(
+    tmp_path: Path,
+) -> None:
+    spool = tmp_path / "events.jsonl"
+    board_path = tmp_path / "campaign-board.json"
+    project_root = tmp_path / "polylogue"
+    project_root.mkdir()
+    closer = FakeBeadCloser()
+    reactor = CampaignReactor(
+        spool,
+        board_path,
+        tmp_path / "reactor",
+        project_roots={"polylogue": project_root},
+        bead_closer=closer,
+    )
+    append(
+        spool,
+        {
+            "kind": "needs-merge",
+            "repo": "Sinity/polylogue",
+            "project": "polylogue",
+            "pr": "43",
+            "state": "NEEDS-MERGE",
+            "decision_receipt": {
+                "receipt_id": "receipt-43",
+                "bead_id": "polylogue-abc",
+                "reason": "merged by reactor",
+            },
+        },
+    )
+    append(
+        spool,
+        {
+            "kind": "merge_close",
+            "repo": "Sinity/polylogue",
+            "project": "polylogue",
+            "pr": "43",
+            "state": "MERGED",
+        },
+    )
+
+    assert reactor.run_once() == 2
+    assert closer.calls == [("polylogue-abc", "merged by reactor", project_root)]
+    assert (
+        CampaignBoard.load(board_path)
+        .prs["Sinity/polylogue#43"]
+        .bead_close_status
+        == "closed"
+    )
+
+
 def test_merged_without_receipt_is_actionable_and_keeper_backoff_is_bounded(
     tmp_path: Path,
 ) -> None:

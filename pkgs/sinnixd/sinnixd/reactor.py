@@ -530,10 +530,16 @@ def _merge_reaction(event: Mapping[str, Any], context: ReactionContext) -> None:
     state = _required_string(event, "state")
     key = f"{repo}#{pr}"
     prior = context.board.prs.get(key)
-    receipt_value = event.get("decision_receipt")
     receipts = _receipts(event)
-    receipt = dict(receipt_value) if isinstance(receipt_value, Mapping) else None
-    bead_id = receipts[0][0] if receipts else None
+    if not receipts and prior is not None and prior.decision_receipt is not None:
+        receipts = _receipts({"decision_receipt": prior.decision_receipt})
+    receipt_value = event.get("decision_receipt")
+    receipt = (
+        dict(receipt_value)
+        if isinstance(receipt_value, Mapping)
+        else (dict(prior.decision_receipt) if prior and prior.decision_receipt else None)
+    )
+    bead_id = receipts[0][0] if receipts else (prior.bead_id if prior else None)
     if bead_id is not None and (not isinstance(bead_id, str) or not bead_id):
         raise ReactorError("merge decision receipt bead_id must be a non-empty string")
     close_status = prior.bead_close_status if prior is not None else "not-attempted"
@@ -607,6 +613,7 @@ def _merge_reaction(event: Mapping[str, Any], context: ReactionContext) -> None:
 def default_reactions() -> ReactionRegistry:
     registry = ReactionRegistry()
     registry.register("attested-agent", "lane-success-to-review-ready", _lane_reaction)
+    registry.register("needs-merge", "record-pending-merge", _merge_reaction)
     registry.register("merge_close", "merge-to-bead-close", _merge_reaction)
     return registry
 
@@ -861,6 +868,11 @@ class CampaignReactor:
             )
         if needs_merge:
             actions.append(("needs-merge", "needs-merge " + "; ".join(needs_merge[:12])))
+        merge_pending = sorted(
+            key for key, pr in self._board.prs.items() if pr.state == "NEEDS-MERGE"
+        )
+        if merge_pending:
+            actions.append(("needs-merge", "merge " + ",".join(merge_pending[:12])))
         active = _active_lane_count(self.jobs_state_dir)
         if active is not None and self._board.lanes and active < self.min_active_lanes:
             actions.append(

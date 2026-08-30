@@ -1038,7 +1038,7 @@ def authorize(
     bead_id: str | None = None,
     close_reason: str | None = None,
     run: Run = subprocess.run,
-    watch: bool = True,
+    watch: bool = False,
     watch_attempts: int = 240,
     watch_delay: float = 30,
 ) -> dict[str, Any]:
@@ -1230,28 +1230,44 @@ def authorize(
             cwd=context.worktree,
             timeout=120,
         )
-        _ = merge  # Auto-merge refusal is handled by the bounded watcher.
-        opened_at, check_states, auto_merge = _pull_request_tracking(
-            run, pr=pr, cwd=context.worktree, fallback_opened_at=_timestamp()
+        merge_state = "ARMED" if merge.returncode == 0 else "NEEDS-MERGE"
+        # The PR was created moments ago by this job: its own clock is the
+        # opened_at authority, and arming exit status is the auto-merge state.
+        # No gh pr view here -- releasing without polling is the contract.
+        opened_at = _timestamp()
+        check_states: list[str] = []
+        auto_merge = merge.returncode == 0
+        decision_receipt = (
+            {
+                "receipt_id": receipt["packet_id"],
+                "bead_id": bead_id,
+                "reason": close_reason,
+            }
+            if bead_id and close_reason
+            else None
         )
         _append_event(
             context.spool,
             {
-                "kind": "merge_close",
+                "kind": "needs-merge",
+                "project": context.project_id,
                 "repo": "Sinity/polylogue",
                 "pr": pr,
-                "state": "OPEN",
+                "state": merge_state,
                 "opened_at": opened_at,
                 "check_states": check_states,
                 "auto_merge": auto_merge,
-                "bead": bead_id,
-                "bead_closed": "skipped",
+                "decision_receipt": decision_receipt,
                 "job_id": context.job_id,
+                "merge_error": (
+                    _bounded_text(merge.stderr or merge.stdout, 8_000)
+                    if merge.returncode != 0
+                    else None
+                ),
             },
         )
-        # The watcher polls GitHub and closes a bead; it touches nothing in the
-        # shared repository, so holding the lock through it would serialize
-        # every other publication behind one merge.
+        # The reactor owns post-publication merge observation and bead closure.
+        # Returning here releases this job and its admission reservation.
         fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
         state = (
             _watch_and_close(
@@ -1265,7 +1281,7 @@ def authorize(
                 watch_delay=watch_delay,
             )
             if watch
-            else "ARMED"
+            else merge_state
         )
         result = {
             "outcome": HARVEST_OK,
@@ -1336,7 +1352,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
     parser.add_argument("--close-reason-file", type=Path)
     parser.add_argument("--base", default=DEFAULT_BASE)
     parser.add_argument("--event-spool", type=Path, default=DEFAULT_SPOOL)
-    parser.add_argument("--no-watch", action="store_true")
+    parser.add_argument("--watch", action="store_true")
     parsed = parser.parse_args(arguments)
     try:
         context = _context_from_environment(
@@ -1360,7 +1376,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 body=body,
                 bead_id=parsed.bead_id,
                 close_reason=close_reason,
-                watch=not parsed.no_watch,
+                watch=parsed.watch,
             )
         print(json.dumps(result, sort_keys=True))
         return 0
