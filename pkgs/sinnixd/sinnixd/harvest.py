@@ -1231,9 +1231,12 @@ def authorize(
             timeout=120,
         )
         merge_state = "ARMED" if merge.returncode == 0 else "NEEDS-MERGE"
-        opened_at, check_states, auto_merge = _pull_request_tracking(
-            run, pr=pr, cwd=context.worktree, fallback_opened_at=_timestamp()
-        )
+        # The PR was created moments ago by this job: its own clock is the
+        # opened_at authority, and arming exit status is the auto-merge state.
+        # No gh pr view here -- releasing without polling is the contract.
+        opened_at = _timestamp()
+        check_states: list[str] = []
+        auto_merge = merge.returncode == 0
         decision_receipt = (
             {
                 "receipt_id": receipt["packet_id"],
