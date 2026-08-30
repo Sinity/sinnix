@@ -277,6 +277,18 @@ def parser() -> argparse.ArgumentParser:
     workspace_finish_integrated.add_argument("--bead", dest="beads", action="append")
     workspace_finish_integrated.add_argument("--receipt", type=Path)
     workspace_finish_integrated.add_argument("--partial-note")
+    events = subcommands.add_parser("events")
+    events_subcommands = events.add_subparsers(dest="events_command", required=True)
+    events_tail = events_subcommands.add_parser(
+        "tail", help="Read the shared event spool as typed one-line events."
+    )
+    events_tail.add_argument("--follow", "-f", action="store_true")
+    events_tail.add_argument("--kind", help="Comma-separated event kinds to include.")
+    events_tail.add_argument("--since", help="ISO timestamp lower bound (matches the 'at' field).")
+    events_tail.add_argument("--limit", type=int, default=200)
+    events_tail.add_argument(
+        "--spool", type=Path, default=Path("/realm/state/agentctl/events.jsonl")
+    )
     lane = subcommands.add_parser("lane")
     lane_subcommands = lane.add_subparsers(dest="lane_command", required=True)
     lane_publish = lane_subcommands.add_parser(
@@ -585,6 +597,26 @@ def _render_plain(response: Mapping[str, Any]) -> str:
         return value
     if isinstance(value, Mapping) and isinstance(value.get("content"), str):
         return value["content"]
+    if isinstance(value, Mapping) and isinstance(value.get("workspaces"), list):
+        rows = []
+        for item in value["workspaces"]:
+            if isinstance(item, Mapping):
+                rows.append(
+                    f"{str(item.get('name') or '')[:40]:40} "
+                    f"{str(item.get('project_id') or ''):12} "
+                    f"{str(item.get('branch') or '')[:48]:48} "
+                    f"{item.get('workspace_id') or ''}"
+                )
+        return "\n".join(rows) if rows else "(no workspaces)"
+    if isinstance(value, Mapping) and "job_id" in value and "state" in value:
+        state = value.get("state")
+        phase = state.get("phase") if isinstance(state, Mapping) else None
+        checkout = value.get("checkout")
+        where = checkout.get("path") if isinstance(checkout, Mapping) else ""
+        return (
+            f"{value['job_id']} {value.get('operation') or value.get('kind') or ''} "
+            f"phase={phase} project={value.get('project_id')} {where}"
+        )
     return json.dumps(value, indent=1, sort_keys=True)
 
 
@@ -944,6 +976,58 @@ def main() -> int:
             {"saga_id": arguments.saga_id},
             "operator",
         )
+    elif arguments.command == "events" and arguments.events_command == "tail":
+        kinds = (
+            {part.strip() for part in arguments.kind.split(",") if part.strip()}
+            if arguments.kind
+            else None
+        )
+
+        def emit(line: str) -> None:
+            line = line.strip()
+            if not line:
+                return
+            try:
+                event = json.loads(line)
+            except ValueError:
+                return
+            if not isinstance(event, dict):
+                return
+            if kinds is not None and event.get("kind") not in kinds:
+                return
+            stamp = str(event.get("at") or event.get("observed_at") or "")
+            if arguments.since and stamp and stamp < arguments.since:
+                return
+            if getattr(arguments, "plain", False):
+                print(json.dumps(event, sort_keys=True), flush=True)
+                return
+            kind = str(event.get("kind") or "event")
+            rest = " ".join(
+                f"{key}={event[key]}"
+                for key in sorted(event)
+                if key not in {"kind"} and not isinstance(event[key], (dict, list))
+            )
+            print(f"{kind} {rest}"[:2000], flush=True)
+
+        spool: Path = arguments.spool
+        try:
+            existing = spool.read_text().splitlines()
+        except OSError:
+            existing = []
+        for line in existing[-arguments.limit :]:
+            emit(line)
+        if arguments.follow:
+            import time as _time
+
+            with open(spool, "r") as handle:
+                handle.seek(0, os.SEEK_END)
+                while True:
+                    line = handle.readline()
+                    if line:
+                        emit(line)
+                    else:
+                        _time.sleep(0.5)
+        return 0
     elif arguments.command == "lane" and arguments.lane_command == "publish":
         list_request = _request("workspace.list", "git-workspaces", {})
         try:
