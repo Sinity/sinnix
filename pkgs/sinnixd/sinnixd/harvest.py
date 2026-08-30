@@ -984,6 +984,51 @@ def _watch_and_close(
     return state or "TIMEOUT"
 
 
+def _pull_request_tracking(
+    run: Run, *, pr: str, cwd: Path, fallback_opened_at: str
+) -> tuple[str, list[str], bool]:
+    """Read bounded PR metadata used by the campaign reactor's keeper."""
+    try:
+        result = _command(
+            run,
+            [
+                "gh",
+                "pr",
+                "view",
+                pr,
+                "-R",
+                "Sinity/polylogue",
+                "--json",
+                "createdAt,statusCheckRollup,autoMergeRequest",
+            ],
+            cwd=cwd,
+        )
+    except HarvestError:
+        return fallback_opened_at, [], False
+    if result.returncode != 0:
+        return fallback_opened_at, [], False
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return fallback_opened_at, [], False
+    if not isinstance(payload, Mapping):
+        return fallback_opened_at, [], False
+    opened_at = payload.get("createdAt")
+    if not isinstance(opened_at, str) or not opened_at:
+        opened_at = fallback_opened_at
+    checks: list[str] = []
+    raw_checks = payload.get("statusCheckRollup")
+    if isinstance(raw_checks, list):
+        for check in raw_checks[:32]:
+            if not isinstance(check, Mapping):
+                continue
+            name = check.get("name") or check.get("context") or "check"
+            state = check.get("conclusion") or check.get("state") or "UNKNOWN"
+            if isinstance(name, str) and isinstance(state, str):
+                checks.append(f"{name}={state}")
+    return opened_at, checks, isinstance(payload.get("autoMergeRequest"), Mapping)
+
+
 def authorize(
     context: HarvestContext,
     *,
@@ -1186,6 +1231,24 @@ def authorize(
             timeout=120,
         )
         _ = merge  # Auto-merge refusal is handled by the bounded watcher.
+        opened_at, check_states, auto_merge = _pull_request_tracking(
+            run, pr=pr, cwd=context.worktree, fallback_opened_at=_timestamp()
+        )
+        _append_event(
+            context.spool,
+            {
+                "kind": "merge_close",
+                "repo": "Sinity/polylogue",
+                "pr": pr,
+                "state": "OPEN",
+                "opened_at": opened_at,
+                "check_states": check_states,
+                "auto_merge": auto_merge,
+                "bead": bead_id,
+                "bead_closed": "skipped",
+                "job_id": context.job_id,
+            },
+        )
         # The watcher polls GitHub and closes a bead; it touches nothing in the
         # shared repository, so holding the lock through it would serialize
         # every other publication behind one merge.
