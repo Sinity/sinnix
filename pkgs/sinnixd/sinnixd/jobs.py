@@ -3743,9 +3743,23 @@ class GenericJobs:
                     terminal = self._with_state(
                         current,
                         {
-                            "phase": "launch-failed",
+                            "phase": (
+                                "checkout-missing"
+                                if self._checkout_path_missing(current)
+                                else "launch-failed"
+                            ),
                             "terminal": True,
                             "launch_evidence": "not-started",
+                            **(
+                                {
+                                    "error": {
+                                        "code": "checkout-missing",
+                                        "message": "registered checkout is unavailable",
+                                    }
+                                }
+                                if self._checkout_path_missing(current)
+                                else {}
+                            ),
                             "observed_at": _timestamp(),
                         },
                     )
@@ -5047,6 +5061,7 @@ class GenericJobs:
     def _public(
         self, record: GenericJobRecord, state: Mapping[str, Any]
     ) -> dict[str, Any]:
+        checkout_status = self._checkout_status(record)
         return {
             "job_id": record.job_id,
             "unit": record.unit,
@@ -5062,6 +5077,11 @@ class GenericJobs:
             "principal": record.spec.principal,
             "checkout": (
                 dict(record.spec.checkout) if record.spec.checkout is not None else None
+            ),
+            **(
+                {"checkout_status": checkout_status}
+                if checkout_status is not None
+                else {}
             ),
             "contract": dict(record.spec.contract),
             "dimensions": {
@@ -5114,6 +5134,26 @@ class GenericJobs:
             },
             "state": dict(state),
         }
+
+    @staticmethod
+    def _checkout_path_missing(record: GenericJobRecord) -> bool:
+        checkout = record.spec.checkout
+        path = checkout.get("path") if isinstance(checkout, Mapping) else None
+        return isinstance(path, str) and bool(path) and not Path(path).is_dir()
+
+    @staticmethod
+    def _checkout_status(record: GenericJobRecord) -> dict[str, str] | None:
+        checkout = record.spec.checkout
+        if not isinstance(checkout, Mapping):
+            return None
+        path = checkout.get("path")
+        if not isinstance(path, str) or not path:
+            return {"state": "missing"}
+        try:
+            available = Path(path).is_dir()
+        except OSError:
+            available = False
+        return None if available else {"state": "missing", "path": path}
 
 
 def _command_digest(command: Sequence[str]) -> str:
