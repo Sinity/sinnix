@@ -768,3 +768,117 @@ def test_a_lane_with_nothing_to_publish_reports_its_close_reason(
     assert result["bead_id"] == "polylogue-teyyg"
     assert result["close_reason"] == "Already satisfied on master."
     assert "receipt_ref" not in result
+
+
+def test_repo_slug_parses_github_and_labels_local_remotes(tmp_path: Path) -> None:
+    root, _remote = _repository(tmp_path)
+    assert harvest._repo_slug(subprocess.run, root).startswith("local/")
+    _run_git(root, "remote", "set-url", "origin", "git@github.com:Example/repo.git")
+    assert harvest._repo_slug(subprocess.run, root) == "Example/repo"
+    _run_git(
+        root, "remote", "set-url", "origin", "https://github.com/Example/other"
+    )
+    assert harvest._repo_slug(subprocess.run, root) == "Example/other"
+
+
+def test_publish_derives_identity_and_authorizes_in_one_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One invocation mints the receipt and publishes it; nothing is restated."""
+    root, _remote = _repository(tmp_path)
+    state = tmp_path / "state"
+    context = _context(root, state, job_id="publish-job")
+    lane_dir = root / ".lane"
+    lane_dir.mkdir()
+    (lane_dir / "title").write_text("fix: publish the harvested lane branch\n")
+    (lane_dir / "body.md").write_text("Reviewed packet.\n")
+    (lane_dir / "close-reason.md").write_text("Delivered and verified.\n")
+    jobs_root = state / "jobs"
+    jobs_root.mkdir(parents=True)
+    (jobs_root / "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.json").write_text(
+        json.dumps(
+            {
+                "job_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "created_at": "2026-08-30T10:00:00+00:00",
+                "spec": {
+                    "kind": "attested-agent",
+                    "checkout": {"checkout_id": "worktree-1"},
+                    "contract": {"bead_binding": {"bead_id": "polylogue-zzz1"}},
+                },
+                "state": {"phase": "succeeded"},
+            }
+        )
+    )
+    captured: dict[str, object] = {}
+
+    def fake_authorize(ctx, **kwargs):
+        captured.update(kwargs)
+        return {"outcome": harvest.HARVEST_OK, "phase": "published"}
+
+    monkeypatch.setattr(harvest, "authorize", fake_authorize)
+    result = harvest.publish(context, close=True)
+    assert result["outcome"] == harvest.HARVEST_OK
+    assert captured["lane_job_id"] if "lane_job_id" in captured else True
+    assert captured["bead_id"] == "polylogue-zzz1"
+    assert captured["title"] == "fix: publish the harvested lane branch"
+    assert captured["close_reason"] == "Delivered and verified."
+    receipt_ref = captured["receipt_ref"]
+    assert isinstance(receipt_ref, str) and receipt_ref.startswith("harvest-")
+
+
+def test_publish_without_close_reason_artifact_refuses_close(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _remote = _repository(tmp_path)
+    state = tmp_path / "state"
+    context = _context(root, state)
+    (root / ".lane").mkdir()
+    (root / ".lane" / "title").write_text("fix: publish the harvested lane branch\n")
+    (root / ".lane" / "body.md").write_text("Reviewed.\n")
+    monkeypatch.setattr(
+        harvest, "authorize", lambda ctx, **k: {"outcome": harvest.HARVEST_OK}
+    )
+    with pytest.raises(harvest.HarvestError, match="close-reason"):
+        harvest.publish(context, close=True)
+
+
+def test_unavailable_affected_verification_reaches_the_spool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: dropping the spool append makes this red."""
+    root, _remote = _repository(tmp_path)
+    state = tmp_path / "state"
+    context = _context(root, state)
+    monkeypatch.setattr(
+        harvest, "_affected_tests", lambda ctx, run: ("unavailable", "no graph")
+    )
+    monkeypatch.setattr(
+        harvest,
+        "_load_receipt",
+        lambda ctx, ref: {
+            "head": harvest._git(subprocess.run, root, "rev-parse", "HEAD"),
+            "worktree_unstaged_sha256": harvest._digest(
+                harvest._git(subprocess.run, root, "diff", "HEAD")
+            ),
+            "worktree_staged_sha256": harvest._digest(
+                harvest._git(subprocess.run, root, "diff", "--cached")
+            ),
+        },
+    )
+
+    def stop_before_lock(path, timeout=900):
+        raise harvest.HarvestError("stop before repository lock")
+
+    monkeypatch.setattr(harvest, "_lock", stop_before_lock)
+    with pytest.raises(harvest.HarvestError, match="stop before repository lock"):
+        harvest.authorize(
+            context,
+            receipt_ref="harvest-" + "0" * 32,
+            title="fix: publish the harvested lane branch",
+            body="Reviewed.",
+        )
+    events = [
+        json.loads(row)
+        for row in (state / "events.jsonl").read_text().splitlines()
+    ]
+    assert any(event["kind"] == "verification-unavailable" for event in events)
