@@ -573,3 +573,55 @@ def test_integration_is_keyed_by_workspace_not_by_review(
     reactor._dispatch_integration(event("review-2"))
 
     assert [c[1] for c in calls] == ["packet-p-1"]
+
+
+def test_interrupted_lane_is_retried_exactly_once(tmp_path: Path) -> None:
+    """A cancelled lane re-dispatches from its preserved prompt, once."""
+    spool = tmp_path / "events.jsonl"
+    board_path = tmp_path / "campaign-board.json"
+    retried: list[str] = []
+    reactor = CampaignReactor(
+        spool,
+        board_path,
+        tmp_path / "reactor",
+        bead_closer=FakeBeadCloser(),
+        retry_dispatcher=retried.append,
+    )
+    event = {
+        "kind": "attested-agent",
+        "job_id": "lane-cancelled-1",
+        "project": "polylogue",
+        "phase": "cancelled",
+        "checkout": "worktree-0000000000000001",
+    }
+    append(spool, event)
+    append(spool, event)
+    reactor.run_once()
+    assert retried == ["lane-cancelled-1"]
+
+
+def test_closed_bead_disposes_its_packet_workspace(tmp_path: Path) -> None:
+    spool = tmp_path / "events.jsonl"
+    board_path = tmp_path / "campaign-board.json"
+    disposed: list[str] = []
+    reactor = CampaignReactor(
+        spool,
+        board_path,
+        tmp_path / "reactor",
+        bead_closer=FakeBeadCloser(),
+        dispose_dispatcher=disposed.append,
+    )
+    append(
+        spool,
+        {
+            "kind": "merge_close",
+            "repo": "Sinity/polylogue",
+            "pr": "77",
+            "state": "MERGED",
+            "bead_closed": True,
+            "project": "polylogue",
+            "decision_receipt": {"bead_id": "polylogue-zzz9", "reason": "done"},
+        },
+    )
+    reactor.run_once()
+    assert disposed == ["packet-polylogue-zzz9"]

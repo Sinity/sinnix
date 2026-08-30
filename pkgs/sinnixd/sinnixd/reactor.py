@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 from .packets import PacketConfig, SubprocessBdReader, compile_launch_snapshot
 
@@ -776,6 +776,8 @@ class CampaignReactor:
     verify_all_failure_threshold: int = DEFAULT_VERIFY_ALL_FAILURE_THRESHOLD
     refill_dispatcher: RefillDispatcher | None = None
     review_dispatcher: ReviewDispatcher | None = None
+    retry_dispatcher: Callable[[str], None] | None = None
+    dispose_dispatcher: Callable[[str], None] | None = None
     integration_dispatcher: IntegrationDispatcher | None = None
     integrator_backend: str = "codex"
     # Workers default to luna, so the integrator is a sibling rather than the
@@ -1223,6 +1225,87 @@ class CampaignReactor:
             "next_eligible_at": _now(),
         }
 
+    def _dispatch_retry(self, record: LaneRecord) -> None:
+        """Re-dispatch an interrupted lane once, from its preserved prompt.
+
+        The runtime keeps the original prompt and contract (job.retry), and
+        #26 restored workspace state on cancellation, so an interrupted lane
+        is resumable without coordinator archaeology. One attempt: a lane
+        that dies twice needs judgment, not a loop.
+        """
+        key = f"retry:{record.job_id}"
+        if key in self._board.keeper:
+            return
+        self._board.keeper[key] = {
+            "emitted_at": _now(),
+            "backoff_seconds": 0,
+            "next_eligible_at": _now(),
+        }
+        try:
+            if self.retry_dispatcher is not None:
+                self.retry_dispatcher(record.job_id)
+            else:
+                subprocess.run(
+                    [self.agentctl_executable, "job", "retry", record.job_id],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+        except (OSError, subprocess.SubprocessError) as error:
+            self._board.record_error(-1, f"retry {record.job_id}: {error}")
+
+    def _dispatch_dispose(self, project: str, bead_id: str) -> None:
+        """Dispose the packet workspace of a closed bead.
+
+        Packet launch names workspaces packet-<bead-id>; disposal safety
+        (clean tree, published head) is enforced by the workspace owner, so
+        the reactor only asks, it never forces.
+        """
+        workspace = f"packet-{bead_id}"
+        key = f"dispose:{workspace}"
+        if key in self._board.keeper:
+            return
+        self._board.keeper[key] = {
+            "emitted_at": _now(),
+            "backoff_seconds": 0,
+            "next_eligible_at": _now(),
+        }
+        try:
+            if self.dispose_dispatcher is not None:
+                self.dispose_dispatcher(workspace)
+            else:
+                listing = subprocess.run(
+                    [self.agentctl_executable, "--plain", "workspace", "list"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+                target = None
+                for line in listing.stdout.splitlines():
+                    parts = line.split()
+                    if parts and parts[0] == workspace:
+                        target = parts[-1]
+                        break
+                if target is None:
+                    return
+                subprocess.run(
+                    [
+                        self.agentctl_executable,
+                        "workspace",
+                        "dispose",
+                        target,
+                        "--acknowledge-published",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+        except (OSError, subprocess.SubprocessError) as error:
+            self._board.record_error(-1, f"dispose {workspace}: {error}")
+
     def _dispatch_refill(self, project: str) -> None:
         root = self.project_roots.get(project)
         if root is None:
@@ -1447,6 +1530,8 @@ class CampaignReactor:
                     )
                     if lane is not None and lane.review_ready:
                         self._dispatch_review(lane)
+                    if lane is not None and lane.phase in {"cancelled", "timeout"}:
+                        self._dispatch_retry(lane)
                 if (
                     event.get("kind") == "harvest"
                     and event.get("transition") == "review-required"
@@ -1464,6 +1549,14 @@ class CampaignReactor:
                     )
                     if isinstance(project, str) and project:
                         self._dispatch_refill(project)
+                        receipt_value = event.get("decision_receipt")
+                        closed_bead = (
+                            receipt_value.get("bead_id")
+                            if isinstance(receipt_value, Mapping)
+                            else (pr.bead_id if pr is not None else None)
+                        )
+                        if isinstance(closed_bead, str) and closed_bead:
+                            self._dispatch_dispose(project, closed_bead)
             self._board.updated_at = _now()
             self._board.save(self.board_path)
             self._cursor.save(self.cursor_path)

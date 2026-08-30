@@ -976,63 +976,6 @@ def _affected_tests(context: HarvestContext, run: Run) -> tuple[str, str]:
     return "failed", output
 
 
-def _watch_and_close(
-    context: HarvestContext,
-    *,
-    repo: str,
-    pr: str,
-    bead_id: str | None,
-    close_reason: str | None,
-    run: Run,
-    watch_attempts: int = 240,
-    watch_delay: float = 30,
-) -> str:
-    state = ""
-    for attempt in range(watch_attempts):
-        result = _command(
-            run,
-            ["gh", "pr", "view", pr, "-R", repo, "--json", "state", "--jq", ".state"],
-            cwd=context.worktree,
-        )
-        state = result.stdout.strip() if result.returncode == 0 else ""
-        if state in {"MERGED", "CLOSED"}:
-            break
-        if attempt + 1 < watch_attempts:
-            time.sleep(watch_delay)
-    if state == "OPEN":
-        state = "TIMEOUT"
-    closed: bool | str = "skipped"
-    if state == "MERGED" and bead_id and close_reason:
-        result = _command(
-            run,
-            [
-                "bd",
-                "close",
-                bead_id,
-                "--force",
-                "--actor",
-                "claude-overseer",
-                "--reason",
-                close_reason,
-            ],
-            cwd=context.worktree,
-        )
-        closed = result.returncode == 0
-    _append_event(
-        context.spool,
-        {
-            "kind": "merge_close",
-            "repo": repo,
-            "pr": pr,
-            "state": state or "TIMEOUT",
-            "bead": bead_id,
-            "bead_closed": closed,
-            "job_id": context.job_id,
-        },
-    )
-    return state or "TIMEOUT"
-
-
 def authorize(
     context: HarvestContext,
     *,
@@ -1042,9 +985,6 @@ def authorize(
     bead_id: str | None = None,
     close_reason: str | None = None,
     run: Run = subprocess.run,
-    watch: bool = False,
-    watch_attempts: int = 240,
-    watch_delay: float = 30,
 ) -> dict[str, Any]:
     """Publish only from a reviewed receipt, returning typed stop outcomes."""
     receipt = _load_receipt(context, receipt_ref)
@@ -1288,20 +1228,7 @@ def authorize(
         # The reactor owns post-publication merge observation and bead closure.
         # Returning here releases this job and its admission reservation.
         fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-        state = (
-            _watch_and_close(
-                context,
-                repo=repo,
-                pr=pr,
-                bead_id=bead_id,
-                close_reason=close_reason,
-                run=run,
-                watch_attempts=watch_attempts,
-                watch_delay=watch_delay,
-            )
-            if watch
-            else merge_state
-        )
+        state = merge_state
         result = {
             "outcome": HARVEST_OK,
             "phase": "published",
@@ -1414,7 +1341,6 @@ def main(arguments: Sequence[str] | None = None) -> int:
     parser.add_argument("--close-reason-file", type=Path)
     parser.add_argument("--base", default=DEFAULT_BASE)
     parser.add_argument("--event-spool", type=Path, default=DEFAULT_SPOOL)
-    parser.add_argument("--watch", action="store_true")
     parsed = parser.parse_args(arguments)
     try:
         context = _context_from_environment(
@@ -1440,7 +1366,6 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 body=body,
                 bead_id=parsed.bead_id,
                 close_reason=close_reason,
-                watch=parsed.watch,
             )
         print(json.dumps(result, sort_keys=True))
         return 0

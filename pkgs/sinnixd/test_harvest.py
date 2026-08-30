@@ -103,7 +103,6 @@ def test_authorize_requires_receipt_and_runs_publish_pipeline(
         title="fix: publish the harvested lane branch",
         body="Reviewed packet.",
         run=run,
-        watch=False,
     )
 
     assert result == {
@@ -157,7 +156,6 @@ def test_cancelled_harvest_restores_rebased_workspace(
             title="fix: restore cancelled harvest workspaces",
             body="Reviewed packet.",
             run=run,
-            watch=False,
         )
 
     assert _run_git(root, "rev-parse", "HEAD").stdout.strip() == original_head
@@ -221,70 +219,6 @@ def test_authorize_returns_after_pr_creation_and_emits_merge_handoff(
     }
 
 
-def test_authorize_watcher_closes_bead_from_receipt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root, _remote = _repository(tmp_path)
-    state = tmp_path / "state"
-    context = _context(root, state, "watch-job")
-    receipt = harvest.compile_packet(
-        context, bead_id="sinnix-c960", close_reason="landed by harvest"
-    )["receipt_ref"]
-    monkeypatch.setattr(harvest, "LOCK_PATH", tmp_path / "harvest.lock")
-    closed: list[list[str]] = []
-
-    def run(argv, **kwargs):
-        if argv[:2] == ["devtools", "verify"] and len(argv) == 2:
-            return subprocess.CompletedProcess(
-                argv, 0, "affected verification passed", ""
-            )
-        if argv[:3] == ["devtools", "verify", "--quick"]:
-            return subprocess.CompletedProcess(argv, 0, "quick gate passed", "")
-        if argv[:3] == ["gh", "pr", "create"]:
-            return subprocess.CompletedProcess(
-                argv, 0, "https://github.test/pull/42\n", ""
-            )
-        if argv[:3] == ["gh", "pr", "merge"]:
-            return subprocess.CompletedProcess(argv, 0, "", "")
-        if argv[:3] == ["gh", "pr", "view"]:
-            return subprocess.CompletedProcess(argv, 0, "MERGED\n", "")
-        if argv[:2] == ["bd", "close"]:
-            closed.append(argv)
-            return subprocess.CompletedProcess(argv, 0, "", "")
-        return subprocess.run(argv, **kwargs)
-
-    result = harvest.authorize(
-        context,
-        receipt_ref=receipt,
-        title="fix: publish the harvested lane branch",
-        body="Reviewed packet.",
-        run=run,
-        watch=True,
-        watch_attempts=1,
-        watch_delay=0,
-    )
-
-    assert result["merge_state"] == "MERGED"
-    assert closed == [
-        [
-            "bd",
-            "close",
-            "sinnix-c960",
-            "--force",
-            "--actor",
-            "claude-overseer",
-            "--reason",
-            "landed by harvest",
-        ]
-    ]
-    events = [
-        json.loads(row) for row in (state / "events.jsonl").read_text().splitlines()
-    ]
-    assert any(
-        event.get("kind") == "merge_close" and event["bead_closed"] for event in events
-    )
-
-
 def test_gate_red_is_typed_and_never_pushes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -313,7 +247,6 @@ def test_gate_red_is_typed_and_never_pushes(
         title="fix: publish the harvested lane branch",
         body="Reviewed packet.",
         run=run,
-        watch=False,
     )
 
     assert result["outcome"] == harvest.GATE_RED
