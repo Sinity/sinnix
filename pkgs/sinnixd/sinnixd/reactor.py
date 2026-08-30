@@ -31,7 +31,7 @@ MAX_KEEPER_BACKOFF_SECONDS = 6 * 60 * 60
 MAX_BOARD_LANES = 2_000
 MAX_BOARD_PRS = 2_000
 MAX_BOARD_ERRORS = 100
-_DURABLE_KEEPER_PREFIXES = ("refill:", "review:", "integrate:")
+_DURABLE_KEEPER_PREFIXES = ("refill:", "review:", "integrate:", "judgment:", "retry:", "dispose:")
 MAX_EVENT_BYTES = 1_000_000
 DEFAULT_REFILL_SPACING_SECONDS = 10
 DEFAULT_PR_AGE_THRESHOLD_SECONDS = 60 * 60
@@ -1062,6 +1062,23 @@ class CampaignReactor:
             return f"no test evidence for this head ({state or 'missing'})"
         return None
 
+    _COORDINATOR_FLAG_MARKERS = ("write_scope", "outside declared write_scope", "schema", "migration")
+
+    @classmethod
+    def _needs_coordinator(cls, reason: str | None, event: Mapping[str, Any]) -> bool:
+        """Scope drift and schema surface changes are decisions, not tasks.
+
+        Every other flag class gets an integrator agent whose publication (or
+        typed report) is itself reviewable; these two change what the bead was
+        allowed to mean, so an agent verdict cannot settle them.
+        """
+        if reason is None:
+            return False
+        packet = event.get("packet")
+        flags = packet.get("redflags") if isinstance(packet, Mapping) else None
+        joined = " ".join(str(f) for f in flags).lower() if isinstance(flags, list) else ""
+        return any(marker in joined for marker in cls._COORDINATOR_FLAG_MARKERS)
+
     def _dispatch_integration(self, event: Mapping[str, Any]) -> None:
         """Route one reviewed lane: publish it, or hand it to an integrator."""
         project = event.get("project")
@@ -1087,6 +1104,17 @@ class CampaignReactor:
         reason = self._needs_judgment(event)
         if reason is None:
             self._publish(str(project), workspace, str(receipt), key)
+            return
+        if self._needs_coordinator(reason, event):
+            judgment_key = f"judgment:{workspace}"
+            if judgment_key not in self._board.keeper:
+                self._board.keeper[judgment_key] = {
+                    "emitted_at": _now(),
+                    "backoff_seconds": 0,
+                    "next_eligible_at": _now(),
+                    "reason": reason,
+                    "receipt": str(receipt),
+                }
             return
         try:
             if self.integration_dispatcher is not None:
