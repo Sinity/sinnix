@@ -35,6 +35,8 @@ _DURABLE_KEEPER_PREFIXES = ("refill:", "review:", "integrate:")
 MAX_EVENT_BYTES = 1_000_000
 DEFAULT_REFILL_SPACING_SECONDS = 10
 DEFAULT_PR_AGE_THRESHOLD_SECONDS = 60 * 60
+DEFAULT_VERIFY_ALL_FAILURE_THRESHOLD = 3
+MAX_CORPUS_FAILURES = 32
 
 
 class ReactorError(ValueError):
@@ -273,6 +275,7 @@ class CampaignBoard:
     keeper: dict[str, dict[str, Any]] = field(default_factory=dict)
     errors: list[dict[str, str]] = field(default_factory=list)
     judgment_queue: list[dict[str, Any]] = field(default_factory=list)
+    corpus_health: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> CampaignBoard:
@@ -296,12 +299,15 @@ class CampaignBoard:
         raw_keeper = value.get("keeper")
         raw_errors = value.get("errors")
         raw_judgment = value.get("judgment_queue", [])
+        raw_corpus_health = value.get("corpus_health", {})
         if not isinstance(raw_lanes, Mapping) or not isinstance(raw_prs, Mapping):
             raise ReactorError("campaign board lanes and prs must be objects")
         if not isinstance(raw_keeper, Mapping) or not isinstance(raw_errors, list):
             raise ReactorError("campaign board keeper and errors have invalid types")
         if not isinstance(raw_judgment, list):
             raise ReactorError("campaign board judgment queue must be a list")
+        if not isinstance(raw_corpus_health, Mapping):
+            raise ReactorError("campaign board corpus health must be an object")
         if len(raw_lanes) > MAX_BOARD_LANES or len(raw_prs) > MAX_BOARD_PRS:
             raise ReactorError("campaign board exceeds its bounded record count")
         lanes = {
@@ -340,12 +346,15 @@ class CampaignBoard:
                 raise ReactorError("campaign board error record is malformed")
             errors.append({key: str(error[key]) for key in ("offset", "message", "at")})
         return cls(
-            value["updated_at"],
-            lanes,
-            prs,
-            keeper,
-            errors,
-            [dict(item) for item in raw_judgment if isinstance(item, Mapping)],
+            updated_at=value["updated_at"],
+            lanes=lanes,
+            prs=prs,
+            keeper=keeper,
+            errors=errors,
+            judgment_queue=[
+                dict(item) for item in raw_judgment if isinstance(item, Mapping)
+            ],
+            corpus_health=dict(raw_corpus_health),
         )
 
     @classmethod
@@ -401,6 +410,7 @@ class CampaignBoard:
             "keeper": dict(sorted(self.keeper.items())),
             "errors": self.errors[-MAX_BOARD_ERRORS:],
             "judgment_queue": self.judgment_queue[-MAX_BOARD_ERRORS:],
+            "corpus_health": dict(self.corpus_health),
         }
 
     def save(self, path: Path) -> None:
@@ -763,6 +773,7 @@ class CampaignReactor:
     pr_age_threshold_seconds: int = DEFAULT_PR_AGE_THRESHOLD_SECONDS
     refill_width_target: int | None = None
     refill_spacing_seconds: int = DEFAULT_REFILL_SPACING_SECONDS
+    verify_all_failure_threshold: int = DEFAULT_VERIFY_ALL_FAILURE_THRESHOLD
     refill_dispatcher: RefillDispatcher | None = None
     review_dispatcher: ReviewDispatcher | None = None
     integration_dispatcher: IntegrationDispatcher | None = None
@@ -787,6 +798,8 @@ class CampaignReactor:
             raise ReactorError("refill width target must be positive")
         if self.refill_spacing_seconds < 1:
             raise ReactorError("refill spacing must be positive")
+        if self.verify_all_failure_threshold < 1:
+            raise ReactorError("verify_all failure threshold must be positive")
         self.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._cursor = SpoolCursor.load(self.state_dir / "cursor.json")
         self._board = CampaignBoard.load(self.board_path)
@@ -1297,6 +1310,124 @@ class CampaignReactor:
         except (OSError, subprocess.SubprocessError, ReactorError, ValueError) as error:
             self._board.record_error(-1, f"refill {project}: {error}")
 
+    def _verify_all_records(self) -> list[dict[str, Any]]:
+        """Read terminal verify_all records in execution order."""
+        if self.jobs_state_dir is None or not self.jobs_state_dir.is_dir():
+            return []
+        records: list[dict[str, Any]] = []
+        for path in self.jobs_state_dir.glob("*.json"):
+            try:
+                value = json.loads(path.read_text())
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if not isinstance(value, Mapping):
+                continue
+            spec = value.get("spec")
+            state = value.get("state")
+            if not isinstance(spec, Mapping) or not isinstance(state, Mapping):
+                continue
+            if (
+                spec.get("kind") != "declared-operation"
+                or spec.get("project_id") != "polylogue"
+                or spec.get("operation") != "verify_all"
+                or not state.get("terminal")
+            ):
+                continue
+            job_id = value.get("job_id")
+            created_at = value.get("created_at")
+            phase = state.get("phase")
+            if not all(
+                isinstance(item, str) and item
+                for item in (job_id, created_at, phase)
+            ):
+                continue
+            records.append(
+                {
+                    "job_id": job_id,
+                    "created_at": created_at,
+                    "phase": phase,
+                    "state": dict(state),
+                }
+            )
+        records.sort(key=lambda item: (str(item["created_at"]), str(item["job_id"])))
+        return records
+
+    @staticmethod
+    def _corpus_failure(record: Mapping[str, Any]) -> dict[str, Any] | None:
+        if record.get("phase") == "succeeded":
+            return None
+        state = record.get("state")
+        failure: dict[str, Any] = {
+            "job_id": record["job_id"],
+            "created_at": record["created_at"],
+            "phase": record["phase"],
+        }
+        if isinstance(state, Mapping):
+            cancellation = state.get("cancellation")
+            if isinstance(cancellation, Mapping):
+                failure["cancellation"] = dict(cancellation)
+            error = state.get("error")
+            if isinstance(error, Mapping):
+                failure["error"] = dict(error)
+        return failure
+
+    def _check_verify_all_health(self) -> None:
+        records = self._verify_all_records()
+        failures: list[dict[str, Any]] = []
+        for record in reversed(records):
+            failure = self._corpus_failure(record)
+            if failure is None:
+                break
+            failures.append(failure)
+        failures.reverse()
+        latest = records[-1] if records else None
+        prior = self._board.corpus_health
+        if not failures:
+            self._board.corpus_health = {
+                "operation": "verify_all",
+                "threshold": self.verify_all_failure_threshold,
+                "consecutive_failures": 0,
+                "status": "healthy",
+                "latest_job_id": latest.get("job_id") if latest else None,
+                "latest_phase": latest.get("phase") if latest else None,
+                "failures": [],
+                "alert_event_id": None,
+                "updated_at": _now(),
+            }
+            return
+        alerting = len(failures) >= self.verify_all_failure_threshold
+        alert_event_id = prior.get("alert_event_id") if alerting else None
+        if alerting and prior.get("status") != "alerting":
+            alert_event_id = hashlib.sha256(
+                json.dumps(failures, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()[:32]
+            append_event(
+                self.event_spool,
+                {
+                    "schema_version": EVENT_SCHEMA_VERSION,
+                    "event_id": alert_event_id,
+                    "kind": "corpus-health-alert",
+                    "project": "polylogue",
+                    "operation": "verify_all",
+                    "phase": "alerting",
+                    "threshold": self.verify_all_failure_threshold,
+                    "consecutive_failures": len(failures),
+                    "failures": failures[-MAX_CORPUS_FAILURES:],
+                    "emitted_at": _now(),
+                },
+            )
+        self._board.corpus_health = {
+            "operation": "verify_all",
+            "threshold": self.verify_all_failure_threshold,
+            "consecutive_failures": len(failures),
+            "status": "alerting" if alerting else "degraded",
+            "latest_job_id": latest["job_id"] if latest else None,
+            "latest_phase": latest["phase"] if latest else None,
+            "failures": failures[-MAX_CORPUS_FAILURES:],
+            "alert_event_id": alert_event_id,
+            "updated_at": _now(),
+        }
+
     def run_once(self) -> int:
         processed = 0
         context = ReactionContext(self._board, self.bead_closer, self.project_roots)
@@ -1338,6 +1469,7 @@ class CampaignReactor:
             self._cursor.save(self.cursor_path)
             processed += 1
         self._emit_keeper()
+        self._check_verify_all_health()
         self._board.updated_at = _now()
         self._board.save(self.board_path)
         self._cursor.save(self.cursor_path)
@@ -1383,6 +1515,11 @@ def parser() -> argparse.ArgumentParser:
         "--refill-spacing-seconds", type=int, default=DEFAULT_REFILL_SPACING_SECONDS
     )
     result.add_argument(
+        "--verify-all-failure-threshold",
+        type=int,
+        default=DEFAULT_VERIFY_ALL_FAILURE_THRESHOLD,
+    )
+    result.add_argument(
         "--keeper-backoff-seconds", type=int, default=DEFAULT_KEEPER_BACKOFF_SECONDS
     )
     result.add_argument(
@@ -1411,6 +1548,7 @@ def main(argv: list[str] | None = None) -> int:
         min_active_lanes=arguments.min_active_lanes,
         refill_width_target=arguments.refill_width_target,
         refill_spacing_seconds=arguments.refill_spacing_seconds,
+        verify_all_failure_threshold=arguments.verify_all_failure_threshold,
         keeper_backoff_seconds=arguments.keeper_backoff_seconds,
         max_keeper_backoff_seconds=arguments.max_keeper_backoff_seconds,
         pr_age_threshold_seconds=arguments.pr_age_threshold_seconds,
