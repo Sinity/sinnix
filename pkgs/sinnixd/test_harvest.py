@@ -239,6 +239,33 @@ def test_redflags_flags_removed_production_lines_and_assertions() -> None:
     assert "FLAG: test assertions removed" in flags
 
 
+def test_redflags_flags_paths_outside_declared_write_scope() -> None:
+    diff = (
+        "diff --git a/pkgs/sinnixd/sinnixd/harvest.py "
+        "b/pkgs/sinnixd/sinnixd/harvest.py\n"
+        "+scope-aware scanner\n"
+        "diff --git a/README.md b/README.md\n"
+        "+unrelated change\n"
+    )
+
+    status, flags = harvest._redflags(
+        diff,
+        write_scope=["pkgs/sinnixd/"],
+        changed_paths=["pkgs/sinnixd/sinnixd/harvest.py", "README.md"],
+    )
+
+    assert status == 1
+    assert "FLAG: changed paths outside declared write scope: README.md" in flags
+
+    status, flags = harvest._redflags(
+        diff,
+        write_scope=["pkgs/sinnixd/"],
+        changed_paths=["pkgs/sinnixd/sinnixd/harvest.py"],
+    )
+    assert status == 0
+    assert not any("outside declared write scope" in flag for flag in flags)
+
+
 def test_publication_title_must_be_a_squashable_conventional_subject() -> None:
     """The title lands verbatim as the squash subject on the protected branch.
 
