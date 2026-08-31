@@ -466,6 +466,66 @@ def test_collected_typed_job_requires_authoritative_semantic_result(
         assert reconciled["state"]["result_evidence"] == "completed"
 
 
+@pytest.mark.parametrize(
+    ("outcome", "expected_phase"),
+    [("GATE_RED", "refused"), ("HARVEST_OK", "succeeded"), ("UNKNOWN", "failed")],
+)
+def test_declared_json_verdict_controls_phase_and_terminal_event(
+    tmp_path: Path, outcome: str, expected_phase: str
+) -> None:
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "InvocationID": "fixture-invocation",
+            "Result": "success",
+            "ExecMainStatus": "0",
+        }
+    )
+    jobs = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        event_spool_path=tmp_path / "events.jsonl",
+    )
+    started = jobs.start(
+        GenericJobSpec(
+            kind="declared-operation",
+            command=("fixture",),
+            working_directory=str(tmp_path),
+            environment={},
+            project_id="fixture",
+            operation="harvest",
+            parameter_digest="0" * 64,
+            result_kind="json",
+            result_verdict={
+                "success": ("HARVEST_OK",),
+                "refusal": ("GATE_RED",),
+            },
+        )
+    )
+    record = jobs.store.load(started["job_id"])
+    assert record.result_path is not None
+    record.result_path.write_text(json.dumps({"outcome": outcome}))
+    record.log_path.with_suffix(".complete").touch(mode=0o600)
+
+    listed = jobs.list()
+    waited = jobs.wait(started["job_id"], timeout_seconds=1)
+    event = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
+
+    assert listed["jobs"][0]["state"]["phase"] == expected_phase
+    assert waited["state"]["phase"] == expected_phase
+    assert listed["jobs"][0]["state"].get("verdict") == (
+        outcome if outcome != "UNKNOWN" else outcome
+    )
+    assert waited["state"].get("verdict") == (
+        outcome if outcome != "UNKNOWN" else outcome
+    )
+    assert event["phase"] == expected_phase
+    assert event["verdict"] == outcome
+    assert waited["state"]["systemd"]["ExecMainStatus"] == "0"
+
+
 @pytest.mark.parametrize(("exit_code", "completed"), [(0, True), (1, False)])
 def test_capture_completion_marker_requires_zero_exit(
     tmp_path: Path, exit_code: int, completed: bool

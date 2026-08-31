@@ -3131,6 +3131,26 @@ def test_project_operation_result_must_have_an_executable_declared_contract(
         ProjectCatalog([tmp_path])
 
 
+@pytest.mark.parametrize(
+    "fragment",
+    [
+        '\n[operations.parameterized.verdict]\nsuccess = ["same"]\nrefusal = ["same"]\n',
+        '\n[operations.check.verdict]\nsuccess = ["OK"]\n',
+        '\n[operations.parameterized.verdict]\nunknown = ["OK"]\n',
+    ],
+)
+def test_project_operation_verdict_schema_rejects_overlap_unknown_or_non_json(
+    tmp_path: Path, fragment: str
+) -> None:
+    """Anti-vacuity: verdict declarations must be bounded to one JSON category."""
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(descriptor.read_text() + fragment)
+
+    with pytest.raises(ProjectConfigError, match="verdict"):
+        ProjectCatalog([tmp_path])
+
+
 def request(
     operation: str,
     owner: str,

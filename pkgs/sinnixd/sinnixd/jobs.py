@@ -1098,6 +1098,7 @@ class GenericJobSpec:
     checkout: Mapping[str, str] | None = None
     contract: Mapping[str, Any] = field(default_factory=dict)
     result_kind: str = "exit-status"
+    result_verdict: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     pool: str = "interactive"
     exclusive_keys: tuple[str, ...] = ()
     dependency_job_ids: tuple[str, ...] = ()
@@ -1208,6 +1209,10 @@ class GenericJobSpec:
             )
         if self.result_kind not in {"exit-status", "last-message", "json", "pytest"}:
             raise ValueError("job result kind is invalid")
+        if self.result_verdict and self.result_kind != "json":
+            raise ValueError("job result verdict requires a JSON result")
+        if not isinstance(self.result_verdict, Mapping):
+            raise ValueError("job result verdict is invalid")
         if self.pool not in POOL_POLICIES:
             raise ValueError("job pool is invalid")
         if any(not isinstance(key, str) or not key for key in self.exclusive_keys):
@@ -1269,6 +1274,9 @@ class GenericJobSpec:
             "checkout": dict(self.checkout) if self.checkout is not None else None,
             "contract": dict(self.contract),
             "result_kind": self.result_kind,
+            "result_verdict": {
+                key: list(value) for key, value in self.result_verdict.items()
+            },
             "lease": self.lease.to_dict() if self.lease is not None else None,
             "admission": {
                 "pool": self.pool,
@@ -1354,6 +1362,10 @@ class GenericJobSpec:
                 checkout=value.get("checkout"),
                 contract=value.get("contract", {}),
                 result_kind=value.get("result_kind", "exit-status"),
+                result_verdict={
+                    key: tuple(outcomes)
+                    for key, outcomes in value.get("result_verdict", {}).items()
+                },
                 pool=admission.get("pool", "interactive"),
                 exclusive_keys=tuple(admission.get("exclusive_keys", ())),
                 dependency_job_ids=tuple(admission.get("dependencies", ())),
@@ -3482,6 +3494,7 @@ class GenericJobs:
                 result_kind={"exit": "exit-status", "json": "json", "pytest": "pytest"}[
                     operation.result
                 ],
+                result_verdict=operation.verdict,
                 pool=operation.pool,
                 exclusive_keys=operation.exclusive_keys,
                 dependency_job_ids=dependency_ids,
@@ -4346,6 +4359,7 @@ class GenericJobs:
                 "kind": record.spec.kind,
                 "project": record.spec.project_id,
                 "phase": record.state.get("phase"),
+                "verdict": record.state.get("verdict"),
                 "completed_at": record.state.get("observed_at"),
                 "checkout": checkout.get("checkout_id")
                 if isinstance(checkout, Mapping)
@@ -5176,6 +5190,24 @@ class GenericJobs:
                     "lease_invocation_id": bound,
                     "observed_at": _timestamp(),
                 }
+        semantic = self._declared_json_verdict(record, properties)
+        if semantic is not None:
+            phase, verdict, error = semantic
+            state = {
+                **forensic,
+                "phase": phase,
+                "terminal": True,
+                "systemd": dict(properties),
+                "verdict": verdict,
+                "result_evidence": "declared-verdict",
+                "observed_at": _timestamp(),
+            }
+            if error is not None:
+                state["error"] = {"code": "RESULT_INVALID", "message": error}
+            state["resources"] = _terminal_resources(properties)
+            state["usage"] = _terminal_usage(record)
+            state["terminal_cause"] = self._terminal_cause(record, properties, phase)
+            return self._with_service_lease_invocation(record, properties, state)
         if self._has_schema_v3_native_success(record, properties):
             state = self._with_service_lease_invocation(
                 record,
@@ -5276,6 +5308,44 @@ class GenericJobs:
             if state.get("phase") == "timed_out":
                 state["timeout_wip"] = self._preserve_timeout(record)
         return state
+
+    def _declared_json_verdict(
+        self, record: GenericJobRecord, properties: Mapping[str, str]
+    ) -> tuple[str, str | None, str | None] | None:
+        """Classify a declared JSON operation from its bounded outcome field."""
+        if (
+            record.spec.kind != "declared-operation"
+            or record.spec.result_kind != "json"
+            or not record.spec.result_verdict
+            or properties.get("ActiveState") not in {"inactive", "failed"}
+            or properties.get("Result") != "success"
+            or properties.get("ExecMainStatus") != "0"
+        ):
+            return None
+        if not self._has_authoritative_result(record):
+            return "failed", None, "declared JSON result is unavailable or incomplete"
+        try:
+            assert record.result_path is not None
+            content = _read_private_artifact(record.result_path, MAX_RESULT_BYTES)
+            assert content is not None
+            value = self._parse_json_result(content)
+        except (AssertionError, JobResultError) as error:
+            return "failed", None, str(error)
+        outcome = value.get("outcome")
+        if not isinstance(outcome, str) or not outcome:
+            return "failed", None, "declared JSON result outcome is missing"
+        for category, outcomes in record.spec.result_verdict.items():
+            if outcome in outcomes:
+                return (
+                    {
+                        "success": "succeeded",
+                        "refusal": "refused",
+                        "failure": "failed",
+                    }[category],
+                    outcome,
+                    None,
+                )
+        return "failed", outcome, "declared JSON result outcome is undeclared"
 
     @staticmethod
     def _terminal_cause(

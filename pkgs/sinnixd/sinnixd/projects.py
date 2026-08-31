@@ -5,7 +5,7 @@ import hashlib
 import json
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -29,6 +29,7 @@ MAX_PARAMETER_LIST_ITEMS = 32
 MAX_PARAMETER_STRING_LENGTH = 128
 MAX_PARAMETER_ENUM_VALUES = 64
 MAX_OPERATION_SCHEDULE_LENGTH = 256
+MAX_OPERATION_VERDICT_OUTCOMES = 32
 MIN_PARAMETER_INTEGER = -(2**31)
 MAX_PARAMETER_INTEGER = 2**31 - 1
 MAX_SERVICE_PORT_SLOTS = 8
@@ -435,6 +436,7 @@ class ProjectOperation:
     pool: str
     result: str
     cache: str
+    verdict: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     exclusive_keys: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
@@ -504,6 +506,7 @@ class ProjectOperation:
             "command": list(self.command),
             "pool": self.pool,
             "result": self.result,
+            "verdict": {key: list(value) for key, value in self.verdict.items()},
             "cache": self.cache,
             "timeout_seconds": self.timeout_seconds,
             "exclusive_keys": list(self.exclusive_keys),
@@ -611,6 +614,45 @@ def _optional_string_list(value: Any, field: str) -> tuple[str, ...]:
     ):
         raise ProjectConfigError(f"{field} must be a list of non-empty strings")
     return tuple(value)
+
+
+def _operation_verdict(
+    value: Any, result: str, field: str
+) -> Mapping[str, tuple[str, ...]]:
+    if value is None:
+        return {}
+    if result != "json":
+        raise ProjectConfigError(f"{field} is only valid for json results")
+    if not isinstance(value, Mapping) or set(value) - {"success", "refusal", "failure"}:
+        raise ProjectConfigError(
+            f"{field} must contain only success, refusal, and failure"
+        )
+    outcomes: dict[str, tuple[str, ...]] = {}
+    owners: dict[str, str] = {}
+    for category in ("success", "refusal", "failure"):
+        raw_outcomes = value.get(category, [])
+        if (
+            not isinstance(raw_outcomes, list)
+            or len(raw_outcomes) > MAX_OPERATION_VERDICT_OUTCOMES
+            or any(
+                not isinstance(outcome, str) or not outcome for outcome in raw_outcomes
+            )
+            or len(set(raw_outcomes)) != len(raw_outcomes)
+        ):
+            raise ProjectConfigError(
+                f"{field}.{category} must be a bounded list of unique strings"
+            )
+        for outcome in raw_outcomes:
+            previous = owners.setdefault(outcome, category)
+            if previous != category:
+                raise ProjectConfigError(
+                    f"{field} outcome {outcome!r} is declared more than once"
+                )
+        if raw_outcomes:
+            outcomes[category] = tuple(raw_outcomes)
+    if not outcomes:
+        raise ProjectConfigError(f"{field} must declare at least one outcome")
+    return outcomes
 
 
 def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, ...]:
@@ -1213,6 +1255,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             "exec",
             "pool",
             "result",
+            "verdict",
             "cache",
             "exclusive_keys",
             "dependencies",
@@ -1242,6 +1285,9 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             raise ProjectConfigError(f"operations.{name}.pool is invalid")
         if result not in {"exit", "json", "pytest"}:
             raise ProjectConfigError(f"operations.{name}.result is invalid")
+        verdict = _operation_verdict(
+            definition.get("verdict"), result, f"operations.{name}.verdict"
+        )
         if not isinstance(cache, str) or not cache:
             raise ProjectConfigError(f"operations.{name}.cache must be non-empty")
         if cache not in {"none", "tree+environment"}:
@@ -1298,6 +1344,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 command=command,
                 pool=pool,
                 result=result,
+                verdict=verdict,
                 cache=cache,
                 timeout_seconds=timeout_seconds,
                 exclusive_keys=_optional_string_list(
