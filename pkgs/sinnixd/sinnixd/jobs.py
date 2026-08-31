@@ -178,6 +178,35 @@ class JobPageCursorError(ValueError):
     """Raised when a job-list continuation does not bind its original view."""
 
 
+@dataclass(frozen=True)
+class CorruptJobSpec:
+    """Safe metadata exposed for a record that cannot be reconstructed."""
+
+    kind: str = "corrupt-record"
+    project_id: None = None
+    operation: None = None
+    principal: None = None
+    contract: Mapping[str, Any] = field(default_factory=dict)
+    dimensions: Mapping[str, Any] = field(default_factory=dict)
+    lease: None = None
+    scratch: str = "none"
+    admission_bypass: bool = True
+
+
+@dataclass(frozen=True)
+class CorruptJobRecord:
+    """A visible, non-authoritative row for an unreadable record file."""
+
+    job_id: str
+    error: str
+    created_at: str = ""
+    unit: str = ""
+    spec: CorruptJobSpec = field(default_factory=CorruptJobSpec)
+    state: Mapping[str, Any] = field(
+        default_factory=lambda: {"phase": "corrupt-record", "terminal": False}
+    )
+
+
 def _job_order_key(record: "GenericJobRecord") -> tuple[str, str]:
     return record.created_at, record.job_id
 
@@ -2006,6 +2035,7 @@ class GenericJobStore:
         active = {
             record.job_id for record in records if not record.state.get("terminal")
         }
+        protected = active | self._unreadable_record_ids()
         for root in (self.tmpfs_scratch_root, self.nvme_scratch_root):
             if not root.exists():
                 continue
@@ -2015,7 +2045,11 @@ class GenericJobStore:
                     _ = job_unit_name(path.name)
                 except (ValueError, JobRecordError):
                     continue
-                if path.name not in active and path.is_dir() and not path.is_symlink():
+                if (
+                    path.name not in protected
+                    and path.is_dir()
+                    and not path.is_symlink()
+                ):
                     self._cleanup_scratch_path(resolved_root, path)
 
     def prepare_service_readiness(self, job_id: str) -> Path:
@@ -2050,12 +2084,13 @@ class GenericJobStore:
         active = {
             record.job_id for record in records if not record.state.get("terminal")
         }
+        protected = active | self._unreadable_record_ids()
         for path in sorted(self.readiness_root.iterdir()):
             try:
                 _ = job_unit_name(path.name)
             except (ValueError, JobRecordError):
                 continue
-            if path.name not in active:
+            if path.name not in protected:
                 path.unlink(missing_ok=True)
 
     @staticmethod
@@ -2185,17 +2220,19 @@ class GenericJobStore:
             raise JobRecordError(f"malformed job record: {job_id}")
         return GenericJobRecord.from_dict(value, self.root)
 
-    def list(self, *, limit: int | None = None) -> list[GenericJobRecord]:
+    def list(
+        self, *, limit: int | None = None
+    ) -> list[GenericJobRecord | CorruptJobRecord]:
         if limit is not None and limit < 1:
             raise ValueError("job record list limit must be positive")
         if not self.records_root.exists():
             return []
-        records: list[GenericJobRecord] = []
+        records: list[GenericJobRecord | CorruptJobRecord] = []
         for path in sorted(self.records_root.glob("*.json")):
             try:
                 records.append(self.load(path.stem))
-            except JobRecordError:
-                continue
+            except JobRecordError as error:
+                records.append(CorruptJobRecord(job_id=path.stem, error=str(error)))
             if limit is not None and len(records) >= limit:
                 break
         return records
@@ -2218,7 +2255,10 @@ class GenericJobStore:
             if job_ids is None:
                 all_records = self.list()
                 records = [
-                    record for record in all_records if not record.state.get("terminal")
+                    record
+                    for record in all_records
+                    if isinstance(record, GenericJobRecord)
+                    and not record.state.get("terminal")
                 ]
                 self._write_active_record_ids({record.job_id for record in records})
                 if self._service_lease_record_ids() is None:
@@ -2227,25 +2267,37 @@ class GenericJobStore:
                             {
                                 record.job_id
                                 for record in all_records
-                                if record.spec.lease is not None
+                                if isinstance(record, GenericJobRecord)
+                                and record.spec.lease is not None
                                 and not self._service_lease_released(record.job_id)
                             }
                         )
                 return records
             records: list[GenericJobRecord] = []
-            recovered_ids: set[str] = set()
+            recovered_ids: set[str] = set(job_ids)
             for job_id in job_ids:
                 try:
                     record = self.load(job_id)
                 except JobRecordError:
                     continue
                 if record.state.get("terminal"):
+                    recovered_ids.discard(job_id)
                     continue
                 records.append(record)
-                recovered_ids.add(job_id)
             if recovered_ids != job_ids:
                 self._write_active_record_ids(recovered_ids)
             return records
+
+    def _unreadable_record_ids(self) -> set[str]:
+        if not self.records_root.exists():
+            return set()
+        unreadable: set[str] = set()
+        for path in self.records_root.glob("*.json"):
+            try:
+                self.load(path.stem)
+            except JobRecordError:
+                unreadable.add(path.stem)
+        return unreadable
 
     def _active_record_ids(self) -> set[str] | None:
         path = self.active_records_path
@@ -2312,6 +2364,7 @@ class GenericJobStore:
                 records = [
                     record
                     for record in self.list()
+                    if isinstance(record, GenericJobRecord)
                     if record.spec.lease is not None
                     and not self._service_lease_released(record.job_id)
                 ]
@@ -5426,7 +5479,10 @@ class GenericJobs:
         """
         enrichment = "reconciliation"
         try:
-            if record.state.get("terminal"):
+            # A corrupt record has no unit to reconcile: rendering it keeps the
+            # typed corrupt-record phase instead of degrading it to a generic
+            # per-row fault.
+            if record.state.get("terminal") or isinstance(record, CorruptJobRecord):
                 enrichment = "render"
                 return self._public(record, record.state)
             return self.get(record.job_id)
@@ -5451,6 +5507,14 @@ class GenericJobs:
     def _public(
         self, record: GenericJobRecord, state: Mapping[str, Any]
     ) -> dict[str, Any]:
+        if isinstance(record, CorruptJobRecord):
+            return {
+                "job_id": record.job_id,
+                "unit": record.unit,
+                "kind": record.spec.kind,
+                "state": dict(record.state),
+                "error": record.error,
+            }
         checkout_status = self._checkout_status(record)
         return {
             "job_id": record.job_id,
