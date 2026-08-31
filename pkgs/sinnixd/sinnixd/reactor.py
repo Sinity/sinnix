@@ -752,16 +752,28 @@ def _validate_event(value: Any) -> dict[str, Any]:
     return event
 
 
+class _ActiveLaneCount(int):
+    degraded_records: int
+
+    def __new__(cls, value: int, degraded_records: int = 0) -> "_ActiveLaneCount":
+        instance = int.__new__(cls, value)
+        instance.degraded_records = degraded_records
+        return instance
+
+
 def _active_lane_count(path: Path | None, project: str | None = None) -> int | None:
     if path is None or not path.is_dir():
         return None
     count = 0
+    degraded = 0
     for record_path in path.glob("*.json"):
         try:
             record = json.loads(record_path.read_text())
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            degraded += 1
             continue
         if not isinstance(record, Mapping):
+            degraded += 1
             continue
         spec = record.get("spec")
         state = record.get("state")
@@ -773,7 +785,7 @@ def _active_lane_count(path: Path | None, project: str | None = None) -> int | N
             and not state.get("terminal", False)
         ):
             count += 1
-    return count
+    return _ActiveLaneCount(count, degraded)
 
 
 def _judgment_reason(bead: Mapping[str, Any], snapshot: Any) -> str | None:
@@ -928,6 +940,10 @@ class CampaignReactor:
         if merge_pending:
             actions.append(("needs-merge", "merge " + ",".join(merge_pending[:12])))
         active = _active_lane_count(self.jobs_state_dir)
+        if active is not None and active.degraded_records:
+            self._board.record_error(
+                -1, f"job records degraded: {active.degraded_records} unreadable"
+            )
         if active is not None and self._board.lanes and active < self.min_active_lanes:
             actions.append(
                 ("lanes-low", f"active lanes {active} < {self.min_active_lanes}")
@@ -1386,6 +1402,10 @@ class CampaignReactor:
             return
         target = self.refill_width_target or self.min_active_lanes
         active = _active_lane_count(self.jobs_state_dir, project)
+        if active is not None and active.degraded_records:
+            self._board.record_error(
+                -1, f"job records degraded: {active.degraded_records} unreadable"
+            )
         refill_key = f"refill:{project}"
         prior = self._board.keeper.get(refill_key)
         if prior is not None and datetime.now(UTC) < _parse_time(
@@ -1470,18 +1490,23 @@ class CampaignReactor:
     def _verify_all_records(self) -> list[dict[str, Any]]:
         """Read terminal verify_all records in execution order."""
         if self.jobs_state_dir is None or not self.jobs_state_dir.is_dir():
+            self._verify_all_degraded_records = 0
             return []
         records: list[dict[str, Any]] = []
+        self._verify_all_degraded_records = 0
         for path in self.jobs_state_dir.glob("*.json"):
             try:
                 value = json.loads(path.read_text())
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                self._verify_all_degraded_records += 1
                 continue
             if not isinstance(value, Mapping):
+                self._verify_all_degraded_records += 1
                 continue
             spec = value.get("spec")
             state = value.get("state")
             if not isinstance(spec, Mapping) or not isinstance(state, Mapping):
+                self._verify_all_degraded_records += 1
                 continue
             if (
                 spec.get("kind") != "declared-operation"
@@ -1496,6 +1521,7 @@ class CampaignReactor:
             if not all(
                 isinstance(item, str) and item for item in (job_id, created_at, phase)
             ):
+                self._verify_all_degraded_records += 1
                 continue
             records.append(
                 {
@@ -1548,6 +1574,7 @@ class CampaignReactor:
                 "latest_phase": latest.get("phase") if latest else None,
                 "failures": [],
                 "alert_event_id": None,
+                "degraded_records": self._verify_all_degraded_records,
                 "updated_at": _now(),
             }
             return
@@ -1581,6 +1608,7 @@ class CampaignReactor:
             "latest_phase": latest["phase"] if latest else None,
             "failures": failures[-MAX_CORPUS_FAILURES:],
             "alert_event_id": alert_event_id,
+            "degraded_records": self._verify_all_degraded_records,
             "updated_at": _now(),
         }
 
