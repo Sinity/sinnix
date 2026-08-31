@@ -10093,6 +10093,7 @@ def test_slow_operations_keep_their_widened_budgets() -> None:
         "workspace.finish": 185.0,
         "packet.finalize": 420.0,
         "campaign.run": 300.0,
+        "campaign.status": 30.0,
         "workspace.list": 60.0,
         # `packet launch` dispatches creation as its own step, so provisioning
         # must fit the client budget here. Without it the socket closes
