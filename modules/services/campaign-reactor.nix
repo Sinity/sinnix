@@ -78,6 +78,11 @@ mkServiceModule {
       default = 3;
       description = "Keeper threshold for an under-filled active campaign wave.";
     };
+    laneGateThreshold = lib.mkOption {
+      type = lib.types.ints.unsigned;
+      default = 0;
+      description = "Maximum active lanes allowed before a heavy operation is deferred.";
+    };
     keeperBackoffSeconds = lib.mkOption {
       type = lib.types.ints.positive;
       default = 600;
@@ -145,7 +150,7 @@ mkServiceModule {
             })
             // {
               Type = "simple";
-              ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --board ${lib.escapeShellArg cfg.boardPath} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --keeper-backoff-seconds ${toString cfg.keeperBackoffSeconds} --pr-age-threshold-seconds ${toString cfg.prAgeThresholdSeconds} --refill-width-target ${toString cfg.refillWidthTarget} --refill-spacing-seconds ${toString cfg.refillSpacingSeconds} --verify-all-failure-threshold ${toString cfg.verifyAllFailureThreshold} ${projectRootArgs}";
+              ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --board ${lib.escapeShellArg cfg.boardPath} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --lane-gate-threshold ${toString cfg.laneGateThreshold} --keeper-backoff-seconds ${toString cfg.keeperBackoffSeconds} --pr-age-threshold-seconds ${toString cfg.prAgeThresholdSeconds} --refill-width-target ${toString cfg.refillWidthTarget} --refill-spacing-seconds ${toString cfg.refillSpacingSeconds} --verify-all-failure-threshold ${toString cfg.verifyAllFailureThreshold} ${projectRootArgs}";
               Restart = "on-failure";
               RestartSec = "5s";
               NoNewPrivileges = true;

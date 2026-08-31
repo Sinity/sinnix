@@ -578,6 +578,101 @@ def test_integration_is_keyed_by_workspace_not_by_review(
     assert [c[1] for c in calls] == ["packet-p-1"]
 
 
+def test_heavy_operation_is_deferred_while_a_lane_is_active(tmp_path: Path) -> None:
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    (jobs / "lane.json").write_text(
+        json.dumps(
+            {
+                "spec": {"kind": "attested-agent", "project_id": "polylogue"},
+                "state": {"phase": "running", "terminal": False},
+            }
+        )
+    )
+    calls: list[tuple[str, str, dict[str, object]]] = []
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        jobs_state_dir=jobs,
+        operation_dispatcher=lambda project, operation, parameters: calls.append(
+            (project, operation, dict(parameters))
+        ),
+    )
+    append(
+        tmp_path / "events.jsonl",
+        {
+            "kind": "operation-request",
+            "request_id": "verify-1",
+            "project": "polylogue",
+            "operation": "verify_all",
+            "parameters": {"mode": "full"},
+            "requested_at": "2026-08-31T00:00:00+00:00",
+        },
+    )
+
+    assert reactor.run_once() == 1
+    assert calls == []
+    board = CampaignBoard.load(tmp_path / "board.json")
+    assert board.pending_operations["verify-1"]["active_lanes"] == 1
+    assert "active lanes 1" in board.pending_operations["verify-1"]["last_reason"]
+    assert board.keeper["operation:verify-1"]
+    assert "cancel" not in (tmp_path / "events.jsonl").read_text().lower()
+
+
+def test_deferred_heavy_operation_dispatches_after_gate_clears(tmp_path: Path) -> None:
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    lane = jobs / "lane.json"
+    lane.write_text(
+        json.dumps(
+            {
+                "spec": {"kind": "attested-agent", "project_id": "polylogue"},
+                "state": {"phase": "running", "terminal": False},
+            }
+        )
+    )
+    calls: list[tuple[str, str, dict[str, object]]] = []
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        jobs_state_dir=jobs,
+        operation_dispatcher=lambda project, operation, parameters: calls.append(
+            (project, operation, dict(parameters))
+        ),
+    )
+    append(
+        tmp_path / "events.jsonl",
+        {
+            "kind": "operation-request",
+            "request_id": "verify-2",
+            "project": "polylogue",
+            "operation": "rehearsal",
+            "parameters": {},
+        },
+    )
+    reactor.run_once()
+    assert calls == []
+
+    lane.write_text(
+        json.dumps(
+            {
+                "spec": {"kind": "attested-agent", "project_id": "polylogue"},
+                "state": {"phase": "succeeded", "terminal": True},
+            }
+        )
+    )
+    reactor._board.keeper["operation:verify-2"]["next_eligible_at"] = (
+        "2026-08-30T00:00:00+00:00"
+    )
+
+    assert reactor.run_once() == 1
+    assert calls == [("polylogue", "rehearsal", {})]
+    board = CampaignBoard.load(tmp_path / "board.json")
+    assert "verify-2" not in board.pending_operations
+
+
 def test_interrupted_lane_is_retried_exactly_once(tmp_path: Path) -> None:
     """A cancelled lane re-dispatches from its preserved prompt, once."""
     spool = tmp_path / "events.jsonl"

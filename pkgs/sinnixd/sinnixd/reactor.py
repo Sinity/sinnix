@@ -32,6 +32,7 @@ MAX_BOARD_LANES = 2_000
 MAX_BOARD_PRS = 2_000
 MAX_BOARD_ERRORS = 100
 _DURABLE_KEEPER_PREFIXES = (
+    "operation:",
     "refill:",
     "review:",
     "integrate:",
@@ -44,6 +45,9 @@ DEFAULT_REFILL_SPACING_SECONDS = 10
 DEFAULT_PR_AGE_THRESHOLD_SECONDS = 60 * 60
 DEFAULT_VERIFY_ALL_FAILURE_THRESHOLD = 3
 MAX_CORPUS_FAILURES = 32
+DEFAULT_LANE_GATE_THRESHOLD = 0
+MAX_PENDING_OPERATIONS = 256
+HEAVY_OPERATIONS = frozenset({"verify_all", "rehearsal", "rehearsals"})
 
 
 class ReactorError(ValueError):
@@ -311,6 +315,7 @@ class CampaignBoard:
     errors: list[dict[str, str]] = field(default_factory=list)
     judgment_queue: list[dict[str, Any]] = field(default_factory=list)
     corpus_health: dict[str, Any] = field(default_factory=dict)
+    pending_operations: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> CampaignBoard:
@@ -335,6 +340,7 @@ class CampaignBoard:
         raw_errors = value.get("errors")
         raw_judgment = value.get("judgment_queue", [])
         raw_corpus_health = value.get("corpus_health", {})
+        raw_pending_operations = value.get("pending_operations", {})
         if not isinstance(raw_lanes, Mapping) or not isinstance(raw_prs, Mapping):
             raise ReactorError("campaign board lanes and prs must be objects")
         if not isinstance(raw_keeper, Mapping) or not isinstance(raw_errors, list):
@@ -343,6 +349,8 @@ class CampaignBoard:
             raise ReactorError("campaign board judgment queue must be a list")
         if not isinstance(raw_corpus_health, Mapping):
             raise ReactorError("campaign board corpus health must be an object")
+        if not isinstance(raw_pending_operations, Mapping):
+            raise ReactorError("campaign board pending operations must be an object")
         if len(raw_lanes) > MAX_BOARD_LANES or len(raw_prs) > MAX_BOARD_PRS:
             raise ReactorError("campaign board exceeds its bounded record count")
         lanes = {
@@ -380,6 +388,39 @@ class CampaignBoard:
             }:
                 raise ReactorError("campaign board error record is malformed")
             errors.append({key: str(error[key]) for key in ("offset", "message", "at")})
+        pending_operations: dict[str, dict[str, Any]] = {}
+        for request_id, record in raw_pending_operations.items():
+            if not isinstance(request_id, str) or not isinstance(record, Mapping):
+                raise ReactorError("campaign board pending operation is malformed")
+            required = {
+                "request_id",
+                "project",
+                "operation",
+                "parameters",
+                "requested_at",
+                "last_reason",
+                "active_lanes",
+            }
+            if set(record) != required:
+                raise ReactorError("campaign board pending operation is malformed")
+            if (
+                record.get("request_id") != request_id
+                or not isinstance(record.get("project"), str)
+                or not isinstance(record.get("operation"), str)
+                or not isinstance(record.get("parameters"), Mapping)
+                or not isinstance(record.get("requested_at"), str)
+                or not isinstance(record.get("last_reason"), str)
+                or (
+                    record.get("active_lanes") is not None
+                    and (
+                        isinstance(record.get("active_lanes"), bool)
+                        or not isinstance(record.get("active_lanes"), int)
+                    )
+                )
+            ):
+                raise ReactorError("campaign board pending operation is malformed")
+            _parse_time(str(record["requested_at"]))
+            pending_operations[request_id] = dict(record)
         return cls(
             updated_at=value["updated_at"],
             lanes=lanes,
@@ -390,6 +431,7 @@ class CampaignBoard:
                 dict(item) for item in raw_judgment if isinstance(item, Mapping)
             ],
             corpus_health=dict(raw_corpus_health),
+            pending_operations=pending_operations,
         )
 
     @classmethod
@@ -446,6 +488,7 @@ class CampaignBoard:
             "errors": self.errors[-MAX_BOARD_ERRORS:],
             "judgment_queue": self.judgment_queue[-MAX_BOARD_ERRORS:],
             "corpus_health": dict(self.corpus_health),
+            "pending_operations": dict(sorted(self.pending_operations.items())),
         }
 
     def save(self, path: Path) -> None:
@@ -485,6 +528,12 @@ class ReviewDispatcher(Protocol):
 
 class IntegrationDispatcher(Protocol):
     def __call__(self, project: str, workspace: str, receipt_ref: str) -> None: ...
+
+
+class OperationDispatcher(Protocol):
+    def __call__(
+        self, project: str, operation: str, parameters: Mapping[str, Any]
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -825,6 +874,8 @@ class CampaignReactor:
     verify_all_failure_threshold: int = DEFAULT_VERIFY_ALL_FAILURE_THRESHOLD
     refill_dispatcher: RefillDispatcher | None = None
     review_dispatcher: ReviewDispatcher | None = None
+    operation_dispatcher: OperationDispatcher | None = None
+    lane_gate_threshold: int = DEFAULT_LANE_GATE_THRESHOLD
     retry_dispatcher: Callable[[str], None] | None = None
     dispose_dispatcher: Callable[[str], None] | None = None
     integration_dispatcher: IntegrationDispatcher | None = None
@@ -849,6 +900,8 @@ class CampaignReactor:
             raise ReactorError("refill width target must be positive")
         if self.refill_spacing_seconds < 1:
             raise ReactorError("refill spacing must be positive")
+        if self.lane_gate_threshold < 0:
+            raise ReactorError("lane gate threshold must not be negative")
         if self.verify_all_failure_threshold < 1:
             raise ReactorError("verify_all failure threshold must be positive")
         self.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -906,6 +959,14 @@ class CampaignReactor:
 
     def _pending_keeper_actions(self) -> list[tuple[str, str]]:
         actions: list[tuple[str, str]] = []
+        for request_id, request in sorted(self._board.pending_operations.items()):
+            reason = str(request["last_reason"])
+            actions.append(
+                (
+                    f"operation:{request_id}",
+                    f"defer {request['project']}:{request['operation']} ({reason})",
+                )
+            )
         ready = sorted(
             job_id for job_id, lane in self._board.lanes.items() if lane.review_ready
         )
@@ -949,6 +1010,115 @@ class CampaignReactor:
                 ("lanes-low", f"active lanes {active} < {self.min_active_lanes}")
             )
         return actions
+
+    @staticmethod
+    def _operation_request(event: Mapping[str, Any]) -> dict[str, Any] | None:
+        kind = event.get("kind")
+        requested = kind == "operation-request" or (
+            kind in {"declared-operation", "operation"}
+            and event.get("phase", event.get("transition")) in {"requested", "request"}
+        )
+        if not requested:
+            return None
+        request_id = _required_string(event, "request_id")
+        project = _required_string(event, "project")
+        operation = _required_string(event, "operation")
+        parameters = event.get("parameters", {})
+        if not isinstance(parameters, Mapping):
+            raise ReactorError("operation request parameters must be an object")
+        if operation not in HEAVY_OPERATIONS:
+            return None
+        requested_at = event.get("requested_at", event.get("emitted_at", _now()))
+        if not isinstance(requested_at, str) or not requested_at:
+            raise ReactorError("operation request requested_at must be a timestamp")
+        _parse_time(requested_at)
+        return {
+            "request_id": request_id,
+            "project": project,
+            "operation": operation,
+            "parameters": dict(parameters),
+            "requested_at": requested_at,
+            "last_reason": "awaiting lane gate evaluation",
+            "active_lanes": None,
+        }
+
+    def _record_operation_request(self, event: Mapping[str, Any]) -> None:
+        request = self._operation_request(event)
+        if request is None:
+            return
+        request_id = str(request["request_id"])
+        prior = self._board.pending_operations.get(request_id)
+        if prior is not None:
+            immutable = ("project", "operation", "parameters")
+            if any(prior[field] != request[field] for field in immutable):
+                raise ReactorError(f"operation request {request_id} changed")
+            return
+        if len(self._board.pending_operations) >= MAX_PENDING_OPERATIONS:
+            raise ReactorError("campaign board pending operation limit exceeded")
+        self._board.pending_operations[request_id] = request
+
+    def _operation_gate_reason(
+        self, request: Mapping[str, Any]
+    ) -> tuple[str, int | None]:
+        active = _active_lane_count(self.jobs_state_dir)
+        if active is None:
+            return "active lane count unavailable", None
+        if active > self.lane_gate_threshold:
+            return (
+                f"active lanes {active} > gate threshold {self.lane_gate_threshold}",
+                active,
+            )
+        return "lane gate clear", active
+
+    def _dispatch_operation(self, request: Mapping[str, Any]) -> None:
+        project = str(request["project"])
+        operation = str(request["operation"])
+        parameters = request["parameters"]
+        if self.operation_dispatcher is not None:
+            self.operation_dispatcher(project, operation, parameters)
+            return
+        subprocess.run(
+            [
+                self.agentctl_executable,
+                "job",
+                "start",
+                project,
+                operation,
+                "--parameters-json",
+                json.dumps(parameters, sort_keys=True, separators=(",", ":")),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    def _dispatch_pending_operations(self) -> None:
+        now = datetime.now(UTC)
+        for request_id, request in sorted(self._board.pending_operations.items()):
+            key = f"operation:{request_id}"
+            prior = self._board.keeper.get(key)
+            if prior is not None and now < _parse_time(str(prior["next_eligible_at"])):
+                continue
+            reason, active = self._operation_gate_reason(request)
+            if reason != "lane gate clear":
+                request["last_reason"] = reason
+                request["active_lanes"] = active
+                continue
+            try:
+                self._dispatch_operation(request)
+            except (OSError, subprocess.SubprocessError) as error:
+                request["last_reason"] = f"dispatch failed: {error}"
+                request["active_lanes"] = active
+                self._board.record_error(-1, f"operation {request_id}: {error}")
+                continue
+            del self._board.pending_operations[request_id]
+            emitted_at = datetime.now(UTC)
+            self._board.keeper[key] = {
+                "emitted_at": emitted_at.isoformat(),
+                "backoff_seconds": 0,
+                "next_eligible_at": emitted_at.isoformat(),
+            }
 
     def _emit_keeper(self) -> None:
         actions = self._pending_keeper_actions()
@@ -1622,6 +1792,7 @@ class CampaignReactor:
                 )
             else:
                 self.registry.dispatch(event, context)
+                self._record_operation_request(event)
                 if event.get("kind") == "attested-agent":
                     job_id = event.get("job_id")
                     lane = (
@@ -1662,6 +1833,7 @@ class CampaignReactor:
             self._board.save(self.board_path)
             self._cursor.save(self.cursor_path)
             processed += 1
+        self._dispatch_pending_operations()
         self._emit_keeper()
         self._check_verify_all_health()
         self._board.updated_at = _now()
@@ -1704,6 +1876,9 @@ def parser() -> argparse.ArgumentParser:
         "--interval-seconds", type=int, default=DEFAULT_INTERVAL_SECONDS
     )
     result.add_argument("--min-active-lanes", type=int, default=3)
+    result.add_argument(
+        "--lane-gate-threshold", type=int, default=DEFAULT_LANE_GATE_THRESHOLD
+    )
     result.add_argument("--refill-width-target", type=int)
     result.add_argument(
         "--refill-spacing-seconds", type=int, default=DEFAULT_REFILL_SPACING_SECONDS
@@ -1740,6 +1915,7 @@ def main(argv: list[str] | None = None) -> int:
         jobs_state_dir=arguments.jobs_state_dir,
         interval_seconds=arguments.interval_seconds,
         min_active_lanes=arguments.min_active_lanes,
+        lane_gate_threshold=arguments.lane_gate_threshold,
         refill_width_target=arguments.refill_width_target,
         refill_spacing_seconds=arguments.refill_spacing_seconds,
         verify_all_failure_threshold=arguments.verify_all_failure_threshold,
