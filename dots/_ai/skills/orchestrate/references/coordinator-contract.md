@@ -44,6 +44,11 @@ Look for the verb before writing any procedure: `agentctl <noun> --help`.
 | wait on work                             | `agentctl job wait`, `agentctl agent wait`, `agentctl plan wait`                              |
 | all evidence for a job or workspace      | `agentctl evidence <id>`                                                                      |
 
+Publication policy is per-repository: polylogue lands via `lane publish`
+(PR + auto-merge); **sinnix publishes from `master` directly** (its CLAUDE.md)
+— verify at exact head, plain merge or fast-forward, push; no PRs, no
+`workspace publish`.
+
 A missing capability is a bead against the substrate. Declared operations are
 the extension point: `.agentctl/project.toml` in the repo, live after a daemon
 restart.
