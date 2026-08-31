@@ -48,7 +48,5 @@ def test_job_record_renders_one_line() -> None:
 
 
 def test_error_envelope_renders_error_line() -> None:
-    rendered = _render_plain(
-        {"ok": False, "error": {"code": "X", "message": "boom"}}
-    )
+    rendered = _render_plain({"ok": False, "error": {"code": "X", "message": "boom"}})
     assert rendered == "ERROR: boom"

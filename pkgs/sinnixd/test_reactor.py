@@ -157,9 +157,7 @@ def test_merge_reaction_uses_needs_merge_receipt_when_merge_event_has_none(
     assert reactor.run_once() == 2
     assert closer.calls == [("polylogue-abc", "merged by reactor", project_root)]
     assert (
-        CampaignBoard.load(board_path)
-        .prs["Sinity/polylogue#43"]
-        .bead_close_status
+        CampaignBoard.load(board_path).prs["Sinity/polylogue#43"].bead_close_status
         == "closed"
     )
 
@@ -442,7 +440,10 @@ def test_verify_all_failure_streak_alerts_once_and_preserves_typed_reasons(
 
     reactor.run_once()
     events = [json.loads(line) for line in spool.read_text().splitlines()]
-    assert len([event for event in events if event.get("kind") == "corpus-health-alert"]) == 1
+    assert (
+        len([event for event in events if event.get("kind") == "corpus-health-alert"])
+        == 1
+    )
 
     (jobs / "verify-success.json").write_text(
         json.dumps(

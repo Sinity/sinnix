@@ -9,8 +9,8 @@ fixture_bin=$TMPDIR/bin
 calls=$TMPDIR/hyprctl-calls
 mkdir -p "$fixture_bin"
 
-printf '#!%s\n' "$(command -v bash)" > "$fixture_bin/hyprctl"
-cat >> "$fixture_bin/hyprctl" <<'EOF'
+printf '#!%s\n' "$(command -v bash)" >"$fixture_bin/hyprctl"
+cat >>"$fixture_bin/hyprctl" <<'EOF'
 set -euo pipefail
 printf '%s\n' "$*" >> "$HYPRCTL_CALLS"
 case "$*" in
@@ -20,8 +20,8 @@ case "$*" in
   *) printf 'unexpected hyprctl call: %s\n' "$*" >&2; exit 1 ;;
 esac
 EOF
-printf '#!%s\n' "$(command -v bash)" > "$fixture_bin/wtype"
-cat >> "$fixture_bin/wtype" <<'EOF'
+printf '#!%s\n' "$(command -v bash)" >"$fixture_bin/wtype"
+cat >>"$fixture_bin/wtype" <<'EOF'
 cat >/dev/null
 EOF
 chmod +x "$fixture_bin/hyprctl" "$fixture_bin/wtype"
@@ -33,7 +33,7 @@ PATH="$fixture_bin:$PATH" "$keyboard" type --text fixture --window 'address:0xab
 PATH="$fixture_bin:$PATH" "$chrome" toggle-agent-workspace >/dev/null
 
 expected=$TMPDIR/expected-hyprctl-calls
-cat > "$expected" <<'EOF'
+cat >"$expected" <<'EOF'
 eval hl.dispatch(hl.dsp.focus({ window = "address:0xabc" }))
 eval hl.dispatch(hl.dsp.focus({ workspace = 3 }))
 eval hl.dispatch(hl.dsp.focus({ window = "address:0xabc" }))

@@ -31,7 +31,14 @@ MAX_KEEPER_BACKOFF_SECONDS = 6 * 60 * 60
 MAX_BOARD_LANES = 2_000
 MAX_BOARD_PRS = 2_000
 MAX_BOARD_ERRORS = 100
-_DURABLE_KEEPER_PREFIXES = ("refill:", "review:", "integrate:", "judgment:", "retry:", "dispose:")
+_DURABLE_KEEPER_PREFIXES = (
+    "refill:",
+    "review:",
+    "integrate:",
+    "judgment:",
+    "retry:",
+    "dispose:",
+)
 MAX_EVENT_BYTES = 1_000_000
 DEFAULT_REFILL_SPACING_SECONDS = 10
 DEFAULT_PR_AGE_THRESHOLD_SECONDS = 60 * 60
@@ -244,7 +251,9 @@ class PullRequestRecord:
             raise ReactorError("board decision receipt must be an object or null")
         opened_at = value.get("opened_at")
         if opened_at is not None and (not isinstance(opened_at, str) or not opened_at):
-            raise ReactorError("board pull request opened_at must be a timestamp or null")
+            raise ReactorError(
+                "board pull request opened_at must be a timestamp or null"
+            )
         if opened_at is not None:
             _parse_time(opened_at)
         raw_checks = value.get("check_states", [])
@@ -573,7 +582,9 @@ def _merge_reaction(event: Mapping[str, Any], context: ReactionContext) -> None:
     receipt = (
         dict(receipt_value)
         if isinstance(receipt_value, Mapping)
-        else (dict(prior.decision_receipt) if prior and prior.decision_receipt else None)
+        else (
+            dict(prior.decision_receipt) if prior and prior.decision_receipt else None
+        )
     )
     bead_id = receipts[0][0] if receipts else (prior.bead_id if prior else None)
     if bead_id is not None and (not isinstance(bead_id, str) or not bead_id):
@@ -900,15 +911,17 @@ class CampaignReactor:
         for key, pr in sorted(self._board.prs.items()):
             if pr.state != "OPEN" or pr.opened_at is None:
                 continue
-            if (now - _parse_time(pr.opened_at)).total_seconds() < self.pr_age_threshold_seconds:
+            if (
+                now - _parse_time(pr.opened_at)
+            ).total_seconds() < self.pr_age_threshold_seconds:
                 continue
             checks = ",".join(pr.check_states) or "none"
             merge_state = "armed" if pr.auto_merge else "unarmed"
-            needs_merge.append(
-                f"{key} checks={checks} auto-merge={merge_state}"
-            )
+            needs_merge.append(f"{key} checks={checks} auto-merge={merge_state}")
         if needs_merge:
-            actions.append(("needs-merge", "needs-merge " + "; ".join(needs_merge[:12])))
+            actions.append(
+                ("needs-merge", "needs-merge " + "; ".join(needs_merge[:12]))
+            )
         merge_pending = sorted(
             key for key, pr in self._board.prs.items() if pr.state == "NEEDS-MERGE"
         )
@@ -1088,7 +1101,12 @@ class CampaignReactor:
             return f"no test evidence for this head ({state or 'missing'})"
         return None
 
-    _COORDINATOR_FLAG_MARKERS = ("write_scope", "outside declared write_scope", "schema", "migration")
+    _COORDINATOR_FLAG_MARKERS = (
+        "write_scope",
+        "outside declared write_scope",
+        "schema",
+        "migration",
+    )
 
     @classmethod
     def _needs_coordinator(cls, reason: str | None, event: Mapping[str, Any]) -> bool:
@@ -1102,7 +1120,9 @@ class CampaignReactor:
             return False
         packet = event.get("packet")
         flags = packet.get("redflags") if isinstance(packet, Mapping) else None
-        joined = " ".join(str(f) for f in flags).lower() if isinstance(flags, list) else ""
+        joined = (
+            " ".join(str(f) for f in flags).lower() if isinstance(flags, list) else ""
+        )
         return any(marker in joined for marker in cls._COORDINATOR_FLAG_MARKERS)
 
     def _dispatch_integration(self, event: Mapping[str, Any]) -> None:
@@ -1474,8 +1494,7 @@ class CampaignReactor:
             created_at = value.get("created_at")
             phase = state.get("phase")
             if not all(
-                isinstance(item, str) and item
-                for item in (job_id, created_at, phase)
+                isinstance(item, str) and item for item in (job_id, created_at, phase)
             ):
                 continue
             records.append(

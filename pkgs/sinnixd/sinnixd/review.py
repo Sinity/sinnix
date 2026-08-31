@@ -123,8 +123,10 @@ def route_review(
             tuple(unresolved),
         )
 
-    if changed_paths and not flags and all(
-        _is_docs_or_tests(path) for path in changed_paths
+    if (
+        changed_paths
+        and not flags
+        and all(_is_docs_or_tests(path) for path in changed_paths)
     ):
         return ReviewRoute(
             "auto-publish",
@@ -149,8 +151,10 @@ def route_review(
 
 def _scanner(worktree: Path, base: str) -> str:
     candidates = [
-        *(parent / "dots/_ai/skills/orchestrate/scripts/redflags"
-          for parent in (worktree.resolve(), *worktree.resolve().parents)),
+        *(
+            parent / "dots/_ai/skills/orchestrate/scripts/redflags"
+            for parent in (worktree.resolve(), *worktree.resolve().parents)
+        ),
         Path("/realm/project/sinnix/dots/_ai/skills/orchestrate/scripts/redflags"),
     ]
     script = next((candidate for candidate in candidates if candidate.is_file()), None)
@@ -185,11 +189,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             timeout=60,
         ).stdout.splitlines()
         output = _scanner(args.worktree, args.base)
-        print(json.dumps(route_review(
-            changed_paths=names,
-            scanner_output=output,
-            implementation_backend=args.implementation_backend,
-        ).to_dict(), sort_keys=True))
+        print(
+            json.dumps(
+                route_review(
+                    changed_paths=names,
+                    scanner_output=output,
+                    implementation_backend=args.implementation_backend,
+                ).to_dict(),
+                sort_keys=True,
+            )
+        )
         return 0
     except (OSError, subprocess.SubprocessError, RuntimeError, ValueError) as error:
         print(json.dumps({"error": str(error)}, sort_keys=True))
