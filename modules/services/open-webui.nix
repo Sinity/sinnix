@@ -51,7 +51,12 @@ mkAiService {
           WEBUI_AUTH = "False"; # single-user localhost
           ANONYMIZED_TELEMETRY = "False";
           DO_NOT_TRACK = "True";
-          ENABLE_OPENAI_API = "False";
+          # LiteLLM lanes in the model picker alongside the raw ollama tags —
+          # this is how the direct llama.cpp endpoints (local-glimmer,
+          # local-qwen38-vram) are reachable from the WebUI at all.
+          ENABLE_OPENAI_API = "True";
+          OPENAI_API_BASE_URLS = "http://127.0.0.1:${toString helpers.data.ports.litellm.public}/v1";
+          OPENAI_API_KEYS = "sk-local";
 
           # RAG / document chat via the Ollama embedding model. Sourced from
           # flake/data/local-models.nix (the roster shared with ollama.nix's
