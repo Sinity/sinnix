@@ -110,34 +110,42 @@ let
       '';
     }
     {
-      ollamaTag = "qwen3.8:27b";
+      ollamaTag = "huihui_ai/qwen3.8-abliterated:27b";
       litellmName = "local-qwen38";
-      role = "general-flagship-offload";
+      role = "uncensored-flagship-offload";
       expectedBytes = null;
       notes = ''
-        Qwen3.8 27B (2026-08 release, 28B dense, hybrid attention, vision +
-        multi-token prediction, 262K native ctx). Official Q4_K_M build,
-        18 GB — partial RAM offload like qwen3-coder:30b. Hybrid attention
-        caches only 16 of 64 layers (~64 KB/token), so long contexts stay
-        affordable despite the dense parameter count.
+        Qwen3.8 27B abliterated (huihui; 2026-08 release, 28B dense,
+        hybrid attention, 262K native ctx) — the flagship general tier,
+        ~17 GB Q4-class with partial RAM offload like qwen3-coder:30b.
+        Hybrid attention caches only 16 of 64 layers (~64 KB/token), so
+        long contexts stay affordable despite the dense parameter count.
+        The official qwen3.8:27b tag needs a newer client than ollama
+        0.32.7 (registry answers 412); huihui's upload carries no such
+        gate and pulled cleanly (verified 2026-08-31).
       '';
     }
     {
-      ollamaTag = "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-IQ2_S";
+      ollamaTag = null;
       litellmName = "local-qwen38-vram";
       role = "general-flagship-vram";
       expectedBytes = null;
+      litellmModel = "openai/qwen38-vram";
+      litellmApiBase = "http://127.0.0.1:8085/v1";
+      litellmApiKey = "sk-local";
       notes = ''
-        Qwen3.8 27B Unsloth UD-IQ2_S (8.37 GB per the HF tree API) — the
-        quant chosen to sit fully resident in the 3080's 10 GB with KV
-        headroom. hf.co GGUF import does not attach the mmproj, so this
-        tier is text-only; use local-qwen38 or the VLM tiers for images.
-        Confirm full residency with `ollama ps` (100% GPU); drop to
-        UD-IQ2_XXS (7.27 GB) if it partially offloads.
+        Qwen3.8 27B UD-IQ2_XXS on the dedicated qwen38-vram llama.cpp
+        endpoint (modules/services/qwen38-vram.nix), which owns the exact
+        fit: strict full offload, batch 64, ctx 4096. Measured 2026-08-31:
+        40.7 tok/s fully resident vs 1.2 tok/s when ollama silently spilled
+        16% of layers to CPU — ollama cannot pin per-model load options,
+        which is why this tier is not an ollama tag. Text-only (no mmproj);
+        larger quants (UD-IQ2_S 8.42 GB abliterated included) exceed the
+        ~8.7 GB the desktop leaves free once compute buffers are counted.
       '';
     }
     {
-      ollamaTag = "huihui_ai/qwen3-vl-abliterated:4b";
+      ollamaTag = "huihui_ai/qwen3-vl-abliterated:4b-instruct";
       litellmName = "local-qwen3-vl-abliterated-4b";
       role = "uncensored-vlm-bulk";
       expectedBytes = null;
@@ -147,19 +155,21 @@ let
       '';
     }
     {
-      ollamaTag = "huihui_ai/qwen3-vl-abliterated:8b";
+      ollamaTag = "huihui_ai/qwen3-vl-abliterated:8b-instruct";
       litellmName = "local-qwen3-vl-abliterated-8b";
       role = "uncensored-vlm";
       expectedBytes = null;
       notes = ''
-        Qwen3-VL abliterated 8B (6.1 GB, dense, fully VRAM-resident) — the
-        default uncensored vision lane. Supplants stashbox's private
+        Qwen3-VL abliterated 8B instruct (6.1 GB, dense, fully
+        VRAM-resident) — the default uncensored vision lane. Instruct, not
+        thinking: the thinking tags spend max_tokens on reasoning and
+        return empty content for bulk caption calls. Supplants stashbox's private
         llama.cpp/koboldcpp endpoint on :8899 and the JoyCaption GGUFs;
         stashbox consumes this through LiteLLM (bead stashbox-1mx).
       '';
     }
     {
-      ollamaTag = "huihui_ai/qwen3-vl-abliterated:30b-a3b";
+      ollamaTag = "huihui_ai/qwen3-vl-abliterated:30b-a3b-instruct";
       litellmName = "local-qwen3-vl-abliterated-30b";
       role = "uncensored-vlm-moe";
       expectedBytes = null;
@@ -288,6 +298,13 @@ rec {
   # hosts/sinnix-prime picks the active one via `llama-cpp.model`. Data only
   # today — no fetch/verify machinery reads this list yet.
   ggufSideloads = [
+    {
+      file = "Qwen3.8-27B-UD-IQ2_XXS.gguf";
+      url = "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/main/Qwen3.8-27B-UD-IQ2_XXS.gguf";
+      # Hardlinked from the ollama blob store (same bytes ollama pulled);
+      # size from stat on disk.
+      expectedBytes = 7266070528;
+    }
     {
       file = "qwen3-reranker-0.6b-q8_0.gguf";
       url = "https://huggingface.co/dean2155/Qwen3-Reranker-0.6B-Q8_0-GGUF/resolve/main/qwen3-reranker-0.6b-q8_0.gguf";

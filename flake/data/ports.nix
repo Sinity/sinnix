@@ -80,6 +80,10 @@
     public = 8083; # direct OpenAI-compatible Glimmer endpoint
     backend = 8084;
   };
+  qwen38Vram = {
+    public = 8085; # direct OpenAI-compatible VRAM-resident Qwen3.8 endpoint
+    backend = 8086;
+  };
 
   # ── Other ────────────────────────────────────────────────────────────────
   chromeDevtools = 9222; # live Chrome remote-debugging port

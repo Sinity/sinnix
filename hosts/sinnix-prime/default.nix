@@ -311,6 +311,10 @@
       gpuLayers = 0;
       extraFlags.reranking = true;
     };
+    qwen38-vram = {
+      enable = true;
+      model = "Qwen3.8-27B-UD-IQ2_XXS.gguf";
+    };
     muse-glimmer = {
       enable = true;
       model = "Muse-Glimmer-30B-Abliterated-Q4_K_M.gguf";
