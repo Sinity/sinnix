@@ -3933,7 +3933,7 @@ class GenericJobs:
                 except SystemdJobError:
                     self._reconcile_launch_error(current)
                     terminal = self.store.load(current.job_id)
-                except (JobRecordError, ProjectConfigError):
+                except (JobRecordError, ProjectConfigError) as launch_error:
                     terminal = self._with_state(
                         current,
                         {
@@ -3944,15 +3944,16 @@ class GenericJobs:
                             ),
                             "terminal": True,
                             "launch_evidence": "not-started",
-                            **(
+                            "error": (
                                 {
-                                    "error": {
-                                        "code": "checkout-missing",
-                                        "message": "registered checkout is unavailable",
-                                    }
+                                    "code": "checkout-missing",
+                                    "message": "registered checkout is unavailable",
                                 }
                                 if self._checkout_path_missing(current)
-                                else {}
+                                else {
+                                    "code": "launch-refused",
+                                    "message": str(launch_error),
+                                }
                             ),
                             "observed_at": _timestamp(),
                         },
@@ -4303,7 +4304,12 @@ class GenericJobs:
                     )
                     if head.returncode == 0:
                         wip_commit = head.stdout.strip()
-            except (OSError, subprocess.SubprocessError) as caught:
+            except (
+                OSError,
+                subprocess.SubprocessError,
+                ProjectConfigError,
+                JobRecordError,
+            ) as caught:
                 error = str(caught)
 
         content = _read_private_artifact(record.log_path, MAX_LOG_ARTIFACT_BYTES)
