@@ -713,7 +713,9 @@ class SinnixdService:
                 "workspace_id",
                 "target_ref",
             } <= set(arguments):
-                raise ValueError("workspace.finish-integrated requires workspace_id and target_ref")
+                raise ValueError(
+                    "workspace.finish-integrated requires workspace_id and target_ref"
+                )
             self._validate_workspace_settlement(arguments)
             assert self.workspaces is not None
             workspace_id = self._job_argument(arguments, "workspace_id")
@@ -1181,8 +1183,10 @@ class SinnixdService:
         """Apply an authored landing receipt and publish one completion event."""
         self._validate_workspace_settlement(arguments)
         beads = arguments.get("beads", [])
-        if not isinstance(beads, list) or not beads or any(
-            not isinstance(item, str) or not item for item in beads
+        if (
+            not isinstance(beads, list)
+            or not beads
+            or any(not isinstance(item, str) or not item for item in beads)
         ):
             if "beads" in arguments:
                 raise ValueError("beads must be a non-empty list of IDs")
@@ -1245,9 +1249,9 @@ class SinnixdService:
     def _validate_workspace_settlement(arguments: Mapping[str, Any]) -> None:
         beads = arguments.get("beads", [])
         if "beads" in arguments and (
-            not isinstance(beads, list) or not beads or any(
-                not isinstance(item, str) or not item for item in beads
-            )
+            not isinstance(beads, list)
+            or not beads
+            or any(not isinstance(item, str) or not item for item in beads)
         ):
             raise ValueError("beads must be a non-empty list of IDs")
         receipt = arguments.get("receipt")

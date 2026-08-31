@@ -309,9 +309,12 @@ rec {
         IOWeight = 10;
         MemoryHigh = "24G";
         ManagedOOMSwap = "kill";
+        # Same reasoning as background.slice above: kill a wedged scope, not a
+        # busy one. Lane verification phases legitimately stall past 10% for
+        # seconds at a time; at 10%/5s oomd killed healthy lanes mid-verify.
         ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "10%";
-        ManagedOOMMemoryPressureDurationSec = "5s";
+        ManagedOOMMemoryPressureLimit = "50%";
+        ManagedOOMMemoryPressureDurationSec = "30s";
       };
       sinnixd-work = {
         IOAccounting = true;
