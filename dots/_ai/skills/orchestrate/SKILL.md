@@ -51,18 +51,27 @@ it before any hunt wave — never pick targets by intuition).
 
 ## Dispatch mechanics (real verbs only)
 
-- Durable work: `agentctl workspace create` (worktree under /realm/worktrees)
-  then `agentctl agent --project P --checkout C --prompt-file F --backend B
---model M --effort E`. Agent jobs are single-shot (no resume yet) and
-  capped at 3600s — for longer arcs, have the lane checkpoint
-  (`agentctl workspace checkpoint`) and re-dispatch a continuation prompt.
-- Job lifecycle: `agentctl job {get,wait,logs,result,cancel}`. Completion
-  notifications are authoritative — **never poll**. One bounded deadline
-  wakeup only when a runtime cannot notify.
+- Dispatch: `agentctl campaign run` for a wave, `agentctl packet launch
+  <bead>` for one bead. An interrupted lane (timeout, preemption) resumes
+  with `agentctl lane resume <workspace>` — never hand-write continuation
+  prompts or derive checkout digests.
+- Publication: `agentctl lane publish <workspace> [--close]` — the one
+  verb; it mints, routes, arms auto-merge, and hands off to the reactor.
+  Never hand-compose authorize parameter JSON. Flagged receipts arrive as
+  judgment items; clean ones publish themselves.
+- Observation: ONE persistent Monitor on `agentctl events tail --follow`
+  (typed kinds: lane, harvest, needs-merge, alert). Completion events are
+  authoritative — no per-job wait loops, no polling.
 - In-session subagents (Agent tool) for read-only analysis, judged panels,
-  and anything needing this session's context (forks).
-- Every dispatch of long-running work states its expected duration WITH
-  evidence, and sets a ~2× deadline watchdog; overshoot >50% is a finding.
+  and forks for context-carrying work.
+- Heavy host operations (full corpus runs, rehearsals) run as declared
+  operations so admission can see them — out-of-band heavies make the
+  preemptor kill innocent jobs. Long arcs state expected duration with
+  evidence; overshoot >50% is a finding.
+- The coordinator's judgment surface: scope-drift flags, schema flags,
+  adversarial reviews of risky lanes, and oracle authorship (a read-only
+  probe against real state that gates authorize — fixture-green alone is
+  not evidence for state-touching work).
 
 ## Lane contract
 
@@ -106,5 +115,6 @@ milestone declares them.
 ## Known gaps (do not script around them silently)
 
 `agentctl task create` is the typed cross-project creation route; agent
-jobs cannot exceed 3600s or resume (oy37.10 / spec items open). When these
-land, update this skill in the same change.
+jobs cannot exceed 3600s (oy37.10). Resume exists: `agentctl lane resume`
+(and `job retry --hint` / `job resume --session-id` underneath) — a lane
+interrupted by timeout or preemption continues in place.
