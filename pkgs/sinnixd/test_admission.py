@@ -642,6 +642,10 @@ def test_sustained_pressure_preempts_largest_managed_job_and_learns_peak(
     preempted = subject.get(second["job_id"])
     assert preempted["state"]["phase"] == "cancelled"
     assert preempted["state"]["preemption"]["reason"] == ["memory-stall"]
+    assert (
+        preempted["state"]["cancellation"]["reason"]
+        == "pressure-preemption:memory-stall"
+    )
     assert preempted["state"]["pre_stop_systemd"]["MemoryPeak"] == str(6 * 1024**3)
     learned = subject._admission_state()["estimates"]["agent:codex:model"]["bytes"]
     assert learned > 6 * 1024**3

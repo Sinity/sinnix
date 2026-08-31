@@ -4966,6 +4966,7 @@ class GenericJobs:
                 record,
                 properties,
                 {
+                    **forensic,
                     "phase": "succeeded",
                     "terminal": True,
                     "systemd": dict(properties),
@@ -5030,6 +5031,7 @@ class GenericJobs:
             record,
             properties,
             {
+                **forensic,
                 "phase": phase,
                 "terminal": terminal,
                 "systemd": dict(properties),
@@ -5280,10 +5282,16 @@ class GenericJobs:
     def _stop_acknowledgement(record: GenericJobRecord) -> dict[str, str]:
         assert record.cancel_stop_acknowledged_at is not None
         assert record.cancel_stop_acknowledged_invocation_id is not None
-        return {
+        acknowledgement = {
             "stop_acknowledged_at": record.cancel_stop_acknowledged_at,
             "invocation_id": record.cancel_stop_acknowledged_invocation_id,
         }
+        cancellation = record.state.get("cancellation")
+        if isinstance(cancellation, Mapping) and isinstance(
+            cancellation.get("reason"), str
+        ):
+            acknowledgement["reason"] = cancellation["reason"]
+        return acknowledgement
 
     @staticmethod
     def _cancel_intent(record: GenericJobRecord) -> dict[str, str]:
@@ -5291,6 +5299,11 @@ class GenericJobs:
         intent = {"requested_at": record.cancel_requested_at}
         if record.cancel_requested_invocation_id is not None:
             intent["invocation_id"] = record.cancel_requested_invocation_id
+        cancellation = record.state.get("cancellation")
+        if isinstance(cancellation, Mapping) and isinstance(
+            cancellation.get("reason"), str
+        ):
+            intent["reason"] = cancellation["reason"]
         return intent
 
     def _list_row(self, record: GenericJobRecord) -> dict[str, Any]:
