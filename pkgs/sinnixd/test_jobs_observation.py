@@ -1395,3 +1395,40 @@ def test_spool_failure_never_breaks_the_job_route(tmp_path: Path) -> None:
     )
 
     assert jobs.get(started["job_id"])["state"]["terminal"]
+
+
+def test_job_environment_carries_a_sandbox_safe_ssh_config(
+    tmp_path, monkeypatch
+) -> None:
+    """The job's mount namespace remaps other-uid files to nobody, so ssh
+    fatally refuses a store-symlinked ~/.ssh/config; the job env must point
+    GIT_SSH_COMMAND at a user-owned copy in the job dir (u9if-era lane
+    evidence: every lane fetch/push failed 'Bad owner or permissions').
+    Anti-vacuity: dropping the injection loses the GIT_SSH_COMMAND key."""
+    from types import SimpleNamespace
+
+    import sinnixd.jobs as jobs_module
+
+    home = tmp_path / "home"
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".ssh" / "config").write_text("Host github.com\n  User git\n")
+    monkeypatch.setattr(jobs_module.Path, "home", staticmethod(lambda: home))
+    job_dir = tmp_path / "job-dirs" / "job-1"
+    job_dir.mkdir(parents=True)
+    subject = object.__new__(jobs_module.GenericJobs)
+    subject.store = SimpleNamespace(job_dirs_root=tmp_path / "job-dirs")
+    record = SimpleNamespace(
+        job_id="job-1", spec=SimpleNamespace(environment={"HOME": str(home)})
+    )
+
+    environment = jobs_module.GenericJobs._job_environment(subject, record)
+
+    assert environment["GIT_SSH_COMMAND"] == f"ssh -F {job_dir / 'ssh_config'}"
+    copied = job_dir / "ssh_config"
+    assert copied.read_text() == "Host github.com\n  User git\n"
+    assert (copied.stat().st_mode & 0o777) == 0o600
+
+    # Absent source config: no injection, no failure.
+    (home / ".ssh" / "config").unlink()
+    bare = jobs_module.GenericJobs._job_environment(subject, record)
+    assert "GIT_SSH_COMMAND" not in bare
