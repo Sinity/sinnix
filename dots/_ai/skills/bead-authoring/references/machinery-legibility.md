@@ -64,3 +64,8 @@ first — pilot lanes wasted effort independently rediscovering absent blocks:
 
 Beads listing all five go to a cheap apply pass (metadata drafted from the
 description); partial/semantic defects go to triage lanes.
+
+9. **No ceremony beads.** A bead whose deliverable is an announcement,
+   declaration, date, or status about other work (rather than work) is a
+   CLOSE candidate: the gates it summarizes are the statement. (Operator
+   ruling on me-cxg, 2026-08-31.)
