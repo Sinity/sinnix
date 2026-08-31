@@ -284,7 +284,9 @@ def parser() -> argparse.ArgumentParser:
     )
     events_tail.add_argument("--follow", "-f", action="store_true")
     events_tail.add_argument("--kind", help="Comma-separated event kinds to include.")
-    events_tail.add_argument("--since", help="ISO timestamp lower bound (matches the 'at' field).")
+    events_tail.add_argument(
+        "--since", help="ISO timestamp lower bound (matches the 'at' field)."
+    )
     events_tail.add_argument("--limit", type=int, default=200)
     events_tail.add_argument(
         "--spool", type=Path, default=Path("/realm/state/agentctl/events.jsonl")
@@ -1043,13 +1045,23 @@ def main() -> int:
             (
                 item
                 for item in workspaces
-                if arguments.workspace
-                in {item.get("name"), item.get("workspace_id")}
+                if arguments.workspace in {item.get("name"), item.get("workspace_id")}
             ),
             None,
         )
         if record is None:
-            print(json.dumps({"ok": False, "error": {"code": "INVALID_ARGUMENT", "message": f"unknown workspace: {arguments.workspace}"}}, indent=1))
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "INVALID_ARGUMENT",
+                            "message": f"unknown workspace: {arguments.workspace}",
+                        },
+                    },
+                    indent=1,
+                )
+            )
             return 1
         start_request = _request(
             "job.start",
@@ -1135,12 +1147,18 @@ def main() -> int:
             for unit in selected:
                 result = subprocess.run(
                     ["git", "worktree", "remove", "--force", str(unit.path)],
-                    cwd=root, capture_output=True, text=True, timeout=120,
+                    cwd=root,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
                 )
                 if result.returncode == 0:
                     subprocess.run(
                         ["git", "branch", "-D", unit.branch],
-                        cwd=root, capture_output=True, text=True, timeout=60,
+                        cwd=root,
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
                     )
                     removed.append(unit.workspace)
             payload["removed"] = removed

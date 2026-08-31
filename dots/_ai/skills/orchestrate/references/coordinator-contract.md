@@ -12,10 +12,11 @@ campaign state itself.
 - **Workspaces**: `agentctl workspace list`.
 - **Task authority**: external Beads per project. `bd` resolves its database
   from the working directory, so mind your cwd.
-- **Events**: one persistent Monitor on `/realm/state/agentctl/events.jsonl`,
-  filtered to lane terminals, the active project, merge watches, and failures.
-  The harvest operation watches its own PR to merge and closes the bead from
-  its receipt.
+- **Events**: one persistent watch on `agentctl events tail --follow` (spool:
+  `/realm/state/agentctl/events.jsonl`), filtered to judgment signals only:
+  failures/timeouts, harvest terminals, and review/needs-merge events. Lane
+  successes need no coordinator wake — the reactor enqueues the harvest, the
+  harvest watches its own PR to merge and closes the bead from its receipt.
 - **History**: per-project memory (`~/.claude/projects/<p>/memory/MEMORY.md`)
   and the repo's `docs/atlas/`.
 
@@ -27,8 +28,8 @@ Look for the verb before writing any procedure: `agentctl <noun> --help`.
 | ---------------------------------------- | --------------------------------------------------------------------------------------------- |
 | schedule a dispatch wave                 | `agentctl campaign run --project <p> [--bead ID …] [--dry-run]`                               |
 | dispatch one bead                        | `agentctl packet launch <bead> --project <p>`                                                 |
-| review a finished lane                   | `agentctl job start <p> harvest --workspace <ws>` (receipt; read-mostly)                      |
-| publish a reviewed lane                  | the same operation with `authorize` + `receipt_ref`                                           |
+| publish a finished lane                  | `agentctl lane publish <ws>` (mints receipt, routes, authorizes, arms auto-merge)             |
+| continue an interrupted lane             | `agentctl agent launch --checkout <worktree-id> --prompt-file …` (no `lane resume` verb yet)  |
 | open a PR outside the harvest flow       | `agentctl workspace publish --job <j> --title T [--body F] [--wait]`                          |
 | land / integrate a workspace             | `agentctl workspace land --job <j>`                                                           |
 | dispose after a GitHub merge             | `agentctl workspace finish-merged`                                                            |
@@ -42,6 +43,11 @@ Look for the verb before writing any procedure: `agentctl <noun> --help`.
 | task-backend mutations                   | `agentctl task create/claim/complete/note/update/relate/reconcile/snapshot`                   |
 | wait on work                             | `agentctl job wait`, `agentctl agent wait`, `agentctl plan wait`                              |
 | all evidence for a job or workspace      | `agentctl evidence <id>`                                                                      |
+
+Publication policy is per-repository: polylogue lands via `lane publish`
+(PR + auto-merge); **sinnix publishes from `master` directly** (its CLAUDE.md)
+— verify at exact head, plain merge or fast-forward, push; no PRs, no
+`workspace publish`.
 
 A missing capability is a bead against the substrate. Declared operations are
 the extension point: `.agentctl/project.toml` in the repo, live after a daemon
@@ -60,31 +66,33 @@ contract into the prompt.
 and produces a receipt; publication is reachable only by quoting that receipt
 back, so nothing publishes unreviewed.
 
-1. `agentctl job start <p> harvest --workspace <ws>` → a receipt carrying the
-   lane trailer, the diffstat, the red-flag scan, and a ref to the full diff.
-   `agentctl job result <job>` reads it.
-2. `sinnixd-review-route <worktree> --base origin/master` compiles the scan
-   into a typed route and never publishes. Docs/tests-only with a clean scan is
-   reactor auto-publish, no model at all; an ordinary production diff with a
-   clean scan goes to a cross-family review lane; migrations, gate or baseline
-   edits, security and excision work, large deletions, legacy shims, and
-   uncleared flags come to the coordinator. Review-lane prompts carry the
-   packet, trailer, and scan; the reviewer identity lands in the publication
-   body.
-3. Judge the receipt. No flags plus a small diff → stat-level skim. Flags → read
-   the full diff. The flags mark deleted production lines, inverted or removed
-   assertions, new xfail or skip, gate, baseline, migration or sidecar edits,
-   and deleted test files. A lane that papered over a real defect is rejected
-   with the reason recorded on the bead.
-4. Write the PR title, body, and bead close-reason to files at decision time,
-   then authorize:
-   `agentctl job start <p> harvest --workspace <ws> --parameters-json
-'{"authorize":true,"receipt_ref":"<ref>","title_file":"…","body_file":"…",
-"bead_id":"…","close_reason_file":"…"}'`. Omit the bead parameters when the
-   lane delivered a slice and the bead stays open. The operation holds the repo
-   lock only across push and PR creation, so review phases run in parallel.
+1. `agentctl lane publish <ws> [--close]` runs the whole pass: mints the
+   receipt (lane trailer, diffstat, red-flag scan, full-diff ref), routes it,
+   and — when the route clears — authorizes, pushes, arms auto-merge, and
+   releases. `agentctl job result <harvest-job>` reads the receipt. The verb
+   enqueues a harvest job and may report RESULT_INVALID before that job runs;
+   confirm via `job list`, do not re-invoke.
+2. Routing: docs/tests-only with a clean scan is reactor auto-publish, no
+   model at all. An ordinary production diff with a clean scan routes to a
+   cross-family review lane — the coordinator dispatches that reviewer
+   (nothing dispatches it automatically) with the packet, trailer, and scan;
+   the reviewer identity lands in the publication body. Migrations, gate or
+   baseline edits, security and excision work, large deletions, legacy shims,
+   and uncleared flags route to the coordinator.
+3. Judge a coordinator-routed receipt. No flags plus a small diff →
+   stat-level skim. Flags → read the full diff. The flags mark deleted
+   production lines, inverted or removed assertions, new xfail or skip, gate,
+   baseline, migration or sidecar edits, and deleted test files. A lane that
+   papered over a real defect is rejected with the reason recorded on the
+   bead. Rewrite `.lane/title` and `.lane/body.md` at decision time,
+   immediately before re-running `lane publish` — harvest restores `.lane/`
+   from lane artifacts, so earlier edits are clobbered.
+4. A receipt binds workspace HEAD at minting; a failed authorize invalidates
+   it — re-mint before retrying. The operation holds the repo lock only
+   across push and PR creation, so review phases run in parallel.
 5. Dispose after the content check: `agentctl workspace finish-integrated
---target <ref>` is squash-proof; `finish-merged` handles the merged case.
+--target <ref>` is squash-proof; `finish-merged` handles the merged case;
+   `lane gc --apply` owns bulk disposal of integrated units.
 
 **Launch wedges**: packet launch advances one step per attempt (worktree →
 record → job) and reports a step failure as a redacted `OWNER_UNAVAILABLE`.

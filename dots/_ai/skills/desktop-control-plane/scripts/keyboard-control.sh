@@ -56,8 +56,8 @@ lua_quote() {
 
 window_selector() {
   case "$1" in
-    0x*) printf 'address:%s' "$1" ;;
-    *) printf '%s' "$1" ;;
+  0x*) printf 'address:%s' "$1" ;;
+  *) printf '%s' "$1" ;;
   esac
 }
 

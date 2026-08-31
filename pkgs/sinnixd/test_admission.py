@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 from sinnixd.jobs import (
+    MEMORY_FULL_BLOCK_THRESHOLD,
+    MEMORY_FULL_PREEMPT_THRESHOLD,
     AdmissionConflictError,
     GenericJobs,
     GenericJobSpec,
     GenericJobStore,
-    MEMORY_FULL_BLOCK_THRESHOLD,
-    MEMORY_FULL_PREEMPT_THRESHOLD,
     SystemdJobTimeout,
     UserSystemdJobs,
 )
@@ -197,9 +197,7 @@ def test_admission_claims_are_durable_and_ledger_explains_queue(
         "operation": "hold",
     }
     ledger = subject.admission_ledger()
-    assert ledger["claims"][holder["job_id"]]["exclusive_keys"] == [
-        "fixture:store"
-    ]
+    assert ledger["claims"][holder["job_id"]]["exclusive_keys"] == ["fixture:store"]
     assert ledger["queue"][0]["job_id"] == queued["job_id"]
     assert ledger["queue"][0]["blocked_by"] == ["exclusive-key"]
     assert (
@@ -366,7 +364,6 @@ def test_memory_psi_noise_does_not_block_admission(tmp_path: Path) -> None:
 
 
 def test_memory_psi_block_requires_two_avg10_probes(tmp_path: Path) -> None:
-    pressure = {"memory_full_avg10": 0.0}
     probes = iter(
         (
             {"memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD},
@@ -1346,13 +1343,17 @@ def test_transient_io_stall_does_not_preempt_before_the_sustained_window(
     first = subject.start(agent_spec(("table:first",)))
     second = subject.start(agent_spec(("table:second",)))
     systemd.unit_properties[first["unit"]] = {
-        **base, "InvocationID": "first",
-        "MemoryCurrent": str(1024**3), "MemorySwapCurrent": "0",
+        **base,
+        "InvocationID": "first",
+        "MemoryCurrent": str(1024**3),
+        "MemorySwapCurrent": "0",
         "MemoryPeak": str(1024**3),
     }
     systemd.unit_properties[second["unit"]] = {
-        **base, "InvocationID": "second",
-        "MemoryCurrent": str(5 * 1024**3), "MemorySwapCurrent": "0",
+        **base,
+        "InvocationID": "second",
+        "MemoryCurrent": str(5 * 1024**3),
+        "MemorySwapCurrent": "0",
         "MemoryPeak": str(5 * 1024**3),
     }
 
@@ -1400,13 +1401,17 @@ def test_memory_stall_keeps_the_short_grace(
     first = subject.start(agent_spec(("table:first",)))
     second = subject.start(agent_spec(("table:second",)))
     systemd.unit_properties[first["unit"]] = {
-        **base, "InvocationID": "first",
-        "MemoryCurrent": str(1024**3), "MemorySwapCurrent": "0",
+        **base,
+        "InvocationID": "first",
+        "MemoryCurrent": str(1024**3),
+        "MemorySwapCurrent": "0",
         "MemoryPeak": str(1024**3),
     }
     systemd.unit_properties[second["unit"]] = {
-        **base, "InvocationID": "second",
-        "MemoryCurrent": str(5 * 1024**3), "MemorySwapCurrent": "0",
+        **base,
+        "InvocationID": "second",
+        "MemoryCurrent": str(5 * 1024**3),
+        "MemorySwapCurrent": "0",
         "MemoryPeak": str(5 * 1024**3),
     }
 
@@ -1429,7 +1434,11 @@ def test_lane_and_harvest_fit_the_host_budget_together(tmp_path: Path) -> None:
     gib = 1024 * 1024 * 1024
     adapter = project(
         tmp_path / "project",
-        (operation("harvest", pool="normal", estimate_memory_bytes=4700 * 1024 * 1024),),
+        (
+            operation(
+                "harvest", pool="normal", estimate_memory_bytes=4700 * 1024 * 1024
+            ),
+        ),
     )
     systemd = FakeSystemd()
     pressure = {
@@ -1507,10 +1516,17 @@ def test_superseding_operation_cancels_its_own_queued_jobs(tmp_path: Path) -> No
         subprocess.run(["git", "-C", str(adapter.root), "add", "tracked"], check=True)
         subprocess.run(
             [
-                "git", "-C", str(adapter.root),
-                "-c", "user.name=Fixture",
-                "-c", "user.email=fixture@example.test",
-                "commit", "--quiet", "-m", marker,
+                "git",
+                "-C",
+                str(adapter.root),
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.test",
+                "commit",
+                "--quiet",
+                "-m",
+                marker,
             ],
             check=True,
         )
@@ -1832,7 +1848,4 @@ def test_cancel_records_a_typed_reason(tmp_path: Path) -> None:
     assert started["state"]["phase"] == "queued"
     subject.cancel(started["job_id"], reason="pressure-preemption:memory-stall")
     record = subject.store.load(started["job_id"])
-    assert (
-        record.state["cancellation"]["reason"]
-        == "pressure-preemption:memory-stall"
-    )
+    assert record.state["cancellation"]["reason"] == "pressure-preemption:memory-stall"
