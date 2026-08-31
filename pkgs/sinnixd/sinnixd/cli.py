@@ -10,6 +10,7 @@ from threading import Event, Thread
 from typing import Any, Mapping
 from uuid import uuid4
 
+import tomllib
 from sinnix_mcp import ErrorCode, ErrorEnvelope, RequestEnvelope, ResponseEnvelope
 
 from .api import (
@@ -35,7 +36,7 @@ from .jobs import (
     default_state_dir,
     host_pressure,
 )
-from .limits import DEFAULT_TIMEOUT_SECONDS
+from .limits import DEFAULT_TIMEOUT_SECONDS, MAX_AGENT_TIMEOUT_SECONDS
 from .packets import (
     PacketConfig,
     PacketError,
@@ -111,6 +112,38 @@ def _packet_step_failure(
     return {**response, "ok": False, "error": error_value}
 
 
+def _continuation_preamble(project: str) -> str:
+    """Generated environment preamble for prompts that skip packet compilation.
+
+    Packet launches compile the worker contract into their prompts; a bare
+    agent launch historically sent the prompt file verbatim, so continuation
+    agents had to rediscover how to invoke the project tooling — one lane
+    burned a full round on `command not found: devtools` (sinnix-05rs).
+    """
+    try:
+        root = resolve_project_root(project)
+        raw = tomllib.loads((root / ".agentctl" / "project.toml").read_text())
+    except (PacketError, OSError, tomllib.TOMLDecodeError):
+        return ""
+    command = raw.get("environment", {}).get("command")
+    if not isinstance(command, list) or not all(
+        isinstance(item, str) and item for item in command
+    ):
+        return ""
+    wrapper = " ".join(command)
+    return (
+        "# Continuation preamble (generated)\n\n"
+        "You are continuing work in an existing project checkout. Any\n"
+        "uncommitted work in the worktree is yours: assess it and continue.\n"
+        "Run project commands through the declared environment wrapper from\n"
+        "the worktree root:\n\n"
+        f"    {wrapper} <command>\n\n"
+        "The repository's own runner (e.g. `devtools`) lives inside that\n"
+        "wrapper (or the worktree's .venv), not on the bare PATH.\n\n"
+        "---\n\n"
+    )
+
+
 def _add_agent_launch_arguments(
     target: argparse.ArgumentParser, *, required: bool
 ) -> None:
@@ -121,7 +154,9 @@ def _add_agent_launch_arguments(
     target.add_argument("--model", required=required)
     target.add_argument("--effort", required=required)
     target.add_argument("--credential-profile", default="subscription")
-    target.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    target.add_argument(
+        "--timeout-seconds", type=int, default=MAX_AGENT_TIMEOUT_SECONDS
+    )
     target.add_argument("--dimensions-json", default="{}")
     target.add_argument(
         "--coordinator-label",
@@ -779,6 +814,12 @@ def main() -> int:
             parser().error(f"could not read --prompt-file: {error}")
         if not prompt or len(prompt.encode()) > 200_000:
             parser().error("--prompt-file must contain at most 200000 non-empty bytes")
+        if not prompt.startswith("# Dispatch packet ("):
+            prompt = _continuation_preamble(arguments.project) + prompt
+            if len(prompt.encode()) > 200_000:
+                parser().error(
+                    "--prompt-file leaves no room for the continuation preamble; trim it"
+                )
         try:
             dimensions = json.loads(arguments.dimensions_json)
         except json.JSONDecodeError as error:
