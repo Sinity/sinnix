@@ -40,6 +40,11 @@ cache = "tree+environment"
 exclusive_keys = ["sinnix:nix-store-pressure"]
 estimate_memory_bytes = 6442450944
 scratch = "nvme"
+# Master-boundary watch: sinnix has no CI, so between landings nothing tests
+# master and one red masks the next (three stacked reds cost hours of lane
+# checks on 2026-08-31). With tree+environment caching an unchanged master
+# is a cache hit, so the standing schedule only pays after a landing.
+schedule = "hourly"
 
 [operations.lint]
 description = "Run maintained Nix and shell linters"
