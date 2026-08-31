@@ -1594,3 +1594,51 @@ def test_job_environment_carries_a_sandbox_safe_ssh_config(
     (home / ".ssh" / "config").unlink()
     bare = jobs_module.GenericJobs._job_environment(subject, record)
     assert "GIT_SSH_COMMAND" not in bare
+
+
+def test_retry_rebinds_the_checkout_to_its_current_head(tmp_path) -> None:
+    """A lane routinely rebases before it is preempted or times out; a retry
+    frozen to the launch-time head fails execution revalidation every time
+    (jobs e8a2c3fd, 9e8de64b on 2026-08-31). Anti-vacuity: returning the
+    recorded head for a healthy checkout reintroduces the stale binding."""
+    import subprocess as sp
+
+    from sinnixd.contracts import TypedJobContracts
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sp.run(["git", "init", "--quiet", str(repo)], check=True)
+    sp.run(["git", "-C", str(repo), "config", "user.name", "F"], check=True)
+    sp.run(
+        ["git", "-C", str(repo), "config", "user.email", "f@example.test"],
+        check=True,
+    )
+    (repo / "a").write_text("1")
+    sp.run(["git", "-C", str(repo), "add", "."], check=True)
+    sp.run(["git", "-C", str(repo), "commit", "-qm", "one"], check=True)
+    stale = sp.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    (repo / "a").write_text("2")
+    sp.run(["git", "-C", str(repo), "commit", "-aqm", "two"], check=True)
+    current = sp.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert stale != current
+
+    rebound = TypedJobContracts._current_checkout_head(
+        {"path": str(repo), "head": stale}
+    )
+    assert rebound == current
+
+    # An unresolvable path falls back to the recorded head rather than failing.
+    fallback = TypedJobContracts._current_checkout_head(
+        {"path": str(tmp_path / "absent"), "head": stale}
+    )
+    assert fallback == stale
