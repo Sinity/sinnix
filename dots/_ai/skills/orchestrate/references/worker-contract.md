@@ -15,18 +15,27 @@ prompt. Write only what the worker must do; coordinator material belongs in
    the test oracle are the structural check.
 3. **Red first for bug fixes.** Demonstrate the failure, then fix it, then show
    green. Each new test names what mutation would make it red.
-4. **Managed commands only** — the repo's own runner (`devtools test <sel>`),
+4. **Fail-closed needs a derivation, not a reflex.** Before adding a guard
+   that refuses input, measure what the real corpus contains: a refusal path
+   must name the evidence that legitimate data never hits it. A guard that
+   refuses real production records is a defect, not safety — this was the
+   dominant rejection cause on 2026-08-31 (guards refusing 8/400, 51%, and
+   100%-ambiguous real records). Where behavior differs between synthetic
+   fixtures and the live archive, run the relevant reader against the live
+   archive read-only and report the counts; the quick gate cannot see this
+   class at all.
+5. **Managed commands only** — the repo's own runner (`devtools test <sel>`),
    never bare pytest. Commit by path, push, never merge.
-5. **Report once, honestly.** Per-bead and per-acceptance-criterion
+6. **Report once, honestly.** Per-bead and per-acceptance-criterion
    disposition, the exact commands and the result line that matters, diffstat,
    residual risk. Refuting a finding needs evidence. The report is the
    deliverable: going idle without one is a contract violation. Report in the
    job result only — PR and bead comments duplicate it into a stale copy.
    Piped exit codes lie (`cmd | tail` reports tail's status); use pipestatus or
    capture to a file before claiming a gate passed.
-6. **No scope expansion.** Discoveries become filings or report notes, never
+7. **No scope expansion.** Discoveries become filings or report notes, never
    inline extra work.
-7. **Exit at current master.** Before reporting, fetch, rebase onto
+8. **Exit at current master.** Before reporting, fetch, rebase onto
    `origin/master`, rerun the quick gate in the rebased state, fix what it
    surfaces, and push. A conflict you cannot resolve honestly is reported as
    such, never forced to green. A failure you attribute to master is a claim
