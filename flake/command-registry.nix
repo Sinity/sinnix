@@ -125,7 +125,7 @@ let
     for agentctl_project_root in "''${agentctl_project_roots[@]}"; do
       agentctl_environment_arguments+=(--project-root "$agentctl_project_root")
     done
-    ${scriptPkgs.sinnixd}/bin/sinnixd-project-environment-check \
+    ${scriptPkgs.sinnixd-tooling}/bin/sinnixd-project-environment-check \
       "''${agentctl_environment_arguments[@]}"
   '';
   # Single source of truth for rebuild concurrency + resource containment, so

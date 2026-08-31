@@ -295,6 +295,14 @@ let
 
     sinnix-mcp = sinnixMcpPackage;
     sinnixd = sinnixdPackage;
+    # The same tool without its test-suite check phase: environment builds
+    # (dev shell, rebuild wrappers) need the binary, not the gate. The gate
+    # stays on `sinnixd` for the suite check and the deployed service; a
+    # worktree with red work-in-progress tests must still produce a usable
+    # environment or continuation lanes can never start to fix it.
+    sinnixd-tooling = sinnixdPackage.overridePythonAttrs (_: {
+      doCheck = false;
+    });
     sinnix-agent-gateway = agentGatewayPackage;
     sinnix-agent-control-mcp = pkgs.writeShellApplication {
       name = "sinnix-agent-control-mcp";

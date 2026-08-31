@@ -126,6 +126,20 @@ def test_reference_extraction_accepts_repo_references_and_rejects_noise() -> Non
     )
 
 
+def test_module_inference_rejects_address_and_host_tokens() -> None:
+    """Email parts, URL hosts, and bare hostnames never become module keys
+    (sinnix-8l2p). Anti-vacuity: the broad dotted-token regex emitted
+    module:gmail.com and module:ezo.dev for this exact text."""
+    references = extract_references("""
+        Contact ezo.dev@gmail.com about the module polylogue.sources.dispatch,
+        see https://api.github.com/repos for details; host gmail.com serves it.
+        """)
+
+    assert references.modules == ("polylogue.sources.dispatch",)
+    keys = infer_conflict_keys(references)
+    assert keys == ("module:polylogue.sources.dispatch",)
+
+
 def test_snapshot_unions_inferred_keys_and_explicit_keys_win_source_label(
     tmp_path: Path,
 ) -> None:
