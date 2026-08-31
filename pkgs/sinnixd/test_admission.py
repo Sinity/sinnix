@@ -352,6 +352,35 @@ def test_swap_exhaustion_queues_even_a_small_agent_job(tmp_path: Path) -> None:
     assert systemd.started == []
 
 
+def test_cold_swap_with_plentiful_ram_does_not_block_admission(
+    tmp_path: Path,
+) -> None:
+    """Nearly-full swap alone is occupancy, not danger: with high available
+    RAM and zero stall pressure the job admits (2026-08-31 wedge: free
+    fraction 0.145 held the whole queue at zero running jobs). Anti-vacuity:
+    restoring the unconditional swap gate turns this red."""
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        pressure_probe=lambda: {
+            "memory_full_avg10": 0.0,
+            "io_full_avg10": 0.0,
+            "memory_total_bytes": 32 * 1024 * 1024 * 1024,
+            "memory_available_bytes": 9 * 1024 * 1024 * 1024,
+            "swap_total_bytes": 20 * 1024 * 1024 * 1024,
+            "swap_free_bytes": 1 * 1024 * 1024 * 1024,
+            "managed_memory_bytes": 0,
+        },
+    )
+
+    started = subject.start(agent_spec(("table:jobs",)))
+
+    assert started["state"]["phase"] != "queued"
+    assert systemd.started != []
+
+
 def test_memory_psi_noise_does_not_block_admission(tmp_path: Path) -> None:
     """0.39% full PSI is 39 ms of whole-system stall in the ten-second window."""
     systemd = FakeSystemd()
