@@ -24,27 +24,67 @@ from .service import SinnixdService
 MAX_FRAME_BYTES = 1_048_576
 CONNECTION_TIMEOUT_SECONDS = 5.0
 WAIT_TRANSPORT_MARGIN_SECONDS = 5.0
-# workspace.publish and workspace.land run on the job substrate and return a
-# job id immediately; only the remaining synchronous delivery reads keep a
-# longer control-response window covering their command deadlines.
+DEFAULT_RESPONSE_BUDGET_SECONDS = 15.0
+# Every daemon operation carries an explicit response budget; job.wait and
+# plan.wait derive theirs from the requested wait window instead. The table
+# must cover service.SUPPORTED_OPERATIONS exactly — a new operation without a
+# declared budget fails the contract test, not silently the 5s connect
+# fallback (sinnix-16in).
 CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS = {
-    # Listing runs git identity checks per record; at fleet scale it exceeds
-    # the 5s default and was misreported as "sinnixd is unavailable" (dn4c).
-    "workspace.list": 60.0,
-    "workspace.review-status": 65.0,
-    "workspace.finish": 185.0,
+    "runtime.status": DEFAULT_RESPONSE_BUDGET_SECONDS,
+    "project.list": DEFAULT_RESPONSE_BUDGET_SECONDS,
+    "project.reload": 60.0,
+    "project.get": DEFAULT_RESPONSE_BUDGET_SECONDS,
+    "project.operations": DEFAULT_RESPONSE_BUDGET_SECONDS,
+    "plan.submit": 60.0,
+    "plan.get": DEFAULT_RESPONSE_BUDGET_SECONDS,
+    "plan.list": 60.0,
+    "plan.result": DEFAULT_RESPONSE_BUDGET_SECONDS,
+    "packet.status": 60.0,
     "packet.finalize": 420.0,
+    # Listing runs git identity checks per record; at fleet scale it exceeds
+    # a short default and was misreported as "sinnixd is unavailable" (dn4c).
+    "workspace.list": 60.0,
+    "workspace.get": 60.0,
+    "workspace.adopt": 60.0,
+    "workspace.reap": 60.0,
+    "workspace.dispose": 60.0,
+    "workspace.checkpoint": 120.0,
+    "workspace.restore": 120.0,
+    "workspace.recover": 300.0,
+    "workspace.stack": 120.0,
+    "workspace.restack": 300.0,
+    "workspace.publish": 60.0,
+    "workspace.review-status": 65.0,
+    "workspace.land": 60.0,
+    "workspace.finish": 185.0,
+    "workspace.finish-integrated": 185.0,
     # Creation runs `git worktree add` and then the project's provision exec
-    # hook (e.g. uv sync) before answering. `packet launch` dispatches it as
-    # its own step, so it needs the budget in its own right and not only
-    # through the launch entry below.
+    # hook (e.g. uv sync) before answering; `packet launch` dispatches it as
+    # its own step, so provisioning must fit this budget.
     "workspace.create": 300.0,
-    # Launch compiles the packet AND provisions the workspace (file seeds plus
-    # the provision exec hook, e.g. uv sync) before answering.
-    "packet.launch": 300.0,
     # Wave scheduling compiles every ready bead's packet before answering.
     "campaign.run": 300.0,
+    "job.start": 60.0,
+    "job.fire": 60.0,
+    "job.shell.start": 60.0,
+    "job.agent.start": 60.0,
+    "job.admission.reset": DEFAULT_RESPONSE_BUDGET_SECONDS,
+    "job.admission": DEFAULT_RESPONSE_BUDGET_SECONDS,
+    # Get and list reconcile live systemd state per non-terminal record; at
+    # fleet scale a short budget times the client out mid-response and the
+    # daemon logs a broken pipe for every retry (sinnix-16in evidence).
+    "job.get": 60.0,
+    "job.retry": 60.0,
+    "job.resume": 60.0,
+    "job.list": 90.0,
+    "job.notify-exit": DEFAULT_RESPONSE_BUDGET_SECONDS,
+    "job.logs": 60.0,
+    "job.result": 60.0,
+    "job.cancel": 60.0,
+    "task.complete": 60.0,
 }
+WAIT_OPERATIONS = {"job.wait", "plan.wait"}
 ACCEPT_POLL_SECONDS = 0.1
 RESERVED_CONTROL_WORKERS = 2
 MAX_JSON_RPC_ERROR_MESSAGE_BYTES = 1_024
@@ -58,6 +98,24 @@ class ProtocolError(ValueError):
 
 class SinnixdClientError(ValueError):
     """The canonical client could not obtain a valid daemon response."""
+
+
+class ResponseBudgetExceeded(SinnixdClientError):
+    """The daemon accepted the request but did not answer within its budget.
+
+    Distinct from unavailability: the socket connected and the request was
+    sent, so the daemon is alive and may still complete the work. Callers
+    report the budget, not a false outage.
+    """
+
+    def __init__(self, operation: str, budget_seconds: float) -> None:
+        self.operation = operation
+        self.budget_seconds = budget_seconds
+        super().__init__(
+            f"response budget exceeded: operation={operation} "
+            f"budget={budget_seconds:g}s (the daemon is alive; the request may "
+            "still be executing)"
+        )
 
 
 @dataclass(frozen=True)
@@ -113,9 +171,9 @@ def send_frame(connection: socket.socket, value: dict[str, Any]) -> None:
 
 
 def _response_timeout_seconds(request: RequestEnvelope) -> float:
-    if request.operation not in {"job.wait", "plan.wait"}:
+    if request.operation not in WAIT_OPERATIONS:
         return CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS.get(
-            request.operation, CONNECTION_TIMEOUT_SECONDS
+            request.operation, DEFAULT_RESPONSE_BUDGET_SECONDS
         )
     timeout_seconds = request.arguments.get("timeout_seconds", DEFAULT_WAIT_SECONDS)
     if (
@@ -361,7 +419,11 @@ class UnixSocketServer:
 
 
 def call(socket_path: Path, request: RequestEnvelope) -> dict[str, Any]:
+    budget_seconds = _response_timeout_seconds(request)
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        # Connect/send failures mean the daemon is unreachable and stay
+        # OSError; once the request is in flight, running out the response
+        # budget is a distinct typed condition (sinnix-16in).
         connection.settimeout(CONNECTION_TIMEOUT_SECONDS)
         connection.connect(str(socket_path))
         send_frame(
@@ -373,8 +435,11 @@ def call(socket_path: Path, request: RequestEnvelope) -> dict[str, Any]:
                 "params": request.to_dict(),
             },
         )
-        connection.settimeout(_response_timeout_seconds(request))
-        response = receive_frame(connection)
+        connection.settimeout(budget_seconds)
+        try:
+            response = receive_frame(connection)
+        except TimeoutError as error:
+            raise ResponseBudgetExceeded(request.operation, budget_seconds) from error
     return _response_result_from_json_rpc_frame(request, response)
 
 

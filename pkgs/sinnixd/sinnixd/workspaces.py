@@ -618,7 +618,7 @@ class GitWorkspaces:
             if not record.managed:
                 raise WorkspaceError("adopted workspaces cannot be finished")
             if any(
-                stack.parent_workspace_id == workspace_id
+                stack.parent_workspace_id == record.workspace_id
                 for stack in self.store.stack_records()
             ):
                 raise WorkspaceError(
@@ -639,10 +639,10 @@ class GitWorkspaces:
                     removed.stderr.strip() or "git worktree remove failed"
                 )
             self._git(project.root, "branch", "-D", record.branch, check=False)
-            self.store.remove_stack_references(workspace_id)
-            self.store.remove(workspace_id)
+            self.store.remove_stack_references(record.workspace_id)
+            self.store.remove(record.workspace_id)
             return {
-                "workspace_id": workspace_id,
+                "workspace_id": record.workspace_id,
                 "finished": True,
                 "head": expected_head,
             }
@@ -654,7 +654,7 @@ class GitWorkspaces:
             if not record.managed:
                 raise WorkspaceError("adopted workspaces cannot be finished")
             if any(
-                stack.parent_workspace_id == workspace_id
+                stack.parent_workspace_id == record.workspace_id
                 for stack in self.store.stack_records()
             ):
                 raise WorkspaceError(
@@ -691,10 +691,10 @@ class GitWorkspaces:
                     removed.stderr.strip() or "git worktree remove failed"
                 )
             self._git(project.root, "branch", "-D", record.branch, check=False)
-            self.store.remove_stack_references(workspace_id)
-            self.store.remove(workspace_id)
+            self.store.remove_stack_references(record.workspace_id)
+            self.store.remove(record.workspace_id)
             return {
-                "workspace_id": workspace_id,
+                "workspace_id": record.workspace_id,
                 "finished": True,
                 "head": checkout.head,
                 "integration_target": self._git(
@@ -1021,7 +1021,7 @@ class GitWorkspaces:
         with flock(self.mutation_lock):
             record = self._record(workspace_id)
             if any(
-                stack.parent_workspace_id == workspace_id
+                stack.parent_workspace_id == record.workspace_id
                 for stack in self.store.stack_records()
             ):
                 raise WorkspaceError(
@@ -1030,7 +1030,7 @@ class GitWorkspaces:
             if self._path_state(record) == "missing":
                 self._gc_missing_locked((record,))
                 return {
-                    "workspace_id": workspace_id,
+                    "workspace_id": record.workspace_id,
                     "reaped": True,
                     "relationship_only": True,
                     "state": "missing",
@@ -1038,10 +1038,10 @@ class GitWorkspaces:
                 }
             status = self._status(record)
             if status["state"] == "missing":
-                self.store.remove_stack_references(workspace_id)
-                self.store.remove(workspace_id)
+                self.store.remove_stack_references(record.workspace_id)
+                self.store.remove(record.workspace_id)
                 return {
-                    "workspace_id": workspace_id,
+                    "workspace_id": record.workspace_id,
                     "reaped": True,
                     "relationship_only": True,
                 }
@@ -1065,10 +1065,10 @@ class GitWorkspaces:
                 raise WorkspaceError(
                     removed.stderr.strip() or "git worktree remove failed"
                 )
-            self.store.remove_stack_references(workspace_id)
-            self.store.remove(workspace_id)
+            self.store.remove_stack_references(record.workspace_id)
+            self.store.remove(record.workspace_id)
             return {
-                "workspace_id": workspace_id,
+                "workspace_id": record.workspace_id,
                 "reaped": True,
                 "relationship_only": False,
                 "retained_branch": record.branch,
@@ -1083,7 +1083,7 @@ class GitWorkspaces:
             if not record.managed:
                 raise WorkspaceError("adopted workspaces cannot be disposed")
             if any(
-                stack.parent_workspace_id == workspace_id
+                stack.parent_workspace_id == record.workspace_id
                 for stack in self.store.stack_records()
             ):
                 raise WorkspaceError(
@@ -1142,10 +1142,10 @@ class GitWorkspaces:
                 raise WorkspaceError(
                     branch.stderr.strip() or "git branch deletion failed"
                 )
-            self.store.remove_stack_references(workspace_id)
-            self.store.remove(workspace_id)
+            self.store.remove_stack_references(record.workspace_id)
+            self.store.remove(record.workspace_id)
             return {
-                "workspace_id": workspace_id,
+                "workspace_id": record.workspace_id,
                 "disposed": True,
                 "head": checkout.head,
                 "deleted_branch": record.branch,
@@ -1170,7 +1170,7 @@ class GitWorkspaces:
             )
             relationship = StackRecord(
                 child_workspace_id=created["workspace_id"],
-                parent_workspace_id=parent_workspace_id,
+                parent_workspace_id=parent.workspace_id,
                 created_at=datetime.now(UTC).isoformat(),
                 parent_head=parent_checkout.head,
             )
@@ -1182,10 +1182,11 @@ class GitWorkspaces:
                 self._remove_worktree(project, child)
                 self.store.remove(child.workspace_id)
                 raise
-        return {**created, "parent_workspace_id": parent_workspace_id}
+        return {**created, "parent_workspace_id": parent.workspace_id}
 
     def restack(self, workspace_id: str) -> dict[str, Any]:
         with flock(self.mutation_lock):
+            workspace_id = self._record(workspace_id).workspace_id
             stack = next(
                 (
                     item
@@ -1711,9 +1712,27 @@ class GitWorkspaces:
         return False
 
     def _record(self, workspace_id: str) -> WorkspaceRecord:
-        for record in self.store.records():
+        # Every identifier the list output prints resolves here: UUID first,
+        # then unique name, then unique branch. Ambiguity refuses with the
+        # candidate UUIDs instead of acting on a first match (sinnix-vb1u).
+        records = list(self.store.records())
+        for record in records:
             if record.workspace_id == workspace_id:
                 return record
+        matches = [record for record in records if record.name == workspace_id]
+        if not matches:
+            matches = [record for record in records if record.branch == workspace_id]
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            candidates = ", ".join(
+                f"{record.workspace_id} ({record.project_id}:{record.name})"
+                for record in matches
+            )
+            raise WorkspaceError(
+                f"ambiguous workspace reference {workspace_id!r}; "
+                f"candidates: {candidates}"
+            )
         raise KeyError(f"unknown workspace: {workspace_id}")
 
     def _project(self, project_id: str) -> ProjectAdapter:
