@@ -74,6 +74,9 @@ MIN_HOST_MEMORY_RESERVE_BYTES = 256 * MIB
 MAX_HOST_MEMORY_RESERVE_BYTES = 6 * GIB
 HOST_MEMORY_RESERVE_FRACTION = 0.15
 MIN_SWAP_FREE_FRACTION = 0.15
+# Below this much available RAM, a nearly-full swap is treated as exhaustion
+# even before stall pressure shows.
+SWAP_EXHAUSTION_MIN_AVAILABLE_BYTES = 4 * 1024**3
 # PSI averages are percentages of elapsed time. A 10% full-memory signal means
 # the host is losing a tenth of its wall time to memory stalls.
 MEMORY_FULL_BLOCK_THRESHOLD = 10.0
@@ -3682,8 +3685,20 @@ class GenericJobs:
     ) -> bool:
         swap_total = float(pressure.get("swap_total_bytes", 0.0))
         swap_free = float(pressure.get("swap_free_bytes", 0.0))
+        memory_available = float(pressure.get("memory_available_bytes", 0.0))
+        # Cold swap occupancy is not danger: with plentiful available RAM and
+        # no stall pressure, a nearly-full swap held the whole queue at zero
+        # running jobs (2026-08-31, free fraction 0.145 vs 0.15 with 8G RAM
+        # free and PSI ~0). Swap exhaustion blocks only alongside actual
+        # memory distress.
         swap_exhausted = (
-            swap_total > 0 and swap_free / swap_total < MIN_SWAP_FREE_FRACTION
+            swap_total > 0
+            and swap_free / swap_total < MIN_SWAP_FREE_FRACTION
+            and (
+                memory_available < SWAP_EXHAUSTION_MIN_AVAILABLE_BYTES
+                or float(pressure.get("memory_full_avg10", 0.0))
+                >= MEMORY_FULL_PREEMPT_THRESHOLD
+            )
         )
         memory_full_avg10 = float(pressure.get("memory_full_avg10", 0.0))
         memory_full_avg60 = float(pressure.get("memory_full_avg60", 0.0))
