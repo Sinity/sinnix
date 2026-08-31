@@ -33,7 +33,6 @@ from sinnix_mcp import (
 )
 from sinnix_mcp.execution import EnvironmentProfile, ExecutionResult, OwnerExecution
 from sinnixd.api import (
-    CONNECTION_TIMEOUT_SECONDS,
     CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS,
     MAX_JSON_RPC_ERROR_MESSAGE_BYTES,
     WAIT_OPERATIONS,
