@@ -136,7 +136,7 @@ let
       notes = ''
         Qwen3.8 27B UD-IQ2_XXS on the dedicated qwen38-vram llama.cpp
         endpoint (modules/services/qwen38-vram.nix), which owns the exact
-        fit: strict full offload, batch 64, ctx 4096. Measured 2026-08-31:
+        fit: strict full offload, batch 64, ctx 16384 with q8_0 KV. Measured 2026-08-31:
         40.7 tok/s fully resident vs 1.2 tok/s when ollama silently spilled
         16% of layers to CPU — ollama cannot pin per-model load options,
         which is why this tier is not an ollama tag. Text-only (no mmproj);
