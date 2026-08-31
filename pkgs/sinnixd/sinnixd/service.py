@@ -20,6 +20,7 @@ from sinnix_mcp import (
 from sinnix_mcp.execution import OwnerExecution
 
 from .campaign import CampaignRunner, WaveDrainedError
+from .campaign_status import build_campaign_status
 from .contracts import TypedJobContracts
 from .delivery import DeliveryError, GitHubDelivery
 from .delivery_runner import DELIVERY_INPUT_SCHEMA_VERSION, delivery_runner_executable
@@ -42,6 +43,7 @@ from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from .packet import PacketFinalizeSaga, PacketSagaError, PacketSagaStore
 from .project_plans import PlanStore, ProjectPlanExecutor
 from .projects import ProjectCatalog
+from .reactor import CampaignBoard
 from .tasks import TaskError, TaskService
 from .workspaces import GitWorkspaces, WorkspaceError, WorkspaceStore
 
@@ -81,6 +83,7 @@ SUPPORTED_OPERATIONS = frozenset(
         "packet.finalize",
         "packet.status",
         "campaign.run",
+        "campaign.status",
         "workspace.list",
         "workspace.get",
         "workspace.create",
@@ -145,6 +148,7 @@ class SinnixdService:
     tasks: TaskService | None = None
     plans: ProjectPlanExecutor | None = None
     packet_sagas: PacketFinalizeSaga | None = None
+    campaign_board_path: Path = Path("/realm/tmp/work/campaign-board.json")
 
     def __post_init__(self) -> None:
         if self.workspaces is None:
@@ -454,6 +458,30 @@ class SinnixdService:
                 dry_run=dry_run,
                 credential_profile=credential_profile,
                 timeout_seconds=timeout_seconds,
+            )
+        if operation == "campaign.status":
+            if principal != "operator":
+                raise JobAuthorizationError(
+                    "campaign status requires the operator principal"
+                )
+            allowed = {"project_id", "coordinator_label"}
+            if set(arguments) - allowed:
+                raise ValueError(
+                    "campaign.status accepts project_id and coordinator_label"
+                )
+            project_id = arguments.get("project_id")
+            if not isinstance(project_id, str) or not project_id:
+                raise ValueError("campaign.status requires project_id")
+            label = arguments.get("coordinator_label")
+            if label is not None and (not isinstance(label, str) or not label):
+                raise ValueError("campaign.status coordinator_label must be a string")
+            board = CampaignBoard.load(self.campaign_board_path)
+            return build_campaign_status(
+                project_id,
+                self.jobs.store.list(),
+                board,
+                self.jobs.admission_ledger(),
+                coordinator_label=label,
             )
         if operation == "plan.get":
             if set(arguments) != {"plan_id"}:

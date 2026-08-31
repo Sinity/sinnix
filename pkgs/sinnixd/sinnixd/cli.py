@@ -348,6 +348,11 @@ def parser() -> argparse.ArgumentParser:
     campaign_run.add_argument("--limit", type=int)
     campaign_run.add_argument("--bead", dest="bead_ids", action="append")
     campaign_run.add_argument("--dry-run", action="store_true")
+    campaign_status = campaign_subcommands.add_parser(
+        "status", help="Show bounded coordinator orientation state."
+    )
+    campaign_status.add_argument("--project", required=True)
+    campaign_status.add_argument("--coordinator-label")
     campaign_integrate = campaign_subcommands.add_parser(
         "integrate",
         help="Group lane branches holding unintegrated content into batches.",
@@ -1331,6 +1336,20 @@ def main() -> int:
                 "limit": arguments.limit,
                 "bead_ids": arguments.bead_ids,
                 "dry_run": arguments.dry_run,
+            },
+            "operator",
+        )
+    elif arguments.command == "campaign" and arguments.campaign_command == "status":
+        request = _request(
+            "campaign.status",
+            "campaign-orchestrator",
+            {
+                "project_id": arguments.project,
+                **(
+                    {"coordinator_label": arguments.coordinator_label}
+                    if arguments.coordinator_label
+                    else {}
+                ),
             },
             "operator",
         )
