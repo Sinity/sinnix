@@ -139,6 +139,38 @@ def agent_spec(keys: tuple[str, ...]) -> GenericJobSpec:
     )
 
 
+def complete_with_phase_peaks(
+    subject: GenericJobs,
+    systemd: FakeSystemd,
+    started: dict[str, object],
+    *,
+    agent_peak: int,
+    verification_peak: int,
+    whole_peak: int,
+) -> dict[str, object]:
+    record = subject.store.load(str(started["job_id"]))
+    subject.store.save(
+        subject._with_state(
+            record,
+            {
+                **record.state,
+                "memory_peaks": {
+                    "agent": agent_peak,
+                    "verification": verification_peak,
+                },
+            },
+        )
+    )
+    systemd.properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "MemoryPeak": str(whole_peak),
+    }
+    return subject.get(str(started["job_id"]))
+
+
 def test_packet_admission_refuses_overlap_but_allows_disjoint_lane(
     tmp_path: Path,
 ) -> None:
@@ -876,6 +908,165 @@ def test_agent_peak_increases_the_next_matching_agent_estimate(tmp_path: Path) -
     assert (
         repeated["state"]["admission"]["estimate_memory_bytes"] > 4 * 1024 * 1024 * 1024
     )
+
+
+def test_phase_attribution_does_not_learn_whole_unit_peak(tmp_path: Path) -> None:
+    """Anti-vacuity: a verify-only peak cannot become the agent estimate."""
+    gib = 1024**3
+    systemd = FakeSystemd()
+    subject = jobs(tmp_path, systemd)
+    spec = GenericJobSpec(
+        **{
+            **agent_spec(("table:phase-attribution",)).__dict__,
+            "estimate_key": "agent:codex:model",
+        }
+    )
+    started = subject.start(spec)
+
+    terminal = complete_with_phase_peaks(
+        subject,
+        systemd,
+        started,
+        agent_peak=1 * gib,
+        verification_peak=6 * gib,
+        whole_peak=7 * gib,
+    )
+
+    observation = terminal["state"]["memory_observation"]
+    assert observation == {
+        "whole_unit_memory_peak_bytes": 7 * gib,
+        "agent_memory_peak_bytes": 1 * gib,
+        "verification_memory_peak_bytes": 6 * gib,
+        "attribution_source": "explicit-phase-peaks",
+    }
+    assert subject._admission_state()["estimates"]["agent:codex:model"]["bytes"] == int(
+        1 * gib * 5 / 4
+    )
+
+
+def test_verification_peak_does_not_block_two_same_shape_agents(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: whole-unit learning makes the second agent exceed 10.2 GiB."""
+    gib = 1024**3
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        pressure_probe=lambda: {
+            "memory_full_avg10": 0.0,
+            "memory_full_avg60": 0.0,
+            "memory_total_bytes": 12 * gib,
+            "memory_available_bytes": 12 * gib,
+            "managed_memory_bytes": 0,
+        },
+    )
+    spec = GenericJobSpec(
+        **{
+            **agent_spec(("table:seed-phase",)).__dict__,
+            "estimate_key": "agent:codex:model",
+        }
+    )
+    complete_with_phase_peaks(
+        subject,
+        systemd,
+        subject.start(spec),
+        agent_peak=1 * gib,
+        verification_peak=6 * gib,
+        whole_peak=7 * gib,
+    )
+
+    holder = subject.start(
+        GenericJobSpec(**{**spec.__dict__, "exclusive_keys": ("table:holder",)})
+    )
+    second = subject.start(
+        GenericJobSpec(**{**spec.__dict__, "exclusive_keys": ("table:second",)})
+    )
+
+    assert holder["state"]["phase"] != "queued"
+    assert second["state"]["phase"] != "queued"
+    assert second["state"]["admission"]["estimate_memory_bytes"] == 2 * gib
+
+
+def test_high_agent_phase_peak_blocks_unsafe_concurrency(tmp_path: Path) -> None:
+    """Anti-vacuity: a genuine agent peak still raises the learned estimate."""
+    gib = 1024**3
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        pressure_probe=lambda: {
+            "memory_full_avg10": 0.0,
+            "memory_full_avg60": 0.0,
+            "memory_total_bytes": 12 * gib,
+            "memory_available_bytes": 12 * gib,
+            "managed_memory_bytes": 0,
+        },
+    )
+    spec = GenericJobSpec(
+        **{
+            **agent_spec(("table:high-seed",)).__dict__,
+            "estimate_key": "agent:codex:model",
+        }
+    )
+    complete_with_phase_peaks(
+        subject,
+        systemd,
+        subject.start(spec),
+        agent_peak=6 * gib,
+        verification_peak=1 * gib,
+        whole_peak=7 * gib,
+    )
+    holder = subject.start(
+        GenericJobSpec(**{**spec.__dict__, "exclusive_keys": ("table:high-holder",)})
+    )
+    blocked = subject.start(
+        GenericJobSpec(**{**spec.__dict__, "exclusive_keys": ("table:high-blocked",)})
+    )
+
+    assert holder["state"]["admission"]["estimate_memory_bytes"] == int(7.5 * gib)
+    assert blocked["state"]["phase"] == "queued"
+    assert "host-memory" in blocked["state"]["admission"]["blocked_by"]
+
+
+def test_admission_explain_reports_phase_observation_and_comparisons(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: the read-only probe exposes attribution and its verdict operands."""
+    gib = 1024**3
+    systemd = FakeSystemd()
+    subject = jobs(tmp_path, systemd)
+    spec = GenericJobSpec(
+        **{
+            **agent_spec(("table:explain",)).__dict__,
+            "estimate_key": "agent:codex:model",
+        }
+    )
+    first = subject.start(spec)
+    queued = subject.start(spec)
+    record = subject.store.load(str(queued["job_id"]))
+    subject.store.save(
+        subject._with_state(
+            record,
+            {
+                **record.state,
+                "memory_peaks": {"agent": 1 * gib, "verification": 6 * gib},
+            },
+        )
+    )
+    explanation = subject.admission_explain(str(queued["job_id"]))
+
+    assert explanation["queue_position"] == 1
+    assert explanation["ahead"] == []
+    assert explanation["memory_observation"]["attribution_source"] == (
+        "explicit-phase-peaks"
+    )
+    assert explanation["memory_observation"]["agent_memory_peak_bytes"] != explanation[
+        "memory_observation"
+    ]["verification_memory_peak_bytes"]
+    assert explanation["estimate_memory_bytes"] == 2 * gib
+    assert explanation["comparisons"]["host_memory"]["fails"] is False
+    assert first["state"]["phase"] != "queued"
 
 
 def test_cache_and_coalescing_are_principal_isolated(tmp_path: Path) -> None:

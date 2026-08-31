@@ -2924,6 +2924,7 @@ class GenericJobs:
                         "phase": record.state.get("phase"),
                         "pool": record.spec.pool,
                         "estimate_memory_bytes": estimate,
+                        "memory_observation": self._memory_observation(record),
                         "blocked_by": list(blocked_by)
                         if isinstance(blocked_by, list)
                         else [],
@@ -3028,6 +3029,7 @@ class GenericJobs:
                     ],
                     "blocked_by": item["blocked_by"],
                     "estimate_memory_bytes": item["estimate_memory_bytes"],
+                    "memory_observation": item["memory_observation"],
                     "comparisons": item["comparisons"],
                 }
         raise JobRecordError(f"job {job_id} is not queued for admission")
@@ -5105,7 +5107,12 @@ class GenericJobs:
         # actor that stopped the job; rebuilding must not erase them.
         forensic = {
             key: dict(record.state[key])
-            for key in ("cancellation", "preemption")
+            for key in (
+                "cancellation",
+                "preemption",
+                "memory_peaks",
+                "memory_observation",
+            )
             if isinstance(record.state.get(key), Mapping)
         }
         if self._is_authoritative_not_started_cancellation(record):
