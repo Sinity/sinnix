@@ -2761,9 +2761,7 @@ class GenericJobs:
         }
 
     @staticmethod
-    def _admission_claim(
-        record: GenericJobRecord, estimate: int
-    ) -> dict[str, Any]:
+    def _admission_claim(record: GenericJobRecord, estimate: int) -> dict[str, Any]:
         return {
             "job_id": record.job_id,
             "pool": record.spec.pool,
@@ -2808,9 +2806,7 @@ class GenericJobs:
             ]
             pressure = self.pressure_probe()
             host_budget = self._host_memory_budget(pressure)
-            host_occupied = sum(
-                self._estimate(record.spec, state) for record in active
-            )
+            host_occupied = sum(self._estimate(record.spec, state) for record in active)
             holders = [
                 {
                     **dict(state["claims"].get(record.job_id, {})),
@@ -2877,9 +2873,7 @@ class GenericJobs:
                         "workers": policy["workers"],
                         "memory_budget_bytes": policy["memory_budget"],
                         "holders": [
-                            holder
-                            for holder in holders
-                            if holder.get("pool") == name
+                            holder for holder in holders if holder.get("pool") == name
                         ],
                     }
                     for name, policy in POOL_POLICIES.items()
@@ -2917,9 +2911,7 @@ class GenericJobs:
                 cleared = sorted(state["estimates"])
                 state["estimates"] = {}
             else:
-                cleared = (
-                    [estimate_key] if estimate_key in state["estimates"] else []
-                )
+                cleared = [estimate_key] if estimate_key in state["estimates"] else []
                 state["estimates"].pop(estimate_key, None)
             self._save_admission_state(state)
         return {"cleared": cleared}
@@ -4601,7 +4593,10 @@ class GenericJobs:
                         "phase": "cancelled",
                         "terminal": True,
                         "launch_evidence": "not-started",
-                        "cancellation": {"reason": reason, "requested_at": _timestamp()},
+                        "cancellation": {
+                            "reason": reason,
+                            "requested_at": _timestamp(),
+                        },
                         "observed_at": _timestamp(),
                     },
                 )
@@ -4904,14 +4899,16 @@ class GenericJobs:
                 "queued",
                 "waiting-dependencies",
             }:
-                return {**forensic, 
+                return {
+                    **forensic,
                     "phase": record.state["phase"],
                     "terminal": False,
                     "systemd": dict(properties),
                     "observed_at": _timestamp(),
                 }
             if record.state.get("phase") == "launch-unknown":
-                return {**forensic, 
+                return {
+                    **forensic,
                     "phase": "launch-failed",
                     "error": {"code": SYSTEMD_ERROR_CODE},
                     "terminal": True,
@@ -4919,7 +4916,8 @@ class GenericJobs:
                     "observed_at": _timestamp(),
                 }
             if self._has_authoritative_result(record):
-                return {**forensic, 
+                return {
+                    **forensic,
                     "phase": "succeeded",
                     "terminal": True,
                     "systemd": dict(properties),
@@ -4927,7 +4925,8 @@ class GenericJobs:
                     "observed_at": _timestamp(),
                 }
             if self._stop_acknowledgement_matches(record):
-                return {**forensic, 
+                return {
+                    **forensic,
                     "phase": "cancelled",
                     "terminal": True,
                     "systemd": dict(properties),
@@ -4936,7 +4935,8 @@ class GenericJobs:
                 }
             if record.cancel_requested_at is not None:
                 terminal = self._cancellation_reconciliation_grace_expired(record)
-                return {**forensic, 
+                return {
+                    **forensic,
                     "phase": "outcome-unknown",
                     "terminal": terminal,
                     "systemd": dict(properties),
@@ -4948,7 +4948,8 @@ class GenericJobs:
                     ),
                     "observed_at": _timestamp(),
                 }
-            return {**forensic, 
+            return {
+                **forensic,
                 "phase": "missing",
                 "terminal": True,
                 "systemd": dict(properties),
@@ -4958,7 +4959,8 @@ class GenericJobs:
             bound = record.state.get("lease_invocation_id")
             invocation = properties.get("InvocationID")
             if isinstance(bound, str) and bound and bound != invocation:
-                return {**forensic, 
+                return {
+                    **forensic,
                     "phase": "observation-unknown",
                     "error": {"code": SYSTEMD_ERROR_CODE},
                     "terminal": False,

@@ -203,9 +203,7 @@ def infer_conflict_keys(value: str | PacketReferences) -> tuple[str, ...]:
     # A path identifies the file that can be changed. Inferring its containing
     # directory as a module serializes unrelated files in shared test trees.
     keys = {
-        f"file:{path}"
-        for path in references.paths
-        if not _MIGRATION_FILE.search(path)
+        f"file:{path}" for path in references.paths if not _MIGRATION_FILE.search(path)
     }
     # A dotted reference already names the leaf module. Ancestor prefixes are
     # too broad: ``tests.unit`` should not lock every test in that directory.

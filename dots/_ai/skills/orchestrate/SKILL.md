@@ -52,7 +52,7 @@ it before any hunt wave — never pick targets by intuition).
 ## Dispatch mechanics (real verbs only)
 
 - Dispatch: `agentctl campaign run` for a wave, `agentctl packet launch
-  <bead>` for one bead. An interrupted lane (timeout, preemption) resumes
+<bead>` for one bead. An interrupted lane (timeout, preemption) resumes
   with `agentctl lane resume <workspace>` — never hand-write continuation
   prompts or derive checkout digests.
 - Publication: `agentctl lane publish <workspace> [--close]` — the one
