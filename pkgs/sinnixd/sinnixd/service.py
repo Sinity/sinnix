@@ -62,6 +62,59 @@ CAPABILITIES = [
     "usage_capture",
     "timeout_wip_preserve",
 ]
+# The dispatchable operation surface. A contract test keeps this in sync with
+# the dispatch branches below and with the client response-budget table in
+# api.py — extending dispatch without registering here (or without a budget)
+# is a red test, not a silent 5s fallback.
+SUPPORTED_OPERATIONS = frozenset(
+    {
+        "runtime.status",
+        "project.list",
+        "project.reload",
+        "project.get",
+        "project.operations",
+        "plan.submit",
+        "plan.get",
+        "plan.list",
+        "plan.wait",
+        "plan.result",
+        "packet.finalize",
+        "packet.status",
+        "campaign.run",
+        "workspace.list",
+        "workspace.get",
+        "workspace.create",
+        "workspace.adopt",
+        "workspace.reap",
+        "workspace.dispose",
+        "workspace.checkpoint",
+        "workspace.restore",
+        "workspace.recover",
+        "workspace.stack",
+        "workspace.restack",
+        "workspace.publish",
+        "workspace.review-status",
+        "workspace.land",
+        "workspace.finish",
+        "workspace.finish-integrated",
+        "job.start",
+        "job.fire",
+        "job.shell.start",
+        "job.agent.start",
+        "job.admission.reset",
+        "job.admission",
+        "job.get",
+        "job.retry",
+        "job.resume",
+        "job.list",
+        "job.wait",
+        "job.notify-exit",
+        "job.logs",
+        "job.result",
+        "job.cancel",
+        "task.complete",
+    }
+)
 
 
 @dataclass(frozen=True)

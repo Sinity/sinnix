@@ -4453,14 +4453,7 @@ class GenericJobs:
             else None
         )
         return {
-            "jobs": [
-                (
-                    self._public(record, record.state)
-                    if record.state.get("terminal")
-                    else self.get(record.job_id)
-                )
-                for record in records
-            ],
+            "jobs": [self._list_row(record) for record in records],
             "limit": limit,
             "query": query,
             "total": len(snapshot_records) if after is None else None,
@@ -5299,6 +5292,38 @@ class GenericJobs:
         if record.cancel_requested_invocation_id is not None:
             intent["invocation_id"] = record.cancel_requested_invocation_id
         return intent
+
+    def _list_row(self, record: GenericJobRecord) -> dict[str, Any]:
+        """Render one listing row inside a per-row fault boundary.
+
+        One stale checkout binding, unreadable result, or failed systemd
+        observation degrades its own row; it must never abort the whole
+        window (sinnix-8rch). Deep inspection with typed errors stays on
+        job.get.
+        """
+        enrichment = "reconciliation"
+        try:
+            if record.state.get("terminal"):
+                enrichment = "render"
+                return self._public(record, record.state)
+            return self.get(record.job_id)
+        except Exception as error:
+            phase = record.state.get("phase")
+            return {
+                "job_id": record.job_id,
+                "kind": record.spec.kind,
+                "project_id": record.spec.project_id,
+                "operation": record.spec.operation,
+                "created_at": record.created_at,
+                "state": {
+                    "phase": phase if isinstance(phase, str) else None,
+                    "terminal": bool(record.state.get("terminal", False)),
+                },
+                "degraded": {
+                    "enrichment": enrichment,
+                    "error": f"{type(error).__name__}: {error}"[:300],
+                },
+            }
 
     def _public(
         self, record: GenericJobRecord, state: Mapping[str, Any]

@@ -36,8 +36,10 @@ from sinnixd.api import (
     CONNECTION_TIMEOUT_SECONDS,
     CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS,
     MAX_JSON_RPC_ERROR_MESSAGE_BYTES,
+    WAIT_OPERATIONS,
     WAIT_TRANSPORT_MARGIN_SECONDS,
     ProtocolError,
+    ResponseBudgetExceeded,
     SinnixdClient,
     SinnixdClientError,
     UnixSocketServer,
@@ -89,7 +91,7 @@ from sinnixd.runner import (
     _run_declared,
     _seal_packet_result,
 )
-from sinnixd.service import SinnixdService
+from sinnixd.service import SUPPORTED_OPERATIONS, SinnixdService
 from sinnixd.tasks import (
     FLOCK_EXECUTABLE,
     MAX_TASK_OUTPUT_BYTES,
@@ -10064,34 +10066,82 @@ def test_agentctl_wait_returns_a_timed_out_envelope_past_control_timeout(
     assert response["payload"]["value"]["wait_timed_out"]
 
 
-def test_delivery_operations_have_truthful_bounded_response_timeouts() -> None:
+def test_every_operation_has_a_declared_response_budget() -> None:
+    """A new dispatch branch without a budget is a red test, not a 5s fallback."""
+    budgeted = set(CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS) | WAIT_OPERATIONS
+    assert budgeted == SUPPORTED_OPERATIONS
+    # The registry itself must track the dispatch branches in the source.
+    import inspect
+    import re as _re
+
+    import sinnixd.service as service_module
+
+    dispatched = set(
+        _re.findall(r'if operation == "([^"]+)"', inspect.getsource(service_module))
+    )
+    assert dispatched == SUPPORTED_OPERATIONS
+    for operation, timeout in CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS.items():
+        assert timeout >= 5.0
+        assert (
+            _response_timeout_seconds(request(operation, "git-workspaces")) == timeout
+        )
+
+
+def test_slow_operations_keep_their_widened_budgets() -> None:
     """Remote effects must not outlive the client's success/failure response."""
-    expected = {
+    floors = {
         "workspace.review-status": 65.0,
         "workspace.finish": 185.0,
         "packet.finalize": 420.0,
         "campaign.run": 300.0,
         "workspace.list": 60.0,
-        "packet.launch": 300.0,
         # `packet launch` dispatches creation as its own step, so provisioning
-        # must fit the client budget here and not only under packet.launch.
-        # Without it the socket closes mid-provision and the daemon logs a
-        # BrokenPipeError while the caller is told it is unavailable.
+        # must fit the client budget here. Without it the socket closes
+        # mid-provision and the daemon logs a BrokenPipeError while the caller
+        # is told it is unavailable.
         "workspace.create": 300.0,
+        # Listing reconciles live systemd state per non-terminal record; at
+        # fleet scale a 5s budget times out mid-response (sinnix-16in).
+        "job.list": 60.0,
     }
-    assert CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS == expected
-    for operation, timeout in expected.items():
-        assert (
-            _response_timeout_seconds(request(operation, "git-workspaces")) == timeout
-        )
-    assert (
-        _response_timeout_seconds(request("workspace.get", "git-workspaces"))
-        == CONNECTION_TIMEOUT_SECONDS
+    for operation, floor in floors.items():
+        assert CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS[operation] >= floor
+
+
+def test_an_exhausted_response_budget_is_typed_not_an_outage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The daemon answered late, not never; the caller must see the difference."""
+    socket_path = tmp_path / "sinnixd.sock"
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_server() -> None:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(str(socket_path))
+            listener.listen()
+            started.set()
+            connection, _ = listener.accept()
+            with connection:
+                receive_frame(connection)
+                release.wait(timeout=5)
+
+    thread = threading.Thread(target=slow_server, daemon=True)
+    thread.start()
+    assert started.wait(timeout=5)
+    monkeypatch.setitem(
+        CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS, "runtime.status", 0.2
     )
-    assert (
-        _response_timeout_seconds(request("unknown.slow-effect", "git-workspaces"))
-        == CONNECTION_TIMEOUT_SECONDS
-    )
+    with pytest.raises(ResponseBudgetExceeded) as exceeded:
+        call(socket_path, request("runtime.status", "sinnixd"))
+    release.set()
+    thread.join(timeout=5)
+    assert exceeded.value.operation == "runtime.status"
+    assert exceeded.value.budget_seconds == 0.2
+    assert "runtime.status" in str(exceeded.value)
+    # Anti-vacuity: an absent socket stays an unavailability, not a budget.
+    with pytest.raises(OSError):
+        call(tmp_path / "absent.sock", request("runtime.status", "sinnixd"))
 
 
 def test_wait_operations_cover_the_requested_wait_deadline() -> None:
@@ -11622,3 +11672,281 @@ def test_a_registration_outliving_its_directory_does_not_refuse_every_checkout(
     assert Path(survivor["path"]) in paths
     assert Path(doomed["path"]) not in paths
     assert tmp_path in paths
+
+
+def _lane_publish_transport(
+    responses: dict[str, object],
+) -> tuple[list[str], Callable[..., object]]:
+    operations: list[str] = []
+
+    def fake_call(socket_path, request_value):
+        operations.append(request_value.operation)
+        outcome = responses[request_value.operation]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    return operations, fake_call
+
+
+def _lane_publish_listing() -> dict[str, object]:
+    return {
+        "schema": 1,
+        "ok": True,
+        "payload": {
+            "value": {
+                "workspaces": [
+                    {
+                        "workspace_id": "11111111-1111-1111-1111-111111111111",
+                        "name": "packet-fixture",
+                        "project_id": "fixture",
+                    }
+                ]
+            }
+        },
+    }
+
+
+def test_lane_publish_reply_names_the_enqueued_job_while_pending(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An enqueued-but-queued harvest is HARVEST_PENDING with the job id, never
+    RESULT_INVALID (sinnix-e307)."""
+    operations, fake_call = _lane_publish_transport(
+        {
+            "workspace.list": _lane_publish_listing(),
+            "job.start": {
+                "schema": 1,
+                "ok": True,
+                "payload": {"value": {"job_id": "job-e307"}},
+            },
+            "job.wait": ResponseBudgetExceeded("job.wait", 1.0),
+            "job.get": {
+                "schema": 1,
+                "ok": True,
+                "payload": {"value": {"state": {"phase": "queued", "terminal": False}}},
+            },
+        }
+    )
+    monkeypatch.setattr(sys, "argv", ["agentctl", "lane", "publish", "packet-fixture"])
+    monkeypatch.setattr(cli_module, "call", fake_call)
+    assert cli_module.main() == 2
+    reply = json.loads(capsys.readouterr().out)
+    assert reply["ok"] is False
+    assert reply["job_id"] == "job-e307"
+    assert reply["phase"] == "queued"
+    assert reply["error"]["code"] == "HARVEST_PENDING"
+    assert "job-e307" in reply["error"]["message"]
+    assert operations == ["workspace.list", "job.start", "job.wait", "job.get"]
+
+
+def test_lane_publish_start_failure_is_a_typed_step_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A failed enqueue must name its step; a budget-exhausted listing must not
+    masquerade as an unknown workspace (sinnix-e307 silent non-enqueue)."""
+    operations, fake_call = _lane_publish_transport(
+        {
+            "workspace.list": _lane_publish_listing(),
+            "job.start": ResponseBudgetExceeded("job.start", 1.0),
+        }
+    )
+    monkeypatch.setattr(sys, "argv", ["agentctl", "lane", "publish", "packet-fixture"])
+    monkeypatch.setattr(cli_module, "call", fake_call)
+    assert cli_module.main() == 1
+    reply = json.loads(capsys.readouterr().out)
+    assert reply["ok"] is False
+    assert reply["failed_step"] == "job.start"
+    assert reply["error"]["code"] == "RESPONSE_BUDGET_EXCEEDED"
+    assert "job_id" not in reply
+    assert operations == ["workspace.list", "job.start"]
+
+
+def test_lane_publish_listing_budget_failure_is_not_unknown_workspace(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    operations, fake_call = _lane_publish_transport(
+        {"workspace.list": ResponseBudgetExceeded("workspace.list", 1.0)}
+    )
+    monkeypatch.setattr(sys, "argv", ["agentctl", "lane", "publish", "packet-fixture"])
+    monkeypatch.setattr(cli_module, "call", fake_call)
+    assert cli_module.main() == 1
+    reply = json.loads(capsys.readouterr().out)
+    assert reply["failed_step"] == "workspace.list"
+    assert reply["error"]["code"] == "RESPONSE_BUDGET_EXCEEDED"
+    assert "unknown workspace" not in json.dumps(reply)
+    assert operations == ["workspace.list"]
+
+
+def test_lane_publish_success_reply_carries_job_identity(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    operations, fake_call = _lane_publish_transport(
+        {
+            "workspace.list": _lane_publish_listing(),
+            "job.start": {
+                "schema": 1,
+                "ok": True,
+                "payload": {"value": {"job_id": "job-ok"}},
+            },
+            "job.wait": {"schema": 1, "ok": True},
+            "job.get": {
+                "schema": 1,
+                "ok": True,
+                "payload": {
+                    "value": {"state": {"phase": "succeeded", "terminal": True}}
+                },
+            },
+            "job.result": {
+                "schema": 1,
+                "ok": True,
+                "payload": {"value": {"value": {"outcome": "HARVEST_OK"}}},
+            },
+        }
+    )
+    monkeypatch.setattr(sys, "argv", ["agentctl", "lane", "publish", "packet-fixture"])
+    monkeypatch.setattr(cli_module, "call", fake_call)
+    assert cli_module.main() == 0
+    reply = json.loads(capsys.readouterr().out)
+    assert reply["ok"] is True
+    assert reply["job_id"] == "job-ok"
+    assert reply["outcome"] == "HARVEST_OK"
+    assert operations[-1] == "job.result"
+
+
+def _listing_record(job_id: str, *, terminal: bool, phase: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        job_id=job_id,
+        created_at=f"2026-08-31T0{job_id[-1]}:00:00+00:00",
+        state={"phase": phase, "terminal": terminal},
+        spec=SimpleNamespace(
+            kind="declared-operation",
+            project_id="fixture",
+            operation="harvest",
+            principal="operator",
+        ),
+    )
+
+
+class _RowFaultJobs(jobs_module.GenericJobs):
+    """GenericJobs with enrichment stubs that fail for chosen job ids."""
+
+    def __init__(self, records, fail_ids):  # noqa: D107 - test stub
+        self._records = records
+        self._fail_ids = fail_ids
+        self._admission_lock = threading.Lock()
+        self.__dict__["_admit_locked"] = lambda: None
+        self.store = SimpleNamespace(
+            list=lambda: list(records),
+            active_records=lambda: [r for r in records if not r.state["terminal"]],
+        )
+
+    def get(self, job_id):
+        if job_id in self._fail_ids:
+            raise jobs_module.JobRecordError("stale checkout binding")
+        record = next(r for r in self._records if r.job_id == job_id)
+        return {"job_id": job_id, "state": dict(record.state)}
+
+    def _public(self, record, state):
+        if record.job_id in self._fail_ids:
+            raise OSError("result artifact unreadable")
+        return {"job_id": record.job_id, "state": dict(state)}
+
+
+def test_job_listing_degrades_one_bad_row_and_keeps_the_window() -> None:
+    """One stale row degrades alone; neighbors and membership survive
+    (sinnix-8rch). Anti-vacuity: rendering rows without the per-row boundary
+    aborts this exact window on the JobRecordError."""
+    records = [
+        _listing_record("job-1", terminal=True, phase="succeeded"),
+        _listing_record("job-2", terminal=False, phase="running"),
+        _listing_record("job-3", terminal=True, phase="failed"),
+    ]
+    jobs = _RowFaultJobs(records, fail_ids={"job-2"})
+    listing = jobs.list()
+    rows = {row["job_id"]: row for row in listing["jobs"]}
+    assert set(rows) == {"job-1", "job-2", "job-3"}
+    assert "degraded" not in rows["job-1"]
+    assert "degraded" not in rows["job-3"]
+    degraded = rows["job-2"]["degraded"]
+    assert degraded["enrichment"] == "reconciliation"
+    assert "stale checkout binding" in degraded["error"]
+    assert rows["job-2"]["state"]["phase"] == "running"
+    assert listing["total"] == 3
+
+
+def test_job_listing_degrades_terminal_render_failures_independently() -> None:
+    records = [
+        _listing_record("job-1", terminal=True, phase="succeeded"),
+        _listing_record("job-2", terminal=True, phase="succeeded"),
+    ]
+    jobs = _RowFaultJobs(records, fail_ids={"job-1"})
+    listing = jobs.list()
+    rows = {row["job_id"]: row for row in listing["jobs"]}
+    assert rows["job-1"]["degraded"]["enrichment"] == "render"
+    assert "degraded" not in rows["job-2"]
+
+
+def test_job_get_keeps_typed_deep_inspection_for_a_bad_row() -> None:
+    """Listing degrades; get still raises the typed error (sinnix-8rch AC3)."""
+    records = [_listing_record("job-2", terminal=False, phase="running")]
+    jobs = _RowFaultJobs(records, fail_ids={"job-2"})
+    with pytest.raises(jobs_module.JobRecordError):
+        jobs.get("job-2")
+
+
+def _resolver_workspaces(records) -> SimpleNamespace:
+    return SimpleNamespace(store=SimpleNamespace(records=lambda: list(records)))
+
+
+def _workspace_record(workspace_id: str, name: str, branch: str) -> WorkspaceRecord:
+    return WorkspaceRecord(
+        workspace_id=workspace_id,
+        project_id="fixture",
+        name=name,
+        path=Path(f"/tmp/{name}"),
+        branch=branch,
+        base="origin/master",
+        created_at="2026-08-31T00:00:00+00:00",
+        managed=True,
+    )
+
+
+def test_workspace_reference_resolves_every_printed_identifier() -> None:
+    """UUID, name, and unique branch all resolve to the same record
+    (sinnix-vb1u). Anti-vacuity: UUID-only lookup raises KeyError for the
+    name and branch forms."""
+    from sinnixd.workspaces import GitWorkspaces
+
+    record = _workspace_record(
+        "11111111-1111-1111-1111-111111111111",
+        "packet-fixture",
+        "feature/packet/fixture",
+    )
+    other = _workspace_record(
+        "22222222-2222-2222-2222-222222222222",
+        "packet-other",
+        "feature/packet/other",
+    )
+    stub = _resolver_workspaces([record, other])
+    for reference in (record.workspace_id, record.name, record.branch):
+        assert GitWorkspaces._record(stub, reference) is record
+
+
+def test_ambiguous_workspace_reference_refuses_with_candidates() -> None:
+    from sinnixd.workspaces import GitWorkspaces
+
+    first = _workspace_record(
+        "11111111-1111-1111-1111-111111111111", "packet-dup", "feature/one"
+    )
+    second = _workspace_record(
+        "22222222-2222-2222-2222-222222222222", "packet-dup", "feature/two"
+    )
+    stub = _resolver_workspaces([first, second])
+    with pytest.raises(WorkspaceError) as refused:
+        GitWorkspaces._record(stub, "packet-dup")
+    message = str(refused.value)
+    assert first.workspace_id in message
+    assert second.workspace_id in message
+    with pytest.raises(KeyError):
+        GitWorkspaces._record(stub, "packet-absent")
