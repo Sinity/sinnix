@@ -257,6 +257,58 @@ def test_gate_red_is_typed_and_never_pushes(
     assert pushed is False
 
 
+def test_unavailable_affected_tests_are_typed_and_spooled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused affected selection reaches the reactor with typed context."""
+    root, _remote = _repository(tmp_path)
+    state = tmp_path / "state"
+    context = _context(root, state, "unavailable-job")
+    receipt = harvest.compile_packet(context)["receipt_ref"]
+    monkeypatch.setattr(
+        harvest,
+        "_affected_tests",
+        lambda _context, _run: ("unavailable", "testmon graph unavailable"),
+    )
+    monkeypatch.setattr(
+        harvest,
+        "_load_receipt",
+        lambda _context, _receipt_ref: {
+            "head": harvest._git(subprocess.run, root, "rev-parse", "HEAD"),
+            "worktree_unstaged_sha256": harvest._digest(
+                harvest._git(subprocess.run, root, "diff", "HEAD")
+            ),
+            "worktree_staged_sha256": harvest._digest(
+                harvest._git(subprocess.run, root, "diff", "--cached")
+            ),
+        },
+    )
+
+    def stop_before_lock(path, timeout=900):
+        raise harvest.HarvestError("stop before repository lock")
+
+    monkeypatch.setattr(harvest, "_lock", stop_before_lock)
+
+    with pytest.raises(harvest.HarvestError, match="stop before repository lock"):
+        harvest.authorize(
+            context,
+            receipt_ref=receipt,
+            title="fix(harvest): report unavailable test selection",
+            body="Reviewed packet.",
+        )
+
+    events = [
+        json.loads(row) for row in (state / "events.jsonl").read_text().splitlines()
+    ]
+    assert events[-1] == {
+        "detail": "testmon graph unavailable",
+        "job_id": "unavailable-job",
+        "kind": "verification-unavailable",
+        "project": "polylogue",
+        "workspace": "worktree-1",
+    }
+
+
 def test_redflags_flags_removed_production_lines_and_assertions() -> None:
     status, flags = harvest._redflags(
         "diff --git a/polylogue/module.py b/polylogue/module.py\n"
