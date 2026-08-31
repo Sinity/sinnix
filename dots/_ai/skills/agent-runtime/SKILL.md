@@ -67,6 +67,22 @@ not add a parallel ledger for any of them.
   differ from the original mandate (a review verdict to apply, a changed
   scope); checkout ids come from `workspace get`.
 
+## Worker toolbelt
+
+Attested workers have `lane` on PATH:
+
+- `lane task` prints the exact dispatch snapshot while the private prompt input
+  is alive.
+- `lane verify` runs the first declared `verify_quick`/focused operation (or
+  the workspace verification operation) through AgentCTL.
+- `lane done report.md` requires a clean tree, pushes the current branch, and
+  emits the report as the final stdout/last-message result. Use
+  `lane done --incomplete report.md` for an honest partial handoff; it pushes
+  committed WIP and marks the emitted report.
+
+The last-message capture wrapper stores worker stdout as the result artifact;
+`lane done` deliberately does not write the private result path itself.
+
 ## Failures
 
 - `agentctl agent --checkout` takes the CHECKOUT id (`worktree-…` from

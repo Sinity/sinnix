@@ -490,6 +490,10 @@ mkFeatureModule {
                 # leaves native Anthropic requests untouched and routes only
                 # explicitly selected Clodex models through OpenAI OAuth.
                 ".local/bin/claude-clodex" = mkClodexWrapper { };
+                ".local/bin/lane" = {
+                  source = mkDotsFile "/_ai/skills/agent-runtime/scripts/lane";
+                  force = true;
+                };
                 ".local/bin/clodex-claude" = mkClodexChildWrapper;
                 ".local/bin/sinnix-clodex-server" = mkClodexServerWrapper;
                 ".local/bin/clodex" = {
