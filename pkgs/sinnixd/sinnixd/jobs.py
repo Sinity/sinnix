@@ -2825,12 +2825,16 @@ class GenericJobs:
             "operation": record.spec.operation,
         }
 
-    def admission_ledger(self) -> dict[str, Any]:
+    def admission_ledger(self, project_id: str | None = None) -> dict[str, Any]:
         """Return the durable admission claims and their current arithmetic."""
         with self._admission_lock:
             self._admit_locked()
             state = self._admission_state()
             records = self.store.active_records()
+            if project_id is not None:
+                records = tuple(
+                    record for record in records if record.spec.project_id == project_id
+                )
             managed = [
                 record
                 for record in records
@@ -5008,6 +5012,10 @@ class GenericJobs:
                 "error": {"code": SYSTEMD_ERROR_CODE},
                 "terminal": True,
                 "systemd": dict(properties),
+                "terminal_cause": {
+                    "kind": "runner-refusal",
+                    "stderr_tail": [],
+                },
                 "observed_at": _timestamp(),
             }
             updated = self._with_state(record, state)
@@ -5066,6 +5074,9 @@ class GenericJobs:
                     "error": {"code": SYSTEMD_ERROR_CODE},
                     "terminal": True,
                     "systemd": dict(properties),
+                    "terminal_cause": self._terminal_cause(
+                        record, properties, "failed"
+                    ),
                     "observed_at": _timestamp(),
                 }
             if self._has_authoritative_result(record):
@@ -5217,9 +5228,36 @@ class GenericJobs:
         if state.get("terminal"):
             state["resources"] = _terminal_resources(properties)
             state["usage"] = _terminal_usage(record)
+            state["terminal_cause"] = self._terminal_cause(record, properties, phase)
             if state.get("phase") == "timed_out":
                 state["timeout_wip"] = self._preserve_timeout(record)
         return state
+
+    @staticmethod
+    def _terminal_cause(
+        record: GenericJobRecord, properties: Mapping[str, str], phase: str
+    ) -> dict[str, Any]:
+        """Keep the small failure explanation operators need beside the phase."""
+        content = _read_private_artifact(record.log_path, MAX_LOG_ARTIFACT_BYTES)
+        lines = (
+            content.decode(errors="replace").splitlines() if content is not None else []
+        )
+        tail = [line for line in lines if line.strip()][-8:]
+        if phase == "timed_out" or properties.get("Result") == "timeout":
+            return {"kind": "timeout", "stderr_tail": tail}
+        status = properties.get("ExecMainStatus")
+        try:
+            exit_code: int | None = int(status) if status is not None else None
+        except (TypeError, ValueError):
+            exit_code = None
+        if record.spec.kind == "attested-agent" and any(
+            marker in "\n".join(tail).lower()
+            for marker in ("checkout", "preflight", "typed-job", "usage:", "runner")
+        ):
+            kind = "runner-refusal"
+        else:
+            kind = "exit-code"
+        return {"kind": kind, "exit_code": exit_code, "stderr_tail": tail}
 
     @staticmethod
     def _with_service_lease_invocation(

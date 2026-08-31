@@ -546,7 +546,7 @@ class SinnixdService:
                 )
             assert self.packet_sagas is not None
             return self.packet_sagas.finalize(
-                workspace_id=self._job_argument(arguments, "workspace_id"),
+                workspace_id=self._workspace_argument(arguments, "packet.finalize"),
                 verification_job_id=self._job_argument(
                     arguments, "verification_job_id"
                 ),
@@ -572,7 +572,7 @@ class SinnixdService:
         if operation == "workspace.get":
             assert self.workspaces is not None
             return self.workspaces.get(
-                self._single_workspace_id(arguments, "workspace.get")
+                self._workspace_argument(arguments, "workspace.get")
             )
         if operation == "workspace.create":
             if principal not in {"agent-control", "operator"}:
@@ -624,7 +624,7 @@ class SinnixdService:
                 )
             assert self.workspaces is not None
             return self.workspaces.reap(
-                self._single_workspace_id(arguments, "workspace.reap")
+                self._workspace_argument(arguments, "workspace.reap")
             )
         if operation == "workspace.dispose":
             if principal not in {"agent-control", "operator"}:
@@ -642,7 +642,7 @@ class SinnixdService:
                     "workspace.dispose acknowledge_published must be boolean"
                 )
             return self.workspaces.dispose(
-                self._job_argument(arguments, "workspace_id"),
+                self._workspace_argument(arguments, "workspace.dispose"),
                 acknowledge_published=acknowledge,
             )
         if operation == "workspace.checkpoint":
@@ -652,7 +652,7 @@ class SinnixdService:
                 )
             assert self.workspaces is not None
             return self.workspaces.checkpoint(
-                self._single_workspace_id(arguments, "workspace.checkpoint")
+                self._workspace_argument(arguments, "workspace.checkpoint")
             )
         if operation == "workspace.restore":
             if principal not in {"agent-control", "operator"}:
@@ -665,7 +665,7 @@ class SinnixdService:
                 )
             assert self.workspaces is not None
             return self.workspaces.restore(
-                self._job_argument(arguments, "workspace_id"),
+                self._workspace_argument(arguments, "workspace.restore"),
                 self._job_argument(arguments, "checkpoint_id"),
             )
         if operation == "workspace.recover":
@@ -679,7 +679,7 @@ class SinnixdService:
                 )
             assert self.workspaces is not None
             return self.workspaces.recover(
-                self._job_argument(arguments, "workspace_id"),
+                self._workspace_argument(arguments, "workspace.recover"),
                 self._job_argument(arguments, "checkpoint_id"),
             )
         if operation == "workspace.stack":
@@ -693,8 +693,8 @@ class SinnixdService:
                 )
             assert self.workspaces is not None
             return self.workspaces.stack(
-                parent_workspace_id=self._job_argument(
-                    arguments, "parent_workspace_id"
+                parent_workspace_id=self.workspaces.resolve_id(
+                    self._job_argument(arguments, "parent_workspace_id")
                 ),
                 name=self._job_argument(arguments, "name"),
                 branch=self._job_argument(arguments, "branch"),
@@ -706,7 +706,7 @@ class SinnixdService:
                 )
             assert self.workspaces is not None
             return self.workspaces.restack(
-                self._single_workspace_id(arguments, "workspace.restack")
+                self._workspace_argument(arguments, "workspace.restack")
             )
         if operation == "workspace.publish":
             if principal not in {"agent-control", "operator"}:
@@ -727,9 +727,11 @@ class SinnixdService:
             return self._start_delivery(
                 "publish",
                 principal,
-                self._job_argument(arguments, "workspace_id"),
+                self._workspace_argument(arguments, "workspace.publish"),
                 {
-                    "workspace_id": self._job_argument(arguments, "workspace_id"),
+                    "workspace_id": self._workspace_argument(
+                        arguments, "workspace.publish"
+                    ),
                     "job_id": self._job_argument(arguments, "job_id"),
                     "title": self._job_argument(arguments, "title"),
                     "body": arguments.get("body")
@@ -745,7 +747,7 @@ class SinnixdService:
         if operation == "workspace.review-status":
             assert self.delivery is not None
             return self.delivery.review_status(
-                self._single_workspace_id(arguments, "workspace.review-status")
+                self._workspace_argument(arguments, "workspace.review-status")
             )
         if operation == "workspace.land":
             if (
@@ -760,9 +762,11 @@ class SinnixdService:
             return self._start_delivery(
                 "land",
                 principal,
-                self._job_argument(arguments, "workspace_id"),
+                self._workspace_argument(arguments, "workspace.land"),
                 {
-                    "workspace_id": self._job_argument(arguments, "workspace_id"),
+                    "workspace_id": self._workspace_argument(
+                        arguments, "workspace.land"
+                    ),
                     "job_id": self._job_argument(arguments, "job_id"),
                     **(
                         {"packet_job_id": packet_job_id}
@@ -781,7 +785,7 @@ class SinnixdService:
             if set(arguments) - allowed:
                 raise ValueError("workspace.finish received unsupported arguments")
             self._validate_workspace_settlement(arguments)
-            workspace_id = self._job_argument(arguments, "workspace_id")
+            workspace_id = self._workspace_argument(arguments, "workspace.finish")
             project_id = self.workspaces.get(workspace_id)["project_id"]
             result = self.delivery.finish(workspace_id)
             return self._settle_workspace(result, arguments, project_id)
@@ -800,7 +804,9 @@ class SinnixdService:
                 )
             self._validate_workspace_settlement(arguments)
             assert self.workspaces is not None
-            workspace_id = self._job_argument(arguments, "workspace_id")
+            workspace_id = self._workspace_argument(
+                arguments, "workspace.finish-integrated"
+            )
             project_id = self.workspaces.get(workspace_id)["project_id"]
             result = self.workspaces.finish_integrated(
                 workspace_id,
@@ -1012,9 +1018,14 @@ class SinnixdService:
                 raise JobAuthorizationError(
                     "job admission ledger requires the operator principal"
                 )
-            if arguments:
-                raise ValueError("job.admission accepts no arguments")
-            return self.jobs.admission_ledger()
+            if set(arguments) - {"project_id"}:
+                raise ValueError("job.admission accepts optional project_id")
+            project_id = arguments.get("project_id")
+            if project_id is not None and (
+                not isinstance(project_id, str) or not project_id
+            ):
+                raise ValueError("job.admission project_id must be non-empty")
+            return self.jobs.admission_ledger(project_id)
         if operation == "job.admission.explain":
             if principal != "operator":
                 raise JobAuthorizationError(
@@ -1373,14 +1384,12 @@ class SinnixdService:
                 return True
         return False
 
-    @staticmethod
-    def _single_workspace_id(arguments: Mapping[str, Any], operation: str) -> str:
-        if set(arguments) != {"workspace_id"}:
-            raise ValueError(f"{operation} requires workspace_id")
+    def _workspace_argument(self, arguments: Mapping[str, Any], operation: str) -> str:
         value = arguments.get("workspace_id")
         if not isinstance(value, str) or not value:
             raise ValueError(f"{operation} workspace_id must be non-empty")
-        return value
+        assert self.workspaces is not None
+        return self.workspaces.resolve_id(value)
 
     @staticmethod
     def _job_argument(arguments: Mapping[str, Any], name: str) -> str:
