@@ -174,7 +174,11 @@ def _latest_lane_job(context: HarvestContext) -> tuple[str | None, str | None]:
         binding = contract.get("bead_binding") or {}
         bead = binding.get("bead_id") if isinstance(binding, dict) else None
         if best is None or created > best[0]:
-            best = (created, str(record.get("job_id")), bead if isinstance(bead, str) else None)
+            best = (
+                created,
+                str(record.get("job_id")),
+                bead if isinstance(bead, str) else None,
+            )
     if best is None:
         return None, None
     return best[1], best[2]
@@ -216,7 +220,7 @@ def _adopt_open_pull_request(
     """
     view = _command(
         run,
-        ["gh", "pr", "view", "--json", "url,state", "--jq", ".url + \" \" + .state"],
+        ["gh", "pr", "view", "--json", "url,state", "--jq", '.url + " " + .state'],
         cwd=context.worktree,
         timeout=120,
     )
@@ -233,9 +237,7 @@ def _adopt_open_pull_request(
         timeout=120,
     )
     if edited.returncode != 0:
-        raise HarvestError(
-            edited.stderr.strip() or "GitHub pull request update failed"
-        )
+        raise HarvestError(edited.stderr.strip() or "GitHub pull request update failed")
     return url
 
 
@@ -382,7 +384,9 @@ def _lane_write_scope(
         state = record.get("state")
         checkout = spec.get("checkout") if isinstance(spec, Mapping) else None
         contract = spec.get("contract") if isinstance(spec, Mapping) else None
-        binding = contract.get("bead_binding") if isinstance(contract, Mapping) else None
+        binding = (
+            contract.get("bead_binding") if isinstance(contract, Mapping) else None
+        )
         scope = binding.get("write_scope") if isinstance(binding, Mapping) else None
         if (
             not isinstance(spec, Mapping)
@@ -396,9 +400,7 @@ def _lane_write_scope(
             or not all(isinstance(path, str) and path for path in scope)
         ):
             continue
-        candidates.append(
-            (str(record.get("created_at", "")), tuple(scope))
-        )
+        candidates.append((str(record.get("created_at", "")), tuple(scope)))
     return sorted(candidates, key=lambda item: item[0])[-1][1] if candidates else ()
 
 
@@ -550,8 +552,7 @@ def _redflags(
             path
             for path in paths
             if not any(
-                path == entry
-                or entry.endswith("/") and path.startswith(entry)
+                path == entry or entry.endswith("/") and path.startswith(entry)
                 for entry in write_scope
             )
         )
@@ -1178,7 +1179,9 @@ def authorize(
                 )
         else:
             pr_url = (
-                created.stdout.strip().splitlines()[-1] if created.stdout.strip() else ""
+                created.stdout.strip().splitlines()[-1]
+                if created.stdout.strip()
+                else ""
             )
         pr = pr_url.rsplit("/", 1)[-1]
         if not pr.isdecimal():

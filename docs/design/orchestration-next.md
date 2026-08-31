@@ -6,12 +6,12 @@ Working sketch. Evidence first, design second; nothing here is settled.
 
 `devtools` lines on polylogue master against PRs merged per day:
 
-| date | devtools lines | PRs/day |
-| --- | ---: | ---: |
-| 2026-06-15 | 23,331 | — |
-| 2026-08-10 | 89,884 | 1–12 |
-| 2026-08-18 | 66,591 | 12–24 |
-| 2026-08-27 | 39,068 | 36 |
+| date       | devtools lines | PRs/day |
+| ---------- | -------------: | ------: |
+| 2026-06-15 |         23,331 |       — |
+| 2026-08-10 |         89,884 |    1–12 |
+| 2026-08-18 |         66,591 |   12–24 |
+| 2026-08-27 |         39,068 |      36 |
 
 agentctl/sinnixd landed 2026-08-22; campaign/packet/reactor 2026-08-26.
 The throughput trough sits on the peak of tooling mass, and recovery begins
@@ -19,11 +19,11 @@ with `c17e38539` (2026-08-14), which deleted 324 files and ~79,000 lines of
 "self-attesting campaign bureaucracy".
 
 That commit names the failure mode precisely: generated mirrors, passive
-ledgers, duplicate tracker projections, and *tests that proved only their
-declarations*, which together *made process artifacts look like runtime
-authority*. `b0cee7b99` adds the sharpest form: the artifact registry
-*duplicated runtime relationships as manually curated descriptors* and
-*could attest to itself without proving a production route*.
+ledgers, duplicate tracker projections, and _tests that proved only their
+declarations_, which together _made process artifacts look like runtime
+authority_. `b0cee7b99` adds the sharpest form: the artifact registry
+_duplicated runtime relationships as manually curated descriptors_ and
+_could attest to itself without proving a production route_.
 
 **Design rule that follows.** Rank every change by the ongoing obligation it
 imposes on future contributors. Prefer mechanisms needing no declaration and
@@ -36,20 +36,20 @@ restate what the runtime already knows: no.
 
 ## Per-lane vs batched publication
 
-| | 2026-08-26 | 2026-08-27 |
-| --- | ---: | ---: |
-| PRs merged | 144 | 36 |
-| lines changed | 47,435 | 22,028 |
-| files touched | 870 | 397 |
-| files per PR | 6.0 | 11.0 |
-| shape | 114/144 `feature/packet/*` | hand-driven `integration/batch-*` |
+|               |                 2026-08-26 |                        2026-08-27 |
+| ------------- | -------------------------: | --------------------------------: |
+| PRs merged    |                        144 |                                36 |
+| lines changed |                     47,435 |                            22,028 |
+| files touched |                        870 |                               397 |
+| files per PR  |                        6.0 |                              11.0 |
+| shape         | 114/144 `feature/packet/*` | hand-driven `integration/batch-*` |
 
 Per-lane publication moved roughly twice the volume. Batching was introduced
 because it catches defects no per-lane gate sees — cross-lane type errors, a
 lane merging clean but semantically stale against a moved master. Both are
 real.
 
-The mistake was putting the cross-lane check *on the critical path*. It
+The mistake was putting the cross-lane check _on the critical path_. It
 belongs continuously against master, not as a precondition for landing.
 
 ## Containment
@@ -129,7 +129,7 @@ what it spawns. Contained coordinators would have queued those gates instead
 of stampeding, without any cap on how much work is in flight.
 
 Concurrency is not the lever. Nineteen gates is a reasonable amount of work for
-this machine to *want*; it is an unreasonable amount to run simultaneously. The
+this machine to _want_; it is an unreasonable amount to run simultaneously. The
 missing piece is a queue, and the queue already exists — the work simply is not
 in it.
 

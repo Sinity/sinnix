@@ -66,86 +66,88 @@ in
         '';
       };
 
-      checks.hyprland-login-launch = pkgs.runCommand "sinnix-hyprland-login-launch"
-        {
-          nativeBuildInputs = [ pkgs.zsh ];
-        }
-        ''
-          mkdir bin home runtime
-          cat > bin/tty <<'EOF_TTY'
-          #!/bin/sh
-          printf '/dev/tty1\n'
-          EOF_TTY
-          cat > bin/id <<'EOF_ID'
-          #!/bin/sh
-          test "$1" = -un
-          printf 'sinity\n'
-          EOF_ID
-          cat > bin/uwsm <<'EOF_UWSM'
-          #!/bin/sh
-          printf '%s\n' "$@" > "$HOME/uwsm-args"
-          EOF_UWSM
-          chmod +x bin/id bin/tty bin/uwsm
-          cat > login.zsh <<'EOF_LOGIN'
-          ${hm.programs.zsh.loginExtra}
-          EOF_LOGIN
-          HOME="$PWD/home" PATH="$PWD/bin:$PATH" zsh login.zsh
-          diff -u - "$PWD/home/uwsm-args" <<EOF_ARGS
-          start
-          -e
-          -D
-          Hyprland
-          --
-          ${hyprland}/bin/Hyprland
-          --config
-          $PWD/home/.config/hypr/hyprland.lua
-          EOF_ARGS
-          uwsm_parse=$(
-            HOME="$PWD/home" XDG_RUNTIME_DIR="$PWD/runtime" \
-              ${pkgs.uwsm}/bin/uwsm start -n -e -D Hyprland -- \
-                ${hyprland}/bin/Hyprland --config "$PWD/home/.config/hypr/hyprland.lua" \
-                2>&1 || true
-          )
-          printf '%s\n' "$uwsm_parse" | grep -F \
-            "Command Line: ${hyprland}/bin/Hyprland --config $PWD/home/.config/hypr/hyprland.lua"
-          touch "$out"
-        '';
+      checks.hyprland-login-launch =
+        pkgs.runCommand "sinnix-hyprland-login-launch"
+          {
+            nativeBuildInputs = [ pkgs.zsh ];
+          }
+          ''
+            mkdir bin home runtime
+            cat > bin/tty <<'EOF_TTY'
+            #!/bin/sh
+            printf '/dev/tty1\n'
+            EOF_TTY
+            cat > bin/id <<'EOF_ID'
+            #!/bin/sh
+            test "$1" = -un
+            printf 'sinity\n'
+            EOF_ID
+            cat > bin/uwsm <<'EOF_UWSM'
+            #!/bin/sh
+            printf '%s\n' "$@" > "$HOME/uwsm-args"
+            EOF_UWSM
+            chmod +x bin/id bin/tty bin/uwsm
+            cat > login.zsh <<'EOF_LOGIN'
+            ${hm.programs.zsh.loginExtra}
+            EOF_LOGIN
+            HOME="$PWD/home" PATH="$PWD/bin:$PATH" zsh login.zsh
+            diff -u - "$PWD/home/uwsm-args" <<EOF_ARGS
+            start
+            -e
+            -D
+            Hyprland
+            --
+            ${hyprland}/bin/Hyprland
+            --config
+            $PWD/home/.config/hypr/hyprland.lua
+            EOF_ARGS
+            uwsm_parse=$(
+              HOME="$PWD/home" XDG_RUNTIME_DIR="$PWD/runtime" \
+                ${pkgs.uwsm}/bin/uwsm start -n -e -D Hyprland -- \
+                  ${hyprland}/bin/Hyprland --config "$PWD/home/.config/hypr/hyprland.lua" \
+                  2>&1 || true
+            )
+            printf '%s\n' "$uwsm_parse" | grep -F \
+              "Command Line: ${hyprland}/bin/Hyprland --config $PWD/home/.config/hypr/hyprland.lua"
+            touch "$out"
+          '';
 
-      checks.hyprland-navigation = pkgs.runCommand "sinnix-hyprland-navigation"
-        {
-          nativeBuildInputs = [ pkgs.bash ];
-        }
-        ''
-          mkdir bin
-          cat > bin/hyprctl <<'EOF_HYPRCTL'
-          #!${pkgs.runtimeShell}
-          printf '%s\n' "$*" >> "$HYPR_RECORD"
-          EOF_HYPRCTL
-          cat > bin/jq <<'EOF_JQ'
-          #!${pkgs.runtimeShell}
-          exit 1
-          EOF_JQ
-          chmod +x bin/hyprctl bin/jq
-          export HYPR_RECORD="$PWD/hyprctl-calls"
-          export PATH="$PWD/bin:$PATH"
+      checks.hyprland-navigation =
+        pkgs.runCommand "sinnix-hyprland-navigation"
+          {
+            nativeBuildInputs = [ pkgs.bash ];
+          }
+          ''
+            mkdir bin
+            cat > bin/hyprctl <<'EOF_HYPRCTL'
+            #!${pkgs.runtimeShell}
+            printf '%s\n' "$*" >> "$HYPR_RECORD"
+            EOF_HYPRCTL
+            cat > bin/jq <<'EOF_JQ'
+            #!${pkgs.runtimeShell}
+            exit 1
+            EOF_JQ
+            chmod +x bin/hyprctl bin/jq
+            export HYPR_RECORD="$PWD/hyprctl-calls"
+            export PATH="$PWD/bin:$PATH"
 
-          nav=${../../scripts/kitty-hypr-nav}
-          ${pkgs.bash}/bin/bash "$nav" focus left
-          ${pkgs.bash}/bin/bash "$nav" focus right
-          ${pkgs.bash}/bin/bash "$nav" focus up
-          ${pkgs.bash}/bin/bash "$nav" focus down
-          ${pkgs.bash}/bin/bash "$nav" move up
-          ${pkgs.bash}/bin/bash "$nav" resize down
+            nav=${../../scripts/kitty-hypr-nav}
+            ${pkgs.bash}/bin/bash "$nav" focus left
+            ${pkgs.bash}/bin/bash "$nav" focus right
+            ${pkgs.bash}/bin/bash "$nav" focus up
+            ${pkgs.bash}/bin/bash "$nav" focus down
+            ${pkgs.bash}/bin/bash "$nav" move up
+            ${pkgs.bash}/bin/bash "$nav" resize down
 
-          diff -u - "$HYPR_RECORD" <<'EOF_EXPECTED'
-          eval hl.dispatch(hl.dsp.focus({ direction = "left" }))
-          eval hl.dispatch(hl.dsp.focus({ direction = "right" }))
-          eval hl.dispatch(hl.dsp.focus({ direction = "up" }))
-          eval hl.dispatch(hl.dsp.focus({ direction = "down" }))
-          eval hl.dispatch(hl.dsp.window.move({ direction = "up" }))
-          eval hl.dispatch(hl.dsp.window.resize({ x = 0, y = 80, relative = true }))
-          EOF_EXPECTED
-          touch "$out"
-        '';
+            diff -u - "$HYPR_RECORD" <<'EOF_EXPECTED'
+            eval hl.dispatch(hl.dsp.focus({ direction = "left" }))
+            eval hl.dispatch(hl.dsp.focus({ direction = "right" }))
+            eval hl.dispatch(hl.dsp.focus({ direction = "up" }))
+            eval hl.dispatch(hl.dsp.focus({ direction = "down" }))
+            eval hl.dispatch(hl.dsp.window.move({ direction = "up" }))
+            eval hl.dispatch(hl.dsp.window.resize({ x = 0, y = 80, relative = true }))
+            EOF_EXPECTED
+            touch "$out"
+          '';
     };
 }

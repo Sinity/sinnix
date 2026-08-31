@@ -180,9 +180,7 @@ def test_operator_can_reset_one_learned_admission_estimate(tmp_path: Path) -> No
         {
             "schema_version": 1,
             "active": {"active-key": "active-job"},
-            "cache": {
-                "cache-key": {"job_id": "cached-job", "touched_at": "fixture"}
-            },
+            "cache": {"cache-key": {"job_id": "cached-job", "touched_at": "fixture"}},
             "estimates": {
                 "agent:polylogue:codex:gpt-5.6-luna": {
                     "bytes": 7590666240,
@@ -358,7 +356,9 @@ def test_a_refused_request_is_reported_to_the_daemon_log(
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
             connection.settimeout(5)
             connection.connect(str(socket_path))
-            send_frame(connection, {"jsonrpc": "2.0", "id": "x", "method": "not-dispatch"})
+            send_frame(
+                connection, {"jsonrpc": "2.0", "id": "x", "method": "not-dispatch"}
+            )
             receive_frame(connection)
     finally:
         stop_event.set()
@@ -646,9 +646,7 @@ def test_agentctl_admission_maps_to_read_only_job_verb(
 def test_agentctl_admission_reset_rejects_unscoped_clear_without_all(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        sys, "argv", ["agentctl", "job", "admission-reset"]
-    )
+    monkeypatch.setattr(sys, "argv", ["agentctl", "job", "admission-reset"])
 
     with pytest.raises(SystemExit):
         cli_module.main()
@@ -5758,9 +5756,10 @@ def test_workspace_create_records_missing_compatible_testmon_seed(
         "kind": "missing-compatible-seed",
         "path": ".cache/testmon/testmondata",
     } in created["provision_notes"]
-    assert service.workspaces.get(created["workspace_id"])["provision_notes"] == created[
-        "provision_notes"
-    ]
+    assert (
+        service.workspaces.get(created["workspace_id"])["provision_notes"]
+        == created["provision_notes"]
+    )
 
 
 def test_workspace_create_rolls_back_locked_provision_failure_without_orphans(
@@ -6582,9 +6581,7 @@ def test_workspace_dispose_squash_equivalence_uses_creation_base_after_unrelated
     )
     workspace_path = Path(workspace["path"])
     (workspace_path / "branch.txt").write_text("branch\n")
-    subprocess.run(
-        ["git", "-C", str(workspace_path), "add", "branch.txt"], check=True
-    )
+    subprocess.run(["git", "-C", str(workspace_path), "add", "branch.txt"], check=True)
     subprocess.run(
         [
             "git",
@@ -6602,9 +6599,7 @@ def test_workspace_dispose_squash_equivalence_uses_creation_base_after_unrelated
         check=True,
     )
     (tmp_path / "branch.txt").write_text("branch\n")
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "add", "branch.txt"], check=True
-    )
+    subprocess.run(["git", "-C", str(tmp_path), "add", "branch.txt"], check=True)
     subprocess.run(
         [
             "git",
@@ -6622,9 +6617,7 @@ def test_workspace_dispose_squash_equivalence_uses_creation_base_after_unrelated
         check=True,
     )
     (tmp_path / "unrelated.txt").write_text("unrelated\n")
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "add", "unrelated.txt"], check=True
-    )
+    subprocess.run(["git", "-C", str(tmp_path), "add", "unrelated.txt"], check=True)
     subprocess.run(
         [
             "git",
@@ -6642,7 +6635,14 @@ def test_workspace_dispose_squash_equivalence_uses_creation_base_after_unrelated
         check=True,
     )
     subprocess.run(
-        ["git", "-C", str(tmp_path), "update-ref", "refs/remotes/origin/master", "HEAD"],
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "update-ref",
+            "refs/remotes/origin/master",
+            "HEAD",
+        ],
         check=True,
     )
 
@@ -11570,10 +11570,14 @@ def test_a_timed_out_delivery_command_reports_the_command_and_its_budget() -> No
     stderr, which is how this failure hid.
     """
 
-    def fake_run(argv: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def fake_run(
+        argv: Sequence[str], **kwargs: Any
+    ) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired(list(argv), kwargs["timeout"])
 
-    with pytest.raises(DeliveryError, match=r"timed out after 900s: git -C /fixture push"):
+    with pytest.raises(
+        DeliveryError, match=r"timed out after 900s: git -C /fixture push"
+    ):
         _delivery_with_run(fake_run)._command(
             ["git", "-C", "/fixture", "push", "origin", "lane"],
             timeout_seconds=PUSH_TIMEOUT_SECONDS,

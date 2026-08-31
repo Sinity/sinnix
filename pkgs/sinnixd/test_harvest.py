@@ -144,7 +144,9 @@ def test_cancelled_harvest_restores_rebased_workspace(
 
     def run(argv, **kwargs):
         if argv[:2] == ["devtools", "verify"] and len(argv) == 2:
-            return subprocess.CompletedProcess(argv, 0, "affected verification passed", "")
+            return subprocess.CompletedProcess(
+                argv, 0, "affected verification passed", ""
+            )
         if argv[:3] == ["devtools", "verify", "--quick"]:
             raise KeyboardInterrupt
         return subprocess.run(argv, **kwargs)
@@ -159,7 +161,9 @@ def test_cancelled_harvest_restores_rebased_workspace(
         )
 
     assert _run_git(root, "rev-parse", "HEAD").stdout.strip() == original_head
-    assert _run_git(root, "branch", "--show-current").stdout.strip() == "feature/fixture"
+    assert (
+        _run_git(root, "branch", "--show-current").stdout.strip() == "feature/fixture"
+    )
     assert _run_git(root, "status", "--porcelain", "--untracked-files=all").stdout == ""
     assert not (root / ".git" / "rebase-merge").exists()
 
@@ -497,6 +501,8 @@ def test_a_failed_run_is_not_test_evidence(tmp_path: Path) -> None:
         )
     )
     assert harvest._verification_evidence(tmp_path, "abc")["state"] == "tests-run"
+
+
 def test_review_route_auto_publishes_only_clean_docs_and_tests() -> None:
     result = route_review(
         changed_paths=("docs/review.md", "tests/test_review.py"),
@@ -613,8 +619,13 @@ def test_lane_artifacts_supply_the_publication_title_and_body(tmp_path: Path) ->
         harvest._lane_artifact(context, "title")
         == "fix(storage): restore the sidecar blob owner"
     )
-    assert harvest._lane_artifact(context, "body.md") == "## Summary\n\nRestores the owner."
-    assert harvest._lane_artifact(context, "close-reason.md") == "Merged: owner restored."
+    assert (
+        harvest._lane_artifact(context, "body.md")
+        == "## Summary\n\nRestores the owner."
+    )
+    assert (
+        harvest._lane_artifact(context, "close-reason.md") == "Merged: owner restored."
+    )
 
 
 def test_absent_or_blank_lane_artifacts_read_as_absent(tmp_path: Path) -> None:
@@ -655,7 +666,16 @@ def test_publication_adopts_the_open_pull_request_it_already_pushed(
     )
 
     assert url == "https://github.com/o/r/pull/4387"
-    assert ["gh", "pr", "edit", url, "--title", "fix(x): subject", "--body", "## Summary\n"] in calls
+    assert [
+        "gh",
+        "pr",
+        "edit",
+        url,
+        "--title",
+        "fix(x): subject",
+        "--body",
+        "## Summary\n",
+    ] in calls
 
 
 def test_publication_does_not_adopt_a_closed_pull_request(tmp_path: Path) -> None:
@@ -708,9 +728,7 @@ def test_repo_slug_parses_github_and_labels_local_remotes(tmp_path: Path) -> Non
     assert harvest._repo_slug(subprocess.run, root).startswith("local/")
     _run_git(root, "remote", "set-url", "origin", "git@github.com:Example/repo.git")
     assert harvest._repo_slug(subprocess.run, root) == "Example/repo"
-    _run_git(
-        root, "remote", "set-url", "origin", "https://github.com/Example/other"
-    )
+    _run_git(root, "remote", "set-url", "origin", "https://github.com/Example/other")
     assert harvest._repo_slug(subprocess.run, root) == "Example/other"
 
 
@@ -811,7 +829,6 @@ def test_unavailable_affected_verification_reaches_the_spool(
             body="Reviewed.",
         )
     events = [
-        json.loads(row)
-        for row in (state / "events.jsonl").read_text().splitlines()
+        json.loads(row) for row in (state / "events.jsonl").read_text().splitlines()
     ]
     assert any(event["kind"] == "verification-unavailable" for event in events)
