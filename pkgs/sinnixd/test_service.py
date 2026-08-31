@@ -11950,3 +11950,118 @@ def test_ambiguous_workspace_reference_refuses_with_candidates() -> None:
     assert second.workspace_id in message
     with pytest.raises(KeyError):
         GitWorkspaces._record(stub, "packet-absent")
+
+
+def test_agent_jobs_may_run_four_hours_and_launch_defaults_to_the_ceiling() -> None:
+    """Real lanes routinely exceed an hour; the old 1h ceiling forced serial
+    relaunch rounds. Anti-vacuity: restoring the 3600 ceiling fails both the
+    validity assertion and the argparse default."""
+    from sinnixd.limits import (
+        MAX_AGENT_TIMEOUT_SECONDS,
+        maximum_timeout_seconds,
+        valid_timeout_seconds,
+    )
+
+    assert MAX_AGENT_TIMEOUT_SECONDS == 14_400
+    assert maximum_timeout_seconds("attested-agent") == 14_400
+    assert valid_timeout_seconds(14_400, kind="attested-agent")
+    assert not valid_timeout_seconds(14_401, kind="attested-agent")
+    arguments = cli_module.parser().parse_args(
+        [
+            "agent",
+            "launch",
+            "--project",
+            "fixture",
+            "--checkout",
+            "worktree-0000000000000000",
+            "--prompt-file",
+            "/dev/null",
+            "--backend",
+            "codex",
+            "--model",
+            "fixture-model",
+            "--effort",
+            "high",
+        ]
+    )
+    assert arguments.timeout_seconds == 14_400
+
+
+def test_agent_launch_prepends_the_generated_environment_preamble(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bare continuation prompt gains the declared environment wrapper;
+    packet-compiled prompts pass through untouched (sinnix-05rs).
+    Anti-vacuity: sending the prompt file verbatim fails the wrapper
+    assertion."""
+    (tmp_path / ".agentctl").mkdir()
+    (tmp_path / ".agentctl" / "project.toml").write_text(
+        'schema = 1\n[project]\nid = "fixture"\n'
+        "[environment]\n"
+        'command = ["nix", "develop", "--accept-flake-config", "--command"]\n'
+    )
+    monkeypatch.setattr(cli_module, "resolve_project_root", lambda project: tmp_path)
+    captured: dict[str, Any] = {}
+
+    def fake_call(socket_path, request_value):
+        captured["prompt"] = request_value.arguments["prompt"]
+        return {
+            "schema": 1,
+            "ok": True,
+            "payload": {"value": {"job_id": "job-preamble"}},
+        }
+
+    monkeypatch.setattr(cli_module, "call", fake_call)
+    plain = tmp_path / "prompt.md"
+    plain.write_text("Continue the bead.")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "agentctl",
+            "agent",
+            "launch",
+            "--project",
+            "fixture",
+            "--checkout",
+            "worktree-0000000000000000",
+            "--prompt-file",
+            str(plain),
+            "--backend",
+            "codex",
+            "--model",
+            "fixture-model",
+            "--effort",
+            "high",
+        ],
+    )
+    assert cli_module.main() == 0
+    assert captured["prompt"].startswith("# Continuation preamble (generated)")
+    assert "nix develop --accept-flake-config --command <command>" in captured["prompt"]
+    assert captured["prompt"].endswith("Continue the bead.")
+
+    packet = tmp_path / "packet.md"
+    packet.write_text("# Dispatch packet (v2)\n\ncompiled contents")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "agentctl",
+            "agent",
+            "launch",
+            "--project",
+            "fixture",
+            "--checkout",
+            "worktree-0000000000000000",
+            "--prompt-file",
+            str(packet),
+            "--backend",
+            "codex",
+            "--model",
+            "fixture-model",
+            "--effort",
+            "high",
+        ],
+    )
+    assert cli_module.main() == 0
+    assert captured["prompt"] == "# Dispatch packet (v2)\n\ncompiled contents"
