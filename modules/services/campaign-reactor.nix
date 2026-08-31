@@ -123,7 +123,12 @@ mkServiceModule {
           scriptPkgs.beads
         ];
         systemd.tmpfiles.rules = [
-          "d ${cfg.stateDir} 0700 ${userName} users -"
+          # systemd's user-manager namespace setup needs every component of a
+          # ReadWritePaths bind source to exist before it starts the unit.  Do
+          # not rely on tmpfiles implicitly creating the root-owned parent:
+          # provision both levels with the service's ownership explicitly.
+          "d ${builtins.dirOf cfg.stateDir} 0750 ${userName} users -"
+          "d ${cfg.stateDir} 0750 ${userName} users -"
           "d ${boardDirectory} 0755 ${userName} users -"
           "d ${spoolDirectory} 0700 ${userName} users -"
         ];
