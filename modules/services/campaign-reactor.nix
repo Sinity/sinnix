@@ -75,7 +75,7 @@ mkServiceModule {
     };
     minActiveLanes = lib.mkOption {
       type = lib.types.ints.positive;
-      default = 3;
+      default = 10;
       description = "Keeper threshold for an under-filled active campaign wave.";
     };
     laneGateThreshold = lib.mkOption {
@@ -95,8 +95,8 @@ mkServiceModule {
     };
     refillWidthTarget = lib.mkOption {
       type = lib.types.ints.positive;
-      default = 3;
-      description = "Maximum active lanes targeted by automatic bead-close refill.";
+      default = 12;
+      description = "Maximum active lanes targeted by automatic refill (keeper tick and bead close).";
     };
     refillSpacingSeconds = lib.mkOption {
       type = lib.types.ints.positive;

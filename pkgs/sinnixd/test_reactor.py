@@ -820,3 +820,85 @@ def test_failure_event_reaches_the_shared_spool(tmp_path: Path) -> None:
     assert event["unit"] == "sinnixd-reactor.service"
     assert event["result"] == "exit-code"
     assert event["event_id"]
+
+
+def test_under_filled_fleet_refills_on_the_keeper_tick_leaves_only(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """An under-filled fleet replenishes itself on the keeper tick — most
+    lane exits (slices, rejections, timeouts) close no bead, and the old
+    bead-close-only trigger starved the pool. Epic/milestone containers are
+    never dispatched as lanes. Anti-vacuity: reverting the keeper-tick call
+    leaves the dispatcher uncalled; dropping the container filter selects
+    the epic."""
+    import sinnixd.reactor as reactor_module
+
+    spool = tmp_path / "events.jsonl"
+    board_path = tmp_path / "campaign-board.json"
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    dispatched: list[tuple[str, tuple[str, ...]]] = []
+    reactor = CampaignReactor(
+        spool,
+        board_path,
+        tmp_path / "reactor",
+        project_roots={"polylogue": project_root},
+        jobs_state_dir=tmp_path / "jobs",
+        min_active_lanes=10,
+        refill_width_target=12,
+        refill_dispatcher=lambda project, beads: dispatched.append(
+            (project, tuple(beads))
+        ),
+    )
+    # One terminal lane on the board, one active job: under-filled.
+    append(
+        spool,
+        {
+            "kind": "attested-agent",
+            "job_id": "lane-1",
+            "project": "polylogue",
+            "phase": "succeeded",
+        },
+    )
+
+    monkeypatch.setattr(
+        reactor_module,
+        "_active_lane_count",
+        lambda *a, **k: reactor_module._ActiveLaneCount(1, 0),
+    )
+
+    class Reader:
+        def ready(self):
+            return [
+                {"id": "polylogue-epic", "issue_type": "epic"},
+                {"id": "polylogue-leaf", "issue_type": "task"},
+            ]
+
+    class Snapshot:
+        def __init__(self, bead_id):
+            self.group = bead_id
+            self.bead_ids = (bead_id,)
+
+            class Dimensions:
+                conflict_keys = (f"file:{bead_id}",)
+
+            self.dimensions = Dimensions()
+
+    monkeypatch.setattr(reactor_module, "SubprocessBdReader", lambda root: Reader())
+    monkeypatch.setattr(
+        reactor_module.PacketConfig, "load", staticmethod(lambda root: object())
+    )
+    monkeypatch.setattr(
+        reactor_module,
+        "compile_launch_snapshot",
+        lambda bead_id, **kw: Snapshot(bead_id),
+    )
+    monkeypatch.setattr(reactor_module, "_judgment_reason", lambda row, snap: None)
+
+    reactor.run_once()
+
+    assert dispatched, "keeper tick did not refill an under-filled fleet"
+    project, beads = dispatched[0]
+    assert project == "polylogue"
+    assert "polylogue-leaf" in beads
+    assert "polylogue-epic" not in beads
