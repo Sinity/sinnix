@@ -40,6 +40,10 @@ duplicate them here. Project semantics live in each repository's `CLAUDE.md`.
   claim a broad invariant from a narrow check.
 - Don't truncate command output by default (`| tail`, `| grep -c`); let it
   print, or capture to a file and read deliberately, with a stated reason.
+- `pkill -f`/`pgrep -f` match the invoking shell's own command line: if the
+  pattern's literal text appears anywhere else in the same compound command
+  (a relaunch, a grep), you kill your own shell (exit 144). Issue `pkill -f`
+  as a standalone command with one character bracketed (`'app[.]py'`).
 - Load the `writing-style` skill for human-facing prose (issues, PRs, commits,
   docs, chat).
 
