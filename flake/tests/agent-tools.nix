@@ -302,8 +302,8 @@ in
           && !(managedWork ? MemoryMax)
           && managedWork.ManagedOOMSwap == "kill"
           && managedWork.ManagedOOMMemoryPressure == "kill"
-          && managedWork.ManagedOOMMemoryPressureLimit == "10%"
-          && managedWork.ManagedOOMMemoryPressureDurationSec == "5s"
+          && managedWork.ManagedOOMMemoryPressureLimit == "50%"
+          && managedWork.ManagedOOMMemoryPressureDurationSec == "30s"
           && userSlices.app.MemoryLow == "4G"
           && userSlices.session.MemoryLow == "4G"
         ) "sinnixd work must yield to protected interactive slices without a hard CPU or memory cap";
