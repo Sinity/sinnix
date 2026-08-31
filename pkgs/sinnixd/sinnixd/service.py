@@ -39,6 +39,7 @@ from .jobs import (
     scheduled_operation_id,
     scheduled_timer_unit,
 )
+from .limits import MAX_AGENT_TIMEOUT_SECONDS
 from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from .packet import PacketFinalizeSaga, PacketSagaError, PacketSagaStore
 from .project_plans import PlanStore, ProjectPlanExecutor
@@ -439,7 +440,9 @@ class SinnixdService:
             if not isinstance(dry_run, bool):
                 raise ValueError("campaign.run dry_run must be boolean")
             credential_profile = arguments.get("credential_profile", "subscription")
-            timeout_seconds = arguments.get("timeout_seconds", 3_600)
+            timeout_seconds = arguments.get(
+                "timeout_seconds", MAX_AGENT_TIMEOUT_SECONDS
+            )
             if not isinstance(credential_profile, str) or not isinstance(
                 timeout_seconds, int
             ):

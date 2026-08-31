@@ -7,6 +7,7 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
+from .limits import MAX_AGENT_TIMEOUT_SECONDS
 from .packets import (
     PacketConfig,
     PacketError,
@@ -205,7 +206,10 @@ class CampaignRunner:
         bead_ids: Sequence[str] | None = None,
         dry_run: bool = False,
         credential_profile: str = "subscription",
-        timeout_seconds: int = 3_600,
+        # Packed dispatch groups carry several beads per lane; the agent
+        # ceiling is the honest default, not the old one-hour slice that
+        # forced serial relaunch rounds.
+        timeout_seconds: int = MAX_AGENT_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         project = self.projects.get(project_id)
         config = PacketConfig.load(project.root)
