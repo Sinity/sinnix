@@ -49,7 +49,7 @@ scratch = "nvme"
 # the working tree can neither redden nor mask it; an unchanged master is a
 # nix cache hit.
 description = "Verify committed master's flake checks on a standing schedule"
-exec = ["nix", "flake", "check", "git+file:///realm/project/sinnix?ref=master", "--accept-flake-config"]
+exec = ["bash", "-c", "set -euo pipefail; ref='git+file:///realm/project/sinnix?ref=master'; for t in $(nix eval \"$ref#checks.x86_64-linux\" --apply builtins.attrNames --json --accept-flake-config | jq -r '.[]'); do nix build \"$ref#checks.x86_64-linux.$t\" --no-link --accept-flake-config; done"]
 pool = "bulk"
 result = "exit"
 cache = "none"
