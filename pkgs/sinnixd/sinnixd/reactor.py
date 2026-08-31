@@ -1009,6 +1009,12 @@ class CampaignReactor:
             actions.append(
                 ("lanes-low", f"active lanes {active} < {self.min_active_lanes}")
             )
+            # The queue replenishes itself: an under-filled fleet refills on
+            # the keeper tick, not only on bead closes — most lane exits
+            # (slices, rejections, timeouts) close no bead, and waiting for
+            # one starved the pool at whatever the last close left behind.
+            for project in self.project_roots:
+                self._dispatch_refill(project)
         return actions
 
     @staticmethod
@@ -1593,6 +1599,9 @@ class CampaignReactor:
             for row in sorted(reader.ready(), key=lambda item: str(item.get("id", ""))):
                 bead_id = row.get("id")
                 if not isinstance(bead_id, str) or not bead_id:
+                    continue
+                if row.get("issue_type") in {"epic", "milestone"}:
+                    # Containers coordinate work; a lane needs a leaf.
                     continue
                 snapshot = compile_launch_snapshot(
                     bead_id,
