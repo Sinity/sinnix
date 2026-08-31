@@ -63,14 +63,17 @@ mkServiceModule {
         "127.0.0.1"
         "--port"
         (toString helpers.data.ports.qwen38Vram.backend)
-        # Strict residency: every layer on the GPU or the load fails. The
-        # hybrid-attention KV (~64 KB/token) makes 4096 ctx cost ~256 MB;
-        # batch 64 keeps the compute buffer small enough to clear the fit
-        # (batch 512 alone pushed the total past free VRAM).
+        # Strict residency: every layer on the GPU or the load fails.
+        # Batch 64 keeps the compute buffer small enough to clear the fit
+        # (batch 512 alone pushed the total past free VRAM). With the KV
+        # cache quantized to q8_0 under flash attention, the hybrid-attention
+        # cache costs ~32 KB/token: 16K ctx loads with ~1 GB of VRAM slack
+        # (measured 2026-08-31; 32K also loads but leaves only ~400 MB,
+        # one Chrome spike from eviction — not the default).
         "--n-gpu-layers"
         "999"
         "--ctx-size"
-        "4096"
+        "16384"
         "--batch-size"
         "64"
         "--ubatch-size"
@@ -79,6 +82,10 @@ mkServiceModule {
         "1"
         "--flash-attn"
         "on"
+        "--cache-type-k"
+        "q8_0"
+        "--cache-type-v"
+        "q8_0"
         "--no-mmproj"
         # Qwen3.8 ships its own chat template; without --jinja the model
         # loses turn boundaries and rambles past stop tokens.
