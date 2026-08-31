@@ -433,6 +433,10 @@ def parser() -> argparse.ArgumentParser:
     job_subcommands.add_parser(
         "admission", help="Show admission queue, claims, and blocking arithmetic."
     )
+    admission_explain = job_subcommands.add_parser(
+        "admission-explain", help="Explain one queued job's admission verdict."
+    )
+    admission_explain.add_argument("job_id")
     plan = subcommands.add_parser("plan")
     plan_subcommands = plan.add_subparsers(dest="plan_command", required=True)
     plan_submit = plan_subcommands.add_parser("submit")
@@ -1646,6 +1650,10 @@ def main() -> int:
         )
     elif arguments.command == "job" and arguments.job_command == "admission":
         request = _request("job.admission", "systemd-jobs", {})
+    elif arguments.command == "job" and arguments.job_command == "admission-explain":
+        request = _request(
+            "job.admission.explain", "systemd-jobs", {"job_id": arguments.job_id}
+        )
     elif arguments.command == "job":
         request = _request("job.cancel", "systemd-jobs", {"job_id": arguments.job_id})
     elif arguments.command == "task":

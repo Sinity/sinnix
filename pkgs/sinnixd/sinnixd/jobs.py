@@ -2835,6 +2835,16 @@ class GenericJobs:
                     }
                 )
                 blocked_by = record.state.get("admission", {}).get("blocked_by", [])
+                comparisons = self._admission_comparisons(
+                    record,
+                    estimate,
+                    pool_occupied,
+                    host_occupied,
+                    host_budget,
+                    len(pool_active),
+                    policy["workers"],
+                    exclusive,
+                )
                 queue.append(
                     {
                         "position": position,
@@ -2845,6 +2855,7 @@ class GenericJobs:
                         "blocked_by": list(blocked_by)
                         if isinstance(blocked_by, list)
                         else [],
+                        "comparisons": comparisons,
                         "arithmetic": {
                             "pool_workers": {
                                 "occupied": len(pool_active),
@@ -2888,6 +2899,66 @@ class GenericJobs:
                 "claims": dict(state["claims"]),
                 "queue": queue,
             }
+
+    @staticmethod
+    def _admission_comparisons(
+        record: GenericJobRecord,
+        estimate: int,
+        pool_occupied: int,
+        host_occupied: int,
+        host_budget: int | None,
+        pool_workers: int,
+        worker_limit: int,
+        exclusive: Sequence[str],
+    ) -> dict[str, dict[str, Any]]:
+        pool_budget = POOL_POLICIES[record.spec.pool]["memory_budget"]
+        return {
+            "pool_workers": {
+                "left": pool_workers,
+                "operator": ">=",
+                "right": worker_limit,
+                "fails": pool_workers >= worker_limit,
+            },
+            "pool_memory": {
+                "left": pool_occupied + estimate,
+                "operator": ">",
+                "right": pool_budget,
+                "fails": pool_occupied + estimate > pool_budget,
+            },
+            "host_memory": {
+                "left": host_occupied + estimate,
+                "operator": ">",
+                "right": host_budget,
+                "fails": host_budget is not None
+                and host_occupied + estimate > host_budget,
+            },
+            "exclusive_key": {
+                "left": list(exclusive),
+                "operator": "non-empty",
+                "right": [],
+                "fails": bool(exclusive),
+            },
+        }
+
+    def admission_explain(self, job_id: str) -> dict[str, Any]:
+        """Return the current admission verdict and its exact operands."""
+        ledger = self.admission_ledger()
+        for item in ledger["queue"]:
+            if item["job_id"] == job_id:
+                position = int(item["position"])
+                return {
+                    "job_id": job_id,
+                    "queue_position": position,
+                    "ahead": [
+                        row["job_id"]
+                        for row in ledger["queue"]
+                        if row["position"] < position
+                    ],
+                    "blocked_by": item["blocked_by"],
+                    "estimate_memory_bytes": item["estimate_memory_bytes"],
+                    "comparisons": item["comparisons"],
+                }
+        raise JobRecordError(f"job {job_id} is not queued for admission")
 
     def _save_admission_state(self, value: Mapping[str, Any]) -> None:
         path = self.store.admission_path
@@ -3494,6 +3565,45 @@ class GenericJobs:
             learned_bytes = min(learned_bytes, 2 * baseline)
         return max(baseline, learned_bytes)
 
+    @classmethod
+    def _memory_observation(cls, record: GenericJobRecord) -> dict[str, Any]:
+        state_observation = record.state.get("memory_observation")
+        if isinstance(state_observation, Mapping) and str(
+            state_observation.get("attribution_source", "")
+        ).startswith("explicit-"):
+            observation = dict(state_observation)
+            observation.setdefault("attribution_source", "explicit-phase-observation")
+            return observation
+        phase_peaks = record.state.get("memory_peaks")
+        if isinstance(phase_peaks, Mapping):
+            return {
+                "whole_unit_memory_peak_bytes": cls._memory_peak(
+                    record.state.get("systemd", {})
+                ),
+                "agent_memory_peak_bytes": phase_peaks.get("agent"),
+                "verification_memory_peak_bytes": phase_peaks.get("verification"),
+                "attribution_source": "explicit-phase-peaks",
+            }
+        whole = max(
+            (
+                value
+                for value in (
+                    cls._memory_peak(record.state.get("systemd", {})),
+                    cls._memory_peak(record.state.get("pre_stop_systemd", {})),
+                )
+                if value is not None
+            ),
+            default=None,
+        )
+        return {
+            "whole_unit_memory_peak_bytes": whole,
+            "agent_memory_peak_bytes": whole if record.spec.pool == "agent" else None,
+            "verification_memory_peak_bytes": (
+                whole if record.spec.pool != "agent" else None
+            ),
+            "attribution_source": "systemd-unit-pool-attribution",
+        }
+
     @staticmethod
     def _host_memory_budget(pressure: Mapping[str, float]) -> int | None:
         total = int(pressure.get("memory_total_bytes", 0.0))
@@ -4078,17 +4188,14 @@ class GenericJobs:
                 state["cache"] = self._bounded(
                     state["cache"], MAX_ADMISSION_CACHE_ENTRIES
                 )
-            peak = max(
-                (
-                    value
-                    for value in (
-                        self._memory_peak(record.state.get("systemd", {})),
-                        self._memory_peak(record.state.get("pre_stop_systemd", {})),
-                    )
-                    if value is not None
-                ),
-                default=None,
+            observation = self._memory_observation(record)
+            peak = observation.get(
+                "agent_memory_peak_bytes"
+                if record.spec.pool == "agent"
+                else "verification_memory_peak_bytes"
             )
+            if not isinstance(peak, int) or peak <= 0:
+                peak = None
             if peak is not None and record.spec.estimate_key is not None:
                 learned = (
                     peak * LEARNED_ESTIMATE_HEADROOM_NUMERATOR
@@ -5050,6 +5157,9 @@ class GenericJobs:
                 ),
                 "observed_at": _timestamp(),
             },
+        )
+        state["memory_observation"] = self._memory_observation(
+            replace(record, state=state)
         )
         if state.get("terminal"):
             state["resources"] = _terminal_resources(properties)
