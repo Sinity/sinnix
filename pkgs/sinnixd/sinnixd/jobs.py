@@ -3141,10 +3141,39 @@ class GenericJobs:
         base: Mapping[str, str] | None = None,
     ) -> dict[str, str]:
         environment = dict(record.spec.environment if base is None else base)
-        environment["SINNIXD_JOB_DIR"] = str(
-            (self.store.job_dirs_root / record.job_id).resolve()
-        )
+        job_dir = (self.store.job_dirs_root / record.job_id).resolve()
+        environment["SINNIXD_JOB_DIR"] = str(job_dir)
+        ssh_config = self._job_ssh_config(job_dir)
+        if ssh_config is not None and "GIT_SSH_COMMAND" not in environment:
+            environment["GIT_SSH_COMMAND"] = f"ssh -F {ssh_config}"
         return environment
+
+    @staticmethod
+    def _job_ssh_config(job_dir: Path) -> Path | None:
+        """A user-owned copy of ~/.ssh/config for the job's mount namespace.
+
+        ReadOnlyPaths on a user unit implies a user namespace, which remaps
+        every other-uid file — including a Home-Manager config symlinked into
+        the nix store — to nobody. OpenSSH then fatally refuses the config
+        ("Bad owner or permissions") and every lane fetch/push dies. A copy in
+        the job dir keeps the invoking user's uid inside the namespace, so
+        ssh accepts it.
+        """
+        source = Path.home() / ".ssh" / "config"
+        try:
+            content = source.read_text()
+        except OSError:
+            return None
+        target = job_dir / "ssh_config"
+        try:
+            descriptor = os.open(
+                target, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+            )
+            with os.fdopen(descriptor, "w") as handle:
+                handle.write(content)
+        except OSError:
+            return None
+        return target
 
     def _active_key_conflicts(self, keys: Sequence[str]) -> dict[str, tuple[str, ...]]:
         requested = set(keys)
