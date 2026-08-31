@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -376,6 +377,25 @@ class TypedJobContracts:
                 Path(prompt_path).unlink(missing_ok=True)
         return response
 
+    @staticmethod
+    def _current_checkout_head(checkout: Mapping[str, Any]) -> str:
+        path = checkout.get("path")
+        recorded = checkout.get("head")
+        assert isinstance(recorded, str)
+        if not isinstance(path, str) or not path:
+            return recorded
+        resolved = subprocess.run(
+            ["git", "-C", path, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        head = resolved.stdout.strip()
+        if resolved.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", head):
+            return recorded
+        return head
+
     def retry_agent(
         self,
         *,
@@ -416,13 +436,17 @@ class TypedJobContracts:
             prompt = f"{hint.strip()}\n\n{prompt}"
         if not prompt or len(prompt.encode()) > MAX_PROMPT_BYTES:
             raise ContractError("retry prompt exceeds the configured bound")
+        # Bind the checkout's CURRENT head, not the original spec's: the
+        # first round routinely rebases before it is preempted or times out,
+        # and a retry frozen to the stale head fails execution revalidation
+        # ("checkout is no longer a registered Git worktree") every time.
         checkout = RegisteredCheckout(
             project_id=record.spec.checkout["project_id"],
             project_path=Path(record.spec.checkout["project_path"]),
             checkout_id=record.spec.checkout["checkout_id"],
             path=Path(record.spec.checkout["path"]),
             git_common_dir=Path(record.spec.checkout["git_common_dir"]),
-            head=record.spec.checkout["head"],
+            head=self._current_checkout_head(record.spec.checkout),
         )
         project = self.projects.get(checkout.project_id)
         new_job_id = str(uuid4())
