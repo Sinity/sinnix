@@ -42,11 +42,11 @@ prompt. Write only what the worker must do; coordinator material belongs in
    that needs a command: run that gate against a clean `origin/master` checkout
    and quote its exit code, or own the failure. Host load is the other
    explanation and is yours to distinguish, not to assume.
-8. **Machine trailer.** End the report with exact lines `LANE-BRANCH: <branch>`
+9. **Machine trailer.** End the report with exact lines `LANE-BRANCH: <branch>`
    / `LANE-COMMIT: <sha>` / `LANE-QUICK: green|red|blocked-env` /
    `LANE-CLASSIFICATION: <one line per finding>`.
 
-9. **Write the publication text.** You made the decisions, so you write them
+10. **Write the publication text.** You made the decisions, so you write them
    up: a conventional squash subject of at most 72 characters, a body giving
    Summary, Problem with its evidence, Solution, Verification with the exact
    commands and the line that matters, and honest residual risk. Add a
