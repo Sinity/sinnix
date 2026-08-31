@@ -532,6 +532,18 @@ class GitWorkspaces:
         record = self._record(workspace_id)
         return self._status(record)
 
+    def resolve_id(self, reference: str) -> str:
+        """Return the canonical workspace ID for an ID or workspace name."""
+        matches = [
+            record
+            for record in self.store.records()
+            if reference in {record.workspace_id, record.name}
+        ]
+        if len(matches) != 1:
+            qualifier = "ambiguous" if matches else "unknown"
+            raise KeyError(f"{qualifier} workspace: {reference}")
+        return matches[0].workspace_id
+
     def delivery_snapshot(
         self,
         workspace_id: str,

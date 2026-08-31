@@ -343,7 +343,7 @@ def parser() -> argparse.ArgumentParser:
     lane_publish.add_argument("--timeout-seconds", type=int, default=7200)
     for name in ("status", "stuck", "gc"):
         lane_command = lane_subcommands.add_parser(name)
-        lane_command.add_argument("--project", required=True)
+        lane_command.add_argument("--project")
         lane_command.add_argument("--base", default="origin/master")
         if name == "gc":
             lane_command.add_argument("--apply", action="store_true")
@@ -470,9 +470,10 @@ def parser() -> argparse.ArgumentParser:
     admission_reset.add_argument(
         "--all", action="store_true", help="Forget every learned memory estimate."
     )
-    job_subcommands.add_parser(
+    admission = job_subcommands.add_parser(
         "admission", help="Show admission queue, claims, and blocking arithmetic."
     )
+    admission.add_argument("--project")
     admission_explain = job_subcommands.add_parser(
         "admission-explain", help="Explain one queued job's admission verdict."
     )
@@ -680,11 +681,23 @@ def _render_plain(response: Mapping[str, Any]) -> str:
     if isinstance(value, Mapping) and "job_id" in value and "state" in value:
         state = value.get("state")
         phase = state.get("phase") if isinstance(state, Mapping) else None
+        cause = state.get("terminal_cause") if isinstance(state, Mapping) else None
         checkout = value.get("checkout")
         where = checkout.get("path") if isinstance(checkout, Mapping) else ""
+        cause_text = ""
+        if isinstance(cause, Mapping):
+            kind = cause.get("kind")
+            code = cause.get("exit_code")
+            tail = cause.get("stderr_tail")
+            detail = tail[-1] if isinstance(tail, list) and tail else None
+            cause_text = f" cause={kind}"
+            if code is not None:
+                cause_text += f" exit={code}"
+            if isinstance(detail, str) and detail:
+                cause_text += f" detail={detail}"
         return (
             f"{value['job_id']} {value.get('operation') or value.get('kind') or ''} "
-            f"phase={phase} project={value.get('project_id')} {where}"
+            f"phase={phase}{cause_text} project={value.get('project_id')} {where}"
         )
     return json.dumps(value, indent=1, sort_keys=True)
 
@@ -1285,6 +1298,7 @@ def main() -> int:
         from .lanes import derive_units, disposable, refresh_base, stuck
 
         root = resolve_project_root(arguments.project)
+        project_id = project_id_from_descriptor(root)
         common = Path(
             subprocess.run(
                 ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -1306,7 +1320,7 @@ def main() -> int:
             selected = disposable(units)
             exit_code = 0
         payload = {
-            "project_id": arguments.project,
+            "project_id": project_id,
             "command": arguments.lane_command,
             "base": arguments.base,
             "base_refreshed": fetched,
@@ -1709,7 +1723,11 @@ def main() -> int:
             else {"all": True},
         )
     elif arguments.command == "job" and arguments.job_command == "admission":
-        request = _request("job.admission", "systemd-jobs", {})
+        request = _request(
+            "job.admission",
+            "systemd-jobs",
+            {"project_id": arguments.project} if arguments.project else {},
+        )
     elif arguments.command == "job" and arguments.job_command == "admission-explain":
         request = _request(
             "job.admission.explain", "systemd-jobs", {"job_id": arguments.job_id}

@@ -50,3 +50,26 @@ def test_job_record_renders_one_line() -> None:
 def test_error_envelope_renders_error_line() -> None:
     rendered = _render_plain({"ok": False, "error": {"code": "X", "message": "boom"}})
     assert rendered == "ERROR: boom"
+
+
+def test_failed_job_plain_status_leads_with_terminal_cause() -> None:
+    rendered = _render_plain(
+        _ok(
+            {
+                "job_id": "job-1",
+                "operation": "agent",
+                "project_id": "sinnix",
+                "state": {
+                    "phase": "failed",
+                    "terminal_cause": {
+                        "kind": "runner-refusal",
+                        "exit_code": 2,
+                        "stderr_tail": ["checkout is no longer registered"],
+                    },
+                },
+            }
+        )
+    )
+
+    assert "phase=failed cause=runner-refusal exit=2" in rendered
+    assert "detail=checkout is no longer registered" in rendered
