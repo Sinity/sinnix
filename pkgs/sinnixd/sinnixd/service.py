@@ -103,6 +103,7 @@ SUPPORTED_OPERATIONS = frozenset(
         "job.agent.start",
         "job.admission.reset",
         "job.admission",
+        "job.admission.explain",
         "job.get",
         "job.retry",
         "job.resume",
@@ -986,6 +987,16 @@ class SinnixdService:
             if arguments:
                 raise ValueError("job.admission accepts no arguments")
             return self.jobs.admission_ledger()
+        if operation == "job.admission.explain":
+            if principal != "operator":
+                raise JobAuthorizationError(
+                    "admission explanation requires the operator principal"
+                )
+            if set(arguments) != {"job_id"} or not isinstance(
+                arguments.get("job_id"), str
+            ):
+                raise ValueError("job.admission.explain requires job_id")
+            return self.jobs.admission_explain(arguments["job_id"])
         if operation == "job.get":
             return self._cleanup_terminal(
                 self.jobs.get(
