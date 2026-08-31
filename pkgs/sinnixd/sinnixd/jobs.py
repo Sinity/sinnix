@@ -72,7 +72,18 @@ MIN_HOST_MEMORY_RESERVE_BYTES = 256 * MIB
 # reserve is pure headroom on top of that; sized so a lane's peak reservation
 # and the harvest that publishes it fit on a 32 GiB host at once.
 MAX_HOST_MEMORY_RESERVE_BYTES = 6 * GIB
-HOST_MEMORY_RESERVE_FRACTION = 0.15
+# Lean reserve: sane oomd thresholds, live pressure preemption, and the
+# distress-gated swap block are the safety nets; a fat static reserve only
+# starves admission (2026-08-31: the queue sat at zero running jobs while
+# gigabytes idled inside the reserve).
+HOST_MEMORY_RESERVE_FRACTION = 0.08
+# Agent lanes are memory-idle for most of their wall time (API-bound) and
+# peak only in short verification bursts that rarely coincide. Reserving the
+# full peak for the whole lane lifetime caps a 31G host at 3-4 lanes; the
+# discounted claim admits a real fleet and pressure preemption bumps the
+# largest lane on the rare collision.
+AGENT_CLAIM_FRACTION = 0.5
+AGENT_CLAIM_FLOOR_BYTES = 512 * MIB
 MIN_SWAP_FREE_FRACTION = 0.15
 # Below this much available RAM, a nearly-full swap is treated as exhaustion
 # even before stall pressure shows.
@@ -3683,7 +3694,10 @@ class GenericJobs:
             # estimates keep uncapped windowed learning -- the pool default is
             # a floor guess, not a contract.
             learned_bytes = min(learned_bytes, 2 * baseline)
-        return max(baseline, learned_bytes)
+        estimate = max(baseline, learned_bytes)
+        if spec.pool == "agent" and spec.estimate_memory_bytes is None:
+            return max(int(estimate * AGENT_CLAIM_FRACTION), AGENT_CLAIM_FLOOR_BYTES)
+        return estimate
 
     @classmethod
     def _memory_observation(cls, record: GenericJobRecord) -> dict[str, Any]:

@@ -873,9 +873,13 @@ def test_agent_peak_increases_the_next_matching_agent_estimate(tmp_path: Path) -
 
     repeated = subject.start(second)
 
-    assert (
-        repeated["state"]["admission"]["estimate_memory_bytes"] > 4 * 1024 * 1024 * 1024
-    )
+    # The learned peak propagates into the next claim through the agent
+    # discount: well above the discounted pool default, at half the peak.
+    from sinnixd.jobs import AGENT_CLAIM_FRACTION, POOL_POLICIES
+
+    claimed = repeated["state"]["admission"]["estimate_memory_bytes"]
+    assert claimed > int(AGENT_CLAIM_FRACTION * 4 * 1024 * 1024 * 1024)
+    assert claimed > AGENT_CLAIM_FRACTION * POOL_POLICIES["agent"]["default_estimate"]
 
 
 def test_cache_and_coalescing_are_principal_isolated(tmp_path: Path) -> None:
@@ -1882,3 +1886,51 @@ def test_cancel_records_a_typed_reason(tmp_path: Path) -> None:
     subject.cancel(started["job_id"], reason="pressure-preemption:memory-stall")
     record = subject.store.load(started["job_id"])
     assert record.state["cancellation"]["reason"] == "pressure-preemption:memory-stall"
+
+
+def test_agent_fleet_admits_at_discounted_claims(tmp_path: Path) -> None:
+    """Agent lanes claim a fraction of their peak estimate: lanes are
+    API-bound and memory-idle most of their life, and pressure preemption
+    bumps the largest lane on the rare verify-burst collision. On a host
+    with ~12G available a real fleet admits instead of 3-4 lanes
+    (2026-08-31: the 12-worker pool never exceeded 3 running).
+    Anti-vacuity: full-peak claims stop the same host at four running."""
+    import sinnixd.jobs as jobs_module
+
+    def build(tmp: Path) -> GenericJobs:
+        return GenericJobs(
+            FakeSystemd(),
+            GenericJobStore(tmp / "state"),
+            wait_poll_seconds=0.001,
+            pressure_probe=lambda: {
+                "memory_full_avg10": 0.0,
+                "io_full_avg10": 0.0,
+                "memory_total_bytes": 32 * 1024**3,
+                "memory_available_bytes": 12 * 1024**3,
+                "swap_total_bytes": 20 * 1024**3,
+                "swap_free_bytes": 10 * 1024**3,
+                "managed_memory_bytes": 0,
+            },
+        )
+
+    subject = build(tmp_path / "discounted")
+    started = [
+        subject.start(agent_spec((f"table:fleet-{index}",))) for index in range(10)
+    ]
+    running = [item for item in started if item["state"]["phase"] != "queued"]
+    assert len(running) >= 8
+
+    original = jobs_module.AGENT_CLAIM_FRACTION
+    jobs_module.AGENT_CLAIM_FRACTION = 1.0
+    try:
+        undiscounted = build(tmp_path / "full")
+        full_started = [
+            undiscounted.start(agent_spec((f"table:full-{index}",)))
+            for index in range(10)
+        ]
+        full_running = [
+            item for item in full_started if item["state"]["phase"] != "queued"
+        ]
+        assert len(full_running) <= 5
+    finally:
+        jobs_module.AGENT_CLAIM_FRACTION = original
