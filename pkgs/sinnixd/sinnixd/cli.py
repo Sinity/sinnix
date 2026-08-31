@@ -12,7 +12,13 @@ from uuid import uuid4
 
 from sinnix_mcp import ErrorCode, ErrorEnvelope, RequestEnvelope, ResponseEnvelope
 
-from .api import ProtocolError, SinnixdClientError, UnixSocketServer, call
+from .api import (
+    ProtocolError,
+    ResponseBudgetExceeded,
+    SinnixdClientError,
+    UnixSocketServer,
+    call,
+)
 from .fleet import (
     DEFAULT_FLEET_LIMIT,
     DEFAULT_GH_LIMIT,
@@ -566,6 +572,20 @@ def _unavailable_response(request: RequestEnvelope) -> dict[str, object]:
     ).to_dict()
 
 
+def _client_error_response(
+    request: RequestEnvelope, error: Exception
+) -> dict[str, object]:
+    """An exhausted response budget is not an outage; keep the two typed."""
+    if isinstance(error, ResponseBudgetExceeded):
+        return ResponseEnvelope(
+            request_id=request.request_id,
+            correlation_id=request.correlation_id,
+            owner=request.owner,
+            error=ErrorEnvelope(ErrorCode.RESPONSE_BUDGET_EXCEEDED, str(error)),
+        ).to_dict()
+    return _unavailable_response(request)
+
+
 _JOB_ID_RE = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z"
 )
@@ -583,7 +603,10 @@ def _expand_job_id(value: str) -> str:
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        parser().error(f"job id prefix {value!r} matches {len(matches)} jobs")
+        candidates = ", ".join(matches[:8])
+        parser().error(
+            f"job id prefix {value!r} matches {len(matches)} jobs: {candidates}"
+        )
     return value
 
 
@@ -1031,16 +1054,55 @@ def main() -> int:
                         _time.sleep(0.5)
         return 0
     elif arguments.command == "lane" and arguments.lane_command == "publish":
+        # The reply always names the harvest job once one exists; a failure
+        # before enqueue is a typed step error, never a fake unknown-workspace
+        # or RESULT_INVALID (sinnix-e307).
+        def _lane_publish_reply(
+            *,
+            ok: bool,
+            step: str | None = None,
+            job_id: str | None = None,
+            phase: str | None = None,
+            outcome: str | None = None,
+            error: object = None,
+            result: object = None,
+        ) -> dict[str, object]:
+            reply: dict[str, object] = {"ok": ok}
+            if job_id is not None:
+                reply["job_id"] = job_id
+            if phase is not None:
+                reply["phase"] = phase
+            if outcome is not None:
+                reply["outcome"] = outcome
+            if step is not None:
+                reply["failed_step"] = step
+            if error is not None:
+                reply["error"] = error
+            if result is not None:
+                reply["result"] = result
+            return reply
+
         list_request = _request("workspace.list", "git-workspaces", {})
         try:
             listing = call(arguments.socket, list_request)
-        except OSError:
-            listing = _unavailable_response(list_request)
-        workspaces = (
-            listing.get("payload", {}).get("value", {}).get("workspaces", [])
-            if isinstance(listing, dict)
-            else []
-        )
+        except (OSError, ProtocolError, SinnixdClientError) as error:
+            listing = _client_error_response(list_request, error)
+        if not (isinstance(listing, dict) and listing.get("ok") is True):
+            print(
+                json.dumps(
+                    _lane_publish_reply(
+                        ok=False,
+                        step="workspace.list",
+                        error=listing.get("error")
+                        if isinstance(listing, dict)
+                        else None,
+                    ),
+                    indent=1,
+                    sort_keys=True,
+                )
+            )
+            return 1
+        workspaces = listing.get("payload", {}).get("value", {}).get("workspaces", [])
         record = next(
             (
                 item
@@ -1052,14 +1114,16 @@ def main() -> int:
         if record is None:
             print(
                 json.dumps(
-                    {
-                        "ok": False,
-                        "error": {
+                    _lane_publish_reply(
+                        ok=False,
+                        step="workspace.list",
+                        error={
                             "code": "INVALID_ARGUMENT",
                             "message": f"unknown workspace: {arguments.workspace}",
                         },
-                    },
+                    ),
                     indent=1,
+                    sort_keys=True,
                 )
             )
             return 1
@@ -1078,15 +1142,27 @@ def main() -> int:
         )
         try:
             started = call(arguments.socket, start_request)
-        except OSError:
-            started = _unavailable_response(start_request)
+        except (OSError, ProtocolError, SinnixdClientError) as error:
+            started = _client_error_response(start_request, error)
         job_id = (
             started.get("payload", {}).get("value", {}).get("job_id")
             if isinstance(started, dict)
             else None
         )
         if not isinstance(job_id, str):
-            print(json.dumps(started, indent=1, sort_keys=True))
+            print(
+                json.dumps(
+                    _lane_publish_reply(
+                        ok=False,
+                        step="job.start",
+                        error=started.get("error")
+                        if isinstance(started, dict)
+                        else None,
+                    ),
+                    indent=1,
+                    sort_keys=True,
+                )
+            )
             return 1
         wait_request = _request(
             "job.wait",
@@ -1095,14 +1171,44 @@ def main() -> int:
         )
         try:
             call(arguments.socket, wait_request)
-        except OSError:
+        except (OSError, ProtocolError, SinnixdClientError):
             pass
+        get_request = _request("job.get", "systemd-jobs", {"job_id": job_id})
+        try:
+            status = call(arguments.socket, get_request)
+        except (OSError, ProtocolError, SinnixdClientError) as error:
+            status = _client_error_response(get_request, error)
+        state = (
+            status.get("payload", {}).get("value", {}).get("state", {})
+            if isinstance(status, dict)
+            else {}
+        )
+        phase = state.get("phase") if isinstance(state, dict) else None
+        if not (isinstance(state, dict) and state.get("terminal")):
+            print(
+                json.dumps(
+                    _lane_publish_reply(
+                        ok=False,
+                        job_id=job_id,
+                        phase=phase if isinstance(phase, str) else None,
+                        error={
+                            "code": "HARVEST_PENDING",
+                            "message": (
+                                "the harvest job is enqueued but not terminal; "
+                                f"follow it with: agentctl job wait {job_id}"
+                            ),
+                        },
+                    ),
+                    indent=1,
+                    sort_keys=True,
+                )
+            )
+            return 2
         result_request = _request("job.result", "systemd-jobs", {"job_id": job_id})
         try:
             response = call(arguments.socket, result_request)
-        except OSError:
-            response = _unavailable_response(result_request)
-        print(json.dumps(response, indent=1, sort_keys=True))
+        except (OSError, ProtocolError, SinnixdClientError) as error:
+            response = _client_error_response(result_request, error)
         payload_value = (
             response.get("payload", {}).get("value", {})
             if isinstance(response, dict)
@@ -1110,7 +1216,21 @@ def main() -> int:
         )
         inner = payload_value.get("value") if isinstance(payload_value, dict) else None
         outcome = inner.get("outcome") if isinstance(inner, dict) else None
-        return 0 if outcome in {"HARVEST_OK", "HARVEST_EMPTY"} else 1
+        ok = outcome in {"HARVEST_OK", "HARVEST_EMPTY"}
+        print(
+            json.dumps(
+                _lane_publish_reply(
+                    ok=ok,
+                    job_id=job_id,
+                    phase=phase if isinstance(phase, str) else None,
+                    outcome=outcome if isinstance(outcome, str) else None,
+                    result=response,
+                ),
+                indent=1,
+                sort_keys=True,
+            )
+        )
+        return 0 if ok else 1
     elif arguments.command == "lane":
         from .lanes import derive_units, disposable, refresh_base, stuck
 
@@ -1242,8 +1362,8 @@ def main() -> int:
         )
         try:
             created = call(arguments.socket, create_request)
-        except (OSError, ProtocolError, SinnixdClientError):
-            created = _unavailable_response(create_request)
+        except (OSError, ProtocolError, SinnixdClientError) as error:
+            created = _client_error_response(create_request, error)
         if created.get("ok") is not True:
             response = _packet_step_failure(created, "workspace.create")
         else:
@@ -1268,8 +1388,8 @@ def main() -> int:
                 )
                 try:
                     disposed = call(arguments.socket, dispose_request)
-                except (OSError, ProtocolError, SinnixdClientError):
-                    disposed = _unavailable_response(dispose_request)
+                except (OSError, ProtocolError, SinnixdClientError) as error:
+                    disposed = _client_error_response(dispose_request, error)
                 return _packet_step_failure(step_response, step, rollback=disposed)
 
             try:
@@ -1297,8 +1417,8 @@ def main() -> int:
                     )
                     try:
                         status = call(arguments.socket, get_request)
-                    except (OSError, ProtocolError, SinnixdClientError):
-                        status = _unavailable_response(get_request)
+                    except (OSError, ProtocolError, SinnixdClientError) as error:
+                        status = _client_error_response(get_request, error)
                     if status.get("ok") is not True:
                         response = compensate(status, "workspace.get")
                         checkout_id = ""
@@ -1350,8 +1470,8 @@ def main() -> int:
                 )
                 try:
                     response = call(arguments.socket, agent_request)
-                except (OSError, ProtocolError, SinnixdClientError):
-                    response = _unavailable_response(agent_request)
+                except (OSError, ProtocolError, SinnixdClientError) as error:
+                    response = _client_error_response(agent_request, error)
                 if response.get("ok") is not True:
                     response = compensate(response, "job.agent.start")
                 response = _attach_packet_notes(response, packet_notes)
@@ -1604,8 +1724,8 @@ def main() -> int:
                 and response.get("ok") is True
             ):
                 response = _wait_for_delivery(arguments.socket, response)
-        except (OSError, ProtocolError, SinnixdClientError):
-            response = _unavailable_response(request)
+        except (OSError, ProtocolError, SinnixdClientError) as error:
+            response = _client_error_response(request, error)
     if getattr(arguments, "plain", False):
         print(_render_plain(response))
     else:

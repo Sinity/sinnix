@@ -697,6 +697,13 @@ def compile_packet(
         "full_diff_ref": f"sinnix://jobs/{context.job_id}/artifacts/{packet_id}.diff",
         "worktree_unstaged_sha256": _digest(unstaged),
         "worktree_staged_sha256": _digest(staged),
+        # The reviewed publication text is part of what the receipt binds:
+        # .lane/ files are untracked, so HEAD equality alone would let text
+        # change between review and publication (sinnix-3ynh).
+        "publication_text": {
+            "title_sha256": _digest(_lane_artifact(context, "title") or ""),
+            "body_sha256": _digest(_lane_artifact(context, "body.md") or ""),
+        },
         "bead_id": bead_id,
         "close_reason": close_reason,
         "created_at": _timestamp(),
@@ -1011,6 +1018,18 @@ def authorize(
     _require_publication_title(title)
     if len(body.encode()) > 64_000:
         raise HarvestError("harvest publication body is outside bounds")
+    bound_text = receipt.get("publication_text")
+    if isinstance(bound_text, Mapping):
+        # Only text that existed at minting was reviewed; a receipt minted
+        # without lane text binds nothing for that field.
+        empty = _digest("")
+        for field_name, value in (("title_sha256", title), ("body_sha256", body)):
+            bound = bound_text.get(field_name)
+            if bound not in (None, empty) and bound != _digest(value):
+                raise HarvestError(
+                    "harvest publication text differs from the reviewed "
+                    "receipt; re-mint so the new text is reviewed"
+                )
 
     # Execute tests before contending for the shared repository: this is the
     # only step in the chain that runs them, and it needs no lock.
