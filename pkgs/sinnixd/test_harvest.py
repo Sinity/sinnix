@@ -832,3 +832,71 @@ def test_unavailable_affected_verification_reaches_the_spool(
         json.loads(row) for row in (state / "events.jsonl").read_text().splitlines()
     ]
     assert any(event["kind"] == "verification-unavailable" for event in events)
+
+
+def test_reminting_binds_the_currently_edited_publication_text(
+    tmp_path: Path,
+) -> None:
+    """A re-mint after coordinator edits binds the edited text, and the
+    receipt carries its digests (sinnix-3ynh AC1). Anti-vacuity: restoring
+    stale artifacts over the edits would bind the stale digests instead."""
+    root, _remote = _repository(tmp_path)
+    lane_dir = root / ".lane"
+    lane_dir.mkdir()
+    (lane_dir / "title").write_text("fix: original reviewed subject")
+    (lane_dir / "body.md").write_text("Original body.")
+    state = tmp_path / "state"
+    context = _context(root, state)
+    first = harvest.compile_packet(context)
+    first_receipt = json.loads(
+        (state / "harvest-packets" / f"{first['packet']['packet_id']}.json").read_text()
+    )
+
+    (lane_dir / "title").write_text("fix: corrected subject after review")
+    (lane_dir / "body.md").write_text("Corrected body.")
+    second = harvest.compile_packet(context)
+    second_receipt = json.loads(
+        (
+            state / "harvest-packets" / f"{second['packet']['packet_id']}.json"
+        ).read_text()
+    )
+
+    import hashlib
+
+    def digest(text: str) -> str:
+        return hashlib.sha256(text.encode()).hexdigest()
+
+    assert first_receipt["publication_text"]["title_sha256"] == digest(
+        "fix: original reviewed subject"
+    )
+    assert second_receipt["publication_text"]["title_sha256"] == digest(
+        "fix: corrected subject after review"
+    )
+    assert second_receipt["publication_text"]["body_sha256"] == digest(
+        "Corrected body."
+    )
+
+
+def test_authorize_refuses_text_that_drifted_from_the_reviewed_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """.lane/ files are untracked, so HEAD equality alone would publish text
+    nobody reviewed (sinnix-3ynh AC2). Anti-vacuity: omitting the text
+    digests from the receipt lets the drifted body publish."""
+    root, _remote = _repository(tmp_path)
+    lane_dir = root / ".lane"
+    lane_dir.mkdir()
+    (lane_dir / "title").write_text("fix: publish the harvested lane branch")
+    (lane_dir / "body.md").write_text("Reviewed body.")
+    state = tmp_path / "state"
+    context = _context(root, state, "drift-job")
+    receipt_ref = harvest.compile_packet(context)["receipt_ref"]
+    monkeypatch.setattr(harvest, "LOCK_PATH", tmp_path / "harvest.lock")
+
+    with pytest.raises(harvest.HarvestError, match="differs from the reviewed"):
+        harvest.authorize(
+            context,
+            receipt_ref=receipt_ref,
+            title="fix: publish the harvested lane branch",
+            body="Body silently rewritten after review.",
+        )
