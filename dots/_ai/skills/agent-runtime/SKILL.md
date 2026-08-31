@@ -59,17 +59,13 @@ not add a parallel ledger for any of them.
 
 ## Agent continuation
 
-`agentctl agent` is a single-shot launch. Use `agentctl agent resume <job-id>
---session-id <native-id>` only when the backend returned a native session id
-and the source job is terminal; it creates a child job bound to that session.
-For work without native session continuity, checkpoint repository state, record
-load-bearing task facts in Beads, prepare a fresh prompt that names the
-checkpoint and next action, and dispatch another exact-workspace agent.
-
-Before context compaction, record current objective, completed evidence,
-active job/workspace/task IDs, changed files, blockers, and the exact next
-action. Resume by verifying those IDs and current Git state, then use `recap`
-to restore orientation without replaying the whole transcript.
+- `agentctl lane resume <workspace>` re-dispatches an interrupted lane from
+  its preserved prompt into the same checkout with the original
+  backend/model/effort. Uncommitted work in the worktree belongs to the
+  resumed agent; the standing preamble tells it so.
+- Reserve manual `agent launch --checkout <id>` for prompts that must
+  differ from the original mandate (a review verdict to apply, a changed
+  scope); checkout ids come from `workspace get`.
 
 ## Failures
 
