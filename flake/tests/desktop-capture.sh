@@ -79,20 +79,20 @@ PATH="$fixture_bin:$PATH" "$ocr_helper"
 
 export HYPR_ACTIONS=$TMPDIR/actions
 export HYPR_SPECIAL_STATE=$TMPDIR/special-state
-printf 'special:scratch_term' > "$HYPR_SPECIAL_STATE"
+printf 'special:scratch_term' >"$HYPR_SPECIAL_STATE"
 PATH="$fixture_bin:$PATH" "$dismiss_helper"
 [ "$(cat "$HYPR_ACTIONS")" = "hidden scratch_term" ]
 
 config_dir=$TMPDIR/scratchpads
 mkdir -p "$config_dir"
-cat > "$config_dir/rawlog.conf" <<'EOF'
+cat >"$config_dir/rawlog.conf" <<'EOF'
 COMMAND=(false)
 CLASS="rawlog-capture"
 WORKSPACE="scratch_rawlog"
 WIDTH_RATIO=0.72
 HEIGHT_RATIO=0.48
 EOF
-: > "$HYPR_SPECIAL_STATE"
+: >"$HYPR_SPECIAL_STATE"
 SCRATCHPAD_CONFIG_DIR="$config_dir" PATH="$fixture_bin:$PATH" "$toggle_helper" rawlog
 [ "$(cat "$HYPR_SPECIAL_STATE")" = "special:scratch_rawlog" ]
 SCRATCHPAD_CONFIG_DIR="$config_dir" PATH="$fixture_bin:$PATH" "$toggle_helper" rawlog

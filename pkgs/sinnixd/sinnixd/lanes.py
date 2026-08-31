@@ -15,12 +15,16 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from .integration import DEFAULT_BASE, _git, _landed_integration_branches, unintegrated_content
+from .integration import (
+    DEFAULT_BASE,
+    _git,
+    _landed_integration_branches,
+    unintegrated_content,
+)
 
 WORKTREE_ROOT = Path("/realm/worktrees")
 
@@ -177,7 +181,9 @@ def derive_units(
     for path in sorted(worktree_root.iterdir()):
         if not path.is_dir() or not (path / ".git").exists():
             continue
-        common = _git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=path)
+        common = _git(
+            "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=path
+        )
         if common.returncode != 0 or Path(common.stdout.strip()) != git_common_dir:
             continue
         branch = _git("rev-parse", "--abbrev-ref", "HEAD", cwd=path).stdout.strip()
@@ -190,7 +196,10 @@ def derive_units(
         contained = False
         if head and landed:
             containing = _git(
-                "branch", "--format=%(refname:short)", "--contains", head,
+                "branch",
+                "--format=%(refname:short)",
+                "--contains",
+                head,
                 cwd=git_common_dir.parent,
             ).stdout.split()
             contained = any(name in landed for name in containing)
@@ -205,7 +214,10 @@ def derive_units(
             state = "unpublished"
             reason = f"{len(files)} file(s) differ from {base} with no landed copy"
         elif ahead:
-            state, reason = "integrated", f"{ahead} commit(s) whose content is on {base}"
+            state, reason = (
+                "integrated",
+                f"{ahead} commit(s) whose content is on {base}",
+            )
         else:
             state, reason = "empty", f"no commits beyond {base}"
         units.append(
