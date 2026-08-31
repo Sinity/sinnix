@@ -515,15 +515,117 @@ def test_declared_json_verdict_controls_phase_and_terminal_event(
 
     assert listed["jobs"][0]["state"]["phase"] == expected_phase
     assert waited["state"]["phase"] == expected_phase
-    assert listed["jobs"][0]["state"].get("verdict") == (
-        outcome if outcome != "UNKNOWN" else outcome
-    )
-    assert waited["state"].get("verdict") == (
-        outcome if outcome != "UNKNOWN" else outcome
-    )
+    assert listed["jobs"][0]["state"].get("verdict") == outcome
+    assert waited["state"].get("verdict") == outcome
     assert event["phase"] == expected_phase
     assert event["verdict"] == outcome
     assert waited["state"]["systemd"]["ExecMainStatus"] == "0"
+
+
+def test_refused_verdict_fails_dependents(tmp_path: Path) -> None:
+    """A dependent of a refused publication receives dependency-failed
+    (sinnix-u9if AC2). Anti-vacuity: treating refused as succeeded in
+    _dependency_block admits the dependent instead."""
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "InvocationID": "fixture-invocation",
+            "Result": "success",
+            "ExecMainStatus": "0",
+        }
+    )
+    jobs = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+    )
+    refused = jobs.start(
+        GenericJobSpec(
+            kind="declared-operation",
+            command=("fixture",),
+            working_directory=str(tmp_path),
+            environment={},
+            project_id="fixture",
+            operation="harvest",
+            parameter_digest="0" * 64,
+            result_kind="json",
+            result_verdict={
+                "success": ("HARVEST_OK",),
+                "refusal": ("GATE_RED",),
+            },
+        )
+    )
+    record = jobs.store.load(refused["job_id"])
+    assert record.result_path is not None
+    record.result_path.write_text(json.dumps({"outcome": "GATE_RED"}))
+    record.log_path.with_suffix(".complete").touch(mode=0o600)
+    assert jobs.get(refused["job_id"])["state"]["phase"] == "refused"
+
+    dependent = jobs.start(
+        GenericJobSpec(
+            kind="declared-operation",
+            command=("fixture",),
+            working_directory=str(tmp_path),
+            environment={},
+            project_id="fixture",
+            operation="followup",
+            parameter_digest="1" * 64,
+            result_kind="exit-status",
+            dependency_job_ids=(refused["job_id"],),
+        )
+    )
+
+    followed = jobs.get(dependent["job_id"])
+    assert followed["state"]["phase"] == "dependency-failed"
+    assert followed["state"]["terminal"] is True
+
+
+def test_malformed_json_result_fails_typed_never_succeeds(tmp_path: Path) -> None:
+    """Unparseable result JSON under a declared verdict terminates failed with
+    a typed RESULT_INVALID error (sinnix-u9if AC3). Anti-vacuity: accepting
+    every zero-exit payload classifies this succeeded."""
+    systemd = FakeSystemdJobs(
+        properties={
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "InvocationID": "fixture-invocation",
+            "Result": "success",
+            "ExecMainStatus": "0",
+        }
+    )
+    jobs = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+    )
+    started = jobs.start(
+        GenericJobSpec(
+            kind="declared-operation",
+            command=("fixture",),
+            working_directory=str(tmp_path),
+            environment={},
+            project_id="fixture",
+            operation="harvest",
+            parameter_digest="0" * 64,
+            result_kind="json",
+            result_verdict={
+                "success": ("HARVEST_OK",),
+                "refusal": ("GATE_RED",),
+            },
+        )
+    )
+    record = jobs.store.load(started["job_id"])
+    assert record.result_path is not None
+    record.result_path.write_text("{not json")
+    record.log_path.with_suffix(".complete").touch(mode=0o600)
+
+    reconciled = jobs.get(started["job_id"])
+
+    assert reconciled["state"]["phase"] == "failed"
+    assert reconciled["state"]["terminal"] is True
+    assert reconciled["state"]["error"]["code"] == "RESULT_INVALID"
+    assert reconciled["state"].get("verdict") is None
 
 
 @pytest.mark.parametrize(("exit_code", "completed"), [(0, True), (1, False)])

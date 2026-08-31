@@ -3253,8 +3253,26 @@ class GenericJobs:
                 self._admit_locked()
                 record = self.store.load(candidate)
                 return self._public(record, record.state)
+        # The immediate path never revisits a job, so an unmet dependency must
+        # settle here: a terminally failed one fails the job before launch and
+        # a live one is a caller error rather than a silent unchecked launch.
+        # Dependency locks are taken before the candidate lock, matching the
+        # admission loop's ordering.
+        immediate_block = (
+            self._dependency_block(spec) if spec.dependency_job_ids else None
+        )
         with self.store.locked(candidate):
             record = self.store.create(spec, candidate)
+            if immediate_block is not None:
+                if not immediate_block.get("terminal"):
+                    raise SystemdJobError(
+                        "immediate job dependencies are not terminal; "
+                        "use a queued job kind for dependency waiting"
+                    )
+                blocked_record = self._with_state(record, immediate_block)
+                self.store.save(blocked_record)
+                self._finalize_terminal(blocked_record)
+                return self._public(blocked_record, blocked_record.state)
             try:
                 if not self.store.service_lease_ports_available(spec.lease):
                     raise SystemdJobError(
@@ -3962,7 +3980,7 @@ class GenericJobs:
             # Dependency observations acquire their own job locks.  Do them
             # before the candidate lock so admission never nests job locks in
             # an order determined by the dependency graph.
-            blocked = self._dependency_block(snapshot)
+            blocked = self._dependency_block(snapshot.spec)
             terminal_blocked: GenericJobRecord | None = None
             with self.store.locked(snapshot.job_id):
                 record = self.store.load(snapshot.job_id)
@@ -4229,8 +4247,8 @@ class GenericJobs:
                 traceback.print_exc()
             stop_event.wait(self.admission_retry_seconds)
 
-    def _dependency_block(self, record: GenericJobRecord) -> Mapping[str, Any] | None:
-        for job_id in record.spec.dependency_job_ids:
+    def _dependency_block(self, spec: GenericJobSpec) -> Mapping[str, Any] | None:
+        for job_id in spec.dependency_job_ids:
             try:
                 with self.store.locked(job_id):
                     dependency = self._get_locked(job_id)
@@ -4244,14 +4262,14 @@ class GenericJobs:
             if (
                 dependency["state"].get("terminal")
                 and dependency["state"].get("phase") != "succeeded"
-                and not record.spec.allow_failed_dependencies
+                and not spec.allow_failed_dependencies
             ):
                 return {
                     "phase": "dependency-failed",
                     "terminal": True,
                     "launch_evidence": "not-started",
                     "observed_at": _timestamp(),
-                    "dependencies": list(record.spec.dependency_job_ids),
+                    "dependencies": list(spec.dependency_job_ids),
                 }
             if not dependency["state"].get("terminal"):
                 dependency_record = self.store.load(job_id)
@@ -4269,7 +4287,7 @@ class GenericJobs:
                     "phase": "waiting-dependencies",
                     "terminal": False,
                     "observed_at": _timestamp(),
-                    "dependencies": list(record.spec.dependency_job_ids),
+                    "dependencies": list(spec.dependency_job_ids),
                 }
         return None
 
