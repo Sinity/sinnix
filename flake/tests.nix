@@ -34,7 +34,6 @@ in
     ./tests/command-registry.nix
     ./tests/agent-environment.nix
     ./tests/lane-toolbelt.nix
-    ./tests/command-registry.nix
     ./tests/agent-parity.nix
     ./tests/swarm-fixture.nix
     ./tests/observability.nix
