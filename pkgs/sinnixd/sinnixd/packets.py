@@ -38,10 +38,16 @@ _MIGRATION_FILE = re.compile(
     r"(?<![A-Za-z0-9_])(?P<slot>[0-9]{3})_[A-Za-z0-9][A-Za-z0-9_.-]*\.sql"
     r"(?![A-Za-z0-9_])"
 )
+# Address- and URL-shaped tokens are not modules: adjacency to @ or /
+# excludes email parts and URL hosts, and a public-suffix tail excludes
+# bare hostnames mentioned in prose (sinnix-8l2p).
 _DOTTED_MODULE = re.compile(
-    r"(?<![A-Za-z0-9_.])"
+    r"(?<![A-Za-z0-9_.@/-])"
     r"(?P<module>[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)"
-    r"(?![A-Za-z0-9_.])"
+    r"(?![A-Za-z0-9_.@/-])"
+)
+_HOST_SUFFIXES = frozenset(
+    {"com", "net", "org", "edu", "gov", "mil", "int", "info", "biz"}
 )
 _QUOTED_IDENTIFIER = re.compile(r"`([^`]+)`|\"([^\"]+)\"|'([^']+)'")
 _PATH_EXTENSIONS = frozenset(
@@ -161,6 +167,8 @@ def extract_references(text: str) -> PacketReferences:
     for match in _DOTTED_MODULE.finditer(text):
         module = match.group("module")
         if module.split(".", 1)[0] in {"e", "g", "i"}:
+            continue
+        if module.rsplit(".", 1)[-1] in _HOST_SUFFIXES:
             continue
         if _in_quoted_context(text, *match.span()) or re.search(
             r"\b(?:module|package|import|from|namespace)\b",
