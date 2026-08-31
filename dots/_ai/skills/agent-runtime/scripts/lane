@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+# Worker-side contract toolbelt. The result of `lane done` is stdout: the
+# attested-agent capture wrapper stores stdout as the last-message artifact.
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  lane task
+  lane verify
+  lane done [--incomplete] <report-file>
+EOF
+}
+
+die() {
+  printf 'lane: %s\n' "$*" >&2
+  exit 1
+}
+
+repo_root() {
+  git rev-parse --show-toplevel 2>/dev/null || die "not inside a Git checkout"
+}
+
+project_file() {
+  local root
+  root=$(repo_root)
+  [[ -f "$root/.agentctl/project.toml" ]] || die "missing $root/.agentctl/project.toml"
+  printf '%s\n' "$root/.agentctl/project.toml"
+}
+
+require_job_identity() {
+  [[ -n ${SINNIXD_JOB_ID:-} ]] || die "SINNIXD_JOB_ID is unavailable"
+  [[ -n ${SINNIXD_PROJECT_ID:-} ]] || die "SINNIXD_PROJECT_ID is unavailable"
+  [[ -n ${SINNIXD_CHECKOUT_ID:-} ]] || die "SINNIXD_CHECKOUT_ID is unavailable"
+}
+
+prompt_from_input() {
+  local input=$1 prompt_path
+  prompt_path=$(sed -nE 's/.*"prompt_path":"([^"]+)".*/\1/p' "$input")
+  [[ -n $prompt_path && -r $prompt_path ]] || return 1
+  printf '%s\n' "$prompt_path"
+}
+
+launch_prompt() {
+  local state_root input prompt_path
+  if [[ -n ${SINNIXD_JOB_PROMPT_FILE:-} && -r $SINNIXD_JOB_PROMPT_FILE ]]; then
+    printf '%s\n' "$SINNIXD_JOB_PROMPT_FILE"
+    return 0
+  fi
+
+  for input in "${SINNIXD_JOB_INPUT:-}" "${SINNIXD_JOB_INPUT_REF:-}"; do
+    if [[ -n $input && -r $input ]] && prompt_path=$(prompt_from_input "$input"); then
+      printf '%s\n' "$prompt_path"
+      return 0
+    fi
+  done
+
+  state_root=${SINNIXD_JOB_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sinnixd}
+  prompt_path="$state_root/inputs/${SINNIXD_JOB_ID}.prompt"
+  if [[ -r $prompt_path ]]; then
+    printf '%s\n' "$prompt_path"
+    return 0
+  fi
+  input="$state_root/inputs/${SINNIXD_JOB_ID}.json"
+  if [[ -r $input ]] && prompt_path=$(prompt_from_input "$input"); then
+    printf '%s\n' "$prompt_path"
+    return 0
+  fi
+  return 1
+}
+
+lane_task() {
+  require_job_identity
+  local prompt_path
+  prompt_path=$(launch_prompt) || die "launch snapshot is unavailable"
+  cat -- "$prompt_path"
+}
+
+operation_has_exec() {
+  local file=$1 operation=$2
+  awk -v target="[operations.$operation]" '
+    $0 == target { in_operation = 1; next }
+    /^\[/ { in_operation = 0 }
+    in_operation && $0 ~ /^[[:space:]]*exec[[:space:]]*=/ { found = 1; exit }
+    END { exit(found ? 0 : 1) }
+  ' "$file"
+}
+
+workspace_operations() {
+  local file=$1
+  awk '
+    $0 == "[workspace]" { in_workspace = 1; next }
+    /^\[/ { in_workspace = 0 }
+    in_workspace && $0 ~ /^[[:space:]]*verification_operations[[:space:]]*=/ {
+      line = $0
+      sub(/^[^=]*=[[:space:]]*/, "", line)
+      gsub(/[\[\]"]/, "", line)
+      n = split(line, values, ",")
+      for (i = 1; i <= n; i++) {
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", values[i])
+        if (values[i] != "") print values[i]
+      }
+      exit
+    }
+  ' "$file"
+}
+
+select_verification_operation() {
+  local file=$1 operation
+  for operation in verify_quick verify_focused focused; do
+    if operation_has_exec "$file" "$operation"; then
+      printf '%s\n' "$operation"
+      return 0
+    fi
+  done
+
+  while IFS= read -r operation; do
+    if operation_has_exec "$file" "$operation"; then
+      printf '%s\n' "$operation"
+      return 0
+    fi
+  done < <(workspace_operations "$file")
+  return 1
+}
+
+job_id_from_response() {
+  sed -nE 's/.*"job_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | awk 'NF { print; exit }'
+}
+
+lane_verify() {
+  require_job_identity
+  local file operation start_output job_id wait_output
+  file=$(project_file)
+  if ! operation=$(select_verification_operation "$file"); then
+    printf 'lane verify: no declared verify_quick/focused operation found; would run: agentctl job start %s verify_quick --checkout %s\n' \
+      "$SINNIXD_PROJECT_ID" "$SINNIXD_CHECKOUT_ID"
+    return 0
+  fi
+  command -v agentctl >/dev/null 2>&1 || die "agentctl is unavailable for managed verification"
+
+  if ! start_output=$(agentctl job start "$SINNIXD_PROJECT_ID" "$operation" --checkout "$SINNIXD_CHECKOUT_ID"); then
+    printf '%s\n' "$start_output" >&2
+    die "managed verification could not be started"
+  fi
+  job_id=$(printf '%s\n' "$start_output" | job_id_from_response)
+  [[ -n $job_id ]] || die "managed verification returned no job ID"
+  if ! wait_output=$(agentctl job wait "$job_id" --timeout-seconds "${SINNIXD_TIMEOUT_SECONDS:-3600}"); then
+    printf '%s\n' "$wait_output" >&2
+    die "managed verification wait failed"
+  fi
+  printf '%s\n' "$wait_output"
+  if ! printf '%s\n' "$wait_output" | grep -q '"phase"[[:space:]]*:[[:space:]]*"succeeded"'; then
+    die "managed verification did not succeed"
+  fi
+}
+
+git_offenders() {
+  git status --porcelain=v1 --untracked-files=all
+}
+
+current_branch() {
+  git symbolic-ref --quiet --short HEAD || die "cannot push a detached HEAD"
+}
+
+push_current_branch() {
+  local branch remote
+  branch=$(current_branch)
+  if git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' >/dev/null 2>&1; then
+    git push >&2
+    return
+  fi
+  remote=$(git config "branch.$branch.remote" 2>/dev/null || true)
+  [[ -n $remote ]] || remote=origin
+  git push --set-upstream "$remote" "$branch" >&2
+}
+
+check_report() {
+  local report=$1
+  [[ -f $report && -r $report ]] || die "report is not a readable file: $report"
+}
+
+lane_done() {
+  local incomplete=0 report dirty
+  if [[ ${1:-} == --incomplete ]]; then
+    incomplete=1
+    shift
+  fi
+  [[ $# -eq 1 ]] || {
+    usage
+    exit 2
+  }
+  report=$1
+  check_report "$report"
+  dirty=$(git_offenders)
+  if [[ $incomplete -eq 0 && -n $dirty ]]; then
+    printf 'lane: refusing complete handoff because the Git tree is dirty-uncommitted. Offenders:\n%s\n' "$dirty" >&2
+    exit 1
+  fi
+
+  push_current_branch
+  if [[ $incomplete -eq 1 ]]; then
+    printf 'INCOMPLETE HANDOFF\nOnly committed WIP was pushed; uncommitted work remains in this workspace.\n\n'
+  fi
+  # The capture wrapper's last-message contract consumes stdout. Keep this
+  # cat as the final stdout-producing action and emit no push chatter there.
+  cat -- "$report"
+}
+
+main() {
+  case ${1:-} in
+    task)
+      [[ $# -eq 1 ]] || { usage; exit 2; }
+      lane_task
+      ;;
+    verify)
+      [[ $# -eq 1 ]] || { usage; exit 2; }
+      lane_verify
+      ;;
+    done)
+      shift
+      lane_done "$@"
+      ;;
+    -h | --help)
+      usage >&1
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+}
+
+main "$@"
