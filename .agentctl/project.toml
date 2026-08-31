@@ -40,10 +40,23 @@ cache = "tree+environment"
 exclusive_keys = ["sinnix:nix-store-pressure"]
 estimate_memory_bytes = 6442450944
 scratch = "nvme"
+
+
+[operations.check_master]
 # Master-boundary watch: sinnix has no CI, so between landings nothing tests
 # master and one red masks the next (three stacked reds cost hours of lane
-# checks on 2026-08-31). With tree+environment caching an unchanged master
-# is a cache hit, so the standing schedule only pays after a landing.
+# checks on 2026-08-31). Builds from the committed ref so operator WIP in
+# the working tree can neither redden nor mask it; an unchanged master is a
+# nix cache hit.
+description = "Verify committed master's flake checks on a standing schedule"
+exec = ["nix", "flake", "check", "git+file:///realm/project/sinnix?ref=master", "--accept-flake-config"]
+pool = "bulk"
+result = "exit"
+cache = "none"
+exclusive_keys = ["sinnix:nix-store-pressure"]
+estimate_memory_bytes = 6442450944
+scratch = "nvme"
+timeout_seconds = 7200
 schedule = "hourly"
 
 [operations.lint]
