@@ -415,14 +415,17 @@ Beyond ambient audio and the passive light/motion sampler:
 
 **Direct Boot**: a `directBootAware` service buffers into device-protected
 storage and migrates on unlock, so a phone rebooted and left locked captures
-instead of waiting for a human. The implementation exists; locked-boot product
-output remains an explicit acceptance test.
+instead of waiting for a human. This completed the acceptance test on
+2026-08-27: the event log records `locked_boot`, a running
+`DirectBootService`, buffered chunks migrated before `BOOT_COMPLETED`, and a
+new canonical ambient chunk immediately after the unlock handoff. The app's
+watchdog is scheduled by `BootReceiver`; no Magisk boot wrapper is required.
 
 ## Known limits
 
-- **Locked-boot capture still needs product proof.** Process presence is not
-  enough: the acceptance test requires a chunk produced before first unlock,
-  then migrated and uploaded after unlock.
+- **Locked-boot capture is bounded by device-protected storage.** The buffer is
+  capped and oldest-first eviction applies during a long locked window; normal
+  operation migrates it after unlock.
 - **Phone calls stop capture.** Platform decision since Android 10, not a
   configuration gap.
 - **The steering ready queue is approximated.** Until the steering store grows
