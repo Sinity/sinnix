@@ -27,8 +27,13 @@ Commands:
       Set --text-limit 0 to return complete selected turns.
 
   full <page-id> [--markdown]
-      Return every currently rendered turn and its complete text. Use this
-      whenever the task calls for the actual complete conversation.
+      Return the complete provider-native active branch, including stable
+      provider IDs, timestamps, attachments, provenance, and bounded access to
+      the provider mapping. If native retrieval is unavailable, return a
+      clearly marked rendered-DOM degraded record.
+
+  full <page-id> --output FILE [--markdown]
+      Write a full record atomically with mode 600 instead of printing it.
 
   read-open [read options]
       Read the selected windows from every currently open ChatGPT conversation
@@ -107,6 +112,95 @@ read -r -d '' SUMMARY_JS <<'JS' || true
     text_characters: turns.reduce((total, turn) => total + (turn.innerText || '').trim().length, 0),
     extracted_at: new Date().toISOString(),
   };
+})()
+JS
+
+read -r -d '' NATIVE_SUMMARY_JS <<'JS' || true
+(async () => {
+  const conversationId = new URL(location.href).pathname.match(/^\/c\/([^/?#]+)/)?.[1] || null;
+  const result = { native_status: 'unavailable', native_message_count: null, native_mapping_count: null };
+  if (!conversationId) return result;
+  try {
+    const session = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store' });
+    if (!session.ok) { result.native_status = `session_http_${session.status}`; return result; }
+    const sessionPayload = await session.json();
+    const token = sessionPayload?.accessToken || sessionPayload?.access_token || sessionPayload?.session?.accessToken || sessionPayload?.session?.access_token;
+    const accountId = sessionPayload?.account?.id || sessionPayload?.session?.account?.id || sessionPayload?.account_id;
+    if (!token) { result.native_status = 'session_missing_access_token'; return result; }
+    const headers = { Authorization: `Bearer ${token}` };
+    if (accountId) headers['ChatGPT-Account-Id'] = accountId;
+    const response = await fetch(`/backend-api/conversation/${encodeURIComponent(conversationId)}`, { credentials: 'include', cache: 'no-store', headers });
+    if (!response.ok) { result.native_status = `conversation_http_${response.status}`; return result; }
+    const payload = await response.json();
+    if (!payload?.mapping || typeof payload.mapping !== 'object') { result.native_status = 'native_missing_mapping'; return result; }
+    result.native_status = 'native';
+    result.native_mapping_count = Object.keys(payload.mapping).length;
+    result.native_message_count = Object.values(payload.mapping).filter(node => node?.message).length;
+    result.native_current_node = payload.current_node || null;
+  } catch (error) {
+    result.native_status = 'native_error';
+  }
+  return result;
+})()
+JS
+
+read -r -d '' NATIVE_TRANSCRIPT_JS <<'JS' || true
+(async () => {
+  const conversationId = new URL(location.href).pathname.match(/^\/c\/([^/?#]+)/)?.[1] || null;
+  const dom = () => {
+    const turns = [...document.querySelectorAll('[data-message-author-role]')];
+    return {
+      schema: 'sinnix-chatgpt-conversation-v2', fidelity: 'dom_degraded', provenance: { source: 'rendered_dom', complete: false },
+      url: location.href, title: document.title, conversation_id: conversationId,
+      messages: turns.map((turn, index) => ({ index, provider_id: turn.dataset.messageId || null,
+        role: turn.dataset.messageAuthorRole || 'unknown', text: (turn.innerText || '').trim(),
+        timestamp: null, attachments: [], provenance: { source: 'rendered_dom', complete: false } }))
+    };
+  };
+  const degraded = (reason) => { const value = dom(); value.native_error = reason; return value; };
+  const session = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store' }).catch(() => null);
+  if (!session?.ok || !conversationId) return degraded(!conversationId ? 'conversation_id_unavailable' : `session_http_${session?.status || 'error'}`);
+  const sessionPayload = await session.json().catch(() => null);
+  const token = sessionPayload?.accessToken || sessionPayload?.access_token || sessionPayload?.session?.accessToken || sessionPayload?.session?.access_token;
+  const accountId = sessionPayload?.account?.id || sessionPayload?.session?.account?.id || sessionPayload?.account_id;
+  if (!token) return degraded('session_missing_access_token');
+  const headers = { Authorization: `Bearer ${token}` };
+  if (accountId) headers['ChatGPT-Account-Id'] = accountId;
+  const response = await fetch(`/backend-api/conversation/${encodeURIComponent(conversationId)}`, { credentials: 'include', cache: 'no-store', headers }).catch(() => null);
+  if (!response?.ok) return degraded(`conversation_http_${response?.status || 'error'}`);
+  const payload = await response.json().catch(() => null);
+  if (!payload?.mapping || typeof payload.mapping !== 'object') return degraded('native_missing_mapping');
+  if (!payload.current_node || !payload.mapping[payload.current_node]) return degraded('native_current_node_unavailable');
+  const textOf = (content) => {
+    if (!content) return '';
+    if (typeof content === 'string') return content;
+    if (typeof content.text === 'string') return content.text;
+    if (Array.isArray(content.parts)) return content.parts.map(part => typeof part === 'string' ? part : (part?.text || '')).filter(Boolean).join('\n');
+    return '';
+  };
+  const timestamp = value => typeof value === 'number' && Number.isFinite(value) ? new Date(value * 1000).toISOString() : null;
+  const nodeIds = [], seen = new Set();
+  for (let id = payload.current_node; id && !seen.has(id); id = payload.mapping[id]?.parent || null) { seen.add(id); nodeIds.push(id); }
+  nodeIds.reverse();
+  const messages = nodeIds.map((node, index) => {
+    const message = payload.mapping[node]?.message;
+    if (!message) return null;
+    const metadata = message.metadata && typeof message.metadata === 'object' ? message.metadata : {};
+    const attachments = Array.isArray(metadata.attachments) ? metadata.attachments.map(item => ({ ...item })) : [];
+    return { index, provider_id: String(message.id || node), node_id: String(node), parent_provider_id: payload.mapping[node]?.parent ? String(payload.mapping[node].parent) : null,
+      role: message.author?.role || 'unknown', text: textOf(message.content), timestamp: timestamp(message.create_time), attachments,
+      provenance: { source: 'chatgpt_backend_api', fidelity: 'native', complete: true, content_type: message.content?.content_type || 'text' } };
+  }).filter(Boolean);
+  const all_mapping_nodes = Object.entries(payload.mapping).map(([node_id, node]) => {
+    const message = node?.message;
+    const metadata = message?.metadata && typeof message.metadata === 'object' ? message.metadata : {};
+    return { node_id, parent_node_id: node?.parent || null, provider_id: message?.id ? String(message.id) : null, has_message: Boolean(message),
+      message: message ? { role: message.author?.role || 'unknown', text: textOf(message.content), timestamp: timestamp(message.create_time),
+        attachments: Array.isArray(metadata.attachments) ? metadata.attachments.map(item => ({ ...item })) : [] } : null };
+  });
+  return { schema: 'sinnix-chatgpt-conversation-v2', fidelity: 'native', provenance: { source: 'chatgpt_backend_api', complete: true },
+    url: location.href, title: document.title, conversation_id: String(payload.conversation_id || payload.id || conversationId), current_node: payload.current_node || null,
+    message_count: messages.length, mapping_node_count: all_mapping_nodes.length, messages, all_mapping_nodes };
 })()
 JS
 
@@ -212,6 +306,24 @@ summary() {
   jq --arg page_id "$page_id" '. + {page_id: $page_id}' <<<"$base"
 }
 
+native_summary() {
+  local page_id="$1" base
+  base=$(evaluate "$page_id" "$NATIVE_SUMMARY_JS")
+  jq --arg page_id "$page_id" '. + {page_id: $page_id}' <<<"$base"
+}
+
+native_chunk_js() {
+  local start="$1" size="$2"
+  cat <<JS
+(async () => {
+  window.__sinnixNativeTranscriptPromise = window.__sinnixNativeTranscriptPromise || ($NATIVE_TRANSCRIPT_JS);
+  const value = await window.__sinnixNativeTranscriptPromise;
+  const serialized = JSON.stringify(value);
+  return { total: serialized.length, chunk: serialized.slice(${start}, ${start} + ${size}) };
+})()
+JS
+}
+
 read_transcript() {
   local page_id="$1" message_start="$2" message_limit="$3" text_start="$4" text_limit="$5"
   local transcript
@@ -224,17 +336,38 @@ read_full_transcript() {
   read_transcript "$page_id" 0 null 0 0
 }
 
+read_full_native_chunked() {
+  local page_id="$1" target="$2" chunk_size=900000 start=0 part total chunk
+  local assembled
+  assembled=$(mktemp /realm/tmp/work/sinnix-chatgpt-native.XXXXXX.json)
+  : >"$assembled"
+  while :; do
+    part=$(evaluate "$page_id" "$(native_chunk_js "$start" "$chunk_size")")
+    total=$(jq -r '.total' <<<"$part")
+    chunk=$(jq -r '.chunk' <<<"$part")
+    printf '%s' "$chunk" >>"$assembled"
+    start=$((start + ${#chunk}))
+    [[ $start -ge $total ]] && break
+  done
+  jq -c --arg page_id "$page_id" '. + {page_id: $page_id}' "$assembled" >"$assembled.checked"
+  if [[ -n $target ]]; then
+    write_output_atomic "$target" "$(<"$assembled.checked")"
+  else
+    cat "$assembled.checked"
+  fi
+}
+
 render_markdown() {
   jq -r '
     "# " + .title,
     "",
     "- Page ID: `" + .page_id + "`",
     "- URL: " + .url,
-    "- Available messages: " + (.available_message_count | tostring),
+    "- Available messages: " + ((.available_message_count // .message_count) | tostring),
     "",
     (.messages[] |
       "## [" + (.index | tostring) + "] " + .role +
-        (if .message_id then " (`" + .message_id + "`)" else "" end),
+        (if (.message_id // .provider_id) then " (`" + (.message_id // .provider_id) + "`)" else "" end),
       "",
       .text,
       (if .text_truncated then "\n*Text is paged. Continue at character " + ((.text_offset + (.text | length)) | tostring) + ".*" else "" end),
@@ -248,11 +381,16 @@ render_markdown() {
 
 parse_full_options() {
   MARKDOWN=0
+  OUTPUT_FILE=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --markdown)
         MARKDOWN=1
         shift
+        ;;
+      --output)
+        OUTPUT_FILE="${2:?missing value for --output}"
+        shift 2
         ;;
       *)
         printf 'unknown option for full: %s\n' "$1" >&2
@@ -260,6 +398,16 @@ parse_full_options() {
         ;;
     esac
   done
+}
+
+write_output_atomic() {
+  local path="$1" content="$2" directory temp
+  directory=$(dirname -- "$path")
+  [[ -d $directory ]] || { printf 'output directory does not exist: %s\n' "$directory" >&2; exit 2; }
+  temp=$(mktemp "$directory/.sinnix-chatgpt.XXXXXX")
+  chmod 600 "$temp"
+  printf '%s\n' "$content" >"$temp"
+  mv -n -- "$temp" "$path" || { rm -f -- "$temp"; printf 'output file already exists: %s\n' "$path" >&2; exit 2; }
 }
 
 parse_read_options() {
@@ -358,7 +506,7 @@ case "$command_name" in
     [[ $# -eq 0 ]] || { printf 'list accepts no options\n' >&2; exit 2; }
     targets=$(chatgpt_targets)
     while IFS= read -r page_id; do
-      summary "$page_id"
+      jq -s '.[0] + .[1]' <(summary "$page_id") <(native_summary "$page_id")
     done < <(jq -r '.[].page_id' <<<"$targets") | jq -s .
     ;;
   read)
@@ -378,11 +526,14 @@ case "$command_name" in
     [[ -n $page_id ]] || { printf 'full requires a page ID\n' >&2; exit 2; }
     shift
     parse_full_options "$@"
-    result=$(read_full_transcript "$page_id")
     if [[ $MARKDOWN -eq 1 ]]; then
-      render_markdown <<<"$result"
+      markdown_input=$(mktemp /realm/tmp/work/sinnix-chatgpt-native-markdown.XXXXXX.json)
+      read_full_native_chunked "$page_id" "$markdown_input"
+      render_markdown <"$markdown_input"
+    elif [[ -n $OUTPUT_FILE ]]; then
+      read_full_native_chunked "$page_id" "$OUTPUT_FILE"
     else
-      printf '%s\n' "$result"
+      read_full_native_chunked "$page_id" ""
     fi
     ;;
   locate)
