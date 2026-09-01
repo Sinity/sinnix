@@ -65,7 +65,7 @@ CAPACITY_RETRY_DELAYS_SECONDS = (5, 30, 120)
 MAX_ADMISSION_CACHE_ENTRIES = 128
 MIB = 1024 * 1024
 GIB = 1024 * MIB
-MIN_HOST_MEMORY_RESERVE_BYTES = 256 * MIB
+MIN_HOST_MEMORY_RESERVE_BYTES = 2 * GIB
 # The budget is already computed against available memory, so what everything
 # outside the job plane uses is subtracted before the reserve applies. The
 # reserve is pure headroom on top of that; sized so a lane's peak reservation
@@ -76,6 +76,8 @@ MAX_HOST_MEMORY_RESERVE_BYTES = 6 * GIB
 # starves admission (2026-08-31: the queue sat at zero running jobs while
 # gigabytes idled inside the reserve).
 HOST_MEMORY_RESERVE_FRACTION = 0.08
+# A launched job needs this long before its footprint is in MemAvailable.
+ADMISSION_SETTLE_SECONDS = 90.0
 MIN_SWAP_FREE_FRACTION = 0.15
 # Below this much available RAM, a nearly-full swap is treated as exhaustion
 # even before stall pressure shows.
@@ -2902,7 +2904,7 @@ class GenericJobs:
             ]
             pressure = self.pressure_probe()
             host_budget = self._host_memory_budget(pressure)
-            host_occupied = sum(self._estimate(record.spec, state) for record in active)
+            host_occupied = sum(self._settling_charge(record, state) for record in active)
             holders = [
                 {
                     **dict(state["claims"].get(record.job_id, {})),
@@ -3728,11 +3730,18 @@ class GenericJobs:
 
     @staticmethod
     def _host_memory_budget(pressure: Mapping[str, float]) -> int | None:
+        """Real headroom: what the kernel reports free, minus the reserve.
+
+        Admission decides the next marginal job from this number, not from a
+        sum of declared guesses: every running job's actual footprint is
+        already subtracted from what the kernel reports available, and each
+        unit's own cgroup ceiling bounds what it can still grow into. Only
+        jobs too young to have a footprint yet are charged their estimate.
+        """
         total = int(pressure.get("memory_total_bytes", 0.0))
         available = int(pressure.get("memory_available_bytes", 0.0))
         if total <= 0 or available < 0:
             return None
-        managed = max(0, int(pressure.get("managed_memory_bytes", 0.0)))
         reserve = min(
             MAX_HOST_MEMORY_RESERVE_BYTES,
             max(
@@ -3740,7 +3749,18 @@ class GenericJobs:
                 int(total * HOST_MEMORY_RESERVE_FRACTION),
             ),
         )
-        return max(0, min(total - reserve, available + managed - reserve))
+        return max(0, available - reserve)
+
+    def _settling_charge(self, record: "GenericJobRecord", state: Mapping[str, Any]) -> int:
+        """A job's estimate while it is too young to show in host memory, else 0."""
+        try:
+            started = datetime.fromisoformat(record.created_at)
+        except (TypeError, ValueError):
+            return self._estimate(record.spec, state)
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=UTC)
+        age = (datetime.now(UTC) - started).total_seconds()
+        return self._estimate(record.spec, state) if age < ADMISSION_SETTLE_SECONDS else 0
 
     def _host_pressure_blocks(self, pressure: Mapping[str, float]) -> bool:
         swap_total = float(pressure.get("swap_total_bytes", 0.0))
@@ -3815,7 +3835,10 @@ class GenericJobs:
     ) -> str | None:
         candidates: list[tuple[int, int, str, GenericJobRecord]] = []
         admission = self._admission_state()
-        pool_priority = {"normal": 1, "agent": 2, "bulk": 3}
+        # Agent lanes shed first: they are many, cheap to resume, and hold
+        # nothing shared. The bulk pool's corpus run is hours of work and the
+        # graph every lane needs; it goes last.
+        pool_priority = {"bulk": 1, "normal": 2, "agent": 3}
         for record in self.store.active_records():
             if (
                 record.spec.kind not in {"declared-operation", "attested-agent"}
@@ -4021,7 +4044,7 @@ class GenericJobs:
                         for item in active[record.spec.pool]
                     )
                     host_occupied = sum(
-                        self._estimate(item.spec, state)
+                        self._settling_charge(item, state)
                         for pool_records in active.values()
                         for item in pool_records
                     )
