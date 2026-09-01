@@ -47,17 +47,17 @@ prompt. Write only what the worker must do; coordinator material belongs in
    `LANE-CLASSIFICATION: <one line per finding>`.
 
 10. **Write the publication text.** You made the decisions, so you write them
-   up: a conventional squash subject of at most 72 characters, a body giving
-   Summary, Problem with its evidence, Solution, Verification with the exact
-   commands and the line that matters, and honest residual risk. Add a
-   close reason only when a bead genuinely closes. Write them to
-   `.lane/title`, `.lane/body.md` and `.lane/close-reason.md` in your
-   worktree. They are worktree scratch that harvest reads: leave them
-   uncommitted, and never force-add a path the repository ignores. You do
-   not publish; whoever integrates your lane judges the change and decides. Prose that oversells what you did will be caught
-   against the diff.
+    up: a conventional squash subject of at most 72 characters, a body giving
+    Summary, Problem with its evidence, Solution, Verification with the exact
+    commands and the line that matters, and honest residual risk. Add a
+    close reason only when a bead genuinely closes. Write them to
+    `.lane/title`, `.lane/body.md` and `.lane/close-reason.md` in your
+    worktree. They are worktree scratch that harvest reads: leave them
+    uncommitted, and never force-add a path the repository ignores. You do
+    not publish; whoever integrates your lane judges the change and decides. Prose that oversells what you did will be caught
+    against the diff.
 
-10. **Do not damage live operator state** — scoped to the harm, not the surface.
+11. **Do not damage live operator state** — scoped to the harm, not the surface.
 
 Forbidden: deleting or overwriting installed tools, dotfiles, or anything
 under `$HOME` outside your workspace; `switch`/`boot` or any system or
