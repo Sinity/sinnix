@@ -115,3 +115,39 @@ def test_a_wave_drained_by_provisioning_names_provisioning() -> None:
         )
 
     assert "uv sync failed" in str(raised.value)
+
+
+def test_leftover_worktree_blocks_only_while_an_agent_holds_it() -> None:
+    """An unheld leftover worktree is resumed, not a lock on its bead.
+
+    Anti-vacuity: treating every registered workspace as active parked 26 of
+    the polylogue frontier's beads (2026-09-01), every P0 among them, behind
+    worktrees their killed lanes left behind.
+    """
+    from types import SimpleNamespace
+
+    from sinnixd.campaign import held_workspace_names
+
+    existing = {
+        "packet-a": SimpleNamespace(workspace_id="worktree-a"),
+        "packet-b": SimpleNamespace(workspace_id="worktree-b"),
+    }
+    assert held_workspace_names(existing, {"worktree-a"}) == {"packet-a"}
+    assert held_workspace_names(existing, set()) == set()
+
+
+def test_frontier_orders_by_priority_before_id() -> None:
+    from sinnixd.campaign import frontier_order
+
+    rows = [
+        {"id": "p-aaa", "priority": 2},
+        {"id": "p-zzz", "priority": 0},
+        {"id": "p-mmm"},
+    ]
+    assert [row["id"] for row in sorted(rows, key=frontier_order)] == [
+        "p-zzz",
+        "p-aaa",
+        "p-mmm",
+    ]
+    # Anti-vacuity: ordering by id alone spends a wave limit on the lowest
+    # ids and never reaches the P0 work.

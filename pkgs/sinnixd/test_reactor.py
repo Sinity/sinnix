@@ -614,6 +614,50 @@ def test_review_fix_defers_to_the_agent_holding_the_worktree(
     assert calls == [("polylogue", "packet-p-9", "41")]
 
 
+def test_integration_is_keyed_by_workspace_and_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A lane that pushed new work after its integration is judged again.
+
+    Anti-vacuity: keying on the workspace alone leaves a re-harvested lane
+    parked behind its first integrator forever.
+    """
+    calls: list[tuple[str, str, str]] = []
+    heads = {"harvest-" + "1" * 32: "a" * 40, "harvest-" + "2" * 32: "b" * 40}
+    monkeypatch.setattr(
+        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
+    )
+    monkeypatch.setattr(
+        CampaignReactor,
+        "_receipt_field",
+        staticmethod(lambda receipt, key: heads.get(receipt.rsplit("/", 1)[-1])),
+    )
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        project_roots={"polylogue": tmp_path / "repo"},
+        integration_dispatcher=lambda p, w, r: calls.append((p, w, r)),
+    )
+
+    def event(receipt: str) -> dict[str, object]:
+        return {
+            "kind": "harvest",
+            "transition": "review-required",
+            "project": "polylogue",
+            "workspace_id": "worktree-abc",
+            "receipt_ref": "sinnix://harvest/" + receipt,
+            "job_id": "job-" + receipt[-4:],
+            "packet": {"redflag_status": 1, "lane_trailer": {"LANE-QUICK": "green"}},
+        }
+
+    reactor._dispatch_integration(event("harvest-" + "1" * 32))
+    reactor._dispatch_integration(event("harvest-" + "1" * 32))
+    reactor._dispatch_integration(event("harvest-" + "2" * 32))
+
+    assert len(calls) == 2
+
+
 def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
     """Judgment is spent on exceptions, not on every lane that passed its scan.
 

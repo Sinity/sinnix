@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Protocol
 
+from .campaign import frontier_order
 from .packets import PacketConfig, SubprocessBdReader, compile_launch_snapshot
 
 BOARD_SCHEMA_VERSION = 1
@@ -1349,7 +1350,11 @@ class CampaignReactor:
                 -1, f"integrate: no registered workspace for {workspace_id}"
             )
             return
-        key = f"integrate:{workspace}"
+        # One integration per (workspace, head): a re-review of the same
+        # commit is a no-op, and a lane that pushed new work after its first
+        # integration gets judged again rather than parked behind it.
+        head = self._receipt_field(str(receipt), "head")
+        key = f"integrate:{workspace}" + (f":{head[:12]}" if head else "")
         if key in self._board.keeper:
             return
         root = self.project_roots.get(str(project))
@@ -1573,9 +1578,13 @@ class CampaignReactor:
                 return True
         return False
 
-    @staticmethod
-    def _receipt_workspace(receipt: str) -> str | None:
+    @classmethod
+    def _receipt_workspace(cls, receipt: str) -> str | None:
         """The workspace a harvest receipt was published from."""
+        return cls._receipt_field(receipt, "workspace_id")
+
+    @staticmethod
+    def _receipt_field(receipt: str, key: str) -> str | None:
         packet_root = Path.home() / ".local/state/sinnixd/harvest-packets"
         name = receipt.rsplit("/", 1)[-1]
         if not re.fullmatch(r"harvest-[0-9a-f]{32}", name):
@@ -1584,8 +1593,8 @@ class CampaignReactor:
             payload = json.loads((packet_root / f"{name}.json").read_text())
         except (OSError, json.JSONDecodeError):
             return None
-        workspace_id = payload.get("workspace_id") if isinstance(payload, dict) else None
-        return workspace_id if isinstance(workspace_id, str) and workspace_id else None
+        value = payload.get(key) if isinstance(payload, dict) else None
+        return value if isinstance(value, str) and value else None
 
     @staticmethod
     def _review_fix_prompt(
@@ -1794,8 +1803,15 @@ class CampaignReactor:
         try:
             reader = SubprocessBdReader(root)
             config = PacketConfig.load(root)
+            # Parked under a judgment reason that no longer exists; the
+            # entries would otherwise sit on the board forever.
+            self._board.judgment_queue[:] = [
+                item
+                for item in self._board.judgment_queue
+                if item.get("reason") != "conflict metadata is incomplete"
+            ]
             candidates: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
-            for row in sorted(reader.ready(), key=lambda item: str(item.get("id", ""))):
+            for row in sorted(reader.ready(), key=frontier_order):
                 bead_id = row.get("id")
                 if not isinstance(bead_id, str) or not bead_id:
                     continue
