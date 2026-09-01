@@ -41,7 +41,8 @@ _DURABLE_KEEPER_PREFIXES = (
     "dispose:",
 )
 MAX_EVENT_BYTES = 1_000_000
-DEFAULT_REFILL_SPACING_SECONDS = 10
+DEFAULT_REFILL_SPACING_SECONDS = 300
+MAX_REFILL_BACKOFF_SECONDS = 3600
 DEFAULT_PR_AGE_THRESHOLD_SECONDS = 60 * 60
 DEFAULT_VERIFY_ALL_FAILURE_THRESHOLD = 3
 MAX_CORPUS_FAILURES = 32
@@ -840,8 +841,6 @@ def _active_lane_count(path: Path | None, project: str | None = None) -> int | N
 def _judgment_reason(bead: Mapping[str, Any], snapshot: Any) -> str | None:
     metadata = bead.get("metadata", {})
     metadata = metadata if isinstance(metadata, Mapping) else {}
-    if not snapshot.dimensions.conflict_keys:
-        return "conflict metadata is incomplete"
     if snapshot.dimensions.conflict_keys and any(
         key.startswith("schema:") for key in snapshot.dimensions.conflict_keys
     ):
@@ -1600,8 +1599,16 @@ class CampaignReactor:
                 bead_id = row.get("id")
                 if not isinstance(bead_id, str) or not bead_id:
                     continue
-                if row.get("issue_type") in {"epic", "milestone"}:
-                    # Containers coordinate work; a lane needs a leaf.
+                if row.get("issue_type") in {"epic", "milestone", "decision"}:
+                    # Containers coordinate work and decisions belong to the
+                    # operator; a lane needs an executable leaf.
+                    continue
+                labels = row.get("labels")
+                if isinstance(labels, list) and {
+                    "needs:operator",
+                    "needs:switch",
+                    "horizon:vision",
+                }.intersection(str(item) for item in labels):
                     continue
                 snapshot = compile_launch_snapshot(
                     bead_id,
@@ -1655,11 +1662,16 @@ class CampaignReactor:
                     command, check=True, capture_output=True, text=True, timeout=60
                 )
             emitted_at = datetime.now(UTC)
+            previous = int(prior["backoff_seconds"]) if prior is not None else 0
+            backoff = min(
+                max(previous * 2, self.refill_spacing_seconds),
+                MAX_REFILL_BACKOFF_SECONDS,
+            )
             self._board.keeper[refill_key] = {
                 "emitted_at": emitted_at.isoformat(),
-                "backoff_seconds": self.refill_spacing_seconds,
+                "backoff_seconds": backoff,
                 "next_eligible_at": (
-                    emitted_at + timedelta(seconds=self.refill_spacing_seconds)
+                    emitted_at + timedelta(seconds=backoff)
                 ).isoformat(),
             }
             self._board.keeper.pop("lanes-low", None)
@@ -1809,6 +1821,10 @@ class CampaignReactor:
                         if isinstance(job_id, str)
                         else None
                     )
+                    if lane is not None and lane.phase == "succeeded":
+                        # A real completion proves dispatch works again;
+                        # collapse any accumulated refill backoff.
+                        self._board.keeper.pop(f"refill:{lane.project}", None)
                     if lane is not None and lane.review_ready:
                         self._dispatch_review(lane)
                     if lane is not None and lane.phase in {"cancelled", "timeout"}:
