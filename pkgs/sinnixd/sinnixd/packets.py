@@ -502,6 +502,11 @@ def resolve_group(bead_id: str, reader: BdReader) -> tuple[str, tuple[str, ...]]
         for row in rows
         if isinstance(row.get("id"), str)
         and _metadata(row).get("dispatch_group") == leader_id
+        # A dispatch group is co-executed OPEN work. Closed members are done
+        # (or deliberately voided); shipping them into the packet resurrects
+        # retired specs as instructions (282KB packet from closed void
+        # beads, 2026-09-01).
+        and row.get("status") in {"open", "in_progress"}
     }
     member_ids.add(leader_id)
     member_ids.add(bead_id)
