@@ -3,8 +3,7 @@
 # description: Speaker verification (enroll/score) via SpeechBrain ECAPA-TDNN embeddings, built on mke's diarization substrate
 # pythonPackages: speechbrain torchaudio numpy
 
-"""sinnix-speaker-verify: enrollment + cosine-similarity scoring against an
-enrolled voice centroid (sinnix-7oly).
+"""sinnix-speaker-verify: enrollment, scoring, and held-out calibration.
 
 DESIGN NOTE, load-bearing: per the bead's own explicit framing, this is
 FRICTION AND ATTRIBUTION, never an authorization boundary -- replay and
@@ -16,6 +15,8 @@ alone. See sinnix-7oly for the full tiering design.
 Usage:
   sinnix-speaker-verify enroll <audio.wav> [--name operator]
   sinnix-speaker-verify score <audio.wav> [--name operator]
+  sinnix-speaker-verify calibrate --enrollment DIR --genuine DIR
+      --impostor DIR --cohort DIR --output calibration.json
   sinnix-speaker-verify list
 
 Enrollment centroid stored at /realm/state/speaker-verify/<name>.json
@@ -30,6 +31,8 @@ import sys
 from pathlib import Path
 
 STORE_DIR = Path("/realm/state/speaker-verify")
+AUDIO_SUFFIXES = {".wav", ".flac", ".ogg", ".mp3", ".m4a"}
+CALIBRATION_VERSION = 1
 
 
 def _load_model():
@@ -53,6 +56,86 @@ def _embed(model, audio_path: str):
         signal = torchaudio.functional.resample(signal, fs, 16000)
     emb = model.encode_batch(signal)
     return emb.squeeze().detach().cpu().numpy()
+
+
+def _unit(vector):
+    import numpy as np
+
+    vector = np.asarray(vector, dtype=float)
+    norm = np.linalg.norm(vector)
+    if not np.isfinite(norm) or norm == 0:
+        raise ValueError("embedding has no finite non-zero norm")
+    return vector / norm
+
+
+def _audio_files(directory: str):
+    path = Path(directory)
+    if not path.is_dir():
+        raise ValueError(f"not an audio directory: {path}")
+    files = sorted(
+        p for p in path.rglob("*") if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES
+    )
+    if not files:
+        raise ValueError(f"audio directory is empty: {path}")
+    return files
+
+
+def _assert_disjoint(groups):
+    seen = {}
+    for label, paths in groups.items():
+        for path in paths:
+            resolved = path.resolve()
+            previous = seen.get(resolved)
+            if previous:
+                raise ValueError(f"audio file is reused by {previous} and {label}: {resolved}")
+            seen[resolved] = label
+
+
+def _as_norm(target, probe, cohort):
+    import numpy as np
+
+    target = _unit(target)
+    probe = _unit(probe)
+    cohort = [_unit(item) for item in cohort]
+    raw = float(np.dot(target, probe))
+    target_scores = np.array([np.dot(target, item) for item in cohort])
+    probe_scores = np.array([np.dot(probe, item) for item in cohort])
+
+    def zscore(value, scores):
+        deviation = float(np.std(scores))
+        # A constant cohort is not evidence for normalization. Preserve the
+        # raw score and make the resulting report fail its support gate.
+        return None if deviation == 0 else (value - float(np.mean(scores))) / deviation
+
+    target_z = zscore(raw, target_scores)
+    probe_z = zscore(raw, probe_scores)
+    normalized = None if target_z is None or probe_z is None else (target_z + probe_z) / 2
+    return raw, normalized
+
+
+def _eer(genuine, impostor):
+    import numpy as np
+
+    scores = sorted(set(genuine + impostor), reverse=True)
+    candidates = [float("inf"), *scores, float("-inf")]
+    best = None
+    for threshold in candidates:
+        far = sum(score >= threshold for score in impostor) / len(impostor)
+        frr = sum(score < threshold for score in genuine) / len(genuine)
+        candidate = (abs(far - frr), (far + frr) / 2, threshold, far, frr)
+        if best is None or candidate < best:
+            best = candidate
+    _, eer, threshold, far, frr = best
+    return {"eer": eer, "threshold": threshold, "far": far, "frr": frr}
+
+
+def _brier(genuine, impostor, threshold):
+    # Brier score is a bounded calibration error for the hard decisions at the
+    # selected operating threshold. Logistic calibration would overfit the
+    # small held-out sets this command is intended to expose.
+    errors = [(int(score >= threshold) - 1) ** 2 for score in genuine]
+    errors += [(int(score >= threshold) - 0) ** 2 for score in impostor]
+    return sum(errors) / len(errors)
 
 
 def cmd_enroll(args: argparse.Namespace) -> int:
@@ -88,23 +171,82 @@ def cmd_score(args: argparse.Namespace) -> int:
         print(f"error: no enrollment for '{args.name}' -- run enroll first", file=sys.stderr)
         return 1
     enrolled = json.loads(enrolled_path.read_text())
-    centroid = np.array(enrolled["centroid"])
+    centroid = _unit(enrolled["centroid"])
 
     model = _load_model()
     emb = _embed(model, args.audio)
-    emb = emb / np.linalg.norm(emb)
+    emb = _unit(emb)
 
     similarity = float(np.dot(centroid, emb))
-    print(
-        json.dumps(
-            {
+    result = {
                 "name": args.name,
                 "audio": args.audio,
                 "cosine_similarity": round(similarity, 4),
                 "note": "friction/attribution signal only -- never an authorization boundary, see sinnix-7oly",
             }
+    if args.calibration:
+        calibration = json.loads(Path(args.calibration).read_text())
+        if calibration.get("supports_attribution"):
+            result["attribution_score"] = round(
+                _as_norm(centroid, emb, [np.array(item) for item in calibration["cohort_embeddings"]])[1], 4
+            )
+    print(json.dumps(result))
+    return 0
+
+
+def cmd_calibrate(args: argparse.Namespace) -> int:
+    import numpy as np
+
+    groups = {
+        label: _audio_files(directory)
+        for label, directory in {
+            "enrollment": args.enrollment,
+            "genuine": args.genuine,
+            "impostor": args.impostor,
+            "cohort": args.cohort,
+        }.items()
+    }
+    _assert_disjoint(groups)
+    if (
+        len(groups["enrollment"]) < 2
+        or len(groups["genuine"]) < 2
+        or len(groups["impostor"]) < 2
+        or len(groups["cohort"]) < 3
+    ):
+        raise ValueError(
+            "calibration requires at least 2 enrollment/genuine/impostor and 3 cohort clips"
         )
-    )
+
+    model = _load_model()
+    enrollment = [_unit(_embed(model, str(path))) for path in groups["enrollment"]]
+    centroid = _unit(np.mean(enrollment, axis=0))
+    cohort_embeddings = [_unit(_embed(model, str(path))) for path in groups["cohort"]]
+
+    def scores(paths):
+        return [_as_norm(centroid, _embed(model, str(path)), cohort_embeddings)[1] for path in paths]
+
+    genuine = scores(groups["genuine"])
+    impostor = scores(groups["impostor"])
+    if any(value is None for value in genuine + impostor):
+        raise ValueError("cohort standard deviation is zero; AS-norm is unavailable")
+    eer = _eer(genuine, impostor)
+    result = {
+        "version": CALIBRATION_VERSION,
+        "method": "symmetric AS-norm over held-out cohort",
+        "counts": {label: len(paths) for label, paths in groups.items()},
+        "genuine": {"min": min(genuine), "mean": float(np.mean(genuine)), "max": max(genuine)},
+        "impostor": {"min": min(impostor), "mean": float(np.mean(impostor)), "max": max(impostor)},
+        "equal_error_rate": eer["eer"],
+        "threshold": eer["threshold"],
+        "false_accept_rate": eer["far"],
+        "false_reject_rate": eer["frr"],
+        "calibration_error_brier": _brier(genuine, impostor, eer["threshold"]),
+        "supports_attribution": eer["eer"] <= args.max_eer,
+        "cohort_embeddings": [item.tolist() for item in cohort_embeddings],
+        "note": "attribution/friction only; never authorization",
+    }
+    Path(args.output).write_text(json.dumps(result, indent=2) + "\n")
+    print(json.dumps({key: value for key, value in result.items() if key != "cohort_embeddings"}))
     return 0
 
 
@@ -130,13 +272,27 @@ def main() -> int:
     score = sub.add_parser("score", help="score an audio file against an enrolled voice")
     score.add_argument("audio")
     score.add_argument("--name", default="operator")
+    score.add_argument("--calibration", help="apply a calibration report when it supports attribution")
     score.set_defaults(func=cmd_score)
+
+    calibrate = sub.add_parser("calibrate", help="evaluate AS-norm on disjoint held-out trials")
+    calibrate.add_argument("--enrollment", required=True, help="directory of enrollment clips")
+    calibrate.add_argument("--genuine", required=True, help="held-out same-speaker clips")
+    calibrate.add_argument("--impostor", required=True, help="held-out different-speaker clips")
+    calibrate.add_argument("--cohort", required=True, help="unrelated clips used only for AS-norm")
+    calibrate.add_argument("--output", required=True, help="calibration report JSON path")
+    calibrate.add_argument("--max-eer", type=float, default=0.05)
+    calibrate.set_defaults(func=cmd_calibrate)
 
     listp = sub.add_parser("list", help="list enrollments")
     listp.set_defaults(func=cmd_list)
 
     args = parser.parse_args()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
