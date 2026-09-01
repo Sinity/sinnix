@@ -177,6 +177,9 @@ class SinnixdService:
                 ),
             )
         self.jobs.register_schedules(self.projects.scheduled_operations())
+        self.jobs.schedule_reconcile = lambda: self.jobs.register_schedules(
+            self.projects.scheduled_operations()
+        )
         _ = self.owners
 
     @property

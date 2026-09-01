@@ -4273,9 +4273,31 @@ class GenericJobs:
                 print("lease reap failed for", record.job_id, file=sys.stderr)
                 traceback.print_exc()
 
+    SCHEDULE_RECONCILE_INTERVAL_SECONDS = 300.0
+    schedule_reconcile: Callable[[], None] | None = None
+
     def run_admission_scheduler(self, stop_event: Event) -> None:
         """Protect the host and retry queued admission independently of clients."""
+        last_schedule_reconcile = 0.0
         while not stop_event.is_set():
+            # Timer registration is a convergence loop, not a startup act: a
+            # back-to-back restart raced registration to an empty durable map
+            # and every scheduled operation (the nightly corpus included)
+            # silently disarmed until the next restart (2026-09-01 21:49).
+            if (
+                self.schedule_reconcile is not None
+                and time.monotonic() - last_schedule_reconcile
+                >= self.SCHEDULE_RECONCILE_INTERVAL_SECONDS
+            ):
+                last_schedule_reconcile = time.monotonic()
+                try:
+                    self.schedule_reconcile()
+                except Exception:
+                    print(
+                        "admission scheduler: schedule reconcile failed",
+                        file=sys.stderr,
+                    )
+                    traceback.print_exc()
             # One failed sweep must not end the daemon. An exception escaping
             # here kills the only thread that owns the active set, orphaning
             # every running unit and wedging all later admission.
