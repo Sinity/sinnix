@@ -493,6 +493,12 @@ class UserSystemdJobs:
                 f"--property=ReadOnlyPaths={path}"
                 for path in self.lane_read_only_paths()
             ),
+            # The event spool is the one /realm/state path jobs may append:
+            # harvest and sibling operations emit their typed transitions
+            # there, and the blanket ReadOnlyPaths silently swallowed every
+            # such event from 2026-08-27 (declared-harvest cutover) to
+            # 2026-09-01 — the reactor never saw a review-required receipt.
+            "--property=ReadWritePaths=/realm/state/agentctl",
             "--property=StandardOutput=journal",
             "--property=StandardError=journal",
             "--",
