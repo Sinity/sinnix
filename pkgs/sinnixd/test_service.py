@@ -11985,3 +11985,15 @@ def test_agent_launch_prepends_the_generated_environment_preamble(
     )
     assert cli_module.main() == 0
     assert captured["prompt"] == "# Dispatch packet (v2)\n\ncompiled contents"
+
+
+def test_sub_hourly_timers_are_not_persistent() -> None:
+    """Anti-vacuity: a persistent transient timer fires on registration, so
+    every deploy ran the ten-minute sweep an extra time (2026-09-01)."""
+    from sinnixd.jobs import timer_persistent
+
+    assert timer_persistent("*:0/10") is False
+    assert timer_persistent("*-*-* *:15:00") is False
+    assert timer_persistent("*-*-* 03:17:00") is True
+    assert timer_persistent("hourly") is True
+    assert timer_persistent("weekly") is True
