@@ -129,6 +129,35 @@ in
               message = "Clodex must run as an advertised local user service for Claude Code child-process routing.";
             }
             {
+              assertion = lib.hasInfix "models --json" (toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre);
+              message = "Clodex startup must inspect aliases through its structured JSON interface.";
+            }
+            {
+              assertion = lib.hasInfix "patch is stale" (toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre);
+              message = "Clodex startup must fail readiness with an actionable stale-patch status.";
+            }
+            {
+              assertion =
+                let
+                  preStart = toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre;
+                in
+                lib.hasInfix "models --unalias" preStart
+                && lib.hasInfix "luna=clodex:openai-oauth:gpt-5.6-luna" preStart
+                && lib.hasInfix "sol=clodex:openai-oauth:gpt-5.6-sol" preStart
+                && lib.hasInfix "terra=clodex:openai-oauth:gpt-5.6-terra" preStart;
+              message = "Clodex startup must converge the complete declared alias set.";
+            }
+            {
+              assertion =
+                let
+                  preStart = toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre;
+                in
+                lib.hasInfix ".claudeVersion" preStart
+                && lib.hasInfix ".patchedSize" preStart
+                && lib.hasInfix "run clodex patch" preStart;
+              message = "Clodex startup must validate the structured patch manifest without rewriting the CLI.";
+            }
+            {
               assertion = lib.any (
                 entry: (if builtins.isAttrs entry then entry.directory else entry) == ".clodex"
               ) config.sinnix.persistence.home.directories;
