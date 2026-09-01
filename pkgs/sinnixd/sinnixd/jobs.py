@@ -4454,7 +4454,10 @@ class GenericJobs:
         # legacy producers may omit it and are still accepted by the reactor
         # during the one-way v0 migration.
         line = json.dumps(
-            {"schema_version": 1, **dict(event)},
+            # Every event dates itself: campaign/harvest kinds shipped
+            # without any timestamp for a week and their history had to be
+            # reconstructed by interpolation.
+            {"schema_version": 1, "emitted_at": _timestamp(), **dict(event)},
             sort_keys=True,
             separators=(",", ":"),
         )
