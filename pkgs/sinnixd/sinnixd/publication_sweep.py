@@ -141,28 +141,7 @@ def derive_pull_states(repo: str, run: Run) -> list[PullState]:
             )
             for check in rollup
         )
-        reactions = _gh_json(
-            run,
-            [
-                "gh",
-                "api",
-                f"repos/{repo}/issues/{number}/reactions",
-                "--jq",
-                f'[.[] | select(.user.login == "{REVIEWER_LOGIN}[bot]"'
-                f' or .user.login == "{REVIEWER_LOGIN}") | .content]',
-            ],
-        )
-        review_clean = isinstance(reactions, list) and "+1" in reactions
-        comments = _gh_json(
-            run,
-            [
-                "gh",
-                "api",
-                f"repos/{repo}/pulls/{number}/comments",
-                "--jq",
-                f'[.[] | select(.user.login == "{REVIEWER_LOGIN}[bot]")] | length',
-            ],
-        )
+        review_clean, review_findings = derive_review(repo, number, run)
         states.append(
             PullState(
                 number=number,
@@ -171,12 +150,60 @@ def derive_pull_states(repo: str, run: Run) -> list[PullState]:
                 mergeable=str(row.get("mergeable") or "UNKNOWN"),
                 ci_red=ci_red,
                 review_clean=review_clean,
-                review_findings=comments if isinstance(comments, int) else 0,
+                review_findings=review_findings,
                 bead_id=bead,
                 receipt_ref=receipt,
             )
         )
     return states
+
+
+def latest_review(
+    clean_stamps: Sequence[str], finding_stamps: Sequence[str]
+) -> tuple[bool, int]:
+    """Judge by the reviewer's most recent verdict, not its whole history.
+
+    Each re-review either reacts +1 (clean) or posts inline findings. Findings
+    older than the latest +1 were answered by the fix that earned it, so they
+    are not open; findings newer than it are. Returns (clean, open findings).
+    """
+    latest_clean = max(clean_stamps, default="")
+    open_findings = [stamp for stamp in finding_stamps if stamp > latest_clean]
+    return bool(latest_clean) and not open_findings, len(open_findings)
+
+
+def derive_review(repo: str, number: int, run: Run) -> tuple[bool, int]:
+    reactions = _gh_json(
+        run,
+        [
+            "gh",
+            "api",
+            f"repos/{repo}/issues/{number}/reactions",
+            "--jq",
+            f'[.[] | select((.user.login == "{REVIEWER_LOGIN}[bot]"'
+            f' or .user.login == "{REVIEWER_LOGIN}") and .content == "+1")'
+            " | .created_at]",
+        ],
+    )
+    findings = _gh_json(
+        run,
+        [
+            "gh",
+            "api",
+            f"repos/{repo}/pulls/{number}/comments",
+            "--jq",
+            f'[.[] | select(.user.login == "{REVIEWER_LOGIN}[bot]"'
+            " and .in_reply_to_id == null) | .created_at]",
+        ],
+    )
+    return latest_review(
+        [stamp for stamp in reactions if isinstance(stamp, str)]
+        if isinstance(reactions, list)
+        else [],
+        [stamp for stamp in findings if isinstance(stamp, str)]
+        if isinstance(findings, list)
+        else [],
+    )
 
 
 def _append_event(spool: Path, event: Mapping[str, Any]) -> None:
@@ -290,7 +317,9 @@ def sweep(
                 {
                     "kind": "publication-sweep",
                     "project": project,
+                    "repo": repo,
                     "pr": pull.number,
+                    "head": pull.head,
                     "outcome": verdict,
                     "findings": pull.review_findings,
                     "bead": pull.bead_id,

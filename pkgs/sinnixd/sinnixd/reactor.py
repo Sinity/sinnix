@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import os
 import subprocess
 import sys
@@ -883,6 +884,7 @@ class CampaignReactor:
     retry_dispatcher: Callable[[str], None] | None = None
     dispose_dispatcher: Callable[[str], None] | None = None
     integration_dispatcher: IntegrationDispatcher | None = None
+    review_fix_dispatcher: IntegrationDispatcher | None = None
     integrator_backend: str = "codex"
     # Workers default to luna, so the integrator is a sibling rather than the
     # same model judging its own family's output.
@@ -1458,6 +1460,122 @@ class CampaignReactor:
             f"## Operating rules\n\n{body}\n"
         )
 
+    def _dispatch_review_fix(self, event: Mapping[str, Any]) -> None:
+        """Answer hosted-review findings on a published PR with a fix lane.
+
+        The sweep holds a PR while its latest review carries findings. One
+        lane per (PR, head) reads the findings, fixes or refutes each with a
+        threaded reply, pushes, and requests re-review; the next sweep pass
+        judges the result. Keying on the head makes a repeated findings event
+        for the same commit a no-op and a new head a new lane.
+        """
+        project = event.get("project")
+        repo = event.get("repo")
+        pr = event.get("pr")
+        head = event.get("head")
+        receipt = event.get("receipt")
+        if not (
+            isinstance(project, str)
+            and isinstance(repo, str)
+            and isinstance(head, str)
+            and head
+            and isinstance(receipt, str)
+            and pr is not None
+        ):
+            return
+        key = f"review-fix:{repo}#{pr}:{head[:12]}"
+        if key in self._board.keeper:
+            return
+        workspace_id = self._receipt_workspace(receipt)
+        workspace = (
+            self._workspace_name(workspace_id) if workspace_id is not None else None
+        )
+        if workspace_id is None or workspace is None:
+            self._board.record_error(
+                -1, f"review-fix {repo}#{pr}: no workspace for receipt {receipt}"
+            )
+            return
+        try:
+            if self.review_fix_dispatcher is not None:
+                self.review_fix_dispatcher(project, workspace, str(pr))
+            else:
+                prompt_path = self.state_dir / f"review-fix-{pr}-{head[:12]}.md"
+                prompt_path.write_text(
+                    self._review_fix_prompt(repo, str(pr), workspace, event),
+                    encoding="utf-8",
+                )
+                subprocess.run(
+                    [
+                        self.agentctl_executable,
+                        "agent",
+                        "launch",
+                        "--project",
+                        project,
+                        "--checkout",
+                        workspace_id,
+                        "--prompt-file",
+                        str(prompt_path),
+                        "--backend",
+                        self.integrator_backend,
+                        "--model",
+                        self.integrator_model,
+                        "--effort",
+                        self.integrator_effort,
+                        "--coordinator-label",
+                        "review-fix",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+        except (OSError, subprocess.SubprocessError) as error:
+            self._board.record_error(-1, f"review-fix {repo}#{pr}: {error}")
+            return
+        self._board.keeper[key] = {
+            "emitted_at": _now(),
+            "backoff_seconds": 0,
+            "next_eligible_at": _now(),
+        }
+
+    @staticmethod
+    def _receipt_workspace(receipt: str) -> str | None:
+        """The workspace a harvest receipt was published from."""
+        packet_root = Path.home() / ".local/state/sinnixd/harvest-packets"
+        name = receipt.rsplit("/", 1)[-1]
+        if not re.fullmatch(r"harvest-[0-9a-f]{32}", name):
+            return None
+        try:
+            payload = json.loads((packet_root / f"{name}.json").read_text())
+        except (OSError, json.JSONDecodeError):
+            return None
+        workspace_id = payload.get("workspace_id") if isinstance(payload, dict) else None
+        return workspace_id if isinstance(workspace_id, str) and workspace_id else None
+
+    @staticmethod
+    def _review_fix_prompt(
+        repo: str, pr: str, workspace: str, event: Mapping[str, Any]
+    ) -> str:
+        return (
+            f"You are a review-fix lane in /realm/worktrees/{workspace} "
+            f"(open PR #{pr} on {repo}). The hosted reviewer left "
+            f"{event.get('findings')} inline finding(s) on the PR. Read them with: "
+            f"gh api repos/{repo}/pulls/{pr}/comments (top-level comments by "
+            "chatgpt-codex-connector[bot] newer than its last +1 reaction are the "
+            "open ones). For each: confirm against the code and fix with a focused "
+            "test, or refute with concrete evidence. Post a threaded reply on every "
+            f"open finding (gh api repos/{repo}/pulls/{pr}/comments/<comment_id>/replies "
+            "-f body='...'), disposition style: \"Fixed in <sha> - one line.\" or "
+            "\"Refuted: <evidence>.\" with \"[review-fix lane]\" appended. Verify with "
+            "the project's devtools (devtools test <selection>; devtools verify "
+            "--quick); rebase onto origin/master; push the branch. Then request "
+            f"re-review by commenting exactly \"@codex review\" on the PR "
+            f"(gh pr comment {pr} --repo {repo} --body \"@codex review\"). Update "
+            ".lane/body.md's disposition table (uncommitted). Report per-finding "
+            "dispositions with the machine trailer "
+            "(LANE-BRANCH/COMMIT/QUICK/CLASSIFICATION).\n"
+        )
+
     def _dispatch_review(self, record: LaneRecord) -> None:
         """Start the read-mostly harvest review as soon as a lane succeeds.
 
@@ -1908,6 +2026,11 @@ class CampaignReactor:
                     and event.get("transition") == "review-required"
                 ):
                     self._dispatch_integration(event)
+                if (
+                    event.get("kind") == "publication-sweep"
+                    and event.get("outcome") == "findings"
+                ):
+                    self._dispatch_review_fix(event)
                 pr = self._board.prs.get(f"{event.get('repo')}#{event.get('pr')}")
                 closed = pr is not None and pr.bead_close_status == "closed"
                 if event.get("kind") in {"bead_close", "merge_close"} and (
