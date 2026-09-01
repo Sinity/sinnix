@@ -41,7 +41,12 @@ prompt. Write only what the worker must do; coordinator material belongs in
    such, never forced to green. A failure you attribute to master is a claim
    that needs a command: run that gate against a clean `origin/master` checkout
    and quote its exit code, or own the failure. Host load is the other
-   explanation and is yours to distinguish, not to assume.
+   explanation and is yours to distinguish, not to assume. When comparing
+   failure counts between your branch and master, disable test-order
+   randomization on both sides (`-p no:randomly`) over the same file list and
+   compare the failing-test sets, not the totals — randomized order makes
+   some suites fail nondeterministically, and master carries inherited
+   failures that are not yours.
 9. **Machine trailer.** End the report with exact lines `LANE-BRANCH: <branch>`
    / `LANE-COMMIT: <sha>` / `LANE-QUICK: green|red|blocked-env` /
    `LANE-CLASSIFICATION: <one line per finding>`.
