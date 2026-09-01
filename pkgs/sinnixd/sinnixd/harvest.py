@@ -1060,6 +1060,10 @@ def authorize(
         return result
 
     repo = _repo_slug(run, context.worktree)
+    trailer_lines = [f"Receipt: {receipt.get('packet_id', receipt_ref)}"]
+    if bead_id:
+        trailer_lines.append(f"Bead: {bead_id}")
+    body = body.rstrip() + "\n\n---\n" + "\n".join(trailer_lines) + "\n"
     pre_harvest_head = current_head
     pre_harvest_branch = _git(run, context.worktree, "branch", "--show-current")
     lock = _lock(LOCK_PATH)
@@ -1205,19 +1209,13 @@ def authorize(
         pr = pr_url.rsplit("/", 1)[-1]
         if not pr.isdecimal():
             raise HarvestError("GitHub pull request number is malformed")
-        merge = _command(
-            run,
-            ["gh", "pr", "merge", pr, "--squash", "--auto"],
-            cwd=context.worktree,
-            timeout=120,
-        )
-        merge_state = "ARMED" if merge.returncode == 0 else "NEEDS-MERGE"
-        # The PR was created moments ago by this job: its own clock is the
-        # opened_at authority, and arming exit status is the auto-merge state.
-        # No gh pr view here -- releasing without polling is the contract.
+        # The publication sweep owns the merge decision (hosted review
+        # verdict + CI), so nothing is armed here: the PR carries its
+        # Receipt/Bead trailers and the sweep converges it to merged.
+        merge_state = "SWEEP-PENDING"
         opened_at = _timestamp()
         check_states: list[str] = []
-        auto_merge = merge.returncode == 0
+        auto_merge = False
         decision_receipt = (
             {
                 "receipt_id": receipt["packet_id"],
@@ -1240,11 +1238,7 @@ def authorize(
                 "auto_merge": auto_merge,
                 "decision_receipt": decision_receipt,
                 "job_id": context.job_id,
-                "merge_error": (
-                    _bounded_text(merge.stderr or merge.stdout, 8_000)
-                    if merge.returncode != 0
-                    else None
-                ),
+                "merge_error": None,
             },
         )
         # The reactor owns post-publication merge observation and bead closure.

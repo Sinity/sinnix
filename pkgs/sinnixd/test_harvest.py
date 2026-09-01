@@ -110,7 +110,7 @@ def test_authorize_requires_receipt_and_runs_publish_pipeline(
         "phase": "published",
         "pr": "42",
         "pr_url": "https://github.test/pull/42",
-        "merge_state": "ARMED",
+        "merge_state": "SWEEP-PENDING",
         "bead_id": None,
         "affected_tests": "passed",
     }
@@ -193,7 +193,7 @@ def test_authorize_returns_after_pr_creation_and_emits_merge_handoff(
                 argv, 0, "https://github.test/pull/43\n", ""
             )
         if argv[:3] == ["gh", "pr", "merge"]:
-            return subprocess.CompletedProcess(argv, 1, "", "auto-merge unavailable")
+            raise AssertionError("authorize must not merge; the sweep owns it")
         if argv[:3] == ["gh", "pr", "view"]:
             viewed = True
         return subprocess.run(argv, **kwargs)
@@ -206,7 +206,7 @@ def test_authorize_returns_after_pr_creation_and_emits_merge_handoff(
         run=run,
     )
 
-    assert result["merge_state"] == "NEEDS-MERGE"
+    assert result["merge_state"] == "SWEEP-PENDING"
     assert viewed is False
     events = [
         json.loads(row) for row in (state / "events.jsonl").read_text().splitlines()
