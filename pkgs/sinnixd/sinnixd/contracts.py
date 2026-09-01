@@ -325,17 +325,6 @@ class TypedJobContracts:
             )
         if kind == "attested-agent":
             self.jobs.store.write_agent_launch(job_id, command, environment)
-        backend = private.get("backend")
-        model = private.get("model")
-        estimate_key = (
-            f"agent:{checkout.project_id}:{backend}:{model}"
-            if kind == "attested-agent"
-            and isinstance(backend, str)
-            and backend
-            and isinstance(model, str)
-            and model
-            else None
-        )
         try:
             response = self.jobs.start(
                 GenericJobSpec(
@@ -350,7 +339,6 @@ class TypedJobContracts:
                     contract=public_contract,
                     result_kind=result_kind,
                     pool="agent",
-                    estimate_key=estimate_key,
                     exclusive_keys=tuple(exclusive_keys),
                     dependency_job_ids=tuple(dependency_job_ids),
                     allow_failed_dependencies=allow_failed_dependencies,
