@@ -486,7 +486,10 @@ def test_host_budget_accounts_for_active_jobs_across_pools(tmp_path: Path) -> No
         "memory_full_avg10": 0.0,
         "io_full_avg10": 0.0,
         "memory_total_bytes": 32 * 1024 * 1024 * 1024,
-        "memory_available_bytes": 32 * 1024 * 1024 * 1024,
+        # Real headroom decides: 24 GiB free minus the 2.56 GiB reserve leaves
+        # 21.4 GiB; the just-launched bulk job (18 GiB, not yet in the kernel's
+        # figure) plus a 12 GiB candidate does not fit.
+        "memory_available_bytes": 24 * 1024 * 1024 * 1024,
         "swap_total_bytes": 20 * 1024 * 1024 * 1024,
         "swap_free_bytes": 20 * 1024 * 1024 * 1024,
         "managed_memory_bytes": 0,
@@ -1439,9 +1442,11 @@ def test_memory_stall_keeps_the_short_grace(
 def test_lane_and_harvest_fit_the_host_budget_together(tmp_path: Path) -> None:
     """A lane's peak reservation must leave room for the harvest that publishes it.
 
-    Sized from the 2026-08-28 wave: a 31 GiB host with ~14 GiB available, a lane
+    Sized from the 2026-08-28 wave: a 31 GiB host with ~15 GiB available, a lane
     holding a 7 GiB reservation, and a 4.7 GiB harvest. A 25% reserve capped at
     8 GiB queues the harvest behind the lane, which is what stalls publication.
+    Admission charges the just-launched lane its estimate until its footprint
+    reaches the kernel's available figure; the reserve is 8% of the host.
     """
     gib = 1024 * 1024 * 1024
     adapter = project(
@@ -1457,7 +1462,7 @@ def test_lane_and_harvest_fit_the_host_budget_together(tmp_path: Path) -> None:
         "memory_full_avg10": 0.0,
         "io_full_avg10": 0.0,
         "memory_total_bytes": 31 * gib,
-        "memory_available_bytes": 14 * gib,
+        "memory_available_bytes": 15 * gib,
         "swap_total_bytes": 20 * gib,
         "swap_free_bytes": 20 * gib,
         "managed_memory_bytes": 3 * gib,
