@@ -70,7 +70,7 @@ USER_AGENT = "sinnix-url-ledger/1 (personal archival-coverage research; contact 
 REQUEST_TIMEOUT_SECONDS = 20
 
 DEFAULT_ACTIVITY_ROOT = Path("/realm/data/activity")
-DEFAULT_DERIVED_ROOT = Path("/realm/data/derived")
+DEFAULT_DERIVED_ROOT = DEFAULT_ACTIVITY_ROOT
 DEFAULT_HISTORY_PATH = DEFAULT_ACTIVITY_ROOT / "webhistory" / "gestalt" / "derived" / "full_history.ndjson"
 
 # ---------------------------------------------------------------------------
