@@ -75,7 +75,7 @@ mkServiceModule {
     };
     minActiveLanes = lib.mkOption {
       type = lib.types.ints.positive;
-      default = 12;
+      default = 4;
       description = "Keeper threshold for an under-filled active campaign wave.";
     };
     laneGateThreshold = lib.mkOption {
@@ -95,13 +95,18 @@ mkServiceModule {
     };
     refillWidthTarget = lib.mkOption {
       type = lib.types.ints.positive;
-      default = 14;
+      default = 6;
       description = "Maximum active lanes targeted by automatic refill (keeper tick and bead close).";
     };
     refillSpacingSeconds = lib.mkOption {
       type = lib.types.ints.positive;
-      default = 10;
+      default = 300;
       description = "Minimum spacing used by automatic refill dispatches.";
+    };
+    refillProjects = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ "polylogue" ];
+      description = "Projects automatic refill may dispatch into; board and event consumption stay estate-wide.";
     };
     verifyAllFailureThreshold = lib.mkOption {
       type = lib.types.ints.positive;
@@ -150,7 +155,7 @@ mkServiceModule {
             })
             // {
               Type = "simple";
-              ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --board ${lib.escapeShellArg cfg.boardPath} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --lane-gate-threshold ${toString cfg.laneGateThreshold} --keeper-backoff-seconds ${toString cfg.keeperBackoffSeconds} --pr-age-threshold-seconds ${toString cfg.prAgeThresholdSeconds} --refill-width-target ${toString cfg.refillWidthTarget} --refill-spacing-seconds ${toString cfg.refillSpacingSeconds} --verify-all-failure-threshold ${toString cfg.verifyAllFailureThreshold} ${projectRootArgs}";
+              ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --board ${lib.escapeShellArg cfg.boardPath} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --lane-gate-threshold ${toString cfg.laneGateThreshold} --keeper-backoff-seconds ${toString cfg.keeperBackoffSeconds} --pr-age-threshold-seconds ${toString cfg.prAgeThresholdSeconds} --refill-width-target ${toString cfg.refillWidthTarget} --refill-spacing-seconds ${toString cfg.refillSpacingSeconds} --verify-all-failure-threshold ${toString cfg.verifyAllFailureThreshold} ${lib.concatMapStringsSep " " (name: "--refill-project ${lib.escapeShellArg name}") cfg.refillProjects} ${projectRootArgs}";
               Restart = "on-failure";
               RestartSec = "5s";
               NoNewPrivileges = true;

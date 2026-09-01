@@ -862,6 +862,11 @@ class CampaignReactor:
     board_path: Path
     state_dir: Path
     project_roots: Mapping[str, Path] = field(default_factory=dict)
+    # Projects the reactor may DISPATCH into. Board upkeep and event
+    # consumption stay estate-wide; launching work is a campaign decision,
+    # and an unscoped refill once launched lanes into every registered
+    # project at once (2026-09-01).
+    refill_projects: tuple[str, ...] = ()
     jobs_state_dir: Path | None = None
     interval_seconds: int = DEFAULT_INTERVAL_SECONDS
     min_active_lanes: int = 3
@@ -1012,7 +1017,7 @@ class CampaignReactor:
             # the keeper tick, not only on bead closes — most lane exits
             # (slices, rejections, timeouts) close no bead, and waiting for
             # one starved the pool at whatever the last close left behind.
-            for project in self.project_roots:
+            for project in self._refill_targets():
                 self._dispatch_refill(project)
         return actions
 
@@ -1571,7 +1576,16 @@ class CampaignReactor:
         except (OSError, subprocess.SubprocessError) as error:
             self._board.record_error(-1, f"dispose {workspace}: {error}")
 
+    def _refill_targets(self) -> tuple[str, ...]:
+        if self.refill_projects:
+            return tuple(
+                name for name in self.refill_projects if name in self.project_roots
+            )
+        return tuple(self.project_roots)
+
     def _dispatch_refill(self, project: str) -> None:
+        if project not in self._refill_targets():
+            return
         root = self.project_roots.get(project)
         if root is None:
             return
@@ -1897,6 +1911,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--project-root", type=_project_root, action="append", default=[]
     )
+    result.add_argument("--refill-project", action="append", default=[])
     result.add_argument(
         "--interval-seconds", type=int, default=DEFAULT_INTERVAL_SECONDS
     )
@@ -1937,6 +1952,7 @@ def main(argv: list[str] | None = None) -> int:
         board_path=arguments.board,
         state_dir=arguments.state_dir,
         project_roots=project_roots,
+        refill_projects=tuple(arguments.refill_project),
         jobs_state_dir=arguments.jobs_state_dir,
         interval_seconds=arguments.interval_seconds,
         min_active_lanes=arguments.min_active_lanes,
