@@ -746,7 +746,6 @@ class SubprocessBeadReleaser:
                     # in_progress claim on the same bead stays theirs.
                     "--if-assignee",
                     "campaign",
-                    "--force",
                     "--actor",
                     self.actor,
                 ],
@@ -786,7 +785,6 @@ class SubprocessBeadParker:
                 "",
                 "--if-assignee",
                 "campaign",
-                "--force",
                 "--append-notes",
                 note,
                 "--actor",
