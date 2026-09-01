@@ -263,14 +263,16 @@ def _resolve_publication_text(
     wrote. `--title` and `--body` default to the empty string rather than to
     None, so absence is falsiness here, not identity.
     """
+    # The receipt binds the stripped artifact text; a file read here must
+    # normalize the same way or its trailing newline fails the binding.
     title = parsed.title
     if parsed.title_file is not None:
-        title = _read_text(parsed.title_file, "publication title file")
+        title = _read_text(parsed.title_file, "publication title file").strip()
     elif not title:
         title = _lane_artifact(context, "title") or title
     body = parsed.body
     if parsed.body_file is not None:
-        body = _read_text(parsed.body_file, "publication body file")
+        body = _read_text(parsed.body_file, "publication body file").strip()
     elif not body:
         body = _lane_artifact(context, "body.md") or body
     close_reason = parsed.close_reason

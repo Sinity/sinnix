@@ -1023,3 +1023,23 @@ def test_authorize_refuses_text_that_drifted_from_the_reviewed_receipt(
             title="fix: publish the harvested lane branch",
             body="Body silently rewritten after review.",
         )
+
+
+def test_publication_text_from_files_matches_the_minted_binding(tmp_path: Path) -> None:
+    """Anti-vacuity: reading the file raw keeps its trailing newline, and every
+    mechanical publish then fails as "text differs from the reviewed receipt"."""
+    import argparse
+    from types import SimpleNamespace
+
+    lane = tmp_path / ".lane"
+    lane.mkdir()
+    (lane / "title").write_text("fix: bound text\n")
+    (lane / "body.md").write_text("Body.\n\n")
+    context = SimpleNamespace(worktree=tmp_path)
+    minted = harvest._digest(harvest._lane_artifact(context, "title") or "")
+    parsed = argparse.Namespace(title="", title_file=lane / "title", body="", body_file=lane / "body.md")
+    title = harvest._read_text(parsed.title_file, "t").strip()
+    assert harvest._digest(title) == minted
+    assert harvest._digest(harvest._read_text(parsed.body_file, "b").strip()) == harvest._digest(
+        harvest._lane_artifact(context, "body.md") or ""
+    )
