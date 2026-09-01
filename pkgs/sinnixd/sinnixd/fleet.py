@@ -353,87 +353,6 @@ def _artifact_refs(record: GenericJobRecord) -> Mapping[str, Any] | None:
     return dict(artifacts) if isinstance(artifacts, Mapping) else None
 
 
-def _finalize_candidates(
-    root: Path,
-    identifier: str,
-    record: GenericJobRecord | None,
-    workspace: Mapping[str, Any] | None,
-) -> list[Path]:
-    candidates: list[Path] = []
-    direct_names = (
-        root / "finalize" / f"{identifier}.json",
-        root / "finalize-records" / f"{identifier}.json",
-        root / "saga" / f"{identifier}.json",
-        root / "sagas" / f"{identifier}.json",
-        root / f"finalize-{identifier}.json",
-        root / f"{identifier}.finalize.json",
-    )
-    candidates.extend(direct_names)
-    sources: list[Any] = []
-    if record is not None:
-        sources.extend((_record_dict(record),))
-    if workspace is not None:
-        sources.append(workspace)
-    refs: dict[str, str] = {}
-
-    def collect(value: Any) -> None:
-        mapping = _mapping(value)
-        if mapping is None:
-            return
-        for key, child in mapping.items():
-            if _normal_key(key) in {
-                "finalize_path",
-                "finalize_record",
-                "finalize_ref",
-                "saga_path",
-            } and isinstance(child, str):
-                refs.setdefault("path", child)
-            collect(child)
-
-    for source in sources:
-        collect(source)
-    for reference in refs.values():
-        path = Path(reference)
-        if not path.is_absolute():
-            path = root / path
-        try:
-            path.resolve().relative_to(root.resolve())
-        except ValueError:
-            continue
-        candidates.append(path)
-
-    verify_root = None
-    if workspace and isinstance(workspace.get("path"), str):
-        verify_root = Path(workspace["path"]) / ".cache" / "verify"
-    if verify_root is not None and verify_root.is_dir():
-        for path in verify_root.glob(f"*{identifier}*.json"):
-            if any(token in path.name.lower() for token in ("final", "saga")):
-                candidates.append(path)
-    return list(dict.fromkeys(candidates))
-
-
-def _finalize_record(
-    root: Path,
-    identifier: str,
-    record: GenericJobRecord | None,
-    workspace: Mapping[str, Any] | None,
-) -> Mapping[str, Any] | None:
-    for path in _finalize_candidates(root, identifier, record, workspace):
-        try:
-            value = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
-        if isinstance(value, Mapping):
-            return {
-                "path": str(path),
-                "record": dict(value),
-                "saga_state": value.get(
-                    "saga_state", value.get("saga", value.get("state"))
-                ),
-            }
-    return None
-
-
 def _matching_jobs(
     records: list[GenericJobRecord], workspace: Mapping[str, Any]
 ) -> list[GenericJobRecord]:
@@ -505,12 +424,6 @@ def read_evidence(
         "workspace": workspace,
         "branch": workspace.get("branch") if workspace else None,
         "pr": pr,
-        "saga": _finalize_record(
-            store.root,
-            identifier,
-            primary,
-            workspace,
-        ),
     }
 
 
@@ -564,7 +477,6 @@ def render_evidence(payload: Mapping[str, Any]) -> str:
         f"workspace: {'present' if _mapping(payload.get('workspace')) is not None else ABSENT}",
         f"branch: {_text(payload.get('branch'))}",
         f"pr: {_pr_text(_mapping(payload.get('pr')))}",
-        f"saga: {'present' if payload.get('saga') is not None else ABSENT}",
     ]
     workspace = _mapping(payload.get("workspace"))
     if workspace is not None:
@@ -596,14 +508,6 @@ def render_evidence(payload: Mapping[str, Any]) -> str:
             "  " + line
             for line in json.dumps(
                 payload["record"], indent=2, sort_keys=True
-            ).splitlines()
-        )
-    if payload.get("saga") is not None:
-        lines.append("saga_json:")
-        lines.extend(
-            "  " + line
-            for line in json.dumps(
-                payload["saga"], indent=2, sort_keys=True
             ).splitlines()
         )
     return "\n".join(lines) + "\n"

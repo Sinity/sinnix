@@ -349,12 +349,6 @@ def parser() -> argparse.ArgumentParser:
             lane_command.add_argument("--apply", action="store_true")
     packet = subcommands.add_parser("packet")
     packet_subcommands = packet.add_subparsers(dest="packet_command", required=True)
-    packet_finalize = packet_subcommands.add_parser("finalize")
-    packet_finalize.add_argument("workspace_id")
-    packet_finalize.add_argument("--verification-job", required=True)
-    packet_finalize.add_argument("--packet-job", required=True)
-    packet_status = packet_subcommands.add_parser("status")
-    packet_status.add_argument("saga_id")
     packet_launch = packet_subcommands.add_parser(
         "launch", help="Compile a bead dispatch group and launch one agent lane."
     )
@@ -1038,24 +1032,6 @@ def main() -> int:
             "git-workspaces",
             {"workspace_id": arguments.workspace_id, **settlement},
             "agent-control",
-        )
-    elif arguments.command == "packet" and arguments.packet_command == "finalize":
-        request = _request(
-            "packet.finalize",
-            "packet-saga",
-            {
-                "workspace_id": arguments.workspace_id,
-                "verification_job_id": arguments.verification_job,
-                "packet_job_id": arguments.packet_job,
-            },
-            "operator",
-        )
-    elif arguments.command == "packet" and arguments.packet_command == "status":
-        request = _request(
-            "packet.status",
-            "packet-saga",
-            {"saga_id": arguments.saga_id},
-            "operator",
         )
     elif arguments.command == "events" and arguments.events_command == "tail":
         kinds = (
