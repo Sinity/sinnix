@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Write a daily digest of terminal jobs with missing result artifacts
+# runtimeInputs: coreutils
+
+"""Report terminal jobs whose contract requires a non-empty result artifact."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import tempfile
+from pathlib import Path
+from typing import Any
+
+SCHEMA = "sinnix-result-gap-digest-v1"
+
+
+def atomic_jsonl(path: Path, record: dict[str, Any]) -> None:
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    existing: list[dict[str, Any]] = []
+    if path.exists():
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    value = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(value, dict) and value.get("date") != record["date"]:
+                    existing.append(value)
+    existing.append(record)
+    existing.sort(key=lambda value: str(value.get("date", "")))
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            for value in existing:
+                handle.write(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def append_failure(spool: Path, error: Exception) -> None:
+    emitted_at = dt.datetime.now(dt.UTC).isoformat()
+    event = {
+        "schema_version": 1,
+        "event_id": hashlib.sha256(f"result-gap:{emitted_at}:{error}".encode()).hexdigest()[:32],
+        "kind": "consumer_failure",
+        "consumer": "result-gap-digest",
+        "error": str(error),
+        "emitted_at": emitted_at,
+    }
+    spool.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with spool.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def records(root: Path) -> list[dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for directory in (root / "jobs", root / "jobs-archive"):
+        if directory.exists():
+            for path in sorted(directory.glob("*.json")):
+                try:
+                    value = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, json.JSONDecodeError):
+                    continue
+                if isinstance(value, dict):
+                    job_id = value.get("job_id")
+                    if isinstance(job_id, str) and job_id:
+                        result[job_id] = value
+    return [result[job_id] for job_id in sorted(result)]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--jobs-state-dir", type=Path, required=True)
+    parser.add_argument("--event-spool", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--state", type=Path, required=True)
+    parser.add_argument("--date", help="UTC date for the digest, defaults to yesterday")
+    args = parser.parse_args()
+    try:
+        day = args.date or (dt.datetime.now(dt.UTC).date() - dt.timedelta(days=1)).isoformat()
+        gaps = []
+        for record in records(args.jobs_state_dir):
+            state = record.get("state")
+            spec = record.get("spec")
+            artifacts = record.get("artifacts")
+            if not isinstance(state, dict) or not state.get("terminal") or not isinstance(spec, dict):
+                continue
+            if spec.get("result_kind", "exit-status") == "exit-status":
+                continue
+            result_path = artifacts.get("result") if isinstance(artifacts, dict) else None
+            missing = not isinstance(result_path, str)
+            size = 0
+            if not missing:
+                try:
+                    result_file = Path(result_path).resolve()
+                    result_file.relative_to((args.jobs_state_dir / "results").resolve())
+                    size = result_file.stat().st_size
+                except OSError:
+                    missing = True
+            if missing or size == 0:
+                gaps.append({"job_id": record.get("job_id"), "result_kind": spec.get("result_kind"), "artifact": result_path, "reason": "missing" if missing else "empty"})
+        gaps.sort(key=lambda gap: str(gap.get("job_id", "")))
+        record = {"schema": SCHEMA, "date": day, "gap_count": len(gaps), "gaps": gaps}
+        atomic_jsonl(args.output, record)
+        atomic_jsonl(args.state, {"schema": SCHEMA, "date": day, "gap_count": len(gaps)})
+        print(json.dumps(record, sort_keys=True))
+        return 0
+    except Exception as error:
+        append_failure(args.event_spool, error)
+        print(f"sinnix-result-gap-digest: {error}", flush=True)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

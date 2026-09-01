@@ -43,6 +43,7 @@ in
     ./tests/vm.nix
     ./tests/host-build.nix
     ./tests/runtime.nix
+    ./tests/campaign-consumers.nix
     ./tests/script-suites.nix
     ./tests/pkg-suites.nix
     ./tests/lifecycle-manifest.nix
