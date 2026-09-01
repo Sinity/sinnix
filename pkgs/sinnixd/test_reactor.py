@@ -1442,3 +1442,73 @@ def test_a_failed_refill_wave_backs_off_like_a_launched_one(
     record = reactor._board.keeper.get("refill:polylogue")
     assert record is not None and record["backoff_seconds"] >= 300
     assert any("refill polylogue" in e["message"] for e in reactor._board.errors)
+
+
+def test_reconcile_releases_claims_whose_lane_died_unseen(tmp_path: Path) -> None:
+    """Anti-vacuity: a claim released only from a terminal event the reactor
+    saw stays parked after a reactor outage during a wave."""
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    for name, bead, phase, created in (
+        ("dead", "polylogue-d1", "cancelled", "2026-09-01T21:00:00+00:00"),
+        ("live", "polylogue-l1", "running", "2026-09-01T21:00:00+00:00"),
+        ("done", "polylogue-s1", "succeeded", "2026-09-01T21:00:00+00:00"),
+    ):
+        (jobs / f"{name}.json").write_text(
+            json.dumps(
+                {
+                    "job_id": name,
+                    "created_at": created,
+                    "spec": {
+                        "kind": "attested-agent",
+                        "contract": {"parameters": {"campaign": {"bead_ids": [bead]}}},
+                    },
+                    "state": {"phase": phase},
+                }
+            )
+        )
+    releaser = FakeBeadReleaser()
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        jobs_state_dir=jobs,
+        project_roots={"polylogue": tmp_path / "repo"},
+        bead_releaser=releaser,
+    )
+
+    class Reader:
+        def list(self):
+            return [
+                {"id": "polylogue-d1", "status": "in_progress", "assignee": "campaign"},
+                {"id": "polylogue-l1", "status": "in_progress", "assignee": "campaign"},
+                {"id": "polylogue-s1", "status": "in_progress", "assignee": "campaign"},
+                {"id": "polylogue-o1", "status": "in_progress", "assignee": "sinity"},
+            ]
+
+    reactor._reconcile_claims("polylogue", tmp_path / "repo", Reader())
+
+    assert releaser.calls == [("polylogue-d1", tmp_path / "repo")]
+
+
+def test_hand_pr_findings_are_not_an_error_every_pass(tmp_path: Path) -> None:
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        project_roots={"polylogue": tmp_path / "repo"},
+        review_fix_dispatcher=lambda *a: None,
+    )
+    reactor._dispatch_review_fix(
+        {
+            "kind": "publication-sweep",
+            "outcome": "findings",
+            "project": "polylogue",
+            "repo": "o/r",
+            "pr": 9,
+            "head": "f" * 40,
+            "findings": 1,
+            "receipt": "session-abc",
+        }
+    )
+    assert reactor._board.errors == []

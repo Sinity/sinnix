@@ -1486,6 +1486,15 @@ class CampaignReactor:
                     "reason": f"integrator already judged: {reason}",
                     "receipt": str(receipt),
                 }
+                self._spool(
+                    {
+                        "kind": "judgment",
+                        "project": str(project),
+                        "workspace": workspace,
+                        "receipt": str(receipt),
+                        "reason": f"integrator already judged: {reason}",
+                    }
+                )
             return
         key = f"integrate:{workspace}{suffix}"
         if key in self._board.keeper:
@@ -1726,6 +1735,71 @@ class CampaignReactor:
                 best = (created, [b for b in bead_ids if isinstance(b, str) and b])
         return best[1] if best else []
 
+    def _spool(self, event: Mapping[str, Any]) -> None:
+        """Append one reactor-originated event to the spool the operator tails."""
+        try:
+            with self.event_spool.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {"emitted_at": _now(), "schema_version": 1, **dict(event)},
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                )
+        except OSError as error:
+            self._board.record_error(-1, f"spool: {error}")
+
+    def _reconcile_claims(self, project: str, root: Path, reader: Any) -> None:
+        """Release campaign claims whose lane died while the reactor was not watching.
+
+        A claim is released from the lane's terminal event; a reactor outage
+        during a wave leaves claims parked. Each refill checks every campaign
+        claim against the newest lane launched for it: cancelled, failed, or
+        timed-out lanes release; running lanes and succeeded lanes awaiting
+        publication keep theirs.
+        """
+        try:
+            rows = reader.list()
+        except Exception as error:  # noqa: BLE001 - one bad listing skips one reconcile
+            self._board.record_error(-1, f"reconcile claims {project}: {error}")
+            return
+        claimed = [
+            str(row["id"])
+            for row in rows
+            if isinstance(row, Mapping)
+            and row.get("status") == "in_progress"
+            and row.get("assignee") == "campaign"
+            and isinstance(row.get("id"), str)
+        ]
+        if not claimed or self.jobs_state_dir is None:
+            return
+        newest: dict[str, tuple[str, str]] = {}
+        for path in self.jobs_state_dir.glob("*.json"):
+            try:
+                record = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            spec = record.get("spec") if isinstance(record, Mapping) else None
+            if not isinstance(spec, Mapping) or spec.get("kind") != "attested-agent":
+                continue
+            contract = spec.get("contract")
+            parameters = contract.get("parameters") if isinstance(contract, Mapping) else None
+            campaign = parameters.get("campaign") if isinstance(parameters, Mapping) else None
+            bead_ids = campaign.get("bead_ids") if isinstance(campaign, Mapping) else None
+            state = record.get("state") if isinstance(record, Mapping) else None
+            phase = str(state.get("phase")) if isinstance(state, Mapping) else ""
+            created = str(record.get("created_at") or "")
+            for bead_id in bead_ids if isinstance(bead_ids, list) else []:
+                if isinstance(bead_id, str) and (bead_id not in newest or created > newest[bead_id][0]):
+                    newest[bead_id] = (created, phase)
+        for bead_id in claimed:
+            phase = newest.get(bead_id, ("", ""))[1]
+            if phase in {"cancelled", "failed", "timeout", "launch-failed"}:
+                released, detail = self.bead_releaser.release(bead_id, cwd=root)
+                if not released:
+                    self._board.record_error(-1, f"reconcile release {bead_id}: {detail}")
+
     def _release_beads(self, lane: LaneRecord) -> None:
         """An interrupted lane's claim goes back to the frontier.
 
@@ -1774,6 +1848,10 @@ class CampaignReactor:
             return
         key = f"review-fix:{repo}#{pr}:{head[:12]}"
         if key in self._board.keeper:
+            return
+        if not re.fullmatch(r"harvest-[0-9a-f]{32}", receipt.rsplit("/", 1)[-1]):
+            # A hand PR carries a non-harvest receipt token; its author
+            # answers findings, and every sweep pass need not say so.
             return
         workspace_id = self._receipt_workspace(receipt)
         workspace = (
@@ -2103,6 +2181,7 @@ class CampaignReactor:
                 for item in self._board.judgment_queue
                 if item.get("reason") != "conflict metadata is incomplete"
             ]
+            self._reconcile_claims(project, root, reader)
             candidates: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
             for row in sorted(reader.ready(), key=frontier_order):
                 bead_id = row.get("id")
