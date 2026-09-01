@@ -1471,6 +1471,22 @@ class CampaignReactor:
             if publish_key not in self._board.keeper:
                 self._publish(str(project), workspace, str(receipt), publish_key)
             return
+        # One integrator per (workspace, reason): an integrator that ran and
+        # left the same flags standing has made its judgment; the next
+        # receipt with those flags is the operator's decision, not another
+        # agent's. A different reason (new flags, a red gate) is new work.
+        reason_key = f"integrate:{workspace}:{hashlib.sha256(reason.encode()).hexdigest()[:8]}"
+        if reason_key in self._board.keeper:
+            judgment_key = f"judgment:{workspace}"
+            if judgment_key not in self._board.keeper:
+                self._board.keeper[judgment_key] = {
+                    "emitted_at": _now(),
+                    "backoff_seconds": 0,
+                    "next_eligible_at": _now(),
+                    "reason": f"integrator already judged: {reason}",
+                    "receipt": str(receipt),
+                }
+            return
         key = f"integrate:{workspace}{suffix}"
         if key in self._board.keeper:
             return
@@ -1520,11 +1536,12 @@ class CampaignReactor:
         except (OSError, subprocess.SubprocessError) as error:
             self._board.record_error(-1, f"integrate {event.get('job_id')}: {error}")
             return
-        self._board.keeper[key] = {
-            "emitted_at": _now(),
-            "backoff_seconds": 0,
-            "next_eligible_at": _now(),
-        }
+        for record_key in (key, reason_key):
+            self._board.keeper[record_key] = {
+                "emitted_at": _now(),
+                "backoff_seconds": 0,
+                "next_eligible_at": _now(),
+            }
 
     @staticmethod
     def _workspace_name(checkout_id: str) -> str | None:

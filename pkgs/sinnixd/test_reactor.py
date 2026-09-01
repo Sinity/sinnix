@@ -640,7 +640,7 @@ def test_integration_is_keyed_by_workspace_and_head(
         integration_dispatcher=lambda p, w, r: calls.append((p, w, r)),
     )
 
-    def event(receipt: str) -> dict[str, object]:
+    def event(receipt: str, packet: dict[str, object]) -> dict[str, object]:
         return {
             "kind": "harvest",
             "transition": "review-required",
@@ -648,12 +648,15 @@ def test_integration_is_keyed_by_workspace_and_head(
             "workspace_id": "worktree-abc",
             "receipt_ref": "sinnix://harvest/" + receipt,
             "job_id": "job-" + receipt[-4:],
-            "packet": {"redflag_status": 1, "lane_trailer": {"LANE-QUICK": "green"}},
+            "packet": packet,
         }
 
-    reactor._dispatch_integration(event("harvest-" + "1" * 32))
-    reactor._dispatch_integration(event("harvest-" + "1" * 32))
-    reactor._dispatch_integration(event("harvest-" + "2" * 32))
+    flagged = {"redflag_status": 1, "lane_trailer": {"LANE-QUICK": "green"}}
+    red_gate = {"redflag_status": 0, "lane_trailer": {"LANE-QUICK": "red"}}
+    reactor._dispatch_integration(event("harvest-" + "1" * 32, flagged))
+    reactor._dispatch_integration(event("harvest-" + "1" * 32, flagged))
+    # A new head with a different reason is new work for an integrator.
+    reactor._dispatch_integration(event("harvest-" + "2" * 32, red_gate))
 
     assert len(calls) == 2
 
@@ -898,6 +901,51 @@ def test_judgment_reads_the_receipt_the_event_names(
     )
 
     assert published == ["publish:packet-p-9:harvest-" + "4" * 32]
+
+
+def test_a_second_receipt_with_the_same_flags_is_the_operators_judgment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: keying integrators by head alone ran three integrators
+    on polylogue-1qmz3, each moving the head and none deciding."""
+    calls: list[tuple[str, str, str]] = []
+    heads = iter(["a" * 40, "b" * 40, "c" * 40])
+    monkeypatch.setattr(
+        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
+    )
+    monkeypatch.setattr(
+        CampaignReactor, "_receipt_field", staticmethod(lambda r, k: next(heads))
+    )
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        project_roots={"polylogue": tmp_path / "repo"},
+        integration_dispatcher=lambda p, w, r: calls.append((p, w, r)),
+    )
+
+    def event(n: int) -> dict[str, object]:
+        return {
+            "kind": "harvest",
+            "transition": "review-required",
+            "project": "polylogue",
+            "workspace_id": "worktree-abc",
+            "receipt_ref": "harvest-" + str(n) * 32,
+            "job_id": f"job-{n}",
+            "packet": {
+                "redflag_status": 1,
+                "redflags": ["FLAG: test files deleted"],
+                "lane_trailer": {"LANE-QUICK": "green"},
+            },
+        }
+
+    reactor._dispatch_integration(event(1))
+    reactor._dispatch_integration(event(2))
+    reactor._dispatch_integration(event(3))
+
+    assert len(calls) == 1
+    judgment = reactor._board.keeper["judgment:packet-p-9"]
+    assert "integrator already judged" in judgment["reason"]
 
 
 def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
