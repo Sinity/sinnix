@@ -42,6 +42,8 @@ _DURABLE_KEEPER_PREFIXES = (
     "retry:",
     "dispose:",
     "review-fix:",
+    "publish:",
+    "park:",
 )
 MAX_EVENT_BYTES = 1_000_000
 DEFAULT_REFILL_SPACING_SECONDS = 300
@@ -761,6 +763,49 @@ class SubprocessBeadReleaser:
         return False, (result.stderr or result.stdout).strip()[:300]
 
 
+class BeadParker(Protocol):
+    def park(self, bead_id: str, note: str, *, cwd: Path) -> tuple[bool, str | None]: ...
+
+
+class SubprocessBeadParker:
+    """Hand a bead back to the operator with the lane's reason attached."""
+
+    def __init__(self, executable: str = "bd", actor: str = "sinnix-reactor") -> None:
+        self.executable = executable
+        self.actor = actor
+
+    def park(self, bead_id: str, note: str, *, cwd: Path) -> tuple[bool, str | None]:
+        commands = [
+            [
+                self.executable,
+                "update",
+                bead_id,
+                "-s",
+                "open",
+                "-a",
+                "",
+                "--if-assignee",
+                "campaign",
+                "--force",
+                "--append-notes",
+                note,
+                "--actor",
+                self.actor,
+            ],
+            [self.executable, "label", "add", bead_id, "needs:operator", "--actor", self.actor],
+        ]
+        for argv in commands:
+            try:
+                result = subprocess.run(
+                    argv, cwd=cwd, capture_output=True, text=True, timeout=30, check=False
+                )
+            except (OSError, subprocess.SubprocessError) as error:
+                return False, str(error)
+            if result.returncode != 0:
+                return False, (result.stderr or result.stdout).strip()[:300]
+        return True, None
+
+
 class SubprocessBeadCloser:
     def __init__(self, executable: str = "bd", actor: str = "sinnix-reactor") -> None:
         self.executable = executable
@@ -939,6 +984,7 @@ class CampaignReactor:
     agentctl_executable: str = "agentctl"
     bead_closer: BeadCloser = field(default_factory=SubprocessBeadCloser)
     bead_releaser: BeadReleaser = field(default_factory=SubprocessBeadReleaser)
+    bead_parker: BeadParker = field(default_factory=SubprocessBeadParker)
     registry: ReactionRegistry = field(default_factory=default_reactions)
 
     def __post_init__(self) -> None:
@@ -1398,15 +1444,21 @@ class CampaignReactor:
         # commit is a no-op, and a lane that pushed new work after its first
         # integration gets judged again rather than parked behind it.
         head = self._receipt_field(str(receipt), "head")
-        key = f"integrate:{workspace}" + (f":{head[:12]}" if head else "")
-        if key in self._board.keeper:
-            return
+        suffix = f":{head[:12]}" if head else ""
         root = self.project_roots.get(str(project))
         if root is None:
             return
         reason = self._needs_judgment(event)
         if reason is None:
-            self._publish(str(project), workspace, str(receipt), key)
+            # Publication has its own record: an integrator that cleared the
+            # flag without moving the head must not block the publish behind
+            # its own integrate key.
+            publish_key = f"publish:{workspace}{suffix}"
+            if publish_key not in self._board.keeper:
+                self._publish(str(project), workspace, str(receipt), publish_key)
+            return
+        key = f"integrate:{workspace}{suffix}"
+        if key in self._board.keeper:
             return
         if self._needs_coordinator(reason, event):
             judgment_key = f"judgment:{workspace}"
@@ -1509,6 +1561,67 @@ class CampaignReactor:
             f"```json\n{summary}\n```\n\n"
             f"## Operating rules\n\n{body}\n"
         )
+
+    def _park_empty_lane(self, event: Mapping[str, Any]) -> None:
+        """A lane with nothing to publish hands its bead back with the reason.
+
+        The claim would otherwise hold the bead forever; releasing it plain
+        would relaunch the same blocked packet every refill. The bead goes
+        back to open under needs:operator with the lane's classification.
+        """
+        harvest_job = event.get("job_id")
+        record = self._job_record(str(harvest_job)) if isinstance(harvest_job, str) else None
+        spec = record.get("spec") if isinstance(record, Mapping) else None
+        checkout = spec.get("checkout") if isinstance(spec, Mapping) else None
+        checkout_id = checkout.get("checkout_id") if isinstance(checkout, Mapping) else None
+        project = event.get("project")
+        root = self.project_roots.get(str(project)) if isinstance(project, str) else None
+        if not isinstance(checkout_id, str) or root is None:
+            return
+        key = f"park:{checkout_id}:{str(event.get('head') or '')[:12]}"
+        if key in self._board.keeper:
+            return
+        trailer = event.get("lane_trailer")
+        classification = (
+            trailer.get("LANE-CLASSIFICATION") if isinstance(trailer, Mapping) else None
+        )
+        note = f"lane had nothing to publish: {classification or 'no classification'}"
+        for bead_id in self._campaign_beads_for_checkout(checkout_id):
+            parked, detail = self.bead_parker.park(bead_id, note, cwd=root)
+            if not parked:
+                self._board.record_error(-1, f"park {bead_id}: {detail}")
+        self._board.keeper[key] = {
+            "emitted_at": _now(),
+            "backoff_seconds": 0,
+            "next_eligible_at": _now(),
+        }
+
+    def _campaign_beads_for_checkout(self, checkout_id: str) -> list[str]:
+        """Beads of the newest campaign lane launched into a checkout."""
+        if self.jobs_state_dir is None:
+            return []
+        best: tuple[str, list[str]] | None = None
+        for path in self.jobs_state_dir.glob("*.json"):
+            try:
+                record = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            spec = record.get("spec") if isinstance(record, Mapping) else None
+            if not isinstance(spec, Mapping) or spec.get("kind") != "attested-agent":
+                continue
+            checkout = spec.get("checkout")
+            if not isinstance(checkout, Mapping) or checkout.get("checkout_id") != checkout_id:
+                continue
+            contract = spec.get("contract")
+            parameters = contract.get("parameters") if isinstance(contract, Mapping) else None
+            campaign = parameters.get("campaign") if isinstance(parameters, Mapping) else None
+            bead_ids = campaign.get("bead_ids") if isinstance(campaign, Mapping) else None
+            if not isinstance(bead_ids, list):
+                continue
+            created = str(record.get("created_at") or "")
+            if best is None or created > best[0]:
+                best = (created, [b for b in bead_ids if isinstance(b, str) and b])
+        return best[1] if best else []
 
     def _release_beads(self, lane: LaneRecord) -> None:
         """An interrupted lane's claim goes back to the frontier.
@@ -2131,6 +2244,11 @@ class CampaignReactor:
                     and event.get("transition") == "review-required"
                 ):
                     self._dispatch_integration(event)
+                if (
+                    event.get("kind") == "harvest"
+                    and event.get("outcome") == "HARVEST_EMPTY"
+                ):
+                    self._park_empty_lane(event)
                 if (
                     event.get("kind") == "publication-sweep"
                     and event.get("outcome") == "findings"

@@ -421,6 +421,34 @@ def _lane_write_scope(
     return sorted(candidates, key=lambda item: item[0])[-1][1] if candidates else ()
 
 
+def _run_is_stale(worktree: Path, run: Mapping[str, Any], head: str) -> bool:
+    """A run is fresh while the code it tested is the code at HEAD.
+
+    Integrators commit lane metadata after the lane's tests ran; that moves
+    the commit without touching a product line, and reading it as stale sent
+    every such lane to another integrator instead of to publication.
+    """
+    final = run.get("final_git_head")
+    started = run.get("git_head")
+    if final in (None, head) or started == head:
+        return False
+    tested_at = final if isinstance(final, str) else started
+    if not isinstance(tested_at, str) or not tested_at:
+        return True
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--quiet", tested_at, head, "--", ".", ":(exclude).lane"],
+            cwd=worktree,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True
+    return result.returncode != 0
+
+
 def _verification_evidence(worktree: Path, head: str) -> dict[str, Any]:
     """Read what the lane's own verification actually did.
 
@@ -454,8 +482,7 @@ def _verification_evidence(worktree: Path, head: str) -> dict[str, Any]:
             "git_dirty": value.get("git_dirty"),
             "pytest": value.get("pytest_aggregate"),
             "finished_at": value.get("finished_at"),
-            "stale": value.get("final_git_head") not in (None, head)
-            and value.get("git_head") != head,
+            "stale": _run_is_stale(worktree, value, head),
         }
         latest[command] = entry
     if not latest:

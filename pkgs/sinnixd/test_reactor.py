@@ -717,6 +717,125 @@ def test_interrupted_lane_releases_its_claimed_beads(tmp_path: Path) -> None:
     assert releaser.calls == [("polylogue-q1", tmp_path / "repo")]
 
 
+def test_cleared_flag_at_the_same_head_publishes_past_the_integrate_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An integrator that cleared the flag without moving HEAD leads to publication.
+
+    Anti-vacuity: sharing the integrate key for both paths held
+    polylogue-0cm7m unpublished after its evidence became fresh.
+    """
+    published: list[str] = []
+    monkeypatch.setattr(
+        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
+    )
+    monkeypatch.setattr(
+        CampaignReactor, "_receipt_field", staticmethod(lambda r, k: "c" * 40)
+    )
+    monkeypatch.setattr(
+        CampaignReactor,
+        "_publish",
+        lambda self, project, workspace, receipt, key: published.append(key),
+    )
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        project_roots={"polylogue": tmp_path / "repo"},
+        integration_dispatcher=lambda *a: None,
+    )
+    reactor._board.keeper["integrate:packet-p-9:cccccccccccc"] = {
+        "emitted_at": "2026-09-01T00:00:00+00:00",
+        "backoff_seconds": 0,
+        "next_eligible_at": "2026-09-01T00:00:00+00:00",
+    }
+    event = {
+        "kind": "harvest",
+        "transition": "review-required",
+        "project": "polylogue",
+        "workspace_id": "worktree-abc",
+        "receipt_ref": "harvest-" + "3" * 32,
+        "job_id": "job-3",
+        "packet": {
+            "redflag_status": 0,
+            "lane_trailer": {"LANE-QUICK": "green"},
+            "verification": {"state": "tests-run"},
+        },
+    }
+
+    reactor._dispatch_integration(event)
+
+    assert published == ["publish:packet-p-9:cccccccccccc"]
+
+
+class FakeBeadParker:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def park(self, bead_id: str, note: str, *, cwd: Path) -> tuple[bool, str | None]:
+        self.calls.append((bead_id, note))
+        return True, None
+
+
+def test_a_lane_with_nothing_to_publish_parks_its_bead_for_the_operator(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: without parking, the claim held polylogue-74kj3 forever."""
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    (jobs / "harvest-1.json").write_text(
+        json.dumps(
+            {
+                "job_id": "harvest-1",
+                "spec": {
+                    "kind": "declared-operation",
+                    "checkout": {"checkout_id": "worktree-r"},
+                },
+            }
+        )
+    )
+    (jobs / "lane-1.json").write_text(
+        json.dumps(
+            {
+                "job_id": "lane-1",
+                "created_at": "2026-09-01T21:00:00+00:00",
+                "spec": {
+                    "kind": "attested-agent",
+                    "checkout": {"checkout_id": "worktree-r"},
+                    "contract": {
+                        "parameters": {"campaign": {"bead_ids": ["polylogue-r1"]}}
+                    },
+                },
+            }
+        )
+    )
+    parker = FakeBeadParker()
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        jobs_state_dir=jobs,
+        project_roots={"polylogue": tmp_path / "repo"},
+        bead_parker=parker,
+    )
+    event = {
+        "kind": "harvest",
+        "outcome": "HARVEST_EMPTY",
+        "phase": "nothing-to-publish",
+        "project": "polylogue",
+        "job_id": "harvest-1",
+        "head": "e" * 40,
+        "lane_trailer": {"LANE-CLASSIFICATION": "blocked on unrouted operations"},
+    }
+
+    reactor._park_empty_lane(event)
+    reactor._park_empty_lane(event)
+
+    assert parker.calls == [
+        ("polylogue-r1", "lane had nothing to publish: blocked on unrouted operations")
+    ]
+
+
 def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
     """Judgment is spent on exceptions, not on every lane that passed its scan.
 
