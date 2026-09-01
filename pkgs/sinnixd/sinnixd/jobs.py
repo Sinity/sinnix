@@ -450,7 +450,6 @@ class SystemdJobs(Protocol):
     def unschedule_timer(self, unit: str) -> None: ...
 
 
-@dataclass(frozen=True)
 def timer_persistent(on_calendar: str) -> bool:
     """Catch up a missed daily or weekly run; never a sub-hourly one.
 
@@ -463,6 +462,7 @@ def timer_persistent(on_calendar: str) -> bool:
     return not (spec.startswith("*:") or spec.startswith("*-*-* *:"))
 
 
+@dataclass(frozen=True)
 class UserSystemdJobs:
     """Launch and inspect transient user services through the user manager."""
 
