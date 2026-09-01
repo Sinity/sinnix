@@ -149,7 +149,8 @@ def _latest_lane_job(context: HarvestContext) -> tuple[str | None, str | None]:
     trailer and the bead for closure; requiring the coordinator to restate
     either repeats what the job records already hold.
     """
-    best: tuple[str, str, str | None] | None = None
+    newest: tuple[str, str] | None = None
+    newest_with_bead: tuple[str, str, str] | None = None
     records_root = context.state_root / "jobs"
     try:
         candidates = list(records_root.glob("*.json"))
@@ -170,18 +171,30 @@ def _latest_lane_job(context: HarvestContext) -> tuple[str | None, str | None]:
         ):
             continue
         created = str(record.get("created_at") or "")
-        contract = spec.get("contract") or {}
-        binding = contract.get("bead_binding") or {}
-        bead = binding.get("bead_id") if isinstance(binding, dict) else None
-        if best is None or created > best[0]:
-            best = (
-                created,
-                str(record.get("job_id")),
-                bead if isinstance(bead, str) else None,
-            )
-    if best is None:
+        job_id = str(record.get("job_id"))
+        bead = _lane_bead(spec.get("contract") or {})
+        if newest is None or created > newest[0]:
+            newest = (created, job_id)
+        if bead is not None and (newest_with_bead is None or created > newest_with_bead[0]):
+            newest_with_bead = (created, job_id, bead)
+    # Review-fix and integrator lanes share the checkout and carry no bead;
+    # the lane that names its bead is the publication's identity.
+    if newest_with_bead is not None:
+        return newest_with_bead[1], newest_with_bead[2]
+    if newest is None:
         return None, None
-    return best[1], best[2]
+    return newest[1], None
+
+
+def _lane_bead(contract: Mapping[str, Any]) -> str | None:
+    """The bead a lane was launched for, from either launch route."""
+    binding = contract.get("bead_binding")
+    if isinstance(binding, Mapping) and isinstance(binding.get("bead_id"), str):
+        return str(binding["bead_id"]) or None
+    parameters = contract.get("parameters")
+    campaign = parameters.get("campaign") if isinstance(parameters, Mapping) else None
+    group = campaign.get("group") if isinstance(campaign, Mapping) else None
+    return group if isinstance(group, str) and group else None
 
 
 def _read_text(path: Path, description: str) -> str:

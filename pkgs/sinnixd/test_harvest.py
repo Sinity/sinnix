@@ -808,7 +808,27 @@ def test_publish_derives_identity_and_authorizes_in_one_pass(
                 "spec": {
                     "kind": "attested-agent",
                     "checkout": {"checkout_id": "worktree-1"},
-                    "contract": {"bead_binding": {"bead_id": "polylogue-zzz1"}},
+                    # The campaign launcher names the bead through the wave
+                    # parameters, not through a bead binding.
+                    "contract": {
+                        "parameters": {"campaign": {"group": "polylogue-zzz1"}}
+                    },
+                },
+                "state": {"phase": "succeeded"},
+            }
+        )
+    )
+    # A newer review-fix lane on the same checkout carries no bead; it must
+    # not displace the lane that does (PR #4507 published with no bead).
+    (jobs_root / "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.json").write_text(
+        json.dumps(
+            {
+                "job_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "created_at": "2026-08-30T11:00:00+00:00",
+                "spec": {
+                    "kind": "attested-agent",
+                    "checkout": {"checkout_id": "worktree-1"},
+                    "contract": {"coordinator_label": "review-fix"},
                 },
                 "state": {"phase": "succeeded"},
             }
@@ -823,7 +843,9 @@ def test_publish_derives_identity_and_authorizes_in_one_pass(
     monkeypatch.setattr(harvest, "authorize", fake_authorize)
     result = harvest.publish(context, close=True)
     assert result["outcome"] == harvest.HARVEST_OK
-    assert captured["lane_job_id"] if "lane_job_id" in captured else True
+    assert captured.get("lane_job_id", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa") == (
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    )
     assert captured["bead_id"] == "polylogue-zzz1"
     assert captured["title"] == "fix: publish the harvested lane branch"
     assert captured["close_reason"] == "Delivered and verified."
