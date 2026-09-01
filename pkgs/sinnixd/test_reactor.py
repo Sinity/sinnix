@@ -1305,3 +1305,64 @@ def test_under_filled_fleet_refills_on_the_keeper_tick_leaves_only(
     assert project == "polylogue"
     assert "polylogue-leaf" in beads
     assert "polylogue-epic" not in beads
+
+
+def test_a_failed_refill_wave_backs_off_like_a_launched_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: without the backoff a wave that fails on one bad packet
+    is retried on every tick (one attempt per minute, 2026-09-01 22:23Z)."""
+    import subprocess
+
+    from sinnixd import reactor as reactor_module
+
+    spool = tmp_path / "events.jsonl"
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    def failing_dispatch(project: str, beads: tuple[str, ...]) -> None:
+        raise subprocess.CalledProcessError(1, ["agentctl", "campaign", "run"])
+
+    reactor = CampaignReactor(
+        spool,
+        tmp_path / "campaign-board.json",
+        tmp_path / "reactor",
+        project_roots={"polylogue": project_root},
+        jobs_state_dir=tmp_path / "jobs",
+        min_active_lanes=10,
+        refill_width_target=12,
+        refill_spacing_seconds=300,
+        refill_dispatcher=failing_dispatch,
+    )
+    append(
+        spool,
+        {"kind": "attested-agent", "job_id": "lane-1", "project": "polylogue", "phase": "succeeded"},
+    )
+    monkeypatch.setattr(
+        reactor_module, "_active_lane_count", lambda *a, **k: reactor_module._ActiveLaneCount(1, 0)
+    )
+
+    class Reader:
+        def ready(self):
+            return [{"id": "polylogue-leaf", "issue_type": "task"}]
+
+    class Snapshot:
+        def __init__(self, bead_id):
+            self.group = bead_id
+            self.bead_ids = (bead_id,)
+
+            class Dimensions:
+                conflict_keys = (f"file:{bead_id}",)
+
+            self.dimensions = Dimensions()
+
+    monkeypatch.setattr(reactor_module, "SubprocessBdReader", lambda root: Reader())
+    monkeypatch.setattr(reactor_module.PacketConfig, "load", staticmethod(lambda root: object()))
+    monkeypatch.setattr(reactor_module, "compile_launch_snapshot", lambda bead_id, **kw: Snapshot(bead_id))
+    monkeypatch.setattr(reactor_module, "_judgment_reason", lambda row, snap: None)
+
+    reactor.run_once()
+
+    record = reactor._board.keeper.get("refill:polylogue")
+    assert record is not None and record["backoff_seconds"] >= 300
+    assert any("refill polylogue" in e["message"] for e in reactor._board.errors)

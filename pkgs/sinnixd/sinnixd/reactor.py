@@ -2105,6 +2105,21 @@ class CampaignReactor:
             self._board.keeper.pop("lanes-low", None)
         except (OSError, subprocess.SubprocessError, ReactorError, ValueError) as error:
             self._board.record_error(-1, f"refill {project}: {error}")
+            # A failed wave backs off like a launched one; retrying every
+            # tick turned one bad packet into a refill attempt per minute.
+            emitted_at = datetime.now(UTC)
+            previous = int(prior["backoff_seconds"]) if prior is not None else 0
+            backoff = min(
+                max(previous * 2, self.refill_spacing_seconds),
+                MAX_REFILL_BACKOFF_SECONDS,
+            )
+            self._board.keeper[refill_key] = {
+                "emitted_at": emitted_at.isoformat(),
+                "backoff_seconds": backoff,
+                "next_eligible_at": (
+                    emitted_at + timedelta(seconds=backoff)
+                ).isoformat(),
+            }
 
     def _verify_all_records(self) -> list[dict[str, Any]]:
         """Read terminal verify_all records in execution order."""
