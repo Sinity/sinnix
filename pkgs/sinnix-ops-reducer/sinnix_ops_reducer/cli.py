@@ -13,6 +13,7 @@ from .actions import ActionService
 from .agent_jobs import AgentCtlClient
 from .ambient import product_source
 from .feedback import CoalescingTrigger, FeedbackSpool
+from .clodex_usage import clodex_usage
 from .reducer import Reducer, observe_source
 from .server import FAILURE_PATH, ensure_token, serve
 from .state import StateLayer
@@ -248,6 +249,7 @@ def main() -> None:
             "agentctl",
         ),
     )
+    parser.add_argument("--clodex-usage", type=Path, default=None, help="Clodex routed inference accounting JSONL")
     args = parser.parse_args()
     observe_command = list(args.observe_command)
     if len(observe_command) == 1:
@@ -265,6 +267,7 @@ def main() -> None:
         layer.reducer_state_path,
         ambient_source=product_source(args.ambient_product),
         agent_jobs_source=AgentCtlClient(args.agentctl).list,
+        clodex_usage_source=lambda: clodex_usage(args.clodex_usage),
     )
     reducer.anchor_event_path = args.anchor_events or (root / "afk-resume.json")
     reducer.hyprland_event_path = args.hyprland_events or (root / "hyprland-events")
