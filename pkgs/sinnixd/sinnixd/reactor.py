@@ -1385,14 +1385,23 @@ class CampaignReactor:
             flags = packet.get("redflags")
             named = ", ".join(str(f) for f in flags) if isinstance(flags, list) else ""
             return f"red flags: {named}" or "red flags"
+        # The trailer is the lane's own prose. The receipt says what actually
+        # ran, so evidence decides in both directions: a fresh green quick run
+        # outranks a trailer written before it, and a trailer claiming green
+        # with no test run of its own HEAD is an exception, not a clean publish.
+        evidence = packet.get("verification")
+        runs = evidence.get("runs") if isinstance(evidence, Mapping) else None
+        quick_green = isinstance(runs, Mapping) and any(
+            str(command).endswith("--quick")
+            and isinstance(run, Mapping)
+            and run.get("status") == "success"
+            and not run.get("stale")
+            for command, run in runs.items()
+        )
         trailer = packet.get("lane_trailer")
         quick = trailer.get("LANE-QUICK") if isinstance(trailer, Mapping) else None
-        if quick != "green":
+        if quick != "green" and not quick_green:
             return f"lane gate {quick or 'unknown'}"
-        # The trailer is the lane's own prose. The receipt says what actually
-        # ran, so a lane claiming green with no test run of its own HEAD is an
-        # exception, not a clean publish.
-        evidence = packet.get("verification")
         state = evidence.get("state") if isinstance(evidence, Mapping) else None
         if state != "tests-run":
             return f"no test evidence for this head ({state or 'missing'})"
