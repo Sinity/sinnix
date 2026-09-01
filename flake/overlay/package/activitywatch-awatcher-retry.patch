@@ -1,6 +1,6 @@
 --- a/watchers/src/report_client.rs
 +++ b/watchers/src/report_client.rs
-@@ -41,22 +41,24 @@
+@@ -41,22 +41,90 @@
          Fut: Future<Output = Result<T, E>>,
          E: std::error::Error + Send + Sync + 'static,
      {
@@ -34,5 +34,71 @@
 +        }
      }
 -
++
++    #[cfg(test)]
++    mod tests {
++        use super::ReportClient;
++        use std::sync::{Arc, Mutex};
++        use std::time::{Duration, Instant};
++
++        #[tokio::test]
++        async fn transition_retry_reuses_timestamp() {
++            let seen = Arc::new(Mutex::new(Vec::new()));
++            let seen_by_request = Arc::clone(&seen);
++            let timestamp = "2026-09-01T10:00:00Z";
++            let result = ReportClient::run_with_retries(move || {
++                let seen = Arc::clone(&seen_by_request);
++                async move {
++                    let mut seen = seen.lock().unwrap();
++                    seen.push(timestamp);
++                    if seen.len() == 1 {
++                        Err(std::io::Error::new(std::io::ErrorKind::ConnectionReset, "rejected"))
++                    } else {
++                        Ok::<_, std::io::Error>(())
++                    }
++                }
++            }).await;
++            assert!(result.is_ok());
++            assert_eq!(*seen.lock().unwrap(), vec![timestamp, timestamp]);
++        }
++
++        #[tokio::test]
++        async fn failure_is_bounded_to_four_attempts() {
++            let attempts = Arc::new(Mutex::new(0));
++            let attempts_by_request = Arc::clone(&attempts);
++            let started = Instant::now();
++            let result = ReportClient::run_with_retries(move || {
++                let attempts = Arc::clone(&attempts_by_request);
++                async move {
++                    *attempts.lock().unwrap() += 1;
++                    Err::<(), _>(std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout"))
++                }
++            }).await;
++            assert!(result.is_err());
++            assert_eq!(*attempts.lock().unwrap(), 4);
++            assert!(started.elapsed() < Duration::from_secs(10));
++        }
++
++        #[tokio::test]
++        async fn accepted_then_lost_response_is_one_effective_transition() {
++            let effective = Arc::new(Mutex::new(Vec::new()));
++            let effective_by_request = Arc::clone(&effective);
++            let timestamp = "2026-09-01T10:00:00Z";
++            let result = ReportClient::run_with_retries(move || {
++                let effective = Arc::clone(&effective_by_request);
++                async move {
++                    let mut effective = effective.lock().unwrap();
++                    if effective.is_empty() {
++                        effective.push(timestamp);
++                        Err(std::io::Error::new(std::io::ErrorKind::ConnectionReset, "response lost"))
++                    } else {
++                        Ok::<_, std::io::Error>(())
++                    }
++                }
++            }).await;
++            assert!(result.is_ok());
++            assert_eq!(*effective.lock().unwrap(), vec![timestamp]);
++        }
++    }
 +
      pub async fn ping(
