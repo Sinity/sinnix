@@ -836,6 +836,22 @@ def test_a_lane_with_nothing_to_publish_parks_its_bead_for_the_operator(
     ]
 
 
+def test_fresh_green_quick_evidence_outranks_a_stale_trailer() -> None:
+    """Anti-vacuity: trusting LANE-QUICK alone held polylogue-0cm7m behind an
+    integrator after its quick gate had already passed at that head."""
+    packet = {
+        "redflag_status": 0,
+        "lane_trailer": {"LANE-QUICK": "blocked-env"},
+        "verification": {
+            "state": "tests-run",
+            "runs": {"--quick": {"status": "success", "stale": False}},
+        },
+    }
+    assert CampaignReactor._needs_judgment({"packet": packet}) is None
+    packet["verification"]["runs"]["--quick"]["stale"] = True
+    assert CampaignReactor._needs_judgment({"packet": packet}) == "lane gate blocked-env"
+
+
 def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
     """Judgment is spent on exceptions, not on every lane that passed its scan.
 
