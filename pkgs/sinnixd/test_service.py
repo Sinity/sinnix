@@ -3097,6 +3097,8 @@ class FakeSystemdJobs:
         log_path: Path,
         json_result_path: Path | None = None,
         pool: str,
+        memory_max_bytes: int | None = None,
+        swap_max_bytes: int | None = None,
     ) -> None:
         self.started.append(
             {
@@ -11997,3 +11999,34 @@ def test_sub_hourly_timers_are_not_persistent() -> None:
     assert timer_persistent("*-*-* 03:17:00") is True
     assert timer_persistent("hourly") is True
     assert timer_persistent("weekly") is True
+
+
+def test_every_unit_runs_under_its_pool_memory_ceiling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anti-vacuity: without MemoryMax/MemorySwapMax an agent lane admitted at
+    the 1 GiB default reached 19.3 GB and swapped the host to 97% (2026-09-01)."""
+    from sinnixd.jobs import MIB, UserSystemdJobs, memory_ceiling
+
+    assert memory_ceiling("agent", None) == (8 * 1024 * MIB, 2 * 1024 * MIB)
+    assert memory_ceiling("bulk", 16_000_000_000) == (20 * 1024 * MIB, 4 * 1024 * MIB)
+    assert memory_ceiling("bulk", 30_000_000_000)[0] == 30_000_000_000
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        UserSystemdJobs, "_run", lambda self, args, **_kw: calls.append(list(args)) or ""
+    )
+    monkeypatch.setattr(UserSystemdJobs, "lane_read_only_paths", staticmethod(lambda: ()))
+    UserSystemdJobs().start(
+        unit="sinnixd-job-00000000-0000-0000-0000-000000000002.service",
+        command=("true",),
+        working_directory="/work/project",
+        environment={},
+        timeout_seconds=1,
+        log_path=tmp_path / "job.log",
+        pool="agent",
+        memory_max_bytes=8 * 1024 * MIB,
+        swap_max_bytes=2 * 1024 * MIB,
+    )
+    argv = calls[0]
+    assert f"--property=MemoryMax={8 * 1024 * MIB}" in argv
+    assert f"--property=MemoryHigh={6 * 1024 * MIB}" in argv
+    assert f"--property=MemorySwapMax={2 * 1024 * MIB}" in argv

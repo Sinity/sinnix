@@ -99,21 +99,32 @@ POOL_SLICES = {
     "bulk": "sinnixd-work-bulk.slice",
     "agent": "sinnixd-work-agent.slice",
 }
+# memory_max is the hard cgroup ceiling every unit in the pool runs under
+# (raised to a declared estimate when one is larger); swap_max bounds how
+# far a unit may push the host into swap. Admission estimates bound nothing
+# by themselves: an integrator lane admitted at the 1 GiB default peaked at
+# 19.3 GB on 2026-09-01 and drove swap to 97% before systemd-oomd acted.
 POOL_POLICIES = {
     "interactive": {
         "workers": 4,
         "memory_budget": 3 * 1024 * MIB,
         "default_estimate": 256 * MIB,
+        "memory_max": 3 * 1024 * MIB,
+        "swap_max": 1024 * MIB,
     },
     "normal": {
         "workers": 3,
         "memory_budget": 8 * 1024 * MIB,
         "default_estimate": 1024 * MIB,
+        "memory_max": 6 * 1024 * MIB,
+        "swap_max": 2 * 1024 * MIB,
     },
     "bulk": {
         "workers": 1,
         "memory_budget": 18 * 1024 * MIB,
         "default_estimate": 8 * 1024 * MIB,
+        "memory_max": 20 * 1024 * MIB,
+        "swap_max": 4 * 1024 * MIB,
     },
     "agent": {
         # Agent lanes are memory-idle for most of their wall time (API-bound)
@@ -123,8 +134,17 @@ POOL_POLICIES = {
         "workers": 16,
         "memory_budget": 48 * 1024 * MIB,
         "default_estimate": 1024 * MIB,
+        "memory_max": 8 * 1024 * MIB,
+        "swap_max": 2 * 1024 * MIB,
     },
 }
+
+
+def memory_ceiling(pool: str, estimate_memory_bytes: int | None) -> tuple[int, int]:
+    """(MemoryMax, MemorySwapMax) for one unit: the pool ceiling, or a larger declaration."""
+    policy = POOL_POLICIES[pool]
+    declared = estimate_memory_bytes or 0
+    return max(int(policy["memory_max"]), declared), int(policy["swap_max"])
 
 
 def default_state_dir() -> Path:
@@ -430,6 +450,8 @@ class SystemdJobs(Protocol):
         notify_socket: Path | None = None,
         notify_job_id: str | None = None,
         pool: str,
+        memory_max_bytes: int | None = None,
+        swap_max_bytes: int | None = None,
     ) -> None: ...
 
     def show(
@@ -492,6 +514,8 @@ class UserSystemdJobs:
         notify_socket: Path | None = None,
         notify_job_id: str | None = None,
         pool: str,
+        memory_max_bytes: int | None = None,
+        swap_max_bytes: int | None = None,
     ) -> None:
         args = [
             "systemd-run",
@@ -501,6 +525,15 @@ class UserSystemdJobs:
             f"--slice={POOL_SLICES[pool]}",
             f"--property=WorkingDirectory={working_directory}",
             f"--property=RuntimeMaxSec={timeout_seconds}s",
+            *(
+                [
+                    f"--property=MemoryMax={memory_max_bytes}",
+                    f"--property=MemoryHigh={memory_max_bytes * 3 // 4}",
+                ]
+                if memory_max_bytes
+                else []
+            ),
+            *([f"--property=MemorySwapMax={swap_max_bytes}"] if swap_max_bytes is not None else []),
             *(
                 f"--property=ReadOnlyPaths={path}"
                 for path in self.lane_read_only_paths()
@@ -3262,6 +3295,8 @@ class GenericJobs:
                     timeout_seconds=spec.timeout_seconds,
                     log_path=record.log_path,
                     pool=spec.pool,
+                    memory_max_bytes=memory_ceiling(spec.pool, spec.estimate_memory_bytes)[0],
+                    swap_max_bytes=memory_ceiling(spec.pool, spec.estimate_memory_bytes)[1],
                     json_result_path=record.result_path
                     if spec.result_kind in {"json", "pytest"}
                     else None,
@@ -4181,6 +4216,8 @@ class GenericJobs:
                         timeout_seconds=current.spec.timeout_seconds,
                         log_path=current.log_path,
                         pool=current.spec.pool,
+                        memory_max_bytes=memory_ceiling(current.spec.pool, current.spec.estimate_memory_bytes)[0],
+                        swap_max_bytes=memory_ceiling(current.spec.pool, current.spec.estimate_memory_bytes)[1],
                         json_result_path=current.result_path
                         if current.spec.result_kind in {"json", "pytest"}
                         else None,
