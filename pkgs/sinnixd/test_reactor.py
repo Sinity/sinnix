@@ -852,6 +852,54 @@ def test_fresh_green_quick_evidence_outranks_a_stale_trailer() -> None:
     assert CampaignReactor._needs_judgment({"packet": packet}) == "lane gate blocked-env"
 
 
+def test_judgment_reads_the_receipt_the_event_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A review-required event carries only the packet id.
+
+    Anti-vacuity: judging the bare event reads every receipt as "no receipt",
+    which sent every clean lane to an integrator (all of 2026-09-01).
+    """
+    published: list[str] = []
+    receipt = {
+        "head": "d" * 40,
+        "redflag_status": 0,
+        "lane_trailer": {"LANE-QUICK": "green"},
+        "verification": {"state": "tests-run", "runs": {}},
+    }
+    monkeypatch.setattr(
+        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
+    )
+    monkeypatch.setattr(
+        CampaignReactor, "_receipt_payload", staticmethod(lambda r: receipt)
+    )
+    monkeypatch.setattr(
+        CampaignReactor,
+        "_publish",
+        lambda self, project, workspace, receipt_ref, key: published.append(key),
+    )
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        project_roots={"polylogue": tmp_path / "repo"},
+        integration_dispatcher=lambda *a: None,
+    )
+
+    reactor._dispatch_integration(
+        {
+            "kind": "harvest",
+            "transition": "review-required",
+            "project": "polylogue",
+            "workspace_id": "worktree-abc",
+            "packet_id": "harvest-" + "4" * 32,
+            "job_id": "job-4",
+        }
+    )
+
+    assert published == ["publish:packet-p-9:dddddddddddd"]
+
+
 def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
     """Judgment is spent on exceptions, not on every lane that passed its scan.
 

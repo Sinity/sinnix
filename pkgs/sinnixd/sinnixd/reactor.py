@@ -1450,6 +1450,11 @@ class CampaignReactor:
         # One integration per (workspace, head): a re-review of the same
         # commit is a no-op, and a lane that pushed new work after its first
         # integration gets judged again rather than parked behind it.
+        if not isinstance(event.get("packet"), Mapping):
+            # Judgment reads the receipt, not the event that names it.
+            payload = self._receipt_payload(str(receipt))
+            if payload is not None:
+                event = {**event, "packet": payload}
         head = self._receipt_field(str(receipt), "head")
         suffix = f":{head[:12]}" if head else ""
         root = self.project_roots.get(str(project))
@@ -1770,8 +1775,19 @@ class CampaignReactor:
         """The workspace a harvest receipt was published from."""
         return cls._receipt_field(receipt, "workspace_id")
 
+    @classmethod
+    def _receipt_field(cls, receipt: str, key: str) -> str | None:
+        payload = cls._receipt_payload(receipt)
+        value = payload.get(key) if payload is not None else None
+        return value if isinstance(value, str) and value else None
+
     @staticmethod
-    def _receipt_field(receipt: str, key: str) -> str | None:
+    def _receipt_payload(receipt: str) -> Mapping[str, Any] | None:
+        """The harvest receipt a review-required event names.
+
+        The event carries the packet id only; the receipt file holds what
+        judgment reads (scan flags, lane trailer, verification evidence).
+        """
         packet_root = Path.home() / ".local/state/sinnixd/harvest-packets"
         name = receipt.rsplit("/", 1)[-1]
         if not re.fullmatch(r"harvest-[0-9a-f]{32}", name):
@@ -1780,8 +1796,7 @@ class CampaignReactor:
             payload = json.loads((packet_root / f"{name}.json").read_text())
         except (OSError, json.JSONDecodeError):
             return None
-        value = payload.get(key) if isinstance(payload, dict) else None
-        return value if isinstance(value, str) and value else None
+        return payload if isinstance(payload, Mapping) else None
 
     @staticmethod
     def _review_fix_prompt(
