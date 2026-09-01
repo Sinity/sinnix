@@ -38,8 +38,6 @@ Look for the verb before writing any procedure: `agentctl <noun> --help`.
 | protect work before risky integration    | `agentctl workspace checkpoint` / `restore` / `recover`                                       |
 | stacked branches                         | `agentctl workspace stack` / `restack`                                                        |
 | review state of a workspace              | `agentctl workspace review-status`                                                            |
-| complete a packet                        | `agentctl packet finalize --verification-job <j> --packet-job <j>`                            |
-| packet state                             | `agentctl packet status`                                                                      |
 | task-backend mutations                   | `agentctl task create/claim/complete/note/update/relate/reconcile/snapshot`                   |
 | wait on work                             | `agentctl job wait`, `agentctl agent wait`, `agentctl plan wait`                              |
 | all evidence for a job or workspace      | `agentctl evidence <id>`                                                                      |

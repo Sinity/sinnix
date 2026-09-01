@@ -10011,7 +10011,6 @@ def test_slow_operations_keep_their_widened_budgets() -> None:
     floors = {
         "workspace.review-status": 65.0,
         "workspace.finish": 185.0,
-        "packet.finalize": 420.0,
         "campaign.run": 300.0,
         "campaign.status": 30.0,
         "workspace.list": 60.0,

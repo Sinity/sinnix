@@ -143,74 +143,6 @@ def test_fleet_joins_fixtures_and_caps_gh_calls(tmp_path: Path) -> None:
     assert "sinnix-byw5" in render_fleet(payload)
 
 
-def test_evidence_preserves_absence_and_reads_finalize_record(tmp_path: Path) -> None:
-    store = GenericJobStore(tmp_path / "state")
-    worktree = tmp_path / "worktree"
-    worktree.mkdir()
-    workspace_id = "workspace-evidence"
-    workspace_store = WorkspaceStore(store.root)
-    workspace_store.put(
-        WorkspaceRecord(
-            workspace_id=workspace_id,
-            project_id="sinnix",
-            name="evidence",
-            path=worktree,
-            branch="feature/evidence",
-            base="master",
-            created_at="2026-08-26T00:00:00+00:00",
-            managed=True,
-        )
-    )
-    job = _job(
-        store,
-        job_id="00000000-0000-0000-0000-000000000005",
-        created_at="2026-08-26T10:00:00+00:00",
-        phase="succeeded",
-        terminal=True,
-        checkout=_checkout(worktree, workspace_id),
-        contract={
-            "bead_binding": {"bead_ref": "sinnix://projects/sinnix/beads/sinnix-byw5"}
-        },
-    )
-    store.save(job)
-    store.inputs_root.mkdir(parents=True, exist_ok=True)
-    (store.inputs_root / f"{job.job_id}.json").write_text(
-        json.dumps({"prompt_path": str(store.inputs_root / f"{job.job_id}.prompt")})
-    )
-    (store.inputs_root / f"{job.job_id}.prompt").write_text("private fixture prompt")
-    finalize = store.root / "finalize"
-    finalize.mkdir()
-    (finalize / f"{job.job_id}.json").write_text(
-        json.dumps({"saga_state": "closed", "merge_sha": "b" * 40})
-    )
-    calls: list[tuple[Path, str]] = []
-
-    def gh(path: Path, branch: str):
-        calls.append((path, branch))
-        return None
-
-    payload = read_evidence(
-        store,
-        job.job_id,
-        workspace_store=workspace_store,
-        gh=gh,
-    )
-    assert payload["unit_kind"] == "job"
-    assert payload["record"]["job_id"] == job.job_id
-    assert payload["branch"] == "feature/evidence"
-    assert payload["refs_by_job"][job.job_id] == {
-        "bead": "sinnix://projects/sinnix/beads/sinnix-byw5",
-        "prompt_file": str(store.inputs_root / f"{job.job_id}.prompt"),
-    }
-    assert payload["usage"]["systemd"]["MemoryPeak"] == "1234"
-    assert payload["pr"] is None
-    assert payload["saga"]["saga_state"] == "closed"
-    assert calls == [(worktree, "feature/evidence")]
-    rendered = render_evidence(payload)
-    assert "record_json:" in rendered
-    assert "saga_json:" in rendered
-
-
 def test_evidence_unknown_unit_is_explicitly_absent(tmp_path: Path) -> None:
     payload = read_evidence(
         GenericJobStore(tmp_path / "state"), "missing-unit", gh_limit=0
@@ -219,5 +151,4 @@ def test_evidence_unknown_unit_is_explicitly_absent(tmp_path: Path) -> None:
     assert payload["record"] is None
     assert payload["workspace"] is None
     assert payload["pr"] is None
-    assert payload["saga"] is None
     assert "record: -" in render_evidence(payload)

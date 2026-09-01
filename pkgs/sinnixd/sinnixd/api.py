@@ -40,8 +40,6 @@ CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS = {
     "plan.get": DEFAULT_RESPONSE_BUDGET_SECONDS,
     "plan.list": 60.0,
     "plan.result": DEFAULT_RESPONSE_BUDGET_SECONDS,
-    "packet.status": 60.0,
-    "packet.finalize": 420.0,
     # Listing runs git identity checks per record; at fleet scale it exceeds
     # a short default and was misreported as "sinnixd is unavailable" (dn4c).
     "workspace.list": 60.0,

@@ -41,7 +41,6 @@ from .jobs import (
 )
 from .limits import MAX_AGENT_TIMEOUT_SECONDS
 from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
-from .packet import PacketFinalizeSaga, PacketSagaError, PacketSagaStore
 from .project_plans import PlanStore, ProjectPlanExecutor
 from .projects import ProjectCatalog
 from .reactor import CampaignBoard
@@ -81,8 +80,6 @@ SUPPORTED_OPERATIONS = frozenset(
         "plan.list",
         "plan.wait",
         "plan.result",
-        "packet.finalize",
-        "packet.status",
         "campaign.run",
         "campaign.status",
         "workspace.list",
@@ -147,7 +144,6 @@ class SinnixdService:
     delivery: GitHubDelivery | None = None
     tasks: TaskService | None = None
     plans: ProjectPlanExecutor | None = None
-    packet_sagas: PacketFinalizeSaga | None = None
     campaign_board_path: Path = Path("/realm/tmp/work/campaign-board.json")
 
     def __post_init__(self) -> None:
@@ -178,17 +174,6 @@ class SinnixdService:
                     self.jobs,
                     PlanStore(self.jobs.store.root),
                     self.workspaces,
-                ),
-            )
-        if self.packet_sagas is None:
-            assert self.delivery is not None and self.tasks is not None
-            object.__setattr__(
-                self,
-                "packet_sagas",
-                PacketFinalizeSaga(
-                    self.delivery,
-                    self.tasks,
-                    PacketSagaStore(self.jobs.store.root),
                 ),
             )
         self.jobs.register_schedules(self.projects.scheduled_operations())
@@ -252,14 +237,6 @@ class SinnixdService:
                 lifecycle=Lifecycle.DAEMON_OWNED,
                 versions=frozenset({1}),
                 documentation="Backend-neutral AgentCTL task operations through the current task authority.",
-            ),
-            OwnerSpec(
-                namespace="packet",
-                owner="packet-saga",
-                authority=Authority.OWNER,
-                lifecycle=Lifecycle.DAEMON_OWNED,
-                versions=frozenset({1}),
-                documentation="Retryable packet land, task completion, and workspace finish saga.",
             ),
         )
         return OwnerRegistry(
@@ -328,8 +305,6 @@ class SinnixdService:
                 request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error)
             )
         except TaskError as error:
-            return self._error(request, owner_name, error.code, str(error))
-        except PacketSagaError as error:
             return self._error(request, owner_name, error.code, str(error))
         except ValueError as error:
             return self._error(
@@ -533,34 +508,6 @@ class SinnixdService:
                 principal=principal,
                 mutation_id=idempotency_key,
             )
-        if operation == "packet.finalize":
-            if principal not in {"agent-control", "operator"}:
-                raise ValueError(
-                    "packet finalization requires agent-control or operator principal"
-                )
-            if set(arguments) != {
-                "workspace_id",
-                "verification_job_id",
-                "packet_job_id",
-            }:
-                raise ValueError(
-                    "packet.finalize requires workspace_id, verification_job_id, and packet_job_id"
-                )
-            assert self.packet_sagas is not None
-            return self.packet_sagas.finalize(
-                workspace_id=self._workspace_argument(arguments, "packet.finalize"),
-                verification_job_id=self._job_argument(
-                    arguments, "verification_job_id"
-                ),
-                packet_job_id=self._job_argument(arguments, "packet_job_id"),
-            )
-        if operation == "packet.status":
-            if principal not in {"agent-control", "operator", "observer"}:
-                raise ValueError("packet status requires an authorized principal")
-            if set(arguments) != {"saga_id"}:
-                raise ValueError("packet.status requires saga_id")
-            assert self.packet_sagas is not None
-            return self.packet_sagas.status(self._job_argument(arguments, "saga_id"))
         if operation == "workspace.list":
             if set(arguments) - {"project_id"}:
                 raise ValueError("workspace.list accepts optional project_id")
