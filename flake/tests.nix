@@ -30,6 +30,7 @@ in
     ./tests/terminal-capture.nix
     ./tests/capture-clipboard.nix
     ./tests/capture-primary.nix
+    ./tests/capture-spotify.nix
     ./tests/backup.nix
     ./tests/command-registry.nix
     ./tests/agent-environment.nix
