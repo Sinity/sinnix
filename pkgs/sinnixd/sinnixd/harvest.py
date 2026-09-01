@@ -404,6 +404,80 @@ def _lane_write_scope(
     return sorted(candidates, key=lambda item: item[0])[-1][1] if candidates else ()
 
 
+def _lane_oracle_command(
+    context: HarvestContext, *, lane_job_id: str | None
+) -> str | None:
+    """Read the packet-declared oracle from the attested job dimensions."""
+    records_root = context.state_root / "jobs"
+    paths = (
+        [records_root / f"{lane_job_id}.json"]
+        if lane_job_id
+        else sorted(records_root.glob("*.json"))
+    )
+    candidates: list[tuple[str, str]] = []
+    for record_path in paths:
+        try:
+            record = json.loads(record_path.read_text())
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        spec = record.get("spec") if isinstance(record, Mapping) else None
+        checkout = spec.get("checkout") if isinstance(spec, Mapping) else None
+        state = record.get("state") if isinstance(record, Mapping) else None
+        dimensions = spec.get("dimensions") if isinstance(spec, Mapping) else None
+        command = dimensions.get("oracle_command") if isinstance(dimensions, Mapping) else None
+        if (
+            isinstance(spec, Mapping)
+            and spec.get("kind") == "attested-agent"
+            and isinstance(checkout, Mapping)
+            and checkout.get("checkout_id") == context.workspace_id
+            and isinstance(state, Mapping)
+            and state.get("phase") == "succeeded"
+            and isinstance(command, str)
+            and command.strip()
+        ):
+            candidates.append((str(record.get("created_at", "")), command.strip()))
+    return sorted(candidates, key=lambda item: item[0])[-1][1] if candidates else None
+
+
+def _oracle_evidence(context: HarvestContext, command: str, run: Run) -> dict[str, Any]:
+    if len(command.encode()) > 4_096 or "\x00" in command:
+        raise HarvestError("harvest oracle command exceeds its bounded limit")
+    result = _command(run, ["bash", "-lc", command], cwd=context.worktree, timeout=60)
+    stdout = result.stdout or ""
+    stderr = result.stderr or ""
+    return {
+        "command": command,
+        "command_sha256": _digest(command),
+        "stdout": stdout,
+        "stderr": stderr,
+        "exit_code": result.returncode,
+        "output_sha256": _digest(json.dumps({"stdout": stdout, "stderr": stderr}, sort_keys=True)),
+    }
+
+
+def _valid_oracle_receipt(value: Any) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    command = value.get("command")
+    stdout = value.get("stdout")
+    stderr = value.get("stderr")
+    exit_code = value.get("exit_code")
+    return (
+        isinstance(command, str)
+        and bool(command.strip())
+        and len(command.encode()) <= 4_096
+        and "\x00" not in command
+        and isinstance(stdout, str)
+        and isinstance(stderr, str)
+        and isinstance(exit_code, int)
+        and not isinstance(exit_code, bool)
+        and exit_code == 0
+        and value.get("command_sha256") == _digest(command)
+        and value.get("output_sha256")
+        == _digest(json.dumps({"stdout": stdout, "stderr": stderr}, sort_keys=True))
+    )
+
+
 def _verification_evidence(worktree: Path, head: str) -> dict[str, Any]:
     """Read what the lane's own verification actually did.
 
@@ -614,6 +688,7 @@ def compile_packet(
     lane_job_id: str | None = None,
     bead_id: str | None = None,
     close_reason: str | None = None,
+    oracle_command: str | None = None,
     run: Run = subprocess.run,
 ) -> dict[str, Any]:
     """Compile a review packet and stop before any publication side effect."""
@@ -656,6 +731,16 @@ def compile_packet(
         if path
     )
     write_scope = _lane_write_scope(context, lane_job_id=lane_job_id)
+    oracle_command = oracle_command or _lane_oracle_command(context, lane_job_id=lane_job_id)
+    oracle = _oracle_evidence(context, oracle_command, run) if oracle_command else None
+    if oracle is not None and oracle["exit_code"] != 0:
+        result = {
+            "outcome": GATE_RED,
+            "message": "harvest reality oracle is red",
+            "oracle": oracle,
+        }
+        _append_event(context.spool, {"kind": "harvest", **result, "job_id": context.job_id})
+        return result
     diffstat = _git(run, context.worktree, "diff", "--stat", f"{context.base}...HEAD")
     redflag_status, redflags = _redflags(
         diff, write_scope=write_scope, changed_paths=changed_paths
@@ -691,6 +776,7 @@ def compile_packet(
         "lane_trailer": trailer,
         "write_scope": list(write_scope),
         "verification": _verification_evidence(context.worktree, head),
+        "oracle": oracle,
         "redflags": redflags,
         "redflag_status": redflag_status,
         "review_route": review_route.to_dict(),
@@ -996,6 +1082,9 @@ def authorize(
 ) -> dict[str, Any]:
     """Publish only from a reviewed receipt, returning typed stop outcomes."""
     receipt = _load_receipt(context, receipt_ref)
+    oracle = receipt.get("oracle")
+    if oracle is not None and not _valid_oracle_receipt(oracle):
+        raise HarvestError("harvest reality oracle receipt is invalid")
     current_head = _git(run, context.worktree, "rev-parse", "HEAD")
     if current_head != receipt["head"]:
         raise HarvestError(

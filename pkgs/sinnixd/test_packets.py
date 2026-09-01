@@ -8,6 +8,7 @@ import pytest
 import sinnixd.cli as cli_module
 from sinnixd.packets import (
     PacketConfig,
+    PacketError,
     checkout_id_from_workspace_response,
     compile_launch_snapshot,
     extract_references,
@@ -17,7 +18,13 @@ from sinnixd.packets import (
 )
 
 
-def bead(bead_id: str, *, group: str | None = None, intent: str = "ship it") -> dict:
+def bead(
+    bead_id: str,
+    *,
+    group: str | None = None,
+    intent: str = "ship it",
+    oracle_command: str | None = None,
+) -> dict:
     metadata = {
         "model_policy": "provider-neutral-calibrated-v2",
         "effort": "medium",
@@ -28,6 +35,8 @@ def bead(bead_id: str, *, group: str | None = None, intent: str = "ship it") -> 
     }
     if group is not None:
         metadata["dispatch_group"] = group
+    if oracle_command is not None:
+        metadata["oracle_command"] = oracle_command
     return {
         "id": bead_id,
         "title": f"Title {bead_id}",
@@ -100,6 +109,39 @@ def test_snapshot_compiles_fixture_bead_json_and_group() -> None:
     assert snapshot.dimensions.conflict_keys == ("area:parser", "area:storage")
     assert "Description leader" in snapshot.prompt
     assert "Description member" in snapshot.prompt
+
+
+def test_snapshot_carries_one_packet_oracle_command() -> None:
+    config = PacketConfig(template_path=Path(__file__), atlas_dir=Path("/does/not/matter"))
+    snapshot = compile_launch_snapshot(
+        "leader",
+        project_root=Path("/does/not/matter"),
+        project_id="fixture",
+        reader=FixtureBd([bead("leader", oracle_command="git status --short")]),
+        config=config,
+    )
+
+    assert snapshot.dimensions.oracle_command == "git status --short"
+    assert snapshot.to_dict()["dimensions"]["oracle_command"] == "git status --short"
+
+
+def test_snapshot_rejects_conflicting_packet_oracle_commands() -> None:
+    config = PacketConfig(template_path=Path(__file__), atlas_dir=Path("/does/not/matter"))
+    reader = FixtureBd(
+        [
+            bead("leader", oracle_command="git status --short"),
+            bead("child", group="leader", oracle_command="git diff --quiet"),
+        ]
+    )
+
+    with pytest.raises(PacketError, match="one oracle_command"):
+        compile_launch_snapshot(
+            "leader",
+            project_root=Path("/does/not/matter"),
+            project_id="fixture",
+            reader=reader,
+            config=config,
+        )
 
 
 def test_reference_extraction_accepts_repo_references_and_rejects_noise() -> None:

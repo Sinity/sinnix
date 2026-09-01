@@ -72,6 +72,75 @@ def test_compile_packet_halts_before_publication_and_spools_review_evidence(
     assert event["transition"] == "review-required"
 
 
+def test_failing_oracle_returns_gate_red_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _remote = _repository(tmp_path)
+    state = tmp_path / "state"
+    context = _context(root, state)
+    published = False
+
+    def publish_sentinel(*_args, **_kwargs):
+        nonlocal published
+        published = True
+        pytest.fail("failing oracle reached publication")
+
+    monkeypatch.setattr(harvest, "authorize", publish_sentinel)
+
+    result = harvest.compile_packet(
+        context, oracle_command="printf 'clone mismatch\\n' >&2; exit 7"
+    )
+
+    assert result["outcome"] == harvest.GATE_RED
+    assert result["oracle"]["exit_code"] == 7
+    assert result["oracle"]["stderr"] == "clone mismatch\n"
+    assert published is False
+
+
+def test_authorize_rejects_a_changed_oracle_command_in_receipt(
+    tmp_path: Path,
+) -> None:
+    root, _remote = _repository(tmp_path)
+    state = tmp_path / "state"
+    context = _context(root, state)
+    compiled = harvest.compile_packet(context, oracle_command="printf 'stable\\n'")
+    packet_id = compiled["packet"]["packet_id"]
+    receipt_path = state / "harvest-packets" / f"{packet_id}.json"
+    receipt = json.loads(receipt_path.read_text())
+    receipt["oracle"]["command"] = "printf 'changed\\n'"
+    receipt_path.write_text(json.dumps(receipt))
+
+    with pytest.raises(harvest.HarvestError, match="oracle receipt is invalid"):
+        harvest.authorize(
+            context,
+            receipt_ref=compiled["receipt_ref"],
+            title="fix: publish the harvested lane branch",
+            body="Reviewed packet.",
+        )
+
+
+def test_authorize_rejects_a_receipt_without_the_oracle_digest(
+    tmp_path: Path,
+) -> None:
+    root, _remote = _repository(tmp_path)
+    state = tmp_path / "state"
+    context = _context(root, state)
+    compiled = harvest.compile_packet(context, oracle_command="printf 'stable\\n'")
+    packet_id = compiled["packet"]["packet_id"]
+    receipt_path = state / "harvest-packets" / f"{packet_id}.json"
+    receipt = json.loads(receipt_path.read_text())
+    del receipt["oracle"]["command_sha256"]
+    receipt_path.write_text(json.dumps(receipt))
+
+    with pytest.raises(harvest.HarvestError, match="oracle receipt is invalid"):
+        harvest.authorize(
+            context,
+            receipt_ref=compiled["receipt_ref"],
+            title="fix: publish the harvested lane branch",
+            body="Reviewed packet.",
+        )
+
+
 def test_authorize_requires_receipt_and_runs_publish_pipeline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
