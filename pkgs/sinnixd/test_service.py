@@ -4710,6 +4710,7 @@ def test_user_systemd_jobs_starts_a_retained_service_with_log_boundary(
             "--property=ReadOnlyPaths=/operator-home/.claude",
             "--property=ReadOnlyPaths=/operator-home/.config",
             "--property=ReadOnlyPaths=/realm/state",
+            "--property=ReadWritePaths=/realm/state/agentctl",
             "--property=StandardOutput=journal",
             "--property=StandardError=journal",
             "--",
