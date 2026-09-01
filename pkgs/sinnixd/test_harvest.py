@@ -557,6 +557,53 @@ def test_a_failed_run_is_not_test_evidence(tmp_path: Path) -> None:
     assert harvest._verification_evidence(tmp_path, "abc")["state"] == "tests-run"
 
 
+def test_a_lane_metadata_commit_does_not_stale_the_test_evidence(tmp_path: Path) -> None:
+    """Evidence is bound to the code tested, not to the commit it ran on.
+
+    Anti-vacuity: comparing commits sent polylogue-0cm7m to a second
+    integrator after the first one committed only .lane/ files.
+    """
+    import subprocess
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=tmp_path, capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    (tmp_path / "module.py").write_text("x = 1\n")
+    git("add", "module.py")
+    git("commit", "-q", "-m", "code")
+    tested = git("rev-parse", "HEAD")
+    (tmp_path / ".lane").mkdir()
+    (tmp_path / ".lane" / "body.md").write_text("disposition\n")
+    git("add", ".lane/body.md")
+    git("commit", "-q", "-m", "chore: refresh review disposition")
+    metadata_only = git("rev-parse", "HEAD")
+    (tmp_path / "module.py").write_text("x = 2\n")
+    git("commit", "-q", "-am", "code changed")
+    code_changed = git("rev-parse", "HEAD")
+
+    runs = tmp_path / ".cache/verify/runs"
+    (runs / "a").mkdir(parents=True)
+    (runs / "a" / "run.json").write_text(
+        json.dumps(
+            {
+                "argv": ["devtools", "test", "tests/unit/test_module.py"],
+                "status": "success",
+                "git_head": tested,
+                "final_git_head": tested,
+                "pytest_aggregate": {"selected_union_count": 3},
+            }
+        )
+    )
+
+    assert harvest._verification_evidence(tmp_path, metadata_only)["state"] == "tests-run"
+    assert harvest._verification_evidence(tmp_path, code_changed)["state"] == "static-only"
+
+
 def test_review_route_auto_publishes_only_clean_docs_and_tests() -> None:
     result = route_review(
         changed_paths=("docs/review.md", "tests/test_review.py"),
