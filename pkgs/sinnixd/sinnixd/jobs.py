@@ -63,7 +63,6 @@ ADMISSION_SCHEMA_VERSION = 2
 CAPACITY_SCHEMA_VERSION = 1
 CAPACITY_RETRY_DELAYS_SECONDS = (5, 30, 120)
 MAX_ADMISSION_CACHE_ENTRIES = 128
-MAX_ADMISSION_ESTIMATES = 128
 MIB = 1024 * 1024
 GIB = 1024 * MIB
 MIN_HOST_MEMORY_RESERVE_BYTES = 256 * MIB
@@ -77,13 +76,6 @@ MAX_HOST_MEMORY_RESERVE_BYTES = 6 * GIB
 # starves admission (2026-08-31: the queue sat at zero running jobs while
 # gigabytes idled inside the reserve).
 HOST_MEMORY_RESERVE_FRACTION = 0.08
-# Agent lanes are memory-idle for most of their wall time (API-bound) and
-# peak only in short verification bursts that rarely coincide. Reserving the
-# full peak for the whole lane lifetime caps a 31G host at 3-4 lanes; the
-# discounted claim admits a real fleet and pressure preemption bumps the
-# largest lane on the rare collision.
-AGENT_CLAIM_FRACTION = 0.5
-AGENT_CLAIM_FLOOR_BYTES = 512 * MIB
 MIN_SWAP_FREE_FRACTION = 0.15
 # Below this much available RAM, a nearly-full swap is treated as exhaustion
 # even before stall pressure shows.
@@ -91,23 +83,16 @@ SWAP_EXHAUSTION_MIN_AVAILABLE_BYTES = 4 * 1024**3
 # PSI averages are percentages of elapsed time. A 10% full-memory signal means
 # the host is losing a tenth of its wall time to memory stalls.
 MEMORY_FULL_BLOCK_THRESHOLD = 10.0
-IO_FULL_BLOCK_THRESHOLD = 5.0
 MEMORY_FULL_PREEMPT_THRESHOLD = 25.0
-IO_FULL_PREEMPT_THRESHOLD = 20.0
 PREEMPT_SWAP_FREE_FRACTION = 0.10
 ACTIVE_PRESSURE_GRACE_SECONDS = 2.0
-# io_full_avg10 is itself a ten-second average, so a two-second grace on top of
-# it preempts on the decaying tail of a burst that has already finished.
-# Workspace provisioning (uv sync, npm ci) produces exactly such bursts.
-# Memory and swap keep the short grace: those endanger the host.
-IO_STALL_GRACE_SECONDS = 45.0
 MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES = 2
-LEARNED_ESTIMATE_HEADROOM_NUMERATOR = 5
-LEARNED_ESTIMATE_HEADROOM_DENOMINATOR = 4
-# The estimate is the high-water mark of this many recent runs. A single
-# pathological peak would otherwise cap concurrency for that estimate key
-# forever, long after whatever caused it was fixed.
-LEARNED_ESTIMATE_WINDOW = 5
+# Host IO PSI cannot attribute stalls to the managed plane: this host idles
+# with io full avg10 in the teens while managed jobs write megabytes. Gating
+# admission or choosing preemption victims on host IO therefore punishes work
+# for pressure it does not produce. IO protection may return only as a
+# managed-plane measurement (per-cgroup io.stat contribution), never as a
+# host PSI threshold. Memory and swap remain gated: those endanger the host.
 POOL_SLICES = {
     "interactive": "sinnixd-work-interactive.slice",
     "normal": "sinnixd-work-normal.slice",
@@ -131,12 +116,13 @@ POOL_POLICIES = {
         "default_estimate": 8 * 1024 * MIB,
     },
     "agent": {
-        # Admission memory arithmetic is the real limiter (discounted claims
-        # against the live host budget); the worker cap only guards CPU-burst
-        # collision on 24 threads.
+        # Agent lanes are memory-idle for most of their wall time (API-bound)
+        # and peak only in short verification bursts that rarely coincide, so
+        # the default claim is deliberately small; the worker cap guards
+        # CPU-burst collision on 24 threads.
         "workers": 16,
         "memory_budget": 48 * 1024 * MIB,
-        "default_estimate": 2 * 1024 * MIB,
+        "default_estimate": 1024 * MIB,
     },
 }
 
@@ -1119,7 +1105,6 @@ class GenericJobSpec:
     allow_failed_dependencies: bool = False
     coalesce_key: str | None = None
     cache_key: str | None = None
-    estimate_key: str | None = None
     estimate_memory_bytes: int | None = None
     scratch: str = "none"
     lease: ServiceLease | None = None
@@ -1244,10 +1229,6 @@ class GenericJobSpec:
                 len(key) != 64 or any(value not in "0123456789abcdef" for value in key)
             ):
                 raise ValueError(f"job {name} key is invalid")
-        if self.estimate_key is not None and (
-            not isinstance(self.estimate_key, str) or not self.estimate_key
-        ):
-            raise ValueError("job estimate key is invalid")
         if self.estimate_memory_bytes is not None and (
             not isinstance(self.estimate_memory_bytes, int)
             or isinstance(self.estimate_memory_bytes, bool)
@@ -1299,7 +1280,6 @@ class GenericJobSpec:
                 "allow_failed_dependencies": self.allow_failed_dependencies,
                 "coalesce_key": self.coalesce_key,
                 "cache_key": self.cache_key,
-                "estimate_key": self.estimate_key,
                 "estimate_memory_bytes": self.estimate_memory_bytes,
                 "scratch": self.scratch,
                 "bypass": self.admission_bypass,
@@ -1388,7 +1368,6 @@ class GenericJobSpec:
                 ),
                 coalesce_key=admission.get("coalesce_key"),
                 cache_key=admission.get("cache_key"),
-                estimate_key=admission.get("estimate_key"),
                 estimate_memory_bytes=admission.get("estimate_memory_bytes"),
                 scratch=admission.get("scratch", "none"),
                 admission_bypass=admission.get("bypass", False),
@@ -2791,50 +2770,30 @@ class GenericJobs:
 
     def _admission_state(self) -> dict[str, Any]:
         path = self.store.admission_path
+        empty = {
+            "schema_version": ADMISSION_SCHEMA_VERSION,
+            "active": {},
+            "cache": {},
+            "claims": {},
+        }
         if not path.exists():
-            return {
-                "schema_version": ADMISSION_SCHEMA_VERSION,
-                "active": {},
-                "cache": {},
-                "estimates": {},
-                "claims": {},
-            }
+            return dict(empty)
         try:
             value = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):
             # Conservatively recover by forgetting optimizations. Existing
             # records/systemd evidence still determine all real jobs.
-            return {
-                "schema_version": ADMISSION_SCHEMA_VERSION,
-                "active": {},
-                "cache": {},
-                "estimates": {},
-                "claims": {},
-            }
+            return dict(empty)
         if not isinstance(value, Mapping) or value.get("schema_version") not in {
             1,
             ADMISSION_SCHEMA_VERSION,
         }:
-            return {
-                "schema_version": ADMISSION_SCHEMA_VERSION,
-                "active": {},
-                "cache": {},
-                "estimates": {},
-                "claims": {},
-            }
-        if not all(
-            isinstance(value.get(key), Mapping)
-            for key in ("active", "cache", "estimates")
-        ):
-            return {
-                "schema_version": ADMISSION_SCHEMA_VERSION,
-                "active": {},
-                "cache": {},
-                "estimates": {},
-            }
+            return dict(empty)
+        if not all(isinstance(value.get(key), Mapping) for key in ("active", "cache")):
+            return dict(empty)
         return {
             "schema_version": ADMISSION_SCHEMA_VERSION,
-            **{key: dict(value[key]) for key in ("active", "cache", "estimates")},
+            **{key: dict(value[key]) for key in ("active", "cache")},
             "claims": (
                 dict(value["claims"])
                 if isinstance(value.get("claims"), Mapping)
@@ -3057,21 +3016,6 @@ class GenericJobs:
             os.fsync(handle.fileno())
         os.replace(temporary, path)
         _fsync_directory(path.parent)
-
-    def reset_admission_estimates(
-        self, estimate_key: str | None = None
-    ) -> dict[str, Any]:
-        """Forget learned memory estimates without disturbing live admission."""
-        with self._admission_lock:
-            state = self._admission_state()
-            if estimate_key is None:
-                cleared = sorted(state["estimates"])
-                state["estimates"] = {}
-            else:
-                cleared = [estimate_key] if estimate_key in state["estimates"] else []
-                state["estimates"].pop(estimate_key, None)
-            self._save_admission_state(state)
-        return {"cleared": cleared}
 
     def _capacity_state(self) -> dict[str, Any]:
         path = self.store.capacity_path
@@ -3491,7 +3435,6 @@ class GenericJobs:
                     "SINNIXD_CHECKOUT_HEAD": checkout.head,
                 }
             )
-        estimate_key = f"{project.project_id}:{operation.name}"
 
         def build_spec(lease: ServiceLease | None) -> GenericJobSpec:
             launch_environment = dict(environment)
@@ -3532,7 +3475,6 @@ class GenericJobs:
                 dependency_job_ids=dependency_ids,
                 coalesce_key=coalesce_key,
                 cache_key=cache_key,
-                estimate_key=estimate_key,
                 estimate_memory_bytes=operation.estimate_memory_bytes,
                 scratch=operation.scratch,
                 lease=lease,
@@ -3681,26 +3623,16 @@ class GenericJobs:
 
     @staticmethod
     def _estimate(spec: GenericJobSpec, state: Mapping[str, Any]) -> int:
-        baseline = (
+        # The declaration is the contract and the pool default is the floor
+        # guess; there is no learned component. Learned high-water estimates
+        # serialized whole campaigns behind one inflated sample, wedged the
+        # queue when a sample exceeded its pool budget, and duplicated what
+        # memory-pressure relief already handles reactively.
+        return (
             spec.estimate_memory_bytes
             if spec.estimate_memory_bytes is not None
             else POOL_POLICIES[spec.pool]["default_estimate"]
         )
-        learned = state.get("estimates", {}).get(spec.estimate_key)
-        learned_bytes = learned.get("bytes") if isinstance(learned, Mapping) else 0
-        if not isinstance(learned_bytes, int):
-            learned_bytes = 0
-        if spec.estimate_memory_bytes is not None:
-            # An explicit declaration is a contract: one cache-inflated run
-            # must not dominate it without bound. Past 2x, the declaration is
-            # what needs fixing and the ledger shows the divergence. Undeclared
-            # estimates keep uncapped windowed learning -- the pool default is
-            # a floor guess, not a contract.
-            learned_bytes = min(learned_bytes, 2 * baseline)
-        estimate = max(baseline, learned_bytes)
-        if spec.pool == "agent" and spec.estimate_memory_bytes is None:
-            return max(int(estimate * AGENT_CLAIM_FRACTION), AGENT_CLAIM_FLOOR_BYTES)
-        return estimate
 
     @classmethod
     def _memory_observation(cls, record: GenericJobRecord) -> dict[str, Any]:
@@ -3757,9 +3689,7 @@ class GenericJobs:
         )
         return max(0, min(total - reserve, available + managed - reserve))
 
-    def _host_pressure_blocks(
-        self, pressure: Mapping[str, float], *, has_active_managed_work: bool
-    ) -> bool:
+    def _host_pressure_blocks(self, pressure: Mapping[str, float]) -> bool:
         swap_total = float(pressure.get("swap_total_bytes", 0.0))
         swap_free = float(pressure.get("swap_free_bytes", 0.0))
         memory_available = float(pressure.get("memory_available_bytes", 0.0))
@@ -3791,33 +3721,20 @@ class GenericJobs:
             or self._memory_full_block_probe_count
             >= MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES
         )
-        return (
-            swap_exhausted
-            or memory_pressure_sustained
-            or (
-                has_active_managed_work
-                and float(pressure.get("io_full_avg10", 0.0)) >= IO_FULL_BLOCK_THRESHOLD
-            )
-        )
+        return swap_exhausted or memory_pressure_sustained
 
     @staticmethod
     def _active_pressure_reasons(pressure: Mapping[str, float]) -> list[str]:
         memory_full = float(pressure.get("memory_full_avg10", 0.0))
-        io_full = float(pressure.get("io_full_avg10", 0.0))
         swap_total = float(pressure.get("swap_total_bytes", 0.0))
         swap_free = float(pressure.get("swap_free_bytes", 0.0))
         reasons: list[str] = []
         if memory_full >= MEMORY_FULL_PREEMPT_THRESHOLD:
             reasons.append("memory-stall")
-        if io_full >= IO_FULL_PREEMPT_THRESHOLD:
-            reasons.append("io-stall")
         if (
             swap_total > 0
             and swap_free / swap_total < PREEMPT_SWAP_FREE_FRACTION
-            and (
-                memory_full >= MEMORY_FULL_BLOCK_THRESHOLD
-                or io_full >= IO_FULL_BLOCK_THRESHOLD
-            )
+            and memory_full >= MEMORY_FULL_BLOCK_THRESHOLD
         ):
             reasons.append("swap-exhaustion")
         return reasons
@@ -3934,10 +3851,7 @@ class GenericJobs:
         if self._active_pressure_since is None:
             self._active_pressure_since = now
             return None
-        grace = ACTIVE_PRESSURE_GRACE_SECONDS
-        if reasons == ["io-stall"]:
-            grace = IO_STALL_GRACE_SECONDS
-        if now - self._active_pressure_since < grace:
+        if now - self._active_pressure_since < ACTIVE_PRESSURE_GRACE_SECONDS:
             return None
         victim = self._preempt_pressure_victim(pressure, reasons)
         self._active_pressure_since = now
@@ -3981,14 +3895,16 @@ class GenericJobs:
         self._save_admission_state(state)
         pressure = self.pressure_probe()
         host_memory_budget = self._host_memory_budget(pressure)
-        host_pressure_blocked = self._host_pressure_blocks(
-            pressure, has_active_managed_work=any(active.values())
-        )
-        # Head-of-line reservation: once the oldest queued job is blocked on
-        # memory, younger jobs may only use what remains AFTER its claim.
-        # Without this, a stream of small jobs starves a large one forever --
-        # each admission re-fills the budget the big job was waiting for.
-        head_of_line_reserved = 0
+        host_pressure_blocked = self._host_pressure_blocks(pressure)
+        # Head-of-line reservation: once the oldest queued job in a pool is
+        # blocked on memory, younger jobs IN THAT POOL may only use what
+        # remains after its claim. Without this, a stream of small jobs
+        # starves a large one forever -- each admission re-fills the budget
+        # the big job was waiting for. The reservation is per-pool: a heavy
+        # bulk job waiting for the desktop to free memory must not freeze
+        # agent and normal lanes across the host (that cross-pool version is
+        # what held 56 unrelated jobs for 6.5 hours on 2026-09-01).
+        head_of_line_reserved: dict[str, int] = {}
         for snapshot in records:
             if snapshot.spec.kind not in {"declared-operation", "attested-agent"}:
                 continue
@@ -4015,6 +3931,38 @@ class GenericJobs:
                 else:
                     policy = POOL_POLICIES[record.spec.pool]
                     estimate = self._estimate(record.spec, state)
+                    host_total = int(pressure.get("memory_total_bytes", 0.0))
+                    if (
+                        host_total > 0
+                        and estimate > host_total - MIN_HOST_MEMORY_RESERVE_BYTES
+                    ):
+                        # A claim no configuration of this host can ever
+                        # satisfy must refuse loudly; queued, it silently
+                        # head-blocks everything behind it (56 jobs sat 6.5
+                        # hours behind one such claim on 2026-09-01). A claim
+                        # larger than its pool budget but within the host is
+                        # NOT refused: a lone job may exceed its pool budget
+                        # by design.
+                        refused = self._with_state(
+                            record,
+                            {
+                                "phase": "launch-refused",
+                                "terminal": True,
+                                "launch_evidence": "not-started",
+                                "error": {
+                                    "code": "estimate-never-fits",
+                                    "message": (
+                                        f"declared estimate {estimate} bytes "
+                                        "exceeds what this host can ever "
+                                        f"offer ({host_total} bytes total)"
+                                    ),
+                                },
+                                "observed_at": _timestamp(),
+                            },
+                        )
+                        self.store.save(refused)
+                        self._finalize_terminal(refused)
+                        continue
                     occupied = sum(
                         self._estimate(item.spec, state)
                         for item in active[record.spec.pool]
@@ -4036,7 +3984,9 @@ class GenericJobs:
                     )
                     host_memory_blocked = (
                         host_memory_budget is not None
-                        and host_occupied + estimate + head_of_line_reserved
+                        and host_occupied
+                        + estimate
+                        + head_of_line_reserved.get(record.spec.pool, 0)
                         > host_memory_budget
                     )
                     exclusive_blocked = bool(
@@ -4059,8 +4009,11 @@ class GenericJobs:
                         )
                         if blocked_now
                     ]
-                    if "host-memory" in blocked_by and not head_of_line_reserved:
-                        head_of_line_reserved = estimate
+                    if (
+                        "host-memory" in blocked_by
+                        and record.spec.pool not in head_of_line_reserved
+                    ):
+                        head_of_line_reserved[record.spec.pool] = estimate
                     if blocked_by:
                         admission = {
                             **(
@@ -4150,7 +4103,41 @@ class GenericJobs:
                         current.spec.kind == "declared-operation"
                         and current.spec.checkout is not None
                     ):
-                        revalidate_registered_checkout(current.spec.checkout)
+                        checkout_binding = dict(current.spec.checkout)
+                        if checkout_binding.get("checkout_id") == "default":
+                            # Default-checkout operations (scheduled runs,
+                            # project-root jobs) follow the project head: the
+                            # binding head was captured when the job was
+                            # created, and master moving in between is normal,
+                            # not identity drift. Workspace-bound jobs keep
+                            # exact-head binding — their verification receipts
+                            # are only meaningful at the recorded commit.
+                            resolved = subprocess.run(
+                                [
+                                    "git",
+                                    "-C",
+                                    str(checkout_binding.get("path", "")),
+                                    "rev-parse",
+                                    "HEAD",
+                                ],
+                                capture_output=True,
+                                text=True,
+                                timeout=30,
+                                check=False,
+                            )
+                            refreshed = resolved.stdout.strip()
+                            if resolved.returncode == 0 and re.fullmatch(
+                                r"[0-9a-f]{40}", refreshed
+                            ):
+                                checkout_binding["head"] = refreshed
+                                current = replace(
+                                    current,
+                                    spec=replace(
+                                        current.spec, checkout=checkout_binding
+                                    ),
+                                )
+                                self.store.save(current)
+                        revalidate_registered_checkout(checkout_binding)
                         # The contract runner repeats this proof in the unit
                         # before it execs the project command. Git worktrees
                         # have no lock we can share with arbitrary writers, so
@@ -4336,39 +4323,6 @@ class GenericJobs:
                 }
                 state["cache"] = self._bounded(
                     state["cache"], MAX_ADMISSION_CACHE_ENTRIES
-                )
-            observation = self._memory_observation(record)
-            peak = observation.get(
-                "agent_memory_peak_bytes"
-                if record.spec.pool == "agent"
-                else "verification_memory_peak_bytes"
-            )
-            if not isinstance(peak, int) or peak <= 0:
-                peak = None
-            if peak is not None and record.spec.estimate_key is not None:
-                learned = (
-                    peak * LEARNED_ESTIMATE_HEADROOM_NUMERATOR
-                    + LEARNED_ESTIMATE_HEADROOM_DENOMINATOR
-                    - 1
-                ) // LEARNED_ESTIMATE_HEADROOM_DENOMINATOR
-                previous = state["estimates"].get(record.spec.estimate_key)
-                history = (
-                    previous.get("recent") if isinstance(previous, Mapping) else None
-                )
-                recent = [
-                    value
-                    for value in (history if isinstance(history, list) else [])
-                    if isinstance(value, int) and value > 0
-                ]
-                recent.append(learned)
-                recent = recent[-LEARNED_ESTIMATE_WINDOW:]
-                state["estimates"][record.spec.estimate_key] = {
-                    "bytes": max(recent),
-                    "recent": recent,
-                    "touched_at": _timestamp(),
-                }
-                state["estimates"] = self._bounded(
-                    state["estimates"], MAX_ADMISSION_ESTIMATES
                 )
             self._save_admission_state(state)
             self.store.save(replace(record, admission_estimate_recorded=True))

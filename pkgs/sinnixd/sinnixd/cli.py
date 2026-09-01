@@ -463,13 +463,6 @@ def parser() -> argparse.ArgumentParser:
     job_result.add_argument("--max-bytes", type=int, default=64_000)
     cancel = job_subcommands.add_parser("cancel")
     cancel.add_argument("job_id")
-    admission_reset = job_subcommands.add_parser(
-        "admission-reset", help="Forget learned memory estimates used by admission."
-    )
-    admission_reset.add_argument("estimate_key", nargs="?")
-    admission_reset.add_argument(
-        "--all", action="store_true", help="Forget every learned memory estimate."
-    )
     admission = job_subcommands.add_parser(
         "admission", help="Show admission queue, claims, and blocking arithmetic."
     )
@@ -1709,18 +1702,6 @@ def main() -> int:
             "job.result",
             "systemd-jobs",
             {"job_id": arguments.job_id, "max_bytes": arguments.max_bytes},
-        )
-    elif arguments.command == "job" and arguments.job_command == "admission-reset":
-        if arguments.estimate_key is None and not arguments.all:
-            parser().error("admission-reset without an estimate key requires --all")
-        if arguments.estimate_key is not None and arguments.all:
-            parser().error("admission-reset --all cannot name an estimate key")
-        request = _request(
-            "job.admission.reset",
-            "systemd-jobs",
-            {"estimate_key": arguments.estimate_key}
-            if arguments.estimate_key is not None
-            else {"all": True},
         )
     elif arguments.command == "job" and arguments.job_command == "admission":
         request = _request(

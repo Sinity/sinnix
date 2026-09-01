@@ -435,9 +435,10 @@ def test_memory_psi_avg60_blocks_on_the_first_probe(tmp_path: Path) -> None:
     assert systemd.started == []
 
 
-def test_io_pressure_allows_one_low_priority_job_then_blocks_concurrency(
-    tmp_path: Path,
-) -> None:
+def test_io_pressure_never_blocks_admission(tmp_path: Path) -> None:
+    """Host IO PSI cannot attribute stalls to managed work on this host
+    (ambient io full sits above any usable threshold), so admission ignores
+    it. Red if anyone reintroduces an IO gate."""
     adapter = project(
         tmp_path / "project",
         (operation("first"), operation("second")),
@@ -449,7 +450,7 @@ def test_io_pressure_allows_one_low_priority_job_then_blocks_concurrency(
         wait_poll_seconds=0.001,
         pressure_probe=lambda: {
             "memory_full_avg10": 0.0,
-            "io_full_avg10": 6.0,
+            "io_full_avg10": 55.0,
         },
     )
 
@@ -467,9 +468,8 @@ def test_io_pressure_allows_one_low_priority_job_then_blocks_concurrency(
     )
 
     assert first["state"]["phase"] == "submitted"
-    assert second["state"]["phase"] == "queued"
-    assert second["state"]["admission"]["blocked_by"] == ["host-pressure"]
-    assert len(systemd.started) == 1
+    assert second["state"]["phase"] == "submitted"
+    assert len(systemd.started) == 2
 
 
 def test_host_budget_accounts_for_active_jobs_across_pools(tmp_path: Path) -> None:
@@ -596,7 +596,7 @@ def test_scheduler_admits_queued_work_after_pressure_clears(tmp_path: Path) -> N
     assert len(systemd.started) == 1
 
 
-def test_sustained_pressure_preempts_largest_managed_job_and_learns_peak(
+def test_sustained_pressure_preempts_largest_managed_job(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pressure = {
@@ -616,16 +616,8 @@ def test_sustained_pressure_preempts_largest_managed_job_and_learns_peak(
         GenericJobStore(tmp_path / "state"),
         pressure_probe=lambda: pressure,
     )
-    first_spec = agent_spec(("table:first",))
-    first_spec = GenericJobSpec(
-        **{**first_spec.__dict__, "estimate_key": "agent:codex:model"}
-    )
-    second_spec = agent_spec(("table:second",))
-    second_spec = GenericJobSpec(
-        **{**second_spec.__dict__, "estimate_key": "agent:codex:model"}
-    )
-    first = subject.start(first_spec)
-    second = subject.start(second_spec)
+    first = subject.start(agent_spec(("table:first",)))
+    second = subject.start(agent_spec(("table:second",)))
     interactive = subject.start_foreground(
         command=("terminal",), working_directory="/fixture", environment={}
     )
@@ -676,8 +668,6 @@ def test_sustained_pressure_preempts_largest_managed_job_and_learns_peak(
         == "pressure-preemption:memory-stall"
     )
     assert preempted["state"]["pre_stop_systemd"]["MemoryPeak"] == str(6 * 1024**3)
-    learned = subject._admission_state()["estimates"]["agent:codex:model"]["bytes"]
-    assert learned > 6 * 1024**3
     assert interactive["unit"] not in systemd.stopped
 
 
@@ -854,32 +844,28 @@ def test_small_successful_peak_does_not_erase_declared_estimate(
     )
 
 
-def test_agent_peak_increases_the_next_matching_agent_estimate(tmp_path: Path) -> None:
+def test_observed_peak_does_not_change_later_estimates(tmp_path: Path) -> None:
+    """Estimates are declared-or-default only. A completed run's peak must
+    not alter later admissions: learned high-water estimates serialized a
+    campaign to one lane and wedged the queue (2026-08-29/09-01)."""
     systemd = FakeSystemd()
     subject = jobs(tmp_path, systemd)
-    first = agent_spec(("table:first",))
-    first = GenericJobSpec(**{**first.__dict__, "estimate_key": "agent:codex:model"})
-    started = subject.start(first)
+    started = subject.start(agent_spec(("table:first",)))
     systemd.properties = {
         "LoadState": "loaded",
         "ActiveState": "inactive",
         "Result": "success",
         "ExecMainStatus": "0",
-        "MemoryPeak": str(4 * 1024 * 1024 * 1024),
+        "MemoryPeak": str(9 * 1024 * 1024 * 1024),
     }
     subject.get(started["job_id"])
-    second = agent_spec(("table:second",))
-    second = GenericJobSpec(**{**second.__dict__, "estimate_key": "agent:codex:model"})
 
-    repeated = subject.start(second)
+    from sinnixd.jobs import POOL_POLICIES
 
-    # The learned peak propagates into the next claim through the agent
-    # discount: well above the discounted pool default, at half the peak.
-    from sinnixd.jobs import AGENT_CLAIM_FRACTION, POOL_POLICIES
-
+    repeated = subject.start(agent_spec(("table:second",)))
     claimed = repeated["state"]["admission"]["estimate_memory_bytes"]
-    assert claimed > int(AGENT_CLAIM_FRACTION * 4 * 1024 * 1024 * 1024)
-    assert claimed > AGENT_CLAIM_FRACTION * POOL_POLICIES["agent"]["default_estimate"]
+    assert claimed == POOL_POLICIES["agent"]["default_estimate"]
+    assert "estimates" not in subject._admission_state()
 
 
 def test_cache_and_coalescing_are_principal_isolated(tmp_path: Path) -> None:
@@ -971,7 +957,7 @@ def test_cache_and_coalescing_are_principal_isolated(tmp_path: Path) -> None:
     assert uncached["job_id"] != operator_first["job_id"] and len(systemd.started) == 3
 
 
-def test_dependencies_exclusive_keys_learned_peaks_and_pressure_gate(
+def test_dependencies_exclusive_keys_defaults_and_pressure_gate(
     tmp_path: Path,
 ) -> None:
     adapter = project(
@@ -1055,10 +1041,7 @@ def test_dependencies_exclusive_keys_learned_peaks_and_pressure_gate(
         correlation_id="again",
         parameters={},
     )
-    assert (
-        repeated["state"]["admission"]["estimate_memory_bytes"]
-        == 2 * 1024 * 1024 * 1024 * 5 // 4
-    )
+    assert repeated["state"]["admission"]["estimate_memory_bytes"] == 1024 * 1024 * 1024
 
 
 @pytest.mark.parametrize("scratch", ("tmpfs", "nvme"))
@@ -1345,15 +1328,13 @@ def test_swap_exhaustion_still_preempts_the_only_managed_job(
     assert "swap-exhaustion" in preempted["state"]["preemption"]["reason"]
 
 
-def test_transient_io_stall_does_not_preempt_before_the_sustained_window(
+def test_io_stall_never_preempts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A burst that clears inside the window costs nothing.
-
-    io_full_avg10 is a ten-second average, so workspace provisioning (uv sync,
-    npm ci) leaves it elevated well after the work is done. Preempting on that
-    tail destroyed three lanes of a sixteen-bead wave on 2026-08-28.
-    """
+    """IO stalls never cost work. Host IO PSI cannot attribute the stall to
+    the managed plane (2026-09-01: four lane kills while user-slice IO
+    measured megabytes against 41MB/s of device writes), and an IO-slow host
+    is degraded, not endangered. Red if io-stall preemption returns."""
     pressure = {
         "memory_full_avg10": 0.0,
         "io_full_avg10": 0.0,
@@ -1394,18 +1375,12 @@ def test_transient_io_stall_does_not_preempt_before_the_sustained_window(
         "MemoryPeak": str(5 * 1024**3),
     }
 
-    pressure.update(io_full_avg10=22.2, managed_memory_bytes=6 * 1024**3)
-    assert subject._relieve_active_pressure(pressure) is None
-    clock[0] = 10.0
-    assert subject._relieve_active_pressure(pressure) is None
-    clock[0] = 30.0
-    assert subject._relieve_active_pressure(pressure) is None
+    pressure.update(io_full_avg10=80.0, managed_memory_bytes=6 * 1024**3)
+    for tick in (0.0, 10.0, 30.0, 60.0, 600.0):
+        clock[0] = tick
+        assert subject._relieve_active_pressure(pressure) is None
     assert systemd.stopped == []
-
-    # Still stalled well past the window: now it is real contention, not a burst.
-    clock[0] = 60.0
-    assert subject._relieve_active_pressure(pressure) == second["job_id"]
-    assert systemd.stopped == [second["unit"]]
+    assert second["state"]["phase"] != "cancelled"
 
 
 def test_memory_stall_keeps_the_short_grace(
@@ -1581,93 +1556,12 @@ def test_superseding_operation_cancels_its_own_queued_jobs(tmp_path: Path) -> No
     assert replaced["state"]["superseded"] is True
 
 
-def test_an_old_outlier_peak_ages_out_of_the_learned_estimate(tmp_path: Path) -> None:
-    """One pathological run must not cap concurrency forever.
-
-    The estimate was a monotonic high-water mark, so a peak recorded while the
-    host was thrashing kept every later lane queued behind a figure nothing
-    since had come close to.
-    """
-    gib = 1024 * 1024 * 1024
-    systemd = FakeSystemd()
-    subject = jobs(tmp_path, systemd)
-
-    def run_with_peak(key: str, peak_bytes: int) -> dict[str, object]:
-        spec = agent_spec((f"table:{peak_bytes}",))
-        spec = GenericJobSpec(**{**spec.__dict__, "estimate_key": "agent:codex:model"})
-        started = subject.start(spec)
-        systemd.properties = {
-            "LoadState": "loaded",
-            "ActiveState": "inactive",
-            "Result": "success",
-            "ExecMainStatus": "0",
-            "MemoryPeak": str(peak_bytes),
-        }
-        subject.get(started["job_id"])
-        return started
-
-    run_with_peak("outlier", 7 * gib)
-    for index in range(5):
-        run_with_peak(f"ordinary-{index}", 2 * gib + index)
-
-    probe = agent_spec(("table:probe",))
-    probe = GenericJobSpec(**{**probe.__dict__, "estimate_key": "agent:codex:model"})
-    admitted = subject.start(probe)
-
-    assert admitted["state"]["admission"]["estimate_memory_bytes"] < 4 * gib
-
-
-def test_pre_window_estimate_starts_a_new_history(tmp_path: Path) -> None:
-    """A legacy high-water mark without recent samples must not be carried forever."""
-    systemd = FakeSystemd()
-    subject = jobs(tmp_path, systemd)
-    subject._save_admission_state(
-        {
-            "schema_version": 1,
-            "active": {},
-            "cache": {},
-            "estimates": {
-                "agent:codex:model": {
-                    "bytes": 7 * 1024**3,
-                    "touched_at": "legacy",
-                }
-            },
-        }
-    )
-    spec = GenericJobSpec(
-        **{
-            **agent_spec(("table:jobs",)).__dict__,
-            "estimate_key": "agent:codex:model",
-        }
-    )
-    started = subject.start(spec)
-    systemd.properties = {
-        "LoadState": "loaded",
-        "ActiveState": "inactive",
-        "Result": "success",
-        "ExecMainStatus": "0",
-        "MemoryPeak": str(2 * 1024**3),
-    }
-
-    subject.get(started["job_id"])
-
-    estimate = subject._admission_state()["estimates"]["agent:codex:model"]
-    assert estimate["recent"] == [int(2 * 1024**3 * 5 / 4)]
-    assert estimate["bytes"] == estimate["recent"][0]
-
-
-def test_terminal_estimate_observation_is_idempotent_and_survives_reset(
+def test_terminal_observation_is_idempotent_and_records_no_estimate(
     tmp_path: Path,
 ) -> None:
     systemd = FakeSystemd()
     subject = jobs(tmp_path, systemd)
-    spec = GenericJobSpec(
-        **{
-            **agent_spec(("table:jobs",)).__dict__,
-            "estimate_key": "agent:codex:model",
-        }
-    )
-    started = subject.start(spec)
+    started = subject.start(agent_spec(("table:jobs",)))
     systemd.properties = {
         "LoadState": "loaded",
         "ActiveState": "inactive",
@@ -1677,18 +1571,11 @@ def test_terminal_estimate_observation_is_idempotent_and_survives_reset(
     }
 
     first = subject.get(started["job_id"])
-    first_estimate = subject._admission_state()["estimates"]["agent:codex:model"]
-    subject.get(started["job_id"])
-    repeated_estimate = subject._admission_state()["estimates"]["agent:codex:model"]
-    reset = subject.reset_admission_estimates("agent:codex:model")
-    after_reset = subject.get(started["job_id"])
+    repeated = subject.get(started["job_id"])
 
     assert first["state"]["phase"] == "succeeded"
-    assert first_estimate["recent"] == [int(6 * 1024**3 * 5 / 4)]
-    assert repeated_estimate == first_estimate
-    assert reset["cleared"] == ["agent:codex:model"]
-    assert "agent:codex:model" not in subject._admission_state()["estimates"]
-    assert after_reset["state"]["phase"] == "succeeded"
+    assert repeated["state"]["phase"] == "succeeded"
+    assert "estimates" not in subject._admission_state()
 
 
 def test_scheduler_survives_a_failing_pressure_sweep(tmp_path: Path) -> None:
@@ -1825,36 +1712,6 @@ def test_memory_blocked_head_of_line_reserves_its_claim(tmp_path: Path) -> None:
     assert "host-memory" in younger["state"]["admission"]["blocked_by"]
 
 
-def test_learned_estimate_is_capped_at_twice_the_declaration(tmp_path: Path) -> None:
-    from sinnixd.jobs import _unmetered_pressure
-
-    gib = 1024 * 1024 * 1024
-    adapter = project(
-        tmp_path / "project",
-        (operation("op", pool="bulk", estimate_memory_bytes=2 * gib),),
-    )
-    subject = GenericJobs(
-        FakeSystemd(),
-        GenericJobStore(tmp_path / "state"),
-        wait_poll_seconds=0.001,
-        pressure_probe=_unmetered_pressure,
-    )
-    started = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("op"),
-        correlation_id="cap",
-        parameters={},
-    )
-    record = subject.store.load(started["job_id"])
-    state = subject._admission_state()
-    state["estimates"][record.spec.estimate_key] = {
-        "bytes": 30 * gib,
-        "recent": [30 * gib],
-        "touched_at": "2026-08-31T00:00:00+00:00",
-    }
-    assert subject._estimate(record.spec, state) == 4 * gib
-
-
 def test_cancel_records_a_typed_reason(tmp_path: Path) -> None:
     gib = 1024 * 1024 * 1024
     adapter = project(
@@ -1864,7 +1721,7 @@ def test_cancel_records_a_typed_reason(tmp_path: Path) -> None:
     pressure = {
         "memory_full_avg10": 0.0,
         "io_full_avg10": 0.0,
-        "memory_total_bytes": 8 * gib,
+        "memory_total_bytes": 32 * gib,
         "memory_available_bytes": 8 * gib,
         "swap_total_bytes": 8 * gib,
         "swap_free_bytes": 8 * gib,
@@ -1888,14 +1745,11 @@ def test_cancel_records_a_typed_reason(tmp_path: Path) -> None:
     assert record.state["cancellation"]["reason"] == "pressure-preemption:memory-stall"
 
 
-def test_agent_fleet_admits_at_discounted_claims(tmp_path: Path) -> None:
-    """Agent lanes claim a fraction of their peak estimate: lanes are
-    API-bound and memory-idle most of their life, and pressure preemption
-    bumps the largest lane on the rare verify-burst collision. On a host
-    with ~12G available a real fleet admits instead of 3-4 lanes
-    (2026-08-31: the 12-worker pool never exceeded 3 running).
-    Anti-vacuity: full-peak claims stop the same host at four running."""
-    import sinnixd.jobs as jobs_module
+def test_agent_fleet_admits_on_default_claims(tmp_path: Path) -> None:
+    """Undeclared agent lanes claim the small pool default (lanes are
+    API-bound; verification bursts are short and rarely coincide), so a real
+    fleet admits on a host with ~12G available. Anti-vacuity: lanes that
+    DECLARE a large estimate stop at the host budget."""
 
     def build(tmp: Path) -> GenericJobs:
         return GenericJobs(
@@ -1913,24 +1767,20 @@ def test_agent_fleet_admits_at_discounted_claims(tmp_path: Path) -> None:
             },
         )
 
-    subject = build(tmp_path / "discounted")
+    subject = build(tmp_path / "default")
     started = [
         subject.start(agent_spec((f"table:fleet-{index}",))) for index in range(10)
     ]
     running = [item for item in started if item["state"]["phase"] != "queued"]
     assert len(running) >= 8
 
-    original = jobs_module.AGENT_CLAIM_FRACTION
-    jobs_module.AGENT_CLAIM_FRACTION = 1.0
-    try:
-        undiscounted = build(tmp_path / "full")
-        full_started = [
-            undiscounted.start(agent_spec((f"table:full-{index}",)))
-            for index in range(10)
-        ]
-        full_running = [
-            item for item in full_started if item["state"]["phase"] != "queued"
-        ]
-        assert len(full_running) <= 5
-    finally:
-        jobs_module.AGENT_CLAIM_FRACTION = original
+    declared = build(tmp_path / "declared")
+    heavy_started = []
+    for index in range(10):
+        spec = agent_spec((f"table:heavy-{index}",))
+        spec = GenericJobSpec(**{**spec.__dict__, "estimate_memory_bytes": 4 * 1024**3})
+        heavy_started.append(declared.start(spec))
+    heavy_running = [
+        item for item in heavy_started if item["state"]["phase"] != "queued"
+    ]
+    assert len(heavy_running) <= 3
