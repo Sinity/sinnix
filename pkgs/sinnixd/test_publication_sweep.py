@@ -61,12 +61,21 @@ def test_conflict_and_ci_red_outrank_review() -> None:
 def test_latest_verdict_wins_over_review_history() -> None:
     # Findings answered by the fix that earned the later +1 are closed;
     # findings posted after the latest +1 reopen the PR.
-    assert latest_review(["T2"], ["T1", "T1"]) == (True, 0)
-    assert latest_review(["T2"], ["T1", "T3"]) == (False, 1)
-    assert latest_review([], ["T1"]) == (False, 1)
+    t1, t2, t3 = (
+        "2026-09-01T10:00:00Z",
+        "2026-09-01T10:30:00Z",
+        "2026-09-01T11:00:00Z",
+    )
+    assert latest_review([t2], [t1, t1]) == (True, 0)
+    assert latest_review([t2], [t1, t3]) == (False, 1)
+    assert latest_review([], [t1]) == (False, 1)
     assert latest_review([], []) == (False, 0)
+    # Two rounds and no +1: only the latest round is open; the earlier
+    # round was superseded by the re-review that produced the later one.
+    assert latest_review([], [t1, t1, t3, "2026-09-01T11:00:30Z"]) == (False, 2)
     # Anti-vacuity: counting every finding ever posted returns (False, 2) for
-    # the first case and holds a clean PR open forever.
+    # the first case and holds a clean PR open forever, and (False, 4) for the
+    # last, sending a fix lane back to findings already answered.
 
 
 def test_young_pr_without_review_waits() -> None:

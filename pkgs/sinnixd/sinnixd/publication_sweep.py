@@ -15,12 +15,14 @@ import argparse
 import json
 import subprocess
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 REVIEWER_LOGIN = "chatgpt-codex-connector"
 REVIEW_ABSENT_GRACE_SECONDS = 30 * 60
+# One review round posts its inline findings within seconds of each other.
+REVIEW_ROUND_SECONDS = 120
 DEFAULT_SPOOL = Path("/realm/state/agentctl/events.jsonl")
 MAX_PR_PAGE = 50
 
@@ -163,13 +165,26 @@ def latest_review(
 ) -> tuple[bool, int]:
     """Judge by the reviewer's most recent verdict, not its whole history.
 
-    Each re-review either reacts +1 (clean) or posts inline findings. Findings
-    older than the latest +1 were answered by the fix that earned it, so they
-    are not open; findings newer than it are. Returns (clean, open findings).
+    Each re-review either reacts +1 (clean) or posts one round of inline
+    findings. Findings older than the latest +1 were answered by the fix that
+    earned it; findings from a round before the latest one were superseded
+    by that re-review. Only the latest round, if newer than the latest +1,
+    is open. Returns (clean, open findings).
     """
     latest_clean = max(clean_stamps, default="")
-    open_findings = [stamp for stamp in finding_stamps if stamp > latest_clean]
-    return bool(latest_clean) and not open_findings, len(open_findings)
+    newer = [stamp for stamp in finding_stamps if stamp > latest_clean]
+    if not newer:
+        return bool(latest_clean), 0
+    round_start = _parse_stamp(max(newer)) - timedelta(seconds=REVIEW_ROUND_SECONDS)
+    open_findings = [stamp for stamp in newer if _parse_stamp(stamp) >= round_start]
+    return False, len(open_findings)
+
+
+def _parse_stamp(value: str) -> datetime:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=UTC)
 
 
 def derive_review(repo: str, number: int, run: Run) -> tuple[bool, int]:
