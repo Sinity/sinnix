@@ -948,6 +948,34 @@ def test_a_second_receipt_with_the_same_flags_is_the_operators_judgment(
     assert "integrator already judged" in judgment["reason"]
 
 
+def test_a_rebase_conflict_dispatches_one_integrator_per_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: with no reaction, a lane refused for a rebase conflict
+    (polylogue-x1gd, 2026-09-01 22:24Z) sat with nothing to move it."""
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    (jobs / "harvest-2.json").write_text(
+        json.dumps({"job_id": "harvest-2", "spec": {"kind": "declared-operation", "checkout": {"checkout_id": "worktree-x"}}})
+    )
+    calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-x"))
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        jobs_state_dir=jobs,
+        project_roots={"polylogue": tmp_path / "repo"},
+        integration_dispatcher=lambda p, w, r: calls.append((p, w, r)),
+    )
+    event = {"kind": "harvest", "outcome": "REBASE_CONFLICT", "project": "polylogue", "job_id": "harvest-2", "head": "e" * 40}
+
+    reactor._dispatch_rebase(event)
+    reactor._dispatch_rebase(event)
+
+    assert calls == [("polylogue", "packet-x", "rebase:eeeeeeeeeeee")]
+
+
 def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
     """Judgment is spent on exceptions, not on every lane that passed its scan.
 

@@ -1593,6 +1593,78 @@ class CampaignReactor:
             f"## Operating rules\n\n{body}\n"
         )
 
+    def _dispatch_rebase(self, event: Mapping[str, Any]) -> None:
+        """A publication refused for a rebase conflict gets one agent to rebase it.
+
+        The conflict is mechanical to detect and needs judgment to resolve;
+        one integrator per (workspace, head) rebases, re-verifies, and commits,
+        after which the ordinary harvest runs again.
+        """
+        harvest_job = event.get("job_id")
+        record = self._job_record(str(harvest_job)) if isinstance(harvest_job, str) else None
+        spec = record.get("spec") if isinstance(record, Mapping) else None
+        checkout = spec.get("checkout") if isinstance(spec, Mapping) else None
+        checkout_id = checkout.get("checkout_id") if isinstance(checkout, Mapping) else None
+        project = event.get("project")
+        if not isinstance(checkout_id, str) or not isinstance(project, str):
+            return
+        workspace = self._workspace_name(checkout_id)
+        if workspace is None:
+            self._board.record_error(-1, f"rebase: no registered workspace for {checkout_id}")
+            return
+        head = str(event.get("head") or "")
+        key = f"integrate:{workspace}:rebase-{head[:12]}"
+        if key in self._board.keeper or self._checkout_owned(checkout_id):
+            return
+        prompt = (
+            f"You are an integrator in /realm/worktrees/{workspace}. Publication of this "
+            "lane was refused: rebasing onto origin/master conflicts. Fetch origin, rebase "
+            "the branch onto origin/master, resolve every conflict preserving the lane's "
+            "intent and master's, run the project's quick gate (devtools verify --quick) "
+            "and the focused tests for the touched modules, commit the resolution, and "
+            "stop. Do not publish; the harvest runs again on your commit. Report the "
+            "machine trailer (LANE-BRANCH/COMMIT/QUICK/CLASSIFICATION).\n"
+        )
+        try:
+            if self.integration_dispatcher is not None:
+                self.integration_dispatcher(project, workspace, f"rebase:{head[:12]}")
+            else:
+                prompt_path = self.state_dir / f"rebase-{workspace}-{head[:12]}.md"
+                prompt_path.write_text(prompt, encoding="utf-8")
+                subprocess.run(
+                    [
+                        self.agentctl_executable,
+                        "agent",
+                        "launch",
+                        "--project",
+                        project,
+                        "--checkout",
+                        checkout_id,
+                        "--prompt-file",
+                        str(prompt_path),
+                        "--backend",
+                        self.integrator_backend,
+                        "--model",
+                        self.integrator_model,
+                        "--effort",
+                        self.integrator_effort,
+                        "--coordinator-label",
+                        "integrator",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+        except (OSError, subprocess.SubprocessError) as error:
+            self._board.record_error(-1, f"rebase {workspace}: {error}")
+            return
+        self._board.keeper[key] = {
+            "emitted_at": _now(),
+            "backoff_seconds": 0,
+            "next_eligible_at": _now(),
+        }
+
     def _park_empty_lane(self, event: Mapping[str, Any]) -> None:
         """A lane with nothing to publish hands its bead back with the reason.
 
@@ -2305,6 +2377,11 @@ class CampaignReactor:
                     and event.get("outcome") == "HARVEST_EMPTY"
                 ):
                     self._park_empty_lane(event)
+                if (
+                    event.get("kind") == "harvest"
+                    and event.get("outcome") == "REBASE_CONFLICT"
+                ):
+                    self._dispatch_rebase(event)
                 if (
                     event.get("kind") == "publication-sweep"
                     and event.get("outcome") == "findings"
