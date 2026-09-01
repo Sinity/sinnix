@@ -956,7 +956,16 @@ def test_a_rebase_conflict_dispatches_one_integrator_per_head(
     jobs = tmp_path / "jobs"
     jobs.mkdir()
     (jobs / "harvest-2.json").write_text(
-        json.dumps({"job_id": "harvest-2", "spec": {"kind": "declared-operation", "checkout": {"checkout_id": "worktree-x"}}})
+        json.dumps(
+            {
+                "job_id": "harvest-2",
+                "spec": {
+                    "kind": "declared-operation",
+                    "project_id": "polylogue",
+                    "checkout": {"checkout_id": "worktree-x", "head": "e" * 40},
+                },
+            }
+        )
     )
     calls: list[tuple[str, str, str]] = []
     monkeypatch.setattr(CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-x"))
@@ -968,7 +977,8 @@ def test_a_rebase_conflict_dispatches_one_integrator_per_head(
         project_roots={"polylogue": tmp_path / "repo"},
         integration_dispatcher=lambda p, w, r: calls.append((p, w, r)),
     )
-    event = {"kind": "harvest", "outcome": "REBASE_CONFLICT", "project": "polylogue", "job_id": "harvest-2", "head": "e" * 40}
+    # The live refusal event carries only the harvest job id and outcome.
+    event = {"kind": "harvest", "outcome": "REBASE_CONFLICT", "job_id": "harvest-2"}
 
     reactor._dispatch_rebase(event)
     reactor._dispatch_rebase(event)
