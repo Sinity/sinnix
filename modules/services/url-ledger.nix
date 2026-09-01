@@ -14,6 +14,8 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   stateDir = "${config.sinnix.paths.activityRoot}/url-ledger/state";
   derivedDir = "${config.sinnix.paths.activityRoot}/url-ledger";
+  historyPath = "${config.sinnix.paths.activityRoot}/webhistory/gestalt/derived/full_history.ndjson";
+  cdxRawRoot = "${config.sinnix.paths.activityRoot}/url-ledger/cdx-raw";
 in
 mkServiceModule {
   name = "url-ledger";
@@ -56,7 +58,7 @@ mkServiceModule {
       # Reads the operator's webhistory capture and writes into the
       # operator-owned data lake.
       user = config.sinnix.user.name;
-      execStart = "${scriptPkgs.sinnix-url-ledger}/bin/sinnix-url-ledger run --max-requests ${toString cfg.maxRequestsPerRun} --max-seconds ${toString cfg.maxSecondsPerRun} --window-days ${toString cfg.windowDays}";
+      execStart = "${scriptPkgs.sinnix-url-ledger}/bin/sinnix-url-ledger run --history-path ${historyPath} --state-root ${stateDir} --cdx-raw-root ${cdxRawRoot} --derived-root ${derivedDir} --max-requests ${toString cfg.maxRequestsPerRun} --max-seconds ${toString cfg.maxSecondsPerRun} --window-days ${toString cfg.windowDays}";
       serviceConfig = {
         # The script stops itself at maxSecondsPerRun; this is the backstop
         # for a wedged provider socket, not the normal bound.
