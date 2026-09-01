@@ -28,7 +28,8 @@ reads, and does not alter the browser.
 
    The result is ordered from root to `current_node`, includes stable provider
    IDs, roles, timestamps, attachment metadata, fidelity and provenance, and
-   retains a bounded `all_mapping_nodes` index for other branches. Use
+   retains complete native records in `all_messages` plus an `all_mapping_nodes`
+   index for every branch. Use
    `--output FILE` for a large record; it is created atomically with mode 600.
    Native failure is explicitly marked `fidelity: dom_degraded` and
    `provenance.complete: false`.

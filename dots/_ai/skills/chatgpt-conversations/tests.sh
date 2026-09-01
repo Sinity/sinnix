@@ -46,6 +46,8 @@ async function run({session, conversation, dom = []}) {
   if (JSON.stringify(native.result).includes('secret-token')) throw new Error('credential disclosed in result');
   if (native.result.fidelity !== 'native' || native.result.mapping_node_count !== 4) throw new Error('native evidence missing');
   if (native.result.all_mapping_nodes.find(node => node.provider_id === 'b1')?.message.text !== 'other') throw new Error('inactive branch not preserved');
+  const inactive = native.result.all_messages.find(message => message.provider_id === 'b1');
+  if (inactive?.content?.parts?.[0] !== 'other' || inactive?.author?.role !== 'user') throw new Error('complete inactive message not preserved');
 
   const degraded = await run({ session: null, conversation: null, dom: [{ role: 'user', text: 'visible', id: 'dom-1' }] });
   if (degraded.result.fidelity !== 'dom_degraded' || degraded.result.provenance.complete !== false || degraded.result.messages.length !== 1) throw new Error('degraded fallback missing');
