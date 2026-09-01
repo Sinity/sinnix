@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Thread
 from typing import Any, Mapping
@@ -177,6 +178,25 @@ def default_socket_path() -> Path:
         Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
         / "sinnixd.sock"
     )
+
+
+def _localize_stamp(value: object) -> object:
+    """Render an ISO timestamp in host-local time for human output.
+
+    Storage and wire stay timezone-aware UTC; only displays convert. A naive
+    stamp is assumed UTC (every sinnixd producer writes aware UTC; the
+    assumption covers foreign producers) and marked with the local zone all
+    the same so the reader never has to guess.
+    """
+    if not isinstance(value, str) or len(value) < 19 or value[4] != "-":
+        return value
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -1052,7 +1072,13 @@ def main() -> int:
                 return
             if kinds is not None and event.get("kind") not in kinds:
                 return
-            stamp = str(event.get("at") or event.get("observed_at") or "")
+            stamp = str(
+                event.get("at")
+                or event.get("observed_at")
+                or event.get("completed_at")
+                or event.get("emitted_at")
+                or ""
+            )
             if arguments.since and stamp and stamp < arguments.since:
                 return
             if getattr(arguments, "plain", False):
@@ -1060,7 +1086,7 @@ def main() -> int:
                 return
             kind = str(event.get("kind") or "event")
             rest = " ".join(
-                f"{key}={event[key]}"
+                f"{key}={_localize_stamp(event[key])}"
                 for key in sorted(event)
                 if key not in {"kind"} and not isinstance(event[key], (dict, list))
             )
