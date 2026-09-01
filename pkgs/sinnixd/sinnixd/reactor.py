@@ -1465,7 +1465,9 @@ class CampaignReactor:
             # Publication has its own record: an integrator that cleared the
             # flag without moving the head must not block the publish behind
             # its own integrate key.
-            publish_key = f"publish:{workspace}{suffix}"
+            # Keyed by receipt, not head: a re-mint at the same head is a
+            # deliberate retry after a failed authorize.
+            publish_key = f"publish:{workspace}:{str(receipt).rsplit('/', 1)[-1]}"
             if publish_key not in self._board.keeper:
                 self._publish(str(project), workspace, str(receipt), publish_key)
             return

@@ -765,7 +765,7 @@ def test_cleared_flag_at_the_same_head_publishes_past_the_integrate_key(
 
     reactor._dispatch_integration(event)
 
-    assert published == ["publish:packet-p-9:cccccccccccc"]
+    assert published == ["publish:packet-p-9:harvest-" + "3" * 32]
 
 
 class FakeBeadParker:
@@ -897,7 +897,7 @@ def test_judgment_reads_the_receipt_the_event_names(
         }
     )
 
-    assert published == ["publish:packet-p-9:dddddddddddd"]
+    assert published == ["publish:packet-p-9:harvest-" + "4" * 32]
 
 
 def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
