@@ -451,6 +451,18 @@ class SystemdJobs(Protocol):
 
 
 @dataclass(frozen=True)
+def timer_persistent(on_calendar: str) -> bool:
+    """Catch up a missed daily or weekly run; never a sub-hourly one.
+
+    A transient timer has no trigger stamp, so a persistent one fires the
+    moment it is registered. Every daemon restart re-registers all timers,
+    which ran the ten-minute sweep twice at each deploy; a missed sub-hourly
+    tick is harmless, while a missed nightly corpus run is a lost night.
+    """
+    spec = on_calendar.strip()
+    return not (spec.startswith("*:") or spec.startswith("*-*-* *:"))
+
+
 class UserSystemdJobs:
     """Launch and inspect transient user services through the user manager."""
 
@@ -589,7 +601,7 @@ class UserSystemdJobs:
                 "--quiet",
                 f"--unit={unit}",
                 f"--on-calendar={on_calendar}",
-                "--timer-property=Persistent=true",
+                f"--timer-property=Persistent={'true' if timer_persistent(on_calendar) else 'false'}",
                 "--",
                 *command,
             ]
