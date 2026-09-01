@@ -497,6 +497,49 @@ def test_completed_review_dispatches_one_integrator(
     assert [c[1] for c in calls] == ["packet-p-9"]
 
 
+def test_sweep_findings_dispatch_one_review_fix_per_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Open findings on a published PR become a fix lane in the PR's worktree.
+
+    Anti-vacuity: dropping the keeper record dispatches a lane on every sweep
+    pass (every ten minutes) for the same commit; keying on the PR alone would
+    never answer findings on a later head.
+    """
+    calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
+    )
+    monkeypatch.setattr(
+        CampaignReactor, "_receipt_workspace", staticmethod(lambda r: "worktree-abc")
+    )
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        project_roots={"polylogue": tmp_path / "repo"},
+        review_fix_dispatcher=lambda p, w, r: calls.append((p, w, r)),
+    )
+
+    def event(head: str) -> dict[str, object]:
+        return {
+            "kind": "publication-sweep",
+            "outcome": "findings",
+            "project": "polylogue",
+            "repo": "o/r",
+            "pr": 41,
+            "head": head,
+            "findings": 2,
+            "receipt": "harvest-" + "0" * 32,
+        }
+
+    reactor._dispatch_review_fix(event("a" * 40))
+    reactor._dispatch_review_fix(event("a" * 40))
+    reactor._dispatch_review_fix(event("b" * 40))
+
+    assert calls == [("polylogue", "packet-p-9", "41")] * 2
+
+
 def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
     """Judgment is spent on exceptions, not on every lane that passed its scan.
 

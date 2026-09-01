@@ -10,6 +10,7 @@ from pathlib import Path
 from sinnixd.publication_sweep import (
     PullState,
     decide,
+    latest_review,
     parse_trailers,
     sweep,
 )
@@ -57,6 +58,17 @@ def test_conflict_and_ci_red_outrank_review() -> None:
     assert decide(pull(ci_red=True, review_clean=True), now=NOW) == "ci-red"
 
 
+def test_latest_verdict_wins_over_review_history() -> None:
+    # Findings answered by the fix that earned the later +1 are closed;
+    # findings posted after the latest +1 reopen the PR.
+    assert latest_review(["T2"], ["T1", "T1"]) == (True, 0)
+    assert latest_review(["T2"], ["T1", "T3"]) == (False, 1)
+    assert latest_review([], ["T1"]) == (False, 1)
+    assert latest_review([], []) == (False, 0)
+    # Anti-vacuity: counting every finding ever posted returns (False, 2) for
+    # the first case and holds a clean PR open forever.
+
+
 def test_young_pr_without_review_waits() -> None:
     assert decide(pull(), now=NOW + timedelta(minutes=5)) == "wait"
 
@@ -79,9 +91,10 @@ class FakeRun:
         if argv[:3] == ["gh", "pr", "list"]:
             return subprocess.CompletedProcess(argv, 0, json.dumps(self.pr_rows), "")
         if "reactions" in joined:
-            return subprocess.CompletedProcess(argv, 0, json.dumps(["+1"]), "")
+            return subprocess.CompletedProcess(argv, 0, json.dumps(["T2"]), "")
         if "comments" in joined:
-            return subprocess.CompletedProcess(argv, 0, "0", "")
+            # A finding older than the +1: answered, so PR 41 is clean.
+            return subprocess.CompletedProcess(argv, 0, json.dumps(["T1"]), "")
         if argv[:3] == ["gh", "pr", "merge"]:
             self.merged.append(int(argv[3]))
             return subprocess.CompletedProcess(argv, 0, "", "")
