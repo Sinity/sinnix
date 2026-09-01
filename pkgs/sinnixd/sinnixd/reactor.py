@@ -1624,13 +1624,21 @@ class CampaignReactor:
                     "horizon:vision",
                 }.intersection(str(item) for item in labels):
                     continue
-                snapshot = compile_launch_snapshot(
-                    bead_id,
-                    project_root=root,
-                    project_id=project,
-                    reader=reader,
-                    config=config,
-                )
+                try:
+                    snapshot = compile_launch_snapshot(
+                        bead_id,
+                        project_root=root,
+                        project_id=project,
+                        reader=reader,
+                        config=config,
+                    )
+                except Exception as error:
+                    # One bead that cannot compile is one bead out of the
+                    # pass, not a refill that aborts (parity with campaign
+                    # run's uncompilable skip; an oversized packet killed
+                    # every polylogue refill on 2026-09-01).
+                    self._board.record_error(-1, f"refill skip {bead_id}: {error}")
+                    continue
                 reason = _judgment_reason(row, snapshot)
                 if reason:
                     record = {
