@@ -57,6 +57,7 @@ in
     ./tests/sinex-user-mile.nix
     ./tests/dots-shell.nix
     ./tests/earlyoom.nix
+    ./tests/activitywatch.nix
   ];
 
   perSystem =
