@@ -40,6 +40,7 @@ _DURABLE_KEEPER_PREFIXES = (
     "judgment:",
     "retry:",
     "dispose:",
+    "review-fix:",
 )
 MAX_EVENT_BYTES = 1_000_000
 DEFAULT_REFILL_SPACING_SECONDS = 300
@@ -373,7 +374,7 @@ class CampaignBoard:
                 raise ReactorError("campaign board keeper record is malformed")
             expected = {"emitted_at", "backoff_seconds", "next_eligible_at"}
             if (
-                set(record) != expected
+                not expected <= set(record)
                 or isinstance(record["backoff_seconds"], bool)
                 or not isinstance(record["backoff_seconds"], int)
             ):
@@ -1495,6 +1496,10 @@ class CampaignReactor:
                 -1, f"review-fix {repo}#{pr}: no workspace for receipt {receipt}"
             )
             return
+        if self._checkout_owned(workspace_id):
+            # The holder (an integrator, or the previous fix lane) finishes
+            # first; the sweep repeats the findings event afterwards.
+            return
         try:
             if self.review_fix_dispatcher is not None:
                 self.review_fix_dispatcher(project, workspace, str(pr))
@@ -1538,6 +1543,36 @@ class CampaignReactor:
             "next_eligible_at": _now(),
         }
 
+    def _checkout_owned(self, checkout_id: str) -> bool:
+        """Whether a running attested agent already works in this checkout.
+
+        Two agents in one worktree edit under each other; every launch into a
+        worktree defers to the agent that holds it and waits for its terminal
+        event instead.
+        """
+        if self.jobs_state_dir is None:
+            return False
+        for path in self.jobs_state_dir.glob("*.json"):
+            try:
+                other = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            other_spec = other.get("spec") if isinstance(other, Mapping) else None
+            other_state = other.get("state") if isinstance(other, Mapping) else None
+            other_checkout = (
+                other_spec.get("checkout") if isinstance(other_spec, Mapping) else None
+            )
+            if (
+                isinstance(other_state, Mapping)
+                and not other_state.get("terminal")
+                and isinstance(other_spec, Mapping)
+                and other_spec.get("kind") == "attested-agent"
+                and isinstance(other_checkout, Mapping)
+                and other_checkout.get("checkout_id") == checkout_id
+            ):
+                return True
+        return False
+
     @staticmethod
     def _receipt_workspace(receipt: str) -> str | None:
         """The workspace a harvest receipt was published from."""
@@ -1560,9 +1595,10 @@ class CampaignReactor:
             f"You are a review-fix lane in /realm/worktrees/{workspace} "
             f"(open PR #{pr} on {repo}). The hosted reviewer left "
             f"{event.get('findings')} inline finding(s) on the PR. Read them with: "
-            f"gh api repos/{repo}/pulls/{pr}/comments (top-level comments by "
-            "chatgpt-codex-connector[bot] newer than its last +1 reaction are the "
-            "open ones). For each: confirm against the code and fix with a focused "
+            f"gh api repos/{repo}/pulls/{pr}/comments (the open ones are the "
+            "top-level comments by chatgpt-codex-connector[bot] from its latest "
+            "review round, newer than its last +1 reaction; earlier rounds were "
+            "superseded). For each: confirm against the code and fix with a focused "
             "test, or refute with concrete evidence. Post a threaded reply on every "
             f"open finding (gh api repos/{repo}/pulls/{pr}/comments/<comment_id>/replies "
             "-f body='...'), disposition style: \"Fixed in <sha> - one line.\" or "
@@ -1654,28 +1690,8 @@ class CampaignReactor:
                 # An explicit cancel is a decision, not an interruption.
                 return
         checkout_id = (record.checkout or {}).get("checkout_id")
-        if checkout_id and self.jobs_state_dir is not None:
-            for path in self.jobs_state_dir.glob("*.json"):
-                try:
-                    other = json.loads(path.read_text())
-                except (OSError, json.JSONDecodeError):
-                    continue
-                other_spec = other.get("spec") if isinstance(other, Mapping) else None
-                other_state = other.get("state") if isinstance(other, Mapping) else None
-                other_checkout = (
-                    other_spec.get("checkout")
-                    if isinstance(other_spec, Mapping)
-                    else None
-                )
-                if (
-                    isinstance(other_state, Mapping)
-                    and not other_state.get("terminal")
-                    and isinstance(other_spec, Mapping)
-                    and other_spec.get("kind") == "attested-agent"
-                    and isinstance(other_checkout, Mapping)
-                    and other_checkout.get("checkout_id") == checkout_id
-                ):
-                    return  # worktree already owned; no duplicate agent
+        if isinstance(checkout_id, str) and self._checkout_owned(checkout_id):
+            return  # worktree already owned; no duplicate agent
         self._board.keeper[key] = {
             "emitted_at": _now(),
             "backoff_seconds": 0,

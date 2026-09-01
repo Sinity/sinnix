@@ -374,6 +374,11 @@ def test_keeper_prune_keeps_records_of_dispatched_work(tmp_path: Path) -> None:
         "backoff_seconds": 0,
         "next_eligible_at": "2026-08-27T00:00:00+00:00",
     }
+    reactor._board.keeper["review-fix:o/r#41:aaaaaaaaaaaa"] = {
+        "emitted_at": "2026-08-27T00:00:00+00:00",
+        "backoff_seconds": 0,
+        "next_eligible_at": "2026-08-27T00:00:00+00:00",
+    }
     reactor._board.keeper["stale-action"] = {
         "emitted_at": "2026-08-27T00:00:00+00:00",
         "backoff_seconds": 0,
@@ -383,6 +388,9 @@ def test_keeper_prune_keeps_records_of_dispatched_work(tmp_path: Path) -> None:
     reactor._emit_keeper()
 
     assert "review:job-1" in reactor._board.keeper
+    # The sweep repeats a findings event every pass; losing this record
+    # launched a second fix lane into the same worktree ten minutes later.
+    assert "review-fix:o/r#41:aaaaaaaaaaaa" in reactor._board.keeper
     assert "stale-action" not in reactor._board.keeper
 
 
@@ -538,6 +546,72 @@ def test_sweep_findings_dispatch_one_review_fix_per_head(
     reactor._dispatch_review_fix(event("b" * 40))
 
     assert calls == [("polylogue", "packet-p-9", "41")] * 2
+
+
+def test_review_fix_defers_to_the_agent_holding_the_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No fix lane launches into a worktree another agent is still editing.
+
+    Anti-vacuity: dropping the ownership check launched a fix lane beside a
+    running integrator in one worktree (PR 4506, 2026-09-01).
+    """
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    (jobs / "job-int.json").write_text(
+        json.dumps(
+            {
+                "spec": {
+                    "kind": "attested-agent",
+                    "checkout": {"checkout_id": "worktree-abc"},
+                },
+                "state": {"terminal": False},
+            }
+        )
+    )
+    calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
+    )
+    monkeypatch.setattr(
+        CampaignReactor, "_receipt_workspace", staticmethod(lambda r: "worktree-abc")
+    )
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        jobs_state_dir=jobs,
+        project_roots={"polylogue": tmp_path / "repo"},
+        review_fix_dispatcher=lambda p, w, r: calls.append((p, w, r)),
+    )
+    event = {
+        "kind": "publication-sweep",
+        "outcome": "findings",
+        "project": "polylogue",
+        "repo": "o/r",
+        "pr": 41,
+        "head": "a" * 40,
+        "findings": 2,
+        "receipt": "harvest-" + "0" * 32,
+    }
+
+    reactor._dispatch_review_fix(event)
+    assert calls == []
+    assert not any(k.startswith("review-fix:") for k in reactor._board.keeper)
+
+    (jobs / "job-int.json").write_text(
+        json.dumps(
+            {
+                "spec": {
+                    "kind": "attested-agent",
+                    "checkout": {"checkout_id": "worktree-abc"},
+                },
+                "state": {"terminal": True},
+            }
+        )
+    )
+    reactor._dispatch_review_fix(event)
+    assert calls == [("polylogue", "packet-p-9", "41")]
 
 
 def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
