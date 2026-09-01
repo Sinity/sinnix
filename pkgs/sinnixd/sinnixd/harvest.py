@@ -294,7 +294,11 @@ def _append_event(path: Path, event: Mapping[str, Any]) -> None:
     """Append an advisory event without making the spool a state authority."""
     try:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        line = json.dumps(dict(event), sort_keys=True, separators=(",", ":"))
+        line = json.dumps(
+            {"emitted_at": _timestamp(), **dict(event)},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         with path.open("a", encoding="utf-8") as handle:
             handle.write(line + "\n")
     except OSError:

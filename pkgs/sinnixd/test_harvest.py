@@ -300,7 +300,9 @@ def test_unavailable_affected_tests_are_typed_and_spooled(
     events = [
         json.loads(row) for row in (state / "events.jsonl").read_text().splitlines()
     ]
-    assert events[-1] == {
+    final = dict(events[-1])
+    assert final.pop("emitted_at")
+    assert final == {
         "detail": "testmon graph unavailable",
         "job_id": "unavailable-job",
         "kind": "verification-unavailable",
