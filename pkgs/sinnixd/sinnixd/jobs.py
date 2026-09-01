@@ -989,6 +989,40 @@ def _terminal_usage(record: "GenericJobRecord") -> dict[str, int | str | None]:
     return parse_backend_usage(content.decode(errors="replace"))
 
 
+def _run_telemetry(
+    record: "GenericJobRecord", state: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Return the safe machine-execution history projection for one terminal run."""
+    finished_at = state.get("observed_at")
+    started_at = record.created_at
+    duration_seconds: float | None = None
+    if isinstance(started_at, str) and isinstance(finished_at, str):
+        try:
+            duration_seconds = max(
+                0.0,
+                (
+                    datetime.fromisoformat(finished_at)
+                    - datetime.fromisoformat(started_at)
+                ).total_seconds(),
+            )
+        except ValueError:
+            pass
+    command = record.spec.to_dict().get("command", {})
+    contract = record.spec.contract
+    backend = contract.get("backend") if isinstance(contract, Mapping) else None
+    return {
+        "schema_version": 1,
+        "command": command,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "duration_seconds": duration_seconds,
+        "phase": state.get("phase"),
+        "resources": state.get("resources"),
+        "backend": backend if isinstance(backend, str) else None,
+        "backend_usage": state.get("usage"),
+    }
+
+
 def _loopback_port_available(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         try:
@@ -5056,6 +5090,8 @@ class GenericJobs:
             state = self._observation_unknown_state()
         else:
             state = self._classify(properties, record)
+        if state.get("terminal"):
+            state["telemetry"] = _run_telemetry(record, state)
         if isinstance(record.state.get("dimensions"), Mapping):
             state["dimensions"] = {
                 **record.spec.dimensions,
@@ -5111,6 +5147,7 @@ class GenericJobs:
                 },
                 "observed_at": _timestamp(),
             }
+            state["telemetry"] = _run_telemetry(record, state)
             updated = self._with_state(record, state)
             self.store.save(updated)
             self._finalize_terminal(updated)

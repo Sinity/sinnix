@@ -257,6 +257,7 @@ def _row(
         "workspace_id": workspace.get("workspace_id") if workspace else None,
         "branch": workspace.get("branch") if workspace else None,
         "pr": None,
+        "telemetry": state.get("telemetry"),
     }
 
 
@@ -494,6 +495,9 @@ def read_evidence(
         "records": [_record_dict(record) for record in records],
         "artifact_refs": [_artifact_refs(record) for record in records],
         "usage": _usage(primary) if primary is not None else None,
+        "telemetry": (
+            _record_parts(primary)[1].get("telemetry") if primary is not None else None
+        ),
         "usage_by_job": {
             str(_record_dict(record).get("job_id")): _usage(record)
             for record in records

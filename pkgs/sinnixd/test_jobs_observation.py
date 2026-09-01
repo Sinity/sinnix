@@ -768,6 +768,37 @@ def test_terminal_capture_records_explicit_backend_usage_fields(
         "cached_tokens": 89,
         "model": "claude-sonnet",
     }
+    telemetry = terminal["state"]["telemetry"]
+    assert telemetry["schema_version"] == 1
+    assert telemetry["command"] == {
+        "digest": record.spec.command_digest,
+        "display": "synthetic foreground command",
+    }
+    assert telemetry["backend"] is None
+    assert telemetry["backend_usage"] == terminal["state"]["usage"]
+    assert telemetry["duration_seconds"] >= 0
+
+
+def test_terminal_telemetry_survives_missing_systemd_counters(tmp_path: Path) -> None:
+    """Unavailable optional counters do not discard machine run history."""
+    systemd = FakeSystemdJobs(
+        properties={"LoadState": "loaded", "ActiveState": "inactive"}
+    )
+    jobs = generic_jobs(tmp_path, systemd)
+    started = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
+    )
+
+    terminal = jobs.get(started["job_id"])
+
+    assert terminal["state"]["terminal"] is True
+    assert terminal["state"]["telemetry"]["resources"] == {
+        "cpu_usage_nsec": None,
+        "io_read_bytes": None,
+        "io_write_bytes": None,
+        "memory_pressure": None,
+    }
+    assert terminal["state"]["telemetry"]["backend_usage"]["input_tokens"] is None
 
 
 def test_terminal_capture_leaves_unparseable_usage_as_null(
