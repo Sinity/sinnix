@@ -506,7 +506,7 @@ def resolve_group(bead_id: str, reader: BdReader) -> tuple[str, tuple[str, ...]]
         # (or deliberately voided); shipping them into the packet resurrects
         # retired specs as instructions (282KB packet from closed void
         # beads, 2026-09-01).
-        and row.get("status") in {"open", "in_progress"}
+        and row.get("status") not in {"closed", "deferred"}
     }
     member_ids.add(leader_id)
     member_ids.add(bead_id)
