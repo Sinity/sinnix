@@ -263,8 +263,7 @@ def _command_model(
         check=True,
         timeout=60,
     )
-    response = json.loads(started.stdout)
-    job_id = response.get("job_id")
+    job_id = _envelope_value(started.stdout).get("job_id")
     if not isinstance(job_id, str) or not job_id:
         raise RetrospectiveError("agentctl did not return a job ID")
     subprocess.run(
@@ -279,11 +278,23 @@ def _command_model(
         check=True,
         timeout=60,
     )
-    value = json.loads(result.stdout)
-    output = value.get("result", result.stdout) if isinstance(value, dict) else value
+    output = _envelope_value(result.stdout).get("content")
     if not isinstance(output, str):
         raise RetrospectiveError("agentctl returned a non-text model result")
     return output
+
+
+def _envelope_value(stdout: str) -> dict[str, Any]:
+    """Unwrap an agentctl response envelope to its payload value."""
+    try:
+        response = json.loads(stdout)
+    except json.JSONDecodeError as error:
+        raise RetrospectiveError("agentctl did not return JSON") from error
+    if not isinstance(response, dict):
+        raise RetrospectiveError("agentctl returned a non-object response")
+    payload = response.get("payload")
+    value = payload.get("value") if isinstance(payload, dict) else None
+    return value if isinstance(value, dict) else {}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
