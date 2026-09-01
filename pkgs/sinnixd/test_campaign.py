@@ -151,3 +151,28 @@ def test_frontier_orders_by_priority_before_id() -> None:
     ]
     # Anti-vacuity: ordering by id alone spends a wave limit on the lowest
     # ids and never reaches the P0 work.
+
+
+def test_launch_claims_beads_and_reports_the_ones_it_could_not() -> None:
+    """A launched lane's bead leaves the frontier until merge or release.
+
+    Anti-vacuity: without the claim, refill relaunched polylogue-0cm7m one
+    minute after its first lane succeeded, while that result was still with
+    an integrator (2026-09-01 21:28Z).
+    """
+    import subprocess
+    from pathlib import Path
+
+    from sinnixd.campaign import claim_beads
+
+    calls: list[list[str]] = []
+
+    def run(argv, **_kwargs):  # type: ignore[no-untyped-def]
+        calls.append(argv)
+        code = 1 if argv[2] == "p-bad" else 0
+        return subprocess.CompletedProcess(argv, code, "", "refused")
+
+    failed = claim_beads(Path("/repo"), ["p-ok", "p-bad"], run=run)
+
+    assert failed == ["p-bad"]
+    assert calls[0][:6] == ["bd", "update", "p-ok", "-s", "in_progress", "-a"]
