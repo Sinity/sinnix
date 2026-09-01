@@ -198,9 +198,17 @@ read -r -d '' NATIVE_TRANSCRIPT_JS <<'JS' || true
       message: message ? { role: message.author?.role || 'unknown', text: textOf(message.content), timestamp: timestamp(message.create_time),
         attachments: Array.isArray(metadata.attachments) ? metadata.attachments.map(item => ({ ...item })) : [] } : null };
   });
+  const all_messages = Object.entries(payload.mapping).flatMap(([node_id, node]) => {
+    const message = node?.message;
+    if (!message) return [];
+    return [{ node_id, parent_node_id: node?.parent || null, children_node_ids: Array.isArray(node?.children) ? [...node.children] : [],
+      provider_id: String(message.id || node_id), author: message.author || null, content: message.content || null,
+      create_time: message.create_time ?? null, update_time: message.update_time ?? null, status: message.status ?? null,
+      end_turn: message.end_turn ?? null, weight: message.weight ?? null, metadata: message.metadata || {}, recipient: message.recipient ?? null }];
+  });
   return { schema: 'sinnix-chatgpt-conversation-v2', fidelity: 'native', provenance: { source: 'chatgpt_backend_api', complete: true },
     url: location.href, title: document.title, conversation_id: String(payload.conversation_id || payload.id || conversationId), current_node: payload.current_node || null,
-    message_count: messages.length, mapping_node_count: all_mapping_nodes.length, messages, all_mapping_nodes };
+    message_count: messages.length, mapping_node_count: all_mapping_nodes.length, all_message_count: all_messages.length, messages, all_messages, all_mapping_nodes };
 })()
 JS
 
@@ -316,10 +324,11 @@ native_chunk_js() {
   local start="$1" size="$2"
   cat <<JS
 (async () => {
-  window.__sinnixNativeTranscriptPromise = window.__sinnixNativeTranscriptPromise || ($NATIVE_TRANSCRIPT_JS);
-  const value = await window.__sinnixNativeTranscriptPromise;
+  window.__sinnixNativeTranscriptPromiseV2 = window.__sinnixNativeTranscriptPromiseV2 || ($NATIVE_TRANSCRIPT_JS);
+  const value = await window.__sinnixNativeTranscriptPromiseV2;
   const serialized = JSON.stringify(value);
-  return { total: serialized.length, chunk: serialized.slice(${start}, ${start} + ${size}) };
+  const end = Math.min(serialized.length, ${start} + ${size});
+  return { total: serialized.length, next_start: end, chunk: serialized.slice(${start}, end) };
 })()
 JS
 }
@@ -337,16 +346,18 @@ read_full_transcript() {
 }
 
 read_full_native_chunked() {
-  local page_id="$1" target="$2" chunk_size=900000 start=0 part total chunk
+  local page_id="$1" target="$2" chunk_size=900000 start=0 part total next_start chunk
   local assembled
   assembled=$(mktemp /realm/tmp/work/sinnix-chatgpt-native.XXXXXX.json)
   : >"$assembled"
   while :; do
     part=$(evaluate "$page_id" "$(native_chunk_js "$start" "$chunk_size")")
     total=$(jq -r '.total' <<<"$part")
+    next_start=$(jq -r '.next_start' <<<"$part")
     chunk=$(jq -r '.chunk' <<<"$part")
     printf '%s' "$chunk" >>"$assembled"
-    start=$((start + ${#chunk}))
+    [[ $next_start -gt $start ]] || { rm -f -- "$assembled"; printf 'native transcript chunk did not advance\n' >&2; exit 1; }
+    start=$next_start
     [[ $start -ge $total ]] && break
   done
   jq -c --arg page_id "$page_id" '. + {page_id: $page_id}' "$assembled" >"$assembled.checked"
@@ -404,10 +415,14 @@ write_output_atomic() {
   local path="$1" content="$2" directory temp
   directory=$(dirname -- "$path")
   [[ -d $directory ]] || { printf 'output directory does not exist: %s\n' "$directory" >&2; exit 2; }
+  [[ ! -e $path ]] || { printf 'output file already exists: %s\n' "$path" >&2; exit 2; }
   temp=$(mktemp "$directory/.sinnix-chatgpt.XXXXXX")
+  trap 'rm -f -- "$temp"' RETURN
   chmod 600 "$temp"
   printf '%s\n' "$content" >"$temp"
-  mv -n -- "$temp" "$path" || { rm -f -- "$temp"; printf 'output file already exists: %s\n' "$path" >&2; exit 2; }
+  ln -- "$temp" "$path" || { printf 'output file already exists: %s\n' "$path" >&2; exit 2; }
+  rm -f -- "$temp"
+  trap - RETURN
 }
 
 parse_read_options() {
