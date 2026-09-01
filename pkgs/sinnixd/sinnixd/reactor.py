@@ -718,6 +718,49 @@ def default_reactions() -> ReactionRegistry:
     return registry
 
 
+class BeadReleaser(Protocol):
+    def release(self, bead_id: str, *, cwd: Path) -> tuple[bool, str | None]: ...
+
+
+class SubprocessBeadReleaser:
+    """Return an interrupted lane's claimed bead to the ready frontier."""
+
+    def __init__(self, executable: str = "bd", actor: str = "sinnix-reactor") -> None:
+        self.executable = executable
+        self.actor = actor
+
+    def release(self, bead_id: str, *, cwd: Path) -> tuple[bool, str | None]:
+        try:
+            result = subprocess.run(
+                [
+                    self.executable,
+                    "update",
+                    bead_id,
+                    "-s",
+                    "open",
+                    "-a",
+                    "",
+                    # Only the campaign's own claim is released; an operator's
+                    # in_progress claim on the same bead stays theirs.
+                    "--if-assignee",
+                    "campaign",
+                    "--force",
+                    "--actor",
+                    self.actor,
+                ],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            return False, str(error)
+        if result.returncode == 0:
+            return True, None
+        return False, (result.stderr or result.stdout).strip()[:300]
+
+
 class SubprocessBeadCloser:
     def __init__(self, executable: str = "bd", actor: str = "sinnix-reactor") -> None:
         self.executable = executable
@@ -895,6 +938,7 @@ class CampaignReactor:
     verify_timeout_seconds: int = 2_400
     agentctl_executable: str = "agentctl"
     bead_closer: BeadCloser = field(default_factory=SubprocessBeadCloser)
+    bead_releaser: BeadReleaser = field(default_factory=SubprocessBeadReleaser)
     registry: ReactionRegistry = field(default_factory=default_reactions)
 
     def __post_init__(self) -> None:
@@ -1465,6 +1509,29 @@ class CampaignReactor:
             f"```json\n{summary}\n```\n\n"
             f"## Operating rules\n\n{body}\n"
         )
+
+    def _release_beads(self, lane: LaneRecord) -> None:
+        """An interrupted lane's claim goes back to the frontier.
+
+        The claim exists so a succeeded lane is not relaunched while its
+        result is integrated; a lane that never reached a result must not
+        keep its bead parked.
+        """
+        record = self._job_record(lane.job_id)
+        spec = record.get("spec") if isinstance(record, Mapping) else None
+        contract = spec.get("contract") if isinstance(spec, Mapping) else None
+        parameters = contract.get("parameters") if isinstance(contract, Mapping) else None
+        campaign = parameters.get("campaign") if isinstance(parameters, Mapping) else None
+        bead_ids = campaign.get("bead_ids") if isinstance(campaign, Mapping) else None
+        root = self.project_roots.get(lane.project)
+        if not isinstance(bead_ids, list) or root is None:
+            return
+        for bead_id in bead_ids:
+            if not isinstance(bead_id, str) or not bead_id:
+                continue
+            released, detail = self.bead_releaser.release(bead_id, cwd=root)
+            if not released:
+                self._board.record_error(-1, f"release {bead_id}: {detail}")
 
     def _dispatch_review_fix(self, event: Mapping[str, Any]) -> None:
         """Answer hosted-review findings on a published PR with a fix lane.
@@ -2053,6 +2120,12 @@ class CampaignReactor:
                         self._dispatch_review(lane)
                     if lane is not None and lane.phase in {"cancelled", "timeout"}:
                         self._dispatch_retry(lane)
+                    if lane is not None and lane.phase in {
+                        "cancelled",
+                        "timeout",
+                        "failed",
+                    }:
+                        self._release_beads(lane)
                 if (
                     event.get("kind") == "harvest"
                     and event.get("transition") == "review-required"

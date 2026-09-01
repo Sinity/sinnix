@@ -658,6 +658,65 @@ def test_integration_is_keyed_by_workspace_and_head(
     assert len(calls) == 2
 
 
+class FakeBeadReleaser:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, Path]] = []
+
+    def release(self, bead_id: str, *, cwd: Path) -> tuple[bool, str | None]:
+        self.calls.append((bead_id, cwd))
+        return True, None
+
+
+def test_interrupted_lane_releases_its_claimed_beads(tmp_path: Path) -> None:
+    """A lane that never reached a result must not keep its bead parked.
+
+    Anti-vacuity: without the release a cancelled lane's bead stays
+    in_progress under the campaign's claim and no later wave can take it.
+    """
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    (jobs / "lane-9.json").write_text(
+        json.dumps(
+            {
+                "job_id": "lane-9",
+                "spec": {
+                    "kind": "attested-agent",
+                    "contract": {
+                        "parameters": {"campaign": {"bead_ids": ["polylogue-q1"]}}
+                    },
+                },
+            }
+        )
+    )
+    releaser = FakeBeadReleaser()
+    spool = tmp_path / "events.jsonl"
+    reactor = CampaignReactor(
+        event_spool=spool,
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        jobs_state_dir=jobs,
+        project_roots={"polylogue": tmp_path / "repo"},
+        bead_releaser=releaser,
+        retry_dispatcher=lambda _job: None,
+    )
+    append(
+        spool,
+        {
+            "kind": "attested-agent",
+            "job_id": "lane-9",
+            "project": "polylogue",
+            "phase": "cancelled",
+            "reason": "operator-cancel",
+            "completed_at": "2026-09-01T21:00:00+00:00",
+            "checkout": {"checkout_id": "worktree-q"},
+        },
+    )
+
+    reactor.run_once()
+
+    assert releaser.calls == [("polylogue-q1", tmp_path / "repo")]
+
+
 def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
     """Judgment is spent on exceptions, not on every lane that passed its scan.
 

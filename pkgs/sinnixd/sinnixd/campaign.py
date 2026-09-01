@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import subprocess
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Mapping, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
 from .limits import MAX_AGENT_TIMEOUT_SECONDS
 
@@ -22,6 +24,37 @@ def frontier_order(row: Mapping[str, Any]) -> tuple[int, str]:
     priority = row.get("priority")
     rank = priority if isinstance(priority, int) and not isinstance(priority, bool) else 9
     return rank, str(row.get("id", ""))
+
+
+CLAIM_ACTOR = "campaign"
+
+
+def claim_beads(
+    root: Path, bead_ids: Sequence[str], *, run: Callable[..., Any] = subprocess.run
+) -> list[str]:
+    """Mark a launched lane's beads in_progress so no later wave relaunches them.
+
+    A claimed bead leaves the ready frontier until the sweep closes it at
+    merge or the reactor releases it when the lane is interrupted. Returns
+    the beads whose claim failed; a failed claim is reported, not fatal.
+    """
+    failed: list[str] = []
+    for bead_id in bead_ids:
+        try:
+            result = run(
+                ["bd", "update", bead_id, "-s", "in_progress", "-a", CLAIM_ACTOR, "--actor", CLAIM_ACTOR],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            failed.append(bead_id)
+            continue
+        if result.returncode != 0:
+            failed.append(bead_id)
+    return failed
 
 
 def held_workspace_names(
@@ -442,6 +475,7 @@ class CampaignRunner:
                 reject_conflicts=True,
             )
             job_id = str(response["job_id"])
+            unclaimed = claim_beads(project.root, [str(b) for b in payload["bead_ids"]])
             self.jobs.spool_event(
                 {
                     "kind": "campaign",
@@ -449,6 +483,7 @@ class CampaignRunner:
                     "wave_id": wave_id,
                     "group": payload["group"],
                     "job_id": job_id,
+                    "unclaimed_beads": unclaimed,
                 }
             )
             return job_id
