@@ -14,6 +14,8 @@ The descriptor at `.agentctl/project.toml:15-21` declares a `git-worktree` provi
 
 `docs/sinnixd.md:248-286` states that the configured project root is the registered default checkout, that workspace creation validates the configured root and base, and that publication requires an exact-head verification receipt before push and review creation. `pkgs/sinnixd/sinnixd/projects.py:1571-1588` currently requires the configured root to be a registered Git worktree and gives it checkout ID `default`. `pkgs/sinnixd/sinnixd/workspaces.py:752-760` resolves an omitted base from the descriptor, and `pkgs/sinnixd/sinnixd/delivery.py:49-72,415-419` derives the publication base branch from that same descriptor value.
 
+The default-checkout API surface is broader than workspace creation. `pkgs/sinnixd/sinnixd/projects.py:1526-1588` discovers and returns the registered `default` checkout, `pkgs/sinnixd/sinnixd/service.py:853-899` selects it for declared and scheduled jobs when no workspace is supplied, and `pkgs/sinnixd/sinnixd/project_plans.py:565` uses it when a plan omits `checkout_id`. `pkgs/sinnixd/sinnixd/packets.py:231` resolves the project source used by packet compilation, while `pkgs/sinnixd/sinnixd/cli.py:1300-1418` routes lane, campaign, and packet commands through that resolver. These are current migration seams, not additional authorities.
+
 Beads is path-independent for authority. `bd context --json` from this worktree reported `cwd_repo_root=/realm/worktrees/packet-sinnix-45vk`, `repo_root=/realm/project/sinnix`, `is_worktree=true`, and `beads_dir=/realm/state/tasks/sinnix/.beads`. The same command from `/realm/project/sinnix` reported `cwd_repo_root=/realm/project/sinnix`, `repo_root=/realm/state/tasks/sinnix`, `is_worktree=false`, and the same `beads_dir`. The differing `repo_root` field is Beads' repository-context result, not a second task database. No task command or Git mutation was performed.
 
 The persistent checkout and this worktree were both at `8af9bb7c31c5cd30a31d357cbc47004c69fbfe3d`; `git rev-parse --verify origin/master` returned that commit from both roots. The persistent checkout had pre-existing modifications in `dots/claude/CLAUDE.md`, `flake/tests/runtime.nix`, `modules/services/lynchpin.nix`, `pkgs/chatgpt-app/default.nix`, `pkgs/sinnixd/sinnixd/cli.py`, and `pkgs/sinnixd/test_service.py`. The lane did not alter them.
@@ -41,7 +43,7 @@ The required census command was run exactly as follows:
 rg -n '/realm/project/sinnix|default_base|workspace_root|projectRoot' .agentctl docs modules pkgs scripts dots flake
 ```
 
-It returned 112 hits in 45 files. Every hit is classified below. Line numbers are the output of that command at decision time.
+It returned 129 hits in 46 files. Seventeen hits are in this decision record itself, because the required search includes `docs/`. Those self-references are classified as evidence, probe, census, or residual-risk statements in this record. The remaining 112 hits in 45 other files are classified below. Line numbers are the output of that command at decision time.
 
 ### Authority and project discovery
 
@@ -88,6 +90,8 @@ It returned 112 hits in 45 files. Every hit is classified below. Line numbers ar
 - `docs/design/orchestration-next.md:101`, `docs/design/lane-lifecycle-prototype.py:40`: design/prototype assumptions. Non-runtime design inputs; update or retire during migration.
 - `flake/treefmt.nix:9`: `projectRootFile = "flake.nix"`. Generic tool configuration; it does not privilege the persistent checkout.
 
+The 17 self-referential hits in `docs/main-checkout-authority.md` are intentional record metadata: lines 13, 19, and 25 identify source evidence and probe scope; lines 33-34 identify observed paths and publication behavior; lines 43, 52, 65-69, 91, 101, and 116 preserve census classifications and decision comparison; line 132 records residual risk; and line 140 records the verification count. They do not represent runtime dependencies.
+
 The census contains no Beads database path under the checkout. The canonical task store is supplied by runtime state and the `.beads/redirect` mechanism described in `docs/sinnixd.md:167` and the live `bd context` probes.
 
 ## Model comparison
@@ -133,6 +137,6 @@ Required commands and results:
 
 - `agentctl workspace list`: exit 0 from the lane worktree and persistent checkout.
 - `bd context --json`: exit 0 from both roots; both reported `/realm/state/tasks/sinnix/.beads`.
-- `rg -n '/realm/project/sinnix|default_base|workspace_root|projectRoot' .agentctl docs modules pkgs scripts dots flake`: exit 0; 112 hits in 45 files, all classified in this record.
+- `rg -n '/realm/project/sinnix|default_base|workspace_root|projectRoot' .agentctl docs modules pkgs scripts dots flake`: exit 0; 129 hits in 46 files, consisting of 112 source hits in 45 other files plus 17 classified self-references in this record.
 
 Additional probes were the two rejected `agentctl workspace create` commands, `agentctl project get sinnix`, `agentctl workspace publish --help`, `git rev-parse --verify origin/master`, `git status --short --branch`, and `git worktree list --porcelain`. No task, checkout, service, or live configuration state was mutated.
