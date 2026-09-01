@@ -119,9 +119,8 @@ truncating it by default. Truncating the output cost the diagnosis.
 
 Nothing metered any of it. Lane jobs launched through `agentctl` land in
 `sinnixd-work-*.slice` with real admission; work an agent starts from its own
-shell inherits the terminal's scope, where the only policy is `MemoryLow=4G`
-protecting it from reclaim. The scheduler saw none of the load it was supposed
-to govern.
+shell inherits the terminal's scope, where no admission boundary or workload
+policy applied. The scheduler saw none of the load it was supposed to govern.
 
 This is the same failure the freeze work addressed, reproduced from the other
 side: not a runaway job, but an orchestrator with no admission control over
