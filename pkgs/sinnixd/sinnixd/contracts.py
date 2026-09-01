@@ -395,6 +395,21 @@ class TypedJobContracts:
         record = self.jobs.store.load(job_id)
         if record.spec.kind != "attested-agent" or record.spec.checkout is None:
             raise ContractError("only attested-agent jobs can be retried")
+        checkout_id = record.spec.checkout.get("checkout_id")
+        for other in self.jobs.store.active_records():
+            if (
+                other.spec.kind == "attested-agent"
+                and not other.state.get("terminal")
+                and isinstance(other.spec.checkout, dict)
+                and other.spec.checkout.get("checkout_id") == checkout_id
+            ):
+                # Two agents in one worktree interleave commits and clobber
+                # .lane text (twelve-job pile-up, 2026-09-01). Cancel the
+                # owner first if the retry is really wanted.
+                raise ContractError(
+                    f"checkout is owned by running job {other.job_id}; "
+                    "a retry would put two agents in one worktree"
+                )
         if hint is not None and (
             not isinstance(hint, str) or not hint.strip() or len(hint.encode()) > 10_000
         ):

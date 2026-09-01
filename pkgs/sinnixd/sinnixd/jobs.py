@@ -4232,6 +4232,41 @@ class GenericJobs:
         }
         self._save_admission_state(state)
 
+    LEASE_REAP_GRACE_SECONDS = 120.0
+
+    def _reap_orphaned_leases(self) -> None:
+        """Cancel service-lease jobs nothing depends on any more.
+
+        lifetime=job binds a lease to the service job's own life, so leases
+        outlived their lanes and held whole pools (three dev_services jobs
+        blocked every harvest on pool-workers, 2026-09-01). A young lease is
+        left alone: its dependent may still be queuing.
+        """
+        records = self.store.active_records()
+        depended_on: set[str] = set()
+        for record in records:
+            if not record.state.get("terminal"):
+                depended_on.update(record.spec.dependency_job_ids)
+        now = time.time()
+        for record in records:
+            if (
+                record.spec.lease is None
+                or record.state.get("terminal")
+                or record.job_id in depended_on
+            ):
+                continue
+            try:
+                created = datetime.fromisoformat(record.created_at).timestamp()
+            except (TypeError, ValueError):
+                continue
+            if now - created < self.LEASE_REAP_GRACE_SECONDS:
+                continue
+            try:
+                self.cancel(record.job_id, reason="lease-released")
+            except Exception:
+                print("lease reap failed for", record.job_id, file=sys.stderr)
+                traceback.print_exc()
+
     def run_admission_scheduler(self, stop_event: Event) -> None:
         """Protect the host and retry queued admission independently of clients."""
         while not stop_event.is_set():
@@ -4248,6 +4283,11 @@ class GenericJobs:
                     self._admit_locked()
             except Exception:
                 print("admission scheduler: admission sweep failed", file=sys.stderr)
+                traceback.print_exc()
+            try:
+                self._reap_orphaned_leases()
+            except Exception:
+                print("admission scheduler: lease reap failed", file=sys.stderr)
                 traceback.print_exc()
             stop_event.wait(self.admission_retry_seconds)
 
@@ -4782,7 +4822,7 @@ class GenericJobs:
             **({"dimensions": dict(dimensions)} if dimensions is not None else {}),
         }
 
-    def cancel(self, job_id: str, *, reason: str = "operator-cancel") -> dict[str, Any]:
+    def cancel(self, job_id: str, *, reason: str) -> dict[str, Any]:
         terminal: GenericJobRecord | None = None
         pre_stop_systemd: Mapping[str, str] | None = None
         with self.store.locked(job_id):

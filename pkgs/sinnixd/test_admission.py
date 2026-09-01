@@ -1108,7 +1108,7 @@ def test_owned_scratch_is_injected_cleaned_on_terminal_and_recovered(
         "ExecMainStatus": "0",
         "InvocationID": "fixture",
     }
-    subject.cancel(cancelled["job_id"])
+    subject.cancel(cancelled["job_id"], reason="test-cancel")
     assert not cancel_record.scratch_path.exists()
     recovered = subject.store.create(
         GenericJobSpec(

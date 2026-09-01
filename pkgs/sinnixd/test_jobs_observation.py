@@ -219,7 +219,7 @@ def test_cancel_reconciles_the_systemd_semantic_terminal_result(
         command=("fixture",), working_directory=str(tmp_path), environment={}
     )
 
-    terminal = jobs.cancel(started["job_id"])
+    terminal = jobs.cancel(started["job_id"], reason="test-cancel")
     record = jobs.store.load(started["job_id"])
 
     assert systemd.stopped == [started["unit"]]
@@ -254,7 +254,7 @@ def test_stop_timeout_then_collected_unit_reconciles_after_restart(
     )
 
     with pytest.raises(SystemdJobError, match="timed out"):
-        jobs.cancel(started["job_id"])
+        jobs.cancel(started["job_id"], reason="test-cancel")
     uncertain = jobs.get(started["job_id"])
     persisted = jobs.store.load(started["job_id"])
 

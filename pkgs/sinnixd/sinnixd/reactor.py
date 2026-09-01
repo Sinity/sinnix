@@ -1175,6 +1175,15 @@ class CampaignReactor:
                 ).isoformat(),
             }
 
+    def _job_record(self, job_id: str) -> Mapping[str, Any] | None:
+        if self.jobs_state_dir is None:
+            return None
+        try:
+            value = json.loads((self.jobs_state_dir / f"{job_id}.json").read_text())
+        except (OSError, json.JSONDecodeError):
+            return None
+        return value if isinstance(value, Mapping) else None
+
     def _workspace_for(self, record: LaneRecord) -> str:
         """The directory a lane was provisioned into, whatever the event carried.
 
@@ -1498,14 +1507,57 @@ class CampaignReactor:
     def _dispatch_retry(self, record: LaneRecord) -> None:
         """Re-dispatch an interrupted lane once, from its preserved prompt.
 
-        The runtime keeps the original prompt and contract (job.retry), and
-        #26 restored workspace state on cancellation, so an interrupted lane
-        is resumable without coordinator archaeology. One attempt: a lane
-        that dies twice needs judgment, not a loop.
+        One auto-retry per ORIGINAL lane, only for interruptions (pressure,
+        timeout), and never into an occupied worktree: replaying a backlog
+        of cancelled events once dispatched a retry per event and piled
+        twelve jobs into one checkout (2026-09-01).
         """
         key = f"retry:{record.job_id}"
         if key in self._board.keeper:
             return
+        stored = self._job_record(record.job_id)
+        if stored is not None:
+            spec = stored.get("spec") if isinstance(stored, Mapping) else None
+            contract = spec.get("contract") if isinstance(spec, Mapping) else None
+            if isinstance(contract, Mapping) and contract.get("retry_of"):
+                return  # already a retry: one auto-attempt per chain
+            state = stored.get("state") if isinstance(stored, Mapping) else None
+            cancellation = (
+                state.get("cancellation") if isinstance(state, Mapping) else None
+            )
+            reason = (
+                str(cancellation.get("reason", ""))
+                if isinstance(cancellation, Mapping)
+                else ""
+            )
+            if record.phase == "cancelled" and not reason.startswith(
+                "pressure-preemption"
+            ):
+                # An explicit cancel is a decision, not an interruption.
+                return
+        checkout_id = (record.checkout or {}).get("checkout_id")
+        if checkout_id and self.jobs_state_dir is not None:
+            for path in self.jobs_state_dir.glob("*.json"):
+                try:
+                    other = json.loads(path.read_text())
+                except (OSError, json.JSONDecodeError):
+                    continue
+                other_spec = other.get("spec") if isinstance(other, Mapping) else None
+                other_state = other.get("state") if isinstance(other, Mapping) else None
+                other_checkout = (
+                    other_spec.get("checkout")
+                    if isinstance(other_spec, Mapping)
+                    else None
+                )
+                if (
+                    isinstance(other_state, Mapping)
+                    and not other_state.get("terminal")
+                    and isinstance(other_spec, Mapping)
+                    and other_spec.get("kind") == "attested-agent"
+                    and isinstance(other_checkout, Mapping)
+                    and other_checkout.get("checkout_id") == checkout_id
+                ):
+                    return  # worktree already owned; no duplicate agent
         self._board.keeper[key] = {
             "emitted_at": _now(),
             "backoff_seconds": 0,

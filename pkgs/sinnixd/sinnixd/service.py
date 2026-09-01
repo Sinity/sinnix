@@ -1126,7 +1126,8 @@ class SinnixdService:
                 self.jobs.cancel(
                     self._authorize_job(
                         principal, self._single_job_id(arguments, "job.cancel")
-                    )
+                    ),
+                    reason=f"{principal}-cancel",
                 )
             )
         raise ValueError(f"unsupported operation: {operation}")
