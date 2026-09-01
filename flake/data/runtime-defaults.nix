@@ -272,7 +272,6 @@ rec {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 300;
-        MemoryLow = "4G";
       };
       desktop-shell = {
         IOAccounting = true;
