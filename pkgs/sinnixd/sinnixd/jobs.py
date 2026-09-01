@@ -131,7 +131,10 @@ POOL_POLICIES = {
         "default_estimate": 8 * 1024 * MIB,
     },
     "agent": {
-        "workers": 12,
+        # Admission memory arithmetic is the real limiter (discounted claims
+        # against the live host budget); the worker cap only guards CPU-burst
+        # collision on 24 threads.
+        "workers": 16,
         "memory_budget": 48 * 1024 * MIB,
         "default_estimate": 2 * 1024 * MIB,
     },
