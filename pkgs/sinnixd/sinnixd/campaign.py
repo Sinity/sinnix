@@ -8,6 +8,31 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from .limits import MAX_AGENT_TIMEOUT_SECONDS
+
+RESUME_PREAMBLE = (
+    "RESUME NOTICE: this worktree already carries partial work for this packet "
+    "from a lane that did not finish. Before anything else run `git status` and "
+    "`git log --oneline origin/master..HEAD`; keep what is correct, discard what "
+    "is not, then complete the packet as specified below and commit.\n\n"
+)
+
+
+def frontier_order(row: Mapping[str, Any]) -> tuple[int, str]:
+    """P0 before P4, then id: a wave limit must spend itself on the most urgent work."""
+    priority = row.get("priority")
+    rank = priority if isinstance(priority, int) and not isinstance(priority, bool) else 9
+    return rank, str(row.get("id", ""))
+
+
+def held_workspace_names(
+    existing: Mapping[str, Any], held_checkouts: set[str] | frozenset[str]
+) -> set[str]:
+    """Workspaces an agent is still editing; every other leftover one is resumable."""
+    return {
+        name
+        for name, record in existing.items()
+        if getattr(record, "workspace_id", None) in held_checkouts
+    }
 from .packets import (
     PacketConfig,
     PacketError,
@@ -225,7 +250,7 @@ class CampaignRunner:
                 and row.get("id")
                 and (bead_ids is None or row["id"] in requested)
             ),
-            key=lambda row: str(row["id"]),
+            key=frontier_order,
         )
         if limit is not None and (isinstance(limit, bool) or limit < 1):
             raise ValueError("campaign limit must be positive")
@@ -271,16 +296,23 @@ class CampaignRunner:
                     },
                 )
             )
-        active_workspaces = {
-            record.name
+        existing_workspaces = {
+            record.name: record
             for record in self.workspaces.store.records()
             if record.project_id == project_id
         }
         active_beads: set[str] = set()
         active_conflict_keys: set[str] = set()
+        held_checkouts: set[str] = set()
         for record in self.jobs.store.active_records():
             if record.spec.project_id != project_id or record.state.get("terminal"):
                 continue
+            if record.spec.kind == "attested-agent" and isinstance(
+                record.spec.checkout, Mapping
+            ):
+                held = record.spec.checkout.get("checkout_id")
+                if isinstance(held, str) and held:
+                    held_checkouts.add(held)
             parameters = record.spec.contract.get("parameters")
             campaign = (
                 parameters.get("campaign") if isinstance(parameters, Mapping) else None
@@ -300,6 +332,11 @@ class CampaignRunner:
                 "outcome-unknown",
             }:
                 active_conflict_keys.update(record.spec.exclusive_keys)
+        # A leftover worktree is a lane's state, not a lock. Only a worktree an
+        # agent is still editing excludes its packet; an unheld one is resumed
+        # by the next lane, so a killed lane's partial work stays in play
+        # instead of parking the bead until someone disposes the worktree.
+        active_workspaces = held_workspace_names(existing_workspaces, held_checkouts)
         schedule = build_schedule(
             lanes,
             active_workspace_names=active_workspaces,
@@ -365,21 +402,24 @@ class CampaignRunner:
             principal: str,
         ) -> str:
             payload = node["payload"]
+            workspace_name = str(payload["workspace_name"])
+            prompt = str(payload["prompt"])
             self._provisioning = str(payload["group"])
-            self.workspaces.create(
-                project_id=project_id,
-                name=str(payload["workspace_name"]),
-                branch=str(payload["branch"]),
-                base=None,
-            )
-            lane_checkout = self.workspaces.resolve_checkout(
-                project_id, str(payload["workspace_name"])
-            )
+            if workspace_name in existing_workspaces:
+                prompt = RESUME_PREAMBLE + prompt
+            else:
+                self.workspaces.create(
+                    project_id=project_id,
+                    name=workspace_name,
+                    branch=str(payload["branch"]),
+                    base=None,
+                )
+            lane_checkout = self.workspaces.resolve_checkout(project_id, workspace_name)
             response = self._job_contracts.start_agent(
                 principal=principal,
                 project_id=project_id,
                 checkout_id=lane_checkout.checkout_id,
-                prompt=str(payload["prompt"]),
+                prompt=prompt,
                 backend=str(payload["backend"]),
                 model=str(payload["model"]),
                 effort=str(payload["effort"]),
