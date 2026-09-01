@@ -256,6 +256,7 @@ mkFeatureModule {
         mkCodexWrapper
         mkGrokWrapper
         mkAntigravityWrapper
+        agentScopePrelude
         hermesBootstrap
         ensureHermes
         mkHermesWrapper
@@ -501,6 +502,8 @@ mkFeatureModule {
                     #!/usr/bin/env bash
                     set -euo pipefail
 
+                    ${agentScopePrelude}
+
                     ${mkNpmBootstrap {
                       stateDir = "clodex";
                       npmPackage = "@bman654/clodex";
@@ -527,6 +530,8 @@ mkFeatureModule {
                   text = ''
                     #!/usr/bin/env bash
                     set -euo pipefail
+
+                    ${agentScopePrelude}
 
                     ${mkNpmBootstrap {
                       stateDir = "gemini";

@@ -619,13 +619,17 @@ in
             grep -Fq 'CLODEX_CREDENTIAL_HELPER=' "$HOME/.local/bin/sinnix-clodex-server"
             jq -e '.env.CLAUDE_CODE_PROCESS_WRAPPER == "/home/sinity/.local/bin/clodex-claude"' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
 
-            # Every agent wrapper launches its npm-bootstrapped entry point
-            # directly, preserving the caller's normal process context.
+            # Every outer agent wrapper must enter agent.slice before its
+            # bootstrap runs. A missing scope launch leaves npm/bootstrap work
+            # in the terminal session and makes the cgroup regression invisible
+            # to admission.
             for wrapper in \
               "$HOME/.local/bin/claude-full" \
               "$HOME/.local/bin/codex" \
               "$HOME/.local/bin/gemini"; do
               grep -Fq 'launch.sh' "$wrapper"
+              grep -Fq '/proc/self/cgroup' "$wrapper"
+              grep -Fq -- '--slice=agent.slice' "$wrapper"
             done
             if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude-full" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini"; then
               echo "agent wrappers must not hardcode resource limits" >&2
