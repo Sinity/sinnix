@@ -2643,7 +2643,7 @@ def test_queued_service_cancellation_wins_the_admission_start_interleaving(
     admission_thread = threading.Thread(target=admit)
     admission_thread.start()
     assert before_start.wait(1)
-    cancellation_thread = threading.Thread(target=lambda: jobs.cancel(job_id))
+    cancellation_thread = threading.Thread(target=lambda: jobs.cancel(job_id, reason="test-cancel"))
     cancellation_thread.start()
     assert cancellation_saved.wait(1)
     resume_admission.set()
@@ -2987,7 +2987,7 @@ def test_record_owns_ports_when_its_lease_artifact_is_missing_or_truncated(
     assert second.ports[0].port == 41001
 
     if phase != "terminal":
-        jobs.cancel(job_id)
+        jobs.cancel(job_id, reason="test-cancel")
     systemd.properties = {"LoadState": "not-found", "ActiveState": "inactive"}
     jobs.get(job_id)
     reclaimed = GenericJobStore(jobs.store.root).allocate_service_lease(
@@ -9479,7 +9479,7 @@ def test_confirmed_absence_and_launch_failure_are_distinct_terminal_outcomes(
         command=("fixture",), working_directory=str(tmp_path), environment={}
     )
     status = jobs.get(status["job_id"])
-    cancelled = jobs.cancel(status["job_id"])
+    cancelled = jobs.cancel(status["job_id"], reason="test-cancel")
     waited = jobs.wait(status["job_id"], timeout_seconds=1)
     assert status["state"]["phase"] == expected
     assert status["state"]["terminal"]
@@ -9710,7 +9710,7 @@ def test_launch_unknown_cancel_reconciles_the_same_job_id(tmp_path: Path) -> Non
     )
     systemd.show_is_unavailable = False
 
-    cancelled = jobs.cancel(uncertain["job_id"])
+    cancelled = jobs.cancel(uncertain["job_id"], reason="test-cancel")
 
     assert systemd.stopped == [uncertain["unit"]]
     assert cancelled["job_id"] == uncertain["job_id"]
@@ -9820,7 +9820,7 @@ def test_cancel_persists_intent_and_preserves_systemd_exit_races(
     started = terminal_jobs.start_foreground(
         command=("fixture",), working_directory=str(tmp_path), environment={}
     )
-    cancelled = terminal_jobs.cancel(started["job_id"])
+    cancelled = terminal_jobs.cancel(started["job_id"], reason="test-cancel")
     assert cancelled["state"]["phase"] == expected
     assert (
         terminal_jobs.store.load(started["job_id"]).cancel_stop_acknowledged_at
@@ -9841,7 +9841,7 @@ def test_cancel_persists_intent_and_preserves_systemd_exit_races(
         command=("fixture",), working_directory=str(tmp_path), environment={}
     )
     with pytest.raises(SystemdJobError):
-        crashing.cancel(started["job_id"])
+        crashing.cancel(started["job_id"], reason="test-cancel")
     record = crashing.store.load(started["job_id"])
     assert record.cancel_requested_at is not None
     assert record.cancel_requested_invocation_id == "fixture-invocation"
@@ -9868,7 +9868,7 @@ def test_cancelled_missing_unit_distinguishes_acknowledged_and_ambiguous_stop(
     started = jobs.start_foreground(
         command=("fixture",), working_directory=str(tmp_path), environment={}
     )
-    cancelled = jobs.cancel(started["job_id"])
+    cancelled = jobs.cancel(started["job_id"], reason="test-cancel")
     assert cancelled["state"]["phase"] == "cancelled"
     assert cancelled["state"]["cancellation"]["invocation_id"] == "fixture-invocation"
 
@@ -9919,7 +9919,7 @@ def test_cancelled_missing_unit_distinguishes_acknowledged_and_ambiguous_stop(
     )
     crashing_store.crash_on_acknowledgement = True
     with pytest.raises(OSError, match="simulated daemon crash"):
-        crashing_jobs.cancel(started["job_id"])
+        crashing_jobs.cancel(started["job_id"], reason="test-cancel")
     persisted = crashing_store.load(started["job_id"])
     assert persisted.cancel_requested_at is not None
     assert persisted.cancel_stop_acknowledged_at is None
@@ -10544,7 +10544,7 @@ def test_real_user_systemd_service_cgroup_cancels_descendants(tmp_path: Path) ->
         status = jobs.get(str(started["job_id"]))
         assert status["state"]["systemd"]["ControlGroup"].endswith(str(started["unit"]))
 
-        cancelled = jobs.cancel(str(started["job_id"]))
+        cancelled = jobs.cancel(str(started["job_id"], reason="test-cancel"))
         terminal = jobs.wait(str(started["job_id"]), timeout_seconds=5)
         pid = int(child_pid.read_text().strip())
         assert cancelled["cancel_requested"]
