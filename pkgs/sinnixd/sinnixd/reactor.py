@@ -1614,14 +1614,17 @@ class CampaignReactor:
         spec = record.get("spec") if isinstance(record, Mapping) else None
         checkout = spec.get("checkout") if isinstance(spec, Mapping) else None
         checkout_id = checkout.get("checkout_id") if isinstance(checkout, Mapping) else None
-        project = event.get("project")
-        if not isinstance(checkout_id, str) or not isinstance(project, str):
+        # The refusal event names only the harvest job; project and head come
+        # from that job's record.
+        project = event.get("project") or (spec.get("project_id") if isinstance(spec, Mapping) else None)
+        if not isinstance(checkout_id, str) or not isinstance(project, str) or not project:
+            self._board.record_error(-1, f"rebase: no checkout or project for harvest {harvest_job}")
             return
         workspace = self._workspace_name(checkout_id)
         if workspace is None:
             self._board.record_error(-1, f"rebase: no registered workspace for {checkout_id}")
             return
-        head = str(event.get("head") or "")
+        head = str(event.get("head") or (checkout.get("head") if isinstance(checkout, Mapping) else "") or "")
         key = f"integrate:{workspace}:rebase-{head[:12]}"
         if key in self._board.keeper or self._checkout_owned(checkout_id):
             return
