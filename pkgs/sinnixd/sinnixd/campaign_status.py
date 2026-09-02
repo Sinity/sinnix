@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from datetime import UTC, datetime, timedelta
 from typing import Any, Iterable, Mapping
 
@@ -108,6 +109,7 @@ def build_campaign_status(
     *,
     coordinator_label: str | None = None,
     now: datetime | None = None,
+    state_root: Path | None = None,
 ) -> dict[str, Any]:
     """Compose a bounded digest without retaining coordinator state."""
     all_records = [record for record in records if _campaign(record)]
@@ -216,9 +218,18 @@ def build_campaign_status(
         if key in raw_corpus
     }
     corpus["failing_gate"] = failing_gate
+    lanes_next: list[dict[str, Any]] = []
+    if state_root is not None:
+        from .lane_facts import collect, lane_view, latest_sweep_pulls
+
+        lanes_next = [
+            lane_view(facts)
+            for facts in collect(project_id, state_root=state_root, receipt_pulls=latest_sweep_pulls(state_root))
+        ][:MAX_LANES]
     return {
         "schema": "sinnix.agentctl.campaign-status.v1",
         "project_id": project_id,
+        "lanes_next": lanes_next,
         "coordinator_label": coordinator_label,
         "projects": sorted(
             {
