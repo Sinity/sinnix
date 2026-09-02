@@ -1821,3 +1821,43 @@ def test_a_conflict_after_master_moves_again_reharvests(
     reactor._dispatch_conflict_harvest(event)
 
     assert calls == [("polylogue", "packet-p-9", "41")] * 2
+
+
+def test_refill_waits_for_a_pending_corpus_run(tmp_path: Path) -> None:
+    """Anti-vacuity: lanes launched beside the corpus run turned its
+    failures into load noise (2026-09-02)."""
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    (jobs / "corpus.json").write_text(
+        json.dumps(
+            {
+                "job_id": "corpus",
+                "spec": {"kind": "declared-operation", "operation": "verify_all", "project_id": "polylogue"},
+                "state": {"phase": "queued", "terminal": False},
+            }
+        )
+    )
+    launched: list[str] = []
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        jobs_state_dir=jobs,
+        project_roots={"polylogue": tmp_path / "repo"},
+        refill_width_target=2,
+        refill_dispatcher=lambda project, beads: launched.append(project),
+    )
+
+    reactor._dispatch_refill("polylogue")
+    assert launched == []
+
+    (jobs / "corpus.json").write_text(
+        json.dumps(
+            {
+                "job_id": "corpus",
+                "spec": {"kind": "declared-operation", "operation": "verify_all", "project_id": "polylogue"},
+                "state": {"phase": "succeeded", "terminal": True},
+            }
+        )
+    )
+    assert reactor._corpus_pending("polylogue") is False
