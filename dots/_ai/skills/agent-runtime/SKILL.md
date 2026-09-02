@@ -22,7 +22,9 @@ Verbs: `status`, `shell`, `agent`, `project`, `workspace`, `events`, `lane`,
 - Inspect with `agentctl workspace list` and `workspace get` before mutation.
   Git is authoritative for HEAD, branch, membership, and dirty state.
 - `workspace create <project> <name> --branch <b> [--base <ref>]` creates a
-  linked worktree beneath the project's declared workspace root.
+  linked worktree beneath the project's declared workspace root through
+  worktrunk, which runs the project's own `.config/wt.toml` hooks to provision
+  it. A name or branch that is already registered is refused.
 - `workspace checkpoint <id>` stores digest-verified staged and unstaged
   patches plus a bounded untracked archive when project policy permits it. It
   does not create a stash or commit. `workspace restore <id> <checkpoint>`
@@ -33,8 +35,8 @@ Verbs: `status`, `shell`, `agent`, `project`, `workspace`, `events`, `lane`,
   `review-status`, `land --job <verify-job>`, `finish`.
 - `workspace drop <id>` deletes the worktree, its branch, and every job record
   and artifact bound to that checkout. It proves the content is published
-  first: contained in the declared base, or tree-equivalent to `--target
-<ref>`. `--force` says the content is expendable.
+  first: contained in the declared base, or carrying worktrunk's `integrated`
+  verdict. `--force` says the content is expendable.
 
 ## Jobs
 

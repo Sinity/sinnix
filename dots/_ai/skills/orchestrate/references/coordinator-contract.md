@@ -49,7 +49,7 @@ Look for the verb before writing any procedure: `agentctl <verb> --help`.
 | open a PR outside the harvest flow        | `agentctl workspace publish <ws> --job <verify-job> --title T [--body F] [--wait]`                              |
 | land a workspace                          | `agentctl workspace land <ws> --job <verify-job>`                                                               |
 | dispose after a GitHub merge              | `agentctl workspace finish <ws>`                                                                                |
-| delete a workspace and everything it owns | `agentctl workspace drop <ws> [--target <ref>] [--force]`                                                       |
+| delete a workspace and everything it owns | `agentctl workspace drop <ws> [--force]`                                                                        |
 | protect work before risky integration     | `agentctl workspace checkpoint <ws>` / `restore <ws> <cp> [--recreate]`                                         |
 | review state of a workspace               | `agentctl workspace review-status <ws>`                                                                         |
 | run a declared operation                  | `agentctl job start <p> <operation> [--workspace <ws>] [--wait]`                                                |
@@ -105,8 +105,8 @@ back, so nothing publishes unreviewed.
    restores `.lane/` from lane artifacts, so earlier edits are clobbered.
 5. A receipt binds workspace HEAD at minting; a failed authorize invalidates
    it — re-mint before retrying.
-6. Drop after the content check: `workspace drop <ws> --target <ref>` for a
-   squash-merged branch, `workspace finish` for the merged case. Both delete
+6. Drop after the content check: `workspace drop <ws>` once worktrunk reports
+   the branch `integrated`, `workspace finish` for the merged case. Both delete
    the lane's job records and artifacts with it.
 
 **Launch wedges**: `packet launch` advances one step per attempt (worktree →
