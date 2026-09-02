@@ -69,6 +69,7 @@ class LaneFacts:
     verify_job: tuple[str, str] | None = None
     harvest_at_head: tuple[str, str] | None = None
     published_at_head: bool = False
+    quick_at_head: tuple[str, str] | None = None
     lane_finished_at: str = ""
     extra: Mapping[str, Any] = field(default_factory=dict)
 
@@ -150,6 +151,8 @@ def advance(facts: LaneFacts, *, now: datetime | None = None) -> Action:
         if facts.master_head and facts.master_head[:12] in facts.extra.get("rebased_on", ()):
             return Action("park", f"no test evidence after rebase ({receipt.verification})")
         return Action("rebase", f"no test evidence ({receipt.verification}); rebase onto master")
+    if facts.quick_at_head is not None and facts.quick_at_head[1] != "succeeded":
+        return Action("park", f"quick gate {facts.quick_at_head[1]} at this head")
     return Action("publish", "clean receipt at head")
 
 
@@ -231,6 +234,8 @@ def collect(
         verify_job: tuple[str, str] | None = None
         verify_created = ""
         lane_finished = ""
+        quick_at_head: tuple[str, str] | None = None
+        quick_created = ""
         harvest_at_head: tuple[str, str] | None = None
         published_at_head = False
         for job in jobs:
@@ -268,6 +273,15 @@ def collect(
                     harvest_at_head = (str(job.get("job_id") or ""), outcome or phase)
             elif (
                 kind == "declared-operation"
+                and spec.get("operation") == "verify_quick"
+                and checkout.get("head") == head
+                and phase in {"succeeded", "failed"}
+            ):
+                created = str(job.get("created_at") or "")
+                if created >= quick_created:
+                    quick_created, quick_at_head = created, (str(job.get("job_id") or ""), phase)
+            elif (
+                kind == "declared-operation"
                 and spec.get("operation") == "verify_affected"
                 and checkout.get("head") == head
                 and phase in {"succeeded", "failed"}
@@ -302,6 +316,7 @@ def collect(
                 verify_job=verify_job,
                 harvest_at_head=harvest_at_head,
                 published_at_head=published_at_head,
+                quick_at_head=quick_at_head,
                 lane_finished_at=lane_finished,
             )
         )

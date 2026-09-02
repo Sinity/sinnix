@@ -92,6 +92,11 @@ MEMORY_FULL_PREEMPT_THRESHOLD = 25.0
 PREEMPT_SWAP_FREE_FRACTION = 0.10
 ACTIVE_PRESSURE_GRACE_SECONDS = 2.0
 MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES = 2
+# Sustained IO stall blocks new admissions (never evicts): this host's lanes
+# are disk-bound, and admitting into a saturated disk only lengthens every
+# queue, the operator's desktop included (io-full 76% avg10, 2026-09-02
+# 12:29Z). Ambient io-full on an idle host measures single digits.
+IO_FULL_BLOCK_THRESHOLD = 40.0
 # After a pressure preemption the host is still paging out what the victim
 # held; admitting a replacement at once re-creates the stall and the next
 # probe evicts another lane (eight lanes in forty minutes on 2026-09-02).
@@ -3870,7 +3875,8 @@ class GenericJobs:
             and time.monotonic() - self._last_pressure_preemption
             < PRESSURE_PREEMPTION_COOLDOWN_SECONDS
         )
-        return swap_exhausted or memory_pressure_sustained or cooling
+        io_saturated = float(pressure.get("io_full_avg60", 0.0)) >= IO_FULL_BLOCK_THRESHOLD
+        return swap_exhausted or memory_pressure_sustained or cooling or io_saturated
 
     @staticmethod
     def _active_pressure_reasons(pressure: Mapping[str, float]) -> list[str]:
