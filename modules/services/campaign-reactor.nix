@@ -146,7 +146,7 @@ mkServiceModule {
                 cfg.stateDir
                 boardDirectory
                 spoolDirectory
-                config.sinnix.services.sinnixd.taskStateRoot
+                "${config.sinnix.paths.stateRoot}/tasks"
               ]
               ++ map (project: project.value.path) (lib.attrsToList config.sinnix.projects.entries);
               UMask = "0077";

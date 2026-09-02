@@ -9,6 +9,7 @@
 let
   userName = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+  taskStateRoot = "${config.sinnix.paths.stateRoot}/tasks";
 in
 mkServiceModule {
   name = "sinnixd";
@@ -25,17 +26,6 @@ mkServiceModule {
       else
         throw "sinnix.services.sinnixd.projectRoots must contain unique absolute project roots";
     description = "Explicit project roots whose .agentctl/project.toml descriptors Sinnixd loads; no parent directory is scanned.";
-  };
-  extraOptions.taskStateRoot = lib.mkOption {
-    type = lib.types.str;
-    default = "${config.sinnix.paths.stateRoot}/tasks";
-    apply =
-      root:
-      if lib.hasPrefix "/" root then
-        root
-      else
-        throw "sinnix.services.sinnixd.taskStateRoot must be absolute";
-    description = "Root containing one activated canonical task authority per registered project.";
   };
   extraOptions.agentRunner = lib.mkOption {
     type = lib.types.str;
@@ -66,7 +56,7 @@ mkServiceModule {
         scriptPkgs.sinnixd
         scriptPkgs.polylogue-cli
       ];
-      systemd.tmpfiles.rules = [ "d ${cfg.taskStateRoot} 0700 ${userName} users -" ];
+      systemd.tmpfiles.rules = [ "d ${taskStateRoot} 0700 ${userName} users -" ];
       sinnix.persistence.home.directories = [ ".local/state/sinnixd" ];
       sinnix.runtime.surfaces.sinnixd-jobs = {
         unit = "sinnixd-job-.service";
@@ -105,7 +95,7 @@ mkServiceModule {
             Restart = "on-failure";
             RestartSec = "2s";
             UMask = "0077";
-            Environment = [ "SINNIXD_TASK_STATE_ROOT=${cfg.taskStateRoot}" ];
+            Environment = [ "SINNIXD_TASK_STATE_ROOT=${taskStateRoot}" ];
           };
         Install.WantedBy = [ "default.target" ];
       };
