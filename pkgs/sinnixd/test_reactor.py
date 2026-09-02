@@ -1726,3 +1726,60 @@ def test_a_clean_receipt_does_not_publish_under_a_holding_agent(
     monkeypatch.setattr(CampaignReactor, "_checkout_owned", lambda self, cid: False)
     reactor._dispatch_integration(event)
     assert published == ["publish:packet-p-9:harvest-" + "2" * 32]
+
+
+def test_static_only_evidence_rebases_once_before_judgment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: five lanes parked on "no test evidence" on 2026-09-02
+    because their branches predated the graph reseed; a rebase is what
+    gets them selection."""
+    receipt = {
+        "head": "e" * 40,
+        "redflag_status": 0,
+        "lane_trailer": {"LANE-QUICK": "green"},
+        "verification": {"state": "static-only", "runs": {}},
+    }
+    rebases: list[str] = []
+    monkeypatch.setattr(
+        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
+    )
+    monkeypatch.setattr(
+        CampaignReactor, "_receipt_payload", staticmethod(lambda r: receipt)
+    )
+    monkeypatch.setattr(
+        CampaignReactor,
+        "_dispatch_rebase",
+        lambda self, event, reason="conflict": rebases.append(reason),
+    )
+    integrations: list[tuple[str, str, str]] = []
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        project_roots={"polylogue": tmp_path / "repo"},
+        integration_dispatcher=lambda p, w, r: integrations.append((p, w, r)),
+    )
+    event = {
+        "kind": "harvest",
+        "transition": "review-required",
+        "project": "polylogue",
+        "workspace_id": "worktree-abc",
+        "packet_id": "harvest-" + "3" * 32,
+        "job_id": "job-3",
+    }
+
+    reactor._dispatch_integration(event)
+    assert rebases == ["evidence"]
+    assert integrations == []
+
+    # The rebase ran at this head and the evidence is still static: the
+    # ordinary integrator path takes over.
+    reactor._board.keeper["integrate:packet-p-9:rebase-" + "e" * 12] = {
+        "emitted_at": _now(),
+        "backoff_seconds": 0,
+        "next_eligible_at": _now(),
+    }
+    reactor._dispatch_integration(event)
+    assert rebases == ["evidence"]
+    assert len(integrations) == 1
