@@ -115,7 +115,10 @@ POOL_POLICIES = {
         "swap_max": 1024 * MIB,
     },
     "normal": {
-        "workers": 3,
+        # Harvests hold a worker for minutes; three of them starved the
+        # sweep and every quick gate behind them while 6 GB of headroom sat
+        # idle. Memory admission bounds this pool; the cap only guards CPU.
+        "workers": 8,
         "memory_budget": 8 * 1024 * MIB,
         "default_estimate": 1024 * MIB,
         "memory_max": 6 * 1024 * MIB,
@@ -3367,6 +3370,15 @@ class GenericJobs:
     ) -> dict[str, Any]:
         if operation.name in lineage:
             raise ValueError("declared operation dependency cycle")
+        if (
+            operation.checkout == "default"
+            and checkout is not None
+            and checkout.checkout_id != "default"
+        ):
+            raise ValueError(
+                f"operation {operation.name} runs only on the default checkout, "
+                f"not {checkout.checkout_id}"
+            )
         dependency_jobs = tuple(
             self._start_declared_locked(
                 project,
