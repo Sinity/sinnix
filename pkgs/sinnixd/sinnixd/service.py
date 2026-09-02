@@ -462,6 +462,7 @@ class SinnixdService:
                 board,
                 self.jobs.admission_ledger(),
                 coordinator_label=label,
+                state_root=self.jobs.store.root,
             )
         if operation == "plan.get":
             if set(arguments) != {"plan_id"}:
