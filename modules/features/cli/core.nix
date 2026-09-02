@@ -101,7 +101,55 @@ mkFeatureModule {
           ...
         }:
         {
-          services.pueue.enable = true;
+          services.pueue = {
+            enable = true;
+            settings.daemon = {
+              # One completion callback per task: it appends the finish
+              # event to the shared spool (`agentctl events tail`) and
+              # notifies the desktop only on failure. Lifecycle events feed
+              # the orchestrating agent first; the desktop is a filter.
+              callback = "${pkgs.writeShellScript "sinnix-pueue-callback" ''
+                set -u
+                id=$1 group=$2 result=$3 exit_code=$4 start=$5 end=$6 output_path=$7 queued=$8
+                label="$(${pkgs.pueue}/bin/pueue status --json 2>/dev/null \
+                  | ${pkgs.jq}/bin/jq -r --arg id "$id" '.tasks[$id].label // empty')"
+                ${pkgs.jq}/bin/jq -cn \
+                  --arg at "$(${pkgs.coreutils}/bin/date -u +%Y-%m-%dT%H:%M:%S.%6N+00:00)" \
+                  --argjson id "$id" --arg group "$group" --arg label "$label" \
+                  --arg result "$result" --arg exit_code "$exit_code" \
+                  --arg start "$start" --arg end "$end" --arg log "$output_path" \
+                  --arg queued "$queued" \
+                  '{kind:"queue-task",schema_version:1,emitted_at:$at,task_id:$id,group:$group,
+                    label:$label,result:$result,exit_code:$exit_code,started_at:$start,
+                    ended_at:$end,log:$log,queued_in_group:$queued}' \
+                  >> /realm/state/agentctl/events.jsonl
+                if [ "$result" != "Success" ]; then
+                  ${pkgs.libnotify}/bin/notify-send -u critical -a pueue \
+                    "$group: ''${label:-task $id} $result" "exit $exit_code; pueue log $id" || true
+                fi
+              ''} {{id}} {{group}} {{result}} {{exit_code}} {{start}} {{end}} {{output_path}} {{queued_count}}";
+              callback_log_lines = 0;
+            };
+          };
+          systemd.user.services.pueued = {
+            # Tasks are the daemon's children, so its slice is the job-plane
+            # ceiling; app.slice is reserved for the desktop.
+            Service.Slice = "sinnixd-work.slice";
+            # A daemon restart marks every running task Killed and pauses
+            # groups with queued tasks; a switch must not do that.
+            Unit.X-RestartIfChanged = false;
+            # Groups live in daemon state, not in the config file.
+            Service.ExecStartPost = "${pkgs.writeShellScript "sinnix-pueue-groups" ''
+              set -u
+              pueue=${pkgs.pueue}/bin/pueue
+              for _ in $(seq 1 50); do "$pueue" status >/dev/null 2>&1 && break; sleep 0.2; done
+              for spec in agent:4 pytest:1 bulk:1; do
+                name=''${spec%%:*}; slots=''${spec##*:}
+                "$pueue" group add "$name" >/dev/null 2>&1 || true
+                "$pueue" parallel -g "$name" "$slots" >/dev/null
+              done
+            ''}";
+          };
           home.packages = lib.mkAfter (
             with pkgs;
             [
