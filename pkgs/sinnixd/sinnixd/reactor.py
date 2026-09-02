@@ -1493,6 +1493,16 @@ class CampaignReactor:
                 return
             self._publish(str(project), workspace, str(receipt), publish_key)
             return
+        if reason.startswith("no test evidence"):
+            # A lane whose branch predates the checkout's affected-selection
+            # fix cannot get test evidence until it sits on current master;
+            # one rebase per head is mechanical, and the harvest that follows
+            # runs the tests. Only a lane already rebased at this head parks.
+            head = str(self._receipt_field(str(receipt), "head") or "")
+            rebase_key = f"integrate:{workspace}:rebase-{head[:12]}"
+            if rebase_key not in self._board.keeper:
+                self._dispatch_rebase({**event, "head": head, "project": project}, reason="evidence")
+                return
         # One integrator per (workspace, reason): an integrator that ran and
         # left the same flags standing has made its judgment; the next
         # receipt with those flags is the operator's decision, not another
@@ -1624,7 +1634,7 @@ class CampaignReactor:
             f"## Operating rules\n\n{body}\n"
         )
 
-    def _dispatch_rebase(self, event: Mapping[str, Any]) -> None:
+    def _dispatch_rebase(self, event: Mapping[str, Any], *, reason: str = "conflict") -> None:
         """A publication refused for a rebase conflict gets one agent to rebase it.
 
         The conflict is mechanical to detect and needs judgment to resolve;
@@ -1650,12 +1660,17 @@ class CampaignReactor:
         key = f"integrate:{workspace}:rebase-{head[:12]}"
         if key in self._board.keeper or self._checkout_owned(checkout_id):
             return
+        refusal = (
+            "rebasing onto origin/master conflicts"
+            if reason == "conflict"
+            else "its branch predates master's verification harness, so affected selection refuses"
+        )
         prompt = (
             f"You are an integrator in /realm/worktrees/{workspace}. Publication of this "
-            "lane was refused: rebasing onto origin/master conflicts. Fetch origin, rebase "
+            f"lane was refused: {refusal}. Fetch origin, rebase "
             "the branch onto origin/master, resolve every conflict preserving the lane's "
             "intent and master's, run the project's quick gate (devtools verify --quick) "
-            "and the focused tests for the touched modules, commit the resolution, and "
+            "and affected verification (devtools verify), fix what they surface, commit, and "
             "stop. Do not publish; the harvest runs again on your commit. Report the "
             "machine trailer (LANE-BRANCH/COMMIT/QUICK/CLASSIFICATION).\n"
         )
