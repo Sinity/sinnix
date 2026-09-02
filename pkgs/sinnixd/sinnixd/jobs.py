@@ -59,46 +59,10 @@ SCHEDULE_UNIT_PREFIX = "sinnixd-schedule-"
 ADMISSION_SCHEMA_VERSION = 2
 CAPACITY_SCHEMA_VERSION = 1
 CAPACITY_RETRY_DELAYS_SECONDS = (5, 30, 120)
-MIB = 1024 * 1024
-GIB = 1024 * MIB
-MIN_HOST_MEMORY_RESERVE_BYTES = 4 * GIB
-# The budget is already computed against available memory, so what everything
-# outside the job plane uses is subtracted before the reserve applies. The
-# reserve is pure headroom on top of that; sized so a lane's peak reservation
-# and the harvest that publishes it fit on a 32 GiB host at once.
-MAX_HOST_MEMORY_RESERVE_BYTES = 6 * GIB
-# The reserve is what the next admission leaves free. Larger reserves starve
-# admission (2026-08-31); smaller ones ran the host into 14 GB of swap and
-# ten-minute environment preflights (2026-09-02).
-HOST_MEMORY_RESERVE_FRACTION = 0.12
-# A launched job needs this long before its footprint is in MemAvailable.
-ADMISSION_SETTLE_SECONDS = 90.0
-MIN_SWAP_FREE_FRACTION = 0.15
-# Below this much available RAM, a nearly-full swap is treated as exhaustion
-# even before stall pressure shows.
-SWAP_EXHAUSTION_MIN_AVAILABLE_BYTES = 4 * 1024**3
-# PSI averages are percentages of elapsed time. A 10% full-memory signal means
-# the host is losing a tenth of its wall time to memory stalls.
-MEMORY_FULL_BLOCK_THRESHOLD = 10.0
-# Swap free below this fraction, alongside a memory stall, is host
-# endangerment rather than degradation: the last managed job is cancelled.
-PREEMPT_SWAP_FREE_FRACTION = 0.10
-ACTIVE_PRESSURE_GRACE_SECONDS = 2.0
-MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES = 2
-# Sustained IO stall blocks new admissions (never evicts): this host's lanes
-# are disk-bound, and admitting into a saturated disk only lengthens every
-# queue, the operator's desktop included (io-full 76% avg10, 2026-09-02
-# 12:29Z). Ambient io-full on an idle host measures single digits.
+# Sustained IO stall blocks new admissions and never evicts. Measured
+# 2026-09-02 12:29Z: io full avg10 76% under eight concurrent normal-pool
+# jobs, against single digits on an idle host.
 IO_FULL_BLOCK_THRESHOLD = 25.0
-# Measured whole-unit peaks per operation (declared jobs) or pool (agents):
-# A job blocked on host memory this long reserves its claim across every
-# pool, not just its own: lanes then drain until it fits. Per-pool
-# reservation alone let six agent lanes and eight harvests refill the
-# headroom the corpus run waited for, for hours (2026-09-02).
-HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS = 900.0
-# Host IO PSI cannot attribute stalls to the managed plane: this host idles
-# with io full avg10 in the teens while managed jobs write megabytes. IO
-# protection is admission-only for that reason, and never costs running work.
 POOL_SLICES = {
     "interactive": "sinnixd-work-interactive.slice",
     "normal": "sinnixd-work-normal.slice",
@@ -111,63 +75,25 @@ POOL_SLICES = {
 # far a unit may push the host into swap. Admission estimates bound nothing
 # by themselves: an integrator lane admitted at the 1 GiB default peaked at
 # 19.3 GB on 2026-09-01 and drove swap to 97% before systemd-oomd acted.
+# Concurrency is the only per-pool bound. Memory belongs to the slice
+# hierarchy: sinnixd.slice carries MemoryHigh and MemorySwapMax for the whole
+# job plane and the desktop slices carry MemoryLow, so jobs collectively use
+# what is left without any admission arithmetic on bytes.
 POOL_POLICIES = {
-    "interactive": {
-        "workers": 4,
-        "memory_budget": 3 * 1024 * MIB,
-        "default_estimate": 256 * MIB,
-        "memory_max": 3 * 1024 * MIB,
-        "swap_max": 1024 * MIB,
-    },
-    "normal": {
-        # Harvests hold a worker for minutes; three of them starved the
-        # sweep and every quick gate behind them while 6 GB of headroom sat
-        # idle. Eight saturated the disk instead (io-full 25% over five
-        # minutes, the operator's desktop lagging, 2026-09-02 11:30Z): this
-        # pool is IO-bound, and the cap is the IO budget until admission
-        # measures IO per job.
-        "workers": 5,
-        "memory_budget": 8 * 1024 * MIB,
-        "default_estimate": 1024 * MIB,
-        "memory_max": 6 * 1024 * MIB,
-        "swap_max": 2 * 1024 * MIB,
-    },
-    "bulk": {
-        "workers": 1,
-        "memory_budget": 18 * 1024 * MIB,
-        "default_estimate": 8 * 1024 * MIB,
-        "memory_max": 20 * 1024 * MIB,
-        "swap_max": 4 * 1024 * MIB,
-    },
-    "pytest": {
-        # One test run on the host at a time. A run writes a scratch archive
-        # per test and an affected selection is a fifth to a half of the
-        # corpus; two of them saturate the disk for every other process.
-        "workers": 1,
-        "memory_budget": 10 * 1024 * MIB,
-        "default_estimate": 6 * 1024 * MIB,
-        "memory_max": 12 * 1024 * MIB,
-        "swap_max": 2 * 1024 * MIB,
-    },
-    "agent": {
-        # Agent lanes are memory-idle for most of their wall time (API-bound)
-        # and peak only in short verification bursts that rarely coincide, so
-        # the default claim is deliberately small; the worker cap guards
-        # CPU-burst collision on 24 threads.
-        "workers": 16,
-        "memory_budget": 48 * 1024 * MIB,
-        "default_estimate": 1024 * MIB,
-        "memory_max": 8 * 1024 * MIB,
-        "swap_max": 2 * 1024 * MIB,
-    },
+    # Operator-facing work; four is a screenful of concurrent shells.
+    "interactive": {"workers": 4},
+    # Harvests and gates are disk-bound: eight saturated the disk (io full
+    # avg10 25% over five minutes, 2026-09-02 11:30Z), three starved the queue.
+    "normal": {"workers": 5},
+    # One whole-corpus or reindex run on the host at a time.
+    "bulk": {"workers": 1},
+    # One test run at a time: a run writes a scratch archive per test and two
+    # of them saturate the disk for every other process.
+    "pytest": {"workers": 1},
+    # Agent lanes are API-bound; the cap guards CPU-burst collision on 24
+    # threads.
+    "agent": {"workers": 16},
 }
-
-
-def memory_ceiling(pool: str, estimate_memory_bytes: int | None) -> tuple[int, int]:
-    """(MemoryMax, MemorySwapMax) for one unit: the pool ceiling, or a larger declaration."""
-    policy = POOL_POLICIES[pool]
-    declared = estimate_memory_bytes or 0
-    return max(int(policy["memory_max"]), declared), int(policy["swap_max"])
 
 
 def default_state_dir() -> Path:
@@ -382,8 +308,6 @@ class SystemdJobs(Protocol):
         notify_socket: Path | None = None,
         notify_job_id: str | None = None,
         pool: str,
-        memory_max_bytes: int | None = None,
-        swap_max_bytes: int | None = None,
     ) -> None: ...
 
     def show(
@@ -446,8 +370,6 @@ class UserSystemdJobs:
         notify_socket: Path | None = None,
         notify_job_id: str | None = None,
         pool: str,
-        memory_max_bytes: int | None = None,
-        swap_max_bytes: int | None = None,
     ) -> None:
         args = [
             "systemd-run",
@@ -457,19 +379,6 @@ class UserSystemdJobs:
             f"--slice={POOL_SLICES[pool]}",
             f"--property=WorkingDirectory={working_directory}",
             f"--property=RuntimeMaxSec={timeout_seconds}s",
-            *(
-                [
-                    f"--property=MemoryMax={memory_max_bytes}",
-                    f"--property=MemoryHigh={memory_max_bytes * 3 // 4}",
-                ]
-                if memory_max_bytes
-                else []
-            ),
-            *(
-                [f"--property=MemorySwapMax={swap_max_bytes}"]
-                if swap_max_bytes is not None
-                else []
-            ),
             *(
                 f"--property=ReadOnlyPaths={path}"
                 for path in self.lane_read_only_paths()
@@ -1115,10 +1024,8 @@ class GenericJobSpec:
     pool: str = "interactive"
     exclusive_keys: tuple[str, ...] = ()
     dependency_job_ids: tuple[str, ...] = ()
-    estimate_memory_bytes: int | None = None
     scratch: str = "none"
     lease: ServiceLease | None = None
-    admission_bypass: bool = False
     dimensions: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -1225,14 +1132,6 @@ class GenericJobSpec:
             not isinstance(value, str) or not value for value in self.dependency_job_ids
         ):
             raise ValueError("job dependency IDs are invalid")
-        if self.estimate_memory_bytes is not None and (
-            not isinstance(self.estimate_memory_bytes, int)
-            or isinstance(self.estimate_memory_bytes, bool)
-            or self.estimate_memory_bytes < 1
-        ):
-            raise ValueError("job memory estimate is invalid")
-        if not isinstance(self.admission_bypass, bool):
-            raise ValueError("job admission bypass is invalid")
         try:
             _dimensions(self.dimensions)
         except ValueError as error:
@@ -1272,9 +1171,7 @@ class GenericJobSpec:
                 "pool": self.pool,
                 "exclusive_keys": list(self.exclusive_keys),
                 "dependencies": list(self.dependency_job_ids),
-                "estimate_memory_bytes": self.estimate_memory_bytes,
                 "scratch": self.scratch,
-                "bypass": self.admission_bypass,
             },
             "dimensions": dict(self.dimensions),
         }
@@ -1354,9 +1251,7 @@ class GenericJobSpec:
                 pool=admission.get("pool", "interactive"),
                 exclusive_keys=tuple(admission.get("exclusive_keys", ())),
                 dependency_job_ids=tuple(admission.get("dependencies", ())),
-                estimate_memory_bytes=admission.get("estimate_memory_bytes"),
                 scratch=admission.get("scratch", "none"),
-                admission_bypass=admission.get("bypass", False),
                 dimensions=_dimensions(value.get("dimensions", {})),
                 lease=(
                     ServiceLease.from_dict(raw_lease) if raw_lease is not None else None
@@ -2558,8 +2453,6 @@ class GenericJobs:
     _admission_written: str | None = field(default=None, init=False, repr=False)
     _admission_observed_at: float = field(default=0.0, init=False, repr=False)
     _spooled: set[str] = field(default_factory=set, init=False, repr=False)
-    _active_pressure_since: float | None = field(default=None, init=False, repr=False)
-    _memory_full_block_probe_count: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         # Recovery observes only the durable nonterminal set. Terminal lease
@@ -2752,12 +2645,7 @@ class GenericJobs:
                 "terminal": False,
                 "observed_at": _timestamp(),
                 "dependencies": list(record.spec.dependency_job_ids),
-                "admission": {
-                    "pool": record.spec.pool,
-                    "estimate_memory_bytes": self._estimate(
-                        record.spec, self._admission_state()
-                    ),
-                },
+                "admission": {"pool": record.spec.pool},
             },
         )
         self.store.save(queued)
@@ -2795,13 +2683,10 @@ class GenericJobs:
             ),
         }
 
-    def _admission_claim(
-        self, record: GenericJobRecord, estimate: int
-    ) -> dict[str, Any]:
+    def _admission_claim(self, record: GenericJobRecord) -> dict[str, Any]:
         return {
             "job_id": record.job_id,
             "pool": record.spec.pool,
-            "estimate_memory_bytes": estimate,
             "exclusive_keys": list(record.spec.exclusive_keys),
             "created_at": record.created_at,
             "project_id": record.spec.project_id,
@@ -2822,7 +2707,6 @@ class GenericJobs:
                 record
                 for record in records
                 if record.spec.kind in {"declared-operation", "attested-agent"}
-                and not record.spec.admission_bypass
                 and not record.state.get("terminal")
             ]
             active = [
@@ -2845,10 +2729,6 @@ class GenericJobs:
                 if record.state.get("phase") in {"queued", "waiting-dependencies"}
             ]
             pressure = self.pressure_probe()
-            host_budget = self._host_memory_budget(pressure)
-            host_occupied = sum(
-                self._settling_charge(record, state) for record in active
-            )
             holders = [
                 {
                     **dict(state["claims"].get(record.job_id, {})),
@@ -2860,13 +2740,9 @@ class GenericJobs:
             for position, record in enumerate(
                 sorted(queued, key=lambda item: (item.created_at, item.job_id)), 1
             ):
-                estimate = self._estimate(record.spec, state)
                 pool_active = [
                     item for item in active if item.spec.pool == record.spec.pool
                 ]
-                pool_occupied = sum(
-                    self._estimate(item.spec, state) for item in pool_active
-                )
                 policy = POOL_POLICIES[record.spec.pool]
                 exclusive = sorted(
                     {
@@ -2883,7 +2759,6 @@ class GenericJobs:
                         "job_id": record.job_id,
                         "phase": record.state.get("phase"),
                         "pool": record.spec.pool,
-                        "estimate_memory_bytes": estimate,
                         "blocked_by": list(blocked_by)
                         if isinstance(blocked_by, list)
                         else [],
@@ -2891,18 +2766,6 @@ class GenericJobs:
                             "pool_workers": {
                                 "occupied": len(pool_active),
                                 "limit": policy["workers"],
-                            },
-                            "pool_memory": {
-                                "occupied_bytes": pool_occupied,
-                                "requested_bytes": estimate,
-                                "budget_bytes": policy["memory_budget"],
-                                "after_bytes": pool_occupied + estimate,
-                            },
-                            "host_memory": {
-                                "occupied_bytes": host_occupied,
-                                "requested_bytes": estimate,
-                                "budget_bytes": host_budget,
-                                "after_bytes": host_occupied + estimate,
                             },
                             "exclusive_keys": exclusive,
                         },
@@ -2913,7 +2776,6 @@ class GenericJobs:
                 "pools": {
                     name: {
                         "workers": policy["workers"],
-                        "memory_budget_bytes": policy["memory_budget"],
                         "holders": [
                             holder for holder in holders if holder.get("pool") == name
                         ],
@@ -2921,11 +2783,7 @@ class GenericJobs:
                     for name, policy in POOL_POLICIES.items()
                 },
                 "host": {
-                    "budget_memory_bytes": host_budget,
-                    "occupied_memory_bytes": host_occupied,
-                    "memory_available_bytes": int(
-                        pressure.get("memory_available_bytes", 0.0)
-                    ),
+                    "io_full_avg60": float(pressure.get("io_full_avg60", 0.0)),
                 },
                 "claims": dict(state["claims"]),
                 "queue": queue,
@@ -3102,7 +2960,7 @@ class GenericJobs:
         reject_conflicts: bool = False,
     ) -> dict[str, Any]:
         candidate = job_id or str(uuid4())
-        if spec.kind == "attested-agent" and not spec.admission_bypass:
+        if spec.kind == "attested-agent":
             with self._admission_lock:
                 self._admit_locked()
                 if reject_conflicts:
@@ -3122,12 +2980,7 @@ class GenericJobs:
                             "phase": "queued",
                             "terminal": False,
                             "observed_at": _timestamp(),
-                            "admission": {
-                                "pool": spec.pool,
-                                "estimate_memory_bytes": self._estimate(
-                                    spec, self._admission_state()
-                                ),
-                            },
+                            "admission": {"pool": spec.pool},
                         },
                     )
                     self.store.save(queued)
@@ -3167,12 +3020,6 @@ class GenericJobs:
                     timeout_seconds=spec.timeout_seconds,
                     log_path=record.log_path,
                     pool=spec.pool,
-                    memory_max_bytes=memory_ceiling(
-                        spec.pool, spec.estimate_memory_bytes
-                    )[0],
-                    swap_max_bytes=memory_ceiling(
-                        spec.pool, spec.estimate_memory_bytes
-                    )[1],
                     json_result_path=record.result_path
                     if spec.result_kind in {"json", "pytest"}
                     else None,
@@ -3344,7 +3191,6 @@ class GenericJobs:
                 pool=operation.pool,
                 exclusive_keys=operation.exclusive_keys,
                 dependency_job_ids=dependency_ids,
-                estimate_memory_bytes=operation.estimate_memory_bytes,
                 scratch=operation.scratch,
                 lease=lease,
                 dimensions=_dimensions(dimensions or {}) if not lineage else {},
@@ -3377,10 +3223,7 @@ class GenericJobs:
                 "terminal": False,
                 "observed_at": _timestamp(),
                 "dependencies": list(dependency_ids),
-                "admission": {
-                    "pool": spec.pool,
-                    "estimate_memory_bytes": self._estimate(spec, state),
-                },
+                "admission": {"pool": spec.pool},
             },
         )
         self.store.save(queued)
@@ -3428,19 +3271,6 @@ class GenericJobs:
             self._finalize_terminal(superseded)
             self._finish_admission(superseded, state)
 
-    @staticmethod
-    def _estimate(spec: GenericJobSpec, state: Mapping[str, Any]) -> int:
-        # The declaration is the contract and the pool default is the floor
-        # guess; there is no learned component. Learned high-water estimates
-        # serialized whole campaigns behind one inflated sample, wedged the
-        # queue when a sample exceeded its pool budget, and duplicated what
-        # memory-pressure relief already handles reactively.
-        return (
-            spec.estimate_memory_bytes
-            if spec.estimate_memory_bytes is not None
-            else POOL_POLICIES[spec.pool]["default_estimate"]
-        )
-
     @classmethod
     def _memory_observation(cls, record: GenericJobRecord) -> dict[str, Any]:
         state_observation = record.state.get("memory_observation")
@@ -3481,29 +3311,6 @@ class GenericJobs:
         }
 
     @staticmethod
-    def _host_memory_budget(pressure: Mapping[str, float]) -> int | None:
-        """Real headroom: what the kernel reports free, minus the reserve.
-
-        Admission decides the next marginal job from this number, not from a
-        sum of declared guesses: every running job's actual footprint is
-        already subtracted from what the kernel reports available, and each
-        unit's own cgroup ceiling bounds what it can still grow into. Only
-        jobs too young to have a footprint yet are charged their estimate.
-        """
-        total = int(pressure.get("memory_total_bytes", 0.0))
-        available = int(pressure.get("memory_available_bytes", 0.0))
-        if total <= 0 or available < 0:
-            return None
-        reserve = min(
-            MAX_HOST_MEMORY_RESERVE_BYTES,
-            max(
-                MIN_HOST_MEMORY_RESERVE_BYTES,
-                int(total * HOST_MEMORY_RESERVE_FRACTION),
-            ),
-        )
-        return max(0, available - reserve)
-
-    @staticmethod
     def _queued_seconds(record: "GenericJobRecord") -> float:
         try:
             started = datetime.fromisoformat(record.created_at)
@@ -3513,69 +3320,10 @@ class GenericJobs:
             started = started.replace(tzinfo=UTC)
         return (datetime.now(UTC) - started).total_seconds()
 
-    def _settling_charge(
-        self, record: "GenericJobRecord", state: Mapping[str, Any]
-    ) -> int:
-        """A job's estimate while it is too young to show in host memory, else 0."""
-        try:
-            started = datetime.fromisoformat(record.created_at)
-        except (TypeError, ValueError):
-            return self._estimate(record.spec, state)
-        if started.tzinfo is None:
-            started = started.replace(tzinfo=UTC)
-        age = (datetime.now(UTC) - started).total_seconds()
-        return (
-            self._estimate(record.spec, state) if age < ADMISSION_SETTLE_SECONDS else 0
-        )
-
-    def _host_pressure_blocks(self, pressure: Mapping[str, float]) -> bool:
-        swap_total = float(pressure.get("swap_total_bytes", 0.0))
-        swap_free = float(pressure.get("swap_free_bytes", 0.0))
-        memory_available = float(pressure.get("memory_available_bytes", 0.0))
-        # Cold swap occupancy is not danger: with plentiful available RAM and
-        # no stall pressure, a nearly-full swap held the whole queue at zero
-        # running jobs (2026-08-31, free fraction 0.145 vs 0.15 with 8G RAM
-        # free and PSI ~0). Swap exhaustion blocks only alongside actual
-        # memory distress.
-        swap_exhausted = (
-            swap_total > 0
-            and swap_free / swap_total < MIN_SWAP_FREE_FRACTION
-            and (
-                memory_available < SWAP_EXHAUSTION_MIN_AVAILABLE_BYTES
-                or float(pressure.get("memory_full_avg10", 0.0))
-                >= MEMORY_FULL_BLOCK_THRESHOLD
-            )
-        )
-        memory_full_avg10 = float(pressure.get("memory_full_avg10", 0.0))
-        memory_full_avg60 = float(pressure.get("memory_full_avg60", 0.0))
-        if memory_full_avg10 >= MEMORY_FULL_BLOCK_THRESHOLD:
-            self._memory_full_block_probe_count = min(
-                self._memory_full_block_probe_count + 1,
-                MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES,
-            )
-        else:
-            self._memory_full_block_probe_count = 0
-        memory_pressure_sustained = (
-            memory_full_avg60 >= MEMORY_FULL_BLOCK_THRESHOLD
-            or self._memory_full_block_probe_count
-            >= MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES
-        )
-        io_saturated = (
-            float(pressure.get("io_full_avg60", 0.0)) >= IO_FULL_BLOCK_THRESHOLD
-        )
-        return swap_exhausted or memory_pressure_sustained or io_saturated
-
     @staticmethod
-    def _swap_exhausted(pressure: Mapping[str, float]) -> bool:
-        """Swap nearly gone under a memory stall: the host itself is at risk."""
-        memory_full = float(pressure.get("memory_full_avg10", 0.0))
-        swap_total = float(pressure.get("swap_total_bytes", 0.0))
-        swap_free = float(pressure.get("swap_free_bytes", 0.0))
-        return (
-            swap_total > 0
-            and swap_free / swap_total < PREEMPT_SWAP_FREE_FRACTION
-            and memory_full >= MEMORY_FULL_BLOCK_THRESHOLD
-        )
+    def _host_pressure_blocks(pressure: Mapping[str, float]) -> bool:
+        """Sustained IO stall stops new admissions and never costs running work."""
+        return float(pressure.get("io_full_avg60", 0.0)) >= IO_FULL_BLOCK_THRESHOLD
 
     @staticmethod
     def _systemd_memory(properties: Mapping[str, str]) -> int:
@@ -3593,106 +3341,6 @@ class GenericJobs:
             return max(0, sum(values) - _cgroup_inactive_file(properties))
         peak = GenericJobs._memory_peak(properties)
         return peak or 0
-
-    def _cancel_largest_managed_job(self, pressure: Mapping[str, float]) -> str | None:
-        """Shed the largest managed job. Only swap exhaustion reaches here."""
-        candidates: list[tuple[int, int, str, GenericJobRecord]] = []
-        admission = self._admission_state()
-        # Agent lanes shed first: they are many, cheap to resume, and hold
-        # nothing shared. The bulk pool's corpus run is hours of work and the
-        # graph every lane needs; it goes last.
-        pool_priority = {"bulk": 1, "pytest": 1, "normal": 2, "agent": 3}
-        for record in self.store.active_records():
-            if (
-                record.spec.kind not in {"declared-operation", "attested-agent"}
-                or record.spec.admission_bypass
-                or record.spec.pool == "interactive"
-                or record.state.get("terminal")
-                or record.state.get("phase")
-                not in {
-                    "submitted",
-                    "running",
-                    "cancelling",
-                    "stopping",
-                    "launch-unknown",
-                    "observation-unknown",
-                    "outcome-unknown",
-                }
-            ):
-                continue
-            try:
-                properties = self.systemd.show(record.unit)
-            except SystemdJobError:
-                continue
-            if properties.get("ActiveState") not in {
-                "active",
-                "activating",
-                "reloading",
-            }:
-                continue
-            observed = self._systemd_memory(properties)
-            estimate = self._estimate(record.spec, admission)
-            candidates.append(
-                (
-                    pool_priority.get(record.spec.pool, 0),
-                    observed or estimate,
-                    record.created_at,
-                    record,
-                )
-            )
-        if not candidates:
-            return None
-        _, _, _, victim = max(candidates, key=lambda item: item[:3])
-        host = {
-            key: pressure.get(key, 0.0)
-            for key in (
-                "memory_available_bytes",
-                "memory_full_avg10",
-                "io_full_avg10",
-                "swap_free_bytes",
-                "swap_total_bytes",
-                "managed_memory_bytes",
-            )
-        }
-        result = self.cancel(
-            victim.job_id, reason="pressure-preemption:swap-exhaustion"
-        )
-        if result.get("already_terminal"):
-            return None
-        with self.store.locked(victim.job_id):
-            record = self.store.load(victim.job_id)
-            updated = self._with_state(
-                record,
-                {
-                    **record.state,
-                    "preemption": {
-                        "reason": ["swap-exhaustion"],
-                        "observed_at": _timestamp(),
-                        "host": host,
-                    },
-                },
-            )
-            self.store.save(updated)
-        return victim.job_id
-
-    def _relieve_active_pressure(self, pressure: Mapping[str, float]) -> str | None:
-        """Swap exhaustion is the only condition that costs running work.
-
-        Everything else -- memory stalls, IO saturation -- is answered by
-        per-unit cgroup ceilings and headroom admission, which cost queued
-        work rather than work already in flight.
-        """
-        if not self._swap_exhausted(pressure):
-            self._active_pressure_since = None
-            return None
-        now = time.monotonic()
-        if self._active_pressure_since is None:
-            self._active_pressure_since = now
-            return None
-        if now - self._active_pressure_since < ACTIVE_PRESSURE_GRACE_SECONDS:
-            return None
-        self._active_pressure_since = now
-        return self._cancel_largest_managed_job(pressure)
 
     ADMISSION_OBSERVE_INTERVAL_SECONDS = 2.0
 
@@ -3722,7 +3370,6 @@ class GenericJobs:
         for record in records:
             if (
                 record.spec.kind in {"declared-operation", "attested-agent"}
-                and not record.spec.admission_bypass
                 and not record.state.get("terminal")
                 and record.state.get("phase")
                 in {
@@ -3737,29 +3384,15 @@ class GenericJobs:
             ):
                 active[record.spec.pool].append(record)
         state["claims"] = {
-            record.job_id: self._admission_claim(
-                record, self._estimate(record.spec, state)
-            )
+            record.job_id: self._admission_claim(record)
             for pool_records in active.values()
             for record in pool_records
         }
         self._save_admission_state(state)
         pressure = self.pressure_probe()
-        host_memory_budget = self._host_memory_budget(pressure)
         host_pressure_blocked = self._host_pressure_blocks(pressure)
-        # Head-of-line reservation: once the oldest queued job in a pool is
-        # blocked on memory, younger jobs IN THAT POOL may only use what
-        # remains after its claim. Without this, a stream of small jobs
-        # starves a large one forever -- each admission re-fills the budget
-        # the big job was waiting for. The reservation is per-pool: a heavy
-        # bulk job waiting for the desktop to free memory must not freeze
-        # agent and normal lanes across the host (that cross-pool version is
-        # what held 56 unrelated jobs for 6.5 hours on 2026-09-01).
-        head_of_line_reserved: dict[str, int] = {}
         for snapshot in records:
             if snapshot.spec.kind not in {"declared-operation", "attested-agent"}:
-                continue
-            if snapshot.spec.admission_bypass:
                 continue
             # Dependency observations acquire their own job locks.  Do them
             # before the candidate lock so admission never nests job locks in
@@ -3781,72 +3414,12 @@ class GenericJobs:
                         terminal_blocked = updated
                 else:
                     policy = POOL_POLICIES[record.spec.pool]
-                    estimate = self._estimate(record.spec, state)
-                    host_total = int(pressure.get("memory_total_bytes", 0.0))
-                    if (
-                        host_total > 0
-                        and estimate > host_total - MIN_HOST_MEMORY_RESERVE_BYTES
-                    ):
-                        # A claim no configuration of this host can ever
-                        # satisfy must refuse loudly; queued, it silently
-                        # head-blocks everything behind it (56 jobs sat 6.5
-                        # hours behind one such claim on 2026-09-01). A claim
-                        # larger than its pool budget but within the host is
-                        # NOT refused: a lone job may exceed its pool budget
-                        # by design.
-                        refused = self._with_state(
-                            record,
-                            {
-                                "phase": "launch-refused",
-                                "terminal": True,
-                                "launch_evidence": "not-started",
-                                "error": {
-                                    "code": "estimate-never-fits",
-                                    "message": (
-                                        f"declared estimate {estimate} bytes "
-                                        "exceeds what this host can ever "
-                                        f"offer ({host_total} bytes total)"
-                                    ),
-                                },
-                                "observed_at": _timestamp(),
-                            },
-                        )
-                        self.store.save(refused)
-                        self._finalize_terminal(refused)
-                        continue
-                    occupied = sum(
-                        self._estimate(item.spec, state)
-                        for item in active[record.spec.pool]
-                    )
-                    host_occupied = sum(
-                        self._settling_charge(item, state)
-                        for pool_records in active.values()
-                        for item in pool_records
-                    )
                     exclusive = {
                         key
                         for pool_records in active.values()
                         for item in pool_records
                         for key in item.spec.exclusive_keys
                     }
-                    pool_memory_blocked = (
-                        bool(active[record.spec.pool])
-                        and occupied + estimate > policy["memory_budget"]
-                    )
-                    host_memory_blocked = (
-                        host_memory_budget is not None
-                        and host_occupied
-                        + estimate
-                        + head_of_line_reserved.get(record.spec.pool, 0)
-                        + head_of_line_reserved.get("*", 0)
-                        > host_memory_budget
-                    )
-                    exclusive_blocked = bool(
-                        exclusive.intersection(record.spec.exclusive_keys)
-                    )
-                    pressure_blocked = (
-                        record.spec.pool != "interactive" and host_pressure_blocked
-                    )
                     blocked_by = [
                         reason
                         for reason, blocked_now in (
@@ -3854,37 +3427,20 @@ class GenericJobs:
                                 "pool-workers",
                                 len(active[record.spec.pool]) >= policy["workers"],
                             ),
-                            ("pool-memory", pool_memory_blocked),
-                            ("host-memory", host_memory_blocked),
-                            ("exclusive-key", exclusive_blocked),
-                            ("host-pressure", pressure_blocked),
+                            (
+                                "exclusive-key",
+                                bool(
+                                    exclusive.intersection(record.spec.exclusive_keys)
+                                ),
+                            ),
+                            (
+                                "host-pressure",
+                                record.spec.pool != "interactive"
+                                and host_pressure_blocked,
+                            ),
                         )
                         if blocked_now
                     ]
-                    if (
-                        "host-memory" in blocked_by
-                        and record.spec.pool not in head_of_line_reserved
-                    ):
-                        head_of_line_reserved[record.spec.pool] = estimate
-                        # Only memory it could actually use is reserved: a job
-                        # also waiting for a pool worker gains nothing from
-                        # draining the other pools (two hourly bulk jobs
-                        # behind the corpus run held every harvest for two
-                        # hours, 2026-09-02).
-                        # Normal-pool work (harvests, gates) finishes and
-                        # publishes what lanes produced; it outranks a new
-                        # lane launch at once, while a bulk job earns the
-                        # cross-pool claim by waiting.
-                        waited = self._queued_seconds(record)
-                        if (
-                            "*" not in head_of_line_reserved
-                            and "pool-workers" not in blocked_by
-                            and (
-                                record.spec.pool == "normal"
-                                or waited >= HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS
-                            )
-                        ):
-                            head_of_line_reserved["*"] = estimate
                     if blocked_by:
                         admission = {
                             **(
@@ -3894,25 +3450,8 @@ class GenericJobs:
                             ),
                             "blocked_by": blocked_by,
                             "host": {
-                                "budget_memory_bytes": host_memory_budget,
-                                "occupied_memory_bytes": host_occupied,
-                                "memory_available_bytes": int(
-                                    pressure.get("memory_available_bytes", 0.0)
-                                ),
-                                "memory_full_avg10": float(
-                                    pressure.get("memory_full_avg10", 0.0)
-                                ),
-                                "memory_full_avg60": float(
-                                    pressure.get("memory_full_avg60", 0.0)
-                                ),
-                                "io_full_avg10": float(
-                                    pressure.get("io_full_avg10", 0.0)
-                                ),
-                                "swap_free_bytes": int(
-                                    pressure.get("swap_free_bytes", 0.0)
-                                ),
-                                "swap_total_bytes": int(
-                                    pressure.get("swap_total_bytes", 0.0)
+                                "io_full_avg60": float(
+                                    pressure.get("io_full_avg60", 0.0)
                                 ),
                             },
                         }
@@ -4044,12 +3583,6 @@ class GenericJobs:
                         timeout_seconds=current.spec.timeout_seconds,
                         log_path=current.log_path,
                         pool=current.spec.pool,
-                        memory_max_bytes=memory_ceiling(
-                            current.spec.pool, current.spec.estimate_memory_bytes
-                        )[0],
-                        swap_max_bytes=memory_ceiling(
-                            current.spec.pool, current.spec.estimate_memory_bytes
-                        )[1],
                         json_result_path=current.result_path
                         if current.spec.result_kind in {"json", "pytest"}
                         else None,
@@ -4111,14 +3644,14 @@ class GenericJobs:
             elif submitted is not None:
                 active[submitted.spec.pool].append(submitted)
         state["claims"] = {
-            record.job_id: self._admission_claim(
-                record, self._estimate(record.spec, state)
-            )
+            record.job_id: self._admission_claim(record)
             for pool_records in active.values()
             for record in pool_records
         }
         self._save_admission_state(state)
 
+    # A unit's lease outlives its process by the time systemd takes to report
+    # the unit inactive; reaping sooner frees a port still bound.
     LEASE_REAP_GRACE_SECONDS = 120.0
 
     def _reap_orphaned_leases(self) -> None:
@@ -4182,11 +3715,6 @@ class GenericJobs:
             # One failed sweep must not end the daemon. An exception escaping
             # here kills the only thread that owns the active set, orphaning
             # every running unit and wedging all later admission.
-            try:
-                self._relieve_active_pressure(self.pressure_probe())
-            except Exception:
-                print("admission scheduler: pressure sweep failed", file=sys.stderr)
-                traceback.print_exc()
             try:
                 with self._admission_lock:
                     self._admit_locked()

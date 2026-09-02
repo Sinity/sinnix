@@ -53,8 +53,8 @@ from sinnixd.delivery import (
 from sinnixd.environment import build_environment
 from sinnixd.jobs import (
     DEFAULT_TIMEOUT_SECONDS,
+    IO_FULL_BLOCK_THRESHOLD,
     MAX_LOG_ARTIFACT_BYTES,
-    MEMORY_FULL_BLOCK_THRESHOLD,
     SYSTEMD_COMMAND_TIMEOUT_SECONDS,
     GenericJobs,
     GenericJobSpec,
@@ -1819,7 +1819,7 @@ def test_queued_service_cancellation_wins_the_admission_start_interleaving(
     descriptor.write_text(
         descriptor.read_text().replace(
             'cache = "none"\n\n[operations.service.service]',
-            'cache = "none"\nestimate_memory_bytes = 4294967296\n\n[operations.service.service]',
+            'cache = "none"\n\n[operations.service.service]',
         )
     )
     systemd = FakeSystemdJobs(
@@ -1831,8 +1831,7 @@ def test_queued_service_cancellation_wins_the_admission_start_interleaving(
         store,
         wait_poll_seconds=0.001,
         pressure_probe=lambda: {
-            "memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD,
-            "memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD,
+            "io_full_avg60": IO_FULL_BLOCK_THRESHOLD,
         },
     )
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
@@ -1901,7 +1900,7 @@ def test_queued_declared_cancellation_survives_service_refresh_and_restart(
     descriptor.write_text(
         descriptor.read_text().replace(
             'cache = "none"\n\n[operations.service.service]',
-            'cache = "none"\nestimate_memory_bytes = 4294967296\n\n[operations.service.service]',
+            'cache = "none"\n\n[operations.service.service]',
         )
     )
     systemd = FakeSystemdJobs(
@@ -1913,8 +1912,7 @@ def test_queued_declared_cancellation_survives_service_refresh_and_restart(
         store,
         wait_poll_seconds=0.001,
         pressure_probe=lambda: {
-            "memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD,
-            "memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD,
+            "io_full_avg60": IO_FULL_BLOCK_THRESHOLD,
         },
     )
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
@@ -2167,7 +2165,7 @@ def test_record_owns_ports_when_its_lease_artifact_is_missing_or_truncated(
         descriptor.write_text(
             descriptor.read_text().replace(
                 'cache = "none"\n\n[operations.service.service]',
-                'cache = "none"\nestimate_memory_bytes = 4294967296\n\n[operations.service.service]',
+                'cache = "none"\n\n[operations.service.service]',
             )
         )
     systemd = (
@@ -2182,12 +2180,7 @@ def test_record_owns_ports_when_its_lease_artifact_is_missing_or_truncated(
         GenericJobStore(tmp_path / "state"),
         wait_poll_seconds=0.001,
         pressure_probe=lambda: {
-            "memory_full_avg10": (
-                MEMORY_FULL_BLOCK_THRESHOLD if phase == "queued" else 0.0
-            ),
-            "memory_full_avg60": (
-                MEMORY_FULL_BLOCK_THRESHOLD if phase == "queued" else 0.0
-            ),
+            "io_full_avg60": (IO_FULL_BLOCK_THRESHOLD if phase == "queued" else 0.0),
         },
     )
     project = ProjectCatalog([tmp_path]).get("fixture")
@@ -2331,8 +2324,6 @@ class FakeSystemdJobs:
         log_path: Path,
         json_result_path: Path | None = None,
         pool: str,
-        memory_max_bytes: int | None = None,
-        swap_max_bytes: int | None = None,
     ) -> None:
         self.started.append(
             {
@@ -5553,7 +5544,7 @@ def test_admission_revalidates_queued_declared_workspace_before_systemd_launch(
     descriptor.write_text(
         descriptor.read_text().replace(
             'cache = "none"\n\n[operations.service.service]',
-            'cache = "none"\nestimate_memory_bytes = 4294967296\n\n[operations.service.service]',
+            'cache = "none"\n\n[operations.service.service]',
         )
     )
     initialize_git_checkout(tmp_path)
@@ -5565,8 +5556,7 @@ def test_admission_revalidates_queued_declared_workspace_before_systemd_launch(
         GenericJobStore(tmp_path / "state"),
         wait_poll_seconds=0.001,
         pressure_probe=lambda: {
-            "memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD,
-            "memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD,
+            "io_full_avg60": IO_FULL_BLOCK_THRESHOLD,
         },
     )
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
@@ -9273,43 +9263,6 @@ def test_sub_hourly_timers_are_not_persistent() -> None:
     assert timer_persistent("*-*-* 03:17:00") is True
     assert timer_persistent("hourly") is True
     assert timer_persistent("weekly") is True
-
-
-def test_every_unit_runs_under_its_pool_memory_ceiling(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Anti-vacuity: without MemoryMax/MemorySwapMax an agent lane admitted at
-    the 1 GiB default reached 19.3 GB and swapped the host to 97% (2026-09-01)."""
-    from sinnixd.jobs import MIB, UserSystemdJobs, memory_ceiling
-
-    assert memory_ceiling("agent", None) == (8 * 1024 * MIB, 2 * 1024 * MIB)
-    assert memory_ceiling("bulk", 16_000_000_000) == (20 * 1024 * MIB, 4 * 1024 * MIB)
-    assert memory_ceiling("bulk", 30_000_000_000)[0] == 30_000_000_000
-
-    calls: list[list[str]] = []
-    monkeypatch.setattr(
-        UserSystemdJobs,
-        "_run",
-        lambda self, args, **_kw: calls.append(list(args)) or "",
-    )
-    monkeypatch.setattr(
-        UserSystemdJobs, "lane_read_only_paths", staticmethod(lambda: ())
-    )
-    UserSystemdJobs().start(
-        unit="sinnixd-job-00000000-0000-0000-0000-000000000002.service",
-        command=("true",),
-        working_directory="/work/project",
-        environment={},
-        timeout_seconds=1,
-        log_path=tmp_path / "job.log",
-        pool="agent",
-        memory_max_bytes=8 * 1024 * MIB,
-        swap_max_bytes=2 * 1024 * MIB,
-    )
-    argv = calls[0]
-    assert f"--property=MemoryMax={8 * 1024 * MIB}" in argv
-    assert f"--property=MemoryHigh={6 * 1024 * MIB}" in argv
-    assert f"--property=MemorySwapMax={2 * 1024 * MIB}" in argv
 
 
 def test_default_checkout_operations_refuse_lane_worktrees(tmp_path: Path) -> None:
