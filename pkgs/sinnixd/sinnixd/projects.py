@@ -450,6 +450,10 @@ class ProjectOperation:
     # Correct only where a later run subsumes an earlier one, as for a cache
     # prebuild whose input has moved on.
     supersede: str = "none"
+    # "default": the operation runs only on the project's main checkout. A
+    # complete corpus run belongs to the master boundary, not to a lane that
+    # cannot get affected selection.
+    checkout: str = "any"
 
     def derive_argv(
         self, raw_parameters: Mapping[str, Any]
@@ -518,6 +522,7 @@ class ProjectOperation:
             "plan_node": self.plan_node,
             "schedule": self.schedule,
             "supersede": self.supersede,
+            "checkout": self.checkout,
         }
 
 
@@ -1267,6 +1272,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             "plan_node",
             "schedule",
             "supersede",
+            "checkout",
         }
         if set(definition) - allowed_operation:
             raise ProjectConfigError(
@@ -1324,6 +1330,9 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         supersede = definition.get("supersede", "none")
         if supersede not in {"none", "queued"}:
             raise ProjectConfigError(f"operations.{name}.supersede is invalid")
+        checkout_policy = definition.get("checkout", "any")
+        if checkout_policy not in {"any", "default"}:
+            raise ProjectConfigError(f"operations.{name}.checkout is invalid")
         schedule = definition.get("schedule")
         if schedule is not None and (
             not isinstance(schedule, str)
@@ -1361,6 +1370,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 plan_node=plan_node,
                 supersede=supersede,
                 schedule=schedule,
+                checkout=checkout_policy,
             )
         )
     operation_names = {operation.name for operation in operations}

@@ -24,6 +24,10 @@ reference to the full diff.
    confirm from the diff whether the change is correct or a paper-over.
 4. A lane whose trailer reports `red` or `blocked-env` did not finish. Do not
    publish it.
+5. Test evidence comes from `devtools test <sel>` on the suites the diff can
+   break, or from affected verification. The complete corpus never runs in a
+   lane worktree; a refusal of affected verification is reported as a
+   harness fault, not answered with `verify --all`.
 
 ## Publish
 

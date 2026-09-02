@@ -25,7 +25,11 @@ prompt. Write only what the worker must do; coordinator material belongs in
    archive read-only and report the counts; the quick gate cannot see this
    class at all.
 5. **Managed commands only** — the repo's own runner (`devtools test <sel>`),
-   never bare pytest. Commit by path, push, never merge.
+   never bare pytest. Commit by path, push, never merge. The complete corpus
+   (`devtools verify --all`, the `verify_all` operation) never runs in a
+   lane: it belongs to the main checkout's nightly. When affected
+   verification refuses, that refusal is a harness fault to report, not a
+   reason to escalate.
 6. **Report once, honestly.** Per-bead and per-acceptance-criterion
    disposition, the exact commands and the result line that matters, diffstat,
    residual risk. Refuting a finding needs evidence. The report is the

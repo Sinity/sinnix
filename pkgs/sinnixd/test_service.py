@@ -12030,3 +12030,60 @@ def test_every_unit_runs_under_its_pool_memory_ceiling(tmp_path: Path, monkeypat
     assert f"--property=MemoryMax={8 * 1024 * MIB}" in argv
     assert f"--property=MemoryHigh={6 * 1024 * MIB}" in argv
     assert f"--property=MemorySwapMax={2 * 1024 * MIB}" in argv
+
+
+def test_default_checkout_operations_refuse_lane_worktrees(tmp_path: Path) -> None:
+    """Anti-vacuity: an agent in packet-polylogue-nrlsl queued a 16 GB
+    complete-corpus run in its own worktree (2026-09-02 00:44Z)."""
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'exclusive_keys = ["fixture:check"]',
+            'checkout = "default"\nexclusive_keys = ["fixture:check"]',
+        )
+    )
+    initialize_git_checkout(tmp_path)
+    other_checkout = tmp_path.parent / "lane-checkout"
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "worktree", "add", "--quiet", "--detach", str(other_checkout), "HEAD"],
+        check=True,
+    )
+    catalog = ProjectCatalog([tmp_path])
+    project = catalog.get("fixture")
+    operation = project.operation("check")
+    assert operation.checkout == "default"
+    lane = next(
+        checkout for checkout in catalog.checkouts("fixture") if checkout.path == other_checkout.resolve()
+    )
+    jobs = generic_jobs(tmp_path.parent / "job-state")
+
+    with pytest.raises(ValueError, match="runs only on the default checkout"):
+        jobs.start_declared(
+            project=project,
+            operation=operation,
+            correlation_id="lane",
+            parameters={},
+            checkout=lane,
+        )
+    started = jobs.start_declared(
+        project=project,
+        operation=operation,
+        correlation_id="main",
+        parameters={},
+        checkout=catalog.checkout("fixture", "default"),
+    )
+    assert started["job_id"]
+
+
+def test_operation_checkout_policy_is_closed(tmp_path: Path) -> None:
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'exclusive_keys = ["fixture:check"]',
+            'checkout = "lane"\nexclusive_keys = ["fixture:check"]',
+        )
+    )
+    with pytest.raises(ProjectConfigError, match="operations.check.checkout"):
+        ProjectCatalog([tmp_path])
