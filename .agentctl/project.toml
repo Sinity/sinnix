@@ -53,6 +53,8 @@ exec = ["bash", "-c", "set -euo pipefail; ref='git+file:///realm/project/sinnix?
 pool = "bulk"
 result = "exit"
 cache = "none"
+# One hourly check at a time: a later firing subsumes an earlier queued one.
+supersede = "queued"
 exclusive_keys = ["sinnix:nix-store-pressure"]
 estimate_memory_bytes = 6442450944
 scratch = "nvme"
