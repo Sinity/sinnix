@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Thread
@@ -405,6 +406,16 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("--parameters-json", default="{}")
     start.add_argument("--bead-binding-json")
     start.add_argument("--dimensions-json", default="{}")
+    start.add_argument(
+        "--wait",
+        action="store_true",
+        help="Wait for the started job and return its result.",
+    )
+    start.add_argument(
+        "--wait-timeout-seconds",
+        type=int,
+        help="Maximum time to wait; defaults to the declared operation timeout.",
+    )
     fire = job_subcommands.add_parser(
         "fire", help="Fire one daemon-registered scheduled operation."
     )
@@ -1592,6 +1603,7 @@ def main() -> int:
         request = _request("job.cancel", "systemd-jobs", {"job_id": arguments.job_id})
     else:
         parser().error(f"unsupported command: {arguments.command}")
+    wait_succeeded = True
     if not (arguments.command == "packet" and arguments.packet_command == "launch"):
         try:
             response = call(arguments.socket, request)
@@ -1601,13 +1613,25 @@ def main() -> int:
                 and response.get("ok") is True
             ):
                 response = _wait_for_delivery(arguments.socket, response)
+            elif (
+                getattr(arguments, "wait", False)
+                and arguments.command == "job"
+                and arguments.job_command == "start"
+                and response.get("ok") is True
+            ):
+                response, wait_succeeded = _wait_for_job(
+                    arguments.socket,
+                    response,
+                    timeout_seconds=arguments.wait_timeout_seconds,
+                )
         except (OSError, ProtocolError, SinnixdClientError) as error:
             response = _client_error_response(request, error)
+            wait_succeeded = False
     if getattr(arguments, "plain", False):
         print(_render_plain(response))
     else:
         print(json.dumps(response, indent=2, sort_keys=True))
-    return 0 if response.get("ok") is True else 1
+    return 0 if response.get("ok") is True and wait_succeeded else 1
 
 
 def _wait_for_delivery(
@@ -1643,6 +1667,51 @@ def _wait_for_delivery(
         socket_path,
         _request("job.result", "systemd-jobs", {"job_id": job_id}),
     )
+
+
+def _wait_for_job(
+    socket_path: Path,
+    started: dict[str, object],
+    *,
+    timeout_seconds: int | None,
+) -> tuple[dict[str, object], bool]:
+    """Follow a started job through terminal state and return its result."""
+    payload = started.get("payload")
+    value = payload.get("value") if isinstance(payload, dict) else None
+    job_id = value.get("job_id") if isinstance(value, dict) else None
+    declared_timeout = value.get("timeout_seconds") if isinstance(value, dict) else None
+    if not isinstance(job_id, str):
+        return started, False
+    wait_for = timeout_seconds if timeout_seconds is not None else declared_timeout
+    if not isinstance(wait_for, int) or wait_for < 1:
+        return started, False
+    deadline = time.monotonic() + wait_for
+    while True:
+        remaining = int(deadline - time.monotonic())
+        if remaining < 1:
+            return started, False
+        waited = call(
+            socket_path,
+            _request(
+                "job.wait",
+                "systemd-jobs",
+                {"job_id": job_id, "timeout_seconds": min(3600, remaining)},
+            ),
+        )
+        waited_value = (
+            waited.get("payload", {}).get("value") if isinstance(waited, dict) else None
+        )
+        state = waited_value.get("state") if isinstance(waited_value, dict) else None
+        if not isinstance(state, dict):
+            return waited, False
+        if state.get("terminal") is True:
+            if state.get("phase") != "succeeded":
+                return waited, False
+            result = call(
+                socket_path,
+                _request("job.result", "systemd-jobs", {"job_id": job_id}),
+            )
+            return result, result.get("ok") is True
 
 
 def daemon_main() -> None:
