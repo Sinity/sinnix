@@ -589,6 +589,10 @@ def _redflags(
         flag(f"test assertions removed: {assertions_removed - assertions_added} net")
     if re.search(r"^\+.*(xfail|skipif|pytest\.mark\.skip)", diff, re.MULTILINE):
         flag("new xfail/skip")
+    # Tracked text is public. A pointer into the operator's private stores
+    # is not something a reader can clear from the diff alone.
+    if re.search(r"^\+.*(rawlog|/realm/data/|/realm/state/polylogue|knowledgebase/logs)", diff, re.MULTILINE):
+        flag("private evidence reference in tracked text")
     if re.search(
         r"^diff --git a/devtools/(consumer_reachability|verify\.py|verify_patterns|patterns/baselines)",
         diff,
