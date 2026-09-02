@@ -276,11 +276,47 @@ def test_canonical_client_redacts_unrecognized_json_rpc_errors(tmp_path: Path) -
         },
     )
 
-    with pytest.raises(SinnixdClientError, match="^sinnixd is unavailable$"):
+    with pytest.raises(SinnixdClientError, match="^sinnixd is unavailable$") as raised:
         SinnixdClient(socket_path).dispatch(request_value)
+    assert raised.value.code is ErrorCode.OWNER_UNAVAILABLE
+    assert raised.value.operation == "runtime.status"
+    assert raised.value.effect == "none"
 
     thread.join(timeout=1)
     assert not thread.is_alive()
+
+
+def test_error_envelope_preserves_operation_and_no_effect_for_validation(
+    tmp_path: Path,
+) -> None:
+    service = SinnixdService(ProjectCatalog([]), jobs=generic_jobs(tmp_path))
+
+    response = service.dispatch(request("workspace.create", "git-workspaces"))
+
+    assert response.error is not None
+    assert response.error.code is ErrorCode.INVALID_ARGUMENT
+    assert response.error.details.inline == {
+        "operation": "workspace.create",
+        "effect": "none",
+    }
+
+
+def test_client_redaction_keeps_timeout_effect_and_hides_exception_text() -> None:
+    request_value = request("job.start", "systemd-jobs")
+    error = ResponseBudgetExceeded("job.start", 15.0)
+
+    response = cli_module._client_error_response(request_value, error)
+
+    assert response["error"] == {
+        "schema": 1,
+        "code": "RESPONSE_BUDGET_EXCEEDED",
+        "message": "sinnixd response budget exceeded",
+        "details": {
+            "kind": "inline",
+            "value": {"operation": "job.start", "effect": "possible"},
+        },
+    }
+    assert "daemon is alive" not in json.dumps(response)
 
 
 def test_a_refused_request_is_reported_to_the_daemon_log(
@@ -312,7 +348,9 @@ def test_a_refused_request_is_reported_to_the_daemon_log(
         stop_event.set()
         thread.join(timeout=5)
 
-    assert "request failed:" in capfd.readouterr().err
+    log = capfd.readouterr().err
+    assert "request failed:" in log
+    assert "correlation_id=unknown" in log
 
 
 def test_agentctl_admission_maps_to_read_only_job_verb(
