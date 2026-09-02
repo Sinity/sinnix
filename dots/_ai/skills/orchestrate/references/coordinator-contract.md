@@ -36,25 +36,25 @@ operation to publish, `campaign log` to explain one lane.
 
 Look for the verb before writing any procedure: `agentctl <verb> --help`.
 
-| Need                                      | Verb                                                                                                     |
-| ----------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| see the campaign                          | `agentctl campaign view --project <p> [--json]`                                                          |
-| explain one lane                          | `agentctl campaign log --project <p> --workspace <ws>`                                                    |
-| schedule a dispatch wave                  | `agentctl campaign run --project <p> [--limit N] [--bead ID …] [--dry-run]`                              |
-| dispatch one bead                         | `agentctl packet launch <bead> --project <p>`                                                            |
-| group unintegrated lanes into batches     | `agentctl campaign integrate --project <p> [--assemble N --name B]`                                       |
-| publish a finished lane                   | `agentctl lane publish <ws> [--close]`                                                                    |
-| record the operator's decision at a head  | `agentctl lane authorize <ws> [--reason R]`                                                              |
+| Need                                      | Verb                                                                                                            |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| see the campaign                          | `agentctl campaign view --project <p> [--json]`                                                                 |
+| explain one lane                          | `agentctl campaign log --project <p> --workspace <ws>`                                                          |
+| schedule a dispatch wave                  | `agentctl campaign run --project <p> [--limit N] [--bead ID …] [--dry-run]`                                     |
+| dispatch one bead                         | `agentctl packet launch <bead> --project <p>`                                                                   |
+| group unintegrated lanes into batches     | `agentctl campaign integrate --project <p> [--assemble N --name B]`                                             |
+| publish a finished lane                   | `agentctl lane publish <ws> [--close]`                                                                          |
+| record the operator's decision at a head  | `agentctl lane authorize <ws> [--reason R]`                                                                     |
 | continue an interrupted lane              | `agentctl agent launch --project <p> --checkout <worktree-id> --prompt-file F --backend B --model M --effort E` |
-| open a PR outside the harvest flow        | `agentctl workspace publish <ws> --job <verify-job> --title T [--body F] [--wait]`                        |
-| land a workspace                          | `agentctl workspace land <ws> --job <verify-job>`                                                        |
-| dispose after a GitHub merge              | `agentctl workspace finish <ws>`                                                                          |
-| delete a workspace and everything it owns | `agentctl workspace drop <ws> [--target <ref>] [--force]`                                                |
-| protect work before risky integration     | `agentctl workspace checkpoint <ws>` / `restore <ws> <cp> [--recreate]`                                   |
-| review state of a workspace               | `agentctl workspace review-status <ws>`                                                                   |
-| run a declared operation                  | `agentctl job start <p> <operation> [--workspace <ws>] [--wait]`                                          |
-| see what blocks the queue                 | `agentctl job admission [--project <p>]`                                                                  |
-| wait on work                              | `agentctl job wait <id>`, `agentctl plan wait <id>`                                                       |
+| open a PR outside the harvest flow        | `agentctl workspace publish <ws> --job <verify-job> --title T [--body F] [--wait]`                              |
+| land a workspace                          | `agentctl workspace land <ws> --job <verify-job>`                                                               |
+| dispose after a GitHub merge              | `agentctl workspace finish <ws>`                                                                                |
+| delete a workspace and everything it owns | `agentctl workspace drop <ws> [--target <ref>] [--force]`                                                       |
+| protect work before risky integration     | `agentctl workspace checkpoint <ws>` / `restore <ws> <cp> [--recreate]`                                         |
+| review state of a workspace               | `agentctl workspace review-status <ws>`                                                                         |
+| run a declared operation                  | `agentctl job start <p> <operation> [--workspace <ws>] [--wait]`                                                |
+| see what blocks the queue                 | `agentctl job admission [--project <p>]`                                                                        |
+| wait on work                              | `agentctl job wait <id>`, `agentctl plan wait <id>`                                                             |
 
 Task mutations go through `bd` directly; see [[task-backend]].
 
