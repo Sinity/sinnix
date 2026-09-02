@@ -43,7 +43,6 @@ from .projects import (
 
 DEFAULT_WAIT_SECONDS = 30
 MAX_WAIT_SECONDS = 3600
-MAX_WAIT_ANY_JOBS = 32
 MAX_TERMINAL_EVENT_ENTRIES = 4096
 NOTIFY_TIMEOUT_SECONDS = 2.0
 MAX_EVENT_SPOOL_BYTES = 64 * 1024 * 1024
@@ -56,15 +55,12 @@ MAX_RESULT_BYTES = 64_000
 MAX_HANDOFF_BYTES = 64_000
 JOB_SCHEMA_VERSION = 6
 JOB_UNIT_PREFIX = "sinnixd-job-"
-JOB_LIST_CURSOR_SCHEMA_VERSION = 1
-MAX_JOB_LIST_CURSOR_BYTES = 512
 SYSTEMD_ERROR_CODE = "systemd-job-error"
 SCHEDULE_STATE_SCHEMA_VERSION = 1
 SCHEDULE_UNIT_PREFIX = "sinnixd-schedule-"
 ADMISSION_SCHEMA_VERSION = 2
 CAPACITY_SCHEMA_VERSION = 1
 CAPACITY_RETRY_DELAYS_SECONDS = (5, 30, 120)
-MAX_ADMISSION_CACHE_ENTRIES = 128
 MIB = 1024 * 1024
 GIB = 1024 * MIB
 MIN_HOST_MEMORY_RESERVE_BYTES = 4 * GIB
@@ -97,12 +93,6 @@ MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES = 2
 # 12:29Z). Ambient io-full on an idle host measures single digits.
 IO_FULL_BLOCK_THRESHOLD = 25.0
 # Measured whole-unit peaks per operation (declared jobs) or pool (agents):
-# evidence beside the declaration, never a claim. A learned claim was tried
-# and removed (one inflated sample serialized a campaign); a declaration
-# more than twice off the measured p90 is logged for the operator instead.
-ENVELOPE_SAMPLES = 50
-ENVELOPE_MIN_SAMPLES = 10
-ENVELOPE_DRIFT_RATIO = 2.0
 # A job blocked on host memory this long reserves its claim across every
 # pool, not just its own: lanes then drain until it fits. Per-pool
 # reservation alone let six agent lanes and eight harvests refill the
@@ -232,10 +222,6 @@ class JobResultLimitError(JobResultError):
     """Raised when a valid declared result exceeds the caller's response bound."""
 
 
-class JobPageCursorError(ValueError):
-    """Raised when a job-list continuation does not bind its original view."""
-
-
 @dataclass(frozen=True)
 class CorruptJobSpec:
     """Safe metadata exposed for a record that cannot be reconstructed."""
@@ -282,64 +268,6 @@ def _dimensions(value: Any) -> dict[str, Any]:
     ):
         raise ValueError("job dimensions must map names to scalar JSON values")
     return dict(value)
-
-
-def _encode_job_list_cursor(
-    *,
-    principal: str,
-    query: Mapping[str, Any],
-    snapshot: tuple[str, str],
-    after: tuple[str, str],
-) -> str:
-    payload = {
-        "schema": JOB_LIST_CURSOR_SCHEMA_VERSION,
-        "principal": principal,
-        "query": dict(query),
-        "snapshot": list(snapshot),
-        "after": list(after),
-    }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return base64.urlsafe_b64encode(encoded).decode().rstrip("=")
-
-
-def _decode_job_list_cursor(
-    cursor: str, *, principal: str, query: Mapping[str, Any]
-) -> tuple[tuple[str, str], tuple[str, str]]:
-    if (
-        not isinstance(cursor, str)
-        or not cursor
-        or len(cursor.encode()) > MAX_JOB_LIST_CURSOR_BYTES
-    ):
-        raise JobPageCursorError("job list cursor is invalid")
-    try:
-        decoded = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
-        value = json.loads(decoded)
-    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise JobPageCursorError("job list cursor is invalid") from error
-    if (
-        not isinstance(value, Mapping)
-        or set(value) != {"schema", "principal", "query", "snapshot", "after"}
-        or value["schema"] != JOB_LIST_CURSOR_SCHEMA_VERSION
-        or value["principal"] != principal
-        or value["query"] != dict(query)
-    ):
-        raise JobPageCursorError("job list cursor does not belong to this principal")
-
-    def pair(name: str) -> tuple[str, str]:
-        candidate = value[name]
-        if (
-            not isinstance(candidate, list)
-            or len(candidate) != 2
-            or any(not isinstance(item, str) for item in candidate)
-        ):
-            raise JobPageCursorError("job list cursor is invalid")
-        return candidate[0], candidate[1]
-
-    snapshot = pair("snapshot")
-    after = pair("after")
-    if after > snapshot:
-        raise JobPageCursorError("job list cursor is invalid")
-    return snapshot, after
 
 
 def _open_private_parent(path: Path) -> int:
@@ -1179,7 +1107,6 @@ class GenericJobSpec:
     environment_keys: tuple[str, ...] = ()
     command_digest: str | None = None
     parameter_digest: str | None = None
-    input_generation: str | None = None
     principal: str | None = None
     checkout: Mapping[str, str] | None = None
     contract: Mapping[str, Any] = field(default_factory=dict)
@@ -1188,9 +1115,6 @@ class GenericJobSpec:
     pool: str = "interactive"
     exclusive_keys: tuple[str, ...] = ()
     dependency_job_ids: tuple[str, ...] = ()
-    allow_failed_dependencies: bool = False
-    coalesce_key: str | None = None
-    cache_key: str | None = None
     estimate_memory_bytes: int | None = None
     scratch: str = "none"
     lease: ServiceLease | None = None
@@ -1226,13 +1150,6 @@ class GenericJobSpec:
             raise ValueError("declared operation jobs require a parameter digest")
         if self.kind != "declared-operation" and self.parameter_digest is not None:
             raise ValueError("only declared operation jobs may have a parameter digest")
-        if self.input_generation is not None and (
-            self.kind != "declared-operation"
-            or not isinstance(self.input_generation, str)
-            or not self.input_generation
-            or len(self.input_generation) > 256
-        ):
-            raise ValueError("job input generation is invalid")
         if not isinstance(self.working_directory, str) or not self.working_directory:
             raise ValueError("job working_directory must be non-empty")
         maximum_timeout = maximum_timeout_seconds(self.kind)
@@ -1308,13 +1225,6 @@ class GenericJobSpec:
             not isinstance(value, str) or not value for value in self.dependency_job_ids
         ):
             raise ValueError("job dependency IDs are invalid")
-        if not isinstance(self.allow_failed_dependencies, bool):
-            raise ValueError("job allow_failed_dependencies must be boolean")
-        for name, key in (("coalesce", self.coalesce_key), ("cache", self.cache_key)):
-            if key is not None and (
-                len(key) != 64 or any(value not in "0123456789abcdef" for value in key)
-            ):
-                raise ValueError(f"job {name} key is invalid")
         if self.estimate_memory_bytes is not None and (
             not isinstance(self.estimate_memory_bytes, int)
             or isinstance(self.estimate_memory_bytes, bool)
@@ -1350,7 +1260,6 @@ class GenericJobSpec:
             "timeout_seconds": self.timeout_seconds,
             "project_id": self.project_id,
             "operation": self.operation,
-            "input_generation": self.input_generation,
             "principal": self.principal,
             "checkout": dict(self.checkout) if self.checkout is not None else None,
             "contract": dict(self.contract),
@@ -1363,9 +1272,6 @@ class GenericJobSpec:
                 "pool": self.pool,
                 "exclusive_keys": list(self.exclusive_keys),
                 "dependencies": list(self.dependency_job_ids),
-                "allow_failed_dependencies": self.allow_failed_dependencies,
-                "coalesce_key": self.coalesce_key,
-                "cache_key": self.cache_key,
                 "estimate_memory_bytes": self.estimate_memory_bytes,
                 "scratch": self.scratch,
                 "bypass": self.admission_bypass,
@@ -1434,7 +1340,6 @@ class GenericJobSpec:
                 timeout_seconds=value.get("timeout_seconds"),
                 project_id=value.get("project_id"),
                 operation=value.get("operation"),
-                input_generation=value.get("input_generation"),
                 environment_keys=tuple(environment_keys),
                 command_digest=digest,
                 parameter_digest=parameter_digest,
@@ -1449,11 +1354,6 @@ class GenericJobSpec:
                 pool=admission.get("pool", "interactive"),
                 exclusive_keys=tuple(admission.get("exclusive_keys", ())),
                 dependency_job_ids=tuple(admission.get("dependencies", ())),
-                allow_failed_dependencies=admission.get(
-                    "allow_failed_dependencies", False
-                ),
-                coalesce_key=admission.get("coalesce_key"),
-                cache_key=admission.get("cache_key"),
                 estimate_memory_bytes=admission.get("estimate_memory_bytes"),
                 scratch=admission.get("scratch", "none"),
                 admission_bypass=admission.get("bypass", False),
@@ -1652,10 +1552,6 @@ class GenericJobStore:
     @property
     def capacity_path(self) -> Path:
         return self.root / "capacity.json"
-
-    @property
-    def envelopes_path(self) -> Path:
-        return self.root / "envelopes.json"
 
     @property
     def inputs_root(self) -> Path:
@@ -2847,7 +2743,6 @@ class GenericJobs:
                 "phase": "queued",
                 "terminal": False,
                 "observed_at": _timestamp(),
-                "subscribers": 1,
                 "dependencies": list(record.spec.dependency_job_ids),
                 "admission": {
                     "pool": record.spec.pool,
@@ -2865,7 +2760,6 @@ class GenericJobs:
         empty = {
             "schema_version": ADMISSION_SCHEMA_VERSION,
             "active": {},
-            "cache": {},
             "claims": {},
         }
         if not path.exists():
@@ -2881,11 +2775,11 @@ class GenericJobs:
             ADMISSION_SCHEMA_VERSION,
         }:
             return dict(empty)
-        if not all(isinstance(value.get(key), Mapping) for key in ("active", "cache")):
+        if not isinstance(value.get("active"), Mapping):
             return dict(empty)
         return {
             "schema_version": ADMISSION_SCHEMA_VERSION,
-            **{key: dict(value[key]) for key in ("active", "cache")},
+            "active": dict(value["active"]),
             "claims": (
                 dict(value["claims"])
                 if isinstance(value.get("claims"), Mapping)
@@ -2898,7 +2792,6 @@ class GenericJobs:
             "job_id": record.job_id,
             "pool": record.spec.pool,
             "estimate_memory_bytes": estimate,
-            "measured": self.measured_envelope(record.spec),
             "exclusive_keys": list(record.spec.exclusive_keys),
             "created_at": record.created_at,
             "project_id": record.spec.project_id,
@@ -2972,16 +2865,6 @@ class GenericJobs:
                     }
                 )
                 blocked_by = record.state.get("admission", {}).get("blocked_by", [])
-                comparisons = self._admission_comparisons(
-                    record,
-                    estimate,
-                    pool_occupied,
-                    host_occupied,
-                    host_budget,
-                    len(pool_active),
-                    policy["workers"],
-                    exclusive,
-                )
                 queue.append(
                     {
                         "position": position,
@@ -2992,7 +2875,6 @@ class GenericJobs:
                         "blocked_by": list(blocked_by)
                         if isinstance(blocked_by, list)
                         else [],
-                        "comparisons": comparisons,
                         "arithmetic": {
                             "pool_workers": {
                                 "occupied": len(pool_active),
@@ -3036,66 +2918,6 @@ class GenericJobs:
                 "claims": dict(state["claims"]),
                 "queue": queue,
             }
-
-    @staticmethod
-    def _admission_comparisons(
-        record: GenericJobRecord,
-        estimate: int,
-        pool_occupied: int,
-        host_occupied: int,
-        host_budget: int | None,
-        pool_workers: int,
-        worker_limit: int,
-        exclusive: Sequence[str],
-    ) -> dict[str, dict[str, Any]]:
-        pool_budget = POOL_POLICIES[record.spec.pool]["memory_budget"]
-        return {
-            "pool_workers": {
-                "left": pool_workers,
-                "operator": ">=",
-                "right": worker_limit,
-                "fails": pool_workers >= worker_limit,
-            },
-            "pool_memory": {
-                "left": pool_occupied + estimate,
-                "operator": ">",
-                "right": pool_budget,
-                "fails": pool_occupied + estimate > pool_budget,
-            },
-            "host_memory": {
-                "left": host_occupied + estimate,
-                "operator": ">",
-                "right": host_budget,
-                "fails": host_budget is not None
-                and host_occupied + estimate > host_budget,
-            },
-            "exclusive_key": {
-                "left": list(exclusive),
-                "operator": "non-empty",
-                "right": [],
-                "fails": bool(exclusive),
-            },
-        }
-
-    def admission_explain(self, job_id: str) -> dict[str, Any]:
-        """Return the current admission verdict and its exact operands."""
-        ledger = self.admission_ledger()
-        for item in ledger["queue"]:
-            if item["job_id"] == job_id:
-                position = int(item["position"])
-                return {
-                    "job_id": job_id,
-                    "queue_position": position,
-                    "ahead": [
-                        row["job_id"]
-                        for row in ledger["queue"]
-                        if row["position"] < position
-                    ],
-                    "blocked_by": item["blocked_by"],
-                    "estimate_memory_bytes": item["estimate_memory_bytes"],
-                    "comparisons": item["comparisons"],
-                }
-        raise JobRecordError(f"job {job_id} is not queued for admission")
 
     def _save_admission_state(self, value: Mapping[str, Any]) -> None:
         """Persist the admission snapshot when it changed.
@@ -3195,19 +3017,6 @@ class GenericJobs:
         self.store.save(queued)
         return queued
 
-    @staticmethod
-    def _bounded(mapping: Mapping[str, Any], limit: int) -> dict[str, Any]:
-        return dict(
-            sorted(
-                mapping.items(),
-                key=lambda item: (
-                    str(item[1].get("touched_at", ""))
-                    if isinstance(item[1], Mapping)
-                    else ""
-                ),
-            )[-limit:]
-        )
-
     def _job_environment(
         self,
         record: GenericJobRecord,
@@ -3301,8 +3110,7 @@ class GenericJobs:
                             "phase": "queued",
                             "terminal": False,
                             "observed_at": _timestamp(),
-                            "subscribers": 1,
-                            "admission": {
+                                        "admission": {
                                 "pool": spec.pool,
                                 "estimate_memory_bytes": self._estimate(
                                     spec, self._admission_state()
@@ -3374,7 +3182,6 @@ class GenericJobs:
         principal: str = "operator",
         contract: Mapping[str, Any] | None = None,
         dependency_job_ids: Sequence[str] = (),
-        input_generation: str | None = None,
         dimensions: Mapping[str, Any] | None = None,
         plan_node: bool = False,
     ) -> dict[str, Any]:
@@ -3395,7 +3202,6 @@ class GenericJobs:
                 (),
                 contract or {},
                 tuple(dependency_job_ids),
-                input_generation,
                 dimensions,
                 plan_node,
             )
@@ -3411,7 +3217,6 @@ class GenericJobs:
         lineage: tuple[str, ...],
         contract: Mapping[str, Any],
         external_dependency_job_ids: tuple[str, ...] = (),
-        input_generation: str | None = None,
         dimensions: Mapping[str, Any] | None = None,
         plan_node: bool = False,
     ) -> dict[str, Any]:
@@ -3462,69 +3267,7 @@ class GenericJobs:
         operation_argv, parameter_digest = operation.derive_argv(parameters)
         workdir = checkout.path if checkout is not None else project.root
         environment = project.environment.values()
-        tree = self._cache_tree(workdir)
-        scheduled_firing = bool(
-            dimensions is not None and isinstance(dimensions.get("schedule_id"), str)
-        )
-        coalesce_key = (
-            self._operation_identity_key(
-                project,
-                operation,
-                parameter_digest,
-                principal,
-                environment,
-                tree,
-                checkout,
-            )
-            if not plan_node
-            and not scheduled_firing
-            and (operation.service is None or operation.cache == "tree+environment")
-            else None
-        )
-        cache_key = (
-            coalesce_key
-            if not plan_node
-            and not scheduled_firing
-            and operation.cache == "tree+environment"
-            else None
-        )
         state = self._admission_state()
-        if cache_key is not None:
-            cached = state["cache"].get(cache_key)
-            if isinstance(cached, Mapping) and isinstance(cached.get("job_id"), str):
-                try:
-                    record = self.store.load(cached["job_id"])
-                except JobRecordError:
-                    state["cache"].pop(cache_key, None)
-                else:
-                    if record.state.get("phase") == "succeeded" and record.state.get(
-                        "terminal"
-                    ):
-                        response = self._public(record, record.state)
-                        response["reused"] = True
-                        return response
-        if coalesce_key is not None:
-            active_id = state["active"].get(coalesce_key)
-            if isinstance(active_id, str):
-                try:
-                    record = self.store.load(active_id)
-                except JobRecordError:
-                    state["active"].pop(coalesce_key, None)
-                else:
-                    if not record.state.get("terminal"):
-                        subscribers = int(record.state.get("subscribers", 1)) + 1
-                        updated = self._with_state(
-                            record,
-                            {
-                                **record.state,
-                                "subscribers": subscribers,
-                                "coalesced": True,
-                            },
-                        )
-                        self.store.save(updated)
-                        response = self._public(updated, updated.state)
-                        response["coalesced"] = True
-                        return response
         if operation.supersede == "queued":
             self._supersede_queued(project.project_id, operation.name, principal, state)
         job_id = str(uuid4())
@@ -3575,7 +3318,6 @@ class GenericJobs:
                 project_id=project.project_id,
                 operation=operation.name,
                 parameter_digest=parameter_digest,
-                input_generation=input_generation,
                 principal=principal,
                 timeout_seconds=operation.timeout_seconds,
                 checkout=checkout.to_dict() if checkout is not None else None,
@@ -3587,8 +3329,6 @@ class GenericJobs:
                 pool=operation.pool,
                 exclusive_keys=operation.exclusive_keys,
                 dependency_job_ids=dependency_ids,
-                coalesce_key=coalesce_key,
-                cache_key=cache_key,
                 estimate_memory_bytes=operation.estimate_memory_bytes,
                 scratch=operation.scratch,
                 lease=lease,
@@ -3621,7 +3361,6 @@ class GenericJobs:
                 "phase": "queued",
                 "terminal": False,
                 "observed_at": _timestamp(),
-                "subscribers": 1,
                 "dependencies": list(dependency_ids),
                 "admission": {
                     "pool": spec.pool,
@@ -3630,8 +3369,6 @@ class GenericJobs:
             },
         )
         self.store.save(queued)
-        if coalesce_key is not None:
-            state["active"][coalesce_key] = job_id
         self._save_admission_state(state)
         self._admit_locked()
         record = self.store.load(job_id)
@@ -3675,65 +3412,6 @@ class GenericJobs:
                 self.store.save(superseded)
             self._finalize_terminal(superseded)
             self._finish_admission(superseded, state)
-
-    @staticmethod
-    def _cache_tree(path: Path) -> str | None:
-        try:
-            clean = subprocess.run(
-                ["git", "-C", str(path), "status", "--porcelain"],
-                capture_output=True,
-                text=True,
-                timeout=2,
-            )
-            if clean.returncode != 0 or clean.stdout:
-                return None
-            tree = subprocess.run(
-                ["git", "-C", str(path), "rev-parse", "HEAD^{tree}"],
-                capture_output=True,
-                text=True,
-                timeout=2,
-            )
-            return (
-                tree.stdout.strip()
-                if tree.returncode == 0 and len(tree.stdout.strip()) == 40
-                else None
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return None
-
-    @staticmethod
-    def _operation_identity_key(
-        project: ProjectAdapter,
-        operation: ProjectOperation,
-        parameter_digest: str,
-        principal: str,
-        environment: Mapping[str, str],
-        tree: str | None,
-        checkout: RegisteredCheckout | None,
-    ) -> str | None:
-        if tree is None:
-            return None
-        payload = {
-            "project": project.project_id,
-            "operation": operation.name,
-            "parameters": parameter_digest,
-            "principal": principal,
-            "tree": tree,
-            "environment": dict(sorted(environment.items())),
-        }
-        if checkout is not None:
-            # Two checkouts are different work even when their trees match, and
-            # empty lanes on the same base match often. Without this, the second
-            # request coalesces onto the first job and reports its result.
-            payload["checkout"] = checkout.to_dict()
-        if operation.service is not None:
-            payload["service_scope"] = {
-                "project_root": str(project.root.resolve()),
-                "checkout": checkout.to_dict() if checkout is not None else None,
-            }
-        return hashlib.sha256(
-            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
 
     @staticmethod
     def _estimate(spec: GenericJobSpec, state: Mapping[str, Any]) -> int:
@@ -4512,7 +4190,6 @@ class GenericJobs:
             if (
                 dependency["state"].get("terminal")
                 and dependency["state"].get("phase") != "succeeded"
-                and not spec.allow_failed_dependencies
             ):
                 return {
                     "phase": "dependency-failed",
@@ -4548,28 +4225,6 @@ class GenericJobs:
             record = self.store.load(record.job_id)
             if record.admission_estimate_recorded:
                 return
-            active_key = record.spec.coalesce_key or record.spec.cache_key
-            if (
-                active_key is not None
-                and state["active"].get(active_key) == record.job_id
-            ):
-                state["active"].pop(active_key, None)
-            if (
-                record.state.get("phase") == "succeeded"
-                and record.spec.lease is None
-                and record.spec.cache_key is not None
-                and (
-                    record.spec.result_kind == "exit-status"
-                    or self._has_authoritative_result(record)
-                )
-            ):
-                state["cache"][record.spec.cache_key] = {
-                    "job_id": record.job_id,
-                    "touched_at": _timestamp(),
-                }
-                state["cache"] = self._bounded(
-                    state["cache"], MAX_ADMISSION_CACHE_ENTRIES
-                )
             self._save_admission_state(state)
             self.store.save(replace(record, admission_estimate_recorded=True))
 
@@ -4584,68 +4239,7 @@ class GenericJobs:
         if record.job_id not in self._spooled:
             self._spooled.add(record.job_id)
             self._spool_terminal_event(record)
-            self._record_envelope(record)
         self._terminal_cleanup(record)
-
-    @staticmethod
-    def _envelope_key(spec: GenericJobSpec) -> str:
-        if spec.kind == "declared-operation" and spec.operation:
-            return f"op:{spec.project_id}:{spec.operation}"
-        return f"pool:{spec.pool}"
-
-    def _envelopes(self) -> dict[str, list[int]]:
-        try:
-            value = json.loads(self.store.envelopes_path.read_text())
-        except (OSError, json.JSONDecodeError):
-            return {}
-        if not isinstance(value, Mapping):
-            return {}
-        return {
-            str(key): [int(item) for item in items if isinstance(item, (int, float))]
-            for key, items in value.items()
-            if isinstance(items, list)
-        }
-
-    def _record_envelope(self, record: GenericJobRecord) -> None:
-        peak = self._memory_observation(record).get("whole_unit_memory_peak_bytes")
-        if not isinstance(peak, int) or peak <= 0:
-            return
-        key = self._envelope_key(record.spec)
-        envelopes = self._envelopes()
-        samples = (envelopes.get(key) or [])[-(ENVELOPE_SAMPLES - 1) :] + [peak]
-        envelopes[key] = samples
-        try:
-            path = self.store.envelopes_path
-            temporary = path.with_suffix(".json.tmp")
-            temporary.write_text(json.dumps(envelopes, sort_keys=True) + "\n", encoding="utf-8")
-            os.replace(temporary, path)
-        except OSError:
-            return
-        measured = self.measured_envelope(record.spec, envelopes)
-        declared = self._estimate(record.spec, {})
-        if measured["samples"] >= ENVELOPE_MIN_SAMPLES and measured["p90_bytes"]:
-            ratio = declared / measured["p90_bytes"]
-            if ratio >= ENVELOPE_DRIFT_RATIO or ratio <= 1 / ENVELOPE_DRIFT_RATIO:
-                logging.getLogger(__name__).warning(
-                    "declaration drift for %s: declared %d bytes, measured p90 %d bytes over %d runs",
-                    key,
-                    declared,
-                    measured["p90_bytes"],
-                    measured["samples"],
-                )
-
-    def measured_envelope(
-        self, spec: GenericJobSpec, envelopes: Mapping[str, Sequence[int]] | None = None
-    ) -> dict[str, Any]:
-        """The measured peak distribution for this job's kind, or empty."""
-        samples = sorted((envelopes if envelopes is not None else self._envelopes()).get(self._envelope_key(spec)) or [])
-        if not samples:
-            return {"samples": 0, "p50_bytes": None, "p90_bytes": None}
-        return {
-            "samples": len(samples),
-            "p50_bytes": samples[(len(samples) - 1) // 2],
-            "p90_bytes": samples[min(len(samples) - 1, int(len(samples) * 0.9))],
-        }
 
     def _spool_terminal_event(self, record: GenericJobRecord) -> None:
         checkout = record.spec.checkout
@@ -4908,7 +4502,6 @@ class GenericJobs:
         *,
         principal: str = "operator",
         limit: int = 100,
-        cursor: str | None = None,
         project_id: str | None = None,
         phases: tuple[str, ...] = (),
         kinds: tuple[str, ...] = (),
@@ -4948,44 +4541,15 @@ class GenericJobs:
             key=_job_order_key,
             reverse=True,
         )
-        if cursor is None:
-            snapshot = _job_order_key(records[0]) if records else ("", "")
-            after: tuple[str, str] | None = None
-        else:
-            snapshot, after = _decode_job_list_cursor(
-                cursor, principal=principal, query=query
-            )
-        snapshot_records = [
-            record for record in records if _job_order_key(record) <= snapshot
-        ]
-        if after is not None:
-            snapshot_records = [
-                record for record in snapshot_records if _job_order_key(record) < after
-            ]
-        page_records = snapshot_records[: limit + 1]
-        has_more = len(page_records) > limit
-        records = page_records[:limit]
-        next_cursor = (
-            _encode_job_list_cursor(
-                principal=principal,
-                query=query,
-                snapshot=snapshot,
-                after=_job_order_key(records[-1]),
-            )
-            if has_more and records
-            else None
-        )
+        has_more = len(records) > limit
+        page = records[:limit]
         return {
-            "jobs": [self._list_row(record) for record in records],
+            "jobs": [self._list_row(record) for record in page],
             "limit": limit,
             "query": query,
-            "total": len(snapshot_records) if after is None else None,
+            "total": len(records),
             "truncated": has_more,
-            "next_cursor": next_cursor,
-            "snapshot": {
-                "ordering": "created_at_desc_job_id_desc",
-                "ceiling": list(snapshot),
-            },
+            "snapshot": {"ordering": "created_at_desc_job_id_desc"},
         }
 
     def wait(
@@ -5021,40 +4585,6 @@ class GenericJobs:
                 return {**status, "wait_timed_out": True}
             self.events.wait_terminal(
                 (job_id,),
-                min(self.wait_poll_seconds, max(0.0, deadline - time.monotonic())),
-            )
-
-    def wait_any(
-        self, job_ids: Sequence[str], timeout_seconds: int = DEFAULT_WAIT_SECONDS
-    ) -> dict[str, Any]:
-        """Return the first terminal job among ``job_ids``, or a bounded timeout."""
-        if not 1 <= timeout_seconds <= MAX_WAIT_SECONDS:
-            raise ValueError(
-                f"wait timeout_seconds must be between 1 and {MAX_WAIT_SECONDS}"
-            )
-        if (
-            not job_ids
-            or len(job_ids) > MAX_WAIT_ANY_JOBS
-            or len(set(job_ids)) != len(job_ids)
-        ):
-            raise ValueError(
-                f"wait_any requires 1-{MAX_WAIT_ANY_JOBS} distinct job ids"
-            )
-        deadline = time.monotonic() + timeout_seconds
-        with self._admission_lock:
-            self._admit_locked()
-        while True:
-            phases: dict[str, Any] = {}
-            for job_id in job_ids:
-                with self.store.locked(job_id):
-                    status = self._get_locked(job_id)
-                if status["state"]["terminal"]:
-                    return {**status, "completed_job_id": job_id}
-                phases[job_id] = status["state"].get("phase")
-            if time.monotonic() >= deadline:
-                return {"wait_timed_out": True, "jobs": phases}
-            self.events.wait_terminal(
-                job_ids,
                 min(self.wait_poll_seconds, max(0.0, deadline - time.monotonic())),
             )
 
@@ -5509,22 +5039,6 @@ class GenericJobs:
             state["usage"] = _terminal_usage(record)
             state["terminal_cause"] = self._terminal_cause(record, properties, phase)
             return self._with_service_lease_invocation(record, properties, state)
-        if self._has_schema_v3_native_success(record, properties):
-            state = self._with_service_lease_invocation(
-                record,
-                properties,
-                {
-                    **forensic,
-                    "phase": "succeeded",
-                    "terminal": True,
-                    "systemd": dict(properties),
-                    "result_evidence": "native-v3",
-                    "observed_at": _timestamp(),
-                },
-            )
-            state["resources"] = _terminal_resources(properties)
-            state["usage"] = _terminal_usage(record)
-            return state
         active = properties.get("ActiveState", "unknown")
         if active in {"active", "activating", "reloading"}:
             phase = "running"
@@ -5750,21 +5264,6 @@ class GenericJobs:
             return completed
         return completed and self._has_valid_result_artifact(record)
 
-    def _has_schema_v3_native_success(
-        self, record: GenericJobRecord, properties: Mapping[str, str]
-    ) -> bool:
-        return (
-            record.spec.kind == "attested-agent"
-            and record.spec.result_kind == "last-message"
-            and record.cancel_requested_at is None
-            and properties.get("ActiveState") == "inactive"
-            and properties.get("Result") == "success"
-            and record.state.get("lifecycle") == "succeeded"
-            and record.state.get("exit_status") == 0
-            and not isinstance(record.state.get("exit_status"), bool)
-            and self._has_valid_result_artifact(record)
-        )
-
     @staticmethod
     def _with_state(
         record: GenericJobRecord, state: Mapping[str, Any]
@@ -5980,7 +5479,6 @@ class GenericJobs:
                 if record.spec.kind == "declared-operation"
                 else None
             ),
-            "input_generation": record.spec.input_generation,
             "principal": record.spec.principal,
             "checkout": (
                 dict(record.spec.checkout) if record.spec.checkout is not None else None

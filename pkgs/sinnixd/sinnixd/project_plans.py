@@ -25,14 +25,11 @@ from .projects import ProjectAdapter, ProjectCatalog, RegisteredCheckout
 MAX_PLAN_NODES = 256
 MAX_PLAN_DEPENDENCIES = 1_024
 MAX_PLAN_ID_BYTES = 64
-MAX_INPUT_GENERATION_BYTES = 256
 MAX_PLAN_RESULT_BYTES = 64_000
 # A packet-lane node carries its whole compiled prompt, so this bound is
 # what decides whether a large bead can be dispatched at all.
 MAX_NODE_PAYLOAD_BYTES = 256_000
-MAX_PLAN_LIST = 100
 _PLAN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
-_GENERATION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:+@=-]{0,255}\Z")
 
 
 class ProjectPlanError(ValueError):
@@ -99,19 +96,6 @@ class PlanStore:
         self.validate_record(value)
         return dict(value)
 
-    def list(self) -> list[dict[str, Any]]:
-        if not self.plans_root.exists():
-            return []
-        records: list[dict[str, Any]] = []
-        for path in sorted(self.plans_root.glob("*.json")):
-            try:
-                value = json.loads(path.read_text())
-                self.validate_record(value)
-            except (OSError, json.JSONDecodeError, ProjectPlanError):
-                continue
-            records.append(dict(value))
-        return records
-
     @staticmethod
     def validate_record(value: Any) -> None:
         if not isinstance(value, Mapping):
@@ -122,13 +106,12 @@ class PlanStore:
             "project_id",
             "project_digest",
             "checkout",
-            "input_generation",
             "plan_digest",
             "nodes",
             "created_at",
             "state",
         }
-        if set(value) != required or value.get("schema_version") != 1:
+        if set(value) != required or value.get("schema_version") != 2:
             raise ProjectPlanError("plan record schema is invalid")
         _safe_text(value.get("plan_id"), "plan_id", _PLAN_ID, MAX_PLAN_ID_BYTES)
         _safe_text(value.get("project_id"), "project_id", _PLAN_ID, 128)
@@ -137,12 +120,6 @@ class PlanStore:
             is None
         ):
             raise ProjectPlanError("project_digest is invalid")
-        _safe_text(
-            value.get("input_generation"),
-            "input_generation",
-            _GENERATION,
-            MAX_INPUT_GENERATION_BYTES,
-        )
         if re.fullmatch(r"[0-9a-f]{64}", str(value.get("plan_digest"))) is None:
             raise ProjectPlanError("plan_digest is invalid")
         if (
@@ -171,19 +148,11 @@ class PlanStore:
                 "operation",
                 "dependencies",
                 "parameter_digest",
-                "input_generation",
                 "job_id",
-                "reused",
             }:
                 raise ProjectPlanError("plan node record is invalid")
             _safe_text(node.get("node_id"), "node_id", _PLAN_ID, 128)
             _safe_text(node.get("operation"), "operation", _PLAN_ID, 128)
-            _safe_text(
-                node.get("input_generation"),
-                "node input_generation",
-                _GENERATION,
-                MAX_INPUT_GENERATION_BYTES,
-            )
             if (
                 not isinstance(node.get("dependencies"), list)
                 or any(
@@ -196,7 +165,6 @@ class PlanStore:
                     node.get("job_id") is not None
                     and not isinstance(node["job_id"], str)
                 )
-                or not isinstance(node.get("reused"), bool)
             ):
                 raise ProjectPlanError("plan node fields are invalid")
 
@@ -230,17 +198,15 @@ class ProjectPlanExecutor:
             {
                 "project_id": project.project_id,
                 "checkout": checkout.to_dict(),
-                "input_generation": normalized["input_generation"],
                 "nodes": nodes,
             }
         )
         record = {
-            "schema_version": 1,
+            "schema_version": 2,
             "plan_id": plan_id,
             "project_id": project.project_id,
             "project_digest": project.digest,
             "checkout": checkout.to_dict(),
-            "input_generation": normalized["input_generation"],
             "plan_digest": plan_digest,
             "nodes": [
                 {
@@ -248,9 +214,7 @@ class ProjectPlanExecutor:
                     "operation": node["operation"],
                     "dependencies": list(node["dependencies"]),
                     "parameter_digest": node["parameter_digest"],
-                    "input_generation": node["input_generation"],
                     "job_id": None,
-                    "reused": False,
                 }
                 for node in nodes
             ],
@@ -301,7 +265,6 @@ class ProjectPlanExecutor:
                 "depends_on",
                 "dependencies",
                 "payload",
-                "input_generation",
             }:
                 raise ProjectPlanError(f"external plan node {index} is invalid")
             node_id = _safe_text(
@@ -340,19 +303,12 @@ class ProjectPlanExecutor:
                 or len(encoded) > MAX_NODE_PAYLOAD_BYTES
             ):
                 raise ProjectPlanError(f"plan node {node_id} payload is invalid")
-            node_generation = _safe_text(
-                raw.get("input_generation", normalized["input_generation"]),
-                f"nodes[{index}].input_generation",
-                _GENERATION,
-                MAX_INPUT_GENERATION_BYTES,
-            )
             nodes.append(
                 {
                     "node_id": node_id,
                     "operation": operation,
                     "dependencies": list(dependencies),
                     "parameter_digest": _digest(payload),
-                    "input_generation": node_generation,
                     "payload": dict(payload),
                 }
             )
@@ -362,17 +318,15 @@ class ProjectPlanExecutor:
             {
                 "project_id": project.project_id,
                 "checkout": checkout.to_dict(),
-                "input_generation": normalized["input_generation"],
                 "nodes": nodes,
             }
         )
         record = {
-            "schema_version": 1,
+            "schema_version": 2,
             "plan_id": plan_id,
             "project_id": project.project_id,
             "project_digest": project.digest,
             "checkout": checkout.to_dict(),
-            "input_generation": normalized["input_generation"],
             "plan_digest": plan_digest,
             "nodes": [
                 {
@@ -380,9 +334,7 @@ class ProjectPlanExecutor:
                     "operation": node["operation"],
                     "dependencies": list(node["dependencies"]),
                     "parameter_digest": node["parameter_digest"],
-                    "input_generation": node["input_generation"],
                     "job_id": None,
-                    "reused": False,
                 }
                 for node in nodes
             ],
@@ -453,60 +405,11 @@ class ProjectPlanExecutor:
                 return result
             time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
 
-    def result(
-        self, plan_id: str, *, max_bytes: int = MAX_PLAN_RESULT_BYTES
-    ) -> dict[str, Any]:
-        if (
-            not isinstance(max_bytes, int)
-            or isinstance(max_bytes, bool)
-            or not 1 <= max_bytes <= MAX_PLAN_RESULT_BYTES
-        ):
-            raise ProjectPlanError(
-                f"plan result max_bytes must be between 1 and {MAX_PLAN_RESULT_BYTES}"
-            )
-        response = self.get(plan_id)
-        encoded = json.dumps(
-            response["result"], sort_keys=True, separators=(",", ":")
-        ).encode()
-        if len(encoded) > max_bytes:
-            raise ProjectPlanError(
-                "aggregate plan result exceeds the requested response limit"
-            )
-        return {"plan_id": plan_id, "kind": "project-plan", "value": response["result"]}
-
-    def list(self, *, project_id: str | None = None) -> dict[str, Any]:
-        records = self.store.list()
-        if project_id is not None:
-            project_id = _safe_text(project_id, "project_id", _PLAN_ID, 128)
-            records = [
-                record for record in records if record["project_id"] == project_id
-            ]
-        records.sort(
-            key=lambda item: (item["created_at"], item["plan_id"]), reverse=True
-        )
-        return {
-            "plans": [
-                {
-                    "plan_id": record["plan_id"],
-                    "project_id": record["project_id"],
-                    "input_generation": record["input_generation"],
-                    "node_count": len(record["nodes"]),
-                    "created_at": record["created_at"],
-                    "state": dict(record["state"]),
-                }
-                for record in records[:MAX_PLAN_LIST]
-            ],
-            "total": len(records),
-            "truncated": len(records) > MAX_PLAN_LIST,
-        }
-
     def _validate_submission(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         allowed = {
             "project_id",
             "workspace_id",
             "checkout_id",
-            "input_generation",
-            "generation",
             "nodes",
             "payloads",
             "node_operation",
@@ -517,12 +420,6 @@ class ProjectPlanExecutor:
         project_id = _safe_text(
             arguments.get("project_id"), "project_id", _PLAN_ID, 128
         )
-        generation = arguments.get("input_generation", arguments.get("generation"))
-        generation = _safe_text(
-            generation, "input_generation", _GENERATION, MAX_INPUT_GENERATION_BYTES
-        )
-        if "input_generation" in arguments and "generation" in arguments:
-            raise ProjectPlanError("plan submission accepts one input_generation field")
         workspace_id = arguments.get("workspace_id")
         checkout_id = arguments.get("checkout_id")
         if workspace_id is not None and checkout_id is not None:
@@ -549,7 +446,6 @@ class ProjectPlanExecutor:
             "project_id": project_id,
             "workspace_id": workspace_id,
             "checkout_id": checkout_id,
-            "input_generation": generation,
             "nodes": nodes,
             "node_operation": node_operation,
         }
@@ -593,7 +489,6 @@ class ProjectPlanExecutor:
                 "dependencies",
                 "payload",
                 "parameters",
-                "input_generation",
             }
             if node_operation is None:
                 allowed_node_fields |= {"operation"}
@@ -648,20 +543,12 @@ class ProjectPlanExecutor:
                 _, parameter_digest = operation.derive_argv(payload)
             except ValueError as error:
                 raise ProjectPlanError(f"plan node {node_id}: {error}") from error
-            node_generation = raw.get("input_generation", arguments["input_generation"])
-            node_generation = _safe_text(
-                node_generation,
-                f"nodes[{index}].input_generation",
-                _GENERATION,
-                MAX_INPUT_GENERATION_BYTES,
-            )
             normalized.append(
                 {
                     "node_id": node_id,
                     "operation": operation_name,
                     "dependencies": list(dependencies),
                     "parameter_digest": parameter_digest,
-                    "input_generation": node_generation,
                     "payload": dict(payload),
                 }
             )
@@ -730,35 +617,27 @@ class ProjectPlanExecutor:
             for node in sorted(ready, key=lambda item: item["node_id"]):
                 manifest = manifest_by_id[node["node_id"]]
                 if manifest["job_id"] is None:
-                    reusable = self._reusable_job(record, manifest)
-                    if reusable is not None:
-                        manifest["job_id"] = reusable
-                        manifest["reused"] = True
-                    else:
-                        dependency_ids = tuple(
-                            manifest_by_id[dependency]["job_id"]
-                            for dependency in node["dependencies"]
-                        )
-                        response = self.jobs.start_declared(
-                            project=project,
-                            operation=project.operation(node["operation"]),
-                            correlation_id=correlation_id,
-                            parameters=node["payload"],
-                            checkout=checkout,
-                            principal=principal,
-                            contract={
-                                "plan": {
-                                    "plan_id": record["plan_id"],
-                                    "node_id": node["node_id"],
-                                    "input_generation": node["input_generation"],
-                                    "project_digest": project.digest,
-                                }
-                            },
-                            dependency_job_ids=dependency_ids,
-                            input_generation=node["input_generation"],
-                            plan_node=True,
-                        )
-                        manifest["job_id"] = response["job_id"]
+                    dependency_ids = tuple(
+                        manifest_by_id[dependency]["job_id"]
+                        for dependency in node["dependencies"]
+                    )
+                    manifest["job_id"] = self.jobs.start_declared(
+                        project=project,
+                        operation=project.operation(node["operation"]),
+                        correlation_id=correlation_id,
+                        parameters=node["payload"],
+                        checkout=checkout,
+                        principal=principal,
+                        contract={
+                            "plan": {
+                                "plan_id": record["plan_id"],
+                                "node_id": node["node_id"],
+                                "project_digest": project.digest,
+                            }
+                        },
+                        dependency_job_ids=dependency_ids,
+                        plan_node=True,
+                    )["job_id"]
                     self.store.save(record)
                 pending.pop(node["node_id"])
         self._reconcile(record)
@@ -827,54 +706,9 @@ class ProjectPlanExecutor:
                 or dict(job.spec.checkout or {}) != dict(record["checkout"])
                 or job.spec.operation != node["operation"]
                 or job.spec.parameter_digest != node["parameter_digest"]
-                or job.spec.input_generation != node["input_generation"]
             ):
                 continue
             return job.job_id
-        return None
-
-    def _reusable_job(
-        self, record: Mapping[str, Any], node: Mapping[str, Any]
-    ) -> str | None:
-        for prior in self.store.list():
-            if (
-                prior["plan_id"] == record["plan_id"]
-                or prior["project_id"] != record["project_id"]
-                or prior["project_digest"] != record["project_digest"]
-            ):
-                continue
-            if prior["checkout"] != record["checkout"]:
-                continue
-            for prior_node in prior["nodes"]:
-                if (
-                    prior_node["node_id"] != node["node_id"]
-                    or prior_node["operation"] != node["operation"]
-                    or prior_node["dependencies"] != node["dependencies"]
-                    or prior_node["parameter_digest"] != node["parameter_digest"]
-                    or prior_node["input_generation"] != node["input_generation"]
-                    or not isinstance(prior_node["job_id"], str)
-                ):
-                    continue
-                try:
-                    job = self.jobs.store.load(prior_node["job_id"])
-                    if (
-                        job.spec.project_id != record["project_id"]
-                        or job.spec.operation != node["operation"]
-                        or job.spec.parameter_digest != node["parameter_digest"]
-                        or job.spec.input_generation != node["input_generation"]
-                        or not isinstance(job.spec.contract.get("plan"), Mapping)
-                        or job.spec.contract["plan"].get("project_digest")
-                        != record["project_digest"]
-                        or dict(job.spec.checkout or {}) != dict(record["checkout"])
-                        or job.state.get("phase") != "succeeded"
-                        or not job.state.get("terminal")
-                        or not self.jobs._has_authoritative_result(job)
-                    ):
-                        continue
-                    self.jobs.result(job.job_id, max_bytes=MAX_RESULT_BYTES)
-                except (JobRecordError, JobResultError):
-                    continue
-                return prior_node["job_id"]
         return None
 
     def _public(self, record: Mapping[str, Any]) -> dict[str, Any]:
@@ -916,8 +750,6 @@ class ProjectPlanExecutor:
                         else []
                     ),
                     "parameter_digest": manifest["parameter_digest"],
-                    "input_generation": manifest["input_generation"],
-                    "reused": manifest["reused"],
                     "state": state,
                     "result": result,
                 }
@@ -925,7 +757,6 @@ class ProjectPlanExecutor:
         aggregate = {
             "plan_id": record["plan_id"],
             "project_id": record["project_id"],
-            "input_generation": record["input_generation"],
             "node_count": len(nodes),
             "state": dict(record["state"]),
             "nodes": nodes,
@@ -935,7 +766,6 @@ class ProjectPlanExecutor:
             "plan_id": record["plan_id"],
             "project_id": record["project_id"],
             "checkout": dict(record["checkout"]),
-            "input_generation": record["input_generation"],
             "node_count": len(nodes),
             "state": dict(record["state"]),
             "nodes": aggregate["nodes"],
@@ -968,7 +798,6 @@ class ProjectPlanExecutor:
                     "phase": node["state"].get("phase"),
                     "terminal": node["state"].get("terminal"),
                 },
-                "reused": node["reused"],
             }
             for node in aggregate["nodes"]
         ]

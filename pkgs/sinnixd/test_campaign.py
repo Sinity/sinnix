@@ -111,7 +111,7 @@ def test_a_wave_drained_by_provisioning_names_provisioning() -> None:
 
     with pytest.raises(WaveDrainedError) as raised:
         runner._submit_tolerating_conflicts(
-            schedule, "fixture", "generation", lambda **_kwargs: "job", "wave-1"
+            schedule, "fixture", lambda **_kwargs: "job", "wave-1"
         )
 
     assert "uv sync failed" in str(raised.value)

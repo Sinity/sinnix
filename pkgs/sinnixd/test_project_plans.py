@@ -125,12 +125,10 @@ max_length = 32
 def submit(
     plans: ProjectPlanExecutor,
     nodes: list[dict[str, object]],
-    generation: str = "gen-1",
 ) -> dict[str, object]:
     return plans.submit(
         {
             "project_id": "fixture",
-            "input_generation": generation,
             "nodes": nodes,
         },
         correlation_id="fixture-correlation",
@@ -208,39 +206,6 @@ def test_dependency_failure_blocks_downstream_node(tmp_path: Path) -> None:
     assert aggregate["state"]["phase"] == "failed"
 
 
-def test_exact_completed_nodes_are_reused_and_mismatches_are_rejected(
-    tmp_path: Path,
-) -> None:
-    plans, systemd, jobs = plan_fixture(tmp_path)
-    nodes = [{"id": "n", "operation": "node", "parameters": {"value": "one"}}]
-    first = submit(plans, nodes)
-    node = first["nodes"][0]
-    systemd.finish(node["job_id"], jobs)
-    assert plans.get(first["plan_id"])["state"]["phase"] == "succeeded"
-    before = len(systemd.started)
-
-    repeated = submit(plans, nodes)
-    assert repeated["nodes"][0]["job_id"] == node["job_id"]
-    assert repeated["nodes"][0]["reused"] is True
-    assert len(systemd.started) == before
-
-    changed_generation = submit(plans, nodes, generation="gen-2")
-    assert changed_generation["nodes"][0]["job_id"] != node["job_id"]
-    changed_payload = submit(
-        plans,
-        [{"id": "n", "operation": "node", "parameters": {"value": "two"}}],
-    )
-    assert changed_payload["nodes"][0]["job_id"] != node["job_id"]
-
-    aggregate_changed_input = dict(nodes[0])
-    aggregate_changed_input["input_generation"] = "gen-1"
-    aggregate_changed = submit(
-        plans, [aggregate_changed_input], generation="aggregate-gen-2"
-    )
-    assert aggregate_changed["nodes"][0]["job_id"] == node["job_id"]
-    assert aggregate_changed["nodes"][0]["reused"] is True
-
-
 def test_interrupted_manifest_reconciles_to_existing_node_job(tmp_path: Path) -> None:
     plans, _, _ = plan_fixture(tmp_path)
     result = submit(plans, [{"id": "n", "operation": "prepare"}])
@@ -261,7 +226,6 @@ def test_node_operation_payloads_and_aggregate_results_are_bounded(
     result = plans.submit(
         {
             "project_id": "fixture",
-            "input_generation": "gen-1",
             "node_operation": "node",
             "nodes": [
                 {"id": "one", "payload": {"value": "one"}},
@@ -300,8 +264,7 @@ def test_plan_service_routes_preserve_typed_owner_surface(tmp_path: Path) -> Non
             principal="operator",
             arguments={
                 "project_id": "fixture",
-                "input_generation": "gen-1",
-                "nodes": [{"id": "n", "operation": "prepare"}],
+                    "nodes": [{"id": "n", "operation": "prepare"}],
             },
         )
     )
