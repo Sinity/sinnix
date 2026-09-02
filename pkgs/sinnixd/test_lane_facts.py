@@ -89,7 +89,9 @@ def test_advance_orders_facts_before_actions() -> None:
     authorized = _receipt(flags=("FLAG: x",), flagged=True, authorized=True)
     assert advance(_facts(receipt=authorized)).kind == "publish"
     static = _receipt(verification="static-only")
-    assert advance(_facts(receipt=static)).kind == "rebase"
+    assert advance(_facts(receipt=static)).kind == "verify"
+    assert advance(_facts(receipt=static, verify_job=("v1", "failed"))).kind == "park"
+    assert advance(_facts(receipt=static, verify_job=("v1", "succeeded"))).kind == "harvest"
     pull = Pull(number=7, head="h" * 40, verdict="conflict", findings=0)
     assert advance(_facts(receipt=_receipt(), pull=pull)).kind == "rebase"
     assert advance(_facts(receipt=_receipt(), pull=pull, integrators_at_head=("rebase",))).kind == "park"
