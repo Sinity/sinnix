@@ -1013,6 +1013,53 @@ def _affected_refusal(worktree: Path) -> str | None:
     return None
 
 
+def _affected_from_job(context: HarvestContext, affected_job: str, *, current_head: str) -> tuple[str, str]:
+    """Read a declared verify_affected job's verdict instead of running one.
+
+    The reactor runs affected verification as a declared job (cached by tree
+    and environment) before the harvest; the job's typed result is the
+    evidence, so the same tree is never verified twice.
+    """
+    if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", affected_job):
+        raise HarvestError("affected job ID is malformed")
+    try:
+        record = json.loads((context.state_root / "jobs" / f"{affected_job}.json").read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise HarvestError("affected job record is unavailable") from error
+    spec = record.get("spec") if isinstance(record, Mapping) else None
+    state = record.get("state") if isinstance(record, Mapping) else None
+    checkout = spec.get("checkout") if isinstance(spec, Mapping) else None
+    if (
+        not isinstance(spec, Mapping)
+        or not isinstance(state, Mapping)
+        or spec.get("operation") != "verify_affected"
+        or not isinstance(checkout, Mapping)
+        or checkout.get("checkout_id") != context.workspace_id
+    ):
+        raise HarvestError("affected job does not verify this workspace")
+    phase = str(state.get("phase") or "")
+    payload: Mapping[str, Any] = {}
+    artifacts = record.get("artifacts") if isinstance(record, Mapping) else None
+    result_path = artifacts.get("result") if isinstance(artifacts, Mapping) else None
+    if isinstance(result_path, str):
+        try:
+            loaded = json.loads(Path(result_path).read_text())
+            if isinstance(loaded, Mapping):
+                payload = loaded
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            payload = {}
+    head = str(checkout.get("head") or "")
+    if head and head != current_head:
+        return "unavailable", f"affected job {affected_job} verified {head[:12]}, not {current_head[:12]}"
+    if phase == "succeeded":
+        return "passed", f"affected verification: declared job {affected_job} succeeded"
+    diagnosis = str(payload.get("diagnosis") or "")
+    detail = json.dumps({"job": affected_job, "phase": phase, "diagnosis": diagnosis})
+    if diagnosis in _UNAVAILABLE_DIAGNOSES or diagnosis == "native_testmon_preparation_failed":
+        return "unavailable", detail
+    return "failed", detail
+
+
 def _affected_tests(context: HarvestContext, run: Run) -> tuple[str, str]:
     """Run the affected-test selection, outside the shared repository lock.
 
@@ -1059,6 +1106,7 @@ def authorize(
     body: str,
     bead_id: str | None = None,
     close_reason: str | None = None,
+    affected_job: str | None = None,
     run: Run = subprocess.run,
 ) -> dict[str, Any]:
     """Publish only from a reviewed receipt, returning typed stop outcomes."""
@@ -1100,7 +1148,11 @@ def authorize(
 
     # Execute tests before contending for the shared repository: this is the
     # only step in the chain that runs them, and it needs no lock.
-    tests, tests_output = _affected_tests(context, run)
+    tests, tests_output = (
+        _affected_from_job(context, affected_job, current_head=current_head)
+        if affected_job
+        else _affected_tests(context, run)
+    )
     if tests == "unavailable":
         # polylogue lanes have shipped static-only green for days because this
         # classification stayed inside the job result. The reactor and the
@@ -1347,6 +1399,7 @@ def publish(
     context: HarvestContext,
     *,
     close: bool,
+    affected_job: str | None = None,
     run: Run = subprocess.run,
 ) -> dict[str, Any]:
     """Mint a fresh receipt and authorize it in one pass.
@@ -1380,6 +1433,7 @@ def publish(
         body=body,
         bead_id=bead_id,
         close_reason=close_reason,
+        affected_job=affected_job,
         run=run,
     )
 
@@ -1415,6 +1469,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
     parser.add_argument("--close", action="store_true")
     parser.add_argument("--receipt-ref")
     parser.add_argument("--lane-job-id")
+    parser.add_argument("--affected-job")
     parser.add_argument("--title", default="")
     parser.add_argument("--title-file", type=Path)
     parser.add_argument("--body", default="")
@@ -1430,7 +1485,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             Path.cwd(), base=parsed.base, spool=parsed.event_spool
         )
         if parsed.publish:
-            result = publish(context, close=parsed.close)
+            result = publish(context, close=parsed.close, affected_job=parsed.affected_job)
         elif not parsed.authorize:
             result = compile_packet(
                 context,
@@ -1449,6 +1504,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 body=body,
                 bead_id=parsed.bead_id,
                 close_reason=close_reason,
+                affected_job=parsed.affected_job,
             )
         print(json.dumps(result, sort_keys=True))
         return 0
