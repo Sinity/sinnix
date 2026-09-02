@@ -26,8 +26,18 @@ in
       timer = evaluated.config.systemd.user.timers.sinnix-capture-spotify;
       captures = evaluated.config.sinnix.runtime.inventory.captures;
       source = builtins.readFile ../../modules/services/capture-spotify.nix;
-      unitJson = builtins.toJSON unit;
-      timerJson = builtins.toJSON timer;
+      # Serialize only the asserted fields: toJSON on the whole unit forces
+      # every systemd option, including ones the module leaves undefined.
+      unitJson = builtins.toJSON {
+        serviceConfig = {
+          inherit (unit.serviceConfig) ExecStart ReadWritePaths;
+        };
+      };
+      timerJson = builtins.toJSON {
+        timerConfig = {
+          inherit (timer.timerConfig) OnUnitActiveSec OnBootSec AccuracySec;
+        };
+      };
       capturesJson = builtins.toJSON captures;
     in
     {
@@ -57,12 +67,13 @@ in
               .timerConfig.OnBootSec == "2min" and
               .timerConfig.AccuracySec == "30s"
             ' timer.json >/dev/null
+            jq -e '(map(select(.name == "spotify")) | length) == 1' captures.json >/dev/null
             jq -e '
-              map(select(.name == "spotify")) | length == 1 and
-              .[0].path | endswith("/activity/spotify") and
-              .[0].expectedCadenceSeconds == 300 and
-              .[0].expectedStaleAfterSeconds == 600 and
-              .[0].eventDriven == true
+              map(select(.name == "spotify"))[0]
+              | (.path | endswith("/activity/spotify"))
+                and .expectedCadenceSeconds == 300
+                and .expectedStaleAfterSeconds == 600
+                and .expectedCadence == "event-driven"
             ' captures.json >/dev/null
             cat > source.txt <<'EOF_SOURCE'
             ${source}

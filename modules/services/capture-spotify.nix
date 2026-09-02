@@ -57,7 +57,10 @@ let
   # land here, and that's live account credential material.
   stateDir = "/realm/state/capture-spotify";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-  secretPaths = config.sinnix.secrets.paths;
+  # sinnix.secrets.paths is empty whenever agenix is off, so name the agenix
+  # location directly rather than throwing on a missing attribute: the unit
+  # already reports the absent file as its own loud failure.
+  secretPath = name: config.sinnix.secrets.paths.${name} or "/run/agenix/${name}";
   cfg = config.sinnix.services.capture-spotify;
 
   poller = pkgs.writeShellApplication {
@@ -171,9 +174,9 @@ mkServiceModule (mkCaptureLane {
   staleAfterSeconds = cfg.intervalSec * 2;
   execStart = lib.concatStringsSep " " [
     "${poller}/bin/capture-spotify-poll"
-    secretPaths.spotify-client-id
-    secretPaths.spotify-client-secret
-    secretPaths.spotify-refresh-token
+    (secretPath "spotify-client-id")
+    (secretPath "spotify-client-secret")
+    (secretPath "spotify-refresh-token")
     stateDir
     "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
     activityRoot
