@@ -14,6 +14,7 @@ import hashlib
 import json
 import subprocess
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -21,6 +22,10 @@ Run = Callable[..., subprocess.CompletedProcess[str]]
 
 INTEGRATOR_LABELS = frozenset({"integrator", "rebase", "review-fix"})
 ANSWERED_ROUNDS_TO_MERGE = 2
+# A workspace whose lane finished longer ago than this, with no open PR, is
+# dormant: advancing it would verify and harvest dozens of abandoned
+# worktrees every tick (the first fact-driven tick did, 2026-09-02 12:19Z).
+DORMANT_AFTER_SECONDS = 3 * 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -64,6 +69,7 @@ class LaneFacts:
     verify_job: tuple[str, str] | None = None
     harvest_at_head: tuple[str, str] | None = None
     published_at_head: bool = False
+    lane_finished_at: str = ""
     extra: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -76,13 +82,30 @@ class Action:
         return {"kind": self.kind, "reason": self.reason}
 
 
-def advance(facts: LaneFacts) -> Action:
+def _dormant(facts: LaneFacts, now: datetime | None) -> bool:
+    if facts.pull is not None or facts.holder is not None or facts.running_ops:
+        return False
+    if not facts.lane_finished_at:
+        return False
+    try:
+        finished = datetime.fromisoformat(facts.lane_finished_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if finished.tzinfo is None:
+        finished = finished.replace(tzinfo=UTC)
+    moment = now or datetime.now(UTC)
+    return (moment - finished).total_seconds() > DORMANT_AFTER_SECONDS
+
+
+def advance(facts: LaneFacts, *, now: datetime | None = None) -> Action:
     """The next action for one lane, from its facts alone.
 
     Ordered by what must be true before anything else may happen; every
     branch names its reason so the status view and the reactor say the same
     thing.
     """
+    if _dormant(facts, now):
+        return Action("idle", "dormant workspace")
     if facts.holder is not None:
         return Action("wait", f"held by {facts.holder}")
     if facts.running_ops:
@@ -207,6 +230,7 @@ def collect(
         bead: str | None = None
         verify_job: tuple[str, str] | None = None
         verify_created = ""
+        lane_finished = ""
         harvest_at_head: tuple[str, str] | None = None
         published_at_head = False
         for job in jobs:
@@ -228,6 +252,7 @@ def collect(
                     created = str(job.get("created_at") or "")
                     if created >= lane_created:
                         lane_created, lane_phase = created, phase
+                        lane_finished = str(state.get("completed_at") or state.get("observed_at") or created)
                     bead = bead or _campaign_bead(spec)
             elif kind == "declared-operation" and not terminal:
                 running_ops.append(str(spec.get("operation") or "operation"))
@@ -277,6 +302,7 @@ def collect(
                 verify_job=verify_job,
                 harvest_at_head=harvest_at_head,
                 published_at_head=published_at_head,
+                lane_finished_at=lane_finished,
             )
         )
     return facts

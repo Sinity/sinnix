@@ -51,6 +51,20 @@ def _receipt(**overrides: object) -> Receipt:
     return Receipt(**base)  # type: ignore[arg-type]
 
 
+def test_dormant_workspaces_are_left_alone() -> None:
+    """Anti-vacuity: the first fact-driven tick verified dozens of
+    abandoned worktrees."""
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 9, 2, 12, 0, tzinfo=UTC)
+    old = _facts(lane_finished_at="2026-08-20T00:00:00+00:00")
+    assert advance(old, now=now).kind == "idle"
+    fresh = _facts(lane_finished_at="2026-09-02T10:00:00+00:00")
+    assert advance(fresh, now=now).kind == "verify"
+    with_pull = _facts(lane_finished_at="2026-08-20T00:00:00+00:00", receipt=_receipt(), pull=Pull(number=1, head="h" * 40, verdict="wait", findings=0))
+    assert advance(with_pull, now=now).kind == "await-sweep"
+
+
 def test_advance_orders_facts_before_actions() -> None:
     """Anti-vacuity: each branch names the fact that decides it; reorder
     two of them and the wrong action wins."""
