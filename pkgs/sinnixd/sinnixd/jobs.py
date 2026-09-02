@@ -4268,6 +4268,16 @@ class GenericJobs:
                                     ),
                                 )
                                 self.store.save(current)
+                                # The unit environment carries the same
+                                # binding the runner proves against the
+                                # record; a refreshed record with an
+                                # enqueue-time environment fails every
+                                # queued default-checkout job once master
+                                # moves (three corpus runs on 2026-09-02).
+                                environment = {
+                                    **environment,
+                                    "SINNIXD_CHECKOUT_HEAD": refreshed,
+                                }
                         revalidate_registered_checkout(checkout_binding)
                         # The contract runner repeats this proof in the unit
                         # before it execs the project command. Git worktrees
