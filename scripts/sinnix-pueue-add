@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Enqueue a pueue task without publishing the calling shell's environment
+# runtimeInputs: pueue coreutils
+#
+# Usage: sinnix-pueue-add [pueue add options] -- command [args...]
+#
+# pueue serialises the environment of the `pueue add` client into its state
+# file, which every `pueue status --json` reader sees. An interactive shell
+# carries API keys, so adding a task by hand publishes them. This wrapper adds
+# the task with only the variables a queued command legitimately needs.
+
+set -euo pipefail
+
+exec env -i \
+	PATH="$PATH" \
+	HOME="$HOME" \
+	XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" \
+	DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}" \
+	pueue add "$@"

@@ -87,7 +87,8 @@ Deleted verbs and their native replacements:
   `pueue add`, world-readable. Adding a task from an ordinary interactive shell
   on this host writes about thirty API keys to disk. Sinnixd therefore runs
   `pueue add` with a scrubbed client environment and the wrapper rebuilds the
-  declared environment at exec time.
+  declared environment at exec time. Add tasks by hand with `sinnix-pueue-add`,
+  which applies the same scrub.
 - **worktrunk's schema is not its default.** `wt list --format=json` emits
   schema 1 unless configured; schema 2 was reaching sinnixd only through the
   operator's user config. Every call pins both the schema and the worktree path
