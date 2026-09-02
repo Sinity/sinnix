@@ -1,9 +1,9 @@
-"""Model-free campaign reactor over the Sinnix event spool.
+"""Model-free campaign reactor.
 
-The reactor is deliberately a small durable state machine.  The event spool is
-the input authority, the versioned board is the externalized campaign state,
-and reactions are registered by event kind rather than inferred from prose.
-No harvester or strategist behavior belongs here.
+Every lane decision is computed fresh each tick by ``lane_facts.collect`` and
+``advance``; the reactor dispatches the action they name.  The only state it
+keeps between ticks is a small file of markers (refill backoff, parked and
+judged lanes) and a rotating error log.
 """
 
 from __future__ import annotations
@@ -18,60 +18,28 @@ import sys
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
 from .campaign import frontier_order
 from .packets import PacketConfig, SubprocessBdReader, compile_launch_snapshot
 
-BOARD_SCHEMA_VERSION = 1
+BOARD_SCHEMA_VERSION = 2
 EVENT_SCHEMA_VERSION = 1
-CURSOR_SCHEMA_VERSION = 1
 DEFAULT_INTERVAL_SECONDS = 10
-DEFAULT_KEEPER_BACKOFF_SECONDS = 600
-MAX_KEEPER_BACKOFF_SECONDS = 6 * 60 * 60
-MAX_BOARD_LANES = 2_000
-MAX_BOARD_PRS = 2_000
 MAX_BOARD_ERRORS = 100
-_DURABLE_KEEPER_PREFIXES = (
-    "operation:",
-    "refill:",
-    "retry:",
-    "dispose:",
-    "park:",
-    "judged:",
-)
+MAX_BOARD_MARKERS = 2_000
 MAX_EVENT_BYTES = 1_000_000
 ADVANCE_DISPATCHES_PER_TICK = 3
-# A dispatch record older than this names a head, receipt, or PR round that
-# no longer exists; keeping it only hides the live entries on the board.
-DURABLE_KEEPER_MAX_AGE_SECONDS = 3 * 24 * 60 * 60
+# A marker older than this names a head, receipt, or PR round that no longer
+# exists; keeping it only hides the live entries.
+MARKER_MAX_AGE_SECONDS = 3 * 24 * 60 * 60
 DEFAULT_REFILL_SPACING_SECONDS = 300
 MAX_REFILL_BACKOFF_SECONDS = 3600
-DEFAULT_PR_AGE_THRESHOLD_SECONDS = 60 * 60
-DEFAULT_VERIFY_ALL_FAILURE_THRESHOLD = 3
-MAX_CORPUS_FAILURES = 32
-DEFAULT_LANE_GATE_THRESHOLD = 0
-MAX_PENDING_OPERATIONS = 256
-HEAVY_OPERATIONS = frozenset({"verify_all", "rehearsal", "rehearsals"})
 
 
 class ReactorError(ValueError):
     """An event, board, or cursor violates the reactor contract."""
-
-
-def _job_id_from_output(text: str) -> str | None:
-    """The job id an agentctl start printed, from JSON or a plain line."""
-    try:
-        value = json.loads(text)
-    except json.JSONDecodeError:
-        value = None
-    if isinstance(value, Mapping):
-        for candidate in (value.get("job_id"), (value.get("job") or {}).get("job_id") if isinstance(value.get("job"), Mapping) else None):
-            if isinstance(candidate, str) and candidate:
-                return candidate
-    match = re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", text)
-    return match.group(0) if match else None
 
 
 def _now() -> str:
@@ -86,20 +54,6 @@ def _parse_time(value: str) -> datetime:
     if parsed.tzinfo is None:
         raise ReactorError("timestamps must include a timezone")
     return parsed.astimezone(UTC)
-
-
-def _required_string(value: Mapping[str, Any], name: str) -> str:
-    result = value.get(name)
-    if not isinstance(result, str) or not result:
-        raise ReactorError(f"event field {name!r} must be a non-empty string")
-    return result
-
-
-def _optional_string(value: Mapping[str, Any], name: str) -> str | None:
-    result = value.get(name)
-    if result is not None and (not isinstance(result, str) or not result):
-        raise ReactorError(f"event field {name!r} must be a non-empty string or null")
-    return result
 
 
 def _atomic_write(path: Path, value: Mapping[str, Any]) -> None:
@@ -163,179 +117,18 @@ def event_main(argv: list[str] | None = None) -> int:
     return 0
 
 
-@dataclass(frozen=True)
-class LaneRecord:
-    job_id: str
-    project: str
-    phase: str
-    checkout: Mapping[str, Any] | None
-    completed_at: str | None
-    review_ready: bool
-    updated_at: str
-
-    @classmethod
-    def from_event(cls, event: Mapping[str, Any], *, updated_at: str) -> LaneRecord:
-        job_id = _required_string(event, "job_id")
-        project = _required_string(event, "project")
-        phase = _required_string(event, "phase")
-        checkout = event.get("checkout")
-        # Lane terminals carry the checkout id as a string; older records
-        # carry the resolved object. Both identify the same checkout.
-        if isinstance(checkout, str) and checkout:
-            checkout = {"checkout_id": checkout}
-        elif checkout is not None and not isinstance(checkout, Mapping):
-            raise ReactorError("lane checkout must be an object or null")
-        completed_at = _optional_string(event, "completed_at")
-        return cls(
-            job_id=job_id,
-            project=project,
-            phase=phase,
-            checkout=dict(checkout) if checkout is not None else None,
-            completed_at=completed_at,
-            review_ready=project == "polylogue" and phase == "succeeded",
-            updated_at=updated_at,
-        )
-
-    @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> LaneRecord:
-        required = {
-            "job_id",
-            "project",
-            "phase",
-            "checkout",
-            "completed_at",
-            "review_ready",
-            "updated_at",
-        }
-        if set(value) != required:
-            raise ReactorError("board lane record has an invalid shape")
-        if not isinstance(value["review_ready"], bool):
-            raise ReactorError("board lane review_ready must be boolean")
-        record = cls(
-            job_id=_required_string(value, "job_id"),
-            project=_required_string(value, "project"),
-            phase=_required_string(value, "phase"),
-            checkout=(
-                dict(value["checkout"])
-                if isinstance(value["checkout"], Mapping)
-                else None
-            ),
-            completed_at=_optional_string(value, "completed_at"),
-            review_ready=value["review_ready"],
-            updated_at=_required_string(value, "updated_at"),
-        )
-        if value["checkout"] is not None and not isinstance(value["checkout"], Mapping):
-            raise ReactorError("board lane checkout must be an object or null")
-        _parse_time(record.updated_at)
-        return record
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "job_id": self.job_id,
-            "project": self.project,
-            "phase": self.phase,
-            "checkout": dict(self.checkout) if self.checkout is not None else None,
-            "completed_at": self.completed_at,
-            "review_ready": self.review_ready,
-            "updated_at": self.updated_at,
-        }
-
-
-@dataclass(frozen=True)
-class PullRequestRecord:
-    repo: str
-    pr: str
-    state: str
-    bead_id: str | None
-    bead_close_status: str
-    decision_receipt: Mapping[str, Any] | None
-    error: str | None
-    updated_at: str
-    opened_at: str | None = None
-    check_states: tuple[str, ...] = ()
-    auto_merge: bool = False
-
-    @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> PullRequestRecord:
-        required = {
-            "repo",
-            "pr",
-            "state",
-            "bead_id",
-            "bead_close_status",
-            "decision_receipt",
-            "error",
-            "updated_at",
-        }
-        optional = {"opened_at", "check_states", "auto_merge"}
-        if set(value) - required - optional or not required <= set(value):
-            raise ReactorError("board pull request record has an invalid shape")
-        receipt = value["decision_receipt"]
-        if receipt is not None and not isinstance(receipt, Mapping):
-            raise ReactorError("board decision receipt must be an object or null")
-        opened_at = value.get("opened_at")
-        if opened_at is not None and (not isinstance(opened_at, str) or not opened_at):
-            raise ReactorError(
-                "board pull request opened_at must be a timestamp or null"
-            )
-        if opened_at is not None:
-            _parse_time(opened_at)
-        raw_checks = value.get("check_states", [])
-        if not isinstance(raw_checks, list) or any(
-            not isinstance(check, str) or not check for check in raw_checks
-        ):
-            raise ReactorError("board pull request check_states must be strings")
-        auto_merge = value.get("auto_merge", False)
-        if not isinstance(auto_merge, bool):
-            raise ReactorError("board pull request auto_merge must be boolean")
-        result = cls(
-            repo=_required_string(value, "repo"),
-            pr=_required_string(value, "pr"),
-            state=_required_string(value, "state"),
-            bead_id=_optional_string(value, "bead_id"),
-            bead_close_status=_required_string(value, "bead_close_status"),
-            decision_receipt=dict(receipt) if receipt is not None else None,
-            error=_optional_string(value, "error"),
-            updated_at=_required_string(value, "updated_at"),
-            opened_at=opened_at,
-            check_states=tuple(raw_checks),
-            auto_merge=auto_merge,
-        )
-        _parse_time(result.updated_at)
-        return result
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "repo": self.repo,
-            "pr": self.pr,
-            "state": self.state,
-            "bead_id": self.bead_id,
-            "bead_close_status": self.bead_close_status,
-            "decision_receipt": (
-                dict(self.decision_receipt)
-                if self.decision_receipt is not None
-                else None
-            ),
-            "error": self.error,
-            "updated_at": self.updated_at,
-            "opened_at": self.opened_at,
-            "check_states": list(self.check_states),
-            "auto_merge": self.auto_merge,
-        }
-
-
 @dataclass
 class CampaignBoard:
-    """Versioned external board; maps are keyed by stable event identities."""
+    """The reactor's own small state: dispatch markers and recent errors.
+
+    Markers are idempotence keys for work already done at a head (a parked
+    bead, a recorded judgment, a refill's backoff); deleting one re-dispatches
+    it. Errors are a rotating log the status view reads.
+    """
 
     updated_at: str = field(default_factory=_now)
-    lanes: dict[str, LaneRecord] = field(default_factory=dict)
-    prs: dict[str, PullRequestRecord] = field(default_factory=dict)
     keeper: dict[str, dict[str, Any]] = field(default_factory=dict)
     errors: list[dict[str, str]] = field(default_factory=list)
-    judgment_queue: list[dict[str, Any]] = field(default_factory=list)
-    corpus_health: dict[str, Any] = field(default_factory=dict)
-    pending_operations: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> CampaignBoard:
@@ -347,168 +140,39 @@ class CampaignBoard:
             raise ReactorError(f"campaign board is unreadable: {error}") from error
         if not isinstance(value, Mapping):
             raise ReactorError("campaign board must be a JSON object")
-        if "schema_version" not in value:
-            return cls._migrate_legacy(value)
-        if value.get("schema_version") != BOARD_SCHEMA_VERSION:
-            raise ReactorError("campaign board has an unsupported schema version")
-        if not isinstance(value.get("updated_at"), str):
+        updated_at = value.get("updated_at")
+        if not isinstance(updated_at, str):
             raise ReactorError("campaign board updated_at is invalid")
-        _parse_time(value["updated_at"])
-        raw_lanes = value.get("lanes")
-        raw_prs = value.get("prs")
-        raw_keeper = value.get("keeper")
-        raw_errors = value.get("errors")
-        raw_judgment = value.get("judgment_queue", [])
-        raw_corpus_health = value.get("corpus_health", {})
-        raw_pending_operations = value.get("pending_operations", {})
-        if not isinstance(raw_lanes, Mapping) or not isinstance(raw_prs, Mapping):
-            raise ReactorError("campaign board lanes and prs must be objects")
+        _parse_time(updated_at)
+        raw_keeper = value.get("keeper", {})
+        raw_errors = value.get("errors", [])
         if not isinstance(raw_keeper, Mapping) or not isinstance(raw_errors, list):
             raise ReactorError("campaign board keeper and errors have invalid types")
-        if not isinstance(raw_judgment, list):
-            raise ReactorError("campaign board judgment queue must be a list")
-        if not isinstance(raw_corpus_health, Mapping):
-            raise ReactorError("campaign board corpus health must be an object")
-        if not isinstance(raw_pending_operations, Mapping):
-            raise ReactorError("campaign board pending operations must be an object")
-        if len(raw_lanes) > MAX_BOARD_LANES or len(raw_prs) > MAX_BOARD_PRS:
-            raise ReactorError("campaign board exceeds its bounded record count")
-        lanes = {
-            str(key): LaneRecord.from_dict(record)
-            for key, record in raw_lanes.items()
-            if isinstance(key, str) and isinstance(record, Mapping)
-        }
-        prs = {
-            str(key): PullRequestRecord.from_dict(record)
-            for key, record in raw_prs.items()
-            if isinstance(key, str) and isinstance(record, Mapping)
-        }
-        if len(lanes) != len(raw_lanes) or len(prs) != len(raw_prs):
-            raise ReactorError("campaign board contains malformed records")
         keeper: dict[str, dict[str, Any]] = {}
         for key, record in raw_keeper.items():
             if not isinstance(key, str) or not isinstance(record, Mapping):
-                raise ReactorError("campaign board keeper record is malformed")
-            expected = {"emitted_at", "backoff_seconds", "next_eligible_at"}
-            if (
-                not expected <= set(record)
-                or isinstance(record["backoff_seconds"], bool)
-                or not isinstance(record["backoff_seconds"], int)
-            ):
-                raise ReactorError("campaign board keeper record is malformed")
-            _parse_time(str(record["emitted_at"]))
-            _parse_time(str(record["next_eligible_at"]))
+                raise ReactorError("campaign board marker is malformed")
+            _parse_time(str(record.get("emitted_at")))
             keeper[key] = dict(record)
         errors: list[dict[str, str]] = []
-        for error in raw_errors[-MAX_BOARD_ERRORS:]:
-            if not isinstance(error, Mapping) or set(error) != {
+        for error_record in raw_errors[-MAX_BOARD_ERRORS:]:
+            if not isinstance(error_record, Mapping) or set(error_record) != {
                 "offset",
                 "message",
                 "at",
             }:
                 raise ReactorError("campaign board error record is malformed")
-            errors.append({key: str(error[key]) for key in ("offset", "message", "at")})
-        pending_operations: dict[str, dict[str, Any]] = {}
-        for request_id, record in raw_pending_operations.items():
-            if not isinstance(request_id, str) or not isinstance(record, Mapping):
-                raise ReactorError("campaign board pending operation is malformed")
-            required = {
-                "request_id",
-                "project",
-                "operation",
-                "parameters",
-                "requested_at",
-                "last_reason",
-                "active_lanes",
-            }
-            if set(record) != required:
-                raise ReactorError("campaign board pending operation is malformed")
-            if (
-                record.get("request_id") != request_id
-                or not isinstance(record.get("project"), str)
-                or not isinstance(record.get("operation"), str)
-                or not isinstance(record.get("parameters"), Mapping)
-                or not isinstance(record.get("requested_at"), str)
-                or not isinstance(record.get("last_reason"), str)
-                or (
-                    record.get("active_lanes") is not None
-                    and (
-                        isinstance(record.get("active_lanes"), bool)
-                        or not isinstance(record.get("active_lanes"), int)
-                    )
-                )
-            ):
-                raise ReactorError("campaign board pending operation is malformed")
-            _parse_time(str(record["requested_at"]))
-            pending_operations[request_id] = dict(record)
-        return cls(
-            updated_at=value["updated_at"],
-            lanes=lanes,
-            prs=prs,
-            keeper=keeper,
-            errors=errors,
-            judgment_queue=[
-                dict(item) for item in raw_judgment if isinstance(item, Mapping)
-            ],
-            corpus_health=dict(raw_corpus_health),
-            pending_operations=pending_operations,
-        )
-
-    @classmethod
-    def _migrate_legacy(cls, value: Mapping[str, Any]) -> CampaignBoard:
-        """Read v0 helper output once, then rewrite it as typed board state."""
-        updated = value.get("updated")
-        if not isinstance(updated, str):
-            updated = _now()
-        try:
-            _parse_time(updated)
-        except ReactorError:
-            updated = _now()
-        lanes: dict[str, LaneRecord] = {}
-        raw_lanes = value.get("lanes", {})
-        if isinstance(raw_lanes, Mapping):
-            for job_id, phase in raw_lanes.items():
-                if isinstance(job_id, str) and isinstance(phase, str):
-                    lanes[job_id] = LaneRecord(
-                        job_id, "unknown", phase, None, None, False, updated
-                    )
-        prs: dict[str, PullRequestRecord] = {}
-        raw_prs = value.get("prs", {})
-        if isinstance(raw_prs, Mapping):
-            for pr, raw in raw_prs.items():
-                if not isinstance(pr, str) or not isinstance(raw, Mapping):
-                    continue
-                repo = raw.get("repo", "unknown")
-                state = raw.get("state", "UNKNOWN")
-                if not isinstance(repo, str) or not repo or not isinstance(state, str):
-                    continue
-                bead_id = raw.get("bead")
-                bead_id = bead_id if isinstance(bead_id, str) and bead_id else None
-                prs[f"{repo}#{pr}"] = PullRequestRecord(
-                    repo,
-                    pr,
-                    state,
-                    bead_id,
-                    "closed" if raw.get("bead_closed") is True else "not-attempted",
-                    None,
-                    None,
-                    updated,
-                )
-        return cls(updated, lanes, prs)
+            errors.append(
+                {key: str(error_record[key]) for key in ("offset", "message", "at")}
+            )
+        return cls(updated_at=updated_at, keeper=keeper, errors=errors)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": BOARD_SCHEMA_VERSION,
             "updated_at": self.updated_at,
-            "lanes": {
-                key: value.to_dict() for key, value in sorted(self.lanes.items())
-            },
-            "prs": {key: value.to_dict() for key, value in sorted(self.prs.items())},
             "keeper": dict(sorted(self.keeper.items())),
             "errors": self.errors[-MAX_BOARD_ERRORS:],
-            "judgment_queue": self.judgment_queue[-MAX_BOARD_ERRORS:],
-            "corpus_health": dict(self.corpus_health),
-            "pending_operations": dict(sorted(self.pending_operations.items())),
         }
 
     def save(self, path: Path) -> None:
@@ -518,220 +182,31 @@ class CampaignBoard:
         self.errors.append({"offset": str(offset), "message": message, "at": _now()})
         self.errors = self.errors[-MAX_BOARD_ERRORS:]
 
-
-class ReactionHandler(Protocol):
-    def __call__(
-        self, event: Mapping[str, Any], context: "ReactionContext"
-    ) -> None: ...
-
-
-@dataclass
-class ReactionContext:
-    board: CampaignBoard
-    bead_closer: "BeadCloser"
-    project_roots: Mapping[str, Path]
-
-
-class BeadCloser(Protocol):
-    def close(
-        self, bead_id: str, reason: str, *, cwd: Path
-    ) -> tuple[bool, str | None]: ...
+    def expire_markers(self, now: datetime) -> None:
+        """Drop markers whose head, receipt, or PR round is long gone."""
+        for key in list(self.keeper):
+            if key.startswith("refill:"):
+                continue
+            try:
+                age = (now - _parse_time(str(self.keeper[key].get("emitted_at")))).total_seconds()
+            except (TypeError, ReactorError):
+                continue
+            if age > MARKER_MAX_AGE_SECONDS:
+                del self.keeper[key]
+        if len(self.keeper) > MAX_BOARD_MARKERS:
+            oldest = sorted(
+                self.keeper, key=lambda key: str(self.keeper[key].get("emitted_at"))
+            )
+            for key in oldest[: len(self.keeper) - MAX_BOARD_MARKERS]:
+                del self.keeper[key]
 
 
 class RefillDispatcher(Protocol):
     def __call__(self, project: str, bead_ids: tuple[str, ...]) -> None: ...
 
 
-class ReviewDispatcher(Protocol):
-    def __call__(self, project: str, workspace: str) -> None: ...
-
-
 class IntegrationDispatcher(Protocol):
     def __call__(self, project: str, workspace: str, receipt_ref: str) -> None: ...
-
-
-class OperationDispatcher(Protocol):
-    def __call__(
-        self, project: str, operation: str, parameters: Mapping[str, Any]
-    ) -> None: ...
-
-
-@dataclass(frozen=True)
-class Reaction:
-    event_kind: str
-    name: str
-    handler: ReactionHandler
-
-
-class ReactionRegistry:
-    """Typed event-kind registry; duplicate registrations are rejected."""
-
-    def __init__(self) -> None:
-        self._reactions: dict[str, Reaction] = {}
-
-    def register(self, event_kind: str, name: str, handler: ReactionHandler) -> None:
-        if not event_kind or event_kind in self._reactions:
-            raise ReactorError(f"reaction already registered for {event_kind!r}")
-        self._reactions[event_kind] = Reaction(event_kind, name, handler)
-
-    def dispatch(self, event: Mapping[str, Any], context: ReactionContext) -> bool:
-        kind = event.get("kind")
-        if not isinstance(kind, str):
-            raise ReactorError("event kind must be a string")
-        reaction = self._reactions.get(kind)
-        if reaction is None:
-            return False
-        reaction.handler(event, context)
-        return True
-
-
-def _lane_reaction(event: Mapping[str, Any], context: ReactionContext) -> None:
-    phase = event.get("phase")
-    if phase not in {"succeeded", "failed", "cancelled", "timeout", "missing"}:
-        return
-    updated_at = _now()
-    record = LaneRecord.from_event(event, updated_at=updated_at)
-    context.board.lanes[record.job_id] = record
-    context.board.updated_at = updated_at
-
-
-def _repo_name(repo: str) -> str:
-    return repo.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
-
-
-def _receipt(event: Mapping[str, Any]) -> tuple[str, str, Mapping[str, Any]] | None:
-    raw = event.get("decision_receipt")
-    if not isinstance(raw, Mapping):
-        return None
-    bead_id = raw.get("bead_id")
-    reason = raw.get("reason")
-    if (
-        not isinstance(bead_id, str)
-        or not bead_id
-        or not isinstance(reason, str)
-        or not reason
-    ):
-        raise ReactorError("merge decision receipt must contain bead_id and reason")
-    receipt_id = raw.get("receipt_id")
-    if receipt_id is not None and (not isinstance(receipt_id, str) or not receipt_id):
-        raise ReactorError("merge decision receipt_id must be a non-empty string")
-    return bead_id, reason, raw
-
-
-def _receipts(
-    event: Mapping[str, Any],
-) -> tuple[tuple[str, str, Mapping[str, Any]], ...]:
-    """Read either the legacy single receipt or an authored receipt set."""
-    raw = event.get("decision_receipts")
-    if raw is None:
-        one = _receipt(event)
-        return (one,) if one is not None else ()
-    if not isinstance(raw, list) or not raw:
-        raise ReactorError("merge decision receipts must be a non-empty list")
-    result = []
-    for item in raw:
-        if not isinstance(item, Mapping):
-            raise ReactorError("merge decision receipt must be an object")
-        one = _receipt({"decision_receipt": item})
-        assert one is not None
-        result.append(one)
-    return tuple(result)
-
-
-def _merge_reaction(event: Mapping[str, Any], context: ReactionContext) -> None:
-    repo = _required_string(event, "repo")
-    pr = _required_string(event, "pr")
-    state = _required_string(event, "state")
-    key = f"{repo}#{pr}"
-    prior = context.board.prs.get(key)
-    receipts = _receipts(event)
-    if not receipts and prior is not None and prior.decision_receipt is not None:
-        receipts = _receipts({"decision_receipt": prior.decision_receipt})
-    receipt_value = event.get("decision_receipt")
-    receipt = (
-        dict(receipt_value)
-        if isinstance(receipt_value, Mapping)
-        else (
-            dict(prior.decision_receipt) if prior and prior.decision_receipt else None
-        )
-    )
-    bead_id = receipts[0][0] if receipts else (prior.bead_id if prior else None)
-    if bead_id is not None and (not isinstance(bead_id, str) or not bead_id):
-        raise ReactorError("merge decision receipt bead_id must be a non-empty string")
-    close_status = prior.bead_close_status if prior is not None else "not-attempted"
-    error = prior.error if prior is not None else None
-    opened_at = _optional_string(event, "opened_at") or (
-        prior.opened_at if prior is not None else None
-    )
-    if opened_at is not None:
-        _parse_time(opened_at)
-    raw_checks = event.get("check_states")
-    if raw_checks is None:
-        check_states = prior.check_states if prior is not None else ()
-    elif isinstance(raw_checks, list) and all(
-        isinstance(check, str) and check for check in raw_checks
-    ):
-        check_states = tuple(raw_checks)
-    else:
-        raise ReactorError("merge event check_states must be strings")
-    raw_auto_merge = event.get("auto_merge")
-    if raw_auto_merge is None:
-        auto_merge = prior.auto_merge if prior is not None else False
-    elif isinstance(raw_auto_merge, bool):
-        auto_merge = raw_auto_merge
-    else:
-        raise ReactorError("merge event auto_merge must be boolean")
-    if state == "MERGED" and close_status not in {"closed", "missing-receipt"}:
-        if receipt is None:
-            close_status = "missing-receipt"
-            error = "merged PR has no decision-time receipt"
-        else:
-            if not receipts:
-                close_status = "missing-receipt"
-                error = "merged PR has no decision-time receipt"
-            else:
-                root_name = event.get("project")
-                project_name = (
-                    root_name
-                    if isinstance(root_name, str) and root_name
-                    else _repo_name(repo)
-                )
-                root = context.project_roots.get(project_name)
-                if root is None:
-                    close_status = "failed"
-                    error = f"no configured project root for {project_name}"
-                else:
-                    failures = []
-                    for settled_bead_id, reason, _ in receipts:
-                        closed, close_error = context.bead_closer.close(
-                            settled_bead_id, reason, cwd=root
-                        )
-                        if not closed:
-                            failures.append(close_error or settled_bead_id)
-                    close_status = "failed" if failures else "closed"
-                    error = "; ".join(failures) if failures else None
-    context.board.prs[key] = PullRequestRecord(
-        repo=repo,
-        pr=pr,
-        state=state,
-        bead_id=bead_id,
-        bead_close_status=close_status,
-        decision_receipt=receipt,
-        error=error,
-        updated_at=_now(),
-        opened_at=opened_at,
-        check_states=check_states,
-        auto_merge=auto_merge,
-    )
-    context.board.updated_at = _now()
-
-
-def default_reactions() -> ReactionRegistry:
-    registry = ReactionRegistry()
-    registry.register("attested-agent", "lane-success-to-review-ready", _lane_reaction)
-    registry.register("needs-merge", "record-pending-merge", _merge_reaction)
-    registry.register("merge_close", "merge-to-bead-close", _merge_reaction)
-    return registry
 
 
 class BeadReleaser(Protocol):
@@ -818,91 +293,19 @@ class SubprocessBeadParker:
         return True, None
 
 
-class SubprocessBeadCloser:
-    def __init__(self, executable: str = "bd", actor: str = "sinnix-reactor") -> None:
-        self.executable = executable
-        self.actor = actor
-
-    def close(self, bead_id: str, reason: str, *, cwd: Path) -> tuple[bool, str | None]:
-        try:
-            result = subprocess.run(
-                [
-                    self.executable,
-                    "close",
-                    bead_id,
-                    "--force",
-                    "--actor",
-                    self.actor,
-                    "--reason",
-                    reason,
-                ],
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as error:
-            return False, str(error)
-        if result.returncode == 0:
-            return True, None
-        detail = (result.stderr or result.stdout).strip()
-        return False, detail[:512] or f"bd close exited {result.returncode}"
-
-
-@dataclass
-class SpoolCursor:
-    offset: int = 0
-    device: int | None = None
-    inode: int | None = None
-
-    @classmethod
-    def load(cls, path: Path) -> SpoolCursor:
-        try:
-            value = json.loads(path.read_text())
-        except FileNotFoundError:
-            return cls()
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ReactorError(f"reactor cursor is unreadable: {error}") from error
-        if (
-            not isinstance(value, Mapping)
-            or value.get("schema_version") != CURSOR_SCHEMA_VERSION
-        ):
-            raise ReactorError("reactor cursor has an unsupported schema version")
-        offset = value.get("offset")
-        device = value.get("device")
-        inode = value.get("inode")
-        if (
-            isinstance(offset, bool)
-            or not isinstance(offset, int)
-            or offset < 0
-            or (device is not None and not isinstance(device, int))
-            or (inode is not None and not isinstance(inode, int))
-        ):
-            raise ReactorError("reactor cursor has invalid fields")
-        return cls(offset, device, inode)
-
-    def save(self, path: Path) -> None:
-        _atomic_write(
-            path,
-            {
-                "schema_version": CURSOR_SCHEMA_VERSION,
-                "offset": self.offset,
-                "device": self.device,
-                "inode": self.inode,
-            },
-        )
-
-
-def _validate_event(value: Any) -> dict[str, Any]:
-    if not isinstance(value, Mapping):
-        raise ReactorError("event must be a JSON object")
-    event = dict(value)
-    schema = event.get("schema_version", EVENT_SCHEMA_VERSION)
-    if schema != EVENT_SCHEMA_VERSION:
-        raise ReactorError("event has an unsupported schema version")
-    _required_string(event, "kind")
-    return event
+def _harvest_outcome(record: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The result payload a terminal harvest job wrote, or an empty mapping."""
+    artifacts = record.get("artifacts")
+    path = artifacts.get("result") if isinstance(artifacts, Mapping) else None
+    if not isinstance(path, str):
+        return {}
+    try:
+        value = json.loads(Path(path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if isinstance(value, Mapping) and isinstance(value.get("value"), Mapping):
+        value = value["value"]
+    return value if isinstance(value, Mapping) else {}
 
 
 class _ActiveLaneCount(int):
@@ -973,18 +376,10 @@ class CampaignReactor:
     jobs_state_dir: Path | None = None
     interval_seconds: int = DEFAULT_INTERVAL_SECONDS
     min_active_lanes: int = 3
-    keeper_backoff_seconds: int = DEFAULT_KEEPER_BACKOFF_SECONDS
-    max_keeper_backoff_seconds: int = MAX_KEEPER_BACKOFF_SECONDS
-    pr_age_threshold_seconds: int = DEFAULT_PR_AGE_THRESHOLD_SECONDS
     refill_width_target: int | None = None
     refill_spacing_seconds: int = DEFAULT_REFILL_SPACING_SECONDS
-    verify_all_failure_threshold: int = DEFAULT_VERIFY_ALL_FAILURE_THRESHOLD
     refill_dispatcher: RefillDispatcher | None = None
-    review_dispatcher: ReviewDispatcher | None = None
-    operation_dispatcher: OperationDispatcher | None = None
-    lane_gate_threshold: int = DEFAULT_LANE_GATE_THRESHOLD
     retry_dispatcher: Callable[[str], None] | None = None
-    dispose_dispatcher: Callable[[str], None] | None = None
     integration_dispatcher: IntegrationDispatcher | None = None
     review_fix_dispatcher: IntegrationDispatcher | None = None
     harvest_dispatcher: IntegrationDispatcher | None = None
@@ -995,301 +390,18 @@ class CampaignReactor:
     integrator_model: str = "gpt-5.6-terra"
     integrator_effort: str = "high"
     agentctl_executable: str = "agentctl"
-    bead_closer: BeadCloser = field(default_factory=SubprocessBeadCloser)
     bead_releaser: BeadReleaser = field(default_factory=SubprocessBeadReleaser)
     bead_parker: BeadParker = field(default_factory=SubprocessBeadParker)
-    registry: ReactionRegistry = field(default_factory=default_reactions)
 
     def __post_init__(self) -> None:
         if self.interval_seconds < 1 or self.min_active_lanes < 1:
             raise ReactorError("reactor intervals and lane targets must be positive")
-        if self.keeper_backoff_seconds < 1 or self.max_keeper_backoff_seconds < 1:
-            raise ReactorError("keeper backoff values must be positive")
-        if self.pr_age_threshold_seconds < 1:
-            raise ReactorError("PR age threshold must be positive")
         if self.refill_width_target is not None and self.refill_width_target < 1:
             raise ReactorError("refill width target must be positive")
         if self.refill_spacing_seconds < 1:
             raise ReactorError("refill spacing must be positive")
-        if self.lane_gate_threshold < 0:
-            raise ReactorError("lane gate threshold must not be negative")
-        if self.verify_all_failure_threshold < 1:
-            raise ReactorError("verify_all failure threshold must be positive")
         self.state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self._cursor = SpoolCursor.load(self.state_dir / "cursor.json")
         self._board = CampaignBoard.load(self.board_path)
-
-    @property
-    def cursor_path(self) -> Path:
-        return self.state_dir / "cursor.json"
-
-    def _available_events(self) -> list[tuple[int, dict[str, Any]]]:
-        try:
-            stat = self.event_spool.stat()
-        except FileNotFoundError:
-            return []
-        if (
-            self._cursor.device != stat.st_dev
-            or self._cursor.inode != stat.st_ino
-            or stat.st_size < self._cursor.offset
-        ):
-            self._cursor.offset = 0
-        self._cursor.device = stat.st_dev
-        self._cursor.inode = stat.st_ino
-        events: list[tuple[int, dict[str, Any]]] = []
-        with self.event_spool.open("rb") as handle:
-            handle.seek(self._cursor.offset)
-            while True:
-                offset = handle.tell()
-                line = handle.readline()
-                if not line or not line.endswith(b"\n"):
-                    break
-                if len(line) > MAX_EVENT_BYTES:
-                    events.append(
-                        (
-                            offset,
-                            {
-                                "kind": "__invalid__",
-                                "error": "event line exceeds size bound",
-                            },
-                        )
-                    )
-                    continue
-                try:
-                    events.append((offset, _validate_event(json.loads(line))))
-                except (
-                    ReactorError,
-                    UnicodeDecodeError,
-                    json.JSONDecodeError,
-                ) as error:
-                    events.append(
-                        (offset, {"kind": "__invalid__", "error": str(error)})
-                    )
-                self._cursor.offset = handle.tell()
-        return events
-
-    def _pending_keeper_actions(self) -> list[tuple[str, str]]:
-        actions: list[tuple[str, str]] = []
-        for request_id, request in sorted(self._board.pending_operations.items()):
-            reason = str(request["last_reason"])
-            actions.append(
-                (
-                    f"operation:{request_id}",
-                    f"defer {request['project']}:{request['operation']} ({reason})",
-                )
-            )
-        ready = sorted(
-            job_id for job_id, lane in self._board.lanes.items() if lane.review_ready
-        )
-        if ready:
-            actions.append(("review-ready", "review " + ",".join(ready[:12])))
-        close_pending = sorted(
-            key
-            for key, pr in self._board.prs.items()
-            if pr.state == "MERGED" and pr.bead_close_status not in {"closed"}
-        )
-        if close_pending:
-            actions.append(("bead-close", "close " + ",".join(close_pending[:12])))
-        needs_merge: list[str] = []
-        now = datetime.now(UTC)
-        for key, pr in sorted(self._board.prs.items()):
-            if pr.state != "OPEN" or pr.opened_at is None:
-                continue
-            if (
-                now - _parse_time(pr.opened_at)
-            ).total_seconds() < self.pr_age_threshold_seconds:
-                continue
-            checks = ",".join(pr.check_states) or "none"
-            merge_state = "armed" if pr.auto_merge else "unarmed"
-            needs_merge.append(f"{key} checks={checks} auto-merge={merge_state}")
-        if needs_merge:
-            actions.append(
-                ("needs-merge", "needs-merge " + "; ".join(needs_merge[:12]))
-            )
-        merge_pending = sorted(
-            key for key, pr in self._board.prs.items() if pr.state == "NEEDS-MERGE"
-        )
-        if merge_pending:
-            actions.append(("needs-merge", "merge " + ",".join(merge_pending[:12])))
-        active = _active_lane_count(self.jobs_state_dir)
-        if active is not None and active.degraded_records:
-            self._board.record_error(
-                -1, f"job records degraded: {active.degraded_records} unreadable"
-            )
-        if active is not None and self._board.lanes and active < self.min_active_lanes:
-            actions.append(
-                ("lanes-low", f"active lanes {active} < {self.min_active_lanes}")
-            )
-            # The queue replenishes itself: an under-filled fleet refills on
-            # the keeper tick, not only on bead closes — most lane exits
-            # (slices, rejections, timeouts) close no bead, and waiting for
-            # one starved the pool at whatever the last close left behind.
-            for project in self._refill_targets():
-                self._dispatch_refill(project)
-        return actions
-
-    @staticmethod
-    def _operation_request(event: Mapping[str, Any]) -> dict[str, Any] | None:
-        kind = event.get("kind")
-        requested = kind == "operation-request" or (
-            kind in {"declared-operation", "operation"}
-            and event.get("phase", event.get("transition")) in {"requested", "request"}
-        )
-        if not requested:
-            return None
-        request_id = _required_string(event, "request_id")
-        project = _required_string(event, "project")
-        operation = _required_string(event, "operation")
-        parameters = event.get("parameters", {})
-        if not isinstance(parameters, Mapping):
-            raise ReactorError("operation request parameters must be an object")
-        if operation not in HEAVY_OPERATIONS:
-            return None
-        requested_at = event.get("requested_at", event.get("emitted_at", _now()))
-        if not isinstance(requested_at, str) or not requested_at:
-            raise ReactorError("operation request requested_at must be a timestamp")
-        _parse_time(requested_at)
-        return {
-            "request_id": request_id,
-            "project": project,
-            "operation": operation,
-            "parameters": dict(parameters),
-            "requested_at": requested_at,
-            "last_reason": "awaiting lane gate evaluation",
-            "active_lanes": None,
-        }
-
-    def _record_operation_request(self, event: Mapping[str, Any]) -> None:
-        request = self._operation_request(event)
-        if request is None:
-            return
-        request_id = str(request["request_id"])
-        prior = self._board.pending_operations.get(request_id)
-        if prior is not None:
-            immutable = ("project", "operation", "parameters")
-            if any(prior[field] != request[field] for field in immutable):
-                raise ReactorError(f"operation request {request_id} changed")
-            return
-        if len(self._board.pending_operations) >= MAX_PENDING_OPERATIONS:
-            raise ReactorError("campaign board pending operation limit exceeded")
-        self._board.pending_operations[request_id] = request
-
-    def _operation_gate_reason(
-        self, request: Mapping[str, Any]
-    ) -> tuple[str, int | None]:
-        active = _active_lane_count(self.jobs_state_dir)
-        if active is None:
-            return "active lane count unavailable", None
-        if active > self.lane_gate_threshold:
-            return (
-                f"active lanes {active} > gate threshold {self.lane_gate_threshold}",
-                active,
-            )
-        return "lane gate clear", active
-
-    def _dispatch_operation(self, request: Mapping[str, Any]) -> None:
-        project = str(request["project"])
-        operation = str(request["operation"])
-        parameters = request["parameters"]
-        if self.operation_dispatcher is not None:
-            self.operation_dispatcher(project, operation, parameters)
-            return
-        subprocess.run(
-            [
-                self.agentctl_executable,
-                "job",
-                "start",
-                project,
-                operation,
-                "--parameters-json",
-                json.dumps(parameters, sort_keys=True, separators=(",", ":")),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-
-    def _dispatch_pending_operations(self) -> None:
-        now = datetime.now(UTC)
-        for request_id, request in sorted(self._board.pending_operations.items()):
-            key = f"operation:{request_id}"
-            prior = self._board.keeper.get(key)
-            if prior is not None and now < _parse_time(str(prior["next_eligible_at"])):
-                continue
-            reason, active = self._operation_gate_reason(request)
-            if reason != "lane gate clear":
-                request["last_reason"] = reason
-                request["active_lanes"] = active
-                continue
-            try:
-                self._dispatch_operation(request)
-            except (OSError, subprocess.SubprocessError) as error:
-                request["last_reason"] = f"dispatch failed: {error}"
-                request["active_lanes"] = active
-                self._board.record_error(-1, f"operation {request_id}: {error}")
-                continue
-            del self._board.pending_operations[request_id]
-            emitted_at = datetime.now(UTC)
-            self._board.keeper[key] = {
-                "emitted_at": emitted_at.isoformat(),
-                "backoff_seconds": 0,
-                "next_eligible_at": emitted_at.isoformat(),
-            }
-
-    def _emit_keeper(self) -> None:
-        actions = self._pending_keeper_actions()
-        active_keys = {key for key, _ in actions}
-        # Only pending-action entries are pruned here. Prefixed entries are
-        # durable records of work already dispatched; deleting one re-dispatches
-        # it on the next tick.
-        now = datetime.now(UTC)
-        for key in list(self._board.keeper):
-            if key.startswith(_DURABLE_KEEPER_PREFIXES):
-                if key.startswith("refill:"):
-                    continue
-                emitted = self._board.keeper[key].get("emitted_at")
-                try:
-                    age = (now - _parse_time(str(emitted))).total_seconds()
-                except (TypeError, ValueError):
-                    continue
-                if age > DURABLE_KEEPER_MAX_AGE_SECONDS:
-                    del self._board.keeper[key]
-                continue
-            if key not in active_keys:
-                del self._board.keeper[key]
-        for key, action in actions:
-            prior = self._board.keeper.get(key)
-            if prior is not None and now < _parse_time(str(prior["next_eligible_at"])):
-                continue
-            prior_backoff = (
-                int(prior["backoff_seconds"])
-                if prior is not None
-                else self.keeper_backoff_seconds
-            )
-            next_backoff = min(prior_backoff * 2, self.max_keeper_backoff_seconds)
-            event_id = hashlib.sha256(f"{key}:{action}".encode()).hexdigest()[:32]
-            append_event(
-                self.event_spool,
-                {
-                    "schema_version": EVENT_SCHEMA_VERSION,
-                    "event_id": event_id,
-                    "kind": "keeper",
-                    "project": "polylogue",
-                    "phase": "actionable",
-                    "reasons": [key],
-                    "actions": [action],
-                    "emitted_at": _now(),
-                },
-            )
-            emitted_at = datetime.now(UTC)
-            self._board.keeper[key] = {
-                "emitted_at": emitted_at.isoformat(),
-                "backoff_seconds": next_backoff,
-                "next_eligible_at": (
-                    emitted_at + timedelta(seconds=next_backoff)
-                ).isoformat(),
-            }
 
     def _job_record(self, job_id: str) -> Mapping[str, Any] | None:
         if self.jobs_state_dir is None:
@@ -1299,33 +411,6 @@ class CampaignReactor:
         except (OSError, json.JSONDecodeError):
             return None
         return value if isinstance(value, Mapping) else None
-
-    def _workspace_for(self, record: LaneRecord) -> str:
-        """The directory a lane was provisioned into, whatever the event carried.
-
-        A lane terminal names its checkout by id, so the durable job record is
-        the only place the path is recorded.
-        """
-        checkout = record.checkout or {}
-        path = checkout.get("path")
-        if not isinstance(path, str) or not path:
-            if self.jobs_state_dir is None:
-                return ""
-            try:
-                stored = json.loads(
-                    (self.jobs_state_dir / f"{record.job_id}.json").read_text()
-                )
-            except (OSError, json.JSONDecodeError):
-                return ""
-            spec = stored.get("spec") if isinstance(stored, Mapping) else None
-            for source in (stored, spec):
-                value = source.get("checkout") if isinstance(source, Mapping) else None
-                if isinstance(value, Mapping) and isinstance(value.get("path"), str):
-                    path = value["path"]
-                    break
-        if not isinstance(path, str) or not path:
-            return ""
-        return PurePosixPath(path).name
 
     def _publish(self, project: str, workspace: str, receipt: str, affected_job: str = "") -> None:
         """Publish a lane whose scan is clean, using the text the lane wrote."""
@@ -1339,12 +424,11 @@ class CampaignReactor:
         title = worktree / ".lane/title"
         body = worktree / ".lane/body.md"
         if not title.is_file() or not body.is_file():
-            # A lane that wrote no publication text still has a bead and a
-            # receipt; the PR text is the bead's title and the lane's own
-            # classification, and hosted review reads the diff.
-            if not self._synthesize_lane_text(project, worktree, receipt):
-                self._board.record_error(-1, f"publish {workspace}: no .lane text and no bead")
-                return
+            # The worker contract requires the lane to write its own
+            # publication text; a lane that skipped it is parked, not
+            # published under text nobody wrote.
+            self._board.record_error(-1, f"publish {workspace}: no .lane publication text")
+            return
         parameters["title_file"] = str(title)
         parameters["body_file"] = str(body)
         try:
@@ -1368,61 +452,6 @@ class CampaignReactor:
         except (OSError, subprocess.SubprocessError) as error:
             self._board.record_error(-1, f"publish {workspace}: {error}")
             return
-
-    def _synthesize_lane_text(self, project: str, worktree: Path, receipt: str) -> bool:
-        """Write .lane/title and .lane/body.md from the bead and receipt."""
-        payload = self._receipt_payload(receipt) or {}
-        bead = payload.get("bead_id")
-        root = self.project_roots.get(project)
-        if not isinstance(bead, str) or not bead or root is None:
-            return False
-        try:
-            record = SubprocessBdReader(root).show(bead)
-        except (OSError, subprocess.SubprocessError, ReactorError, ValueError):
-            return False
-        title = str(record.get("title") or "").strip()
-        if not title:
-            return False
-        trailer = payload.get("lane_trailer")
-        classification = (
-            str(trailer.get("LANE-CLASSIFICATION") or "").strip()
-            if isinstance(trailer, Mapping)
-            else ""
-        )
-        body = f"Lane for {bead}: {title}\n"
-        if classification:
-            body += f"\n{classification}\n"
-        body += f"\nPublication text synthesized from the bead and receipt; the lane wrote none.\n"
-        try:
-            lane_dir = worktree / ".lane"
-            lane_dir.mkdir(exist_ok=True)
-            (lane_dir / "title").write_text(title[:72] + "\n", encoding="utf-8")
-            (lane_dir / "body.md").write_text(body, encoding="utf-8")
-        except OSError:
-            return False
-        return True
-
-    @staticmethod
-    def _workspace_name(checkout_id: str) -> str | None:
-        """Map a checkout id back to the workspace name the verbs take.
-
-        Events carry the checkout id; `job start --workspace` and the harvest
-        operation address a workspace by name.
-        """
-        index = Path.home() / ".local/state/sinnixd/workspaces/index.json"
-        try:
-            records = json.loads(index.read_text()).get("workspaces", [])
-        except (OSError, json.JSONDecodeError, AttributeError):
-            return None
-        for record in records:
-            path = record.get("path")
-            name = record.get("name")
-            if not isinstance(path, str) or not isinstance(name, str):
-                continue
-            derived = "worktree-" + hashlib.sha256(path.encode()).hexdigest()[:16]
-            if derived == checkout_id:
-                return name
-        return None
 
     def _integration_prompt(
         self, root: Path, event: Mapping[str, Any], workspace: str
@@ -1506,39 +535,53 @@ class CampaignReactor:
         except (OSError, subprocess.SubprocessError) as error:
             self._board.record_error(-1, f"{label} {workspace}: {error}")
 
-    def _park_empty_lane(self, event: Mapping[str, Any]) -> None:
+    def _park_empty_lanes(self, project: str) -> None:
         """A lane with nothing to publish hands its bead back with the reason.
 
         The claim would otherwise hold the bead forever; releasing it plain
         would relaunch the same blocked packet every refill. The bead goes
         back to open under needs:operator with the lane's classification.
         """
-        harvest_job = event.get("job_id")
-        record = self._job_record(str(harvest_job)) if isinstance(harvest_job, str) else None
-        spec = record.get("spec") if isinstance(record, Mapping) else None
-        checkout = spec.get("checkout") if isinstance(spec, Mapping) else None
-        checkout_id = checkout.get("checkout_id") if isinstance(checkout, Mapping) else None
-        project = event.get("project")
-        root = self.project_roots.get(str(project)) if isinstance(project, str) else None
-        if not isinstance(checkout_id, str) or root is None:
+        root = self.project_roots.get(project)
+        if root is None or self.jobs_state_dir is None:
             return
-        key = f"park:{checkout_id}:{str(event.get('head') or '')[:12]}"
-        if key in self._board.keeper:
-            return
-        trailer = event.get("lane_trailer")
-        classification = (
-            trailer.get("LANE-CLASSIFICATION") if isinstance(trailer, Mapping) else None
-        )
-        note = f"lane had nothing to publish: {classification or 'no classification'}"
-        for bead_id in self._campaign_beads_for_checkout(checkout_id):
-            parked, detail = self.bead_parker.park(bead_id, note, cwd=root)
-            if not parked:
-                self._board.record_error(-1, f"park {bead_id}: {detail}")
-        self._board.keeper[key] = {
-            "emitted_at": _now(),
-            "backoff_seconds": 0,
-            "next_eligible_at": _now(),
-        }
+        for path in sorted(self.jobs_state_dir.glob("*.json")):
+            try:
+                record = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            spec = record.get("spec") if isinstance(record, Mapping) else None
+            state = record.get("state") if isinstance(record, Mapping) else None
+            if (
+                not isinstance(spec, Mapping)
+                or spec.get("operation") != "harvest"
+                or spec.get("project_id") != project
+                or not isinstance(state, Mapping)
+                or not state.get("terminal")
+            ):
+                continue
+            outcome = _harvest_outcome(record)
+            if outcome.get("outcome") != "HARVEST_EMPTY":
+                continue
+            checkout = spec.get("checkout")
+            checkout_id = (
+                checkout.get("checkout_id") if isinstance(checkout, Mapping) else None
+            )
+            if not isinstance(checkout_id, str):
+                continue
+            key = f"park:{checkout_id}:{str(outcome.get('head') or '')[:12]}"
+            if key in self._board.keeper:
+                continue
+            trailer = outcome.get("lane_trailer")
+            classification = (
+                trailer.get("LANE-CLASSIFICATION") if isinstance(trailer, Mapping) else None
+            )
+            note = f"lane had nothing to publish: {classification or 'no classification'}"
+            for bead_id in self._campaign_beads_for_checkout(checkout_id):
+                parked, detail = self.bead_parker.park(bead_id, note, cwd=root)
+                if not parked:
+                    self._board.record_error(-1, f"park {bead_id}: {detail}")
+            self._board.keeper[key] = {"emitted_at": _now()}
 
     def _campaign_beads_for_checkout(self, checkout_id: str) -> list[str]:
         """Beads of the newest campaign lane launched into a checkout."""
@@ -1632,29 +675,6 @@ class CampaignReactor:
                 if not released:
                     self._board.record_error(-1, f"reconcile release {bead_id}: {detail}")
 
-    def _release_beads(self, lane: LaneRecord) -> None:
-        """An interrupted lane's claim goes back to the frontier.
-
-        The claim exists so a succeeded lane is not relaunched while its
-        result is integrated; a lane that never reached a result must not
-        keep its bead parked.
-        """
-        record = self._job_record(lane.job_id)
-        spec = record.get("spec") if isinstance(record, Mapping) else None
-        contract = spec.get("contract") if isinstance(spec, Mapping) else None
-        parameters = contract.get("parameters") if isinstance(contract, Mapping) else None
-        campaign = parameters.get("campaign") if isinstance(parameters, Mapping) else None
-        bead_ids = campaign.get("bead_ids") if isinstance(campaign, Mapping) else None
-        root = self.project_roots.get(lane.project)
-        if not isinstance(bead_ids, list) or root is None:
-            return
-        for bead_id in bead_ids:
-            if not isinstance(bead_id, str) or not bead_id:
-                continue
-            released, detail = self.bead_releaser.release(bead_id, cwd=root)
-            if not released:
-                self._board.record_error(-1, f"release {bead_id}: {detail}")
-
     def _checkout_owned(self, checkout_id: str) -> bool:
         """Whether a running attested agent already works in this checkout.
 
@@ -1684,17 +704,6 @@ class CampaignReactor:
             ):
                 return True
         return False
-
-    @classmethod
-    def _receipt_workspace(cls, receipt: str) -> str | None:
-        """The workspace a harvest receipt was published from."""
-        return cls._receipt_field(receipt, "workspace_id")
-
-    @classmethod
-    def _receipt_field(cls, receipt: str, key: str) -> str | None:
-        payload = cls._receipt_payload(receipt)
-        value = payload.get(key) if payload is not None else None
-        return value if isinstance(value, str) and value else None
 
     @staticmethod
     def _receipt_payload(receipt: str) -> Mapping[str, Any] | None:
@@ -1809,10 +818,33 @@ class CampaignReactor:
                         self._review_fix_prompt(repo, str(pull.number), workspace, {"findings": pull.findings}),
                         label="review-fix", name=f"review-fix-{pull.number}-{facts.head[:12]}",
                     )
+            elif action.kind == "retry":
+                self._dispatch_retry(facts)
             elif action.kind == "park":
                 self._record_judgment(project, facts, action.reason)
         except (OSError, subprocess.SubprocessError, KeyError) as error:
             self._board.record_error(-1, f"{action.kind} {workspace}: {error}")
+
+    def _dispatch_retry(self, facts: Any) -> None:
+        """Re-dispatch an interrupted lane once, from its own job record.
+
+        One auto-retry per lane job: the retry keeps the checkout, so a second
+        attempt at the same dead job would pile agents into one worktree.
+        """
+        job_id = facts.lane_job
+        if not job_id:
+            return
+        key = f"retry:{job_id}"
+        if key in self._board.keeper:
+            return
+        self._board.keeper[key] = {"emitted_at": _now()}
+        if self.retry_dispatcher is not None:
+            self.retry_dispatcher(job_id)
+            return
+        subprocess.run(
+            [self.agentctl_executable, "job", "retry", job_id],
+            check=True, capture_output=True, text=True, timeout=60,
+        )
 
     def _record_judgment(self, project: str, facts: Any, reason: str) -> None:
         key = f"judged:{facts.name}:{facts.head[:12]}"
@@ -1820,8 +852,6 @@ class CampaignReactor:
             return
         self._board.keeper[key] = {
             "emitted_at": _now(),
-            "backoff_seconds": 0,
-            "next_eligible_at": _now(),
             "reason": reason,
             "receipt": facts.receipt.packet_id if facts.receipt else None,
         }
@@ -1868,110 +898,6 @@ class CampaignReactor:
             "dispositions with the machine trailer "
             "(LANE-BRANCH/COMMIT/QUICK/CLASSIFICATION).\n"
         )
-
-    def _dispatch_retry(self, record: LaneRecord) -> None:
-        """Re-dispatch an interrupted lane once, from its preserved prompt.
-
-        One auto-retry per ORIGINAL lane, only for interruptions (pressure,
-        timeout), and never into an occupied worktree: replaying a backlog
-        of cancelled events once dispatched a retry per event and piled
-        twelve jobs into one checkout (2026-09-01).
-        """
-        key = f"retry:{record.job_id}"
-        if key in self._board.keeper:
-            return
-        stored = self._job_record(record.job_id)
-        if stored is not None:
-            spec = stored.get("spec") if isinstance(stored, Mapping) else None
-            contract = spec.get("contract") if isinstance(spec, Mapping) else None
-            if isinstance(contract, Mapping) and contract.get("retry_of"):
-                return  # already a retry: one auto-attempt per chain
-            state = stored.get("state") if isinstance(stored, Mapping) else None
-            cancellation = (
-                state.get("cancellation") if isinstance(state, Mapping) else None
-            )
-            reason = (
-                str(cancellation.get("reason", ""))
-                if isinstance(cancellation, Mapping)
-                else ""
-            )
-            if record.phase == "cancelled" and not reason.startswith(
-                "pressure-preemption"
-            ):
-                # An explicit cancel is a decision, not an interruption.
-                return
-        checkout_id = (record.checkout or {}).get("checkout_id")
-        if isinstance(checkout_id, str) and self._checkout_owned(checkout_id):
-            return  # worktree already owned; no duplicate agent
-        self._board.keeper[key] = {
-            "emitted_at": _now(),
-            "backoff_seconds": 0,
-            "next_eligible_at": _now(),
-        }
-        try:
-            if self.retry_dispatcher is not None:
-                self.retry_dispatcher(record.job_id)
-            else:
-                subprocess.run(
-                    [self.agentctl_executable, "job", "retry", record.job_id],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                )
-        except (OSError, subprocess.SubprocessError) as error:
-            self._board.record_error(-1, f"retry {record.job_id}: {error}")
-
-    def _dispatch_dispose(self, project: str, bead_id: str) -> None:
-        """Dispose the packet workspace of a closed bead.
-
-        Packet launch names workspaces packet-<bead-id>; disposal safety
-        (clean tree, published head) is enforced by the workspace owner, so
-        the reactor only asks, it never forces.
-        """
-        workspace = f"packet-{bead_id}"
-        key = f"dispose:{workspace}"
-        if key in self._board.keeper:
-            return
-        self._board.keeper[key] = {
-            "emitted_at": _now(),
-            "backoff_seconds": 0,
-            "next_eligible_at": _now(),
-        }
-        try:
-            if self.dispose_dispatcher is not None:
-                self.dispose_dispatcher(workspace)
-            else:
-                listing = subprocess.run(
-                    [self.agentctl_executable, "--plain", "workspace", "list"],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                )
-                target = None
-                for line in listing.stdout.splitlines():
-                    parts = line.split()
-                    if parts and parts[0] == workspace:
-                        target = parts[-1]
-                        break
-                if target is None:
-                    return
-                subprocess.run(
-                    [
-                        self.agentctl_executable,
-                        "workspace",
-                        "dispose",
-                        target,
-                        "--acknowledge-published",
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-        except (OSError, subprocess.SubprocessError) as error:
-            self._board.record_error(-1, f"dispose {workspace}: {error}")
 
     def _refill_targets(self) -> tuple[str, ...]:
         if self.refill_projects:
@@ -2033,13 +959,6 @@ class CampaignReactor:
         try:
             reader = SubprocessBdReader(root)
             config = PacketConfig.load(root)
-            # Parked under a judgment reason that no longer exists; the
-            # entries would otherwise sit on the board forever.
-            self._board.judgment_queue[:] = [
-                item
-                for item in self._board.judgment_queue
-                if item.get("reason") != "conflict metadata is incomplete"
-            ]
             self._reconcile_claims(project, root, reader)
             candidates: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
             for row in sorted(reader.ready(), key=frontier_order):
@@ -2074,18 +993,8 @@ class CampaignReactor:
                     continue
                 reason = _judgment_reason(row, snapshot)
                 if reason:
-                    record = {
-                        "project": project,
-                        "group": snapshot.group,
-                        "bead_ids": list(snapshot.bead_ids),
-                        "reason": reason,
-                        "queued_at": _now(),
-                    }
-                    if not any(
-                        item.get("group") == snapshot.group
-                        for item in self._board.judgment_queue
-                    ):
-                        self._board.judgment_queue.append(record)
+                    # The operator decides this one; a lane must not.
+                    self._board.record_error(-1, f"refill judgment {bead_id}: {reason}")
                     continue
                 candidates.append(
                     (bead_id, snapshot.bead_ids, snapshot.dimensions.conflict_keys)
@@ -2150,202 +1059,16 @@ class CampaignReactor:
                 ).isoformat(),
             }
 
-    def _verify_all_records(self) -> list[dict[str, Any]]:
-        """Read terminal verify_all records in execution order."""
-        if self.jobs_state_dir is None or not self.jobs_state_dir.is_dir():
-            self._verify_all_degraded_records = 0
-            return []
-        records: list[dict[str, Any]] = []
-        self._verify_all_degraded_records = 0
-        for path in self.jobs_state_dir.glob("*.json"):
-            try:
-                value = json.loads(path.read_text())
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                self._verify_all_degraded_records += 1
-                continue
-            if not isinstance(value, Mapping):
-                self._verify_all_degraded_records += 1
-                continue
-            spec = value.get("spec")
-            state = value.get("state")
-            if not isinstance(spec, Mapping) or not isinstance(state, Mapping):
-                self._verify_all_degraded_records += 1
-                continue
-            if (
-                spec.get("kind") != "declared-operation"
-                or spec.get("project_id") != "polylogue"
-                or spec.get("operation") != "verify_all"
-                or not state.get("terminal")
-            ):
-                continue
-            job_id = value.get("job_id")
-            created_at = value.get("created_at")
-            phase = state.get("phase")
-            if not all(
-                isinstance(item, str) and item for item in (job_id, created_at, phase)
-            ):
-                self._verify_all_degraded_records += 1
-                continue
-            records.append(
-                {
-                    "job_id": job_id,
-                    "created_at": created_at,
-                    "phase": phase,
-                    "state": dict(state),
-                }
-            )
-        records.sort(key=lambda item: (str(item["created_at"]), str(item["job_id"])))
-        return records
-
-    @staticmethod
-    def _corpus_failure(record: Mapping[str, Any]) -> dict[str, Any] | None:
-        if record.get("phase") == "succeeded":
-            return None
-        state = record.get("state")
-        failure: dict[str, Any] = {
-            "job_id": record["job_id"],
-            "created_at": record["created_at"],
-            "phase": record["phase"],
-        }
-        if isinstance(state, Mapping):
-            cancellation = state.get("cancellation")
-            if isinstance(cancellation, Mapping):
-                failure["cancellation"] = dict(cancellation)
-            error = state.get("error")
-            if isinstance(error, Mapping):
-                failure["error"] = dict(error)
-        return failure
-
-    def _check_verify_all_health(self) -> None:
-        records = self._verify_all_records()
-        failures: list[dict[str, Any]] = []
-        for record in reversed(records):
-            failure = self._corpus_failure(record)
-            if failure is None:
-                break
-            failures.append(failure)
-        failures.reverse()
-        latest = records[-1] if records else None
-        prior = self._board.corpus_health
-        if not failures:
-            self._board.corpus_health = {
-                "operation": "verify_all",
-                "threshold": self.verify_all_failure_threshold,
-                "consecutive_failures": 0,
-                "status": "healthy",
-                "latest_job_id": latest.get("job_id") if latest else None,
-                "latest_phase": latest.get("phase") if latest else None,
-                "failures": [],
-                "alert_event_id": None,
-                "degraded_records": self._verify_all_degraded_records,
-                "updated_at": _now(),
-            }
-            return
-        alerting = len(failures) >= self.verify_all_failure_threshold
-        alert_event_id = prior.get("alert_event_id") if alerting else None
-        if alerting and prior.get("status") != "alerting":
-            alert_event_id = hashlib.sha256(
-                json.dumps(failures, sort_keys=True, separators=(",", ":")).encode()
-            ).hexdigest()[:32]
-            append_event(
-                self.event_spool,
-                {
-                    "schema_version": EVENT_SCHEMA_VERSION,
-                    "event_id": alert_event_id,
-                    "kind": "corpus-health-alert",
-                    "project": "polylogue",
-                    "operation": "verify_all",
-                    "phase": "alerting",
-                    "threshold": self.verify_all_failure_threshold,
-                    "consecutive_failures": len(failures),
-                    "failures": failures[-MAX_CORPUS_FAILURES:],
-                    "emitted_at": _now(),
-                },
-            )
-        self._board.corpus_health = {
-            "operation": "verify_all",
-            "threshold": self.verify_all_failure_threshold,
-            "consecutive_failures": len(failures),
-            "status": "alerting" if alerting else "degraded",
-            "latest_job_id": latest["job_id"] if latest else None,
-            "latest_phase": latest["phase"] if latest else None,
-            "failures": failures[-MAX_CORPUS_FAILURES:],
-            "alert_event_id": alert_event_id,
-            "degraded_records": self._verify_all_degraded_records,
-            "updated_at": _now(),
-        }
-
     def run_once(self) -> int:
-        processed = 0
-        context = ReactionContext(self._board, self.bead_closer, self.project_roots)
-        for offset, event in self._available_events():
-            if event.get("kind") == "__invalid__":
-                self._board.record_error(
-                    offset, str(event.get("error", "invalid event"))
-                )
-            else:
-                self.registry.dispatch(event, context)
-                self._record_operation_request(event)
-                if event.get("kind") == "attested-agent":
-                    job_id = event.get("job_id")
-                    lane = (
-                        self._board.lanes.get(job_id)
-                        if isinstance(job_id, str)
-                        else None
-                    )
-                    if lane is not None and lane.phase == "succeeded":
-                        # A real completion proves dispatch works again;
-                        # collapse any accumulated refill backoff.
-                        self._board.keeper.pop(f"refill:{lane.project}", None)
-                    if lane is not None and lane.phase in {"cancelled", "timeout"}:
-                        self._dispatch_retry(lane)
-                    if lane is not None and lane.phase in {
-                        "cancelled",
-                        "timeout",
-                        "failed",
-                    }:
-                        self._release_beads(lane)
-                if (
-                    event.get("kind") == "harvest"
-                    and event.get("outcome") == "HARVEST_EMPTY"
-                ):
-                    self._park_empty_lane(event)
-                pr = self._board.prs.get(f"{event.get('repo')}#{event.get('pr')}")
-                closed = pr is not None and pr.bead_close_status == "closed"
-                if event.get("kind") in {"bead_close", "merge_close"} and (
-                    event.get("bead_closed") is True
-                    or event.get("kind") == "bead_close"
-                    or closed
-                ):
-                    project = event.get("project") or _repo_name(
-                        str(event.get("repo", ""))
-                    )
-                    if isinstance(project, str) and project:
-                        self._dispatch_refill(project)
-                        receipt_value = event.get("decision_receipt")
-                        closed_bead = (
-                            receipt_value.get("bead_id")
-                            if isinstance(receipt_value, Mapping)
-                            else (pr.bead_id if pr is not None else None)
-                        )
-                        if isinstance(closed_bead, str) and closed_bead:
-                            self._dispatch_dispose(project, closed_bead)
-            self._board.updated_at = _now()
-            self._board.save(self.board_path)
-            self._cursor.save(self.cursor_path)
-            processed += 1
+        """Advance, park, and refill every campaign project once."""
         for project in self._refill_targets():
             self._advance_lanes(project)
-        if self._board.keeper:
-            self._board.updated_at = _now()
-            self._board.save(self.board_path)
-        self._dispatch_pending_operations()
-        self._emit_keeper()
-        self._check_verify_all_health()
+            self._park_empty_lanes(project)
+            self._dispatch_refill(project)
+        self._board.expire_markers(datetime.now(UTC))
         self._board.updated_at = _now()
         self._board.save(self.board_path)
-        self._cursor.save(self.cursor_path)
-        return processed
+        return len(self._refill_targets())
 
     def run(self) -> None:
         while True:
@@ -2383,28 +1106,9 @@ def parser() -> argparse.ArgumentParser:
         "--interval-seconds", type=int, default=DEFAULT_INTERVAL_SECONDS
     )
     result.add_argument("--min-active-lanes", type=int, default=3)
-    result.add_argument(
-        "--lane-gate-threshold", type=int, default=DEFAULT_LANE_GATE_THRESHOLD
-    )
     result.add_argument("--refill-width-target", type=int)
     result.add_argument(
         "--refill-spacing-seconds", type=int, default=DEFAULT_REFILL_SPACING_SECONDS
-    )
-    result.add_argument(
-        "--verify-all-failure-threshold",
-        type=int,
-        default=DEFAULT_VERIFY_ALL_FAILURE_THRESHOLD,
-    )
-    result.add_argument(
-        "--keeper-backoff-seconds", type=int, default=DEFAULT_KEEPER_BACKOFF_SECONDS
-    )
-    result.add_argument(
-        "--max-keeper-backoff-seconds", type=int, default=MAX_KEEPER_BACKOFF_SECONDS
-    )
-    result.add_argument(
-        "--pr-age-threshold-seconds",
-        type=int,
-        default=DEFAULT_PR_AGE_THRESHOLD_SECONDS,
     )
     result.add_argument("--bd", default="bd")
     result.add_argument("--once", action="store_true")
@@ -2423,14 +1127,10 @@ def main(argv: list[str] | None = None) -> int:
         jobs_state_dir=arguments.jobs_state_dir,
         interval_seconds=arguments.interval_seconds,
         min_active_lanes=arguments.min_active_lanes,
-        lane_gate_threshold=arguments.lane_gate_threshold,
         refill_width_target=arguments.refill_width_target,
         refill_spacing_seconds=arguments.refill_spacing_seconds,
-        verify_all_failure_threshold=arguments.verify_all_failure_threshold,
-        keeper_backoff_seconds=arguments.keeper_backoff_seconds,
-        max_keeper_backoff_seconds=arguments.max_keeper_backoff_seconds,
-        pr_age_threshold_seconds=arguments.pr_age_threshold_seconds,
-        bead_closer=SubprocessBeadCloser(arguments.bd),
+        bead_releaser=SubprocessBeadReleaser(arguments.bd),
+        bead_parker=SubprocessBeadParker(arguments.bd),
     )
     if arguments.once:
         reactor.run_once()
