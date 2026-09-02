@@ -42,6 +42,7 @@ _DURABLE_KEEPER_PREFIXES = (
     "judged:",
 )
 MAX_EVENT_BYTES = 1_000_000
+ADVANCE_DISPATCHES_PER_TICK = 3
 # A dispatch record older than this names a head, receipt, or PR round that
 # no longer exists; keeping it only hides the live entries on the board.
 DURABLE_KEEPER_MAX_AGE_SECONDS = 3 * 24 * 60 * 60
@@ -1758,8 +1759,14 @@ class CampaignReactor:
         except (OSError, ValueError) as error:
             self._board.record_error(-1, f"advance {project}: {error}")
             return
+        launched = 0
         for facts in lanes:
             action = advance(facts)
+            if action.kind in {"verify", "harvest", "publish", "integrate", "rebase", "review-fix"}:
+                # Smooth bursts: the rest of the backlog advances next tick.
+                if launched >= ADVANCE_DISPATCHES_PER_TICK:
+                    continue
+                launched += 1
             self._dispatch_action(project, facts, action)
 
     def _closed_beads(self, project: str, root: Path) -> tuple[str, ...]:
