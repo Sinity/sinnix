@@ -454,9 +454,9 @@ def build_campaign_status(
             coordinator_label = next(iter(labels))
 
     pools = _mapping(admission.get("pools"))
-    budget = {
+    slots = {
         name: {
-            "budget_bytes": _mapping(value).get("memory_budget_bytes"),
+            "workers": _mapping(value).get("workers"),
             "occupied": len(_mapping(value).get("holders", []))
             if isinstance(_mapping(value).get("holders", []), list)
             else 0,
@@ -472,9 +472,8 @@ def build_campaign_status(
         else {}
     )
     admission_digest = {
-        "budget": budget,
-        "occupied_memory_bytes": host.get("occupied_memory_bytes"),
-        "budget_memory_bytes": host.get("budget_memory_bytes"),
+        "pools": slots,
+        "io_full_avg60": host.get("io_full_avg60"),
         "head_of_queue": {
             key: head.get(key)
             for key in ("job_id", "pool", "blocked_by", "position")
