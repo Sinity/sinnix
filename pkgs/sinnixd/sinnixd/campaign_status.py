@@ -110,6 +110,7 @@ def build_campaign_status(
     coordinator_label: str | None = None,
     now: datetime | None = None,
     state_root: Path | None = None,
+    project_root: Path | None = None,
 ) -> dict[str, Any]:
     """Compose a bounded digest without retaining coordinator state."""
     all_records = [record for record in records if _campaign(record)]
@@ -220,11 +221,16 @@ def build_campaign_status(
     corpus["failing_gate"] = failing_gate
     lanes_next: list[dict[str, Any]] = []
     if state_root is not None:
-        from .lane_facts import collect, lane_view, latest_sweep_pulls
+        from .lane_facts import closed_bead_ids, collect, lane_view, latest_sweep_pulls
 
         lanes_next = [
             lane_view(facts)
-            for facts in collect(project_id, state_root=state_root, receipt_pulls=latest_sweep_pulls(state_root))
+            for facts in collect(
+                project_id,
+                state_root=state_root,
+                receipt_pulls=latest_sweep_pulls(state_root),
+                closed_beads=closed_bead_ids(project_root, timeout=30) if project_root is not None else (),
+            )
         ][:MAX_LANES]
     return {
         "schema": "sinnix.agentctl.campaign-status.v1",

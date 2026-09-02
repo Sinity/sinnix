@@ -1775,21 +1775,12 @@ class CampaignReactor:
         now = time.monotonic()
         if cached is not None and now - cached[0] < 300:
             return cached[1]
-        try:
-            # Only the closed set, with a budget that survives a loaded host:
-            # the generic reader's 30 s listing of every bead timed out under
-            # IO stall and silently reported nothing closed.
-            result = subprocess.run(
-                ["bd", "list", "--status", "closed", "--json"],
-                cwd=root, capture_output=True, text=True, timeout=180, check=True,
-            )
-            rows = json.loads(result.stdout)
-        except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
-            self._board.record_error(-1, f"closed beads {project}: {error}")
+        from .lane_facts import closed_bead_ids
+
+        closed = closed_bead_ids(root)
+        if not closed:
+            self._board.record_error(-1, f"closed beads {project}: bd answered nothing")
             return cached[1] if cached is not None else ()
-        closed = tuple(
-            str(row.get("id")) for row in (rows if isinstance(rows, list) else []) if isinstance(row, Mapping) and row.get("id")
-        )
         self._closed_beads_cache[project] = (now, closed)
         return closed
 

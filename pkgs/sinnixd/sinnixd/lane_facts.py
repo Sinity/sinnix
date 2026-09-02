@@ -445,6 +445,19 @@ def pulls_from_sweep_actions(actions: Sequence[Mapping[str, Any]]) -> dict[str, 
     return pulls
 
 
+def closed_bead_ids(project_root: Path, *, run: Run = subprocess.run, timeout: float = 180) -> tuple[str, ...]:
+    """Closed bead ids for the project, or () when bd cannot answer."""
+    try:
+        result = run(
+            ["bd", "list", "--status", "closed", "--json"],
+            cwd=project_root, capture_output=True, text=True, timeout=timeout, check=True,
+        )
+        rows = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return ()
+    return tuple(str(row.get("id")) for row in (rows if isinstance(rows, list) else []) if isinstance(row, Mapping) and row.get("id"))
+
+
 def latest_sweep_pulls(state_root: Path) -> dict[str, Pull]:
     """PRs by receipt id from the newest finished publication-sweep job."""
     newest: tuple[str, Mapping[str, Any]] | None = None
@@ -507,6 +520,7 @@ __all__ = [
     "Pull",
     "Receipt",
     "advance",
+    "closed_bead_ids",
     "collect",
     "derived_checkout_id",
     "lane_view",
