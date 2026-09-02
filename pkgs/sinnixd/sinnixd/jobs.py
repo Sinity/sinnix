@@ -65,17 +65,18 @@ CAPACITY_RETRY_DELAYS_SECONDS = (5, 30, 120)
 MAX_ADMISSION_CACHE_ENTRIES = 128
 MIB = 1024 * 1024
 GIB = 1024 * MIB
-MIN_HOST_MEMORY_RESERVE_BYTES = 2 * GIB
+MIN_HOST_MEMORY_RESERVE_BYTES = 4 * GIB
 # The budget is already computed against available memory, so what everything
 # outside the job plane uses is subtracted before the reserve applies. The
 # reserve is pure headroom on top of that; sized so a lane's peak reservation
 # and the harvest that publishes it fit on a 32 GiB host at once.
 MAX_HOST_MEMORY_RESERVE_BYTES = 6 * GIB
-# Lean reserve: sane oomd thresholds, live pressure preemption, and the
-# distress-gated swap block are the safety nets; a fat static reserve only
-# starves admission (2026-08-31: the queue sat at zero running jobs while
-# gigabytes idled inside the reserve).
-HOST_MEMORY_RESERVE_FRACTION = 0.08
+# The reserve is what the next admission leaves free, and it matches the
+# scarcity floor below which a memory stall is preemptable: admission stops
+# exactly where eviction would begin. Larger reserves starve admission
+# (2026-08-31); smaller ones ran the host into 14 GB of swap and ten-minute
+# environment preflights (2026-09-02).
+HOST_MEMORY_RESERVE_FRACTION = 0.12
 # A launched job needs this long before its footprint is in MemAvailable.
 ADMISSION_SETTLE_SECONDS = 90.0
 MIN_SWAP_FREE_FRACTION = 0.15
