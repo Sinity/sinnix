@@ -1252,7 +1252,13 @@ in
         ];
         unitConfig.RequiresMountsFor = [ machineTelemetryBackupRoot ];
       };
-      serviceConfig.TimeoutStopSec = "15s";
+      serviceConfig = {
+        # This is a Type=oneshot service, so TimeoutStartSec bounds the full
+        # Borg process lifetime. The dump set can be large on the HDD; keep
+        # the measured 12-hour allowance used by the weekly restore path.
+        TimeoutStartSec = "12h";
+        TimeoutStopSec = "15s";
+      };
       environment = {
         BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
         BORG_CACHE_DIR = borgCacheDir;

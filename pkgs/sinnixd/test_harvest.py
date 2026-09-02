@@ -50,19 +50,25 @@ def _context(
     )
 
 
-
 def _verified_job(root: Path, state: Path, context: harvest.HarvestContext) -> str:
     """Plant a succeeded verify_affected job for the workspace at its current HEAD."""
     job_id = "0f7d4d0e-2f6a-4b1e-9c0a-3d1e5a6b7c8d"
     (state / "jobs").mkdir(parents=True, exist_ok=True)
-    (state / "jobs" / f"{job_id}.json").write_text(json.dumps({
-        "spec": {
-            "operation": "verify_affected",
-            "checkout": {"checkout_id": context.workspace_id, "head": harvest._git(subprocess.run, root, "rev-parse", "HEAD")},
-        },
-        "state": {"phase": "succeeded", "terminal": True},
-        "artifacts": {},
-    }))
+    (state / "jobs" / f"{job_id}.json").write_text(
+        json.dumps(
+            {
+                "spec": {
+                    "operation": "verify_affected",
+                    "checkout": {
+                        "checkout_id": context.workspace_id,
+                        "head": harvest._git(subprocess.run, root, "rev-parse", "HEAD"),
+                    },
+                },
+                "state": {"phase": "succeeded", "terminal": True},
+                "artifacts": {},
+            }
+        )
+    )
     return job_id
 
 
@@ -85,6 +91,75 @@ def test_compile_packet_halts_before_publication_and_spools_review_evidence(
     event = json.loads((state / "events.jsonl").read_text())
     assert event["kind"] == "harvest"
     assert event["transition"] == "review-required"
+
+
+def test_failing_oracle_returns_gate_red_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, _remote = _repository(tmp_path)
+    state = tmp_path / "state"
+    context = _context(root, state)
+    published = False
+
+    def publish_sentinel(*_args, **_kwargs):
+        nonlocal published
+        published = True
+        pytest.fail("failing oracle reached publication")
+
+    monkeypatch.setattr(harvest, "authorize", publish_sentinel)
+
+    result = harvest.compile_packet(
+        context, oracle_command="printf 'clone mismatch\\n' >&2; exit 7"
+    )
+
+    assert result["outcome"] == harvest.GATE_RED
+    assert result["oracle"]["exit_code"] == 7
+    assert result["oracle"]["stderr"] == "clone mismatch\n"
+    assert published is False
+
+
+def test_authorize_rejects_a_changed_oracle_command_in_receipt(
+    tmp_path: Path,
+) -> None:
+    root, _remote = _repository(tmp_path)
+    state = tmp_path / "state"
+    context = _context(root, state)
+    compiled = harvest.compile_packet(context, oracle_command="printf 'stable\\n'")
+    packet_id = compiled["packet"]["packet_id"]
+    receipt_path = state / "harvest-packets" / f"{packet_id}.json"
+    receipt = json.loads(receipt_path.read_text())
+    receipt["oracle"]["command"] = "printf 'changed\\n'"
+    receipt_path.write_text(json.dumps(receipt))
+
+    with pytest.raises(harvest.HarvestError, match="oracle receipt is invalid"):
+        harvest.authorize(
+            context,
+            receipt_ref=compiled["receipt_ref"],
+            title="fix: publish the harvested lane branch",
+            body="Reviewed packet.",
+        )
+
+
+def test_authorize_rejects_a_receipt_without_the_oracle_digest(
+    tmp_path: Path,
+) -> None:
+    root, _remote = _repository(tmp_path)
+    state = tmp_path / "state"
+    context = _context(root, state)
+    compiled = harvest.compile_packet(context, oracle_command="printf 'stable\\n'")
+    packet_id = compiled["packet"]["packet_id"]
+    receipt_path = state / "harvest-packets" / f"{packet_id}.json"
+    receipt = json.loads(receipt_path.read_text())
+    del receipt["oracle"]["command_sha256"]
+    receipt_path.write_text(json.dumps(receipt))
+
+    with pytest.raises(harvest.HarvestError, match="oracle receipt is invalid"):
+        harvest.authorize(
+            context,
+            receipt_ref=compiled["receipt_ref"],
+            title="fix: publish the harvested lane branch",
+            body="Reviewed packet.",
+        )
 
 
 def test_authorize_requires_receipt_and_runs_publish_pipeline(
@@ -171,7 +246,7 @@ def test_cancelled_harvest_restores_rebased_workspace(
     with pytest.raises(KeyboardInterrupt):
         harvest.authorize(
             context,
-        affected_job=_verified_job(root, state, context),
+            affected_job=_verified_job(root, state, context),
             receipt_ref=receipt,
             title="fix: restore cancelled harvest workspaces",
             body="Reviewed packet.",
@@ -695,7 +770,9 @@ def test_publish_derives_identity_and_authorizes_in_one_pass(
         return {"outcome": harvest.HARVEST_OK, "phase": "published"}
 
     monkeypatch.setattr(harvest, "authorize", fake_authorize)
-    result = harvest.publish(context, close=True, affected_job=_verified_job(root, state, context))
+    result = harvest.publish(
+        context, close=True, affected_job=_verified_job(root, state, context)
+    )
     assert result["outcome"] == harvest.HARVEST_OK
     assert captured.get("lane_job_id", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa") == (
         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -803,12 +880,14 @@ def test_publication_text_from_files_matches_the_minted_binding(tmp_path: Path) 
     (lane / "body.md").write_text("Body.\n\n")
     context = SimpleNamespace(worktree=tmp_path)
     minted = harvest._digest(harvest._lane_artifact(context, "title") or "")
-    parsed = argparse.Namespace(title="", title_file=lane / "title", body="", body_file=lane / "body.md")
+    parsed = argparse.Namespace(
+        title="", title_file=lane / "title", body="", body_file=lane / "body.md"
+    )
     title = harvest._read_text(parsed.title_file, "t").strip()
     assert harvest._digest(title) == minted
-    assert harvest._digest(harvest._read_text(parsed.body_file, "b").strip()) == harvest._digest(
-        harvest._lane_artifact(context, "body.md") or ""
-    )
+    assert harvest._digest(
+        harvest._read_text(parsed.body_file, "b").strip()
+    ) == harvest._digest(harvest._lane_artifact(context, "body.md") or "")
 
 
 def test_redflags_polarity_needs_a_removed_success_assertion() -> None:
@@ -834,11 +913,13 @@ def test_redflags_gate_flag_names_gates_not_every_verify_module() -> None:
     """Anti-vacuity: the `verify` prefix matched verify_runs.py (receipt
     bookkeeping) and parked packet-polylogue-a74ru for a reader."""
     _, bookkeeping = harvest._redflags(
-        "diff --git a/devtools/verify_runs.py b/devtools/verify_runs.py\n+    row[\"agentctl\"] = 1\n"
+        'diff --git a/devtools/verify_runs.py b/devtools/verify_runs.py\n+    row["agentctl"] = 1\n'
     )
     assert not any(flag.startswith("FLAG: verification gate") for flag in bookkeeping)
 
-    _, gate = harvest._redflags("diff --git a/devtools/verify.py b/devtools/verify.py\n+    pass\n")
+    _, gate = harvest._redflags(
+        "diff --git a/devtools/verify.py b/devtools/verify.py\n+    pass\n"
+    )
     assert "FLAG: verification gate or baseline edited" in gate
 
 
@@ -857,12 +938,23 @@ def test_authorization_binds_the_head(tmp_path: Path) -> None:
     from sinnixd.harvest import HarvestContext, _authorization
 
     context = HarvestContext(
-        worktree=tmp_path, project_id="polylogue", workspace_id="worktree-x", job_id="job-1", state_root=tmp_path / "state"
+        worktree=tmp_path,
+        project_id="polylogue",
+        workspace_id="worktree-x",
+        job_id="job-1",
+        state_root=tmp_path / "state",
     )
     assert _authorization(context, "a" * 40) is None
     (tmp_path / ".lane").mkdir()
-    (tmp_path / ".lane" / "authorization.json").write_text(json.dumps({"head": "a" * 40, "reason": "reviewed by hand"}))
-    assert _authorization(context, "a" * 40) == {"head": "a" * 40, "reason": "reviewed by hand", "at": "", "by": "operator"}
+    (tmp_path / ".lane" / "authorization.json").write_text(
+        json.dumps({"head": "a" * 40, "reason": "reviewed by hand"})
+    )
+    assert _authorization(context, "a" * 40) == {
+        "head": "a" * 40,
+        "reason": "reviewed by hand",
+        "at": "",
+        "by": "operator",
+    }
     assert _authorization(context, "b" * 40) is None
 
 

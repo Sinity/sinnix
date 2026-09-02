@@ -5,9 +5,9 @@ description: Read, compare, summarize, or continue complete ChatGPT conversation
 
 # ChatGPT conversations
 
-Use this skill for the operator's currently open ChatGPT conversations. It is a
-browser DOM adapter whose truth is the full content currently rendered in an
-explicitly selected tab. Use Polylogue for durable historical session search.
+Use this skill for the operator's currently open ChatGPT conversations. Full
+reads use the provider-native conversation endpoint in an explicitly selected
+tab. Use Polylogue for durable historical session search.
 
 Run the bundled `scripts/sinnix-chatgpt-conversations` helper. It uses the
 shared Chrome CDP control plane, requires an explicit page ID for individual
@@ -16,18 +16,23 @@ reads, and does not alter the browser.
 ## Read conversations
 
 1. Start with `scripts/sinnix-chatgpt-conversations list`. It returns one
-   compact row per open ChatGPT conversation: page ID, URL, title, role order,
-   per-turn character counts, attachment-turn indexes, and total characters.
-2. When the work requires the actual conversation, read all currently rendered
-   turns and their complete text directly:
+   compact row per open ChatGPT conversation with rendered-DOM counts plus
+   cheap native evidence (`native_status`, mapping count, and native message
+   count).
+2. When the work requires the actual conversation, use the provider-native
+   active branch and complete text:
 
    ```bash
    scripts/sinnix-chatgpt-conversations full <page-id>
    ```
 
-   Use `--markdown` only when a human-readable handoff is preferable to the
-   structured JSON record. Full reads are the normal choice when the agent must
-   understand the conversation as a whole.
+   The result is ordered from root to `current_node`, includes stable provider
+   IDs, roles, timestamps, attachment metadata, fidelity and provenance, and
+   retains complete native records in `all_messages` plus an `all_mapping_nodes`
+   index for every branch. Use
+   `--output FILE` for a large record; it is created atomically with mode 600.
+   Native failure is explicitly marked `fidelity: dom_degraded` and
+   `provenance.complete: false`.
 
 3. Use `read` only to reduce context usage when a narrower range answers the
    task:
@@ -51,16 +56,17 @@ reads, and does not alter the browser.
 
 ## Transcript contract
 
-The helper returns `sinnix-chatgpt-conversation-v1` records. Each message has:
+The helper returns `sinnix-chatgpt-conversation-v2` records for `full`. Each
+native message has:
 
-- stable tab-local `index` and page-provided `message_id` where available;
-- `role` and original `text_characters`;
-- complete text from `full`, or a paged `text` segment with an explicit
-  truncation flag from `read`;
-- rendered `links`; and
-- visible attachment references, including their turn-local `index`, label,
-  kind, test ID, direct href when ChatGPT exposes one, and rendered control
-  metadata.
+- root-to-current-branch order, `provider_id`, `node_id`, parent ID, role,
+  complete text, ISO timestamp, and provider attachment metadata;
+- `provenance.source: chatgpt_backend_api`, `fidelity: native`, and
+  `provenance.complete: true`.
+
+`read` remains the bounded rendered-DOM route and returns v1 records with
+explicit text paging. Its counts describe rendered content only; it is not a
+complete-conversation proof.
 
 An attachment reference proves that the tab visibly rendered it and gives the
 agent stable page, message, and attachment context for a requested action. It

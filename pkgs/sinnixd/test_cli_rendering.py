@@ -49,7 +49,27 @@ def test_job_record_renders_one_line() -> None:
 
 def test_error_envelope_renders_error_line() -> None:
     rendered = _render_plain({"ok": False, "error": {"code": "X", "message": "boom"}})
-    assert rendered == "ERROR: boom"
+    assert rendered == "ERROR [X]: boom"
+
+
+def test_error_envelope_renders_safe_operation_and_effect() -> None:
+    rendered = _render_plain(
+        {
+            "ok": False,
+            "error": {
+                "code": "RESPONSE_BUDGET_EXCEEDED",
+                "message": "sinnixd response budget exceeded",
+                "details": {
+                    "kind": "inline",
+                    "value": {"operation": "job.start", "effect": "possible"},
+                },
+            },
+        }
+    )
+    assert rendered == (
+        "ERROR [RESPONSE_BUDGET_EXCEEDED operation=job.start effect=possible]: "
+        "sinnixd response budget exceeded"
+    )
 
 
 def test_failed_job_plain_status_leads_with_terminal_cause() -> None:

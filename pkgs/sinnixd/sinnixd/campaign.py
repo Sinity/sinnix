@@ -7,6 +7,8 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
+
+from .limits import MAX_AGENT_TIMEOUT_SECONDS
 from .packets import (
     PacketConfig,
     PacketError,
@@ -15,8 +17,6 @@ from .packets import (
     derived_workspace,
     runtime_dimensions,
 )
-
-from .limits import MAX_AGENT_TIMEOUT_SECONDS
 
 RESUME_PREAMBLE = (
     "RESUME NOTICE: this worktree already carries partial work for this packet "

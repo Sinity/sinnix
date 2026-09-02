@@ -1,0 +1,142 @@
+--- a/watchers/Cargo.toml
++++ b/watchers/Cargo.toml
+@@ -10,6 +10,7 @@
+ path = "src/lib.rs"
+ 
+ [dev-dependencies]
++tokio = { workspace = true, features = ["rt", "macros", "test-util", "time"] }
+ rstest = "0.26.1"
+ tempfile = "3.13.0"
+ 
+--- a/watchers/src/report_client.rs
++++ b/watchers/src/report_client.rs
+@@ -15,6 +15,11 @@
+     active_window_bucket_name: String,
+ }
+ 
++// One event value is reused for every attempt, so an accepted request whose
++// response was lost merges server-side on the same timestamp: retrying any
++// transport failure cannot double-count a transition.
++const RETRY_DELAYS_SECONDS: [u64; 3] = [1, 2, 4];
++
+ impl ReportClient {
+     pub async fn new(config: Config) -> anyhow::Result<Self, Box<dyn Error>> {
+         let client = AwClient::new(&config.client_host(), config.port, "awatcher")?;
+@@ -41,22 +46,30 @@
+         Fut: Future<Output = Result<T, E>>,
+         E: std::error::Error + Send + Sync + 'static,
+     {
+-        for (attempt, &secs) in [1, 2, 4].iter().enumerate() {
++        for (attempt, secs) in RETRY_DELAYS_SECONDS.iter().copied().enumerate() {
+             match f().await {
+                 Ok(val) => return Ok(val),
+-                Err(e)
+-                    if e.to_string()
+-                        .contains("tcp connect error: Connection refused") =>
+-                {
+-                    warn!("Failed to connect on attempt #{attempt}, retrying: {e}");
++                Err(e) => {
++                    warn!(
++                        "Heartbeat request failed on attempt #{}, retrying in {secs}s: {e}",
++                        attempt + 1
++                    );
+ 
+                     tokio::time::sleep(tokio::time::Duration::from_secs(secs)).await;
+                 }
+-                Err(e) => return Err(e),
+             }
+         }
+ 
+-        f().await
++        match f().await {
++            Ok(val) => Ok(val),
++            Err(e) => {
++                error!(
++                    "Heartbeat request failed after {} attempts: {e}",
++                    RETRY_DELAYS_SECONDS.len() + 1
++                );
++                Err(e)
++            }
++        }
+     }
+ 
+     pub async fn ping(
+@@ -250,3 +263,78 @@
+         }
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::{ReportClient, RETRY_DELAYS_SECONDS};
++    use std::sync::{Arc, Mutex};
++
++    fn transport_error(message: &str) -> std::io::Error {
++        std::io::Error::new(std::io::ErrorKind::ConnectionReset, message.to_string())
++    }
++
++    #[tokio::test(start_paused = true)]
++    async fn retry_reuses_the_same_event_value() {
++        let seen = Arc::new(Mutex::new(Vec::new()));
++        let seen_by_request = Arc::clone(&seen);
++        let timestamp = "2026-09-01T10:00:00Z";
++        let result = ReportClient::run_with_retries(move || {
++            let seen = Arc::clone(&seen_by_request);
++            async move {
++                let mut seen = seen.lock().unwrap();
++                seen.push(timestamp);
++                if seen.len() == 1 {
++                    Err(transport_error("response lost"))
++                } else {
++                    Ok::<_, std::io::Error>(())
++                }
++            }
++        })
++        .await;
++        assert!(result.is_ok());
++        assert_eq!(*seen.lock().unwrap(), vec![timestamp, timestamp]);
++    }
++
++    #[tokio::test(start_paused = true)]
++    async fn failure_is_bounded_to_one_attempt_past_the_delays() {
++        let attempts = Arc::new(Mutex::new(0_usize));
++        let attempts_by_request = Arc::clone(&attempts);
++        let result = ReportClient::run_with_retries(move || {
++            let attempts = Arc::clone(&attempts_by_request);
++            async move {
++                *attempts.lock().unwrap() += 1;
++                Err::<(), _>(transport_error("timeout"))
++            }
++        })
++        .await;
++        assert!(result.is_err());
++        assert_eq!(
++            *attempts.lock().unwrap(),
++            RETRY_DELAYS_SECONDS.len() + 1
++        );
++    }
++
++    #[tokio::test(start_paused = true)]
++    async fn a_non_connection_error_is_retried_too() {
++        let attempts = Arc::new(Mutex::new(0_usize));
++        let attempts_by_request = Arc::clone(&attempts);
++        let result = ReportClient::run_with_retries(move || {
++            let attempts = Arc::clone(&attempts_by_request);
++            async move {
++                let mut attempts = attempts.lock().unwrap();
++                *attempts += 1;
++                if *attempts == 1 {
++                    Err(std::io::Error::new(
++                        std::io::ErrorKind::BrokenPipe,
++                        "operation timed out",
++                    ))
++                } else {
++                    Ok::<_, std::io::Error>(())
++                }
++            }
++        })
++        .await;
++        assert!(result.is_ok());
++        assert_eq!(*attempts.lock().unwrap(), 2);
++    }
++}

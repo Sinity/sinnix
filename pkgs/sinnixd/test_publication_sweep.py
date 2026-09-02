@@ -8,8 +8,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sinnixd.publication_sweep import (
-    answered_rounds,
     PullState,
+    answered_rounds,
     decide,
     latest_review,
     parse_trailers,
@@ -105,10 +105,24 @@ class FakeRun:
         if "pulls/41/comments" in joined:
             # A finding older than the +1: answered, so PR 41 is clean.
             return subprocess.CompletedProcess(
-                argv, 0, json.dumps([{"id": 1, "login": "chatgpt-codex-connector[bot]", "reply_to": None, "at": "T1"}]), ""
+                argv,
+                0,
+                json.dumps(
+                    [
+                        {
+                            "id": 1,
+                            "login": "chatgpt-codex-connector[bot]",
+                            "reply_to": None,
+                            "at": "T1",
+                        }
+                    ]
+                ),
+                "",
             )
         if "reviews" in joined:
-            return subprocess.CompletedProcess(argv, 0, json.dumps([{"commit": "a" * 40, "at": "T1"}]), "")
+            return subprocess.CompletedProcess(
+                argv, 0, json.dumps([{"commit": "a" * 40, "at": "T1"}]), ""
+            )
         if "issues/41/comments" in joined:
             return subprocess.CompletedProcess(argv, 0, json.dumps([]), "")
         if "/commits/" in joined:
@@ -146,7 +160,9 @@ def test_sweep_merges_clean_pr_and_closes_its_bead(tmp_path: Path) -> None:
     )
     packets = tmp_path / "packets"
     packets.mkdir()
-    (packets / "harvest-9.json").write_text(json.dumps({"publication": {"affected_tests": "passed"}}))
+    (packets / "harvest-9.json").write_text(
+        json.dumps({"publication": {"affected_tests": "passed"}})
+    )
     receipt = sweep(
         "owner/repo",
         project="polylogue",
@@ -183,9 +199,14 @@ def test_two_answered_rounds_bound_review() -> None:
     assert answered_rounds([(t1, True), (t2, False)]) == 0
     assert answered_rounds([(t1, True), (t2, True), (t3, True)]) == 3
 
-    assert decide(pull(review_findings=1, answered_rounds=2), now=NOW) == "merge-answered"
+    assert (
+        decide(pull(review_findings=1, answered_rounds=2), now=NOW) == "merge-answered"
+    )
     assert decide(pull(review_findings=1, answered_rounds=1), now=NOW) == "findings"
-    assert decide(pull(review_findings=1, answered_rounds=2, ci_red=True), now=NOW) == "ci-red"
+    assert (
+        decide(pull(review_findings=1, answered_rounds=2, ci_red=True), now=NOW)
+        == "ci-red"
+    )
 
 
 def test_review_absent_grace_runs_from_the_latest_push() -> None:
@@ -194,7 +215,10 @@ def test_review_absent_grace_runs_from_the_latest_push() -> None:
     old = (NOW - timedelta(hours=2)).isoformat()
     fresh = (NOW - timedelta(minutes=5)).isoformat()
     assert decide(pull(created_at=old, head_pushed_at=fresh), now=NOW) == "wait"
-    assert decide(pull(created_at=old, head_pushed_at=old), now=NOW) == "merge-review-absent"
+    assert (
+        decide(pull(created_at=old, head_pushed_at=old), now=NOW)
+        == "merge-review-absent"
+    )
 
 
 def test_a_receipt_without_test_evidence_never_merges(tmp_path: Path) -> None:
@@ -213,7 +237,9 @@ def test_a_receipt_without_test_evidence_never_merges(tmp_path: Path) -> None:
     )
     packets = tmp_path / "packets"
     packets.mkdir()
-    (packets / "harvest-10.json").write_text(json.dumps({"publication": {"affected_tests": "unavailable"}}))
+    (packets / "harvest-10.json").write_text(
+        json.dumps({"publication": {"affected_tests": "unavailable"}})
+    )
     receipt = sweep(
         "owner/repo",
         project="polylogue",
@@ -225,5 +251,18 @@ def test_a_receipt_without_test_evidence_never_merges(tmp_path: Path) -> None:
     )
     assert fake.merged == []
     assert [action["verdict"] for action in receipt["actions"]] == ["no-test-evidence"]
-    (packets / "harvest-10.json").write_text(json.dumps({"authorization": {"head": "d" * 40}}))
-    assert sweep("owner/repo", project="polylogue", project_root=tmp_path, spool=tmp_path / "events.jsonl", run=FakeRun(fake.pr_rows), now=NOW, packets_root=packets)["actions"][0]["verdict"] != "no-test-evidence"
+    (packets / "harvest-10.json").write_text(
+        json.dumps({"authorization": {"head": "d" * 40}})
+    )
+    assert (
+        sweep(
+            "owner/repo",
+            project="polylogue",
+            project_root=tmp_path,
+            spool=tmp_path / "events.jsonl",
+            run=FakeRun(fake.pr_rows),
+            now=NOW,
+            packets_root=packets,
+        )["actions"][0]["verdict"]
+        != "no-test-evidence"
+    )

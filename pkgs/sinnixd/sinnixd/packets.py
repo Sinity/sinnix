@@ -434,6 +434,7 @@ class PacketDimensions:
     conflict_keys: tuple[str, ...]
     affected_paths: tuple[str, ...]
     packet_intent: tuple[str, ...]
+    oracle_command: str | None = None
     inferred_conflict_keys: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -448,6 +449,7 @@ class PacketDimensions:
             "inferred_conflict_keys": list(self.inferred_conflict_keys),
             "affected_paths": list(self.affected_paths),
             "packet_intent": list(self.packet_intent),
+            "oracle_command": self.oracle_command,
         }
 
 
@@ -459,6 +461,7 @@ def runtime_dimensions(dimensions: PacketDimensions) -> dict[str, str | int]:
         "model": dimensions.model,
         "effort": dimensions.effort,
         "model_policy": dimensions.model_policy,
+        "oracle_command": dimensions.oracle_command or "",
         "conflict_keys": ";".join(dimensions.conflict_keys),
         "inferred_conflict_keys": ";".join(dimensions.inferred_conflict_keys),
     }
@@ -489,6 +492,21 @@ class PacketSnapshot:
             "atlas_refs": list(self.atlas_refs),
             "worker_contract_path": self.worker_contract_path,
         }
+
+
+def _oracle_command(beads: Sequence[Mapping[str, Any]]) -> str | None:
+    commands = {
+        value.strip()
+        for bead in beads
+        for value in [_metadata(bead).get("oracle_command")]
+        if isinstance(value, str) and value.strip()
+    }
+    if len(commands) > 1:
+        raise PacketError("packets in one lane must declare one oracle_command")
+    command = next(iter(commands), None)
+    if command is not None and (len(command.encode()) > 4_096 or "\x00" in command):
+        raise PacketError("oracle_command exceeds its bounded command limit")
+    return command
 
 
 def resolve_group(bead_id: str, reader: BdReader) -> tuple[str, tuple[str, ...]]:
@@ -558,6 +576,7 @@ def _policy_dimensions(
         conflict_keys=tuple(sorted(declared_keys | inferred_keys)),
         affected_paths=values("affected_paths"),
         packet_intent=intents,
+        oracle_command=_oracle_command(beads),
         # An explicit declaration owns the source label when it repeats an
         # inferred key; this makes the plan's annotation useful for overrides.
         inferred_conflict_keys=tuple(sorted(inferred_keys - declared_keys)),

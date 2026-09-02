@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Thread
@@ -12,7 +13,13 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 import tomllib
-from sinnix_mcp import ErrorCode, ErrorEnvelope, RequestEnvelope, ResponseEnvelope
+from sinnix_mcp import (
+    ErrorCode,
+    ErrorEnvelope,
+    OpaquePayload,
+    RequestEnvelope,
+    ResponseEnvelope,
+)
 
 from .api import (
     ProtocolError,
@@ -371,11 +378,13 @@ def parser() -> argparse.ArgumentParser:
     campaign_status.add_argument("--project", required=True)
     campaign_status.add_argument("--coordinator-label")
     campaign_view = campaign_subcommands.add_parser(
-        "view", help="One screen for the operator: what needs attention, lanes by next action, active jobs, corpus."
+        "view",
+        help="One screen for the operator: what needs attention, lanes by next action, active jobs, corpus.",
     )
     campaign_view.add_argument("--project", required=True)
     campaign_log = campaign_subcommands.add_parser(
-        "log", help="One lane's timeline: its jobs, the events about it, and its current verdict."
+        "log",
+        help="One lane's timeline: its jobs, the events about it, and its current verdict.",
     )
     campaign_log.add_argument("--project", required=True)
     campaign_log.add_argument("--workspace", required=True)
@@ -405,6 +414,16 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("--parameters-json", default="{}")
     start.add_argument("--bead-binding-json")
     start.add_argument("--dimensions-json", default="{}")
+    start.add_argument(
+        "--wait",
+        action="store_true",
+        help="Wait for the started job and return its result.",
+    )
+    start.add_argument(
+        "--wait-timeout-seconds",
+        type=int,
+        help="Maximum time to wait; defaults to the declared operation timeout.",
+    )
     fire = job_subcommands.add_parser(
         "fire", help="Fire one daemon-registered scheduled operation."
     )
@@ -495,7 +514,13 @@ def _unavailable_response(request: RequestEnvelope) -> dict[str, object]:
         request_id=request.request_id,
         correlation_id=request.correlation_id,
         owner=request.owner,
-        error=ErrorEnvelope(ErrorCode.OWNER_UNAVAILABLE, "sinnixd is unavailable"),
+        error=ErrorEnvelope(
+            ErrorCode.OWNER_UNAVAILABLE,
+            "sinnixd is unavailable",
+            details=OpaquePayload.bounded(
+                {"operation": request.operation, "effect": "none"}
+            ),
+        ),
     ).to_dict()
 
 
@@ -508,9 +533,29 @@ def _client_error_response(
             request_id=request.request_id,
             correlation_id=request.correlation_id,
             owner=request.owner,
-            error=ErrorEnvelope(ErrorCode.RESPONSE_BUDGET_EXCEEDED, str(error)),
+            error=ErrorEnvelope(
+                ErrorCode.RESPONSE_BUDGET_EXCEEDED,
+                "sinnixd response budget exceeded",
+                details=OpaquePayload.bounded(
+                    {"operation": request.operation, "effect": error.effect}
+                ),
+            ),
         ).to_dict()
-    return _unavailable_response(request)
+    code = getattr(error, "code", ErrorCode.OWNER_UNAVAILABLE)
+    effect = getattr(error, "effect", "none")
+    operation = getattr(error, "operation", request.operation)
+    return ResponseEnvelope(
+        request_id=request.request_id,
+        correlation_id=request.correlation_id,
+        owner=request.owner,
+        error=ErrorEnvelope(
+            code,
+            "sinnixd is unavailable"
+            if code is ErrorCode.OWNER_UNAVAILABLE
+            else "sinnixd request failed",
+            details=OpaquePayload.bounded({"operation": operation, "effect": effect}),
+        ),
+    ).to_dict()
 
 
 _JOB_ID_RE = re.compile(
@@ -543,7 +588,12 @@ def _operator_view(arguments: argparse.Namespace) -> int:
     from .operator_view import load_jobs, render_lane_log, render_overview
     from .publication_sweep import DEFAULT_SPOOL
 
-    request = _request("campaign.status", "campaign-orchestrator", {"project_id": arguments.project}, "operator")
+    request = _request(
+        "campaign.status",
+        "campaign-orchestrator",
+        {"project_id": arguments.project},
+        "operator",
+    )
     try:
         response = call(arguments.socket, request)
     except (OSError, ResponseBudgetExceeded) as error:
@@ -552,15 +602,31 @@ def _operator_view(arguments: argparse.Namespace) -> int:
         print(_render_plain(response))
         return 1
     payload = response.get("payload") or {}
-    status = payload.get("value") if isinstance(payload, Mapping) and isinstance(payload.get("value"), Mapping) else payload
+    status = (
+        payload.get("value")
+        if isinstance(payload, Mapping) and isinstance(payload.get("value"), Mapping)
+        else payload
+    )
     jobs = load_jobs(default_state_dir() / "jobs", arguments.project)
     if arguments.campaign_command == "log":
         print(render_lane_log(arguments.workspace, status, jobs, DEFAULT_SPOOL))
         return 0
-    active = subprocess.run(["systemctl", "--user", "is-active", "sinnixd-reactor"], capture_output=True, text=True, check=False)
+    active = subprocess.run(
+        ["systemctl", "--user", "is-active", "sinnixd-reactor"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     from .operator_view import _reactor_last_dispatch
 
-    print(render_overview(status, jobs, reactor_active=active.stdout.strip() == "active", last_dispatch=_reactor_last_dispatch(DEFAULT_SPOOL)))
+    print(
+        render_overview(
+            status,
+            jobs,
+            reactor_active=active.stdout.strip() == "active",
+            last_dispatch=_reactor_last_dispatch(DEFAULT_SPOOL),
+        )
+    )
     return 0
 
 
@@ -569,7 +635,24 @@ def _render_plain(response: Mapping[str, Any]) -> str:
     if response.get("ok") is not True:
         error = response.get("error")
         message = error.get("message") if isinstance(error, Mapping) else None
-        return f"ERROR: {message or 'request failed'}"
+        code = error.get("code") if isinstance(error, Mapping) else None
+        details = error.get("details") if isinstance(error, Mapping) else None
+        detail_value = details.get("value") if isinstance(details, Mapping) else None
+        operation = (
+            detail_value.get("operation") if isinstance(detail_value, Mapping) else None
+        )
+        effect = (
+            detail_value.get("effect") if isinstance(detail_value, Mapping) else None
+        )
+        context = ""
+        if isinstance(code, str):
+            context = f" [{code}"
+            if isinstance(operation, str):
+                context += f" operation={operation}"
+            if isinstance(effect, str):
+                context += f" effect={effect}"
+            context += "]"
+        return f"ERROR{context}: {message or 'request failed'}"
     payload = response.get("payload")
     value = payload.get("value") if isinstance(payload, Mapping) else payload
     if isinstance(value, str):
@@ -1292,7 +1375,10 @@ def main() -> int:
             },
             "operator",
         )
-    elif arguments.command == "campaign" and arguments.campaign_command in {"view", "log"}:
+    elif arguments.command == "campaign" and arguments.campaign_command in {
+        "view",
+        "log",
+    }:
         return _operator_view(arguments)
     elif arguments.command == "campaign" and arguments.campaign_command == "status":
         request = _request(
@@ -1592,6 +1678,7 @@ def main() -> int:
         request = _request("job.cancel", "systemd-jobs", {"job_id": arguments.job_id})
     else:
         parser().error(f"unsupported command: {arguments.command}")
+    wait_succeeded = True
     if not (arguments.command == "packet" and arguments.packet_command == "launch"):
         try:
             response = call(arguments.socket, request)
@@ -1601,13 +1688,25 @@ def main() -> int:
                 and response.get("ok") is True
             ):
                 response = _wait_for_delivery(arguments.socket, response)
+            elif (
+                getattr(arguments, "wait", False)
+                and arguments.command == "job"
+                and arguments.job_command == "start"
+                and response.get("ok") is True
+            ):
+                response, wait_succeeded = _wait_for_job(
+                    arguments.socket,
+                    response,
+                    timeout_seconds=arguments.wait_timeout_seconds,
+                )
         except (OSError, ProtocolError, SinnixdClientError) as error:
             response = _client_error_response(request, error)
+            wait_succeeded = False
     if getattr(arguments, "plain", False):
         print(_render_plain(response))
     else:
         print(json.dumps(response, indent=2, sort_keys=True))
-    return 0 if response.get("ok") is True else 1
+    return 0 if response.get("ok") is True and wait_succeeded else 1
 
 
 def _wait_for_delivery(
@@ -1643,6 +1742,51 @@ def _wait_for_delivery(
         socket_path,
         _request("job.result", "systemd-jobs", {"job_id": job_id}),
     )
+
+
+def _wait_for_job(
+    socket_path: Path,
+    started: dict[str, object],
+    *,
+    timeout_seconds: int | None,
+) -> tuple[dict[str, object], bool]:
+    """Follow a started job through terminal state and return its result."""
+    payload = started.get("payload")
+    value = payload.get("value") if isinstance(payload, dict) else None
+    job_id = value.get("job_id") if isinstance(value, dict) else None
+    declared_timeout = value.get("timeout_seconds") if isinstance(value, dict) else None
+    if not isinstance(job_id, str):
+        return started, False
+    wait_for = timeout_seconds if timeout_seconds is not None else declared_timeout
+    if not isinstance(wait_for, int) or wait_for < 1:
+        return started, False
+    deadline = time.monotonic() + wait_for
+    while True:
+        remaining = int(deadline - time.monotonic())
+        if remaining < 1:
+            return started, False
+        waited = call(
+            socket_path,
+            _request(
+                "job.wait",
+                "systemd-jobs",
+                {"job_id": job_id, "timeout_seconds": min(3600, remaining)},
+            ),
+        )
+        waited_value = (
+            waited.get("payload", {}).get("value") if isinstance(waited, dict) else None
+        )
+        state = waited_value.get("state") if isinstance(waited_value, dict) else None
+        if not isinstance(state, dict):
+            return waited, False
+        if state.get("terminal") is True:
+            if state.get("phase") != "succeeded":
+                return waited, False
+            result = call(
+                socket_path,
+                _request("job.result", "systemd-jobs", {"job_id": job_id}),
+            )
+            return result, result.get("ok") is True
 
 
 def daemon_main() -> None:

@@ -22,6 +22,15 @@
 # ActivityWatch/aw-server-rust#256 (currently only in unreleased 0.14.0
 # betas) -- drop this patch, it will fail to apply (loud failure) once the
 # upstream source already contains the fix.
+#
+# awatcher's retry helper only recognized one connection error spelling and
+# made a fourth attempt outside its retry logging. The watcher uses one event
+# value for every attempt, so retrying transport failures is safe for
+# ActivityWatch heartbeat semantics: an accepted request followed by a lost
+# response is merged by the server using the same timestamp and data.
+#
+# recheck: when nixpkgs awatcher contains bounded retries for all reqwest
+# transport failures and tests the accepted-then-lost-response case.
 _: _final: prev: {
   aw-server-rust = prev.aw-server-rust.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
@@ -32,5 +41,16 @@ _: _final: prev: {
         doCheck = false;
       });
     };
+  });
+
+  awatcher = prev.awatcher.overrideAttrs (old: {
+    patches = (old.patches or [ ]) ++ [ ./activitywatch-awatcher-retry.patch ];
+    doCheck = true;
+    # The retry helper lives in the workspace's `watchers` library, which the
+    # default single-package `cargo test` never builds.
+    cargoTestFlags = (old.cargoTestFlags or [ ]) ++ [
+      "--package"
+      "watchers"
+    ];
   });
 }

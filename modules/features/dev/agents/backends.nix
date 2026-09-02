@@ -54,6 +54,19 @@ let
   resolveSecretPath =
     secretName: lib.attrByPath [ "secrets" "paths" secretName ] "/run/agenix/${secretName}" sinnixCfg;
 
+  # Put the outermost interactive agent process in the same cgroup tree as
+  # declared agent work. Processes launched from an existing managed job or
+  # agent scope already inherit the correct accounting boundary.
+  agentScopePrelude = ''
+    case "$(< /proc/self/cgroup)" in
+      *"/agent.slice/"*|*"/sinnixd-work.slice/"*) ;;
+      *)
+        exec ${pkgs.systemd}/bin/systemd-run --user --scope --quiet --wait \
+          --slice=agent.slice -- "$0" "$@"
+        ;;
+    esac
+  '';
+
   # Backend-switch env builder for the claude-deepseek/claude-local wrappers
   # (flake/data/agent-lanes.nix claudeLanes): points Claude Code's native
   # Anthropic-protocol client at a non-Anthropic endpoint and fans one model
@@ -152,6 +165,8 @@ let
         #!/usr/bin/env bash
         set -euo pipefail
 
+        ${agentScopePrelude}
+
         ${mkNpmBootstrap {
           stateDir = "claude-code";
           npmPackage = "@anthropic-ai/claude-code";
@@ -207,6 +222,8 @@ let
       text = ''
         #!/usr/bin/env bash
         set -euo pipefail
+
+        ${agentScopePrelude}
 
         ${mkNpmBootstrap {
           stateDir = "clodex";
@@ -316,6 +333,8 @@ let
         #!/usr/bin/env bash
         set -euo pipefail
 
+        ${agentScopePrelude}
+
         ${mkNpmBootstrap {
           stateDir = "codex";
           npmPackage = "@openai/codex";
@@ -337,6 +356,8 @@ let
       #!/usr/bin/env bash
       set -euo pipefail
 
+      ${agentScopePrelude}
+
       if [ ! -x "$HOME/.grok/bin/grok" ]; then
         echo "grok-sinnix: install the official Grok CLI first: curl -fsSL https://x.ai/cli/install.sh | bash" >&2
         exit 1
@@ -350,6 +371,8 @@ let
     text = ''
       #!/usr/bin/env bash
       set -euo pipefail
+
+      ${agentScopePrelude}
 
       if [ ! -x "$HOME/.local/bin/agy" ]; then
         echo "agy-sinnix: install the official Antigravity CLI first: curl -fsSL https://antigravity.google/cli/install.sh | bash" >&2
@@ -403,6 +426,8 @@ let
         #!/usr/bin/env bash
         set -euo pipefail
 
+        ${agentScopePrelude}
+
         ${lib.optionalString (profile != null) ''
           export HERMES_HOME="$HOME/.hermes/profiles/${profile}"
           export HERMES_INSTALL_DIR="$HOME/.hermes/hermes-agent"
@@ -421,6 +446,7 @@ in
 {
   inherit
     mkNpmBootstrap
+    agentScopePrelude
     resolveSecretPath
     mkClaudeBackendEnv
     mkCodexBackendEnv

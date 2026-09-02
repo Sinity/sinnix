@@ -173,6 +173,7 @@ lie.
 | File                                      | Direction | Writer → route → reader                                    |
 | ----------------------------------------- | --------- | ---------------------------------------------------------- |
 | `ambient-*.m4a`                           | out       | AmbientService → `POST /chunk?lane=ambient` → lake         |
+| `sensor-*.bin` + `.json`                  | out       | SensorChunkWriter → `POST /chunk?lane=outbox` → lake       |
 | `status.json`                             | out       | app → `app-status`, tile, capture screen (adb, on demand)  |
 | `events/events-*.jsonl`                   | out       | every screen → `POST /events?day=&offset=` → lake day file |
 | `outbox/intent-*.json`                    | out       | app → `POST /intent` → executed, receipt back              |
@@ -195,6 +196,14 @@ inbox, epoch — and nothing deletes the event day files at all: they are also
 the app's own history, which the ribbon, the hole list and the offer policy
 are reductions of. Delete-after-transfer pointed at an event log is a data-loss bug waiting
 for its first run.
+
+The sensor lane keeps raw accelerometer and light callbacks in five-minute
+`sinnix.phone.sensor-binary/1` chunks. Each chunk carries wall-clock and
+elapsed-realtime anchors followed by timestamped float records using Android's
+`SensorEvent.timestamp`; its JSON sidecar records the anchors and per-sensor
+counts. The minute-level `ambient_context` event remains a derived convenience
+reduction. The listener requests the highest stable rate and stays registered
+continuously; Android may still choose the delivered rate.
 
 ### What is still a pull, and why
 
@@ -415,14 +424,17 @@ Beyond ambient audio and the passive light/motion sampler:
 
 **Direct Boot**: a `directBootAware` service buffers into device-protected
 storage and migrates on unlock, so a phone rebooted and left locked captures
-instead of waiting for a human. The implementation exists; locked-boot product
-output remains an explicit acceptance test.
+instead of waiting for a human. This completed the acceptance test on
+2026-08-27: the event log records `locked_boot`, a running
+`DirectBootService`, buffered chunks migrated before `BOOT_COMPLETED`, and a
+new canonical ambient chunk immediately after the unlock handoff. The app's
+watchdog is scheduled by `BootReceiver`; no Magisk boot wrapper is required.
 
 ## Known limits
 
-- **Locked-boot capture still needs product proof.** Process presence is not
-  enough: the acceptance test requires a chunk produced before first unlock,
-  then migrated and uploaded after unlock.
+- **Locked-boot capture is bounded by device-protected storage.** The buffer is
+  capped and oldest-first eviction applies during a long locked window; normal
+  operation migrates it after unlock.
 - **Phone calls stop capture.** Platform decision since Android 10, not a
   configuration gap.
 - **The steering ready queue is approximated.** Until the steering store grows

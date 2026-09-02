@@ -22,12 +22,13 @@
           # inlined into a unit, for instance) must sit where the suite
           # expects them, next to its tests directory.
           packageFiles ? [ ],
+          pythonPackages ? [ ],
           nativeBuildInputs ? [ ],
         }:
         pkgs.runCommand "sinnix-${name}-suite-check"
           {
             nativeBuildInputs = [
-              (pkgs.python3.withPackages (ps: [ ps.pytest ]))
+              (pkgs.python3.withPackages (ps: [ ps.pytest ] ++ map (name: ps.${name}) pythonPackages))
               pkgs.coreutils
             ]
             ++ nativeBuildInputs;
@@ -82,6 +83,12 @@
           name = "sinnix-census";
           suiteDir = ../../pkgs/sinnix-census/tests;
           scripts = [ "sinnix-census" ];
+        };
+        speaker-verify-suite = mkScriptSuite {
+          name = "sinnix-speaker-verify";
+          suiteDir = ../../pkgs/sinnix-speaker-verify/tests;
+          scripts = [ "sinnix-speaker-verify" ];
+          pythonPackages = [ "numpy" ];
         };
       };
     };

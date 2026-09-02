@@ -30,6 +30,7 @@ in
     ./tests/terminal-capture.nix
     ./tests/capture-clipboard.nix
     ./tests/capture-primary.nix
+    ./tests/capture-spotify.nix
     ./tests/backup.nix
     ./tests/command-registry.nix
     ./tests/agent-environment.nix
@@ -43,6 +44,7 @@ in
     ./tests/vm.nix
     ./tests/host-build.nix
     ./tests/runtime.nix
+    ./tests/campaign-consumers.nix
     ./tests/script-suites.nix
     ./tests/pkg-suites.nix
     ./tests/lifecycle-manifest.nix
@@ -56,6 +58,7 @@ in
     ./tests/sinex-user-mile.nix
     ./tests/dots-shell.nix
     ./tests/earlyoom.nix
+    ./tests/activitywatch.nix
   ];
 
   perSystem =

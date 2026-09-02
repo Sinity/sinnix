@@ -130,7 +130,9 @@ def build_campaign_status(
                 project_id,
                 state_root=state_root,
                 receipt_pulls=latest_sweep_pulls(state_root),
-                closed_beads=closed_bead_ids(project_root, wait=False) if project_root is not None else (),
+                closed_beads=closed_bead_ids(project_root, wait=False)
+                if project_root is not None
+                else (),
             )
         ][:MAX_LANES]
     return {

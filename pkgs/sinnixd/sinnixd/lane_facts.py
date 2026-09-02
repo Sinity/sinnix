@@ -133,7 +133,10 @@ def advance(facts: LaneFacts, *, now: datetime | None = None) -> Action:
     if action.kind in AGENT_ACTIONS:
         since = _seconds_since(facts.agent_launched_at, now)
         if since is not None and since < AGENT_LAUNCH_COOLDOWN_SECONDS:
-            return Action("wait", f"agent launched {int(since)}s ago; {action.kind} after cooldown")
+            return Action(
+                "wait",
+                f"agent launched {int(since)}s ago; {action.kind} after cooldown",
+            )
     return action
 
 
@@ -150,14 +153,22 @@ def _advance(facts: LaneFacts, now: datetime | None) -> Action:
         return Action("wait", f"lane {facts.lane_phase}")
     if facts.lane_phase is None and facts.receipt is None:
         return Action("wait", "no finished lane")
-    if facts.lane_phase in {"failed", "cancelled", "timeout", "timed_out"} and facts.receipt is None:
+    if (
+        facts.lane_phase in {"failed", "cancelled", "timeout", "timed_out"}
+        and facts.receipt is None
+    ):
         return Action("retry", f"lane {facts.lane_phase}")
     receipt = facts.receipt
     if receipt is None or receipt.head != facts.head:
         if facts.harvest_at_head is not None:
-            return Action("park", f"harvest {facts.harvest_at_head[1]} at this head left no receipt")
+            return Action(
+                "park",
+                f"harvest {facts.harvest_at_head[1]} at this head left no receipt",
+            )
         if facts.verify_job is not None and facts.verify_job[1] != "succeeded":
-            return Action("park", f"affected verification {facts.verify_job[1]} at this head")
+            return Action(
+                "park", f"affected verification {facts.verify_job[1]} at this head"
+            )
         if facts.verify_job is not None:
             return Action("harvest", f"verified by {facts.verify_job[0][:8]}")
         return Action("verify", "no receipt at head")
@@ -169,11 +180,17 @@ def _advance(facts: LaneFacts, now: datetime | None) -> Action:
             if facts.verify_job is None:
                 return Action("verify", "PR published without test evidence")
             if facts.verify_job[1] != "succeeded":
-                return Action("park", f"affected verification {facts.verify_job[1]} at this head")
-            return Action("harvest", f"re-publish with verdict {facts.verify_job[0][:8]}")
+                return Action(
+                    "park", f"affected verification {facts.verify_job[1]} at this head"
+                )
+            return Action(
+                "harvest", f"re-publish with verdict {facts.verify_job[0][:8]}"
+            )
         if pull.verdict == "conflict":
             if any(label == "rebase" for label in facts.integrators_at_head):
-                return Action("park", "rebase integrator ran at this head and it still conflicts")
+                return Action(
+                    "park", "rebase integrator ran at this head and it still conflicts"
+                )
             return Action("rebase", "PR conflicts with master")
         if pull.verdict == "ci-red":
             return Action("park", "CI red on the PR")
@@ -186,7 +203,11 @@ def _advance(facts: LaneFacts, now: datetime | None) -> Action:
         return Action("publish", "head moved past the PR; push and re-mint")
     if receipt.flagged and not receipt.authorized:
         if "integrator" in facts.integrators_at_head:
-            return Action("park", "integrator ran at this head and flags remain: " + ", ".join(receipt.flags[:4]))
+            return Action(
+                "park",
+                "integrator ran at this head and flags remain: "
+                + ", ".join(receipt.flags[:4]),
+            )
         return Action("integrate", ", ".join(receipt.flags[:4]))
     if receipt.verification != "from-job" and not receipt.authorized:
         # Test evidence comes only from the declared verify_affected job: the
@@ -194,7 +215,9 @@ def _advance(facts: LaneFacts, now: datetime | None) -> Action:
         if facts.verify_job is None:
             return Action("verify", "receipt has no test evidence")
         if facts.verify_job[1] != "succeeded":
-            return Action("park", f"affected verification {facts.verify_job[1]} at this head")
+            return Action(
+                "park", f"affected verification {facts.verify_job[1]} at this head"
+            )
         return Action("harvest", f"re-mint with verdict {facts.verify_job[0][:8]}")
     return Action("publish", "clean receipt at head")
 
@@ -205,7 +228,13 @@ def derived_checkout_id(path: str) -> str:
 
 def _git(run: Run, cwd: Path, *args: str) -> str:
     try:
-        result = run(["git", "-C", str(cwd), *args], capture_output=True, text=True, timeout=30, check=False)
+        result = run(
+            ["git", "-C", str(cwd), *args],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
     except (OSError, subprocess.SubprocessError):
         return ""
     return result.stdout.strip() if result.returncode == 0 else ""
@@ -216,17 +245,26 @@ def _receipt_from(payload: Mapping[str, Any]) -> Receipt | None:
     head = payload.get("head")
     if not isinstance(packet_id, str) or not isinstance(head, str):
         return None
-    flags = tuple(str(flag) for flag in payload.get("redflags", []) if str(flag).startswith("FLAG:"))
+    flags = tuple(
+        str(flag)
+        for flag in payload.get("redflags", [])
+        if str(flag).startswith("FLAG:")
+    )
     authorization = payload.get("authorization")
     verification = payload.get("verification")
-    state = str(verification.get("state") or "") if isinstance(verification, Mapping) else ""
+    state = (
+        str(verification.get("state") or "")
+        if isinstance(verification, Mapping)
+        else ""
+    )
     bead = payload.get("bead_id")
     return Receipt(
         packet_id=packet_id,
         head=head,
         flags=flags,
         flagged=bool(payload.get("redflag_status")),
-        authorized=isinstance(authorization, Mapping) and authorization.get("head") == head,
+        authorized=isinstance(authorization, Mapping)
+        and authorization.get("head") == head,
         verification=state,
         bead=bead if isinstance(bead, str) else None,
         created_at=str(payload.get("created_at") or ""),
@@ -268,7 +306,11 @@ def collect(
         if resolved_master is None:
             resolved_master = _git(run, worktree, "rev-parse", "origin/master")
         head = _git(run, worktree, "rev-parse", "HEAD")
-        pushed = _git(run, worktree, "rev-parse", f"refs/remotes/origin/{branch}") if branch else ""
+        pushed = (
+            _git(run, worktree, "rev-parse", f"refs/remotes/origin/{branch}")
+            if branch
+            else ""
+        )
         holder: str | None = None
         running_ops: list[str] = []
         lane_phase: str | None = None
@@ -296,14 +338,23 @@ def collect(
                 agent_launched = max(agent_launched, str(job.get("created_at") or ""))
                 if not terminal:
                     holder = label
-                if label in INTEGRATOR_LABELS and checkout.get("head") == head and terminal and phase == "succeeded":
+                if (
+                    label in INTEGRATOR_LABELS
+                    and checkout.get("head") == head
+                    and terminal
+                    and phase == "succeeded"
+                ):
                     integrators.append(label)
                 if label == "lane":
                     created = str(job.get("created_at") or "")
                     if created >= lane_created:
                         lane_created, lane_phase = created, phase
                         lane_job = str(job.get("job_id") or "") or None
-                        lane_finished = str(state.get("completed_at") or state.get("observed_at") or created)
+                        lane_finished = str(
+                            state.get("completed_at")
+                            or state.get("observed_at")
+                            or created
+                        )
                     bead = bead or _campaign_bead(spec)
             elif kind == "declared-operation" and not terminal:
                 running_ops.append(str(spec.get("operation") or "operation"))
@@ -325,7 +376,10 @@ def collect(
             ):
                 created = str(job.get("created_at") or "")
                 if created >= verify_created:
-                    verify_created, verify_job = created, (str(job.get("job_id") or ""), phase)
+                    verify_created, verify_job = (
+                        created,
+                        (str(job.get("job_id") or ""), phase),
+                    )
         receipt = receipts.get(checkout_id)
         pull = None
         if receipt is not None and receipt_pulls:
@@ -333,7 +387,14 @@ def collect(
         if pull is None and receipt_pulls:
             # A PR names the receipt it was opened under; later re-mints at
             # the same head are still that PR.
-            pull = next((item for item in receipt_pulls.values() if item.head in {head, pushed}), None)
+            pull = next(
+                (
+                    item
+                    for item in receipt_pulls.values()
+                    if item.head in {head, pushed}
+                ),
+                None,
+            )
         if pull is None:
             pull = next((item for item in pulls if item.head in {head, pushed}), None)
         authorization_head = _authorization_head(worktree)
@@ -359,7 +420,8 @@ def collect(
                 harvest_at_head=harvest_at_head,
                 published_at_head=published_at_head,
                 lane_finished_at=lane_finished,
-                bead_closed=(bead or (receipt.bead if receipt else None)) in set(closed_beads),
+                bead_closed=(bead or (receipt.bead if receipt else None))
+                in set(closed_beads),
                 agent_launched_at=agent_launched,
             )
         )
@@ -382,7 +444,10 @@ def _harvest_result(job: Mapping[str, Any]) -> tuple[str | None, str | None]:
         return None, None
     outcome = value.get("outcome")
     result_phase = value.get("phase")
-    return (outcome if isinstance(outcome, str) else None, result_phase if isinstance(result_phase, str) else None)
+    return (
+        outcome if isinstance(outcome, str) else None,
+        result_phase if isinstance(result_phase, str) else None,
+    )
 
 
 def _agent_label(spec: Mapping[str, Any]) -> str:
@@ -391,7 +456,9 @@ def _agent_label(spec: Mapping[str, Any]) -> str:
     if isinstance(label, str) and label:
         return label
     parameters = contract.get("parameters") if isinstance(contract, Mapping) else None
-    if isinstance(parameters, Mapping) and isinstance(parameters.get("campaign"), Mapping):
+    if isinstance(parameters, Mapping) and isinstance(
+        parameters.get("campaign"), Mapping
+    ):
         return "lane"
     return "agent"
 
@@ -482,19 +549,35 @@ _closed_beads_cache: dict[Path, tuple[float, tuple[str, ...]]] = {}
 _closed_beads_refreshing: set[Path] = set()
 
 
-def _query_closed_beads(project_root: Path, run: Run, timeout: float) -> tuple[str, ...] | None:
+def _query_closed_beads(
+    project_root: Path, run: Run, timeout: float
+) -> tuple[str, ...] | None:
     try:
         result = run(
             ["bd", "list", "--status", "closed", "--json"],
-            cwd=project_root, capture_output=True, text=True, timeout=timeout, check=True,
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=True,
         )
         rows = json.loads(result.stdout)
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
         return None
-    return tuple(str(row.get("id")) for row in (rows if isinstance(rows, list) else []) if isinstance(row, Mapping) and row.get("id"))
+    return tuple(
+        str(row.get("id"))
+        for row in (rows if isinstance(rows, list) else [])
+        if isinstance(row, Mapping) and row.get("id")
+    )
 
 
-def closed_bead_ids(project_root: Path, *, run: Run = subprocess.run, timeout: float = 180, wait: bool | None = None) -> tuple[str, ...]:
+def closed_bead_ids(
+    project_root: Path,
+    *,
+    run: Run = subprocess.run,
+    timeout: float = 180,
+    wait: bool | None = None,
+) -> tuple[str, ...]:
     """Closed bead ids for the project.
 
     The cached answer is returned and refreshed on a background thread once
@@ -547,9 +630,15 @@ def _corpus_outcomes(job: Mapping[str, Any]) -> tuple[Mapping[str, Any], Any]:
     if not isinstance(value, Mapping):
         return {}, None
     pytest_outcomes = value.get("pytest_outcomes")
-    outcomes = pytest_outcomes.get("outcomes") if isinstance(pytest_outcomes, Mapping) else None
+    outcomes = (
+        pytest_outcomes.get("outcomes")
+        if isinstance(pytest_outcomes, Mapping)
+        else None
+    )
     diagnostics = value.get("diagnostics")
-    diagnosis = diagnostics.get("diagnosis") if isinstance(diagnostics, Mapping) else None
+    diagnosis = (
+        diagnostics.get("diagnosis") if isinstance(diagnostics, Mapping) else None
+    )
     return (outcomes if isinstance(outcomes, Mapping) else {}), diagnosis
 
 
@@ -565,7 +654,11 @@ def latest_corpus(state_root: Path, project: str) -> dict[str, Any] | None:
     for job in _job_records(state_root / "jobs"):
         spec = job.get("spec") or {}
         state = job.get("state") or {}
-        if spec.get("operation") != "verify_all" or spec.get("project_id") != project or not state.get("terminal"):
+        if (
+            spec.get("operation") != "verify_all"
+            or spec.get("project_id") != project
+            or not state.get("terminal")
+        ):
             continue
         created = str(job.get("created_at") or "")
         if newest is not None and created <= newest[0]:
@@ -639,7 +732,12 @@ def lane_view(facts: LaneFacts) -> dict[str, Any]:
             else None
         ),
         "pr": (
-            {"number": facts.pull.number, "at_head": facts.pull.head == facts.head, "verdict": facts.pull.verdict, "findings": facts.pull.findings}
+            {
+                "number": facts.pull.number,
+                "at_head": facts.pull.head == facts.head,
+                "verdict": facts.pull.verdict,
+                "findings": facts.pull.findings,
+            }
             if facts.pull
             else None
         ),

@@ -57,7 +57,10 @@ let
   # land here, and that's live account credential material.
   stateDir = "/realm/state/capture-spotify";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-  secretPaths = config.sinnix.secrets.paths;
+  # sinnix.secrets.paths is empty whenever agenix is off, so name the agenix
+  # location directly rather than throwing on a missing attribute: the unit
+  # already reports the absent file as its own loud failure.
+  secretPath = name: config.sinnix.secrets.paths.${name} or "/run/agenix/${name}";
   cfg = config.sinnix.services.capture-spotify;
 
   poller = pkgs.writeShellApplication {
@@ -88,7 +91,8 @@ let
       elif [ -s "$refresh_token_file" ]; then
         refresh_token_source="$refresh_token_file"
       else
-        exit 0
+        echo "capture-spotify: no refresh token -- run 'sinnix spotify-auth' and store the result as secret/spotify-refresh-token.age" >&2
+        exit 1
       fi
 
       client_id="$(<"$client_id_file")"
@@ -162,18 +166,17 @@ mkServiceModule (mkCaptureLane {
   inherit username laneDir;
   mode = "poll";
   captureName = "spotify";
-  # Listening is intermittent by nature -- a quiet day is a legitimate "not
-  # listening" outcome, not a broken lane (same reasoning as capture-mpris's
-  # week-long budget). The poll cadence itself (well inside the 50-item
-  # recently-played wraparound at normal listening pace) is what keeps
-  # dedup correct; it says nothing about how long silence is expected.
+  # The stale budget is two poll intervals. A quiet listening period may still
+  # report stale, but that keeps a stopped timer visible instead of hiding it
+  # behind an inactivity exception.
   eventDriven = true;
-  staleAfterSeconds = 604800;
+  cadenceSeconds = cfg.intervalSec;
+  staleAfterSeconds = cfg.intervalSec * 2;
   execStart = lib.concatStringsSep " " [
     "${poller}/bin/capture-spotify-poll"
-    secretPaths.spotify-client-id
-    secretPaths.spotify-client-secret
-    secretPaths.spotify-refresh-token
+    (secretPath "spotify-client-id")
+    (secretPath "spotify-client-secret")
+    (secretPath "spotify-refresh-token")
     stateDir
     "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
     activityRoot
