@@ -146,6 +146,9 @@ mkFeatureModule {
             # Tasks are the daemon's children, so its slice is the job-plane
             # ceiling; app.slice is reserved for the desktop.
             Service.Slice = "sinnixd-work.slice";
+            # state.json carries every task's full client environment; an
+            # interactive `pueue add` writes the shell's API keys into it.
+            Service.UMask = "0077";
             # A daemon restart marks every running task Killed and pauses
             # groups with queued tasks; a switch must not do that.
             Unit.X-RestartIfChanged = false;
