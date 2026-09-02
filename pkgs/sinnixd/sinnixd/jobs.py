@@ -4140,8 +4140,14 @@ class GenericJobs:
                         and record.spec.pool not in head_of_line_reserved
                     ):
                         head_of_line_reserved[record.spec.pool] = estimate
+                        # Only memory it could actually use is reserved: a job
+                        # also waiting for a pool worker gains nothing from
+                        # draining the other pools (two hourly bulk jobs
+                        # behind the corpus run held every harvest for two
+                        # hours, 2026-09-02).
                         if (
                             "*" not in head_of_line_reserved
+                            and "pool-workers" not in blocked_by
                             and self._queued_seconds(record) >= HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS
                         ):
                             head_of_line_reserved["*"] = estimate
