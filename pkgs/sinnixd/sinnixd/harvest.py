@@ -590,7 +590,7 @@ def _redflags(
     if re.search(r"^\+.*(xfail|skipif|pytest\.mark\.skip)", diff, re.MULTILINE):
         flag("new xfail/skip")
     if re.search(
-        r"^diff --git a/devtools/(consumer_reachability|verify|patterns/baselines)",
+        r"^diff --git a/devtools/(consumer_reachability|verify\.py|verify_patterns|patterns/baselines)",
         diff,
         re.MULTILINE,
     ):
