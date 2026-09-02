@@ -528,41 +528,49 @@ def closed_bead_ids(project_root: Path, *, run: Run = subprocess.run, timeout: f
     return known
 
 
+def _corpus_outcomes(job: Mapping[str, Any]) -> tuple[Mapping[str, Any], Any]:
+    artifacts = job.get("artifacts") or {}
+    path = artifacts.get("result") if isinstance(artifacts, Mapping) else None
+    if not isinstance(path, str):
+        return {}, None
+    try:
+        value = json.loads(Path(path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}, None
+    if isinstance(value, Mapping) and isinstance(value.get("value"), Mapping):
+        value = value["value"]
+    if not isinstance(value, Mapping):
+        return {}, None
+    pytest_outcomes = value.get("pytest_outcomes")
+    outcomes = pytest_outcomes.get("outcomes") if isinstance(pytest_outcomes, Mapping) else None
+    diagnostics = value.get("diagnostics")
+    diagnosis = diagnostics.get("diagnosis") if isinstance(diagnostics, Mapping) else None
+    return (outcomes if isinstance(outcomes, Mapping) else {}), diagnosis
+
+
 def latest_corpus(state_root: Path, project: str) -> dict[str, Any] | None:
     """The newest finished complete-corpus run: head, outcome counts, age.
 
     Read from the verify_all job's result so the number never depends on a
     memory of what was reported.
     """
-    newest: tuple[str, Mapping[str, Any]] | None = None
+    # The newest run that produced outcomes; a cancelled or vanished run
+    # carries no number and must not hide the last real one.
+    newest: tuple[str, Mapping[str, Any], Mapping[str, Any], Any] | None = None
     for job in _job_records(state_root / "jobs"):
         spec = job.get("spec") or {}
         state = job.get("state") or {}
         if spec.get("operation") != "verify_all" or spec.get("project_id") != project or not state.get("terminal"):
             continue
         created = str(job.get("created_at") or "")
-        if newest is None or created > newest[0]:
-            newest = (created, job)
+        if newest is not None and created <= newest[0]:
+            continue
+        outcomes, diagnosis = _corpus_outcomes(job)
+        if outcomes:
+            newest = (created, job, outcomes, diagnosis)
     if newest is None:
         return None
-    job = newest[1]
-    artifacts = job.get("artifacts") or {}
-    path = artifacts.get("result") if isinstance(artifacts, Mapping) else None
-    outcomes: Mapping[str, Any] = {}
-    diagnosis = None
-    if isinstance(path, str):
-        try:
-            value = json.loads(Path(path).read_text())
-        except (OSError, json.JSONDecodeError):
-            value = {}
-        if isinstance(value, Mapping) and isinstance(value.get("value"), Mapping):
-            value = value["value"]
-        pytest_outcomes = value.get("pytest_outcomes") if isinstance(value, Mapping) else None
-        if isinstance(pytest_outcomes, Mapping) and isinstance(pytest_outcomes.get("outcomes"), Mapping):
-            outcomes = pytest_outcomes["outcomes"]
-        diagnostics = value.get("diagnostics") if isinstance(value, Mapping) else None
-        if isinstance(diagnostics, Mapping):
-            diagnosis = diagnostics.get("diagnosis")
+    _, job, outcomes, diagnosis = newest
     state = job.get("state") or {}
     checkout = (job.get("spec") or {}).get("checkout") or {}
     red = int(outcomes.get("failed", 0) or 0) + int(outcomes.get("error", 0) or 0)

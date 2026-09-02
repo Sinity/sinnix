@@ -24,10 +24,10 @@ reference to the full diff.
    confirm from the diff whether the change is correct or a paper-over.
 4. A lane whose trailer reports `red` or `blocked-env` did not finish. Do not
    publish it.
-5. Test evidence comes from `devtools test <sel>` on the suites the diff can
-   break, or from affected verification. The complete corpus never runs in a
-   lane worktree; a refusal of affected verification is reported as a
-   harness fault, not answered with `verify --all`.
+5. Test evidence is the declared `verify_affected` job named in the packet
+   header (`affected_job`); the harvest reads its verdict and the sweep
+   merges nothing without it. Do not run test tiers yourself; `devtools test
+   <sel>` on the suites the diff can break is allowed and bounded.
 
 ## Publish
 
@@ -38,9 +38,9 @@ gap is not just wording. Write the files yourself only when the lane left none.
 
 ```
 agentctl job start <project> harvest --workspace <workspace> --parameters-json \
-  '{"authorize":true,"receipt_ref":"<ref>","title_file":"<worktree>/.lane/title",
-    "body_file":"<worktree>/.lane/body.md","bead_id":"…",
-    "close_reason_file":"<worktree>/.lane/close-reason.md"}'
+  '{"authorize":true,"receipt_ref":"<ref>","affected_job":"<affected_job>",
+    "title_file":"<worktree>/.lane/title","body_file":"<worktree>/.lane/body.md",
+    "bead_id":"…","close_reason_file":"<worktree>/.lane/close-reason.md"}'
 ```
 
 Omit `bead_id` and `close_reason_file` when the lane delivered a slice, when

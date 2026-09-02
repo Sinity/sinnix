@@ -1446,7 +1446,8 @@ class CampaignReactor:
             f"project: {event.get('project')}\n"
             f"workspace: {workspace}\n"
             f"worktree: /realm/worktrees/{workspace}\n"
-            f"receipt_ref: {receipt.rsplit('/', 1)[-1]}\n\n"
+            f"receipt_ref: {receipt.rsplit('/', 1)[-1]}\n"
+            f"affected_job: {event.get('affected_job') or ''}\n\n"
             "## Review receipt\n\n"
             f"```json\n{summary}\n```\n\n"
             f"## Operating rules\n\n{body}\n"
@@ -1788,7 +1789,8 @@ class CampaignReactor:
             elif action.kind == "integrate":
                 packet = self._receipt_payload(facts.receipt.packet_id) if facts.receipt else None
                 root = self.project_roots[project]
-                event = {"project": project, "packet": packet, "receipt_ref": facts.receipt.packet_id if facts.receipt else ""}
+                verified = facts.verify_job[0] if facts.verify_job and facts.verify_job[1] == "succeeded" else ""
+                event = {"project": project, "packet": packet, "receipt_ref": facts.receipt.packet_id if facts.receipt else "", "affected_job": verified}
                 self._launch_agent(
                     project, workspace, checkout_id, self._integration_prompt(root, event, workspace),
                     label="integrator", name=f"integrate-{workspace}-{facts.head[:12]}",
