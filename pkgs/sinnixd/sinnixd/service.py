@@ -875,7 +875,6 @@ class SinnixdService:
             | {
                 "bead_binding",
                 "parameters",
-                "admission_bypass",
                 "dimensions",
                 "exclusive_keys",
                 "reject_conflicts",
@@ -899,7 +898,6 @@ class SinnixdService:
                 result=self._job_argument(arguments, "result"),
                 bead_binding=arguments.get("bead_binding"),
                 parameters=arguments.get("parameters"),
-                admission_bypass=arguments.get("admission_bypass", False),
                 dimensions=arguments.get("dimensions"),
                 exclusive_keys=arguments.get("exclusive_keys", ()),
                 reject_conflicts=arguments.get("reject_conflicts", False),

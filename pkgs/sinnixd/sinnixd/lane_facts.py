@@ -23,6 +23,8 @@ from typing import Any, Callable, Mapping, Sequence
 Run = Callable[..., subprocess.CompletedProcess[str]]
 
 INTEGRATOR_LABELS = frozenset({"integrator", "rebase", "review-fix"})
+# One reviewer round answers the findings; the second confirms the answer
+# held. A third never changed a verdict.
 ANSWERED_ROUNDS_TO_MERGE = 2
 # A workspace whose lane finished longer ago than this, with no open PR, is
 # dormant: advancing it would verify and harvest dozens of abandoned
@@ -87,6 +89,8 @@ class Action:
         return {"kind": self.kind, "reason": self.reason}
 
 
+# An agent lane needs this long to reach its first commit; re-dispatching
+# sooner piles a second agent into the same worktree.
 AGENT_LAUNCH_COOLDOWN_SECONDS = 900.0
 AGENT_ACTIONS = frozenset({"retry", "integrate", "rebase", "review-fix"})
 

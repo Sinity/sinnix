@@ -29,6 +29,8 @@ DEFAULT_INTERVAL_SECONDS = 10
 MAX_BOARD_ERRORS = 100
 MAX_BOARD_MARKERS = 2_000
 MAX_EVENT_BYTES = 1_000_000
+# Each dispatch provisions a worktree; a whole backlog at once is minutes of
+# graph copy and venv sync before anything runs.
 ADVANCE_DISPATCHES_PER_TICK = 3
 # A marker older than this names a head, receipt, or PR round that no longer
 # exists; keeping it only hides the live entries.

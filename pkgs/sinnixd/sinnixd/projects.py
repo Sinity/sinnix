@@ -453,7 +453,6 @@ class ProjectOperation:
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     exclusive_keys: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
-    estimate_memory_bytes: int | None = None
     scratch: str = "none"
     parameters: tuple[OperationParameter, ...] = ()
     service: OperationService | None = None
@@ -527,7 +526,6 @@ class ProjectOperation:
             "timeout_seconds": self.timeout_seconds,
             "exclusive_keys": list(self.exclusive_keys),
             "dependencies": list(self.dependencies),
-            "estimate_memory_bytes": self.estimate_memory_bytes,
             "scratch": self.scratch,
             "parameters": [parameter.catalog_row() for parameter in self.parameters],
             "service": self.service.catalog_row() if self.service is not None else None,
@@ -1144,7 +1142,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             "cache",
             "exclusive_keys",
             "dependencies",
-            "estimate_memory_bytes",
             "scratch",
             "parameters",
             "timeout_seconds",
@@ -1154,6 +1151,9 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             "supersede",
             "checkout",
         }
+        definition = _ignore_retired(
+            definition, f"operations.{name}", {"estimate_memory_bytes"}
+        )
         if set(definition) - allowed_operation:
             raise ProjectConfigError(
                 f"{descriptor} operation {name} contains unknown fields"
@@ -1184,15 +1184,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         )
         if name in dependencies or len(set(dependencies)) != len(dependencies):
             raise ProjectConfigError(f"operations.{name}.dependencies is invalid")
-        estimate_memory_bytes = definition.get("estimate_memory_bytes")
-        if estimate_memory_bytes is not None and (
-            not isinstance(estimate_memory_bytes, int)
-            or isinstance(estimate_memory_bytes, bool)
-            or not 1 <= estimate_memory_bytes <= 128 * 1024 * 1024 * 1024
-        ):
-            raise ProjectConfigError(
-                f"operations.{name}.estimate_memory_bytes is invalid"
-            )
         scratch = definition.get("scratch", "none")
         if scratch not in {"none", "tmpfs", "nvme"}:
             raise ProjectConfigError(f"operations.{name}.scratch is invalid")
@@ -1235,7 +1226,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                     f"operations.{name}.exclusive_keys",
                 ),
                 dependencies=dependencies,
-                estimate_memory_bytes=estimate_memory_bytes,
                 scratch=scratch,
                 parameters=_operation_parameters(
                     definition.get("parameters"), f"operations.{name}.parameters"

@@ -150,11 +150,6 @@ def _add_agent_launch_arguments(
         dest="coordinator_label",
         help="Optional campaign/coordinator label copied to terminal events.",
     )
-    target.add_argument(
-        "--bypass-admission",
-        action="store_true",
-        help="Start immediately for an emergency, bypassing agent admission.",
-    )
 
 
 def default_socket_path() -> Path:
@@ -758,7 +753,6 @@ def main() -> int:
                 "credential_profile": arguments.credential_profile,
                 "timeout_seconds": arguments.timeout_seconds,
                 "result": "last-message",
-                "admission_bypass": arguments.bypass_admission,
                 **(
                     {"coordinator_label": arguments.coordinator_label}
                     if arguments.coordinator_label is not None

@@ -282,7 +282,10 @@ rec {
         # target throttles batch whenever the desktop's own requests wait,
         # which is what swap-in feels like under six lanes.
         IODeviceLatencyTargetSec = "/dev/nvme0n1 20ms";
-        MemoryLow = "6G";
+        # The interactive part of session.slice, measured 2026-09-02 21:30 at
+        # 7 GB current. Its 23 GB peak is Claude-session subagents running
+        # pytest, which belong in the work slice, not behind this guarantee.
+        MemoryLow = "5G";
       };
       desktop-shell = {
         IOAccounting = true;
@@ -317,7 +320,15 @@ rec {
         IOAccounting = true;
         CPUWeight = 10;
         IOWeight = 10;
+        # The whole job plane's memory policy, and the only one: host memory
+        # (31 GB) minus the desktop reservation below (app 6G + session 5G +
+        # desktop-shell 512M, measured 2026-09-02 21:30 against app.slice peak
+        # 9 GB and desktop.slice peak 10 GB). Jobs collectively use what is
+        # left; nothing meters bytes per job or per pool.
         MemoryHigh = "20G";
+        # A little swap absorbs a burst; more of it is where the host went to
+        # die (14 GB of swap, ten-minute preflights, 2026-09-02).
+        MemorySwapMax = "2G";
         ManagedOOMSwap = "kill";
         # Same reasoning as background.slice above: kill a wedged scope, not a
         # busy one. Lane verification phases legitimately stall past 10% for

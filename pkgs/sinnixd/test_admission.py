@@ -4,19 +4,15 @@ import subprocess
 import threading
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from sinnixd.jobs import (
-    HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS,
     IO_FULL_BLOCK_THRESHOLD,
-    MEMORY_FULL_BLOCK_THRESHOLD,
     AdmissionConflictError,
     GenericJobs,
     GenericJobSpec,
     GenericJobStore,
-    SystemdJobTimeout,
     UserSystemdJobs,
 )
 from sinnixd.projects import (
@@ -111,10 +107,7 @@ def jobs(tmp_path: Path, systemd: FakeSystemd, pressure: float = 0.0) -> Generic
         systemd,
         GenericJobStore(tmp_path / "state"),
         wait_poll_seconds=0.001,
-        pressure_probe=lambda: {
-            "memory_full_avg10": pressure,
-            "memory_full_avg60": pressure,
-        },
+        pressure_probe=lambda: {"io_full_avg60": pressure},
     )
 
 
@@ -192,7 +185,6 @@ def test_admission_claims_are_durable_and_ledger_explains_queue(
     assert persisted["claims"][holder["job_id"]] == {
         "job_id": holder["job_id"],
         "pool": "normal",
-        "estimate_memory_bytes": 1024 * 1024 * 1024,
         "exclusive_keys": ["fixture:store"],
         "created_at": persisted["claims"][holder["job_id"]]["created_at"],
         "project_id": "fixture",
@@ -202,10 +194,10 @@ def test_admission_claims_are_durable_and_ledger_explains_queue(
     assert ledger["claims"][holder["job_id"]]["exclusive_keys"] == ["fixture:store"]
     assert ledger["queue"][0]["job_id"] == queued["job_id"]
     assert ledger["queue"][0]["blocked_by"] == ["exclusive-key"]
-    assert (
-        ledger["queue"][0]["arithmetic"]["pool_memory"]["after_bytes"]
-        == 2 * 1024 * 1024 * 1024
-    )
+    assert ledger["queue"][0]["arithmetic"]["pool_workers"] == {
+        "occupied": 1,
+        "limit": 5,
+    }
 
 
 def test_descriptor_loads_typed_admission_controls(tmp_path: Path) -> None:
@@ -238,25 +230,114 @@ result = "pytest"
 cache = "tree+environment"
 dependencies = ["prepare"]
 exclusive_keys = ["fixture:store"]
-estimate_memory_bytes = 1048576
 scratch = "nvme"
+estimate_memory_bytes = 1048576
+[operations.check.service]
+readiness = "project-command"
+lifetime = "job"
+[operations.check.service.ports.http]
+environment = "FIXTURE_HTTP_PORT"
+range = [41000, 41001]
 """)
     check = load_project_adapter(root).operation("check")
     assert check.dependencies == ("prepare",)
     assert check.exclusive_keys == ("fixture:store",)
-    assert check.estimate_memory_bytes == 1_048_576 and check.scratch == "nvme"
+    assert check.scratch == "nvme"
+
+
+def test_a_descriptor_declaring_retired_memory_fields_still_loads(
+    tmp_path: Path,
+) -> None:
+    """The daemon stopped reading estimate_memory_bytes and readiness.
+
+    A descriptor written for the older daemon must keep working: those keys
+    are ignored, not rejected. Anti-vacuity: rejecting them takes the whole
+    project out of service, which is what the previous key-set check did.
+    """
+    root = tmp_path / "retired"
+    root.mkdir()
+    (root / "marker").touch()
+    (root / ".agentctl").mkdir()
+    (root / ".agentctl" / "project.toml").write_text("""
+schema = 1
+[project]
+id = "fixture"
+display_name = "Fixture"
+root_markers = ["marker"]
+[environment]
+kind = "fixture"
+command = ["env"]
+[operations.serve]
+description = "serve"
+exec = ["serve"]
+pool = "bulk"
+result = "exit"
+estimate_memory_bytes = 12884901888
+[operations.serve.service]
+readiness = "project-command"
+lifetime = "job"
+[operations.serve.service.ports.http]
+environment = "FIXTURE_HTTP_PORT"
+range = [41000, 41001]
+""")
+
+    serve = load_project_adapter(root).operation("serve")
+
+    assert not hasattr(serve, "estimate_memory_bytes")
+    assert serve.service is not None and serve.service.lifetime == "job"
+
+
+def test_admission_counts_workers_and_never_meters_memory(tmp_path: Path) -> None:
+    """Concurrency is the only bound admission applies.
+
+    The slice hierarchy owns memory: sinnixd.slice carries MemoryHigh for the
+    whole job plane. Anti-vacuity: reintroducing any byte arithmetic would
+    hold the sixth normal job for a reason other than "pool-workers", and
+    would put a memory term back in the ledger.
+    """
+    adapter = project(
+        tmp_path / "project",
+        tuple(operation(f"job{index}") for index in range(6)),
+    )
+    subject = GenericJobs(
+        FakeSystemd(),
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        # A host with almost nothing free and heavy swap use: none of it
+        # reaches admission any more.
+        pressure_probe=lambda: {
+            "memory_available_bytes": 64 * 1024 * 1024,
+            "memory_full_avg10": 90.0,
+            "memory_full_avg60": 90.0,
+            "swap_total_bytes": 8 * 1024**3,
+            "swap_free_bytes": 1024,
+        },
+    )
+
+    started = [
+        subject.start_declared(
+            project=adapter,
+            operation=adapter.operation(f"job{index}"),
+            correlation_id=f"job{index}",
+            parameters={},
+        )
+        for index in range(6)
+    ]
+
+    assert [job["state"]["phase"] for job in started[:5]] == ["submitted"] * 5
+    assert started[5]["state"]["phase"] == "queued"
+    assert started[5]["state"]["admission"]["blocked_by"] == ["pool-workers"]
+    ledger = subject.admission_ledger()
+    assert set(ledger["pools"]["normal"]) == {"workers", "holders"}
+    assert set(ledger["queue"][0]["arithmetic"]) == {"pool_workers", "exclusive_keys"}
 
 
 def test_mixed_workload_injects_light_workers_and_queues_bulk(tmp_path: Path) -> None:
     adapter = project(
         tmp_path / "project",
         (
-            operation(
-                "heavy", pool="bulk", estimate_memory_bytes=12 * 1024 * 1024 * 1024
-            ),
-            operation(
-                "light", pool="interactive", estimate_memory_bytes=64 * 1024 * 1024
-            ),
+            operation("heavy", pool="bulk"),
+            operation("light", pool="interactive"),
         ),
     )
     systemd = FakeSystemd()
@@ -299,144 +380,6 @@ def test_mixed_workload_injects_light_workers_and_queues_bulk(tmp_path: Path) ->
     assert first["state"]["phase"] == "submitted"
 
 
-def test_lone_job_larger_than_pool_budget_is_not_permanently_starved(
-    tmp_path: Path,
-) -> None:
-    adapter = project(
-        tmp_path / "project",
-        (
-            operation(
-                "oversized", pool="bulk", estimate_memory_bytes=24 * 1024 * 1024 * 1024
-            ),
-        ),
-    )
-    systemd = FakeSystemd()
-    subject = jobs(tmp_path, systemd)
-
-    started = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("oversized"),
-        correlation_id="oversized",
-        parameters={},
-    )
-
-    assert started["state"]["phase"] == "submitted"
-    assert started["state"]["admitted_at"]
-    assert (
-        started["state"]["admission"]["estimate_memory_bytes"]
-        == 24 * 1024 * 1024 * 1024
-    )
-    assert [entry["command"] for entry in systemd.started] == [("env", "oversized")]
-
-
-def test_swap_exhaustion_queues_even_a_small_agent_job(tmp_path: Path) -> None:
-    systemd = FakeSystemd()
-    subject = GenericJobs(
-        systemd,
-        GenericJobStore(tmp_path / "state"),
-        wait_poll_seconds=0.001,
-        pressure_probe=lambda: {
-            "memory_full_avg10": 0.0,
-            "io_full_avg10": 0.0,
-            "memory_total_bytes": 32 * 1024 * 1024 * 1024,
-            "memory_available_bytes": 2 * 1024 * 1024 * 1024,
-            "swap_total_bytes": 20 * 1024 * 1024 * 1024,
-            "swap_free_bytes": 0,
-            "managed_memory_bytes": 0,
-        },
-    )
-
-    queued = subject.start(agent_spec(("table:jobs",)))
-
-    assert queued["state"]["phase"] == "queued"
-    assert "host-pressure" in queued["state"]["admission"]["blocked_by"]
-    assert queued["state"]["admission"]["host"]["swap_free_bytes"] == 0
-    assert systemd.started == []
-
-
-def test_cold_swap_with_plentiful_ram_does_not_block_admission(
-    tmp_path: Path,
-) -> None:
-    """Nearly-full swap alone is occupancy, not danger: with high available
-    RAM and zero stall pressure the job admits (2026-08-31 wedge: free
-    fraction 0.145 held the whole queue at zero running jobs). Anti-vacuity:
-    restoring the unconditional swap gate turns this red."""
-    systemd = FakeSystemd()
-    subject = GenericJobs(
-        systemd,
-        GenericJobStore(tmp_path / "state"),
-        wait_poll_seconds=0.001,
-        pressure_probe=lambda: {
-            "memory_full_avg10": 0.0,
-            "io_full_avg10": 0.0,
-            "memory_total_bytes": 32 * 1024 * 1024 * 1024,
-            "memory_available_bytes": 9 * 1024 * 1024 * 1024,
-            "swap_total_bytes": 20 * 1024 * 1024 * 1024,
-            "swap_free_bytes": 1 * 1024 * 1024 * 1024,
-            "managed_memory_bytes": 0,
-        },
-    )
-
-    started = subject.start(agent_spec(("table:jobs",)))
-
-    assert started["state"]["phase"] != "queued"
-    assert systemd.started != []
-
-
-def test_memory_psi_noise_does_not_block_admission(tmp_path: Path) -> None:
-    """0.39% full PSI is 39 ms of whole-system stall in the ten-second window."""
-    systemd = FakeSystemd()
-    subject = jobs(tmp_path, systemd, pressure=0.39)
-
-    started = subject.start(agent_spec(("table:jobs",)))
-
-    assert started["state"]["phase"] == "submitted"
-    assert len(systemd.started) == 1
-
-
-def test_memory_psi_block_requires_two_avg10_probes(tmp_path: Path) -> None:
-    probes = iter(
-        (
-            {"memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD},
-            {"memory_full_avg10": 0.0},
-            {"memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD},
-            {"memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD},
-        )
-    )
-    systemd = FakeSystemd()
-    subject = GenericJobs(
-        systemd,
-        GenericJobStore(tmp_path / "state"),
-        wait_poll_seconds=0.001,
-        pressure_probe=lambda: next(probes),
-    )
-
-    first = subject.start(agent_spec(("table:first",)))
-    second = subject.start(agent_spec(("table:second",)))
-
-    assert first["state"]["phase"] == "submitted"
-    assert second["state"]["phase"] == "queued"
-
-
-def test_memory_psi_avg60_blocks_on_the_first_probe(tmp_path: Path) -> None:
-    pressure = {
-        "memory_full_avg10": 0.0,
-        "memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD,
-    }
-    systemd = FakeSystemd()
-    subject = GenericJobs(
-        systemd,
-        GenericJobStore(tmp_path / "state"),
-        wait_poll_seconds=0.001,
-        pressure_probe=lambda: pressure,
-    )
-
-    queued = subject.start(agent_spec(("table:jobs",)))
-
-    assert queued["state"]["phase"] == "queued"
-    assert systemd.started == []
-
-
 def test_io_pressure_never_blocks_admission(tmp_path: Path) -> None:
     """Host IO PSI cannot attribute stalls to managed work on this host
     (ambient io full sits above any usable threshold), so admission ignores
@@ -474,69 +417,15 @@ def test_io_pressure_never_blocks_admission(tmp_path: Path) -> None:
     assert len(systemd.started) == 2
 
 
-def test_host_budget_accounts_for_active_jobs_across_pools(tmp_path: Path) -> None:
-    adapter = project(
-        tmp_path / "project",
-        (
-            operation(
-                "bulk", pool="bulk", estimate_memory_bytes=18 * 1024 * 1024 * 1024
-            ),
-        ),
-    )
-    systemd = FakeSystemd()
-    pressure = {
-        "memory_full_avg10": 0.0,
-        "io_full_avg10": 0.0,
-        "memory_total_bytes": 32 * 1024 * 1024 * 1024,
-        # Real headroom decides: 24 GiB free minus the 2.56 GiB reserve leaves
-        # 21.4 GiB; the just-launched bulk job (18 GiB, not yet in the kernel's
-        # figure) plus a 12 GiB candidate does not fit.
-        "memory_available_bytes": 24 * 1024 * 1024 * 1024,
-        "swap_total_bytes": 20 * 1024 * 1024 * 1024,
-        "swap_free_bytes": 20 * 1024 * 1024 * 1024,
-        "managed_memory_bytes": 0,
-    }
-    subject = GenericJobs(
-        systemd,
-        GenericJobStore(tmp_path / "state"),
-        wait_poll_seconds=0.001,
-        pressure_probe=lambda: pressure,
-    )
-    subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("bulk"),
-        correlation_id="bulk",
-        parameters={},
-    )
-    candidate = agent_spec(("table:jobs",))
-    candidate = GenericJobSpec(
-        **{
-            **candidate.__dict__,
-            "estimate_memory_bytes": 12 * 1024 * 1024 * 1024,
-        }
-    )
-
-    queued = subject.start(candidate)
-
-    assert queued["state"]["phase"] == "queued"
-    assert queued["state"]["admission"]["blocked_by"] == ["host-memory"]
-    assert (
-        queued["state"]["admission"]["host"]["occupied_memory_bytes"]
-        == 18 * 1024 * 1024 * 1024
-    )
-    assert len(systemd.started) == 1
-
-
 def test_unchanged_admission_block_does_not_rewrite_job_record(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     adapter = project(
         tmp_path / "project",
-        (operation("heavy", pool="bulk", estimate_memory_bytes=1024),),
+        (operation("heavy", pool="bulk"),),
     )
     pressure = {
-        "memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD,
-        "memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD,
+        "io_full_avg60": IO_FULL_BLOCK_THRESHOLD,
     }
     subject = GenericJobs(
         FakeSystemd(),
@@ -552,7 +441,6 @@ def test_unchanged_admission_block_does_not_rewrite_job_record(
     assert queued["state"]["admission"]["blocked_by"] == ["host-pressure"]
     writes: list[object] = []
     monkeypatch.setattr(subject.store, "save", writes.append)
-    pressure["memory_full_avg10"] = 2.0
 
     subject._admit_locked()
 
@@ -562,11 +450,10 @@ def test_unchanged_admission_block_does_not_rewrite_job_record(
 def test_scheduler_admits_queued_work_after_pressure_clears(tmp_path: Path) -> None:
     adapter = project(
         tmp_path / "project",
-        (operation("heavy", pool="bulk", estimate_memory_bytes=1024),),
+        (operation("heavy", pool="bulk"),),
     )
     pressure = {
-        "memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD,
-        "memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD,
+        "io_full_avg60": IO_FULL_BLOCK_THRESHOLD,
     }
     admitted = threading.Event()
     systemd = FakeSystemd()
@@ -590,9 +477,8 @@ def test_scheduler_admits_queued_work_after_pressure_clears(tmp_path: Path) -> N
     )
     scheduler.start()
     try:
-        pressure["memory_full_avg10"] = 0.0
-        pressure["memory_full_avg60"] = 0.0
-        assert admitted.wait(1)
+        pressure["io_full_avg60"] = 0.0
+        assert admitted.wait(2)
     finally:
         stop_event.set()
         scheduler.join(1)
@@ -628,7 +514,7 @@ def test_wait_does_not_drive_admission_on_each_observation(
 ) -> None:
     adapter = project(
         tmp_path / "project",
-        (operation("heavy", pool="bulk", estimate_memory_bytes=1024),),
+        (operation("heavy", pool="bulk"),),
     )
     probes = 0
 
@@ -636,8 +522,7 @@ def test_wait_does_not_drive_admission_on_each_observation(
         nonlocal probes
         probes += 1
         return {
-            "memory_full_avg10": MEMORY_FULL_BLOCK_THRESHOLD,
-            "memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD,
+            "io_full_avg60": IO_FULL_BLOCK_THRESHOLD,
         }
 
     subject = GenericJobs(
@@ -669,133 +554,25 @@ def test_wait_does_not_drive_admission_on_each_observation(
     assert probes == 1
 
 
-def test_failed_launch_peak_does_not_replace_declared_memory_estimate(
-    tmp_path: Path,
-) -> None:
-    adapter = project(
-        tmp_path / "project",
-        (
-            operation(
-                "heavy", pool="bulk", estimate_memory_bytes=12 * 1024 * 1024 * 1024
-            ),
-        ),
-    )
-    systemd = FakeSystemd()
-    subject = jobs(tmp_path, systemd)
-    started = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("heavy"),
-        correlation_id="failed",
-        parameters={},
-    )
-    systemd.properties = {
-        "LoadState": "loaded",
-        "ActiveState": "inactive",
-        "Result": "exit-code",
-        "ExecMainStatus": "1",
-        "MemoryPeak": str(128 * 1024 * 1024),
-    }
-    subject.get(started["job_id"])
-
-    repeated = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("heavy"),
-        correlation_id="retry",
-        parameters={},
-    )
-
-    assert (
-        repeated["state"]["admission"]["estimate_memory_bytes"]
-        == 12 * 1024 * 1024 * 1024
-    )
-
-
-def test_small_successful_peak_does_not_erase_declared_estimate(
-    tmp_path: Path,
-) -> None:
-    adapter = project(
-        tmp_path / "project",
-        (
-            operation(
-                "heavy", pool="bulk", estimate_memory_bytes=12 * 1024 * 1024 * 1024
-            ),
-        ),
-    )
-    systemd = FakeSystemd()
-    subject = jobs(tmp_path, systemd)
-    started = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("heavy"),
-        correlation_id="first",
-        parameters={},
-    )
-    systemd.properties = {
-        "LoadState": "loaded",
-        "ActiveState": "inactive",
-        "Result": "success",
-        "ExecMainStatus": "0",
-        "MemoryPeak": str(32 * 1024 * 1024),
-    }
-    subject.get(started["job_id"])
-
-    repeated = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("heavy"),
-        correlation_id="second",
-        parameters={},
-    )
-
-    assert (
-        repeated["state"]["admission"]["estimate_memory_bytes"]
-        == 12 * 1024 * 1024 * 1024
-    )
-
-
-def test_observed_peak_does_not_change_later_estimates(tmp_path: Path) -> None:
-    """Estimates are declared-or-default only. A completed run's peak must
-    not alter later admissions: learned high-water estimates serialized a
-    campaign to one lane and wedged the queue (2026-08-29/09-01)."""
-    systemd = FakeSystemd()
-    subject = jobs(tmp_path, systemd)
-    started = subject.start(agent_spec(("table:first",)))
-    systemd.properties = {
-        "LoadState": "loaded",
-        "ActiveState": "inactive",
-        "Result": "success",
-        "ExecMainStatus": "0",
-        "MemoryPeak": str(9 * 1024 * 1024 * 1024),
-    }
-    subject.get(started["job_id"])
-
-    from sinnixd.jobs import POOL_POLICIES
-
-    repeated = subject.start(agent_spec(("table:second",)))
-    claimed = repeated["state"]["admission"]["estimate_memory_bytes"]
-    assert claimed == POOL_POLICIES["agent"]["default_estimate"]
-    assert "estimates" not in subject._admission_state()
-
-
 def test_dependencies_exclusive_keys_defaults_and_pressure_gate(
     tmp_path: Path,
 ) -> None:
     adapter = project(
         tmp_path / "project",
         (
-            operation("prepare", estimate_memory_bytes=64 * 1024 * 1024),
+            operation("prepare"),
             operation(
                 "check",
                 dependencies=("prepare",),
                 exclusive_keys=("fixture:store",),
             ),
             operation("other", exclusive_keys=("fixture:store",)),
-            operation(
-                "heavy", pool="bulk", estimate_memory_bytes=12 * 1024 * 1024 * 1024
-            ),
+            operation("heavy", pool="bulk"),
             operation("interactive", pool="interactive"),
         ),
     )
     systemd = FakeSystemd()
-    subject = jobs(tmp_path, systemd, pressure=MEMORY_FULL_BLOCK_THRESHOLD)
+    subject = jobs(tmp_path, systemd, pressure=IO_FULL_BLOCK_THRESHOLD)
 
     heavy = subject.start_declared(
         project=adapter,
@@ -852,13 +629,6 @@ def test_dependencies_exclusive_keys_defaults_and_pressure_gate(
         "MemoryPeak": str(2 * 1024 * 1024 * 1024),
     }
     subject.get(primary["job_id"])
-    repeated = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("check"),
-        correlation_id="again",
-        parameters={},
-    )
-    assert repeated["state"]["admission"]["estimate_memory_bytes"] == 1024 * 1024 * 1024
 
 
 @pytest.mark.parametrize("scratch", ("tmpfs", "nvme"))
@@ -975,7 +745,6 @@ def test_queued_job_recreates_aged_scratch_before_launch(
             operation(
                 "heavy",
                 pool="bulk",
-                estimate_memory_bytes=12 * 1024 * 1024 * 1024,
                 scratch="nvme",
             ),
         ),
@@ -1101,108 +870,23 @@ def _lone_managed_job(
     return subject, systemd, only, pressure, clock
 
 
-def test_swap_exhaustion_still_preempts_the_only_managed_job(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Host endangerment is the exception: a lone job is still a valid victim."""
-    subject, systemd, only, pressure, clock = _lone_managed_job(tmp_path, monkeypatch)
-
-    pressure.update(
-        memory_full_avg10=MEMORY_FULL_BLOCK_THRESHOLD,
-        io_full_avg10=22.2,
-        memory_available_bytes=1024**3,
-        swap_free_bytes=1024**3,
-        managed_memory_bytes=6 * 1024**3,
-    )
-    assert subject._relieve_active_pressure(pressure) is None
-    clock[0] = 2.1
-    assert subject._relieve_active_pressure(pressure) == only["job_id"]
-
-    assert systemd.stopped == [only["unit"]]
-    preempted = subject.get(only["job_id"])
-    assert preempted["state"]["phase"] == "cancelled"
-    assert "swap-exhaustion" in preempted["state"]["preemption"]["reason"]
-
-
-def test_lane_and_harvest_fit_the_host_budget_together(tmp_path: Path) -> None:
-    """A lane's peak reservation must leave room for the harvest that publishes it.
-
-    Sized from the 2026-08-28 wave: a 31 GiB host with ~15 GiB available, a lane
-    holding a 7 GiB reservation, and a 4.7 GiB harvest. A 25% reserve capped at
-    8 GiB queues the harvest behind the lane, which is what stalls publication.
-    Admission charges the just-launched lane its estimate until its footprint
-    reaches the kernel's available figure; the reserve is 8% of the host.
-    """
-    gib = 1024 * 1024 * 1024
-    adapter = project(
-        tmp_path / "project",
-        (
-            operation(
-                "harvest", pool="normal", estimate_memory_bytes=4700 * 1024 * 1024
-            ),
-        ),
-    )
-    systemd = FakeSystemd()
-    pressure = {
-        "memory_full_avg10": 0.0,
-        "io_full_avg10": 0.0,
-        "memory_total_bytes": 31 * gib,
-        "memory_available_bytes": 16 * gib,
-        "swap_total_bytes": 20 * gib,
-        "swap_free_bytes": 20 * gib,
-        "managed_memory_bytes": 3 * gib,
-    }
-    subject = GenericJobs(
-        systemd,
-        GenericJobStore(tmp_path / "state"),
-        wait_poll_seconds=0.001,
-        pressure_probe=lambda: pressure,
-    )
-    lane = GenericJobSpec(
-        **{**agent_spec(("table:jobs",)).__dict__, "estimate_memory_bytes": 7 * gib}
-    )
-    running = subject.start(lane)
-    assert running["state"]["phase"] == "submitted"
-
-    harvest = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("harvest"),
-        correlation_id="harvest",
-        parameters={},
-    )
-
-    assert harvest["state"]["phase"] == "submitted"
-    assert len(systemd.started) == 2
-
-
 def test_superseding_operation_cancels_its_own_queued_jobs(tmp_path: Path) -> None:
-    gib = 1024 * 1024 * 1024
     adapter = project(
         tmp_path / "project",
         (
             operation(
                 "prebuild",
                 pool="bulk",
-                estimate_memory_bytes=24 * gib,
                 supersede="queued",
             ),
         ),
     )
     systemd = FakeSystemd()
-    pressure = {
-        "memory_full_avg10": 0.0,
-        "io_full_avg10": 0.0,
-        "memory_total_bytes": 31 * gib,
-        "memory_available_bytes": 8 * gib,
-        "swap_total_bytes": 20 * gib,
-        "swap_free_bytes": 20 * gib,
-        "managed_memory_bytes": 0,
-    }
     subject = GenericJobs(
         systemd,
         GenericJobStore(tmp_path / "state"),
         wait_poll_seconds=0.001,
-        pressure_probe=lambda: pressure,
+        pressure_probe=lambda: {"io_full_avg60": IO_FULL_BLOCK_THRESHOLD},
     )
 
     def start(correlation_id: str) -> dict[str, object]:
@@ -1246,7 +930,7 @@ def test_superseding_operation_cancels_its_own_queued_jobs(tmp_path: Path) -> No
     assert replaced["state"]["superseded"] is True
 
 
-def test_terminal_observation_is_idempotent_and_records_no_estimate(
+def test_terminal_observation_is_idempotent(
     tmp_path: Path,
 ) -> None:
     systemd = FakeSystemd()
@@ -1266,67 +950,6 @@ def test_terminal_observation_is_idempotent_and_records_no_estimate(
     assert first["state"]["phase"] == "succeeded"
     assert repeated["state"]["phase"] == "succeeded"
     assert "estimates" not in subject._admission_state()
-
-
-def test_scheduler_survives_a_failing_pressure_sweep(tmp_path: Path) -> None:
-    """A raising pressure sweep must not end the thread that owns the active set.
-
-    A preemption whose ``systemctl stop`` times out raises out of the sweep;
-    the thread that dies is the only one holding the active set, which orphans
-    every running unit and wedges all later admission.
-
-    Anti-vacuity: remove the try/except around the pressure sweep in
-    ``run_admission_scheduler`` and the thread dies on the first raise, so the
-    queued job is never admitted and ``scheduler.is_alive()`` is false.
-    """
-    failures = []
-    armed = threading.Event()
-    adapter = project(
-        tmp_path / "project",
-        (operation("light", pool="bulk", estimate_memory_bytes=1024),),
-    )
-
-    pressure = {"memory_full_avg60": MEMORY_FULL_BLOCK_THRESHOLD}
-
-    def probe() -> dict[str, float]:
-        if armed.is_set() and len(failures) < 3:
-            failures.append("raised")
-            raise SystemdJobTimeout("systemd command timed out")
-        return dict(pressure)
-
-    admitted = threading.Event()
-    subject = GenericJobs(
-        FakeSystemd(),
-        GenericJobStore(tmp_path / "state"),
-        pressure_probe=probe,
-        before_admission_start=lambda _job_id: admitted.set(),
-        admission_retry_seconds=0.001,
-    )
-    queued = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("light"),
-        correlation_id="queued",
-        parameters={},
-    )
-    assert queued["state"]["phase"] == "queued"
-
-    armed.set()
-    stop_event = threading.Event()
-    scheduler = threading.Thread(
-        target=subject.run_admission_scheduler, args=(stop_event,)
-    )
-    scheduler.start()
-    try:
-        # The sweep raises three times before the probe answers; the loop must
-        # still be alive to admit the queued job once pressure clears.
-        pressure["memory_full_avg60"] = 0.0
-        assert admitted.wait(5)
-    finally:
-        stop_event.set()
-        scheduler.join(2)
-
-    assert not scheduler.is_alive()
-    assert len(failures) == 3
 
 
 def test_stop_does_not_wait_for_the_unit_to_finish_shutting_down() -> None:
@@ -1350,78 +973,16 @@ def test_stop_does_not_wait_for_the_unit_to_finish_shutting_down() -> None:
     ]
 
 
-def test_memory_blocked_head_of_line_reserves_its_claim(tmp_path: Path) -> None:
-    """Younger small jobs cannot slip past a memory-blocked older job forever."""
-    gib = 1024 * 1024 * 1024
-    adapter = project(
-        tmp_path / "project",
-        (
-            operation("seed", pool="bulk", estimate_memory_bytes=10 * gib),
-            operation("large", pool="normal", estimate_memory_bytes=7 * gib),
-            operation("small", pool="normal", estimate_memory_bytes=3 * gib),
-        ),
-    )
-    systemd = FakeSystemd()
-    pressure = {
-        "memory_full_avg10": 0.0,
-        "io_full_avg10": 0.0,
-        "memory_total_bytes": 16 * gib,
-        "memory_available_bytes": 16 * gib,
-        "swap_total_bytes": 20 * gib,
-        "swap_free_bytes": 20 * gib,
-        "managed_memory_bytes": 0,
-    }
-    subject = GenericJobs(
-        systemd,
-        GenericJobStore(tmp_path / "state"),
-        wait_poll_seconds=0.001,
-        pressure_probe=lambda: pressure,
-    )
-    subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("seed"),
-        correlation_id="seed",
-        parameters={},
-    )
-    blocked = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("large"),
-        correlation_id="large",
-        parameters={},
-    )
-    assert blocked["state"]["admission"]["blocked_by"] == ["host-memory"]
-    younger = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("small"),
-        correlation_id="small",
-        parameters={},
-    )
-    # 10 (seed) + 3 (small) fits the raw budget, but the blocked 7GiB head
-    # reserves its claim: the younger job queues instead of starving it.
-    assert younger["state"]["phase"] == "queued"
-    assert "host-memory" in younger["state"]["admission"]["blocked_by"]
-
-
 def test_cancel_records_a_typed_reason(tmp_path: Path) -> None:
-    gib = 1024 * 1024 * 1024
     adapter = project(
         tmp_path / "project",
-        (operation("op", pool="bulk", estimate_memory_bytes=14 * gib),),
+        (operation("op", pool="bulk"),),
     )
-    pressure = {
-        "memory_full_avg10": 0.0,
-        "io_full_avg10": 0.0,
-        "memory_total_bytes": 32 * gib,
-        "memory_available_bytes": 8 * gib,
-        "swap_total_bytes": 8 * gib,
-        "swap_free_bytes": 8 * gib,
-        "managed_memory_bytes": 0,
-    }
     subject = GenericJobs(
         FakeSystemd(),
         GenericJobStore(tmp_path / "state"),
         wait_poll_seconds=0.001,
-        pressure_probe=lambda: pressure,
+        pressure_probe=lambda: {"io_full_avg60": IO_FULL_BLOCK_THRESHOLD},
     )
     started = subject.start_declared(
         project=adapter,
@@ -1430,193 +991,9 @@ def test_cancel_records_a_typed_reason(tmp_path: Path) -> None:
         parameters={},
     )
     assert started["state"]["phase"] == "queued"
-    subject.cancel(started["job_id"], reason="pressure-preemption:swap-exhaustion")
+    subject.cancel(started["job_id"], reason="operator-request")
     record = subject.store.load(started["job_id"])
-    assert (
-        record.state["cancellation"]["reason"] == "pressure-preemption:swap-exhaustion"
-    )
-
-
-def test_agent_fleet_admits_on_default_claims(tmp_path: Path) -> None:
-    """Undeclared agent lanes claim the small pool default (lanes are
-    API-bound; verification bursts are short and rarely coincide), so a real
-    fleet admits on a host with ~12G available. Anti-vacuity: lanes that
-    DECLARE a large estimate stop at the host budget."""
-
-    def build(tmp: Path) -> GenericJobs:
-        return GenericJobs(
-            FakeSystemd(),
-            GenericJobStore(tmp / "state"),
-            wait_poll_seconds=0.001,
-            pressure_probe=lambda: {
-                "memory_full_avg10": 0.0,
-                "io_full_avg10": 0.0,
-                "memory_total_bytes": 32 * 1024**3,
-                "memory_available_bytes": 12 * 1024**3,
-                "swap_total_bytes": 20 * 1024**3,
-                "swap_free_bytes": 10 * 1024**3,
-                "managed_memory_bytes": 0,
-            },
-        )
-
-    subject = build(tmp_path / "default")
-    started = [
-        subject.start(agent_spec((f"table:fleet-{index}",))) for index in range(10)
-    ]
-    running = [item for item in started if item["state"]["phase"] != "queued"]
-    assert len(running) >= 8
-
-    declared = build(tmp_path / "declared")
-    heavy_started = []
-    for index in range(10):
-        spec = agent_spec((f"table:heavy-{index}",))
-        spec = GenericJobSpec(**{**spec.__dict__, "estimate_memory_bytes": 4 * 1024**3})
-        heavy_started.append(declared.start(spec))
-    heavy_running = [
-        item for item in heavy_started if item["state"]["phase"] != "queued"
-    ]
-    assert len(heavy_running) <= 3
-
-
-def test_a_long_waiting_bulk_job_reserves_across_pools(tmp_path: Path) -> None:
-    """Anti-vacuity: with per-pool reservation only, the small agent lane is
-    admitted into the headroom the corpus run has waited fifteen minutes for."""
-    import dataclasses
-    from datetime import timedelta
-
-    gib = 1024**3
-    pressure = {
-        "memory_full_avg10": 0.0,
-        "memory_full_avg60": 0.0,
-        "io_full_avg10": 0.0,
-        "memory_total_bytes": 32 * gib,
-        "memory_available_bytes": 9 * gib,
-        "swap_total_bytes": 20 * gib,
-        "swap_free_bytes": 20 * gib,
-        "managed_memory_bytes": 0,
-    }
-    adapter = project(
-        tmp_path / "project",
-        (operation("corpus", pool="bulk", estimate_memory_bytes=8 * gib),),
-    )
-    systemd = FakeSystemd()
-    subject = GenericJobs(
-        systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure
-    )
-    corpus = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("corpus"),
-        correlation_id="corpus",
-        parameters={},
-    )
-    assert corpus["state"]["phase"] == "queued"
-    with subject.store.locked(corpus["job_id"]):
-        record = subject.store.load(corpus["job_id"])
-        aged = (
-            datetime.now(UTC)
-            - timedelta(seconds=HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS + 60)
-        ).isoformat()
-        subject.store.save(dataclasses.replace(record, created_at=aged))
-
-    lane = subject.start(agent_spec(("table:lane",)))
-
-    assert subject.get(lane["job_id"])["state"]["phase"] == "queued"
-
-
-def test_a_job_waiting_for_a_pool_worker_does_not_reserve_across_pools(
-    tmp_path: Path,
-) -> None:
-    """Anti-vacuity: two hourly bulk jobs queued behind the running corpus
-    reserved 8 GB each against every pool and held harvests for two hours."""
-    import dataclasses
-    from datetime import timedelta
-
-    gib = 1024**3
-    pressure = {
-        "memory_full_avg10": 0.0,
-        "memory_full_avg60": 0.0,
-        "io_full_avg10": 0.0,
-        "memory_total_bytes": 32 * gib,
-        "memory_available_bytes": 9 * gib,
-        "swap_total_bytes": 20 * gib,
-        "swap_free_bytes": 20 * gib,
-        "managed_memory_bytes": 0,
-    }
-    adapter = project(
-        tmp_path / "project",
-        (
-            operation("corpus", pool="bulk", estimate_memory_bytes=3 * gib),
-            operation("hourly", pool="bulk", estimate_memory_bytes=8 * gib),
-        ),
-    )
-    systemd = FakeSystemd()
-    subject = GenericJobs(
-        systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure
-    )
-    running = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("corpus"),
-        correlation_id="corpus",
-        parameters={},
-    )
-    assert running["state"]["phase"] == "submitted"
-    hourly = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("hourly"),
-        correlation_id="hourly",
-        parameters={},
-    )
-    assert hourly["state"]["phase"] == "queued"
-    with subject.store.locked(hourly["job_id"]):
-        record = subject.store.load(hourly["job_id"])
-        aged = (
-            datetime.now(UTC)
-            - timedelta(seconds=HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS + 60)
-        ).isoformat()
-        subject.store.save(dataclasses.replace(record, created_at=aged))
-
-    lane = subject.start(agent_spec(("table:lane",)))
-
-    assert subject.get(lane["job_id"])["state"]["phase"] != "queued"
-
-
-def test_a_waiting_harvest_outranks_a_new_lane_launch(tmp_path: Path) -> None:
-    """Anti-vacuity: six publications sat two hours behind agent lanes that
-    refill kept topping up (2026-09-02 07:00–09:30Z)."""
-    gib = 1024**3
-    pressure = {
-        "memory_full_avg10": 0.0,
-        "memory_full_avg60": 0.0,
-        "io_full_avg10": 0.0,
-        "memory_total_bytes": 32 * gib,
-        "memory_available_bytes": 5 * gib,
-        "swap_total_bytes": 20 * gib,
-        "swap_free_bytes": 20 * gib,
-        "managed_memory_bytes": 0,
-    }
-    adapter = project(
-        tmp_path / "project",
-        (operation("harvest", pool="normal", estimate_memory_bytes=2 * gib),),
-    )
-    systemd = FakeSystemd()
-    subject = GenericJobs(
-        systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure
-    )
-    harvest = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("harvest"),
-        correlation_id="harvest",
-        parameters={},
-    )
-    assert harvest["state"]["phase"] == "queued", (
-        "5 GiB available minus the 4 GiB reserve cannot hold 2 GiB"
-    )
-
-    lane = subject.start(agent_spec(("table:lane",)))
-
-    assert subject.get(lane["job_id"])["state"]["phase"] == "queued", (
-        "the lane must not take the harvest's headroom"
-    )
+    assert record.state["cancellation"]["reason"] == "operator-request"
 
 
 def test_sustained_io_stall_blocks_new_admissions(tmp_path: Path) -> None:
