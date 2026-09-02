@@ -66,6 +66,7 @@ class LaneFacts:
     lane_phase: str | None
     receipt: Receipt | None
     pull: Pull | None
+    lane_job: str | None = None
     integrators_at_head: tuple[str, ...] = ()
     authorization_head: str | None = None
     verify_job: tuple[str, str] | None = None
@@ -187,10 +188,11 @@ def _advance(facts: LaneFacts, now: datetime | None) -> Action:
         if "integrator" in facts.integrators_at_head:
             return Action("park", "integrator ran at this head and flags remain: " + ", ".join(receipt.flags[:4]))
         return Action("integrate", ", ".join(receipt.flags[:4]))
-    if receipt.verification in {"static-only", "unavailable"} and not receipt.authorized:
-        # Test evidence comes only from the declared verify_affected job.
+    if receipt.verification != "from-job" and not receipt.authorized:
+        # Test evidence comes only from the declared verify_affected job: the
+        # receipt records whether it was minted against one.
         if facts.verify_job is None:
-            return Action("verify", f"receipt has no test evidence ({receipt.verification})")
+            return Action("verify", "receipt has no test evidence")
         if facts.verify_job[1] != "succeeded":
             return Action("park", f"affected verification {facts.verify_job[1]} at this head")
         return Action("harvest", f"re-mint with verdict {facts.verify_job[0][:8]}")
@@ -270,6 +272,7 @@ def collect(
         holder: str | None = None
         running_ops: list[str] = []
         lane_phase: str | None = None
+        lane_job: str | None = None
         lane_created = ""
         integrators: list[str] = []
         bead: str | None = None
@@ -299,6 +302,7 @@ def collect(
                     created = str(job.get("created_at") or "")
                     if created >= lane_created:
                         lane_created, lane_phase = created, phase
+                        lane_job = str(job.get("job_id") or "") or None
                         lane_finished = str(state.get("completed_at") or state.get("observed_at") or created)
                     bead = bead or _campaign_bead(spec)
             elif kind == "declared-operation" and not terminal:
@@ -346,6 +350,7 @@ def collect(
                 holder=holder,
                 running_ops=tuple(sorted(set(running_ops))),
                 lane_phase=lane_phase,
+                lane_job=lane_job,
                 receipt=receipt,
                 pull=pull,
                 integrators_at_head=tuple(integrators),

@@ -44,7 +44,7 @@ def _receipt(**overrides: object) -> Receipt:
         "flags": (),
         "flagged": False,
         "authorized": False,
-        "verification": "tests-run",
+        "verification": "from-job",
         "bead": "polylogue-1",
         "created_at": "2026-09-02T10:00:00+00:00",
     }
@@ -88,7 +88,7 @@ def test_advance_orders_facts_before_actions() -> None:
     assert advance(_facts(receipt=flagged, integrators_at_head=("integrator",))).kind == "park"
     authorized = _receipt(flags=("FLAG: x",), flagged=True, authorized=True)
     assert advance(_facts(receipt=authorized)).kind == "publish"
-    static = _receipt(verification="static-only")
+    static = _receipt(verification="absent")
     assert advance(_facts(receipt=static)).kind == "verify"
     assert advance(_facts(receipt=static, verify_job=("v1", "failed"))).kind == "park"
     assert advance(_facts(receipt=static, verify_job=("v1", "succeeded"))).kind == "harvest"
