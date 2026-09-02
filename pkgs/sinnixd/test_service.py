@@ -88,7 +88,6 @@ from sinnixd.runner import (
 )
 from sinnixd.service import SUPPORTED_OPERATIONS, SinnixdService
 from sinnixd.workspaces import (
-    MAX_PROVISION_OUTPUT_BYTES,
     WorkspaceError,
     WorkspaceRecord,
 )
@@ -3645,140 +3644,6 @@ def test_workspace_create_is_git_derived_durable_and_restart_safe(
     assert recovered.payload.inline["checkout_id"].startswith("worktree-")
 
 
-def test_workspace_create_inherits_declared_seed_files_and_records_missing_sources(
-    tmp_path: Path,
-) -> None:
-    """Anti-vacuity: create copies a main-checkout seed while missing declarations become typed notes."""
-    write_adapter(tmp_path)
-    descriptor = tmp_path / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text()
-        + '\n[workspace.provision]\ncopy = [".cache/testmon/testmondata", "missing.seed"]\n'
-    )
-    initialize_git_checkout(tmp_path)
-    seed = tmp_path / ".cache" / "testmon" / "testmondata"
-    seed.parent.mkdir(parents=True)
-    seed.write_text("seed\n")
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-
-    created = service.workspaces.create(
-        project_id="fixture",
-        name="seed-lane",
-        branch="feature/seed-lane",
-        base="HEAD",
-    )
-
-    copied = Path(created["path"]) / ".cache" / "testmon" / "testmondata"
-    assert copied.read_text() == "seed\n"
-    # The seed must own its bytes: a shared inode would let workspace writes
-    # (testmon updates its SQLite graph in place) mutate the main checkout.
-    assert os.stat(copied).st_ino != os.stat(seed).st_ino
-    copied.write_text("workspace-mutation\n")
-    assert seed.read_text() == "seed\n"
-    assert created["provision_notes"] == [
-        {"kind": "missing-source", "path": "missing.seed"}
-    ]
-    recovered = service.workspaces.get(created["workspace_id"])
-    assert recovered["provision_notes"] == created["provision_notes"]
-
-
-def test_workspace_create_records_missing_compatible_testmon_seed(
-    tmp_path: Path,
-) -> None:
-    """An incompatible native graph is visible as a workspace warning."""
-    write_adapter(tmp_path)
-    descriptor = tmp_path / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            'command = ["fixture-env", "--command"]', 'command = ["env"]'
-        )
-        + '\n[workspace.provision]\ncopy = [".cache/testmon/testmondata"]\n'
-        + 'exec = ["sh", "-c", "printf \'testmon provision: absent: incompatible environment\\n\'"]\n'
-    )
-    initialize_git_checkout(tmp_path)
-    seed = tmp_path / ".cache" / "testmon" / "testmondata"
-    seed.parent.mkdir(parents=True)
-    seed.write_text("incompatible\n")
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-
-    created = service.workspaces.create(
-        project_id="fixture",
-        name="incompatible-seed",
-        branch="feature/incompatible-seed",
-        base="HEAD",
-    )
-
-    assert {note["kind"] for note in created["provision_notes"]} == {
-        "exec",
-        "missing-compatible-seed",
-    }
-    assert {
-        "kind": "missing-compatible-seed",
-        "path": ".cache/testmon/testmondata",
-    } in created["provision_notes"]
-    assert (
-        service.workspaces.get(created["workspace_id"])["provision_notes"]
-        == created["provision_notes"]
-    )
-
-
-def test_workspace_create_rolls_back_locked_provision_failure_without_orphans(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    write_adapter(tmp_path)
-    initialize_git_checkout(tmp_path)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-
-    def fail_locked_provision(project: object, target: Path) -> None:
-        assert service.workspaces is not None
-        service.workspaces._git(project.root, "worktree", "lock", str(target))  # type: ignore[attr-defined]
-        raise RuntimeError("injected provision failure")
-
-    monkeypatch.setattr(
-        type(service.workspaces), "_provision", staticmethod(fail_locked_provision)
-    )
-    with pytest.raises(RuntimeError, match="injected provision failure"):
-        service.workspaces.create(
-            project_id="fixture",
-            name="rollback-lane",
-            branch="feature/rollback-lane",
-            base="HEAD",
-        )
-
-    assert service.workspaces.store.records() == ()
-    assert not (tmp_path / "worktrees" / "rollback-lane").exists()
-    assert (
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(tmp_path),
-                "show-ref",
-                "--verify",
-                "--quiet",
-                "refs/heads/feature/rollback-lane",
-            ],
-            check=False,
-        ).returncode
-        != 0
-    )
-    assert (
-        len(
-            [
-                record
-                for record in subprocess.run(
-                    ["git", "-C", str(tmp_path), "worktree", "list", "--porcelain"],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                ).stdout.split("\n\n")
-                if record
-            ]
-        )
-        == 1
-    )
-
-
 def test_rapid_sequential_workspace_creates_leave_no_collision_orphans(
     tmp_path: Path,
 ) -> None:
@@ -3802,283 +3667,44 @@ def test_rapid_sequential_workspace_creates_leave_no_collision_orphans(
     assert not list((tmp_path / "worktrees").glob(".rapid-*"))
 
 
-def test_packet_workspace_create_recovers_dead_registry_leftover_and_notes_it(
+def test_workspace_create_refuses_a_registered_name_or_branch_without_replacing_it(
     tmp_path: Path,
 ) -> None:
+    """Anti-vacuity: a second create on a live lane's name must not adopt or delete it."""
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-    first = service.workspaces.create(
-        project_id="fixture",
-        name="packet-polylogue-jfeaz",
-        branch="feature/packet/polylogue-jfeaz",
-        base="HEAD",
-    )
-    shutil.rmtree(first["path"])
-
-    recovered = service.dispatch(
-        request(
-            "workspace.create",
-            "git-workspaces",
-            {
-                "project_id": "fixture",
-                "name": "packet-polylogue-jfeaz",
-                "branch": "feature/packet/polylogue-jfeaz",
-                "base": None,
-                "recover_dead": True,
-            },
-            "agent-control",
-        )
-    )
-
-    assert recovered.ok and recovered.payload is not None
-    value = recovered.payload.inline
-    assert value["workspace_id"] != first["workspace_id"]
-    assert value["notes"] == [
-        {
-            "kind": "packet-dead-collision-recovered",
-            "workspace_id": first["workspace_id"],
-            "name": "packet-polylogue-jfeaz",
-            "branch": "feature/packet/polylogue-jfeaz",
-        }
-    ]
-    assert (
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(tmp_path),
-                "show-ref",
-                "--verify",
-                "--quiet",
-                "refs/heads/feature/packet/polylogue-jfeaz",
-            ],
-            check=False,
-        ).returncode
-        == 0
-    )
-
-
-def test_packet_workspace_create_refuses_live_collision(
-    tmp_path: Path,
-) -> None:
-    write_adapter(tmp_path)
-    initialize_git_checkout(tmp_path)
-    jobs = generic_jobs(tmp_path)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
     workspace = service.workspaces.create(
         project_id="fixture",
         name="live-packet",
         branch="feature/live-packet",
         base="HEAD",
     )
-    checkout = service.workspaces.checkout(workspace["workspace_id"])
-    jobs.start(
-        GenericJobSpec(
-            kind="attested-agent",
-            command=("true",),
-            working_directory=str(checkout.path),
-            environment={},
-            timeout_seconds=60,
-            project_id="fixture",
-            principal="agent-control",
-            checkout=checkout.to_dict(),
-            result_kind="last-message",
-        ),
-        str(uuid4()),
-    )
 
-    response = service.dispatch(
-        request(
-            "workspace.create",
-            "git-workspaces",
-            {
-                "project_id": "fixture",
-                "name": "live-packet",
-                "branch": "feature/live-packet",
-                "base": None,
-                "recover_dead": True,
-            },
-            "agent-control",
+    for name, branch in (
+        ("live-packet", "feature/other-branch"),
+        ("other-name", "feature/live-packet"),
+    ):
+        response = service.dispatch(
+            request(
+                "workspace.create",
+                "git-workspaces",
+                {
+                    "project_id": "fixture",
+                    "name": name,
+                    "branch": branch,
+                    "base": None,
+                },
+                "agent-control",
+            )
         )
-    )
+        assert response.error is not None
+        assert response.error.code.value == "INVALID_ARGUMENT"
+        assert "already exists" in response.error.message
 
-    assert response.error is not None
-    assert response.error.code.value == "INVALID_ARGUMENT"
-    assert "live job" in response.error.message
-    assert (
-        service.workspaces.store.records()[0].workspace_id == workspace["workspace_id"]
-    )
-
-
-def _write_provision_exec_descriptor(
-    root: Path, command: str, timeout: int = 600
-) -> None:
-    descriptor = root / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            'command = ["fixture-env", "--command"]', 'command = ["env"]'
-        )
-        + f"\n[workspace.provision]\nexec = {command}\nexec_timeout_seconds = {timeout}\n"
-    )
-
-
-def test_workspace_provision_exec_records_bounded_output_in_the_workspace_note(
-    tmp_path: Path,
-) -> None:
-    write_adapter(tmp_path)
-    _write_provision_exec_descriptor(
-        tmp_path,
-        '["/bin/sh", "-c", "printf provisioned > provisioned.txt; printf stdout; printf stderr >&2"]',
-    )
-    initialize_git_checkout(tmp_path)
-
-    created = SinnixdService(
-        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path)
-    ).workspaces.create(
-        project_id="fixture",
-        name="exec-lane",
-        branch="feature/exec-lane",
-        base="HEAD",
-    )
-
-    assert (Path(created["path"]) / "provisioned.txt").read_text() == "provisioned"
-    assert created["provision_notes"] == [
-        {
-            "kind": "exec",
-            "path": "/bin/sh -c printf provisioned > provisioned.txt; printf stdout; printf stderr >&2",
-            "output": "stdoutstderr",
-        }
-    ]
-
-
-def test_workspace_provision_exec_scripts_keep_the_final_workspace_path(
-    tmp_path: Path,
-) -> None:
-    """Anti-vacuity: an absolute console-script shebang must survive atomic create."""
-    write_adapter(tmp_path)
-    _write_provision_exec_descriptor(
-        tmp_path,
-        r"""["/bin/sh", "-c", "printf '#!/bin/sh\\nprintf provisioned' > interpreter; chmod +x interpreter; printf '#!%s/interpreter\\n' \"$PWD\" > tool; chmod +x tool"]""",
-    )
-    initialize_git_checkout(tmp_path)
-
-    created = SinnixdService(
-        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path)
-    ).workspaces.create(
-        project_id="fixture",
-        name="shebang-lane",
-        branch="feature/shebang-lane",
-        base="HEAD",
-    )
-
-    tool = Path(created["path"]) / "tool"
-    result = subprocess.run([str(tool)], check=True, capture_output=True, text=True)
-    assert result.stdout == "provisioned"
-
-
-def test_workspace_provision_exec_failure_rolls_back_before_registration(
-    tmp_path: Path,
-) -> None:
-    write_adapter(tmp_path)
-    _write_provision_exec_descriptor(
-        tmp_path,
-        '["/bin/sh", "-c", "printf partial > partial.txt; printf failed >&2; exit 23"]',
-    )
-    initialize_git_checkout(tmp_path)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-
-    with pytest.raises(WorkspaceError, match="exit status 23"):
-        service.workspaces.create(
-            project_id="fixture",
-            name="failed-lane",
-            branch="feature/failed-lane",
-            base="HEAD",
-        )
-
-    assert not (tmp_path / "worktrees" / "failed-lane").exists()
-    assert service.workspaces.list("fixture") == {"workspaces": []}
-    assert (
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(tmp_path),
-                "show-ref",
-                "--verify",
-                "--quiet",
-                "refs/heads/feature/failed-lane",
-            ],
-            check=False,
-        ).returncode
-        != 0
-    )
-
-
-def test_workspace_provision_exec_timeout_kills_the_process_group(
-    tmp_path: Path,
-) -> None:
-    write_adapter(tmp_path)
-    marker = tmp_path / "child-survived"
-    _write_provision_exec_descriptor(
-        tmp_path,
-        f'["/bin/sh", "-c", "(sleep 30; printf survived > {marker}) & wait"]',
-        timeout=1,
-    )
-    initialize_git_checkout(tmp_path)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-
-    with pytest.raises(WorkspaceError, match="timed out after 1 seconds"):
-        service.workspaces.create(
-            project_id="fixture",
-            name="timeout-lane",
-            branch="feature/timeout-lane",
-            base="HEAD",
-        )
-
-    time.sleep(0.1)
-    assert not marker.exists()
-    assert not (tmp_path / "worktrees" / "timeout-lane").exists()
-
-
-def test_workspace_provision_exec_output_is_bounded(tmp_path: Path) -> None:
-    write_adapter(tmp_path)
-    _write_provision_exec_descriptor(
-        tmp_path, '["/bin/sh", "-c", "head -c 100000 /dev/zero"]'
-    )
-    initialize_git_checkout(tmp_path)
-
-    created = SinnixdService(
-        ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path)
-    ).workspaces.create(
-        project_id="fixture",
-        name="bounded-lane",
-        branch="feature/bounded-lane",
-        base="HEAD",
-    )
-
-    output = created["provision_notes"][0]["output"]
-    assert len(output.encode()) == MAX_PROVISION_OUTPUT_BYTES
-
-
-@pytest.mark.parametrize(
-    "provision",
-    (
-        "[workspace.provision]\nexec = []\n",
-        '[workspace.provision]\nexec = ["/bin/true"]\nexec_timeout_seconds = 0\n',
-        '[workspace.provision]\nexec = ["/bin/true"]\nexec_timeout_seconds = 3601\n',
-    ),
-)
-def test_workspace_provision_exec_schema_rejects_unbounded_values(
-    tmp_path: Path, provision: str
-) -> None:
-    write_adapter(tmp_path)
-    (tmp_path / ".agentctl" / "project.toml").write_text(
-        (tmp_path / ".agentctl" / "project.toml").read_text() + "\n" + provision
-    )
-
-    with pytest.raises(ProjectConfigError, match="workspace.provision"):
-        ProjectCatalog([tmp_path]).get("fixture")
+    records = service.workspaces.store.records()
+    assert [record.workspace_id for record in records] == [workspace["workspace_id"]]
+    assert Path(workspace["path"]).is_dir()
 
 
 def test_workspace_mutations_reject_weak_principals_paths_refs_and_duplicates(
@@ -4363,93 +3989,6 @@ def test_workspace_drop_deletes_a_clean_no_pr_branch_without_checkpoint_content(
         / checkpoint["checkpoint_id"]
     ).exists()
     assert service.workspaces.list("fixture") == {"workspaces": []}
-
-
-def test_workspace_drop_squash_equivalence_uses_creation_base_after_unrelated_landing(
-    tmp_path: Path,
-) -> None:
-    write_adapter(tmp_path)
-    initialize_git_checkout(tmp_path)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-    workspace = service.workspaces.create(
-        project_id="fixture",
-        name="dispose-after-later-landing",
-        branch="feature/dispose-after-later-landing",
-        base="origin/master",
-    )
-    workspace_path = Path(workspace["path"])
-    (workspace_path / "branch.txt").write_text("branch\n")
-    subprocess.run(["git", "-C", str(workspace_path), "add", "branch.txt"], check=True)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(workspace_path),
-            "-c",
-            "user.name=Fixture",
-            "-c",
-            "user.email=fixture@example.test",
-            "commit",
-            "--quiet",
-            "-m",
-            "branch",
-        ],
-        check=True,
-    )
-    (tmp_path / "branch.txt").write_text("branch\n")
-    subprocess.run(["git", "-C", str(tmp_path), "add", "branch.txt"], check=True)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(tmp_path),
-            "-c",
-            "user.name=Fixture",
-            "-c",
-            "user.email=fixture@example.test",
-            "commit",
-            "--quiet",
-            "-m",
-            "squash branch",
-        ],
-        check=True,
-    )
-    (tmp_path / "unrelated.txt").write_text("unrelated\n")
-    subprocess.run(["git", "-C", str(tmp_path), "add", "unrelated.txt"], check=True)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(tmp_path),
-            "-c",
-            "user.name=Fixture",
-            "-c",
-            "user.email=fixture@example.test",
-            "commit",
-            "--quiet",
-            "-m",
-            "unrelated landing",
-        ],
-        check=True,
-    )
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(tmp_path),
-            "update-ref",
-            "refs/remotes/origin/master",
-            "HEAD",
-        ],
-        check=True,
-    )
-
-    disposed = service.workspaces.drop(workspace["workspace_id"])
-
-    assert disposed["dropped"]
-    assert disposed["publication_evidence"]["branch_owned_paths"] == ["branch.txt"]
-    assert not workspace_path.exists()
-    assert not service.workspaces.list()["workspaces"]
 
 
 def test_workspace_gitfile_symlink_rejects_mismatched_and_outside_targets_without_mutation(

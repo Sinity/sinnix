@@ -1,22 +1,20 @@
 from __future__ import annotations
 
-import fcntl
+import contextlib
 import hashlib
 import io
 import json
 import os
 import re
 import shutil
-import signal
 import stat
 import subprocess
 import tarfile
 import tempfile
-import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 from uuid import uuid4
 
 from sinnix_lib.atomic_json import modify_json, read_json, write_json_atomic
@@ -29,14 +27,17 @@ from .projects import (
     RegisteredCheckout,
     parse_worktree_records,
 )
+from .worktrunk import (
+    WorktrunkError,
+    worktrunk_create,
+    worktrunk_find,
+    worktrunk_remove,
+)
 
 WORKSPACE_SCHEMA_VERSION = 1
 CHECKPOINT_SCHEMA_VERSION = 1
 MAX_CHECKPOINT_BYTES = 64 * 1024 * 1024
 MAX_UNTRACKED_FILES = 4096
-MAX_PROVISION_OUTPUT_BYTES = 64 * 1024
-TESTMON_SEED_PATH = ".cache/testmon/testmondata"
-_FICLONE = 0x40049409  # linux/fs.h FICLONE: reflink clone on supporting filesystems
 _NAME = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?\Z")
 
 
@@ -44,7 +45,6 @@ class WorkspaceError(ValueError):
     """A workspace request violates declared Git authority or preservation rules."""
 
 
-DEAD_PACKET_COLLISION_NOTE = "packet-dead-collision-recovered"
 MISSING_WORKTREE_GC_NOTE = "workspace-missing-worktree-gc"
 
 
@@ -57,7 +57,6 @@ class WorkspaceRecord:
     branch: str
     base: str
     created_at: str
-    provision_notes: tuple[dict[str, str], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -69,7 +68,6 @@ class WorkspaceRecord:
             "branch": self.branch,
             "base": self.base,
             "created_at": self.created_at,
-            "provision_notes": [dict(note) for note in self.provision_notes],
         }
 
     @classmethod
@@ -92,21 +90,6 @@ class WorkspaceRecord:
         strings = {key: value.get(key) for key in required - {"schema_version"}}
         if any(not isinstance(item, str) or not item for item in strings.values()):
             raise WorkspaceError("workspace record fields are invalid")
-        raw_notes = value.get("provision_notes", [])
-        if not isinstance(raw_notes, list) or any(
-            not isinstance(note, Mapping)
-            or set(note)
-            not in (
-                {"kind", "path"},
-                {"kind", "path", "output"},
-            )
-            or any(
-                not isinstance(item, str) or (not item and key != "output")
-                for key, item in note.items()
-            )
-            for note in raw_notes
-        ):
-            raise WorkspaceError("workspace provision notes are invalid")
         return cls(
             workspace_id=strings["workspace_id"],
             project_id=strings["project_id"],
@@ -115,7 +98,6 @@ class WorkspaceRecord:
             branch=strings["branch"],
             base=strings["base"],
             created_at=strings["created_at"],
-            provision_notes=tuple(dict(note) for note in raw_notes),
         )
 
 
@@ -514,18 +496,14 @@ class GitWorkspaces:
                     raise WorkspaceError(
                         "merged review head no longer matches workspace HEAD"
                     )
-                if integration_target is not None:
-                    publication_evidence = self._integration_evidence(
-                        project, checkout.head, integration_target
-                    )
-                elif (
+                if (
                     expected_head is None
                     and not self._head_is_contained_in_declared_base(
                         project, checkout.head
                     )
                 ):
-                    publication_evidence = self._squash_equivalent_evidence(
-                        project, record, checkout.head
+                    publication_evidence = self._integrated_evidence(
+                        project, record.branch, checkout.head
                     )
                     if publication_evidence is None:
                         raise WorkspaceError(
@@ -547,12 +525,10 @@ class GitWorkspaces:
                         **publication_evidence,
                     }
                 )
-            removed = self._remove_worktree(project, record, checkout)
-            if removed.returncode != 0:
-                raise WorkspaceError(
-                    removed.stderr.strip() or "git worktree remove failed"
-                )
-            self._git(project.root, "branch", "-D", record.branch, check=False)
+            try:
+                worktrunk_remove(project.root, record.branch, force=force)
+            except WorktrunkError as error:
+                raise WorkspaceError(str(error)) from error
             self.store.remove(record.workspace_id)
             return {
                 "workspace_id": record.workspace_id,
@@ -605,8 +581,6 @@ class GitWorkspaces:
         name: str,
         branch: str,
         base: str | None,
-        recover_dead: bool = False,
-        is_live: Callable[[Path], bool] | None = None,
     ) -> dict[str, Any]:
         with flock(self.mutation_lock):
             return self._create_locked(
@@ -614,8 +588,6 @@ class GitWorkspaces:
                 name=name,
                 branch=branch,
                 base=base,
-                recover_dead=recover_dead,
-                is_live=is_live,
             )
 
     def _create_locked(
@@ -625,8 +597,6 @@ class GitWorkspaces:
         name: str,
         branch: str,
         base: str | None,
-        recover_dead: bool = False,
-        is_live: Callable[[Path], bool] | None = None,
     ) -> dict[str, Any]:
         project = self._project(project_id)
         policy = project.workspace
@@ -638,180 +608,30 @@ class GitWorkspaces:
         resolved_base = self._git(
             project.root, "rev-parse", f"{resolved_base}^{{commit}}"
         ).stdout.strip()
+        if any(
+            record.project_id == project_id
+            and (record.name == name or record.branch == branch)
+            for record in self.store.records()
+        ):
+            raise WorkspaceError("workspace target or name already exists")
         path = policy.root / name
         self._validate_target(policy.root, path)
         policy.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        existing = next(
-            (
-                record
-                for record in self.store.records()
-                if record.project_id == project_id
-                and (record.name == name or record.path == path)
-            ),
-            None,
-        )
-        recovery_note: dict[str, Any] | None = None
-        if path.exists() or existing is not None:
-            if not recover_dead:
-                raise WorkspaceError("workspace target or name already exists")
-            recovery_note = self._recover_dead_collision_locked(
-                project,
-                name=name,
-                branch=branch,
-                base=resolved_base,
-                path=path,
-                record=existing,
-                is_live=is_live,
-            )
-        branch_exists = (
-            self._git(
-                project.root,
-                "show-ref",
-                "--verify",
-                "--quiet",
-                f"refs/heads/{branch}",
-                check=False,
-            ).returncode
-            == 0
-        )
-        staging_path = Path(tempfile.mkdtemp(prefix=f".{name}.", dir=policy.root))
-        staging_path.rmdir()
-        created_path = staging_path
-        arguments = ["worktree", "add"]
-        if not branch_exists:
-            arguments.extend(["-b", branch])
-        arguments.append(str(staging_path))
-        arguments.append(branch if branch_exists else resolved_base)
-        result = self._git(project.root, *arguments, check=False)
-        if result.returncode != 0:
-            self._cleanup_created_worktree(project, staging_path)
-            raise WorkspaceError(result.stderr.strip() or "git worktree add failed")
         try:
-            if path.exists():
-                raise WorkspaceError("workspace target appeared during creation")
-            moved = self._git(
-                project.root,
-                "worktree",
-                "move",
-                str(staging_path),
-                str(path),
-                check=False,
-            )
-            if moved.returncode != 0:
-                raise WorkspaceError(moved.stderr.strip() or "git worktree move failed")
-            created_path = path
-            checkout = self._checkout_by_path(project_id, path)
-            notes = self._provision(project, path)
-            record = self._new_record(
-                project,
-                name,
-                checkout,
-                resolved_base,
-                provision_notes=notes,
-            )
-        except BaseException:
-            self._cleanup_created_worktree(project, created_path)
-            if not branch_exists:
-                self._git(project.root, "branch", "-D", branch, check=False)
-            raise
+            tree = worktrunk_create(project.root, branch, path=path, base=resolved_base)
+        except WorktrunkError as error:
+            raise WorkspaceError(str(error)) from error
+        if tree.path != path:
+            raise WorkspaceError("wt created the worktree outside the declared root")
         try:
+            checkout = self._checkout_by_path(project_id, tree.path)
+            record = self._new_record(project, name, checkout, resolved_base)
             self.store.put(record)
         except BaseException:
-            self._cleanup_created_worktree(project, path)
-            if not branch_exists:
-                self._git(project.root, "branch", "-D", branch, check=False)
+            with contextlib.suppress(WorktrunkError):
+                worktrunk_remove(project.root, branch, force=True)
             raise
-        result = self._status(record)
-        if recovery_note is not None:
-            result["notes"] = [recovery_note]
-        return result
-
-    def _recover_dead_collision_locked(
-        self,
-        project: ProjectAdapter,
-        *,
-        name: str,
-        branch: str,
-        base: str,
-        path: Path,
-        record: WorkspaceRecord | None,
-        is_live: Callable[[Path], bool] | None,
-    ) -> dict[str, Any]:
-        """Remove one proven packet orphan while the create lock is held."""
-        if record is not None and (
-            record.name != name or record.path != path or record.branch != branch
-        ):
-            raise WorkspaceError("workspace target or name already exists")
-        if is_live is not None and is_live(path):
-            raise WorkspaceError("workspace collision has a live job")
-
-        if record is not None:
-            status = self._status(record)
-            if status["state"] == "available":
-                if status["dirty"] or not status["identity_matches"]:
-                    raise WorkspaceError("workspace collision contains work")
-                head = status["head"]
-                if not isinstance(head, str) or not self._head_is_contained_in_ref(
-                    project, head, base
-                ):
-                    raise WorkspaceError(
-                        "workspace collision contains unpublished work"
-                    )
-                removed = self._remove_worktree(project, record)
-                if removed.returncode != 0:
-                    raise WorkspaceError(
-                        removed.stderr.strip() or "dead workspace cleanup failed"
-                    )
-            elif status["state"] != "missing":
-                raise WorkspaceError("workspace collision cannot be inspected")
-            else:
-                worktree = self._worktree_record(project, path)
-                if path.exists() and worktree is None:
-                    raise WorkspaceError("workspace collision cannot be inspected")
-                if worktree is not None:
-                    self._cleanup_created_worktree(project, path)
-            self._delete_branch_if_present(project, record.branch)
-            self.store.remove(record.workspace_id)
-            return {
-                "kind": DEAD_PACKET_COLLISION_NOTE,
-                "workspace_id": record.workspace_id,
-                "name": name,
-                "branch": record.branch,
-            }
-
-        worktree = self._worktree_record(project, path)
-        if worktree is None:
-            raise WorkspaceError("workspace target or name already exists")
-        raw_branch = worktree.get("branch")
-        expected_branch = f"refs/heads/{branch}"
-        if raw_branch != expected_branch:
-            raise WorkspaceError("workspace collision branch identity changed")
-        if "locked" not in worktree:
-            try:
-                dirty = bool(
-                    self._git(
-                        path, "status", "--porcelain", "--untracked-files=all"
-                    ).stdout
-                )
-            except WorkspaceError:
-                raise WorkspaceError(
-                    "workspace collision cannot be inspected"
-                ) from None
-            if dirty:
-                raise WorkspaceError("workspace collision is still provisioning")
-        head = self._git(project.root, "rev-parse", branch, check=False)
-        if head.returncode != 0 or not self._head_is_contained_in_ref(
-            project, head.stdout.strip(), base
-        ):
-            raise WorkspaceError("workspace collision contains unpublished work")
-        self._cleanup_created_worktree(project, path)
-        self._delete_branch_if_present(project, branch)
-        return {
-            "kind": DEAD_PACKET_COLLISION_NOTE,
-            "workspace_id": None,
-            "name": name,
-            "branch": branch,
-        }
+        return self._status(record)
 
     def _worktree_record(
         self, project: ProjectAdapter, path: Path
@@ -857,58 +677,6 @@ class GitWorkspaces:
                 result.stderr.strip() or "dead workspace branch cleanup failed"
             )
 
-    def _cleanup_created_worktree(self, project: ProjectAdapter, path: Path) -> None:
-        """Best-effort rollback for a worktree created by this transaction."""
-        if not path.exists() and self._worktree_record(project, path) is None:
-            return
-        try:
-            result = self._git(
-                project.root,
-                "worktree",
-                "remove",
-                "--force",
-                "--force",
-                str(path),
-                check=False,
-            )
-        except WorkspaceError:
-            # A provision hook may have left a descendant with the worktree as
-            # its cwd. Git can then time out while removing the entry; remove
-            # the path directly and let worktree prune discard the stale
-            # administrative record below.
-            result = None
-        if (
-            result is not None
-            and result.returncode == 0
-            and not path.exists()
-            and self._worktree_record(project, path) is None
-        ):
-            return
-        if path.exists():
-            try:
-                shutil.rmtree(path)
-            except OSError as error:
-                raise WorkspaceError("created workspace rollback failed") from error
-        self._git(project.root, "worktree", "prune", "--expire", "now", check=False)
-        if path.exists() or self._worktree_record(project, path) is not None:
-            raise WorkspaceError(
-                (result.stderr.strip() if result is not None else "")
-                or "created workspace rollback failed"
-            )
-
-    def _tree_equivalent(self, root: Path, target_ref: str, source_ref: str) -> bool:
-        target_tree = self._git(
-            root, "rev-parse", f"{target_ref}^{{tree}}", check=False
-        )
-        merged_tree = self._git(
-            root, "merge-tree", "--write-tree", target_ref, source_ref, check=False
-        )
-        return (
-            target_tree.returncode == 0
-            and merged_tree.returncode == 0
-            and target_tree.stdout.strip() == merged_tree.stdout.strip()
-        )
-
     def _head_is_contained_in_declared_base(
         self, project: ProjectAdapter, head: str
     ) -> bool:
@@ -925,47 +693,26 @@ class GitWorkspaces:
             == 0
         )
 
-    def _squash_equivalent_evidence(
-        self, project: ProjectAdapter, record: WorkspaceRecord, head: str
+    def _integrated_evidence(
+        self, project: ProjectAdapter, branch: str, head: str
     ) -> dict[str, Any] | None:
+        """Return wt's verdict that the branch's content is on the default branch.
+
+        worktrunk runs six checks, squash-merge patch-id equality included, and
+        publishes one state. Sinnixd asks; it does not re-derive.
+        """
         assert project.workspace is not None
-        changed = self._name_status(project.root, record.base, head)
-        paths = tuple(path for change in changed for path in change["paths"])
-        if not paths:
-            equivalent = (
-                self._git(
-                    project.root,
-                    "diff",
-                    "--quiet",
-                    project.workspace.default_base,
-                    head,
-                    "--",
-                    check=False,
-                ).returncode
-                == 0
-            )
-        else:
-            equivalent = all(
-                self._git(
-                    project.root,
-                    "diff",
-                    "--quiet",
-                    project.workspace.default_base,
-                    head,
-                    "--",
-                    path,
-                    check=False,
-                ).returncode
-                == 0
-                for path in paths
-            )
-        if not equivalent:
+        try:
+            tree = worktrunk_find(project.root, branch)
+        except WorktrunkError as error:
+            raise WorkspaceError(str(error)) from error
+        if tree is None or not tree.integrated:
             return None
         return {
-            "kind": "content-equality",
+            "kind": "worktrunk-integrated",
             "default_base": project.workspace.default_base,
             "branch_head": head,
-            "branch_owned_paths": list(paths),
+            "state": tree.state,
         }
 
     def _verify_disposable_checkpoints(self, workspace_id: str) -> None:
@@ -1587,7 +1334,6 @@ class GitWorkspaces:
         base: str,
         *,
         branch: str | None = None,
-        provision_notes: tuple[dict[str, str], ...] = (),
     ) -> WorkspaceRecord:
         return WorkspaceRecord(
             workspace_id=str(uuid4()),
@@ -1597,153 +1343,7 @@ class GitWorkspaces:
             branch=branch or GitWorkspaces._branch(checkout.path),
             base=base,
             created_at=datetime.now(UTC).isoformat(),
-            provision_notes=provision_notes,
         )
-
-    @staticmethod
-    def _clone_file(source: Path | str, destination: Path | str) -> None:
-        # Provisioned seeds must own their bytes: a hardlink shares the inode,
-        # so a workspace writing its seed (testmon's SQLite graph, caches)
-        # would mutate the main checkout's copy. Reflink when the filesystem
-        # supports it, otherwise pay for a real copy.
-        with open(source, "rb") as source_file, open(destination, "wb") as clone:
-            try:
-                fcntl.ioctl(clone.fileno(), _FICLONE, source_file.fileno())
-            except OSError:
-                shutil.copyfileobj(source_file, clone, 1024 * 1024)
-        shutil.copystat(source, destination)
-
-    @staticmethod
-    def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        try:
-            process.wait(timeout=1)
-            return
-        except subprocess.TimeoutExpired:
-            pass
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
-
-    @staticmethod
-    def _run_provision_exec(project: ProjectAdapter, target: Path) -> dict[str, str]:
-        assert project.workspace is not None
-        command = project.environment.command_for(project.workspace.provision_exec)
-        environment = project.environment.values()
-        output = bytearray()
-
-        def drain(stream: Any) -> None:
-            while True:
-                chunk = stream.read(8192)
-                if not chunk:
-                    return
-                remaining = MAX_PROVISION_OUTPUT_BYTES - len(output)
-                if remaining > 0:
-                    output.extend(chunk[:remaining])
-
-        try:
-            process = subprocess.Popen(
-                command,
-                cwd=target,
-                env=environment,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-        except OSError as error:
-            raise WorkspaceError("workspace provision exec could not start") from error
-        assert process.stdout is not None
-        reader = threading.Thread(target=drain, args=(process.stdout,), daemon=True)
-        reader.start()
-        timed_out = False
-        try:
-            try:
-                returncode = process.wait(
-                    timeout=project.workspace.provision_exec_timeout_seconds
-                )
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                GitWorkspaces._terminate_process_group(process)
-                returncode = process.returncode
-        except BaseException:
-            GitWorkspaces._terminate_process_group(process)
-            raise
-        finally:
-            reader.join(timeout=5)
-            if reader.is_alive():
-                process.stdout.close()
-                reader.join(timeout=1)
-        text = bytes(output).decode("utf-8", errors="replace")
-        if timed_out:
-            detail = f": {text}" if text else ""
-            raise WorkspaceError(
-                "workspace provision exec timed out after "
-                f"{project.workspace.provision_exec_timeout_seconds} seconds{detail}"
-            )
-        if returncode != 0:
-            detail = f": {text}" if text else ""
-            raise WorkspaceError(
-                f"workspace provision exec failed with exit status {returncode}{detail}"
-            )
-        return {
-            "kind": "exec",
-            "path": " ".join(project.workspace.provision_exec),
-            "output": text,
-        }
-
-    @staticmethod
-    def _provision(project: ProjectAdapter, target: Path) -> tuple[dict[str, str], ...]:
-        assert project.workspace is not None
-        notes: list[dict[str, str]] = []
-        for relative in project.workspace.provision_copy:
-            source = project.root / relative
-            destination = target / relative
-            if not source.exists():
-                notes.append({"kind": "missing-source", "path": relative})
-                continue
-            if source.is_symlink():
-                raise WorkspaceError(
-                    f"workspace provision source is a symlink: {relative}"
-                )
-            destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            if source.is_file():
-                GitWorkspaces._clone_file(source, destination)
-            elif source.is_dir():
-                if destination.exists():
-                    shutil.rmtree(destination)
-                shutil.copytree(
-                    source, destination, copy_function=GitWorkspaces._clone_file
-                )
-            else:
-                raise WorkspaceError(
-                    f"workspace provision source is not a regular file or directory: {relative}"
-                )
-        if project.workspace.provision_exec:
-            exec_note = GitWorkspaces._run_provision_exec(project, target)
-            notes.append(exec_note)
-            if TESTMON_SEED_PATH in project.workspace.provision_copy and any(
-                marker in exec_note["output"]
-                for marker in (
-                    "testmon provision: absent",
-                    "testmon provision: invalid",
-                )
-            ):
-                notes.append(
-                    {
-                        "kind": "missing-compatible-seed",
-                        "path": TESTMON_SEED_PATH,
-                    }
-                )
-        return tuple(notes)
 
     @staticmethod
     def _validate_name(name: str) -> None:

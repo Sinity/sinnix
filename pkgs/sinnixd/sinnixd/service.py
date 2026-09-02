@@ -508,26 +508,19 @@ class SinnixdService:
                 "workspace creation requires agent-control or operator principal"
             )
         required = {"project_id", "name", "branch", "base"}
-        if set(arguments) - required - {"recover_dead"} or not required.issubset(
-            arguments
-        ):
+        if set(arguments) - required or not required.issubset(arguments):
             raise ValueError(
-                "workspace.create requires project_id, name, branch, and nullable base, and accepts recover_dead"
+                "workspace.create requires project_id, name, branch, and nullable base"
             )
         base = arguments.get("base")
         if base is not None and (not isinstance(base, str) or not base):
             raise ValueError("workspace.create base must be null or non-empty")
-        recover_dead = arguments.get("recover_dead", False)
-        if not isinstance(recover_dead, bool):
-            raise ValueError("workspace.create recover_dead must be boolean")
         assert self.workspaces is not None
         return self.workspaces.create(
             project_id=self._job_argument(arguments, "project_id"),
             name=self._job_argument(arguments, "name"),
             branch=self._job_argument(arguments, "branch"),
             base=base,
-            recover_dead=recover_dead,
-            is_live=self._workspace_has_live_job if recover_dead else None,
         )
 
     def _op_workspace_drop(
@@ -540,22 +533,15 @@ class SinnixdService:
             raise ValueError(
                 "workspace drop requires agent-control or operator principal"
             )
-        if set(arguments) - {"workspace_id", "force", "integration_target"}:
-            raise ValueError(
-                "workspace.drop accepts workspace_id, force, and integration_target"
-            )
+        if set(arguments) - {"workspace_id", "force"}:
+            raise ValueError("workspace.drop accepts workspace_id and force")
         force = arguments.get("force", False)
         if not isinstance(force, bool):
             raise ValueError("workspace.drop force must be boolean")
-        target = arguments.get("integration_target")
-        if target is not None and (not isinstance(target, str) or not target):
-            raise ValueError("workspace.drop integration_target must be non-empty")
         assert self.workspaces is not None
         workspace_id = self._workspace_argument(arguments, "workspace.drop")
         checkout_path = str(self.workspaces.get(workspace_id).get("path") or "")
-        result = self.workspaces.drop(
-            workspace_id, force=force, integration_target=target
-        )
+        result = self.workspaces.drop(workspace_id, force=force)
         return {**result, **self._delete_owned_job_records(checkout_path)}
 
     def _delete_owned_job_records(self, checkout_path: str) -> dict[str, Any]:
@@ -1174,19 +1160,6 @@ class SinnixdService:
 
     def _cleanup_terminal(self, response: Mapping[str, Any]) -> dict[str, Any]:
         return self.job_contracts.cleanup_terminal(response)
-
-    def _workspace_has_live_job(self, path: Path) -> bool:
-        active = self.jobs.list(
-            principal="operator",
-            project_id=None,
-            kinds=("attested-agent",),
-            active_only=True,
-        )
-        for job in active["jobs"]:
-            checkout = job.get("checkout") if isinstance(job, Mapping) else None
-            if isinstance(checkout, Mapping) and checkout.get("path") == str(path):
-                return True
-        return False
 
     def _workspace_argument(self, arguments: Mapping[str, Any], operation: str) -> str:
         value = arguments.get("workspace_id")

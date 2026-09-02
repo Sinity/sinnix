@@ -319,10 +319,7 @@ def test_launch_creates_then_dispatches_with_dimensions(
         "area:parser",
         "area:storage",
     ]
-    assert calls[0].arguments["recover_dead"] is True
-    assert calls[1].arguments["parameters"]["packet_notes"][0]["kind"] == (
-        "packet-dead-collision-recovered"
-    )
+    assert "recover_dead" not in calls[0].arguments
     assert json.loads(capsys.readouterr().out)["payload"]["value"]["notes"] == [
         {
             "kind": "packet-dead-collision-recovered",

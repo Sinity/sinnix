@@ -4,6 +4,7 @@
   sinnix-lib,
   git,
   beads,
+  worktrunk,
   ...
 }:
 python3Packages.buildPythonApplication {
@@ -21,6 +22,7 @@ python3Packages.buildPythonApplication {
     python3Packages.pytest
     git
     beads
+    worktrunk
   ];
 
   checkPhase = ''
