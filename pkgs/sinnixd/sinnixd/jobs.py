@@ -73,11 +73,9 @@ MIN_HOST_MEMORY_RESERVE_BYTES = 4 * GIB
 # reserve is pure headroom on top of that; sized so a lane's peak reservation
 # and the harvest that publishes it fit on a 32 GiB host at once.
 MAX_HOST_MEMORY_RESERVE_BYTES = 6 * GIB
-# The reserve is what the next admission leaves free, and it matches the
-# scarcity floor below which a memory stall is preemptable: admission stops
-# exactly where eviction would begin. Larger reserves starve admission
-# (2026-08-31); smaller ones ran the host into 14 GB of swap and ten-minute
-# environment preflights (2026-09-02).
+# The reserve is what the next admission leaves free. Larger reserves starve
+# admission (2026-08-31); smaller ones ran the host into 14 GB of swap and
+# ten-minute environment preflights (2026-09-02).
 HOST_MEMORY_RESERVE_FRACTION = 0.12
 # A launched job needs this long before its footprint is in MemAvailable.
 ADMISSION_SETTLE_SECONDS = 90.0
@@ -88,7 +86,8 @@ SWAP_EXHAUSTION_MIN_AVAILABLE_BYTES = 4 * 1024**3
 # PSI averages are percentages of elapsed time. A 10% full-memory signal means
 # the host is losing a tenth of its wall time to memory stalls.
 MEMORY_FULL_BLOCK_THRESHOLD = 10.0
-MEMORY_FULL_PREEMPT_THRESHOLD = 25.0
+# Swap free below this fraction, alongside a memory stall, is host
+# endangerment rather than degradation: the last managed job is cancelled.
 PREEMPT_SWAP_FREE_FRACTION = 0.10
 ACTIVE_PRESSURE_GRACE_SECONDS = 2.0
 MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES = 2
@@ -97,17 +96,6 @@ MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES = 2
 # queue, the operator's desktop included (io-full 76% avg10, 2026-09-02
 # 12:29Z). Ambient io-full on an idle host measures single digits.
 IO_FULL_BLOCK_THRESHOLD = 25.0
-# After a pressure preemption the host is still paging out what the victim
-# held; admitting a replacement at once re-creates the stall and the next
-# probe evicts another lane (eight lanes in forty minutes on 2026-09-02).
-PRESSURE_PREEMPTION_COOLDOWN_SECONDS = 300.0
-# A memory stall freezes an agent lane instead of killing it: frozen, it
-# stops competing for CPU and IO and its pages go cold and get reclaimed,
-# and it resumes where it was once memory is back. Hosted agent sessions do
-# not survive an indefinite pause, so a lane frozen past this bound is
-# cancelled with retry semantics.
-FREEZE_MAX_SECONDS = 1200.0
-FREEZE_THAW_MIN_QUIET_SECONDS = 60.0
 # Measured whole-unit peaks per operation (declared jobs) or pool (agents):
 # evidence beside the declaration, never a claim. A learned claim was tried
 # and removed (one inflated sample serialized a campaign); a declaration
@@ -120,17 +108,9 @@ ENVELOPE_DRIFT_RATIO = 2.0
 # reservation alone let six agent lanes and eight harvests refill the
 # headroom the corpus run waited for, for hours (2026-09-02).
 HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS = 900.0
-# A memory stall with this much RAM still available is swap-in churn, not
-# scarcity; cancelling a lane frees memory nobody is short of and only
-# destroys the work (five evictions in ten minutes with 6 GB free,
-# 2026-09-02 02:47Z). Preemption answers scarcity only.
-MEMORY_STALL_MAX_AVAILABLE_BYTES = 4 * 1024**3
 # Host IO PSI cannot attribute stalls to the managed plane: this host idles
-# with io full avg10 in the teens while managed jobs write megabytes. Gating
-# admission or choosing preemption victims on host IO therefore punishes work
-# for pressure it does not produce. IO protection may return only as a
-# managed-plane measurement (per-cgroup io.stat contribution), never as a
-# host PSI threshold. Memory and swap remain gated: those endanger the host.
+# with io full avg10 in the teens while managed jobs write megabytes. IO
+# protection is admission-only for that reason, and never costs running work.
 POOL_SLICES = {
     "interactive": "sinnixd-work-interactive.slice",
     "normal": "sinnixd-work-normal.slice",
@@ -518,10 +498,6 @@ class SystemdJobs(Protocol):
 
     def stop(self, unit: str) -> None: ...
 
-    def freeze(self, unit: str) -> None: ...
-
-    def thaw(self, unit: str) -> None: ...
-
     def schedule_timer(
         self, *, unit: str, on_calendar: str, command: Sequence[str]
     ) -> None: ...
@@ -682,12 +658,6 @@ class UserSystemdJobs:
         # unit's own shutdown finishes, which for an agent unit is seconds --
         # far past the command budget every other systemd call is sized for.
         self._run(["systemctl", "--user", "--no-block", "stop", unit])
-
-    def freeze(self, unit: str) -> None:
-        self._run(["systemctl", "--user", "freeze", unit])
-
-    def thaw(self, unit: str) -> None:
-        self._run(["systemctl", "--user", "thaw", unit])
 
     def schedule_timer(
         self, *, unit: str, on_calendar: str, command: Sequence[str]
@@ -2684,7 +2654,6 @@ class GenericJobs:
     _admission_observed_at: float = field(default=0.0, init=False, repr=False)
     _spooled: set[str] = field(default_factory=set, init=False, repr=False)
     _active_pressure_since: float | None = field(default=None, init=False, repr=False)
-    _last_pressure_preemption: float | None = field(default=None, init=False, repr=False)
     _memory_full_block_probe_count: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -3877,7 +3846,7 @@ class GenericJobs:
             and (
                 memory_available < SWAP_EXHAUSTION_MIN_AVAILABLE_BYTES
                 or float(pressure.get("memory_full_avg10", 0.0))
-                >= MEMORY_FULL_PREEMPT_THRESHOLD
+                >= MEMORY_FULL_BLOCK_THRESHOLD
             )
         )
         memory_full_avg10 = float(pressure.get("memory_full_avg10", 0.0))
@@ -3894,33 +3863,20 @@ class GenericJobs:
             or self._memory_full_block_probe_count
             >= MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES
         )
-        cooling = (
-            self._last_pressure_preemption is not None
-            and time.monotonic() - self._last_pressure_preemption
-            < PRESSURE_PREEMPTION_COOLDOWN_SECONDS
-        )
         io_saturated = float(pressure.get("io_full_avg60", 0.0)) >= IO_FULL_BLOCK_THRESHOLD
-        return swap_exhausted or memory_pressure_sustained or cooling or io_saturated
+        return swap_exhausted or memory_pressure_sustained or io_saturated
 
     @staticmethod
-    def _active_pressure_reasons(pressure: Mapping[str, float]) -> list[str]:
+    def _swap_exhausted(pressure: Mapping[str, float]) -> bool:
+        """Swap nearly gone under a memory stall: the host itself is at risk."""
         memory_full = float(pressure.get("memory_full_avg10", 0.0))
         swap_total = float(pressure.get("swap_total_bytes", 0.0))
         swap_free = float(pressure.get("swap_free_bytes", 0.0))
-        memory_available = float(pressure.get("memory_available_bytes", 0.0))
-        reasons: list[str] = []
-        if (
-            memory_full >= MEMORY_FULL_PREEMPT_THRESHOLD
-            and memory_available <= MEMORY_STALL_MAX_AVAILABLE_BYTES
-        ):
-            reasons.append("memory-stall")
-        if (
+        return (
             swap_total > 0
             and swap_free / swap_total < PREEMPT_SWAP_FREE_FRACTION
             and memory_full >= MEMORY_FULL_BLOCK_THRESHOLD
-        ):
-            reasons.append("swap-exhaustion")
-        return reasons
+        )
 
     @staticmethod
     def _systemd_memory(properties: Mapping[str, str]) -> int:
@@ -3934,15 +3890,13 @@ class GenericJobs:
                 values.append(value)
         if values:
             # Page cache is reclaimed under pressure, not held; counting it
-            # picked IO-heavy jobs as preemption victims and taught inflated
-            # estimates for them.
+            # taught inflated estimates for IO-heavy jobs.
             return max(0, sum(values) - _cgroup_inactive_file(properties))
         peak = GenericJobs._memory_peak(properties)
         return peak or 0
 
-    def _preempt_pressure_victim(
-        self, pressure: Mapping[str, float], reasons: Sequence[str]
-    ) -> str | None:
+    def _cancel_largest_managed_job(self, pressure: Mapping[str, float]) -> str | None:
+        """Shed the largest managed job. Only swap exhaustion reaches here."""
         candidates: list[tuple[int, int, str, GenericJobRecord]] = []
         admission = self._admission_state()
         # Agent lanes shed first: they are many, cheap to resume, and hold
@@ -3977,8 +3931,6 @@ class GenericJobs:
                 "reloading",
             }:
                 continue
-            if record.state.get("frozen"):
-                continue
             observed = self._systemd_memory(properties)
             estimate = self._estimate(record.spec, admission)
             candidates.append(
@@ -3990,13 +3942,6 @@ class GenericJobs:
                 )
             )
         if not candidates:
-            return None
-        # Preemption sheds contention. A single job is not contending with
-        # anything, so cancelling it cannot relieve the pressure it is itself
-        # producing -- it only destroys the work. Swap exhaustion is the
-        # exception: there the host is genuinely endangered and a lone job is
-        # still a valid victim.
-        if len(candidates) == 1 and "swap-exhaustion" not in reasons:
             return None
         _, _, _, victim = max(candidates, key=lambda item: item[:3])
         host = {
@@ -4010,29 +3955,8 @@ class GenericJobs:
                 "managed_memory_bytes",
             )
         }
-        if victim.spec.pool == "agent" and "swap-exhaustion" not in reasons:
-            try:
-                self.systemd.freeze(victim.unit)
-            except SystemdJobError:
-                return None
-            with self.store.locked(victim.job_id):
-                record = self.store.load(victim.job_id)
-                updated = self._with_state(
-                    record,
-                    {
-                        **record.state,
-                        "frozen": {
-                            "at": _timestamp(),
-                            "monotonic": time.monotonic(),
-                            "reason": list(reasons),
-                            "host": host,
-                        },
-                    },
-                )
-                self.store.save(updated)
-            return victim.job_id
         result = self.cancel(
-            victim.job_id, reason="pressure-preemption:" + ",".join(reasons)
+            victim.job_id, reason="pressure-preemption:swap-exhaustion"
         )
         if result.get("already_terminal"):
             return None
@@ -4043,7 +3967,7 @@ class GenericJobs:
                 {
                     **record.state,
                     "preemption": {
-                        "reason": list(reasons),
+                        "reason": ["swap-exhaustion"],
                         "observed_at": _timestamp(),
                         "host": host,
                     },
@@ -4052,55 +3976,15 @@ class GenericJobs:
             self.store.save(updated)
         return victim.job_id
 
-    def _thaw_relieved(self, pressure: Mapping[str, float]) -> str | None:
-        """Resume the oldest frozen lane once memory is back, or give it up.
-
-        One lane per probe, so the host settles between resumptions. A lane
-        frozen past FREEZE_MAX_SECONDS is cancelled: its hosted session has
-        expired and a resumed worktree is worth more than a hung process.
-        """
-        now = time.monotonic()
-        frozen: list[tuple[float, GenericJobRecord]] = []
-        for record in self.store.active_records():
-            marker = record.state.get("frozen")
-            if not isinstance(marker, Mapping) or record.state.get("terminal"):
-                continue
-            since = marker.get("monotonic")
-            frozen.append((float(since) if isinstance(since, (int, float)) else now, record))
-        if not frozen:
-            return None
-        frozen.sort(key=lambda item: item[0])
-        since, record = frozen[0]
-        if now - since >= FREEZE_MAX_SECONDS:
-            with contextlib.suppress(SystemdJobError):
-                self.systemd.thaw(record.unit)
-            self.cancel(record.job_id, reason="pressure-preemption:frozen-too-long")
-            return record.job_id
-        budget = self._host_memory_budget(pressure)
-        admission = self._admission_state()
-        if budget is None or budget < self._estimate(record.spec, admission):
-            return None
-        if (
-            self._last_pressure_preemption is not None
-            and now - self._last_pressure_preemption < FREEZE_THAW_MIN_QUIET_SECONDS
-        ):
-            return None
-        try:
-            self.systemd.thaw(record.unit)
-        except SystemdJobError:
-            return None
-        with self.store.locked(record.job_id):
-            current = self.store.load(record.job_id)
-            state = {key: value for key, value in current.state.items() if key != "frozen"}
-            state["thawed"] = {"at": _timestamp(), "frozen_seconds": round(now - since, 1)}
-            self.store.save(self._with_state(current, state))
-        return record.job_id
-
     def _relieve_active_pressure(self, pressure: Mapping[str, float]) -> str | None:
-        reasons = self._active_pressure_reasons(pressure)
-        if not reasons:
+        """Swap exhaustion is the only condition that costs running work.
+
+        Everything else -- memory stalls, IO saturation -- is answered by
+        per-unit cgroup ceilings and headroom admission, which cost queued
+        work rather than work already in flight.
+        """
+        if not self._swap_exhausted(pressure):
             self._active_pressure_since = None
-            self._thaw_relieved(pressure)
             return None
         now = time.monotonic()
         if self._active_pressure_since is None:
@@ -4108,11 +3992,8 @@ class GenericJobs:
             return None
         if now - self._active_pressure_since < ACTIVE_PRESSURE_GRACE_SECONDS:
             return None
-        victim = self._preempt_pressure_victim(pressure, reasons)
         self._active_pressure_since = now
-        if victim is not None:
-            self._last_pressure_preemption = now
-        return victim
+        return self._cancel_largest_managed_job(pressure)
 
     ADMISSION_OBSERVE_INTERVAL_SECONDS = 2.0
 
@@ -5525,7 +5406,7 @@ class GenericJobs:
         # actor that stopped the job; rebuilding must not erase them.
         forensic = {
             key: dict(record.state[key])
-            for key in ("cancellation", "preemption", "frozen", "thawed")
+            for key in ("cancellation", "preemption")
             if isinstance(record.state.get(key), Mapping)
         }
         if self._is_authoritative_not_started_cancellation(record):
