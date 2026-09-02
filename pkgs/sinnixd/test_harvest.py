@@ -1134,3 +1134,14 @@ def test_authorization_binds_the_head(tmp_path: Path) -> None:
     (tmp_path / ".lane" / "authorization.json").write_text(json.dumps({"head": "a" * 40, "reason": "reviewed by hand"}))
     assert _authorization(context, "a" * 40) == {"head": "a" * 40, "reason": "reviewed by hand", "at": "", "by": "operator"}
     assert _authorization(context, "b" * 40) is None
+
+
+def test_redflags_catches_ignored_paths_committed() -> None:
+    """Anti-vacuity: a lane force-added .lane/ after master untracked it
+    (2026-09-02); no prose rule stopped it."""
+    status, flags = harvest._redflags(
+        "diff --git a/.lane/title b/.lane/title\n+fix: thing\n",
+        ignored_paths=(".lane/title",),
+    )
+    assert status == 1
+    assert "FLAG: ignored paths committed: .lane/title" in flags

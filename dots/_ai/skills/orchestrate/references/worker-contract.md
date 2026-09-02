@@ -26,10 +26,8 @@ prompt. Write only what the worker must do; coordinator material belongs in
    class at all.
 5. **Managed commands only** — the repo's own runner (`devtools test <sel>`),
    never bare pytest. Commit by path, push, never merge. The complete corpus
-   (`devtools verify --all`, the `verify_all` operation) never runs in a
-   lane: it belongs to the main checkout's nightly. When affected
-   verification refuses, that refusal is a harness fault to report, not a
-   reason to escalate.
+   runs only on the main checkout (the daemon refuses it elsewhere); when
+   affected verification refuses, report the refusal.
 6. **Report once, honestly.** Per-bead and per-acceptance-criterion
    disposition, the exact commands and the result line that matters, diffstat,
    residual risk. Refuting a finding needs evidence. The report is the
@@ -61,8 +59,9 @@ prompt. Write only what the worker must do; coordinator material belongs in
     commands and the line that matters, and honest residual risk. Add a
     close reason only when a bead genuinely closes. Write them to
     `.lane/title`, `.lane/body.md` and `.lane/close-reason.md` in your
-    worktree. They are worktree scratch that harvest reads: leave them
-    uncommitted, and never force-add a path the repository ignores. You do
+    worktree. They are worktree scratch that harvest reads; leave them
+    uncommitted (the scanner flags any ignored path that reaches a commit,
+    and a lane that writes none gets text synthesized from its bead). You do
     not publish; whoever integrates your lane judges the change and decides. Prose that oversells what you did will be caught
     against the diff.
 
