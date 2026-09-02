@@ -346,6 +346,11 @@ rec {
         CPUWeight = 50;
         IOWeight = 50;
       };
+      sinnixd-work-pytest = {
+        IOAccounting = true;
+        CPUWeight = 50;
+        IOWeight = 50;
+      };
       sinnixd-work-bulk = {
         IOAccounting = true;
         CPUWeight = 10;

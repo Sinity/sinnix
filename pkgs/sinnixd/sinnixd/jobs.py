@@ -135,6 +135,7 @@ POOL_SLICES = {
     "interactive": "sinnixd-work-interactive.slice",
     "normal": "sinnixd-work-normal.slice",
     "bulk": "sinnixd-work-bulk.slice",
+    "pytest": "sinnixd-work-pytest.slice",
     "agent": "sinnixd-work-agent.slice",
 }
 # memory_max is the hard cgroup ceiling every unit in the pool runs under
@@ -169,6 +170,16 @@ POOL_POLICIES = {
         "default_estimate": 8 * 1024 * MIB,
         "memory_max": 20 * 1024 * MIB,
         "swap_max": 4 * 1024 * MIB,
+    },
+    "pytest": {
+        # One test run on the host at a time. A run writes a scratch archive
+        # per test and an affected selection is a fifth to a half of the
+        # corpus; two of them saturate the disk for every other process.
+        "workers": 1,
+        "memory_budget": 10 * 1024 * MIB,
+        "default_estimate": 6 * 1024 * MIB,
+        "memory_max": 12 * 1024 * MIB,
+        "swap_max": 2 * 1024 * MIB,
     },
     "agent": {
         # Agent lanes are memory-idle for most of their wall time (API-bound)
@@ -3937,7 +3948,7 @@ class GenericJobs:
         # Agent lanes shed first: they are many, cheap to resume, and hold
         # nothing shared. The bulk pool's corpus run is hours of work and the
         # graph every lane needs; it goes last.
-        pool_priority = {"bulk": 1, "normal": 2, "agent": 3}
+        pool_priority = {"bulk": 1, "pytest": 1, "normal": 2, "agent": 3}
         for record in self.store.active_records():
             if (
                 record.spec.kind not in {"declared-operation", "attested-agent"}

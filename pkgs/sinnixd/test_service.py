@@ -187,6 +187,7 @@ def test_admission_ledger_is_operator_only_and_has_empty_shape(tmp_path: Path) -
         "interactive",
         "normal",
         "bulk",
+        "pytest",
         "agent",
     }
     denied = service.dispatch(

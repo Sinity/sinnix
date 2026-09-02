@@ -922,7 +922,7 @@ def test_the_reactor_advances_each_lane_from_its_facts(tmp_path: Path, monkeypat
         harvest_dispatcher=lambda p, w, ref: calls.append(("harvest", w, ref)),
         integration_dispatcher=lambda p, w, label: calls.append(("agent", w, label)),
     )
-    monkeypatch.setattr(CampaignReactor, "_publish", lambda self, p, w, receipt: calls.append(("publish", w, receipt)))
+    monkeypatch.setattr(CampaignReactor, "_publish", lambda self, p, w, receipt, affected_job="": calls.append(("publish", w, receipt)))
     monkeypatch.setattr(CampaignReactor, "_repo_slug", lambda self, project: "o/r")
     monkeypatch.setattr(CampaignReactor, "_closed_beads", lambda self, project, root: ())
     from sinnixd.lane_facts import Pull

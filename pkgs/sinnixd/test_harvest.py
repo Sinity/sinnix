@@ -97,12 +97,23 @@ def test_authorize_requires_receipt_and_runs_publish_pipeline(
                 return subprocess.CompletedProcess(argv, 0, "", "")
         return subprocess.run(argv, **kwargs)
 
+    verified = "0f7d4d0e-2f6a-4b1e-9c0a-3d1e5a6b7c8d"
+    (state / "jobs").mkdir(parents=True, exist_ok=True)
+    (state / "jobs" / f"{verified}.json").write_text(json.dumps({
+        "spec": {
+            "operation": "verify_affected",
+            "checkout": {"checkout_id": context.workspace_id, "head": harvest._git(subprocess.run, root, "rev-parse", "HEAD")},
+        },
+        "state": {"phase": "succeeded", "terminal": True},
+        "artifacts": {},
+    }))
     result = harvest.authorize(
         context,
         receipt_ref=packet,
         title="fix: publish the harvested lane branch",
         body="Reviewed packet.",
         run=run,
+        affected_job=verified,
     )
 
     assert result == {
@@ -267,11 +278,6 @@ def test_unavailable_affected_tests_are_typed_and_spooled(
     receipt = harvest.compile_packet(context)["receipt_ref"]
     monkeypatch.setattr(
         harvest,
-        "_affected_tests",
-        lambda _context, _run: ("unavailable", "testmon graph unavailable"),
-    )
-    monkeypatch.setattr(
-        harvest,
         "_load_receipt",
         lambda _context, _receipt_ref: {
             "head": harvest._git(subprocess.run, root, "rev-parse", "HEAD"),
@@ -303,7 +309,7 @@ def test_unavailable_affected_tests_are_typed_and_spooled(
     final = dict(events[-1])
     assert final.pop("emitted_at")
     assert final == {
-        "detail": "testmon graph unavailable",
+        "detail": "no affected verification job for this head",
         "job_id": "unavailable-job",
         "kind": "verification-unavailable",
         "project": "polylogue",
@@ -407,88 +413,6 @@ def test_publication_title_must_be_a_squashable_conventional_subject() -> None:
     ):
         with pytest.raises(harvest.HarvestError):
             harvest._require_publication_title(rejected)
-
-
-def test_affected_tests_separates_refusal_from_failure() -> None:
-    """A missing testmon graph is not a red test run, and must not read as one.
-
-    Anti-vacuity: collapsing the two makes an unavailable selection block
-    publication; dropping the check makes a real failure publish.
-    """
-    context = harvest.HarvestContext(
-        worktree=Path("/realm/worktrees/fixture"),
-        project_id="polylogue",
-        workspace_id="worktree-abc",
-        job_id="job-1",
-        state_root=Path("/realm/state/fixture"),
-    )
-
-    def run_with(returncode: int, stdout: str):
-        def run(argv, **kwargs):
-            return subprocess.CompletedProcess(argv, returncode, stdout, "")
-
-        return run
-
-    assert harvest._affected_tests(context, run_with(0, "ok"))[0] == "passed"
-    assert (
-        harvest._affected_tests(context, run_with(1, "failed 3 tests"))[0] == "failed"
-    )
-    refusal = "testmon graph is incompatible; refusing to run selected verification"
-    assert harvest._affected_tests(context, run_with(2, refusal))[0] == "unavailable"
-
-
-def test_silent_refusal_is_unavailable_not_red(tmp_path: Path) -> None:
-    """The real refusal prints nothing, so only the receipt can name it.
-
-    ``devtools verify`` without a compatible testmon graph exits 2 and writes
-    to neither stream. Reading the prose is therefore not enough, and treating
-    the silence as a failure blocks publication for a lane whose tests are
-    fine.
-
-    Anti-vacuity: drop the receipt read and this returns "failed"; drop the
-    tier or diagnosis checks and a genuinely red run reports "unavailable".
-    """
-    run_dir = tmp_path / ".cache/verify/runs/20260828T034732Z-affected"
-    run_dir.mkdir(parents=True)
-    receipt = {
-        "run_id": "20260828T034732Z-affected",
-        "tier": "affected",
-        "status": "failed",
-        "exit_code": 2,
-        "diagnosis": "native_testmon_graph_unavailable",
-        "testmon_selection": {
-            "selection_mode": "affected",
-            "state_status": "absent",
-            "state_reason": "native environment 'polylogue-6c675d4d' is absent",
-        },
-        "pytest_aggregate": {"selection_mode": "none"},
-    }
-    (run_dir / "run.json").write_text(json.dumps(receipt))
-
-    context = harvest.HarvestContext(
-        worktree=tmp_path,
-        project_id="polylogue",
-        workspace_id="worktree-abc",
-        job_id="job-1",
-        state_root=tmp_path / "state",
-    )
-
-    def run_silent(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 2, "", "")
-
-    verdict, output = harvest._affected_tests(context, run_silent)
-    assert verdict == "unavailable"
-    assert "native_testmon_graph_unavailable" in output
-    assert "polylogue-6c675d4d" in output
-
-    red = dict(receipt)
-    red.pop("diagnosis")
-    red["testmon_selection"] = {"selection_mode": "affected", "state_status": "present"}
-    red["pytest_aggregate"] = {"selection_mode": "affected", "outcomes": {"failed": 3}}
-    (run_dir / "run.json").write_text(json.dumps(red))
-    verdict, output = harvest._affected_tests(context, run_silent)
-    assert verdict == "failed"
-    assert output.strip(), "a silent failure must still explain itself"
 
 
 def test_redflags_catches_a_new_module_that_no_test_touches() -> None:
@@ -959,9 +883,6 @@ def test_unavailable_affected_verification_reaches_the_spool(
     root, _remote = _repository(tmp_path)
     state = tmp_path / "state"
     context = _context(root, state)
-    monkeypatch.setattr(
-        harvest, "_affected_tests", lambda ctx, run: ("unavailable", "no graph")
-    )
     monkeypatch.setattr(
         harvest,
         "_load_receipt",

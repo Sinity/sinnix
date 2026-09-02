@@ -40,7 +40,6 @@ DEFAULT_SPOOL = Path("/realm/state/agentctl/events.jsonl")
 PACKET_DIRECTORY = "harvest-packets"
 LOCK_PATH = Path("/realm/tmp/work/.harvest-git.flock")
 PUSH_TIMEOUT_SECONDS = 2_400
-AFFECTED_TIMEOUT_SECONDS = 3_600
 _TRAILER_FIELDS = (
     "LANE-BRANCH",
     "LANE-COMMIT",
@@ -1011,54 +1010,6 @@ def _gate(context: HarvestContext, run: Run) -> tuple[bool, str]:
 _UNAVAILABLE_DIAGNOSES = frozenset({"native_testmon_graph_unavailable"})
 
 
-def _affected_refusal(worktree: Path) -> str | None:
-    """Read the newest affected-run receipt and name a refusal to measure.
-
-    ``devtools verify`` refuses without a compatible testmon graph by exiting
-    non-zero and printing nothing, so the refusal is legible only in the typed
-    receipt it writes. Returns a human-readable description when the receipt
-    shows selection was unavailable, and ``None`` when tests genuinely ran.
-    """
-    runs = worktree / ".cache/verify/runs"
-    try:
-        records = sorted(runs.glob("*/run.json"))
-    except OSError:
-        return None
-    for record in reversed(records):
-        try:
-            value = json.loads(record.read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
-        if not isinstance(value, Mapping) or value.get("tier") != "affected":
-            continue
-        diagnosis = value.get("diagnosis")
-        selection = value.get("testmon_selection")
-        state_status = (
-            selection.get("state_status") if isinstance(selection, Mapping) else None
-        )
-        aggregate = value.get("pytest_aggregate")
-        selection_mode = (
-            aggregate.get("selection_mode") if isinstance(aggregate, Mapping) else None
-        )
-        unavailable = diagnosis in _UNAVAILABLE_DIAGNOSES or (
-            state_status == "absent" and selection_mode == "none"
-        )
-        if not unavailable:
-            return None
-        reason = (
-            selection.get("state_reason") if isinstance(selection, Mapping) else None
-        )
-        parts = [f"run {value.get('run_id')}: {diagnosis or 'selection unavailable'}"]
-        if isinstance(reason, str) and reason:
-            parts.append(reason)
-        parts.append(
-            "the affected selection did not run; this is a refusal to measure, "
-            "not a failing test"
-        )
-        return "\n".join(parts)
-    return None
-
-
 def _affected_from_job(context: HarvestContext, affected_job: str, *, current_head: str) -> tuple[str, str]:
     """Read a declared verify_affected job's verdict instead of running one.
 
@@ -1104,44 +1055,6 @@ def _affected_from_job(context: HarvestContext, affected_job: str, *, current_he
     if diagnosis in _UNAVAILABLE_DIAGNOSES or diagnosis == "native_testmon_preparation_failed":
         return "unavailable", detail
     return "failed", detail
-
-
-def _affected_tests(context: HarvestContext, run: Run) -> tuple[str, str]:
-    """Run the affected-test selection, outside the shared repository lock.
-
-    The quick gate is static: nothing between a lane's own claim of a green
-    test run and the protected branch actually executes tests. This does,
-    against the lane's worktree, so it needs no lock and does not serialize
-    other publications.
-
-    Selection needs a compatible testmon graph and refuses without one. That
-    refusal is reported as ``unavailable`` rather than treated as a failure,
-    so publication is never blocked by a missing accelerator -- but it is
-    named in the receipt instead of passing silently as if tests had run.
-
-    The refusal is read from the typed run receipt, because the command that
-    refuses exits non-zero and writes nothing to either stream.
-    """
-    result = _command(
-        run,
-        ["devtools", "verify"],
-        cwd=context.worktree,
-        timeout=AFFECTED_TIMEOUT_SECONDS,
-    )
-    output = result.stdout + result.stderr
-    if result.returncode == 0:
-        return "passed", output
-    refusal = _affected_refusal(context.worktree)
-    if refusal is not None:
-        return "unavailable", "\n".join(part for part in (output, refusal) if part)
-    if "testmon" in output.lower() and "refus" in output.lower():
-        return "unavailable", output
-    if not output.strip():
-        output = (
-            f"devtools verify exited {result.returncode} without output, and no "
-            "affected run receipt explained it"
-        )
-    return "failed", output
 
 
 def authorize(
@@ -1194,10 +1107,12 @@ def authorize(
 
     # Execute tests before contending for the shared repository: this is the
     # only step in the chain that runs them, and it needs no lock.
+    # Tests run exactly once, as the declared verify_affected job; the
+    # harvest reads that verdict and never starts pytest itself.
     tests, tests_output = (
         _affected_from_job(context, affected_job, current_head=current_head)
         if affected_job
-        else _affected_tests(context, run)
+        else ("unavailable", "no affected verification job for this head")
     )
     if tests == "unavailable":
         # polylogue lanes have shipped static-only green for days because this
