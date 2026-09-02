@@ -10,6 +10,7 @@ import pytest
 from sinnixd.jobs import (
     MEMORY_FULL_BLOCK_THRESHOLD,
     MEMORY_FULL_PREEMPT_THRESHOLD,
+    MEMORY_STALL_MAX_AVAILABLE_BYTES,
     PRESSURE_PREEMPTION_COOLDOWN_SECONDS,
     AdmissionConflictError,
     GenericJobs,
@@ -1433,6 +1434,7 @@ def test_memory_stall_keeps_the_short_grace(
 
     pressure.update(
         memory_full_avg10=MEMORY_FULL_PREEMPT_THRESHOLD,
+        memory_available_bytes=3 * 1024**3,
         managed_memory_bytes=6 * 1024**3,
     )
     assert subject._relieve_active_pressure(pressure) is None
@@ -1891,3 +1893,18 @@ def test_admission_holds_after_a_pressure_preemption(
     clock[0] = 2.1 + PRESSURE_PREEMPTION_COOLDOWN_SECONDS + 1
     subject.start(agent_spec(("table:fourth",)))
     assert subject.get(replacement["job_id"])["state"]["phase"] != "queued"
+
+
+def test_a_stall_with_ample_free_memory_is_not_a_preemption_reason() -> None:
+    """Anti-vacuity: with the availability clause removed, swap-in churn at
+    6 GB free reads as scarcity and evicts a lane per probe."""
+    churn = {
+        "memory_full_avg10": MEMORY_FULL_PREEMPT_THRESHOLD + 5,
+        "memory_available_bytes": MEMORY_STALL_MAX_AVAILABLE_BYTES + 1024**3,
+        "swap_total_bytes": 20 * 1024**3,
+        "swap_free_bytes": 10 * 1024**3,
+    }
+    assert GenericJobs._active_pressure_reasons(churn) == []
+
+    scarce = {**churn, "memory_available_bytes": MEMORY_STALL_MAX_AVAILABLE_BYTES - 1024**3}
+    assert GenericJobs._active_pressure_reasons(scarce) == ["memory-stall"]
