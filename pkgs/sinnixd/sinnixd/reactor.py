@@ -64,6 +64,20 @@ class ReactorError(ValueError):
     """An event, board, or cursor violates the reactor contract."""
 
 
+def _job_id_from_output(text: str) -> str | None:
+    """The job id an agentctl start printed, from JSON or a plain line."""
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        value = None
+    if isinstance(value, Mapping):
+        for candidate in (value.get("job_id"), (value.get("job") or {}).get("job_id") if isinstance(value.get("job"), Mapping) else None):
+            if isinstance(candidate, str) and candidate:
+                return candidate
+    match = re.search(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", text)
+    return match.group(0) if match else None
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -978,6 +992,7 @@ class CampaignReactor:
     integration_dispatcher: IntegrationDispatcher | None = None
     review_fix_dispatcher: IntegrationDispatcher | None = None
     harvest_dispatcher: IntegrationDispatcher | None = None
+    verify_dispatcher: Callable[[str, str], str | None] | None = None
     integrator_backend: str = "codex"
     # Workers default to luna, so the integrator is a sibling rather than the
     # same model judging its own family's output.
@@ -2183,17 +2198,24 @@ class CampaignReactor:
         key = f"review:{record.job_id}"
         if key in self._board.keeper:
             return
+        # Affected verification runs once, as a declared job cached by tree
+        # and environment; the harvest that follows reads its verdict
+        # instead of running the tests again.
+        verify_job: str | None = None
         try:
-            if self.review_dispatcher is not None:
+            if self.verify_dispatcher is not None:
+                verify_job = self.verify_dispatcher(record.project, workspace)
+            elif self.review_dispatcher is not None:
                 self.review_dispatcher(record.project, workspace)
             else:
-                subprocess.run(
+                started = subprocess.run(
                     [
                         self.agentctl_executable,
+                        "--plain",
                         "job",
                         "start",
                         record.project,
-                        "harvest",
+                        "verify_affected",
                         "--workspace",
                         workspace,
                     ],
@@ -2202,6 +2224,7 @@ class CampaignReactor:
                     text=True,
                     timeout=60,
                 )
+                verify_job = _job_id_from_output(started.stdout)
         except (OSError, subprocess.SubprocessError) as error:
             self._board.record_error(-1, f"review {record.job_id}: {error}")
             return
@@ -2209,7 +2232,45 @@ class CampaignReactor:
             "emitted_at": _now(),
             "backoff_seconds": 0,
             "next_eligible_at": _now(),
+            **({"verify_job": verify_job, "workspace": workspace, "project": record.project} if verify_job else {}),
         }
+
+    def _harvest_after_verification(self, event: Mapping[str, Any]) -> None:
+        """Start the harvest once the declared verification the review started ends."""
+        job_id = event.get("job_id")
+        if not isinstance(job_id, str) or event.get("phase") not in {"succeeded", "failed"}:
+            return
+        for key, entry in list(self._board.keeper.items()):
+            if not key.startswith("review:") or entry.get("verify_job") != job_id or entry.get("harvest_job"):
+                continue
+            project = str(entry.get("project") or "")
+            workspace = str(entry.get("workspace") or "")
+            parameters = json.dumps({"affected_job": job_id}, sort_keys=True)
+            try:
+                if self.harvest_dispatcher is not None:
+                    self.harvest_dispatcher(project, workspace, job_id)
+                else:
+                    subprocess.run(
+                        [
+                            self.agentctl_executable,
+                            "job",
+                            "start",
+                            project,
+                            "harvest",
+                            "--workspace",
+                            workspace,
+                            "--parameters-json",
+                            parameters,
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                    )
+            except (OSError, subprocess.SubprocessError) as error:
+                self._board.record_error(-1, f"harvest {workspace}: {error}")
+                return
+            entry["harvest_job"] = job_id
 
     def _dispatch_retry(self, record: LaneRecord) -> None:
         """Re-dispatch an interrupted lane once, from its preserved prompt.
@@ -2628,6 +2689,8 @@ class CampaignReactor:
             else:
                 self.registry.dispatch(event, context)
                 self._record_operation_request(event)
+                if event.get("kind") == "declared-operation":
+                    self._harvest_after_verification(event)
                 if event.get("kind") == "attested-agent":
                     job_id = event.get("job_id")
                     lane = (

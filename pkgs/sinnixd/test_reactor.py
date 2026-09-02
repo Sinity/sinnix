@@ -1895,3 +1895,39 @@ def test_publish_synthesizes_lane_text_from_the_bead(tmp_path: Path, monkeypatch
 
     monkeypatch.setattr(CampaignReactor, "_receipt_payload", staticmethod(lambda r: {}))
     assert reactor._synthesize_lane_text("polylogue", worktree, "harvest-" + "1" * 32) is False
+
+
+def test_a_finished_lane_is_verified_once_then_harvested(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anti-vacuity: starting the harvest directly verifies the tree a second
+    time inline (an hour under load) and leaves publish without declared
+    evidence at the head."""
+    verified: list[tuple[str, str]] = []
+    harvested: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(CampaignReactor, "_workspace_for", lambda self, record: "packet-p-9")
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        project_roots={"polylogue": tmp_path / "repo"},
+        verify_dispatcher=lambda project, workspace: verified.append((project, workspace)) or "v" * 8 + "-1111-4111-8111-" + "1" * 12,
+        harvest_dispatcher=lambda project, workspace, ref: harvested.append((project, workspace, ref)),
+    )
+    lane = LaneRecord(
+        job_id="lane-1",
+        project="polylogue",
+        phase="succeeded",
+        checkout={"checkout_id": "worktree-abc"},
+        completed_at=_now(),
+        review_ready=True,
+        updated_at=_now(),
+    )
+
+    reactor._dispatch_review(lane)
+    reactor._dispatch_review(lane)
+    assert verified == [("polylogue", "packet-p-9")]
+    assert harvested == []
+
+    verify_job = reactor._board.keeper["review:lane-1"]["verify_job"]
+    reactor._harvest_after_verification({"kind": "declared-operation", "job_id": verify_job, "phase": "succeeded"})
+    reactor._harvest_after_verification({"kind": "declared-operation", "job_id": verify_job, "phase": "succeeded"})
+    assert harvested == [("polylogue", "packet-p-9", verify_job)]
