@@ -577,10 +577,10 @@ def _redflags(
             "production changed with no test in the diff: "
             + ", ".join(sorted(touched_production_modules)[:5])
         )
-    if re.search(
-        r"^-\s*assert .*== 0\b|^\+\s*assert .*exit_code == 1|^\+.*pytest\.raises",
-        diff,
-        re.MULTILINE,
+    # A polarity change replaces a success assertion with a failure one; an
+    # added ``pytest.raises`` beside untouched assertions is new coverage.
+    if re.search(r"^-\s*assert .*== 0\b|^-.*pytest\.raises", diff, re.MULTILINE) and re.search(
+        r"^\+\s*assert .*exit_code == 1|^\+.*pytest\.raises", diff, re.MULTILINE
     ):
         flag("assertion polarity change")
     # Rewritten assertions come and go in pairs; only a net loss of

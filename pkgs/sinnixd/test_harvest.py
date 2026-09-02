@@ -1079,3 +1079,22 @@ def test_publication_text_from_files_matches_the_minted_binding(tmp_path: Path) 
     assert harvest._digest(harvest._read_text(parsed.body_file, "b").strip()) == harvest._digest(
         harvest._lane_artifact(context, "body.md") or ""
     )
+
+
+def test_redflags_polarity_needs_a_removed_success_assertion() -> None:
+    """Anti-vacuity: an added ``pytest.raises`` alone parked
+    packet-polylogue-aex0-publication (2026-09-02 01:12Z)."""
+    _, added_only = harvest._redflags(
+        "diff --git a/tests/test_module.py b/tests/test_module.py\n"
+        "+    with pytest.raises(ValueError):\n"
+        "+        act()\n"
+    )
+    assert "FLAG: assertion polarity change" not in added_only
+
+    _, flipped = harvest._redflags(
+        "diff --git a/tests/test_module.py b/tests/test_module.py\n"
+        "-    assert result.exit_code == 0\n"
+        "+    with pytest.raises(ValueError):\n"
+        "+        act()\n"
+    )
+    assert "FLAG: assertion polarity change" in flipped
