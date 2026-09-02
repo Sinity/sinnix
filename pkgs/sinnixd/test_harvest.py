@@ -1098,3 +1098,15 @@ def test_redflags_polarity_needs_a_removed_success_assertion() -> None:
         "+        act()\n"
     )
     assert "FLAG: assertion polarity change" in flipped
+
+
+def test_redflags_gate_flag_names_gates_not_every_verify_module() -> None:
+    """Anti-vacuity: the `verify` prefix matched verify_runs.py (receipt
+    bookkeeping) and parked packet-polylogue-a74ru for a reader."""
+    _, bookkeeping = harvest._redflags(
+        "diff --git a/devtools/verify_runs.py b/devtools/verify_runs.py\n+    row[\"agentctl\"] = 1\n"
+    )
+    assert not any(flag.startswith("FLAG: verification gate") for flag in bookkeeping)
+
+    _, gate = harvest._redflags("diff --git a/devtools/verify.py b/devtools/verify.py\n+    pass\n")
+    assert "FLAG: verification gate or baseline edited" in gate

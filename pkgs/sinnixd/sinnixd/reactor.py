@@ -2372,8 +2372,10 @@ class CampaignReactor:
                 ]
                 for bead_id in selected:
                     command.extend(("--bead", bead_id))
+                # A wave provisions one worktree per bead (graph copy, venv
+                # sync); on a loaded host that is minutes, not seconds.
                 subprocess.run(
-                    command, check=True, capture_output=True, text=True, timeout=60
+                    command, check=True, capture_output=True, text=True, timeout=900
                 )
             emitted_at = datetime.now(UTC)
             previous = int(prior["backoff_seconds"]) if prior is not None else 0
