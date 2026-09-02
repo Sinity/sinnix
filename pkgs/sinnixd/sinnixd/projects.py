@@ -1287,7 +1287,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         pool = definition.get("pool", "normal")
         result = definition.get("result", "exit")
         cache = definition.get("cache", "none")
-        if pool not in {"interactive", "normal", "bulk"}:
+        if pool not in {"interactive", "normal", "bulk", "pytest"}:
             raise ProjectConfigError(f"operations.{name}.pool is invalid")
         if result not in {"exit", "json", "pytest"}:
             raise ProjectConfigError(f"operations.{name}.result is invalid")
