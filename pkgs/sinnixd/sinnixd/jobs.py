@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 import fcntl
+import contextlib
 import hashlib
 import json
 import os
@@ -94,6 +95,13 @@ MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES = 2
 # held; admitting a replacement at once re-creates the stall and the next
 # probe evicts another lane (eight lanes in forty minutes on 2026-09-02).
 PRESSURE_PREEMPTION_COOLDOWN_SECONDS = 300.0
+# A memory stall freezes an agent lane instead of killing it: frozen, it
+# stops competing for CPU and IO and its pages go cold and get reclaimed,
+# and it resumes where it was once memory is back. Hosted agent sessions do
+# not survive an indefinite pause, so a lane frozen past this bound is
+# cancelled with retry semantics.
+FREEZE_MAX_SECONDS = 1200.0
+FREEZE_THAW_MIN_QUIET_SECONDS = 60.0
 # A job blocked on host memory this long reserves its claim across every
 # pool, not just its own: lanes then drain until it fits. Per-pool
 # reservation alone let six agent lanes and eight harvests refill the
@@ -483,6 +491,10 @@ class SystemdJobs(Protocol):
 
     def stop(self, unit: str) -> None: ...
 
+    def freeze(self, unit: str) -> None: ...
+
+    def thaw(self, unit: str) -> None: ...
+
     def schedule_timer(
         self, *, unit: str, on_calendar: str, command: Sequence[str]
     ) -> None: ...
@@ -643,6 +655,12 @@ class UserSystemdJobs:
         # unit's own shutdown finishes, which for an agent unit is seconds --
         # far past the command budget every other systemd call is sized for.
         self._run(["systemctl", "--user", "--no-block", "stop", unit])
+
+    def freeze(self, unit: str) -> None:
+        self._run(["systemctl", "--user", "freeze", unit])
+
+    def thaw(self, unit: str) -> None:
+        self._run(["systemctl", "--user", "thaw", unit])
 
     def schedule_timer(
         self, *, unit: str, on_calendar: str, command: Sequence[str]
@@ -3914,6 +3932,8 @@ class GenericJobs:
                 "reloading",
             }:
                 continue
+            if record.state.get("frozen"):
+                continue
             observed = self._systemd_memory(properties)
             estimate = self._estimate(record.spec, admission)
             candidates.append(
@@ -3934,6 +3954,38 @@ class GenericJobs:
         if len(candidates) == 1 and "swap-exhaustion" not in reasons:
             return None
         _, _, _, victim = max(candidates, key=lambda item: item[:3])
+        host = {
+            key: pressure.get(key, 0.0)
+            for key in (
+                "memory_available_bytes",
+                "memory_full_avg10",
+                "io_full_avg10",
+                "swap_free_bytes",
+                "swap_total_bytes",
+                "managed_memory_bytes",
+            )
+        }
+        if victim.spec.pool == "agent" and "swap-exhaustion" not in reasons:
+            try:
+                self.systemd.freeze(victim.unit)
+            except SystemdJobError:
+                return None
+            with self.store.locked(victim.job_id):
+                record = self.store.load(victim.job_id)
+                updated = self._with_state(
+                    record,
+                    {
+                        **record.state,
+                        "frozen": {
+                            "at": _timestamp(),
+                            "monotonic": time.monotonic(),
+                            "reason": list(reasons),
+                            "host": host,
+                        },
+                    },
+                )
+                self.store.save(updated)
+            return victim.job_id
         result = self.cancel(
             victim.job_id, reason="pressure-preemption:" + ",".join(reasons)
         )
@@ -3948,27 +4000,62 @@ class GenericJobs:
                     "preemption": {
                         "reason": list(reasons),
                         "observed_at": _timestamp(),
-                        "host": {
-                            key: pressure.get(key, 0.0)
-                            for key in (
-                                "memory_available_bytes",
-                                "memory_full_avg10",
-                                "io_full_avg10",
-                                "swap_free_bytes",
-                                "swap_total_bytes",
-                                "managed_memory_bytes",
-                            )
-                        },
+                        "host": host,
                     },
                 },
             )
             self.store.save(updated)
         return victim.job_id
 
+    def _thaw_relieved(self, pressure: Mapping[str, float]) -> str | None:
+        """Resume the oldest frozen lane once memory is back, or give it up.
+
+        One lane per probe, so the host settles between resumptions. A lane
+        frozen past FREEZE_MAX_SECONDS is cancelled: its hosted session has
+        expired and a resumed worktree is worth more than a hung process.
+        """
+        now = time.monotonic()
+        frozen: list[tuple[float, GenericJobRecord]] = []
+        for record in self.store.active_records():
+            marker = record.state.get("frozen")
+            if not isinstance(marker, Mapping) or record.state.get("terminal"):
+                continue
+            since = marker.get("monotonic")
+            frozen.append((float(since) if isinstance(since, (int, float)) else now, record))
+        if not frozen:
+            return None
+        frozen.sort(key=lambda item: item[0])
+        since, record = frozen[0]
+        if now - since >= FREEZE_MAX_SECONDS:
+            with contextlib.suppress(SystemdJobError):
+                self.systemd.thaw(record.unit)
+            self.cancel(record.job_id, reason="pressure-preemption:frozen-too-long")
+            return record.job_id
+        budget = self._host_memory_budget(pressure)
+        admission = self._admission_state()
+        if budget is None or budget < self._estimate(record.spec, admission):
+            return None
+        if (
+            self._last_pressure_preemption is not None
+            and now - self._last_pressure_preemption < FREEZE_THAW_MIN_QUIET_SECONDS
+        ):
+            return None
+        try:
+            self.systemd.thaw(record.unit)
+        except SystemdJobError:
+            return None
+        with self.store.locked(record.job_id):
+            current = self.store.load(record.job_id)
+            state = {key: value for key, value in current.state.items() if key != "frozen"}
+            state["thawed"] = {"at": _timestamp(), "frozen_seconds": round(now - since, 1)}
+            self.store.save(self._with_state(current, state))
+        return record.job_id
+
     def _relieve_active_pressure(self, pressure: Mapping[str, float]) -> str | None:
         reasons = self._active_pressure_reasons(pressure)
         if not reasons:
             self._active_pressure_since = None
+            self._thaw_relieved(pressure)
             return None
         now = time.monotonic()
         if self._active_pressure_since is None:
@@ -5316,7 +5403,7 @@ class GenericJobs:
         # actor that stopped the job; rebuilding must not erase them.
         forensic = {
             key: dict(record.state[key])
-            for key in ("cancellation", "preemption")
+            for key in ("cancellation", "preemption", "frozen", "thawed")
             if isinstance(record.state.get(key), Mapping)
         }
         if self._is_authoritative_not_started_cancellation(record):

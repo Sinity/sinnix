@@ -11,6 +11,7 @@ import pytest
 from sinnixd.jobs import (
     MEMORY_FULL_BLOCK_THRESHOLD,
     MEMORY_FULL_PREEMPT_THRESHOLD,
+    FREEZE_MAX_SECONDS,
     HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS,
     MEMORY_STALL_MAX_AVAILABLE_BYTES,
     PRESSURE_PREEMPTION_COOLDOWN_SECONDS,
@@ -51,6 +52,15 @@ class FakeSystemd:
     def show(self, unit: str, *, timeout_seconds: float = 0.25) -> dict[str, str]:
         assert unit.startswith("sinnixd-job-")
         return dict(self.unit_properties.get(unit, self.properties))
+
+    frozen: list[str] = field(default_factory=list)
+    thawed: list[str] = field(default_factory=list)
+
+    def freeze(self, unit: str) -> None:
+        self.frozen.append(unit)
+
+    def thaw(self, unit: str) -> None:
+        self.thawed.append(unit)
 
     def stop(self, unit: str) -> None:
         self.stopped.append(unit)
@@ -666,15 +676,12 @@ def test_sustained_pressure_preempts_largest_managed_job(
     clock[0] = 2.1
     assert subject._relieve_active_pressure(pressure) == second["job_id"]
 
-    assert systemd.stopped == [second["unit"]]
+    # An agent lane is frozen, not killed: its work resumes when memory returns.
+    assert systemd.frozen == [second["unit"]]
+    assert systemd.stopped == []
     preempted = subject.get(second["job_id"])
-    assert preempted["state"]["phase"] == "cancelled"
-    assert preempted["state"]["preemption"]["reason"] == ["memory-stall"]
-    assert (
-        preempted["state"]["cancellation"]["reason"]
-        == "pressure-preemption:memory-stall"
-    )
-    assert preempted["state"]["pre_stop_systemd"]["MemoryPeak"] == str(6 * 1024**3)
+    assert preempted["state"]["phase"] == "running"
+    assert preempted["state"]["frozen"]["reason"] == ["memory-stall"]
     assert interactive["unit"] not in systemd.stopped
 
 
@@ -1846,7 +1853,8 @@ def test_pressure_sheds_an_agent_lane_before_the_bulk_corpus(
     assert subject._relieve_active_pressure(pressure) is None
     clock[0] = 2.1
     assert subject._relieve_active_pressure(pressure) == lane["job_id"]
-    assert systemd.stopped == [lane["unit"]]
+    assert systemd.frozen == [lane["unit"]]
+    assert systemd.stopped == []
 
 
 def test_admission_holds_after_a_pressure_preemption(
@@ -2015,3 +2023,74 @@ def test_a_waiting_harvest_outranks_a_new_lane_launch(tmp_path: Path) -> None:
     lane = subject.start(agent_spec(("table:lane",)))
 
     assert subject.get(lane["job_id"])["state"]["phase"] == "queued", "the lane must not take the harvest's headroom"
+
+
+def _two_agents_under_stall(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[GenericJobs, FakeSystemd, dict, list[float], dict, dict]:
+    pressure = {
+        "memory_full_avg10": 0.0,
+        "memory_full_avg60": 0.0,
+        "io_full_avg10": 0.0,
+        "memory_total_bytes": 32 * 1024**3,
+        "memory_available_bytes": 24 * 1024**3,
+        "swap_total_bytes": 20 * 1024**3,
+        "swap_free_bytes": 20 * 1024**3,
+        "managed_memory_bytes": 0,
+    }
+    clock = [0.0]
+    monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
+    systemd = FakeSystemd()
+    subject = GenericJobs(systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure)
+    first = subject.start(agent_spec(("table:first",)))
+    second = subject.start(agent_spec(("table:second",)))
+    base = {"LoadState": "loaded", "ActiveState": "active", "Result": "success", "ExecMainStatus": "0"}
+    for job, name, size in ((first, "first", 1), (second, "second", 3)):
+        systemd.unit_properties[job["unit"]] = {
+            **base,
+            "InvocationID": name,
+            "MemoryCurrent": str(size * 1024**3),
+            "MemorySwapCurrent": "0",
+            "MemoryPeak": str(size * 1024**3),
+        }
+    pressure.update(memory_full_avg10=MEMORY_FULL_PREEMPT_THRESHOLD, memory_available_bytes=3 * 1024**3)
+    return subject, systemd, pressure, clock, first, second
+
+
+def test_a_memory_stall_freezes_the_lane_and_thaws_it_when_memory_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: with cancel as the response the lane's work is lost;
+    with no thaw it never resumes."""
+    subject, systemd, pressure, clock, _first, second = _two_agents_under_stall(tmp_path, monkeypatch)
+
+    assert subject._relieve_active_pressure(pressure) is None
+    clock[0] = 2.1
+    assert subject._relieve_active_pressure(pressure) == second["job_id"]
+    assert systemd.frozen == [second["unit"]]
+    assert systemd.stopped == []
+    assert subject.get(second["job_id"])["state"]["phase"] == "running"
+    assert subject.get(second["job_id"])["state"]["frozen"]["reason"] == ["memory-stall"]
+
+    pressure.update(memory_full_avg10=0.0, memory_available_bytes=24 * 1024**3)
+    clock[0] = 30.0
+    subject._relieve_active_pressure(pressure)
+    assert systemd.thawed == [], "the host settles for a minute before a resumption"
+    clock[0] = 100.0
+    subject._relieve_active_pressure(pressure)
+    assert systemd.thawed == [second["unit"]]
+    state = subject.get(second["job_id"])["state"]
+    assert "frozen" not in state and state["thawed"]["frozen_seconds"] > 0
+
+
+def test_a_lane_frozen_past_the_bound_is_cancelled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    subject, systemd, pressure, clock, _first, second = _two_agents_under_stall(tmp_path, monkeypatch)
+    assert subject._relieve_active_pressure(pressure) is None
+    clock[0] = 2.1
+    assert subject._relieve_active_pressure(pressure) == second["job_id"]
+    pressure.update(memory_full_avg10=0.0, memory_available_bytes=3 * 1024**3)
+
+    clock[0] = 2.1 + FREEZE_MAX_SECONDS + 1
+    subject._relieve_active_pressure(pressure)
+
+    assert systemd.thawed == [second["unit"]]
+    assert systemd.stopped == [second["unit"]]
+    assert subject.get(second["job_id"])["state"]["cancellation"]["reason"] == "pressure-preemption:frozen-too-long"
