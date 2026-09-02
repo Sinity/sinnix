@@ -266,6 +266,10 @@ rec {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 300;
+        # Weights share bandwidth only while both sides issue IO; a latency
+        # target throttles batch whenever the desktop's own requests wait,
+        # which is what swap-in feels like under six lanes.
+        IODeviceLatencyTargetSec = "/dev/nvme0n1 20ms";
         # Batch under sinnixd.slice grows into swap; the desktop's working
         # set must not be what gets reclaimed to make room for it.
         MemoryLow = "6G";
@@ -274,6 +278,10 @@ rec {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 300;
+        # Weights share bandwidth only while both sides issue IO; a latency
+        # target throttles batch whenever the desktop's own requests wait,
+        # which is what swap-in feels like under six lanes.
+        IODeviceLatencyTargetSec = "/dev/nvme0n1 20ms";
         MemoryLow = "6G";
       };
       desktop-shell = {
