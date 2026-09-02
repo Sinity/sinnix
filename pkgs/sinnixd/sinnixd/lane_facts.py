@@ -71,7 +71,6 @@ class LaneFacts:
     verify_job: tuple[str, str] | None = None
     harvest_at_head: tuple[str, str] | None = None
     published_at_head: bool = False
-    quick_at_head: tuple[str, str] | None = None
     lane_finished_at: str = ""
     bead_closed: bool = False
     agent_launched_at: str = ""
@@ -189,8 +188,6 @@ def _advance(facts: LaneFacts, now: datetime | None) -> Action:
         if facts.verify_job[1] != "succeeded":
             return Action("park", f"affected verification {facts.verify_job[1]} at this head")
         return Action("harvest", f"re-mint with verdict {facts.verify_job[0][:8]}")
-    if facts.quick_at_head is not None and facts.quick_at_head[1] != "succeeded":
-        return Action("park", f"quick gate {facts.quick_at_head[1]} at this head")
     return Action("publish", "clean receipt at head")
 
 
@@ -273,8 +270,6 @@ def collect(
         verify_job: tuple[str, str] | None = None
         verify_created = ""
         lane_finished = ""
-        quick_at_head: tuple[str, str] | None = None
-        quick_created = ""
         harvest_at_head: tuple[str, str] | None = None
         published_at_head = False
         agent_launched = ""
@@ -312,16 +307,6 @@ def collect(
                     published_at_head = True
                 elif outcome in {"HARVEST_ERROR", "GATE_RED"} or phase == "failed":
                     harvest_at_head = (str(job.get("job_id") or ""), outcome or phase)
-            elif (
-                kind == "declared-operation"
-                and spec.get("operation") == "verify_quick"
-                and checkout.get("head") == head
-                and phase in {"succeeded", "failed"}
-                and _harvest_result(job)[0] != "cancelled"
-            ):
-                created = str(job.get("created_at") or "")
-                if created >= quick_created:
-                    quick_created, quick_at_head = created, (str(job.get("job_id") or ""), phase)
             elif (
                 kind == "declared-operation"
                 and spec.get("operation") == "verify_affected"
@@ -362,7 +347,6 @@ def collect(
                 verify_job=verify_job,
                 harvest_at_head=harvest_at_head,
                 published_at_head=published_at_head,
-                quick_at_head=quick_at_head,
                 lane_finished_at=lane_finished,
                 bead_closed=(bead or (receipt.bead if receipt else None)) in set(closed_beads),
                 agent_launched_at=agent_launched,
