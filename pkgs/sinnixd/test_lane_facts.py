@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from sinnixd.lane_facts import (
+    latest_corpus,
     LaneFacts,
     Pull,
     Receipt,
@@ -220,3 +221,29 @@ def test_a_recent_agent_launch_blocks_the_next_one() -> None:
     assert action.kind == "wait" and "cooldown" in action.reason
     later = datetime(2026, 9, 2, 13, 50, tzinfo=UTC)
     assert advance(failed, now=later).kind == "retry"
+
+
+def test_latest_corpus_reads_the_newest_complete_run(tmp_path: Path) -> None:
+    """Anti-vacuity: the red count comes from the result artifact, not the job phase."""
+    import json as _json
+
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    result = tmp_path / "corpus.result"
+    result.write_text(_json.dumps({
+        "pytest_outcomes": {"outcomes": {"passed": 20401, "failed": 559, "error": 67}},
+        "diagnostics": {"diagnosis": "pytest_failed"},
+    }))
+    for created, job_id, phase in (("2026-09-01T00:00:00+00:00", "old", "succeeded"), ("2026-09-02T00:00:00+00:00", "new", "failed")):
+        (jobs / f"{job_id}.json").write_text(_json.dumps({
+            "job_id": job_id,
+            "created_at": created,
+            "spec": {"operation": "verify_all", "project_id": "polylogue", "checkout": {"head": "abcdef0123456789"}},
+            "state": {"terminal": True, "phase": phase, "completed_at": created},
+            "artifacts": {"result": str(result)} if job_id == "new" else {},
+        }))
+    corpus = latest_corpus(tmp_path, "polylogue")
+    assert corpus is not None
+    assert corpus["job_id"] == "new" and corpus["red"] == 626 and corpus["passed"] == 20401
+    assert corpus["green"] is False and corpus["head"] == "abcdef012345"
+    assert latest_corpus(tmp_path, "other") is None
