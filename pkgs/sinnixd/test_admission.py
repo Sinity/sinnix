@@ -1465,7 +1465,7 @@ def test_lane_and_harvest_fit_the_host_budget_together(tmp_path: Path) -> None:
         "memory_full_avg10": 0.0,
         "io_full_avg10": 0.0,
         "memory_total_bytes": 31 * gib,
-        "memory_available_bytes": 15 * gib,
+        "memory_available_bytes": 16 * gib,
         "swap_total_bytes": 20 * gib,
         "swap_free_bytes": 20 * gib,
         "managed_memory_bytes": 3 * gib,
