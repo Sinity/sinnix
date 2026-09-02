@@ -51,13 +51,24 @@ five means the change should be split).
 - Stage by path, never `git add -A` on significant changes. Never
   `--no-verify` unbidden; a hook failure means fix the cause in a new
   commit. From a linked worktree, use `git -C /abs/path`.
-- AgentCTL workspace flow where registered: `workspace publish` →
-  `review-status` → `land` → `finish` (or `drop --target <ref>` for an
-  already-integrated branch) — exact-head results, no parallel merge-ledger
-  protocols.
+- AgentCTL workspace flow where registered: `workspace publish --job
+<verify-job>` → `review-status` → `land --job <verify-job>` → `finish` (or
+  `drop --target <ref>` for an already-integrated branch) — exact-head results,
+  no parallel merge-ledger protocols.
+- Lane publication goes through `agentctl lane publish <ws>`. It refuses with
+  `NO_TEST_EVIDENCE` unless a succeeded `verify_affected` job covers the exact
+  head or the operator recorded `agentctl lane authorize <ws>` for it; the
+  publication sweep reports the same state as the verdict `no-test-evidence`
+  and merges nothing on it.
 - A green hosted check is not test evidence where CI skips the heavy suite
   (recorded polylogue gotcha) — verify locally with the focused selector
-  and say which tier ran.
+  and say which tier ran. `devtools verify` selects from the checkout's one
+  testmon datafile and writes back; `--all` runs everything; a corrupt or
+  foreign datafile stops with `graph_unusable` (delete it and rerun). A
+  selected green proves the selected scope only.
+- Merge everything in progress, then run the corpus once at the master
+  boundary (`agentctl job start polylogue verify_all`). Never a corpus run per
+  lane; excisions land as whole merges.
 - Before claiming "unified / complete / converged": grep the diff and check
   both paths. State partial work honestly; split remainder to a successor
   bead ([[task-backend]] close discipline).

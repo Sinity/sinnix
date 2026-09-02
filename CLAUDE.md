@@ -75,7 +75,7 @@ Keep option ownership local:
 The runtime exposes one Unix-socket API and `agentctl` CLI. It owns:
 
 - jobs and dependencies;
-- adaptive host resource admission;
+- pool-concurrency admission (memory belongs to the slice hierarchy);
 - worktree/workspace lifecycle and checkpoints;
 - coding-agent backend/session binding;
 - on-demand local service leases;
@@ -98,9 +98,11 @@ Do not recreate any of the retired forms:
 
 ## Resource policy
 
-Declared operations choose the `normal` or `bulk` admission pool and provide
-memory estimates, scratch placement, and exact conflict keys. Sinnixd admits
-them against live host pressure and owns their transient systemd units. Fixed
+Declared operations choose an admission pool (`interactive`, `normal`, `bulk`,
+`pytest`, `agent`) and provide scratch placement and exact conflict keys.
+Admission bounds concurrency per pool and blocks new non-interactive work under
+sustained host IO stall; memory is bounded by the slice hierarchy, not by
+per-job arithmetic. Sinnixd owns the transient systemd units. Fixed
 runtime surfaces use the resource classes and slice budgets declared in
 `flake/data/runtime-defaults.nix`; do not restate those values here.
 
