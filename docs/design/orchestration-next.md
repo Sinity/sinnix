@@ -80,7 +80,7 @@ Two corollaries:
 ## Friction observed while landing one lane
 
 Closing `sinnix-ygjw` end to end took six commands and an identifier lookup:
-rebase, fix, test, merge, push, `bd close`, then `workspace dispose` — which
+rebase, fix, test, merge, push, `bd close`, then `workspace drop` — which
 rejects the `name` that `workspace list` prints and requires the `workspace_id`
 it also prints. Landing must settle its own beads and workspaces
 (`sinnix-oj9s`), and one identifier should work everywhere it appears.

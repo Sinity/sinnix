@@ -54,10 +54,10 @@ agents report patches or commit only by explicit instruction.
    `agentctl workspace get <workspace-id>`.
 2. Checkpoint dirty work before recovery or integration; do not copy changes
    between checkouts as a substitute for preserving their Git identity.
-3. Use `agentctl workspace stack`/`restack` for dependent histories and the
-   publish/land path for independent delivery.
+3. Use the publish/land path for delivery; dependent histories rebase onto
+   their parent branch by hand.
 4. After merge, use `agentctl workspace finish <workspace-id>`; for abandoned
-   work use guarded `reap` only after its checkpoint/divergence evidence is
+   work use `workspace drop` once its checkpoint and divergence evidence is
    resolved.
 
 ### Foreground-only execution

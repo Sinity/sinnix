@@ -13,19 +13,15 @@ agentctl project get sinnix
 agentctl project operations sinnix
 agentctl workspace list --project sinnix
 agentctl workspace create sinnix my-lane --branch feature/my-lane
-agentctl workspace adopt sinnix worktree-0123456789abcdef adopted-lane
 agentctl workspace get <workspace-id>
 agentctl workspace checkpoint <workspace-id>
 agentctl workspace restore <workspace-id> <checkpoint-id>
-agentctl workspace recover <workspace-id> <checkpoint-id>
-agentctl workspace stack <parent-workspace-id> child-lane --branch feature/child
-agentctl workspace restack <child-workspace-id>
+agentctl workspace restore <workspace-id> <checkpoint-id> --recreate
 agentctl workspace publish <workspace-id> --job <job-id> --title 'Review title' --body 'Review body'
 agentctl workspace review-status <workspace-id>
 agentctl workspace land <workspace-id> --job <job-id>
 agentctl workspace finish <workspace-id>
-agentctl workspace dispose <workspace-id>
-agentctl workspace reap <workspace-id>
+agentctl workspace drop <workspace-id>
 agentctl job start sinnix lint
 agentctl job start sinnix sinex_cache_prebuild
 agentctl job start sinex check_default --parameters-json '{"full":true,"package":["sinexd","xtask"]}'
