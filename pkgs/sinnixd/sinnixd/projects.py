@@ -434,7 +434,6 @@ class ProjectOperation:
     command: tuple[str, ...]
     pool: str
     result: str
-    cache: str
     verdict: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     exclusive_keys: tuple[str, ...] = ()
@@ -510,7 +509,6 @@ class ProjectOperation:
             "pool": self.pool,
             "result": self.result,
             "verdict": {key: list(value) for key, value in self.verdict.items()},
-            "cache": self.cache,
             "timeout_seconds": self.timeout_seconds,
             "exclusive_keys": list(self.exclusive_keys),
             "dependencies": list(self.dependencies),
@@ -1133,6 +1131,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             "pool",
             "result",
             "verdict",
+            # Accepted and ignored: descriptors still declare it.
             "cache",
             "exclusive_keys",
             "dependencies",
@@ -1158,7 +1157,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         command = _string_list(definition.get("exec"), f"operations.{name}.exec")
         pool = definition.get("pool", "normal")
         result = definition.get("result", "exit")
-        cache = definition.get("cache", "none")
         if pool not in {"interactive", "normal", "bulk", "pytest"}:
             raise ProjectConfigError(f"operations.{name}.pool is invalid")
         if result not in {"exit", "json", "pytest"}:
@@ -1166,10 +1164,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         verdict = _operation_verdict(
             definition.get("verdict"), result, f"operations.{name}.verdict"
         )
-        if not isinstance(cache, str) or not cache:
-            raise ProjectConfigError(f"operations.{name}.cache must be non-empty")
-        if cache not in {"none", "tree+environment"}:
-            raise ProjectConfigError(f"operations.{name}.cache is invalid")
         timeout_seconds = definition.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
         if not valid_timeout_seconds(timeout_seconds, kind="declared-operation"):
             raise ProjectConfigError(
@@ -1226,7 +1220,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 pool=pool,
                 result=result,
                 verdict=verdict,
-                cache=cache,
                 timeout_seconds=timeout_seconds,
                 exclusive_keys=_optional_string_list(
                     definition.get("exclusive_keys"),

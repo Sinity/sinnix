@@ -37,19 +37,17 @@ not add a parallel ledger for any of them.
   Parameters, when declared, enter through `--parameters-json` and are retained
   publicly only as a digest.
 - Observe with `job get`, `job logs`, `job list --kind <kind>`, and `job wait
-<id...> --any`; consume the typed artifact with `job result`. Cancel by job
-  ID, then verify terminal state. `agentctl agent list|status|wait|result`
-  are sugar over jobs of kind `attested-agent`.
+  <id>`; consume the typed artifact with `job result`. Cancel by job ID, then
+  verify terminal state. Agent jobs are `--kind attested-agent`.
 - **Never poll.** Terminal transitions append to
   `/realm/state/agentctl/events.jsonl` — tail that one stream (or one
   persistent Monitor on it) instead of per-job status loops. Non-job scripts
   append their completions to the same spool by convention.
-- Feature gate: the event plane, agent verbs, `--kind`, wait `--any`,
-  `environment.require` (missing required vars fail dispatch loudly),
-  `BEADS_ACTOR=agent-<job-id>` injection, timeout WIP-preservation, and
-  14-day record retention deploy together — the daemon's `status` capability
-  list is the runtime check; a daemon predating the current rebuild lacks
-  them.
+- Feature gate: the event plane, `--kind`, `environment.require` (missing
+  required vars fail dispatch loudly), `BEADS_ACTOR=agent-<job-id>` injection,
+  timeout WIP-preservation, and 14-day record retention deploy together —
+  `agentctl status` lists the daemon's operation surface; a daemon predating
+  the current rebuild lacks them.
 - The operation descriptor owns environment, resources, dependencies, result
   contract, and timeout. Declared operations may run for up to eight hours;
   typed agent jobs remain capped at one hour.

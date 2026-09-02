@@ -146,6 +146,35 @@ def test_canonical_client_validates_typed_response_identity() -> None:
         mismatched.dispatch(request)
 
 
+def test_retired_descriptor_sections_load_without_effect(tmp_path: Path) -> None:
+    """Operator descriptors still declare `cache` and `[owner_adapters]`.
+
+    Anti-vacuity: rejecting either as an unknown field would take every
+    project declaring them out of service.
+    """
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + """
+[owner_adapters.polylogue_archive]
+namespace = "polylogue.archive"
+owner = "polylogue-archive"
+authority = "owner"
+lifecycle = "read_only"
+protocol_versions = [1]
+source_scoped = true
+source_ref = "sinnix://polylogue/archive"
+exec = ["polylogue-agentctl-adapter"]
+"""
+    )
+
+    project = ProjectCatalog([tmp_path]).get("fixture")
+
+    assert "cache" not in project.operation("check").catalog_row()
+    assert "owner_adapters" not in project.catalog_row()
+
+
 def test_runtime_status_lists_the_dispatchable_operations(tmp_path: Path) -> None:
     """Anti-vacuity: status exposes the operation surface, not only version and owners."""
     service = SinnixdService(ProjectCatalog([]), jobs=generic_jobs(tmp_path))

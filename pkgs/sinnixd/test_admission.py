@@ -101,7 +101,7 @@ def project(root: Path, operations: tuple[ProjectOperation, ...]) -> ProjectAdap
 
 
 def operation(name: str, **kwargs: object) -> ProjectOperation:
-    defaults = {"pool": "normal", "result": "exit", "cache": "none"}
+    defaults = {"pool": "normal", "result": "exit"}
     defaults.update(kwargs)
     return ProjectOperation(name=name, description=name, command=(name,), **defaults)
 
@@ -785,7 +785,6 @@ def test_dependencies_exclusive_keys_defaults_and_pressure_gate(
             operation(
                 "check",
                 dependencies=("prepare",),
-                cache="none",
                 exclusive_keys=("fixture:store",),
             ),
             operation("other", exclusive_keys=("fixture:store",)),
