@@ -28,15 +28,6 @@ from .api import (
     UnixSocketServer,
     call,
 )
-from .fleet import (
-    DEFAULT_FLEET_LIMIT,
-    DEFAULT_GH_LIMIT,
-    DEFAULT_RECENT_HOURS,
-    read_evidence,
-    read_fleet,
-    render_evidence,
-    render_fleet,
-)
 from .jobs import (
     GenericJobs,
     GenericJobStore,
@@ -202,25 +193,6 @@ def parser() -> argparse.ArgumentParser:
     )
     subcommands = result.add_subparsers(dest="command", required=True)
     subcommands.add_parser("status")
-    fleet = subcommands.add_parser(
-        "fleet", help="Show active, queued, and recent jobs with best-effort joins."
-    )
-    fleet.add_argument("--state-dir", type=Path, default=default_state_dir())
-    fleet.add_argument(
-        "--limit", type=int, choices=range(1, 201), default=DEFAULT_FLEET_LIMIT
-    )
-    fleet.add_argument("--recent-hours", type=float, default=DEFAULT_RECENT_HOURS)
-    fleet.add_argument(
-        "--gh-limit", type=int, choices=range(0, 33), default=DEFAULT_GH_LIMIT
-    )
-    fleet.add_argument("--json", action="store_true")
-    evidence = subcommands.add_parser(
-        "evidence", help="Show all locally available evidence for one job or workspace."
-    )
-    evidence.add_argument("unit_id", metavar="job-id|workspace-id")
-    evidence.add_argument("--state-dir", type=Path, default=default_state_dir())
-    evidence.add_argument("--gh-limit", type=int, choices=range(0, 2), default=1)
-    evidence.add_argument("--json", action="store_true")
     shell = subcommands.add_parser("shell")
     shell.add_argument("--project", required=True)
     shell.add_argument("--checkout", required=True)
@@ -336,12 +308,6 @@ def parser() -> argparse.ArgumentParser:
     )
     lane_authorize.add_argument("workspace")
     lane_authorize.add_argument("--reason", default="")
-    for name in ("status", "stuck", "gc"):
-        lane_command = lane_subcommands.add_parser(name)
-        lane_command.add_argument("--project")
-        lane_command.add_argument("--base", default="origin/master")
-        if name == "gc":
-            lane_command.add_argument("--apply", action="store_true")
     packet = subcommands.add_parser("packet")
     packet_subcommands = packet.add_subparsers(dest="packet_command", required=True)
     packet_launch = packet_subcommands.add_parser(
@@ -372,16 +338,15 @@ def parser() -> argparse.ArgumentParser:
     campaign_run.add_argument("--limit", type=int)
     campaign_run.add_argument("--bead", dest="bead_ids", action="append")
     campaign_run.add_argument("--dry-run", action="store_true")
-    campaign_status = campaign_subcommands.add_parser(
-        "status", help="Show bounded coordinator orientation state."
-    )
-    campaign_status.add_argument("--project", required=True)
-    campaign_status.add_argument("--coordinator-label")
     campaign_view = campaign_subcommands.add_parser(
         "view",
         help="One screen for the operator: what needs attention, lanes by next action, active jobs, corpus.",
     )
     campaign_view.add_argument("--project", required=True)
+    campaign_view.add_argument("--coordinator-label")
+    campaign_view.add_argument(
+        "--json", action="store_true", help="Print the status payload instead of the screen."
+    )
     campaign_log = campaign_subcommands.add_parser(
         "log",
         help="One lane's timeline: its jobs, the events about it, and its current verdict.",
@@ -588,10 +553,11 @@ def _operator_view(arguments: argparse.Namespace) -> int:
     from .operator_view import load_jobs, render_lane_log, render_overview
     from .publication_sweep import DEFAULT_SPOOL
 
+    label = getattr(arguments, "coordinator_label", None)
     request = _request(
         "campaign.status",
         "campaign-orchestrator",
-        {"project_id": arguments.project},
+        {"project_id": arguments.project, **({"coordinator_label": label} if label else {})},
         "operator",
     )
     try:
@@ -607,6 +573,9 @@ def _operator_view(arguments: argparse.Namespace) -> int:
         if isinstance(payload, Mapping) and isinstance(payload.get("value"), Mapping)
         else payload
     )
+    if getattr(arguments, "json", False):
+        print(json.dumps(status, indent=2, sort_keys=True))
+        return 0
     jobs = load_jobs(default_state_dir() / "jobs", arguments.project)
     if arguments.campaign_command == "log":
         print(render_lane_log(arguments.workspace, status, jobs, DEFAULT_SPOOL))
@@ -703,31 +672,6 @@ def main() -> int:
     for option in ("job", "packet_job", "verification_job"):
         if isinstance(getattr(arguments, option, None), str):
             setattr(arguments, option, _expand_job_id(getattr(arguments, option)))
-    if arguments.command == "fleet":
-        payload = read_fleet(
-            GenericJobStore(arguments.state_dir),
-            limit=arguments.limit,
-            recent_hours=arguments.recent_hours,
-            gh_limit=arguments.gh_limit,
-        )
-        print(
-            json.dumps(payload, indent=2, sort_keys=True)
-            if arguments.json
-            else render_fleet(payload)
-        )
-        return 0
-    if arguments.command == "evidence":
-        payload = read_evidence(
-            GenericJobStore(arguments.state_dir),
-            arguments.unit_id,
-            gh_limit=arguments.gh_limit,
-        )
-        print(
-            json.dumps(payload, indent=2, sort_keys=True)
-            if arguments.json
-            else render_evidence(payload)
-        )
-        return 0 if payload["unit_kind"] != "absent" else 1
     if arguments.command == "status":
         request = _request("runtime.status", "sinnixd", {})
     elif arguments.command == "shell":
@@ -1275,60 +1219,6 @@ def main() -> int:
             )
         )
         return 0 if ok else 1
-    elif arguments.command == "lane":
-        from .lanes import derive_units, disposable, refresh_base, stuck
-
-        root = resolve_project_root(arguments.project)
-        project_id = project_id_from_descriptor(root)
-        common = Path(
-            subprocess.run(
-                ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                cwd=root,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            ).stdout.strip()
-        )
-        fetched = refresh_base(root, arguments.base)
-        units = derive_units(Path("/realm/worktrees"), common, arguments.base)
-        if arguments.lane_command == "status":
-            selected, exit_code = units, 0
-        elif arguments.lane_command == "stuck":
-            selected = stuck(units)
-            # Non-zero so a keeper or CI step cannot quietly ignore held work.
-            exit_code = 1 if selected else 0
-        else:
-            selected = disposable(units)
-            exit_code = 0
-        payload = {
-            "project_id": project_id,
-            "command": arguments.lane_command,
-            "base": arguments.base,
-            "base_refreshed": fetched,
-            "units": [unit.to_dict() for unit in selected],
-        }
-        if arguments.lane_command == "gc" and arguments.apply:
-            removed = []
-            for unit in selected:
-                result = subprocess.run(
-                    ["git", "worktree", "remove", "--force", str(unit.path)],
-                    cwd=root,
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-                if result.returncode == 0:
-                    subprocess.run(
-                        ["git", "branch", "-D", unit.branch],
-                        cwd=root,
-                        capture_output=True,
-                        text=True,
-                        timeout=60,
-                    )
-                    removed.append(unit.workspace)
-            payload["removed"] = removed
-        print(json.dumps(payload, indent=1, sort_keys=True))
-        return exit_code
     elif arguments.command == "campaign" and arguments.campaign_command == "integrate":
         from .integration import assemble, discover_units, pack
 
@@ -1380,20 +1270,6 @@ def main() -> int:
         "log",
     }:
         return _operator_view(arguments)
-    elif arguments.command == "campaign" and arguments.campaign_command == "status":
-        request = _request(
-            "campaign.status",
-            "campaign-orchestrator",
-            {
-                "project_id": arguments.project,
-                **(
-                    {"coordinator_label": arguments.coordinator_label}
-                    if arguments.coordinator_label
-                    else {}
-                ),
-            },
-            "operator",
-        )
     elif arguments.command == "packet" and arguments.packet_command == "launch":
         try:
             project_root = resolve_project_root(arguments.project)

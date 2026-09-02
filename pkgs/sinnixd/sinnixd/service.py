@@ -19,7 +19,7 @@ from sinnix_mcp import (
 )
 
 from .campaign import CampaignRunner, WaveDrainedError
-from .campaign_status import build_campaign_status
+from .operator_view import build_campaign_status
 from .contracts import TypedJobContracts
 from .delivery import DeliveryError, GitHubDelivery
 from .delivery_runner import DELIVERY_INPUT_SCHEMA_VERSION, delivery_runner_executable
