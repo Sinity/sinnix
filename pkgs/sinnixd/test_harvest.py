@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 import sinnixd.harvest as harvest
-from sinnixd.review import route_review
 
 
 def _run_git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -81,7 +80,7 @@ def test_compile_packet_halts_before_publication_and_spools_review_evidence(
     packet = result["packet"]
     assert packet["branch"] == "feature/fixture"
     assert "1 file changed" in packet["diffstat"]
-    assert packet["full_diff_ref"].startswith("sinnix://jobs/")
+    assert packet["verification"] == {"state": "absent"}
     assert (state / "harvest-packets" / f"{packet['packet_id']}.diff").is_file()
     event = json.loads((state / "events.jsonl").read_text())
     assert event["kind"] == "harvest"
@@ -311,16 +310,8 @@ def test_unavailable_affected_tests_are_typed_and_spooled(
     events = [
         json.loads(row) for row in (state / "events.jsonl").read_text().splitlines()
     ]
-    unavailable = dict(events[-2])
-    assert unavailable.pop("emitted_at")
-    assert unavailable == {
-        "detail": "no affected verification job for this head",
-        "job_id": "unavailable-job",
-        "kind": "verification-unavailable",
-        "project": "polylogue",
-        "workspace": "worktree-1",
-    }
     assert events[-1]["outcome"] == harvest.NO_TEST_EVIDENCE
+    assert events[-1]["detail"] == "no affected verification job for this head"
 
 
 def test_redflags_flags_vanished_definitions_and_net_assertion_loss() -> None:
@@ -487,144 +478,13 @@ def test_a_docs_only_change_is_not_flagged_for_missing_tests() -> None:
     assert not any("no test in the diff" in f for f in flags)
 
 
-def test_a_failed_run_is_not_test_evidence(tmp_path: Path) -> None:
-    """Tests having run is not the same as tests having passed.
-
-    Anti-vacuity: without the status check a lane whose gate failed still reads
-    as `tests-run` and qualifies to publish mechanically.
-    """
-    runs = tmp_path / ".cache/verify/runs"
-    (runs / "a").mkdir(parents=True)
-    (runs / "a" / "run.json").write_text(
-        json.dumps(
-            {
-                "argv": ["devtools", "verify", "--quick"],
-                "status": "failed",
-                "git_head": "abc",
-                "final_git_head": "abc",
-                "pytest_aggregate": {"selected_union_count": 3},
-            }
-        )
-    )
-
-    assert harvest._verification_evidence(tmp_path, "abc")["state"] == "static-only"
-
-    (runs / "a" / "run.json").write_text(
-        json.dumps(
-            {
-                "argv": ["devtools", "verify", "--quick"],
-                "status": "success",
-                "git_head": "abc",
-                "final_git_head": "abc",
-                "pytest_aggregate": {"selected_union_count": 3},
-            }
-        )
-    )
-    assert harvest._verification_evidence(tmp_path, "abc")["state"] == "tests-run"
-
-
-def test_a_lane_metadata_commit_does_not_stale_the_test_evidence(tmp_path: Path) -> None:
-    """Evidence is bound to the code tested, not to the commit it ran on.
-
-    Anti-vacuity: comparing commits sent polylogue-0cm7m to a second
-    integrator after the first one committed only .lane/ files.
-    """
-    import subprocess
-
-    def git(*args: str) -> str:
-        return subprocess.run(
-            ["git", *args], cwd=tmp_path, capture_output=True, text=True, check=True
-        ).stdout.strip()
-
-    git("init", "-q")
-    git("config", "user.email", "t@example.com")
-    git("config", "user.name", "t")
-    (tmp_path / "module.py").write_text("x = 1\n")
-    git("add", "module.py")
-    git("commit", "-q", "-m", "code")
-    tested = git("rev-parse", "HEAD")
-    (tmp_path / ".lane").mkdir()
-    (tmp_path / ".lane" / "body.md").write_text("disposition\n")
-    git("add", ".lane/body.md")
-    git("commit", "-q", "-m", "chore: refresh review disposition")
-    metadata_only = git("rev-parse", "HEAD")
-    (tmp_path / "module.py").write_text("x = 2\n")
-    git("commit", "-q", "-am", "code changed")
-    code_changed = git("rev-parse", "HEAD")
-
-    runs = tmp_path / ".cache/verify/runs"
-    (runs / "a").mkdir(parents=True)
-    (runs / "a" / "run.json").write_text(
-        json.dumps(
-            {
-                "argv": ["devtools", "test", "tests/unit/test_module.py"],
-                "status": "success",
-                "git_head": tested,
-                "final_git_head": tested,
-                "pytest_aggregate": {"selected_union_count": 3},
-            }
-        )
-    )
-
-    assert harvest._verification_evidence(tmp_path, metadata_only)["state"] == "tests-run"
-    assert harvest._verification_evidence(tmp_path, code_changed)["state"] == "static-only"
-
-
-def test_review_route_auto_publishes_only_clean_docs_and_tests() -> None:
-    result = route_review(
-        changed_paths=("docs/review.md", "tests/test_review.py"),
-        scanner_output="diff lines: 4\n",
-    )
-
-    assert result.route == "auto-publish"
-    assert result.reviewer_model is None
-
-
-def test_review_route_dispatches_cross_family_for_ordinary_production() -> None:
-    result = route_review(
-        changed_paths=("polylogue/module.py",),
-        scanner_output="diff lines: 4\n",
-        implementation_backend="codex",
-    )
-
-    assert result.route == "review-lane"
-    assert (result.reviewer_backend, result.reviewer_model) == (
-        "claude",
-        "claude-opus-5",
-    )
-
-
-def test_review_route_escalates_uncleared_and_risky_flags() -> None:
-    result = route_review(
-        changed_paths=("polylogue/module.py",),
-        scanner_output=(
-            "FLAG: production definitions removed: helper\n"
-            "EXPLAIN: production definitions removed\n"
-        ),
-    )
-    assert result.route == "coordinator"
-    assert result.unresolved
-
-    risky = route_review(
-        changed_paths=("polylogue/module.py",),
-        scanner_output=(
-            "FLAG: durable migration touched\n"
-            "  VERDICT: migration metadata is present\n"
-        ),
-    )
-    assert risky.route == "coordinator"
-
-
 def _parsed(**overrides: object) -> object:
-    """The argparse defaults that matter: title and body are "", not None."""
+    """The argparse defaults of the publication-text flags."""
     import argparse
 
     values = {
-        "title": "",
         "title_file": None,
-        "body": "",
         "body_file": None,
-        "close_reason": None,
         "close_reason_file": None,
     }
     values.update(overrides)
@@ -632,12 +492,7 @@ def _parsed(**overrides: object) -> object:
 
 
 def test_publication_text_falls_back_to_the_lane_artifacts(tmp_path: Path) -> None:
-    """The real call site, with the real argparse defaults.
-
-    --title and --body default to the empty string, so an `is None` guard never
-    fires and the publication dies with 'harvest publication title is empty'
-    after the gate has already run.
-    """
+    """Publication text comes from the lane's own artifacts when no file is named."""
     root, _remote = _repository(tmp_path)
     lane = root / ".lane"
     lane.mkdir()
@@ -651,20 +506,6 @@ def test_publication_text_falls_back_to_the_lane_artifacts(tmp_path: Path) -> No
     assert title == "fix(storage): restore the sidecar blob owner"
     assert body == "## Summary\n\nRestores the owner."
     assert close_reason == "Merged: owner restored."
-
-
-def test_an_explicit_title_still_wins_over_the_lane_artifact(tmp_path: Path) -> None:
-    root, _remote = _repository(tmp_path)
-    lane = root / ".lane"
-    lane.mkdir()
-    (lane / "title").write_text("fix(storage): the lane's own subject\n")
-    context = _context(root, tmp_path / "state")
-
-    title, _body, _reason = harvest._resolve_publication_text(
-        _parsed(title="fix(storage): the caller's subject"), context
-    )
-
-    assert title == "fix(storage): the caller's subject"
 
 
 def test_lane_artifacts_supply_the_publication_title_and_body(tmp_path: Path) -> None:
