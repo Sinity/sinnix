@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sinnixd.publication_sweep import (
+    answered_rounds,
     PullState,
     decide,
     latest_review,
@@ -101,9 +102,15 @@ class FakeRun:
             return subprocess.CompletedProcess(argv, 0, json.dumps(self.pr_rows), "")
         if "reactions" in joined:
             return subprocess.CompletedProcess(argv, 0, json.dumps(["T2"]), "")
-        if "comments" in joined:
+        if "pulls/41/comments" in joined:
             # A finding older than the +1: answered, so PR 41 is clean.
-            return subprocess.CompletedProcess(argv, 0, json.dumps(["T1"]), "")
+            return subprocess.CompletedProcess(
+                argv, 0, json.dumps([{"id": 1, "login": "chatgpt-codex-connector[bot]", "reply_to": None, "at": "T1"}]), ""
+            )
+        if "reviews" in joined:
+            return subprocess.CompletedProcess(argv, 0, json.dumps([{"commit": "a" * 40, "at": "T1"}]), "")
+        if "issues/41/comments" in joined:
+            return subprocess.CompletedProcess(argv, 0, json.dumps([]), "")
         if argv[:3] == ["gh", "pr", "merge"]:
             self.merged.append(int(argv[3]))
             return subprocess.CompletedProcess(argv, 0, "", "")
@@ -154,3 +161,22 @@ def test_sweep_merges_clean_pr_and_closes_its_bead(tmp_path: Path) -> None:
     assert events[0]["outcome"] == "merge"
     # Anti-vacuity: dropping the trailer filter would merge PR 42 and turn
     # fake.merged into [41, 42].
+
+
+def test_two_answered_rounds_bound_review() -> None:
+    """Anti-vacuity: without the bound, a PR with every finding answered
+    still waits for a thumbs-up that a reviewer may never give."""
+    t1, t1b, t2, t3 = (
+        "2026-09-02T10:00:00Z",
+        "2026-09-02T10:00:30Z",
+        "2026-09-02T11:00:00Z",
+        "2026-09-02T12:00:00Z",
+    )
+    assert answered_rounds([(t1, True), (t1b, True), (t2, True)]) == 2
+    assert answered_rounds([(t1, True), (t1b, False), (t2, True)]) == 1
+    assert answered_rounds([(t1, True), (t2, False)]) == 0
+    assert answered_rounds([(t1, True), (t2, True), (t3, True)]) == 3
+
+    assert decide(pull(review_findings=1, answered_rounds=2), now=NOW) == "merge-answered"
+    assert decide(pull(review_findings=1, answered_rounds=1), now=NOW) == "findings"
+    assert decide(pull(review_findings=1, answered_rounds=2, ci_red=True), now=NOW) == "ci-red"

@@ -23,6 +23,11 @@ REVIEWER_LOGIN = "chatgpt-codex-connector"
 REVIEW_ABSENT_GRACE_SECONDS = 30 * 60
 # One review round posts its inline findings within seconds of each other.
 REVIEW_ROUND_SECONDS = 120
+# Rounds are bounded by answers, not by a thumbs-up: once this many
+# consecutive rounds have every finding answered in-thread, review has had
+# its say (ten rounds on polylogue #4509, 2026-09-02, each costing a rebase).
+REVIEW_ANSWERED_ROUNDS = 2
+REVIEW_REQUEST_TEXT = "@codex review"
 DEFAULT_SPOOL = Path("/realm/state/agentctl/events.jsonl")
 MAX_PR_PAGE = 50
 
@@ -46,6 +51,9 @@ class PullState:
     review_findings: int
     bead_id: str | None
     receipt_ref: str | None
+    answered_rounds: int = 0
+    reviewed_head: str = ""
+    review_request_pending: bool = False
 
     @property
     def review_arrived(self) -> bool:
@@ -73,6 +81,8 @@ def decide(pull: PullState, *, now: datetime) -> str:
     if pull.ci_red:
         return "ci-red"
     if pull.review_findings > 0:
+        if pull.answered_rounds >= REVIEW_ANSWERED_ROUNDS:
+            return "merge-answered"
         return "findings"
     if pull.review_clean:
         return "merge"
@@ -143,21 +153,60 @@ def derive_pull_states(repo: str, run: Run) -> list[PullState]:
             )
             for check in rollup
         )
-        review_clean, review_findings = derive_review(repo, number, run)
+        head = str(row.get("headRefOid") or "")
+        review = derive_review(repo, number, run, head=head)
         states.append(
             PullState(
                 number=number,
-                head=str(row.get("headRefOid") or ""),
+                head=head,
                 created_at=str(row.get("createdAt") or ""),
                 mergeable=str(row.get("mergeable") or "UNKNOWN"),
                 ci_red=ci_red,
-                review_clean=review_clean,
-                review_findings=review_findings,
+                review_clean=review.clean,
+                review_findings=review.open_findings,
                 bead_id=bead,
                 receipt_ref=receipt,
+                answered_rounds=review.answered_rounds,
+                reviewed_head=review.reviewed_head,
+                review_request_pending=review.request_pending,
             )
         )
     return states
+
+
+@dataclass(frozen=True)
+class ReviewState:
+    clean: bool
+    open_findings: int
+    answered_rounds: int
+    reviewed_head: str
+    request_pending: bool
+
+
+def answered_rounds(findings: Sequence[tuple[str, bool]]) -> int:
+    """Consecutive rounds, newest first, in which every finding was answered.
+
+    A finding is answered when a non-reviewer reply follows it in its thread
+    (a fix commit named, or a refutation). Rounds are the reviewer's bursts
+    of top-level comments within REVIEW_ROUND_SECONDS of each other.
+    """
+    ordered = sorted(findings, key=lambda item: item[0], reverse=True)
+    rounds: list[list[bool]] = []
+    round_start: datetime | None = None
+    for stamp, answered in ordered:
+        moment = _parse_stamp(stamp)
+        if round_start is None or (round_start - moment).total_seconds() > REVIEW_ROUND_SECONDS:
+            rounds.append([answered])
+            round_start = moment
+        else:
+            rounds[-1].append(answered)
+    count = 0
+    for verdicts in rounds:
+        if all(verdicts):
+            count += 1
+        else:
+            break
+    return count
 
 
 def latest_review(
@@ -187,7 +236,7 @@ def _parse_stamp(value: str) -> datetime:
         return datetime.min.replace(tzinfo=UTC)
 
 
-def derive_review(repo: str, number: int, run: Run) -> tuple[bool, int]:
+def derive_review(repo: str, number: int, run: Run, *, head: str = "") -> ReviewState:
     reactions = _gh_json(
         run,
         [
@@ -200,25 +249,65 @@ def derive_review(repo: str, number: int, run: Run) -> tuple[bool, int]:
             " | .created_at]",
         ],
     )
-    findings = _gh_json(
+    comments = _gh_json(
         run,
         [
             "gh",
             "api",
-            f"repos/{repo}/pulls/{number}/comments",
+            f"repos/{repo}/pulls/{number}/comments?per_page=100",
+            "--paginate",
             "--jq",
-            f'[.[] | select(.user.login == "{REVIEWER_LOGIN}[bot]"'
-            " and .in_reply_to_id == null) | .created_at]",
+            "[.[] | {id, login: .user.login, reply_to: .in_reply_to_id, at: .created_at}]",
         ],
     )
-    return latest_review(
-        [stamp for stamp in reactions if isinstance(stamp, str)]
-        if isinstance(reactions, list)
-        else [],
-        [stamp for stamp in findings if isinstance(stamp, str)]
-        if isinstance(findings, list)
-        else [],
+    rows = [row for row in (comments if isinstance(comments, list) else []) if isinstance(row, Mapping)]
+    reviewer_logins = {REVIEWER_LOGIN, f"{REVIEWER_LOGIN}[bot]"}
+    replied_to = {
+        row.get("reply_to")
+        for row in rows
+        if row.get("reply_to") is not None and row.get("login") not in reviewer_logins
+    }
+    top_level = [
+        (str(row.get("at") or ""), row.get("id") in replied_to)
+        for row in rows
+        if row.get("login") in reviewer_logins and row.get("reply_to") is None
+    ]
+    clean, open_findings = latest_review(
+        [stamp for stamp in reactions if isinstance(stamp, str)],
+        [stamp for stamp, _answered in top_level],
     )
+    latest_clean = max((stamp for stamp in reactions if isinstance(stamp, str)), default="")
+    rounds = answered_rounds([item for item in top_level if item[0] > latest_clean]) if open_findings else 0
+    reviews = _gh_json(
+        run,
+        [
+            "gh",
+            "api",
+            f"repos/{repo}/pulls/{number}/reviews?per_page=100",
+            "--jq",
+            f'[.[] | select(.user.login == "{REVIEWER_LOGIN}[bot]" or .user.login == "{REVIEWER_LOGIN}")'
+            " | {commit: .commit_id, at: .submitted_at}]",
+        ],
+    )
+    review_rows = [row for row in (reviews if isinstance(reviews, list) else []) if isinstance(row, Mapping)]
+    latest = max(review_rows, key=lambda row: str(row.get("at") or ""), default=None)
+    reviewed_head = str(latest.get("commit") or "") if latest is not None else ""
+    latest_review_at = str(latest.get("at") or "") if latest is not None else ""
+    requests = _gh_json(
+        run,
+        [
+            "gh",
+            "api",
+            f"repos/{repo}/issues/{number}/comments?per_page=100",
+            "--jq",
+            f'[.[] | select(.body | test("{REVIEW_REQUEST_TEXT}")) | .created_at]',
+        ],
+    )
+    latest_request = max((stamp for stamp in (requests if isinstance(requests, list) else []) if isinstance(stamp, str)), default="")
+    # A head the reviewer has not seen, with no request newer than its last
+    # verdict, waits for nobody: the sweep asks.
+    request_pending = bool(head) and reviewed_head not in ("", head) and latest_request <= latest_review_at
+    return ReviewState(clean, open_findings, rounds, reviewed_head, request_pending)
 
 
 def _append_event(spool: Path, event: Mapping[str, Any]) -> None:
@@ -274,7 +363,14 @@ def sweep(
             "verdict": verdict,
             "bead": pull.bead_id,
         }
-        if verdict in {"merge", "merge-review-absent"}:
+        if pull.review_request_pending and verdict in {"findings", "wait", "merge-answered"}:
+            requested = _command(
+                run,
+                ["gh", "pr", "comment", str(pull.number), "--repo", repo, "--body", REVIEW_REQUEST_TEXT],
+                timeout=60,
+            )
+            action["review_requested"] = requested.returncode == 0
+        if verdict in {"merge", "merge-review-absent", "merge-answered"}:
             merged = _command(
                 run,
                 [
@@ -310,6 +406,8 @@ def sweep(
                     )
                     if verdict == "merge-review-absent":
                         reason += " Hosted review absent past grace (fail-open)."
+                    elif verdict == "merge-answered":
+                        reason += f" {REVIEW_ANSWERED_ROUNDS} review rounds answered in-thread."
                     close_error = _close_bead(
                         pull.bead_id, reason, project_root=project_root, run=run
                     )
