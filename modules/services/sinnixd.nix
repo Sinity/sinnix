@@ -55,6 +55,10 @@ mkServiceModule {
       environment.systemPackages = [
         scriptPkgs.sinnixd
         scriptPkgs.polylogue-cli
+        # The worktree and queue planes the daemon shells out to. They must be
+        # system packages: a Home Manager profile is not on the env -i PATH.
+        pkgs.worktrunk
+        pkgs.pueue
       ];
       systemd.tmpfiles.rules = [ "d ${taskStateRoot} 0700 ${userName} users -" ];
       sinnix.persistence.home.directories = [ ".local/state/sinnixd" ];
