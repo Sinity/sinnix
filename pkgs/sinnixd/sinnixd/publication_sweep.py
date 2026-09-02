@@ -55,6 +55,7 @@ class PullState:
     reviewed_head: str = ""
     review_request_pending: bool = False
     head_pushed_at: str = ""
+    tests_evidenced: bool = True
 
     @property
     def review_arrived(self) -> bool:
@@ -81,6 +82,8 @@ def decide(pull: PullState, *, now: datetime) -> str:
         return "conflict"
     if pull.ci_red:
         return "ci-red"
+    if not pull.tests_evidenced:
+        return "no-test-evidence"
     if pull.review_findings > 0:
         if pull.answered_rounds >= REVIEW_ANSWERED_ROUNDS:
             return "merge-answered"
@@ -119,7 +122,27 @@ def _gh_json(run: Run, argv: Sequence[str]) -> Any:
         raise SweepError("gh returned invalid JSON") from error
 
 
-def derive_pull_states(repo: str, run: Run) -> list[PullState]:
+DEFAULT_PACKETS_ROOT = Path.home() / ".local/state/sinnixd/harvest-packets"
+
+
+def tests_evidenced(receipt_ref: str | None, packets_root: Path) -> bool:
+    """Whether the receipt a PR names carries passed affected tests or an authorization."""
+    if not receipt_ref:
+        return False
+    name = receipt_ref.rsplit("/", 1)[-1]
+    try:
+        payload = json.loads((packets_root / f"{name}.json").read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, Mapping):
+        return False
+    if isinstance(payload.get("authorization"), Mapping):
+        return True
+    publication = payload.get("publication")
+    return isinstance(publication, Mapping) and publication.get("affected_tests") == "passed"
+
+
+def derive_pull_states(repo: str, run: Run, *, packets_root: Path = DEFAULT_PACKETS_ROOT) -> list[PullState]:
     rows = _gh_json(
         run,
         [
@@ -174,6 +197,7 @@ def derive_pull_states(repo: str, run: Run) -> list[PullState]:
                 reviewed_head=review.reviewed_head,
                 review_request_pending=review.request_pending,
                 head_pushed_at=_head_pushed_at(repo, head, run),
+                tests_evidenced=tests_evidenced(receipt, packets_root),
             )
         )
     return states
@@ -366,11 +390,12 @@ def sweep(
     spool: Path = DEFAULT_SPOOL,
     run: Run = subprocess.run,
     now: datetime | None = None,
+    packets_root: Path = DEFAULT_PACKETS_ROOT,
 ) -> dict[str, Any]:
     """One pass. Returns the JSON receipt of every action taken."""
     observed = now or datetime.now(UTC)
     actions: list[dict[str, Any]] = []
-    for pull in derive_pull_states(repo, run):
+    for pull in derive_pull_states(repo, run, packets_root=packets_root):
         verdict = decide(pull, now=observed)
         action: dict[str, Any] = {
             "pr": pull.number,
@@ -439,7 +464,7 @@ def sweep(
                         "emitted_at": observed.isoformat(),
                     },
                 )
-        elif verdict in {"findings", "conflict", "ci-red"}:
+        elif verdict in {"findings", "conflict", "ci-red", "no-test-evidence"}:
             _append_event(
                 spool,
                 {

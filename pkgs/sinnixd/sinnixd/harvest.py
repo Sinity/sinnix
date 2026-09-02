@@ -842,6 +842,31 @@ def compile_packet(
     }
 
 
+def _record_publication(context: HarvestContext, reference: str, *, tests: str, affected_job: str | None, pr: str) -> None:
+    """Write the publication verdict into the receipt the PR names.
+
+    The sweep merges only a PR whose receipt carries passed affected tests
+    or an operator authorization; the harvest is the only writer of both.
+    """
+    prefix = "sinnix://harvest/"
+    packet_id = reference[len(prefix) :] if reference.startswith(prefix) else reference
+    path = _receipt_path(context, packet_id)
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return
+    if not isinstance(payload, Mapping):
+        return
+    updated = dict(payload)
+    updated["publication"] = {
+        "affected_tests": tests,
+        "affected_job": affected_job or None,
+        "pr": pr,
+        "at": datetime.now(UTC).isoformat(),
+    }
+    path.write_text(json.dumps(updated, indent=2, sort_keys=True))
+
+
 def _load_receipt(context: HarvestContext, reference: str) -> dict[str, Any]:
     prefix = "sinnix://harvest/"
     packet_id = reference[len(prefix) :] if reference.startswith(prefix) else reference
@@ -1320,6 +1345,7 @@ def authorize(
             if bead_id and close_reason
             else None
         )
+        _record_publication(context, receipt_ref, tests=tests, affected_job=affected_job, pr=pr)
         _append_event(
             context.spool,
             {
@@ -1327,6 +1353,7 @@ def authorize(
                 "project": context.project_id,
                 "repo": repo,
                 "pr": pr,
+                "affected_tests": tests,
                 "state": merge_state,
                 "opened_at": opened_at,
                 "check_states": check_states,

@@ -144,6 +144,9 @@ def test_sweep_merges_clean_pr_and_closes_its_bead(tmp_path: Path) -> None:
             },
         ]
     )
+    packets = tmp_path / "packets"
+    packets.mkdir()
+    (packets / "harvest-9.json").write_text(json.dumps({"publication": {"affected_tests": "passed"}}))
     receipt = sweep(
         "owner/repo",
         project="polylogue",
@@ -151,6 +154,7 @@ def test_sweep_merges_clean_pr_and_closes_its_bead(tmp_path: Path) -> None:
         spool=tmp_path / "events.jsonl",
         run=fake,
         now=NOW,
+        packets_root=packets,
     )
     assert fake.merged == [41]
     assert fake.closed == ["polylogue-z2"]
@@ -191,3 +195,35 @@ def test_review_absent_grace_runs_from_the_latest_push() -> None:
     fresh = (NOW - timedelta(minutes=5)).isoformat()
     assert decide(pull(created_at=old, head_pushed_at=fresh), now=NOW) == "wait"
     assert decide(pull(created_at=old, head_pushed_at=old), now=NOW) == "merge-review-absent"
+
+
+def test_a_receipt_without_test_evidence_never_merges(tmp_path: Path) -> None:
+    """Anti-vacuity: dropping the evidence check merges a PR whose tests never ran."""
+    fake = FakeRun(
+        [
+            {
+                "number": 41,
+                "headRefOid": "d" * 40,
+                "createdAt": NOW.isoformat(),
+                "mergeable": "MERGEABLE",
+                "body": "text\n\n---\nReceipt: harvest-10\nBead: polylogue-z3\n",
+                "statusCheckRollup": [],
+            }
+        ]
+    )
+    packets = tmp_path / "packets"
+    packets.mkdir()
+    (packets / "harvest-10.json").write_text(json.dumps({"publication": {"affected_tests": "unavailable"}}))
+    receipt = sweep(
+        "owner/repo",
+        project="polylogue",
+        project_root=tmp_path,
+        spool=tmp_path / "events.jsonl",
+        run=fake,
+        now=NOW,
+        packets_root=packets,
+    )
+    assert fake.merged == []
+    assert [action["verdict"] for action in receipt["actions"]] == ["no-test-evidence"]
+    (packets / "harvest-10.json").write_text(json.dumps({"authorization": {"head": "d" * 40}}))
+    assert sweep("owner/repo", project="polylogue", project_root=tmp_path, spool=tmp_path / "events.jsonl", run=FakeRun(fake.pr_rows), now=NOW, packets_root=packets)["actions"][0]["verdict"] != "no-test-evidence"

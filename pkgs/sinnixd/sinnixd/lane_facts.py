@@ -164,6 +164,12 @@ def _advance(facts: LaneFacts, now: datetime | None) -> Action:
     if facts.published_at_head and (pull is None or pull.head != facts.head):
         return Action("await-sweep", "published; waiting for the sweep to see the head")
     if pull is not None and pull.head == facts.head:
+        if pull.verdict == "no-test-evidence":
+            if facts.verify_job is None:
+                return Action("verify", "PR published without test evidence")
+            if facts.verify_job[1] != "succeeded":
+                return Action("park", f"affected verification {facts.verify_job[1]} at this head")
+            return Action("harvest", f"re-publish with verdict {facts.verify_job[0][:8]}")
         if pull.verdict == "conflict":
             if any(label == "rebase" for label in facts.integrators_at_head):
                 return Action("park", "rebase integrator ran at this head and it still conflicts")
