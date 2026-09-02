@@ -71,6 +71,7 @@ class LaneFacts:
     published_at_head: bool = False
     quick_at_head: tuple[str, str] | None = None
     lane_finished_at: str = ""
+    bead_closed: bool = False
     extra: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -87,7 +88,9 @@ def _dormant(facts: LaneFacts, now: datetime | None) -> bool:
     if facts.pull is not None or facts.holder is not None or facts.running_ops:
         return False
     if not facts.lane_finished_at:
-        return False
+        # No lane record at all: the records were pruned, so the lane ended
+        # at least a retention window ago.
+        return facts.lane_phase is None
     try:
         finished = datetime.fromisoformat(facts.lane_finished_at.replace("Z", "+00:00"))
     except ValueError:
@@ -105,6 +108,8 @@ def advance(facts: LaneFacts, *, now: datetime | None = None) -> Action:
     branch names its reason so the status view and the reactor say the same
     thing.
     """
+    if facts.bead_closed:
+        return Action("done", "bead closed")
     if _dormant(facts, now):
         return Action("idle", "dormant workspace")
     if facts.holder is not None:
@@ -198,6 +203,7 @@ def collect(
     receipt_pulls: Mapping[str, Pull] | None = None,
     run: Run = subprocess.run,
     master_head: str | None = None,
+    closed_beads: Sequence[str] = (),
 ) -> list[LaneFacts]:
     """Read every managed workspace of the project into facts."""
     index_path = state_root / "workspaces" / "index.json"
@@ -269,13 +275,14 @@ def collect(
                 outcome, result_phase = _harvest_result(job)
                 if result_phase == "published":
                     published_at_head = True
-                elif outcome in {"HARVEST_ERROR", "GATE_RED"} or (phase != "succeeded" and outcome is None):
+                elif outcome in {"HARVEST_ERROR", "GATE_RED"} or phase == "failed":
                     harvest_at_head = (str(job.get("job_id") or ""), outcome or phase)
             elif (
                 kind == "declared-operation"
                 and spec.get("operation") == "verify_quick"
                 and checkout.get("head") == head
                 and phase in {"succeeded", "failed"}
+                and _harvest_result(job)[0] != "cancelled"
             ):
                 created = str(job.get("created_at") or "")
                 if created >= quick_created:
@@ -318,6 +325,7 @@ def collect(
                 published_at_head=published_at_head,
                 quick_at_head=quick_at_head,
                 lane_finished_at=lane_finished,
+                bead_closed=(bead or (receipt.bead if receipt else None)) in set(closed_beads),
             )
         )
     return facts
