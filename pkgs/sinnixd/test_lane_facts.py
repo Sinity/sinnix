@@ -246,3 +246,10 @@ def test_latest_corpus_reads_the_newest_complete_run(tmp_path: Path) -> None:
     assert corpus["job_id"] == "new" and corpus["red"] == 626 and corpus["passed"] == 20401
     assert corpus["green"] is False and corpus["head"] == "abcdef012345"
     assert latest_corpus(tmp_path, "other") is None
+
+
+def test_a_pr_without_test_evidence_is_verified_then_republished() -> None:
+    pull = Pull(number=7, head=_facts().head, verdict="no-test-evidence", findings=0)
+    assert advance(_facts(receipt=_receipt(), pull=pull)).kind == "verify"
+    assert advance(_facts(receipt=_receipt(), pull=pull, verify_job=("v", "failed"))).kind == "park"
+    assert advance(_facts(receipt=_receipt(), pull=pull, verify_job=("v", "succeeded"))).kind == "harvest"
