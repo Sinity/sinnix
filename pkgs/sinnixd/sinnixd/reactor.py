@@ -1327,10 +1327,12 @@ class CampaignReactor:
         title = worktree / ".lane/title"
         body = worktree / ".lane/body.md"
         if not title.is_file() or not body.is_file():
-            # Without publication text there is nothing to publish under; that
-            # is a lane defect, so it goes to a reader rather than to master.
-            self._board.record_error(-1, f"publish {workspace}: no .lane text")
-            return
+            # A lane that wrote no publication text still has a bead and a
+            # receipt; the PR text is the bead's title and the lane's own
+            # classification, and hosted review reads the diff.
+            if not self._synthesize_lane_text(project, worktree, receipt):
+                self._board.record_error(-1, f"publish {workspace}: no .lane text and no bead")
+                return
         parameters["title_file"] = str(title)
         parameters["body_file"] = str(body)
         # Delivery requires a successful DECLARED verification at the exact
@@ -1383,6 +1385,39 @@ class CampaignReactor:
             "backoff_seconds": 0,
             "next_eligible_at": _now(),
         }
+
+    def _synthesize_lane_text(self, project: str, worktree: Path, receipt: str) -> bool:
+        """Write .lane/title and .lane/body.md from the bead and receipt."""
+        payload = self._receipt_payload(receipt) or {}
+        bead = payload.get("bead_id")
+        root = self.project_roots.get(project)
+        if not isinstance(bead, str) or not bead or root is None:
+            return False
+        try:
+            record = SubprocessBdReader(root).show(bead)
+        except (OSError, subprocess.SubprocessError, ReactorError, ValueError):
+            return False
+        title = str(record.get("title") or "").strip()
+        if not title:
+            return False
+        trailer = payload.get("lane_trailer")
+        classification = (
+            str(trailer.get("LANE-CLASSIFICATION") or "").strip()
+            if isinstance(trailer, Mapping)
+            else ""
+        )
+        body = f"Lane for {bead}: {title}\n"
+        if classification:
+            body += f"\n{classification}\n"
+        body += f"\nPublication text synthesized from the bead and receipt; the lane wrote none.\n"
+        try:
+            lane_dir = worktree / ".lane"
+            lane_dir.mkdir(exist_ok=True)
+            (lane_dir / "title").write_text(title[:72] + "\n", encoding="utf-8")
+            (lane_dir / "body.md").write_text(body, encoding="utf-8")
+        except OSError:
+            return False
+        return True
 
     @staticmethod
     def _needs_judgment(event: Mapping[str, Any]) -> str | None:

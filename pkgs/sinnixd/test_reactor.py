@@ -1861,3 +1861,37 @@ def test_refill_waits_for_a_pending_corpus_run(tmp_path: Path) -> None:
         )
     )
     assert reactor._corpus_pending("polylogue") is False
+
+
+def test_publish_synthesizes_lane_text_from_the_bead(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anti-vacuity: a lane without .lane text could not publish at all
+    (packet-polylogue-1xc.14.1.7, 2026-09-02 07:57Z)."""
+    receipt = {
+        "bead_id": "polylogue-1",
+        "lane_trailer": {"LANE-CLASSIFICATION": "one parser fixed and covered"},
+    }
+    monkeypatch.setattr(CampaignReactor, "_receipt_payload", staticmethod(lambda r: receipt))
+
+    class Reader:
+        def __init__(self, root: Path) -> None:
+            self.root = root
+
+        def show(self, bead_id: str) -> dict[str, str]:
+            return {"id": bead_id, "title": "fix(sources): keep Codex tool ids"}
+
+    monkeypatch.setattr("sinnixd.reactor.SubprocessBdReader", Reader)
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        project_roots={"polylogue": tmp_path / "repo"},
+    )
+    worktree = tmp_path / "packet-polylogue-x"
+    worktree.mkdir()
+
+    assert reactor._synthesize_lane_text("polylogue", worktree, "harvest-" + "0" * 32) is True
+    assert (worktree / ".lane" / "title").read_text().strip() == "fix(sources): keep Codex tool ids"
+    assert "one parser fixed and covered" in (worktree / ".lane" / "body.md").read_text()
+
+    monkeypatch.setattr(CampaignReactor, "_receipt_payload", staticmethod(lambda r: {}))
+    assert reactor._synthesize_lane_text("polylogue", worktree, "harvest-" + "1" * 32) is False
