@@ -93,6 +93,11 @@ MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES = 2
 # held; admitting a replacement at once re-creates the stall and the next
 # probe evicts another lane (eight lanes in forty minutes on 2026-09-02).
 PRESSURE_PREEMPTION_COOLDOWN_SECONDS = 300.0
+# A memory stall with this much RAM still available is swap-in churn, not
+# scarcity; cancelling a lane frees memory nobody is short of and only
+# destroys the work (five evictions in ten minutes with 6 GB free,
+# 2026-09-02 02:47Z). Preemption answers scarcity only.
+MEMORY_STALL_MAX_AVAILABLE_BYTES = 4 * 1024**3
 # Host IO PSI cannot attribute stalls to the managed plane: this host idles
 # with io full avg10 in the teens while managed jobs write megabytes. Gating
 # admission or choosing preemption victims on host IO therefore punishes work
@@ -3823,8 +3828,12 @@ class GenericJobs:
         memory_full = float(pressure.get("memory_full_avg10", 0.0))
         swap_total = float(pressure.get("swap_total_bytes", 0.0))
         swap_free = float(pressure.get("swap_free_bytes", 0.0))
+        memory_available = float(pressure.get("memory_available_bytes", 0.0))
         reasons: list[str] = []
-        if memory_full >= MEMORY_FULL_PREEMPT_THRESHOLD:
+        if (
+            memory_full >= MEMORY_FULL_PREEMPT_THRESHOLD
+            and memory_available <= MEMORY_STALL_MAX_AVAILABLE_BYTES
+        ):
             reasons.append("memory-stall")
         if (
             swap_total > 0
