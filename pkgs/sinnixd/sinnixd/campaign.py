@@ -7,6 +7,14 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
+from .packets import (
+    PacketConfig,
+    PacketError,
+    SubprocessBdReader,
+    compile_launch_snapshot,
+    derived_workspace,
+    runtime_dimensions,
+)
 
 from .limits import MAX_AGENT_TIMEOUT_SECONDS
 
@@ -78,15 +86,6 @@ def held_workspace_names(
         if getattr(record, "workspace_id", None) in held_checkouts
     }
 
-
-from .packets import (
-    PacketConfig,
-    PacketError,
-    SubprocessBdReader,
-    compile_launch_snapshot,
-    derived_workspace,
-    runtime_dimensions,
-)
 
 if TYPE_CHECKING:
     from .jobs import GenericJobs

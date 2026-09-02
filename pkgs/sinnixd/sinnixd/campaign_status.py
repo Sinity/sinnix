@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .reactor import CampaignBoard
@@ -115,7 +115,13 @@ def build_campaign_status(
     lanes_next: list[dict[str, Any]] = []
     master_corpus: dict[str, Any] | None = None
     if state_root is not None:
-        from .lane_facts import closed_bead_ids, collect, lane_view, latest_corpus, latest_sweep_pulls
+        from .lane_facts import (
+            closed_bead_ids,
+            collect,
+            lane_view,
+            latest_corpus,
+            latest_sweep_pulls,
+        )
 
         master_corpus = latest_corpus(state_root, project_id)
         lanes_next = [

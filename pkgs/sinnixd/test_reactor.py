@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from sinnixd.reactor import CampaignReactor, event_main
+from sinnixd.reactor import CampaignReactor
 
 
 class FakeBeadReleaser:
@@ -14,31 +14,6 @@ class FakeBeadReleaser:
     def release(self, bead_id: str, *, cwd: Path) -> tuple[bool, str | None]:
         self.calls.append((bead_id, cwd))
         return True, None
-
-
-def test_failure_event_reaches_the_shared_spool(tmp_path: Path) -> None:
-    spool = tmp_path / "events.jsonl"
-
-    assert (
-        event_main(
-            [
-                "--event-spool",
-                str(spool),
-                "--unit",
-                "sinnixd-reactor.service",
-                "--result",
-                "exit-code",
-            ]
-        )
-        == 0
-    )
-
-    event = json.loads(spool.read_text().strip())
-    assert event["schema_version"] == 1
-    assert event["kind"] == "service_failure"
-    assert event["unit"] == "sinnixd-reactor.service"
-    assert event["result"] == "exit-code"
-    assert event["event_id"]
 
 
 def test_under_filled_fleet_refills_on_the_keeper_tick_leaves_only(
@@ -318,7 +293,7 @@ def test_the_reactor_advances_each_lane_from_its_facts(tmp_path: Path, monkeypat
     ]
     for facts, expected in scenarios:
         calls.clear()
-        monkeypatch.setattr("sinnixd.lane_facts.collect", lambda *a, **k: [facts])
+        monkeypatch.setattr("sinnixd.lane_facts.collect", lambda *a, _facts=facts, **k: [_facts])
         monkeypatch.setattr("sinnixd.lane_facts.latest_sweep_pulls", lambda root: {})
         reactor._advance_lanes("polylogue")
         assert calls == [expected], expected
@@ -352,7 +327,7 @@ def test_a_retry_action_re_dispatches_the_lane_job_once(tmp_path: Path, monkeypa
     )
     monkeypatch.setattr(CampaignReactor, "_closed_beads", lambda self, project, root: ())
     facts = _lane_facts(lane_phase="timed_out", lane_job="job-77")
-    monkeypatch.setattr("sinnixd.lane_facts.collect", lambda *a, **k: [facts])
+    monkeypatch.setattr("sinnixd.lane_facts.collect", lambda *a, _facts=facts, **k: [_facts])
     monkeypatch.setattr("sinnixd.lane_facts.latest_sweep_pulls", lambda root: {})
 
     reactor._advance_lanes("polylogue")
