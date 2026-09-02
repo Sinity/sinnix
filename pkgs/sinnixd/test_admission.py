@@ -1988,3 +1988,30 @@ def test_a_job_waiting_for_a_pool_worker_does_not_reserve_across_pools(tmp_path:
     lane = subject.start(agent_spec(("table:lane",)))
 
     assert subject.get(lane["job_id"])["state"]["phase"] != "queued"
+
+
+def test_a_waiting_harvest_outranks_a_new_lane_launch(tmp_path: Path) -> None:
+    """Anti-vacuity: six publications sat two hours behind agent lanes that
+    refill kept topping up (2026-09-02 07:00–09:30Z)."""
+    gib = 1024**3
+    pressure = {
+        "memory_full_avg10": 0.0,
+        "memory_full_avg60": 0.0,
+        "io_full_avg10": 0.0,
+        "memory_total_bytes": 32 * gib,
+        "memory_available_bytes": 5 * gib,
+        "swap_total_bytes": 20 * gib,
+        "swap_free_bytes": 20 * gib,
+        "managed_memory_bytes": 0,
+    }
+    adapter = project(tmp_path / "project", (operation("harvest", pool="normal", estimate_memory_bytes=2 * gib),))
+    systemd = FakeSystemd()
+    subject = GenericJobs(systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure)
+    harvest = subject.start_declared(
+        project=adapter, operation=adapter.operation("harvest"), correlation_id="harvest", parameters={}
+    )
+    assert harvest["state"]["phase"] == "queued", "5 GiB available minus the 4 GiB reserve cannot hold 2 GiB"
+
+    lane = subject.start(agent_spec(("table:lane",)))
+
+    assert subject.get(lane["job_id"])["state"]["phase"] == "queued", "the lane must not take the harvest's headroom"
