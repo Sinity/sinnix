@@ -53,6 +53,40 @@ class JobAuthorizationError(PermissionError):
 # worker: workspace.publish/land return a job id immediately.
 DELIVERY_TIMEOUT_SECONDS = {"publish": 790, "land": 185}
 
+# An error before a mutating operation starts has no known remote effect. A
+# caller that loses the response after submission must treat that operation as
+# potentially applied; read-only operations can never have a remote effect.
+READ_ONLY_OPERATIONS = frozenset(
+    {
+        "runtime.status",
+        "project.list",
+        "project.get",
+        "project.operations",
+        "plan.get",
+        "plan.list",
+        "plan.wait",
+        "plan.result",
+        "campaign.status",
+        "workspace.list",
+        "workspace.get",
+        "workspace.review-status",
+        "job.admission",
+        "job.admission.explain",
+        "job.get",
+        "job.list",
+        "job.wait",
+        "job.logs",
+        "job.result",
+    }
+)
+
+
+def effect_certainty(operation: str, *, submitted: bool = False) -> str:
+    """Return the safe effect certainty exposed with a failed request."""
+    if operation in READ_ONLY_OPERATIONS:
+        return "none"
+    return "possible" if submitted else "none"
+
 
 @dataclass(frozen=True)
 class SinnixdService:
@@ -1295,12 +1329,23 @@ class SinnixdService:
         owner: str,
         code: ErrorCode,
         message: str,
+        effect: str | None = None,
     ) -> ResponseEnvelope:
+        if effect is None:
+            effect = effect_certainty(
+                request.operation, submitted=code is ErrorCode.OPERATION_FAILED
+            )
         return ResponseEnvelope(
             request_id=request.request_id,
             correlation_id=request.correlation_id,
             owner=owner,
-            error=ErrorEnvelope(code, message),
+            error=ErrorEnvelope(
+                code,
+                message,
+                details=OpaquePayload.bounded(
+                    {"operation": request.operation, "effect": effect}
+                ),
+            ),
         )
 
 

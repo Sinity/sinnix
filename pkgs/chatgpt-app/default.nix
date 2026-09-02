@@ -2,8 +2,10 @@
   lib,
   stdenv,
   fetchurl,
+  asar,
   dpkg,
   autoPatchelfHook,
+  wrapGAppsHook3,
   alsa-lib,
   at-spi2-atk,
   at-spi2-core,
@@ -15,6 +17,7 @@
   fontconfig,
   gdk-pixbuf,
   glib,
+  gsettings-desktop-schemas,
   gtk3,
   libGL,
   libdrm,
@@ -54,8 +57,10 @@ stdenv.mkDerivation rec {
   };
 
   nativeBuildInputs = [
+    asar
     dpkg
     autoPatchelfHook
+    wrapGAppsHook3
   ];
 
   # The upstream bundle ships optional Qt shims and musl/architecture
@@ -86,6 +91,7 @@ stdenv.mkDerivation rec {
     fontconfig
     gdk-pixbuf
     glib
+    gsettings-desktop-schemas
     gtk3
     libGL
     libdrm
@@ -122,6 +128,8 @@ stdenv.mkDerivation rec {
   '';
 
   installPhase = ''
+    runHook preInstall
+
     mkdir -p "$out/lib" "$out/bin"
     cp -a usr/lib/chatgpt "$out/lib/"
     ln -s ../lib/chatgpt/codex-launcher "$out/bin/chatgpt"
@@ -129,6 +137,22 @@ stdenv.mkDerivation rec {
       "$out/share/applications/chatgpt.desktop"
     install -Dm644 usr/share/pixmaps/chatgpt.png \
       "$out/share/pixmaps/chatgpt.png"
+
+    runHook postInstall
+  '';
+
+  postInstall = ''
+    asar extract "$out/lib/chatgpt/resources/app.asar" app-asar
+
+    # fs.cp preserves the read-only modes of bundled files in the Nix store.
+    # The app customizes those files in its staging directory before install.
+    substituteInPlace app-asar/.vite/build/main-*.js \
+      --replace-fail \
+        'await y.default.cp(e,t,{recursive:!0,verbatimSymlinks:!0});return' \
+        'await y.default.cp(e,t,{recursive:!0,verbatimSymlinks:!0});for(let e of await y.default.readdir(t,{recursive:!0,withFileTypes:!0})){if(e.isSymbolicLink())continue;let n=(0,p.join)(e.parentPath,e.name),r=await y.default.stat(n);await y.default.chmod(n,r.mode|128)}let n=await y.default.stat(t);await y.default.chmod(t,n.mode|128);return'
+
+    rm "$out/lib/chatgpt/resources/app.asar"
+    asar pack app-asar "$out/lib/chatgpt/resources/app.asar"
   '';
 
   meta = {

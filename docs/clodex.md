@@ -10,14 +10,11 @@ Run the following from a terminal. The device-code flow opens a browser authoriz
 
 ```bash
 clodex providers auth openai
-clodex models --alias sol=clodex:openai-oauth:gpt-5.6-sol
-clodex models --alias terra=clodex:openai-oauth:gpt-5.6-terra
-clodex models --alias luna=clodex:openai-oauth:gpt-5.6-luna
 clodex patch
 systemctl --user start sinnix-clodex
 ```
 
-Use `clodex models --list` to inspect the registered names. `clodex patch` makes the aliases first-class Claude Code models, reports their correct context windows, and permits them in Claude Code subagents. The patch is version-specific, so run `clodex patch` again after the Claude Code CLI updates.
+The service declaration owns the `sol`, `terra`, and `luna` aliases. It reconciles them with `clodex models --alias` on every start, including removal of undeclared aliases, so manual alias registration is not part of setup. `clodex patch` is an explicit repair operation: the service checks its structured patch manifest and refuses readiness when the Claude Code version or patched bytes no longer match. It never rewrites the CLI during session startup.
 
 ## Daily use
 
@@ -29,7 +26,11 @@ claude-clodex
 
 Select `/model sol`, `/model terra`, or `/model luna`. Select a native Claude model normally when it is preferable. The launcher always uses Clodex proxy mode. It deliberately does not set `ANTHROPIC_BASE_URL`, so Claude Code keeps its own Anthropic authentication and its normal provider routing remains available.
 
-The `clodex` command is the managed Clodex CLI. It bootstraps the pinned runtime under `~/.local/state/clodex` and runs in the same agent resource class as the other agent CLIs. Use it for provider status, model aliases, and re-patching. `sinnix-clodex.service` owns the long-running local proxy and starts automatically after later logins. The service has a condition on the OAuth provider registry, so its first start after authorization is explicit. Do not start a second `clodex server` manually for this workflow.
+The `clodex` command is the managed Clodex CLI. It bootstraps the pinned runtime under `~/.local/state/clodex` and runs in the same agent resource class as the other agent CLIs. Use it for provider status, inspecting aliases with `clodex models --json`, and explicit repair with `clodex patch`. `sinnix-clodex.service` owns the long-running local proxy and starts automatically after later logins. The service has a condition on the OAuth provider registry, so its first start after authorization is explicit. Do not start a second `clodex server` manually for this workflow.
+
+Routed accounting is published by the ops reducer from Clodex's bounded `~/.clodex/logs/inference-requests.jsonl` response-usage records. It reports aggregate request and token counters with source freshness; missing accounting is unavailable, never zero. Request bodies, credentials, and raw logs are not copied into reducer state.
+
+Orchestrated Sinnix jobs use the AgentCTL Codex backend directly, for example `agentctl agent launch --project sinnix --checkout default --prompt-file ./prompt.md --backend codex --model gpt-5.6-terra --effort high`. Clodex is a Claude Code subscription bridge, not a second job scheduler.
 
 ## Operating limits
 

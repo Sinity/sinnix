@@ -115,7 +115,9 @@ def test_a_failed_refill_wave_backs_off_like_a_launched_one(
         refill_dispatcher=failing_dispatch,
     )
     monkeypatch.setattr(
-        reactor_module, "_active_lane_count", lambda *a, **k: reactor_module._ActiveLaneCount(1, 0)
+        reactor_module,
+        "_active_lane_count",
+        lambda *a, **k: reactor_module._ActiveLaneCount(1, 0),
     )
 
     class Reader:
@@ -133,8 +135,14 @@ def test_a_failed_refill_wave_backs_off_like_a_launched_one(
             self.dimensions = Dimensions()
 
     monkeypatch.setattr(reactor_module, "SubprocessBdReader", lambda root: Reader())
-    monkeypatch.setattr(reactor_module.PacketConfig, "load", staticmethod(lambda root: object()))
-    monkeypatch.setattr(reactor_module, "compile_launch_snapshot", lambda bead_id, **kw: Snapshot(bead_id))
+    monkeypatch.setattr(
+        reactor_module.PacketConfig, "load", staticmethod(lambda root: object())
+    )
+    monkeypatch.setattr(
+        reactor_module,
+        "compile_launch_snapshot",
+        lambda bead_id, **kw: Snapshot(bead_id),
+    )
     monkeypatch.setattr(reactor_module, "_judgment_reason", lambda row, snap: None)
 
     reactor.run_once()
@@ -200,7 +208,11 @@ def test_refill_waits_for_a_pending_corpus_run(tmp_path: Path) -> None:
         json.dumps(
             {
                 "job_id": "corpus",
-                "spec": {"kind": "declared-operation", "operation": "verify_all", "project_id": "polylogue"},
+                "spec": {
+                    "kind": "declared-operation",
+                    "operation": "verify_all",
+                    "project_id": "polylogue",
+                },
                 "state": {"phase": "queued", "terminal": False},
             }
         )
@@ -223,7 +235,11 @@ def test_refill_waits_for_a_pending_corpus_run(tmp_path: Path) -> None:
         json.dumps(
             {
                 "job_id": "corpus",
-                "spec": {"kind": "declared-operation", "operation": "verify_all", "project_id": "polylogue"},
+                "spec": {
+                    "kind": "declared-operation",
+                    "operation": "verify_all",
+                    "project_id": "polylogue",
+                },
                 "state": {"phase": "succeeded", "terminal": True},
             }
         )
@@ -251,19 +267,33 @@ def _lane_facts(**overrides: object) -> object:
     }
     if overrides.pop("clean_receipt", False):
         base["receipt"] = Receipt(
-            packet_id="harvest-" + "0" * 32, head="h" * 40, flags=(), flagged=False, authorized=False,
-            verification="from-job", bead="polylogue-9", created_at="",
+            packet_id="harvest-" + "0" * 32,
+            head="h" * 40,
+            flags=(),
+            flagged=False,
+            authorized=False,
+            verification="from-job",
+            bead="polylogue-9",
+            created_at="",
         )
     if overrides.pop("flagged_receipt", False):
         base["receipt"] = Receipt(
-            packet_id="harvest-" + "1" * 32, head="h" * 40, flags=("FLAG: production definitions removed: f",),
-            flagged=True, authorized=False, verification="from-job", bead="polylogue-9", created_at="",
+            packet_id="harvest-" + "1" * 32,
+            head="h" * 40,
+            flags=("FLAG: production definitions removed: f",),
+            flagged=True,
+            authorized=False,
+            verification="from-job",
+            bead="polylogue-9",
+            created_at="",
         )
     base.update(overrides)
     return LaneFacts(**base)  # type: ignore[arg-type]
 
 
-def test_the_reactor_advances_each_lane_from_its_facts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_reactor_advances_each_lane_from_its_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Anti-vacuity: with keyed reactions an unforeseen edge (master moving
     again, a lane writing no text) stalled until a new key existed; here the
     same facts always produce the same action and nothing is remembered."""
@@ -278,29 +308,60 @@ def test_the_reactor_advances_each_lane_from_its_facts(tmp_path: Path, monkeypat
         harvest_dispatcher=lambda p, w, ref: calls.append(("harvest", w, ref)),
         integration_dispatcher=lambda p, w, label: calls.append(("agent", w, label)),
     )
-    monkeypatch.setattr(CampaignReactor, "_publish", lambda self, p, w, receipt, affected_job="": calls.append(("publish", w, receipt)))
+    monkeypatch.setattr(
+        CampaignReactor,
+        "_publish",
+        lambda self, p, w, receipt, affected_job="": calls.append(
+            ("publish", w, receipt)
+        ),
+    )
     monkeypatch.setattr(CampaignReactor, "_repo_slug", lambda self, project: "o/r")
-    monkeypatch.setattr(CampaignReactor, "_closed_beads", lambda self, project, root: ())
+    monkeypatch.setattr(
+        CampaignReactor, "_closed_beads", lambda self, project, root: ()
+    )
     from sinnixd.lane_facts import Pull
 
     scenarios = [
         (_lane_facts(), ("verify", "packet-p-9")),
-        (_lane_facts(verify_job=("vvvvvvvv-1", "succeeded")), ("harvest", "packet-p-9", "vvvvvvvv-1")),
-        (_lane_facts(clean_receipt=True), ("publish", "packet-p-9", "harvest-" + "0" * 32)),
+        (
+            _lane_facts(verify_job=("vvvvvvvv-1", "succeeded")),
+            ("harvest", "packet-p-9", "vvvvvvvv-1"),
+        ),
+        (
+            _lane_facts(clean_receipt=True),
+            ("publish", "packet-p-9", "harvest-" + "0" * 32),
+        ),
         (_lane_facts(flagged_receipt=True), ("agent", "packet-p-9", "integrator")),
-        (_lane_facts(clean_receipt=True, pull=Pull(number=7, head="h" * 40, verdict="conflict", findings=0)), ("agent", "packet-p-9", "rebase")),
-        (_lane_facts(clean_receipt=True, pull=Pull(number=7, head="h" * 40, verdict="findings", findings=2)), ("agent", "packet-p-9", "review-fix")),
+        (
+            _lane_facts(
+                clean_receipt=True,
+                pull=Pull(number=7, head="h" * 40, verdict="conflict", findings=0),
+            ),
+            ("agent", "packet-p-9", "rebase"),
+        ),
+        (
+            _lane_facts(
+                clean_receipt=True,
+                pull=Pull(number=7, head="h" * 40, verdict="findings", findings=2),
+            ),
+            ("agent", "packet-p-9", "review-fix"),
+        ),
     ]
     for facts, expected in scenarios:
         calls.clear()
-        monkeypatch.setattr("sinnixd.lane_facts.collect", lambda *a, _facts=facts, **k: [_facts])
+        monkeypatch.setattr(
+            "sinnixd.lane_facts.collect", lambda *a, _facts=facts, **k: [_facts]
+        )
         monkeypatch.setattr("sinnixd.lane_facts.latest_sweep_pulls", lambda root: {})
         reactor._advance_lanes("polylogue")
         assert calls == [expected], expected
 
     # Held or busy lanes are left alone; a parked lane is recorded once per head.
     calls.clear()
-    monkeypatch.setattr("sinnixd.lane_facts.collect", lambda *a, **k: [_lane_facts(holder="integrator", clean_receipt=True)])
+    monkeypatch.setattr(
+        "sinnixd.lane_facts.collect",
+        lambda *a, **k: [_lane_facts(holder="integrator", clean_receipt=True)],
+    )
     reactor._advance_lanes("polylogue")
     assert calls == []
     parked = _lane_facts(flagged_receipt=True, integrators_at_head=("integrator",))
@@ -312,7 +373,9 @@ def test_the_reactor_advances_each_lane_from_its_facts(tmp_path: Path, monkeypat
     assert calls == []
 
 
-def test_a_retry_action_re_dispatches_the_lane_job_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_retry_action_re_dispatches_the_lane_job_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Anti-vacuity: without the retry branch the action only spooled an
     event, and two interrupted workspaces emitted 65 no-op dispatches each in
     three days (2026-09-02)."""
@@ -325,9 +388,13 @@ def test_a_retry_action_re_dispatches_the_lane_job_once(tmp_path: Path, monkeypa
         project_roots={"polylogue": tmp_path / "repo"},
         retry_dispatcher=retried.append,
     )
-    monkeypatch.setattr(CampaignReactor, "_closed_beads", lambda self, project, root: ())
+    monkeypatch.setattr(
+        CampaignReactor, "_closed_beads", lambda self, project, root: ()
+    )
     facts = _lane_facts(lane_phase="timed_out", lane_job="job-77")
-    monkeypatch.setattr("sinnixd.lane_facts.collect", lambda *a, _facts=facts, **k: [_facts])
+    monkeypatch.setattr(
+        "sinnixd.lane_facts.collect", lambda *a, _facts=facts, **k: [_facts]
+    )
     monkeypatch.setattr("sinnixd.lane_facts.latest_sweep_pulls", lambda root: {})
 
     reactor._advance_lanes("polylogue")

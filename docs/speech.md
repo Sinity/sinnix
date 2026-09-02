@@ -158,13 +158,21 @@ not a strong authenticator and sinnix can synthesise the operator's own
 voice locally, so treating a voiceprint as authorisation would be theatre. The
 question it answers is only _whether an utterance is a command at all_.
 
-`scripts/sinnix-speaker-verify` exists (ECAPA-TDNN via speechbrain) and is
-**verified functional but measured NOT discriminative**: a different-source
-clip scored 0.991 against a same-speaker clip's 0.986. Raw cosine similarity on
-ECAPA embeddings is known to be poorly calibrated without AS-norm/cohort score
-normalisation. Until that is fixed and shown to separate on a held-out cohort,
-the lane listens and records, and the phone's deliberate push-to-talk verb
-remains the way to actually ask for something.
+`scripts/sinnix-speaker-verify` supports enrollment, raw scoring, and a
+held-out `calibrate` command. Calibration requires disjoint enrollment,
+same-speaker, different-speaker, and unrelated cohort directories; it reports
+symmetric AS-norm scores, EER, and Brier calibration error. The report's
+`supports_attribution` field is true only when EER is at most 5% (override with
+`--max-eer`). A report is not a license to authorize an action: it is only a
+friction signal, and score output applies the normalized score only when the
+report supports attribution.
+
+The available archive does not contain speaker-labelled impostor or cohort
+provenance, so it cannot produce a defensible calibration report. The voice
+lane therefore remains unintegrated and the phone's deliberate push-to-talk
+verb remains the way to actually ask for something. Do not manufacture an
+impostor set by treating unlabeled ambient or historical clips as a different
+speaker.
 
 Shipping the channel ungated because the gate is nearly ready is how a system
 acquires a voice-activated foot-gun.

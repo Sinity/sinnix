@@ -82,7 +82,8 @@ mkFeatureModule {
         }:
         {
           # awatcher (Rust) handles both AFK and window tracking natively on
-          # Wayland; aw-watcher-afk is X11-only.
+          # Wayland; aw-watcher-afk is X11-only. Its first supported Wayland
+          # idle backend is ext-idle-notify-v1, which remains the idle source.
           services.activitywatch = {
             enable = true;
             package = pkgs.aw-server-rust;

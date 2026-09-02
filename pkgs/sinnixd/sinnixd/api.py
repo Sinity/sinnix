@@ -13,13 +13,14 @@ from typing import Any, Callable
 from sinnix_mcp import (
     ErrorCode,
     ErrorEnvelope,
+    OpaquePayload,
     RequestEnvelope,
     ResponseEnvelope,
     response_envelope_from_dict,
 )
 
 from .jobs import DEFAULT_WAIT_SECONDS, MAX_WAIT_SECONDS
-from .service import SinnixdService
+from .service import SinnixdService, effect_certainty
 
 MAX_FRAME_BYTES = 1_048_576
 CONNECTION_TIMEOUT_SECONDS = 5.0
@@ -93,6 +94,19 @@ class ProtocolError(ValueError):
 class SinnixdClientError(ValueError):
     """The canonical client could not obtain a valid daemon response."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: ErrorCode = ErrorCode.OWNER_UNAVAILABLE,
+        operation: str | None = None,
+        effect: str = "none",
+    ) -> None:
+        self.code = code
+        self.operation = operation
+        self.effect = effect
+        super().__init__(message)
+
 
 class ResponseBudgetExceeded(SinnixdClientError):
     """The daemon accepted the request but did not answer within its budget.
@@ -108,7 +122,10 @@ class ResponseBudgetExceeded(SinnixdClientError):
         super().__init__(
             f"response budget exceeded: operation={operation} "
             f"budget={budget_seconds:g}s (the daemon is alive; the request may "
-            "still be executing)"
+            "still be executing)",
+            code=ErrorCode.RESPONSE_BUDGET_EXCEEDED,
+            operation=operation,
+            effect=effect_certainty(operation, submitted=True),
         )
 
 
@@ -196,9 +213,19 @@ def _response_from_json_rpc_error(
             request_id=request.request_id,
             correlation_id=request.correlation_id,
             owner=request.owner,
-            error=ErrorEnvelope(ErrorCode.RESOURCE_EXHAUSTED, error.message),
+            error=ErrorEnvelope(
+                ErrorCode.RESOURCE_EXHAUSTED,
+                error.message,
+                details=OpaquePayload.bounded(
+                    {"operation": request.operation, "effect": "none"}
+                ),
+            ),
         ).to_dict()
-    raise SinnixdClientError("sinnixd is unavailable")
+    raise SinnixdClientError(
+        "sinnixd is unavailable",
+        operation=request.operation,
+        effect=effect_certainty(request.operation, submitted=True),
+    )
 
 
 def _response_result_from_json_rpc_frame(
@@ -363,6 +390,7 @@ class UnixSocketServer:
             # line is the operator's only account of a refused request.
             print(
                 f"request failed: operation={request.operation if request is not None else 'unknown'} "
+                f"correlation_id={request.correlation_id if request is not None else 'unknown'} "
                 f"request_id={request_id}: {error!r}",
                 file=sys.stderr,
                 flush=True,
@@ -447,15 +475,33 @@ class SinnixdClient:
     def dispatch(self, request: RequestEnvelope) -> ResponseEnvelope:
         try:
             raw = self.transport(self.socket_path, request)
-        except (OSError, ProtocolError) as error:
-            raise SinnixdClientError("sinnixd is unavailable") from error
+        except OSError as error:
+            raise SinnixdClientError(
+                "sinnixd is unavailable",
+                operation=request.operation,
+                effect="none",
+            ) from error
+        except ProtocolError as error:
+            raise SinnixdClientError(
+                "sinnixd returned an invalid response",
+                operation=request.operation,
+                effect=effect_certainty(request.operation, submitted=True),
+            ) from error
         try:
             response = response_envelope_from_dict(raw)
         except ValueError as error:
-            raise SinnixdClientError("sinnixd returned an invalid response") from error
+            raise SinnixdClientError(
+                "sinnixd returned an invalid response",
+                operation=request.operation,
+                effect=effect_certainty(request.operation, submitted=True),
+            ) from error
         if (
             response.request_id != request.request_id
             or response.correlation_id != request.correlation_id
         ):
-            raise SinnixdClientError("sinnixd response does not match the request")
+            raise SinnixdClientError(
+                "sinnixd response does not match the request",
+                operation=request.operation,
+                effect=effect_certainty(request.operation, submitted=True),
+            )
         return response

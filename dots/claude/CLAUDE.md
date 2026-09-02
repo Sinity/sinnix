@@ -134,6 +134,12 @@ runtime/workspace operations and `orchestrate` before multi-agent work.
   PR/review/merge; the external task backend (`bd`, Beads per
   project under `/realm/state/tasks/`) = task state. Reconcile disagreements;
   never invent a second truth. Feature branches never carry task state.
+- Background watches are work-in-progress, not fire-and-forget: keep at most a
+  few consolidated watches alive, kill each in the turn its purpose ends, and
+  never arm a per-job watch when one watch per concern covers it. On takeover
+  or after compaction, inventory running background tasks FIRST and kill every
+  watch whose target is terminal — watches survive compaction; the context
+  that understood them does not.
 - Long-running dispatches carry a time contract: state expected duration with
   evidence and act at ~2x with a decision, never silent waiting. Completion
   notifications are authoritative; do not poll.

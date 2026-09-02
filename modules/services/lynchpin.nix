@@ -5,9 +5,9 @@
 # demand by AI agent runtimes via the stdio transport registered in
 # mcp-registry.nix.
 #
-# A daily oneshot only submits Lynchpin's typed convergence plan to sinnixd.
-# The runtime owns admission, node dependencies, reuse, artifacts, and the
-# exclusive promotion job; this module does not execute the DAG itself.
+# A daily oneshot starts one bounded convergence operation. The runtime owns
+# admission, logs, cancellation, and the exclusive promotion lease; the
+# operation returns only after materialization, verification, and publication.
 #
 # Enable with:
 #   sinnix.services.lynchpin.enable = true;
@@ -103,19 +103,32 @@ mkServiceModule {
         '';
       };
 
-      # Optional: submit the daily typed convergence plan. This unit is only a
-      # control-plane trigger; its child jobs own execution and result state.
+      # Optional: run the daily convergence operation to completion.
       systemd.services.lynchpin-materialize = lib.mkIf cfg.materializationTimer.enable {
-        description = "Submit Lynchpin convergence plan";
+        description = "Materialize and publish Lynchpin substrate";
         onFailure = [ "sinnix-unit-failure-notify@%n.service" ];
         requires = [ "lynchpin-local-attrs.service" ];
         after = [ "lynchpin-local-attrs.service" ];
         serviceConfig = {
           Type = "oneshot";
-          ExecStart = "${scriptPkgs.sinnixd}/bin/agentctl job start lynchpin schedule_convergence";
+          ExecStart = "${scriptPkgs.sinnixd}/bin/agentctl job start lynchpin converge --wait";
           User = "sinity";
           Group = "users";
-          TimeoutStartSec = 60;
+          TimeoutStartSec = "4h";
+        };
+      };
+
+      systemd.services.lynchpin-keylog-materialize = lib.mkIf cfg.materializationTimer.enable {
+        description = "Refresh Lynchpin keylog analysis";
+        onFailure = [ "sinnix-unit-failure-notify@%n.service" ];
+        requires = [ "lynchpin-local-attrs.service" ];
+        after = [ "lynchpin-local-attrs.service" ];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${scriptPkgs.sinnixd}/bin/agentctl job start lynchpin refresh_keylog --wait";
+          User = "sinity";
+          Group = "users";
+          TimeoutStartSec = "10min";
         };
       };
 
@@ -131,7 +144,7 @@ mkServiceModule {
         observe.enable = true;
         workload = {
           class = "sacrificial";
-          rationale = "Short daily control-plane submission; AgentCTL owns all materialization work.";
+          rationale = "Bounded daily source convergence and complete substrate publication.";
         };
         captures = [
           {
@@ -153,6 +166,16 @@ mkServiceModule {
         timerConfig = {
           OnCalendar = cfg.materializationTimer.onCalendar;
           RandomizedDelaySec = toString cfg.materializationTimer.randomizedDelaySec;
+          Persistent = true;
+        };
+      };
+
+      systemd.timers.lynchpin-keylog-materialize = lib.mkIf cfg.materializationTimer.enable {
+        description = "Quarter-hour Lynchpin keylog analysis refresh";
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnCalendar = "*-*-* *:00/15:00";
+          RandomizedDelaySec = "60s";
           Persistent = true;
         };
       };

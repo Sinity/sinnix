@@ -129,6 +129,39 @@ in
               message = "Clodex must run as an advertised local user service for Claude Code child-process routing.";
             }
             {
+              assertion = lib.hasInfix "models --json" (
+                toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre
+              );
+              message = "Clodex startup must inspect aliases through its structured JSON interface.";
+            }
+            {
+              assertion = lib.hasInfix "patch is stale" (
+                toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre
+              );
+              message = "Clodex startup must fail readiness with an actionable stale-patch status.";
+            }
+            {
+              assertion =
+                let
+                  preStart = toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre;
+                in
+                lib.hasInfix "models --unalias" preStart
+                && lib.hasInfix "luna=clodex:openai-oauth:gpt-5.6-luna" preStart
+                && lib.hasInfix "sol=clodex:openai-oauth:gpt-5.6-sol" preStart
+                && lib.hasInfix "terra=clodex:openai-oauth:gpt-5.6-terra" preStart;
+              message = "Clodex startup must converge the complete declared alias set.";
+            }
+            {
+              assertion =
+                let
+                  preStart = toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre;
+                in
+                lib.hasInfix ".claudeVersion" preStart
+                && lib.hasInfix ".patchedSize" preStart
+                && lib.hasInfix "run clodex patch" preStart;
+              message = "Clodex startup must validate the structured patch manifest without rewriting the CLI.";
+            }
+            {
               assertion = lib.any (
                 entry: (if builtins.isAttrs entry then entry.directory else entry) == ".clodex"
               ) config.sinnix.persistence.home.directories;
@@ -304,14 +337,14 @@ in
         assert lib.assertMsg (
           managedWork.CPUWeight < userSlices.app.CPUWeight
           && managedWork.IOWeight < userSlices.app.IOWeight
-          && managedWork.MemoryHigh == "24G"
+          && managedWork.MemoryHigh == "20G"
           && !(managedWork ? MemoryMax)
           && managedWork.ManagedOOMSwap == "kill"
           && managedWork.ManagedOOMMemoryPressure == "kill"
           && managedWork.ManagedOOMMemoryPressureLimit == "50%"
           && managedWork.ManagedOOMMemoryPressureDurationSec == "30s"
-          && userSlices.app.MemoryLow == "4G"
-          && userSlices.session.MemoryLow == "4G"
+          && userSlices.app.MemoryLow == "6G"
+          && userSlices.session.MemoryLow == "6G"
         ) "sinnixd work must yield to protected interactive slices without a hard CPU or memory cap";
         pkgs.runCommand "sinnix-agent-resource-policy-check" { } ''
           touch "$out"
@@ -619,13 +652,17 @@ in
             grep -Fq 'CLODEX_CREDENTIAL_HELPER=' "$HOME/.local/bin/sinnix-clodex-server"
             jq -e '.env.CLAUDE_CODE_PROCESS_WRAPPER == "/home/sinity/.local/bin/clodex-claude"' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
 
-            # Every agent wrapper launches its npm-bootstrapped entry point
-            # directly, preserving the caller's normal process context.
+            # Every outer agent wrapper must enter agent.slice before its
+            # bootstrap runs. A missing scope launch leaves npm/bootstrap work
+            # in the terminal session and makes the cgroup regression invisible
+            # to admission.
             for wrapper in \
               "$HOME/.local/bin/claude-full" \
               "$HOME/.local/bin/codex" \
               "$HOME/.local/bin/gemini"; do
               grep -Fq 'launch.sh' "$wrapper"
+              grep -Fq '/proc/self/cgroup' "$wrapper"
+              grep -Fq -- '--slice=agent.slice' "$wrapper"
             done
             if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude-full" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini"; then
               echo "agent wrappers must not hardcode resource limits" >&2
@@ -981,6 +1018,24 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/skill-authoring.sh} "$validator"
             touch "$out"
           '';
+      chatgptConversationsFixture =
+        pkgs.runCommand "chatgpt-conversations-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.nodejs
+            ];
+          }
+          ''
+            skill="$TMPDIR/chatgpt-conversations"
+            mkdir -p "$skill/scripts"
+            cp ${../../dots/_ai/skills/chatgpt-conversations/scripts/sinnix-chatgpt-conversations} "$skill/scripts/sinnix-chatgpt-conversations"
+            cp ${../../dots/_ai/skills/chatgpt-conversations/tests.sh} "$skill/tests.sh"
+            chmod -R u+w "$skill"
+            ${pkgs.bash}/bin/bash "$skill/tests.sh"
+            touch "$out"
+          '';
       desktopCaptureFixture =
         pkgs.runCommand "desktop-capture-fixture"
           {
@@ -1115,6 +1170,7 @@ in
         bd-dolt-authority = bdDoltAuthorityFixture;
         context-handoff = contextHandoffFixture;
         skill-authoring = skillAuthoringFixture;
+        chatgpt-conversations = chatgptConversationsFixture;
         desktop-capture = desktopCaptureFixture;
         recovery-skills = recoverySkillsFixture;
         hooks-harness = hooksHarnessFixture;
