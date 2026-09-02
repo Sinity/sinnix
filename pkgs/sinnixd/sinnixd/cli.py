@@ -230,11 +230,6 @@ def parser() -> argparse.ArgumentParser:
     )
     workspace_drop.add_argument("workspace_id")
     workspace_drop.add_argument(
-        "--target",
-        dest="integration_target",
-        help="Prove publication by tree-equivalence with this integrated ref.",
-    )
-    workspace_drop.add_argument(
         "--force",
         action="store_true",
         help="Drop without proving the content is published.",
@@ -802,11 +797,6 @@ def main() -> int:
             {
                 "workspace_id": arguments.workspace_id,
                 **({"force": True} if arguments.force else {}),
-                **(
-                    {"integration_target": arguments.integration_target}
-                    if arguments.integration_target
-                    else {}
-                ),
             },
             "agent-control",
         )
@@ -1257,7 +1247,6 @@ def main() -> int:
                 "name": workspace_name,
                 "branch": branch,
                 "base": None,
-                "recover_dead": True,
             },
             "agent-control",
         )
