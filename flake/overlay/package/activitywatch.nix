@@ -46,5 +46,11 @@ _: _final: prev: {
   awatcher = prev.awatcher.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [ ./activitywatch-awatcher-retry.patch ];
     doCheck = true;
+    # The retry helper lives in the workspace's `watchers` library, which the
+    # default single-package `cargo test` never builds.
+    cargoTestFlags = (old.cargoTestFlags or [ ]) ++ [
+      "--package"
+      "watchers"
+    ];
   });
 }
