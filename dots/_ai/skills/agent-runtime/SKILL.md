@@ -13,22 +13,21 @@ not add a parallel ledger for any of them.
 ## Workspaces
 
 - Inspect with `agentctl workspace list` and `workspace get` before mutation.
-- Create or adopt linked worktrees only beneath the project's declared
-  workspace root. Git remains authoritative for HEAD, branch, membership, and
+- Create linked worktrees only beneath the project's declared workspace root. Git remains authoritative for HEAD, branch, membership, and
   dirty state on every read.
 - `workspace checkpoint <id>` stores digest-verified staged and unstaged
   patches plus a bounded untracked archive when project policy permits it. It
   does not create a stash or commit.
 - `workspace restore <id> <checkpoint>` requires the same branch and HEAD and
-  a clean existing workspace. `workspace recover` recreates a missing
-  AgentCTL-created workspace whose branch still matches the checkpoint, then
-  restores it. Adopted workspaces cannot be recovered this way.
+  a clean workspace; `--recreate` rebuilds a missing worktree from its branch
+  first.
 - Publish only after an exact-head declared verifier succeeds. Use
-  `workspace publish`, `review-status`, `land`, and `finish` for hosted review;
-  use `finish-integrated` for an already-integrated branch.
-- `dispose` is only for clean, base-contained, no-review work with empty
-  checkpoints. `reap` removes an eligible managed worktree but retains its
-  branch. Never clean an adopted, dirty, divergent, or identity-changed tree.
+  `workspace publish`, `review-status`, `land`, and `finish` for hosted review.
+- `workspace drop <id>` deletes the worktree, its branch, and every job record
+  and artifact bound to that checkout. It proves the content is published
+  first: contained in the declared base, tree-equivalent to `--target <ref>`,
+  or squash-equivalent. `--force` says the content is expendable. Never drop a
+  dirty, divergent, or identity-changed tree without `--force`.
 
 ## Jobs
 

@@ -6,9 +6,11 @@ campaign state itself.
 
 ## Where state lives
 
-- **Fleet and jobs**: `agentctl fleet`, `agentctl evidence <id>`,
-  `agentctl job result <id>`. Job ids may be abbreviated to any unambiguous
-  prefix. `--plain` prints the payload as text.
+- **Jobs and lanes**: `agentctl campaign view --project <p>` is the screen;
+  `campaign view --json` is the same payload, `campaign log --workspace <ws>`
+  is one lane's timeline, `agentctl job result <id>` is one job's outcome. Job
+  ids may be abbreviated to any unambiguous prefix. `--plain` prints the
+  payload as text.
 - **Workspaces**: `agentctl workspace list`.
 - **Task authority**: external Beads per project. `bd` resolves its database
   from the working directory, so mind your cwd.
@@ -24,23 +26,20 @@ campaign state itself.
 
 Look for the verb before writing any procedure: `agentctl <noun> --help`.
 
-| Need                                     | Verb                                                                                          |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------- |
-| schedule a dispatch wave                 | `agentctl campaign run --project <p> [--bead ID …] [--dry-run]`                               |
-| dispatch one bead                        | `agentctl packet launch <bead> --project <p>`                                                 |
-| publish a finished lane                  | `agentctl lane publish <ws>` (mints receipt, routes, authorizes, arms auto-merge)             |
-| continue an interrupted lane             | `agentctl agent launch --checkout <worktree-id> --prompt-file …` (no `lane resume` verb yet)  |
-| open a PR outside the harvest flow       | `agentctl workspace publish --job <j> --title T [--body F] [--wait]`                          |
-| land / integrate a workspace             | `agentctl workspace land --job <j>`                                                           |
-| dispose after a GitHub merge             | `agentctl workspace finish-merged`                                                            |
-| dispose when content is already in a ref | `agentctl workspace finish-integrated --target <ref>` (tree-contribution check; squash-proof) |
-| adopt an orphan worktree                 | `agentctl workspace adopt <project> <checkout> <name>`                                        |
-| protect work before risky integration    | `agentctl workspace checkpoint` / `restore` / `recover`                                       |
-| stacked branches                         | `agentctl workspace stack` / `restack`                                                        |
-| review state of a workspace              | `agentctl workspace review-status`                                                            |
-| task-backend mutations                   | `agentctl task create/claim/complete/note/update/relate/reconcile/snapshot`                   |
-| wait on work                             | `agentctl job wait`, `agentctl agent wait`, `agentctl plan wait`                              |
-| all evidence for a job or workspace      | `agentctl evidence <id>`                                                                      |
+| Need                                      | Verb                                                                                                                                                                                                                                         |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| schedule a dispatch wave                  | `agentctl campaign run --project <p> [--bead ID …] [--dry-run]`                                                                                                                                                                              |
+| dispatch one bead                         | `agentctl packet launch <bead> --project <p>`                                                                                                                                                                                                |
+| publish a finished lane                   | `agentctl lane publish <ws>` (mints receipt, routes, authorizes, arms auto-merge)                                                                                                                                                            |
+| continue an interrupted lane              | `agentctl agent launch --checkout <worktree-id> --prompt-file …` (no `lane resume` verb yet)                                                                                                                                                 |
+| open a PR outside the harvest flow        | `agentctl workspace publish --job <j> --title T [--body F] [--wait]`                                                                                                                                                                         |
+| land / integrate a workspace              | `agentctl workspace land --job <j>`                                                                                                                                                                                                          |
+| delete a workspace and everything it owns | `agentctl workspace drop <ws> [--target <ref>] [--force]` (proves publication by containment, tree-equivalence with `--target`, or the operator's `--force`; deletes the branch, the job records bound to the checkout, and their artifacts) |
+| dispose after a GitHub merge              | `agentctl workspace finish` (merged review, deletes the remote branch, then drops)                                                                                                                                                           |
+| protect work before risky integration     | `agentctl workspace checkpoint` / `restore [--recreate]`                                                                                                                                                                                     |
+| review state of a workspace               | `agentctl workspace review-status`                                                                                                                                                                                                           |
+| task-backend mutations                    | `agentctl task create/claim/complete/note/update/relate/reconcile/snapshot`                                                                                                                                                                  |
+| wait on work                              | `agentctl job wait`, `agentctl agent wait`, `agentctl plan wait`                                                                                                                                                                             |
 
 Publication policy is per-repository: polylogue lands via `lane publish`
 (PR + auto-merge); **sinnix publishes from `master` directly** (its CLAUDE.md)
@@ -88,16 +87,16 @@ back, so nothing publishes unreviewed.
 4. A receipt binds workspace HEAD at minting; a failed authorize invalidates
    it — re-mint before retrying. The operation holds the repo lock only
    across push and PR creation, so review phases run in parallel.
-5. Dispose after the content check: `agentctl workspace finish-integrated
---target <ref>` is squash-proof; `finish-merged` handles the merged case;
-   `lane gc --apply` owns bulk disposal of integrated units.
+5. Drop after the content check: `agentctl workspace drop <ws> --target <ref>`
+   is squash-proof, `agentctl workspace finish` handles the merged case, and
+   both delete the lane's job records and artifacts with it.
 
 **Launch wedges**: packet launch advances one step per attempt (worktree →
 record → job) and reports a step failure as a redacted `OWNER_UNAVAILABLE`.
 Retry about three times, spaced. A leftover worktree with no workspace record
-is adopted: `agentctl workspace adopt <project> <checkout> <name>`.
+is not a workspace: remove it with `git worktree remove` and relaunch.
 
-**Refill**: read the fleet. Lanes at target with nothing
+**Refill**: read `campaign view`. Lanes at target with nothing
 review-ready → say so and stop. Otherwise harvest what finished and launch a
 wave sized to free memory — lanes peak near a gigabyte each under verification.
 

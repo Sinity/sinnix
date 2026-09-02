@@ -52,8 +52,9 @@ five means the change should be split).
   `--no-verify` unbidden; a hook failure means fix the cause in a new
   commit. From a linked worktree, use `git -C /abs/path`.
 - AgentCTL workspace flow where registered: `workspace publish` →
-  `review-status` → `land` / `finish-integrated` — exact-head results, no
-  parallel merge-ledger protocols.
+  `review-status` → `land` → `finish` (or `drop --target <ref>` for an
+  already-integrated branch) — exact-head results, no parallel merge-ledger
+  protocols.
 - A green hosted check is not test evidence where CI skips the heavy suite
   (recorded polylogue gotcha) — verify locally with the focused selector
   and say which tier ran.
