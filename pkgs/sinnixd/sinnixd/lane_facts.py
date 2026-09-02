@@ -300,6 +300,10 @@ def collect(
         pull = None
         if receipt is not None and receipt_pulls:
             pull = receipt_pulls.get(receipt.packet_id)
+        if pull is None and receipt_pulls:
+            # A PR names the receipt it was opened under; later re-mints at
+            # the same head are still that PR.
+            pull = next((item for item in receipt_pulls.values() if item.head in {head, pushed}), None)
         if pull is None:
             pull = next((item for item in pulls if item.head in {head, pushed}), None)
         authorization_head = _authorization_head(worktree)

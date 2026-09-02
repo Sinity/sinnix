@@ -178,3 +178,32 @@ def test_pulls_from_sweep_actions_key_on_receipt() -> None:
         [{"pr": 41, "head": "h" * 40, "verdict": "findings", "findings": 2, "receipt": "harvest-" + "0" * 32}, {"pr": 42, "head": "x"}]
     )
     assert pulls == {"harvest-" + "0" * 32: Pull(number=41, head="h" * 40, verdict="findings", findings=2)}
+
+
+def test_a_pr_opened_under_an_older_receipt_still_counts_at_the_same_head(tmp_path: Path) -> None:
+    """Anti-vacuity: keying PRs by receipt id alone re-published 26 lanes
+    whose PR bodies named an earlier receipt (2026-09-02 12:48Z)."""
+    state = tmp_path / "state"
+    worktree = tmp_path / "packet-p-1"
+    worktree.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "feature/packet/polylogue-1", str(worktree)], check=True)
+    subprocess.run(
+        ["git", "-C", str(worktree), "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-q", "--allow-empty", "-m", "seed"],
+        check=True,
+    )
+    head = subprocess.run(["git", "-C", str(worktree), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    checkout_id = derived_checkout_id(str(worktree))
+    (state / "workspaces").mkdir(parents=True)
+    (state / "workspaces" / "index.json").write_text(
+        json.dumps({"workspaces": [{"name": "packet-p-1", "path": str(worktree), "project_id": "polylogue", "branch": "feature/packet/polylogue-1"}]})
+    )
+    (state / "jobs").mkdir()
+    (state / "harvest-packets").mkdir()
+    (state / "harvest-packets" / ("harvest-" + "2" * 32 + ".json")).write_text(
+        json.dumps({"packet_id": "harvest-" + "2" * 32, "workspace_id": checkout_id, "head": head, "redflags": [], "redflag_status": 0})
+    )
+    older = Pull(number=41, head=head, verdict="wait", findings=0)
+
+    facts = collect("polylogue", state_root=state, master_head="m" * 40, receipt_pulls={"harvest-" + "1" * 32: older})
+
+    assert facts[0].pull == older
