@@ -9,7 +9,6 @@ import subprocess
 import sys
 import threading
 import time
-import types
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -28,10 +27,8 @@ from sinnix_mcp import (
     OpaquePayload,
     RequestEnvelope,
     ResponseEnvelope,
-    SinnixRef,
-    SourceBinding,
 )
-from sinnix_mcp.execution import EnvironmentProfile, ExecutionResult, OwnerExecution
+from sinnix_mcp.execution import ExecutionResult
 from sinnixd.api import (
     CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS,
     MAX_JSON_RPC_ERROR_MESSAGE_BYTES,
@@ -72,11 +69,9 @@ from sinnixd.jobs import (
     capture_main,
 )
 from sinnixd.limits import MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
-from sinnixd.owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from sinnixd.projects import (
     ProjectCatalog,
     ProjectConfigError,
-    RegisteredCheckout,
     parse_worktree_records,
     validate_agent_environment_descriptors,
 )
@@ -91,17 +86,6 @@ from sinnixd.runner import (
     _seal_packet_result,
 )
 from sinnixd.service import SUPPORTED_OPERATIONS, SinnixdService
-from sinnixd.tasks import (
-    FLOCK_EXECUTABLE,
-    MAX_TASK_OUTPUT_BYTES,
-    TASK_MUTATION_JOURNAL_DIRECTORY,
-    BeadsCommandBoundary,
-    TaskAuthority,
-    TaskError,
-    TaskMutationJournal,
-    TaskService,
-    reconcile_task_mutations,
-)
 from sinnixd.workspaces import (
     MAX_PROVISION_OUTPUT_BYTES,
     WorkspaceError,
@@ -158,21 +142,43 @@ def test_canonical_client_validates_typed_response_identity() -> None:
         mismatched.dispatch(request)
 
 
-def test_runtime_status_lists_build_capabilities(tmp_path: Path) -> None:
-    """Anti-vacuity: status exposes the build capability contract, not only version and owners."""
+def test_retired_descriptor_sections_load_without_effect(tmp_path: Path) -> None:
+    """Operator descriptors still declare `cache` and `[owner_adapters]`.
+
+    Anti-vacuity: rejecting either as an unknown field would take every
+    project declaring them out of service.
+    """
+    write_adapter(tmp_path)
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + """
+[owner_adapters.polylogue_archive]
+namespace = "polylogue.archive"
+owner = "polylogue-archive"
+authority = "owner"
+lifecycle = "read_only"
+protocol_versions = [1]
+source_scoped = true
+source_ref = "sinnix://polylogue/archive"
+exec = ["polylogue-agentctl-adapter"]
+"""
+    )
+
+    project = ProjectCatalog([tmp_path]).get("fixture")
+
+    assert "cache" not in project.operation("check").catalog_row()
+    assert "owner_adapters" not in project.catalog_row()
+
+
+def test_runtime_status_lists_the_dispatchable_operations(tmp_path: Path) -> None:
+    """Anti-vacuity: status exposes the operation surface, not only version and owners."""
     service = SinnixdService(ProjectCatalog([]), jobs=generic_jobs(tmp_path))
 
     response = service.dispatch(request("runtime.status", "sinnixd"))
 
     assert response.ok and response.payload is not None
-    assert response.payload.inline["capabilities"] == [
-        "completion_events",
-        "wait_any",
-        "environment_require",
-        "workspace_provision",
-        "usage_capture",
-        "timeout_wip_preserve",
-    ]
+    assert response.payload.inline["operations"] == sorted(SUPPORTED_OPERATIONS)
 
 
 def test_admission_ledger_is_operator_only_and_has_empty_shape(tmp_path: Path) -> None:
@@ -309,232 +315,6 @@ def test_a_refused_request_is_reported_to_the_daemon_log(
     assert "request failed:" in capfd.readouterr().err
 
 
-@pytest.mark.parametrize(
-    ("argv", "operation", "payload"),
-    (
-        (
-            (
-                "agentctl",
-                "task",
-                "create",
-                "fixture",
-                "typed title",
-                "--description",
-                "typed description",
-                "--type",
-                "task",
-                "--priority",
-                "2",
-                "--label",
-                "area:agentctl",
-                "--parent",
-                "fixture-parent",
-                "--dependency",
-                "depends-on:fixture-blocker",
-                "--request-id",
-                "request-1",
-            ),
-            "task.create",
-            {
-                "project_id": "fixture",
-                "title": "typed title",
-                "description": "typed description",
-                "issue_type": "task",
-                "priority": 2,
-                "labels": ["area:agentctl"],
-                "parent_task_id": "fixture-parent",
-                "dependencies": [
-                    {"relation": "depends-on", "task_id": "fixture-blocker"}
-                ],
-            },
-        ),
-        (
-            (
-                "agentctl",
-                "task",
-                "claim",
-                "fixture",
-                "fixture-1",
-                "--request-id",
-                "request-1",
-            ),
-            "task.claim",
-            {"project_id": "fixture", "task_id": "fixture-1"},
-        ),
-        (
-            (
-                "agentctl",
-                "task",
-                "note",
-                "fixture",
-                "fixture-1",
-                "note",
-                "--request-id",
-                "request-1",
-            ),
-            "task.note",
-            {"project_id": "fixture", "task_id": "fixture-1", "text": "note"},
-        ),
-        (
-            (
-                "agentctl",
-                "task",
-                "note",
-                "fixture",
-                "fixture-1",
-                "--text",
-                "note",
-                "--request-id",
-                "request-1",
-            ),
-            "task.note",
-            {"project_id": "fixture", "task_id": "fixture-1", "text": "note"},
-        ),
-        (
-            (
-                "agentctl",
-                "task",
-                "update",
-                "fixture",
-                "fixture-1",
-                "--set-metadata",
-                'write_scope=["pkgs/sinnixd/"]',
-                "--request-id",
-                "request-1",
-            ),
-            "task.update",
-            {
-                "project_id": "fixture",
-                "task_id": "fixture-1",
-                "metadata": {"write_scope": '["pkgs/sinnixd/"]'},
-            },
-        ),
-        (
-            (
-                "agentctl",
-                "task",
-                "relate",
-                "fixture",
-                "fixture-1",
-                "fixture-2",
-                "--request-id",
-                "request-1",
-            ),
-            "task.relate",
-            {
-                "project_id": "fixture",
-                "task_id": "fixture-1",
-                "related_task_id": "fixture-2",
-            },
-        ),
-        (
-            (
-                "agentctl",
-                "task",
-                "complete",
-                "fixture",
-                "fixture-1",
-                "--reason",
-                "done",
-                "--merge-sha",
-                "a" * 40,
-                "--request-id",
-                "request-1",
-            ),
-            "task.complete",
-            {
-                "project_id": "fixture",
-                "task_id": "fixture-1",
-                "reason": "done",
-                "merge_sha": "a" * 40,
-            },
-        ),
-        (
-            (
-                "agentctl",
-                "task",
-                "release",
-                "fixture",
-                "fixture-1",
-                "--if-assignee",
-                "worker",
-                "--request-id",
-                "request-1",
-            ),
-            "task.release",
-            {"project_id": "fixture", "task_id": "fixture-1", "if_assignee": "worker"},
-        ),
-        (
-            ("agentctl", "task", "reconcile", "fixture"),
-            "task.reconcile",
-            {"project_id": "fixture"},
-        ),
-        (
-            ("agentctl", "task", "snapshot", "fixture"),
-            "task.snapshot",
-            {"project_id": "fixture"},
-        ),
-    ),
-)
-def test_agentctl_task_commands_map_to_task_envelopes(
-    argv: tuple[str, ...],
-    operation: str,
-    payload: dict[str, object],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, RequestEnvelope] = {}
-
-    def fake_call(socket_path, request_value):
-        captured["request"] = request_value
-        return {"schema": 1, "ok": True}
-
-    monkeypatch.setattr(sys, "argv", list(argv))
-    monkeypatch.setattr(cli_module, "call", fake_call)
-
-    assert cli_module.main() == 0
-    outbound = captured["request"]
-    assert outbound.operation == operation
-    assert outbound.owner == "task-backend"
-    assert outbound.principal == "operator"
-    assert dict(outbound.arguments) == payload
-    expected_key = (
-        "request-1"
-        if operation
-        in {
-            "task.create",
-            "task.claim",
-            "task.note",
-            "task.relate",
-            "task.complete",
-            "task.release",
-            "task.update",
-        }
-        else None
-    )
-    assert outbound.idempotency_key == expected_key
-
-
-@pytest.mark.parametrize(
-    ("command", "extra_args"),
-    (("get", ()), ("status", ()), ("status", ("--json",))),
-)
-def test_agentctl_job_status_aliases_job_get(
-    command: str, extra_args: tuple[str, ...], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    captured: dict[str, RequestEnvelope] = {}
-
-    def fake_call(socket_path, request_value):
-        captured["request"] = request_value
-        return {"schema": 1, "ok": True}
-
-    monkeypatch.setattr(sys, "argv", ["agentctl", "job", command, "job-1", *extra_args])
-    monkeypatch.setattr(cli_module, "call", fake_call)
-
-    assert cli_module.main() == 0
-    assert captured["request"].operation == "job.get"
-    assert captured["request"].arguments == {"job_id": "job-1"}
-
-
 def test_agentctl_admission_maps_to_read_only_job_verb(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -552,109 +332,6 @@ def test_agentctl_admission_maps_to_read_only_job_verb(
     assert captured["request"].owner == "systemd-jobs"
     assert captured["request"].principal == "operator"
     assert captured["request"].arguments == {}
-
-
-@pytest.mark.parametrize(
-    "argv",
-    (
-        ["agentctl", "agent", "resume", "job-1", "--session-id", "codex-session"],
-        ["agentctl", "job", "resume", "job-1", "--session-id", "codex-session"],
-    ),
-)
-def test_agentctl_resume_carries_the_native_session_id(
-    argv: list[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    captured: dict[str, RequestEnvelope] = {}
-
-    def fake_call(socket_path, request_value):
-        captured["request"] = request_value
-        return {"schema": 1, "ok": True}
-
-    monkeypatch.setattr(sys, "argv", argv)
-    monkeypatch.setattr(cli_module, "call", fake_call)
-
-    assert cli_module.main() == 0
-    assert captured["request"].operation == "job.resume"
-    assert captured["request"].arguments == {
-        "job_id": "job-1",
-        "native_session_id": "codex-session",
-    }
-
-
-def test_agentctl_task_mutations_require_a_stable_request_id() -> None:
-    with pytest.raises(SystemExit):
-        cli_module.parser().parse_args(["task", "claim", "fixture", "fixture-1"])
-    with pytest.raises(SystemExit):
-        cli_module.parser().parse_args(
-            ["task", "complete", "fixture", "fixture-1", "--request-id", "request-1"]
-        )
-    with pytest.raises(SystemExit):
-        cli_module.parser().parse_args(
-            [
-                "task",
-                "create",
-                "fixture",
-                "title",
-                "--description",
-                "body",
-                "--type",
-                "task",
-                "--priority",
-                "2",
-            ]
-        )
-    with pytest.raises(SystemExit):
-        cli_module.parser().parse_args(
-            [
-                "task",
-                "create",
-                "fixture",
-                "title",
-                "--description",
-                "body",
-                "--type",
-                "task",
-                "--priority",
-                "5",
-                "--request-id",
-                "request-1",
-            ]
-        )
-
-
-@pytest.mark.parametrize(
-    "argv",
-    (
-        [
-            "agentctl",
-            "task",
-            "note",
-            "fixture",
-            "fixture-1",
-            "--request-id",
-            "request-1",
-        ],
-        [
-            "agentctl",
-            "task",
-            "note",
-            "fixture",
-            "fixture-1",
-            "positional",
-            "--text",
-            "option",
-            "--request-id",
-            "request-1",
-        ],
-    ),
-)
-def test_agentctl_task_note_requires_one_text_spelling(
-    argv: list[str], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(sys, "argv", argv)
-
-    with pytest.raises(SystemExit):
-        cli_module.main()
 
 
 def test_agentctl_job_list_exposes_service_pagination(
@@ -675,8 +352,6 @@ def test_agentctl_job_list_exposes_service_pagination(
             "list",
             "--limit",
             "250",
-            "--cursor",
-            "next-page",
             "--project",
             "polylogue",
             "--phase",
@@ -694,7 +369,6 @@ def test_agentctl_job_list_exposes_service_pagination(
     assert outbound.owner == "systemd-jobs"
     assert dict(outbound.arguments) == {
         "limit": 250,
-        "cursor": "next-page",
         "project_id": "polylogue",
         "phases": ["queued", "running"],
         "kinds": [],
@@ -762,66 +436,6 @@ def test_agentctl_workspace_finish_integrated_maps_target_to_a_typed_envelope(
         "workspace_id": "workspace-1",
         "target_ref": "abc123",
     }
-
-
-def test_agentctl_workspace_finish_carries_the_authored_bead_settlement(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    captured: dict[str, RequestEnvelope] = {}
-
-    def fake_call(socket_path, request_value):
-        captured["request"] = request_value
-        return {"schema": 1, "ok": True}
-
-    receipt = tmp_path / "receipt.json"
-    receipt.write_text(json.dumps({"sinnix-1": "landed as abc123"}))
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "agentctl",
-            "workspace",
-            "finish",
-            "workspace-1",
-            "--bead",
-            "sinnix-1",
-            "--receipt",
-            str(receipt),
-        ],
-    )
-    monkeypatch.setattr(cli_module, "call", fake_call)
-
-    assert cli_module.main() == 0
-    outbound = captured["request"]
-    assert outbound.operation == "workspace.finish"
-    assert dict(outbound.arguments) == {
-        "workspace_id": "workspace-1",
-        "beads": ["sinnix-1"],
-        "receipt": {"sinnix-1": "landed as abc123"},
-    }
-
-
-def test_workspace_settlement_refuses_beads_without_an_authored_reason() -> None:
-    """A settled bead must carry a reason a person wrote, never an inferred one."""
-    service = SinnixdService.__new__(SinnixdService)
-
-    with pytest.raises(ValueError, match="authored receipt or partial note"):
-        service._settle_workspace(
-            {"workspace_id": "workspace-1"},
-            {"workspace_id": "workspace-1", "beads": ["sinnix-1"]},
-            "sinnix",
-        )
-
-    with pytest.raises(ValueError, match="exactly the beads being settled"):
-        service._settle_workspace(
-            {"workspace_id": "workspace-1"},
-            {
-                "workspace_id": "workspace-1",
-                "beads": ["sinnix-1"],
-                "receipt": {"sinnix-2": "wrong bead"},
-            },
-            "sinnix",
-        )
 
 
 def test_agentctl_job_start_maps_parameters_json_to_the_typed_request(
@@ -1020,26 +634,6 @@ cache = "tree+environment"
 """
     )
     initialize_git_checkout(root)
-
-
-def write_owner_adapter(root: Path) -> None:
-    write_adapter(root)
-    descriptor = root / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text()
-        + """
-[owner_adapters.polylogue_archive]
-namespace = "polylogue.archive"
-owner = "polylogue-archive"
-authority = "owner"
-lifecycle = "read_only"
-protocol_versions = [1]
-source_scoped = true
-source_ref = "sinnix://polylogue/archive"
-exec = ["polylogue-agentctl-adapter"]
-documentation = "Bounded Polylogue archive status."
-"""
-    )
 
 
 @pytest.mark.parametrize(
@@ -1409,7 +1003,9 @@ def test_declared_service_dependency_supplies_lease_and_unblocks_when_bound(
     assert len(systemd.started) == 1
 
     port_available = False
-    jobs.ADMISSION_OBSERVE_INTERVAL_SECONDS = 0.0  # every poll re-evaluates readiness here
+    jobs.ADMISSION_OBSERVE_INTERVAL_SECONDS = (
+        0.0  # every poll re-evaluates readiness here
+    )
     jobs.get(check_id)
     assert len(systemd.started) == 1, "a transient port bind is not readiness"
 
@@ -1452,399 +1048,6 @@ def test_live_service_leases_never_share_a_port(
     )
     assert first.payload.inline["lease"]["ports"][0]["port"] == 41000
     assert second.payload.inline["lease"]["ports"][0]["port"] == 41001
-
-
-def test_non_cacheable_operation_coalesces_only_while_active(tmp_path: Path) -> None:
-    """Repeated timers share one active refresh without reusing its completed result."""
-    write_adapter(tmp_path)
-    descriptor = tmp_path / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text()
-        + '\n[operations.refresh]\ndescription = "Refresh a derived cache"\nexec = ["fixture-refresh"]\n'
-        'pool = "bulk"\nresult = "exit"\ncache = "none"\nexclusive_keys = ["fixture:refresh"]\n'
-    )
-    initialize_git_checkout(tmp_path)
-    systemd = FakeSystemdJobs()
-    jobs = GenericJobs(
-        systemd,
-        GenericJobStore(tmp_path.parent / f"{tmp_path.name}-runtime-state"),
-        wait_poll_seconds=0.001,
-    )
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
-    arguments = {"project_id": "fixture", "operation": "refresh"}
-
-    first = service.dispatch(request("job.start", "systemd-jobs", arguments))
-    duplicate = service.dispatch(request("job.start", "systemd-jobs", arguments))
-
-    assert (
-        first.ok
-        and duplicate.ok
-        and first.payload is not None
-        and duplicate.payload is not None
-    )
-    assert duplicate.payload.inline["job_id"] == first.payload.inline["job_id"]
-    assert duplicate.payload.inline["coalesced"] is True
-    assert duplicate.payload.inline["state"]["subscribers"] == 2
-    assert len(systemd.started) == 1
-
-    systemd.properties = {
-        "LoadState": "loaded",
-        "ActiveState": "inactive",
-        "Result": "success",
-        "ExecMainStatus": "0",
-        "InvocationID": "fixture-invocation",
-    }
-    service.dispatch(
-        request("job.get", "systemd-jobs", {"job_id": first.payload.inline["job_id"]})
-    )
-    replacement = service.dispatch(request("job.start", "systemd-jobs", arguments))
-
-    assert replacement.ok and replacement.payload is not None
-    assert replacement.payload.inline["job_id"] != first.payload.inline["job_id"]
-    assert "reused" not in replacement.payload.inline
-    assert len(systemd.started) == 2
-
-
-def test_tree_cached_service_coalesces_within_scope_and_retires_terminal_entries(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Service reuse is scoped to its root or registered checkout and never caches a dead success."""
-    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
-    write_adapter(tmp_path)
-    descriptor = tmp_path / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text()
-        .replace(
-            'cache = "none"\n\n[operations.service.service]',
-            'cache = "tree+environment"\n\n[operations.service.service]',
-        )
-        .replace("range = [41000, 41001]", "range = [41000, 41003]")
-    )
-    initialize_git_checkout(tmp_path)
-    other_checkout = tmp_path.parent / "other-checkout"
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(tmp_path),
-            "worktree",
-            "add",
-            "--quiet",
-            "--detach",
-            str(other_checkout),
-            "HEAD",
-        ],
-        check=True,
-    )
-
-    catalog = ProjectCatalog([tmp_path])
-    project = catalog.get("fixture")
-    default_checkout = catalog.checkout("fixture", "default")
-    other_checkout_record = next(
-        checkout
-        for checkout in catalog.checkouts("fixture")
-        if checkout.path == other_checkout.resolve()
-    )
-    jobs = generic_jobs(tmp_path.parent / "job-state")
-    operation = project.operation("service")
-    assert operation.cache == "tree+environment"
-
-    def start(checkout: RegisteredCheckout | None) -> dict[str, object]:
-        return jobs.start_declared(
-            project=project,
-            operation=operation,
-            correlation_id="service-scope",
-            parameters={},
-            checkout=checkout,
-        )
-
-    root_first = start(None)
-    root_record = jobs.store.load(root_first["job_id"])
-    assert root_record.spec.cache_key is not None
-    assert (
-        jobs._admission_state()["active"][root_record.spec.cache_key]
-        == root_first["job_id"]
-    )
-    root_duplicate = start(None)
-    assert root_duplicate["job_id"] == root_first["job_id"]
-    assert root_duplicate["coalesced"]
-    assert jobs.store.load(root_first["job_id"]).state["subscribers"] == 2
-    assert len(list(jobs.store.leases_root.glob("*.json"))) == 1
-
-    default_started = start(default_checkout)
-    default_duplicate = start(default_checkout)
-    assert default_duplicate["job_id"] == default_started["job_id"]
-    assert default_duplicate["coalesced"]
-    assert jobs.store.load(default_started["job_id"]).state["subscribers"] == 2
-    assert len(list(jobs.store.leases_root.glob("*.json"))) == 2
-    other_started = start(other_checkout_record)
-    assert default_started["job_id"] != root_first["job_id"]
-    assert other_started["job_id"] not in {
-        root_first["job_id"],
-        default_started["job_id"],
-    }
-    default_record = jobs.store.load(default_started["job_id"])
-    other_record = jobs.store.load(other_started["job_id"])
-    assert default_record.spec.cache_key != other_record.spec.cache_key
-    assert default_record.spec.lease is not None and other_record.spec.lease is not None
-    assert (
-        default_record.spec.lease.ports[0].port != other_record.spec.lease.ports[0].port
-    )
-    assert len(list(jobs.store.leases_root.glob("*.json"))) == 3
-
-    jobs.systemd.properties = {
-        "LoadState": "loaded",
-        "ActiveState": "failed",
-        "Result": "exit-code",
-        "ExecMainStatus": "1",
-        "InvocationID": "fixture-failure",
-    }
-    failed = jobs.get(root_first["job_id"])
-    assert failed["state"]["phase"] == "failed"
-    assert not (jobs.store.leases_root / f"{root_first['job_id']}.json").exists()
-    root_after_failure = start(None)
-    assert root_after_failure["job_id"] != root_first["job_id"]
-
-    jobs.systemd.properties = {
-        "LoadState": "loaded",
-        "ActiveState": "inactive",
-        "Result": "success",
-        "ExecMainStatus": "0",
-        "InvocationID": "fixture-success",
-    }
-    succeeded = jobs.get(root_after_failure["job_id"])
-    assert succeeded["state"]["phase"] == "succeeded"
-    root_after_success = start(None)
-    assert root_after_success["job_id"] != root_after_failure["job_id"]
-    assert "reused" not in root_after_success
-    assert len(list(jobs.store.leases_root.glob("*.json"))) == 3
-
-
-def test_tree_cached_service_retires_after_cancellation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A cancelled cached service releases admission and its descriptor-owned lease."""
-    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
-    write_adapter(tmp_path)
-    descriptor = tmp_path / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            'cache = "none"\n\n[operations.service.service]',
-            'cache = "tree+environment"\n\n[operations.service.service]',
-        )
-    )
-    initialize_git_checkout(tmp_path)
-    systemd = FakeSystemdJobs(
-        properties={
-            "LoadState": "loaded",
-            "ActiveState": "active",
-            "InvocationID": "fixture-invocation",
-            "Result": "success",
-        }
-    )
-    jobs = generic_jobs(tmp_path, systemd)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
-
-    started = service.dispatch(
-        request(
-            "job.start",
-            "systemd-jobs",
-            {"project_id": "fixture", "operation": "service"},
-        )
-    )
-    assert started.ok and started.payload is not None
-    job_id = started.payload.inline["job_id"]
-    record = jobs.store.load(job_id)
-    assert record.spec.cache_key is not None and record.spec.lease is not None
-    cache_key = record.spec.cache_key
-    assert jobs._admission_state()["active"][cache_key] == job_id
-
-    cancelled = service.dispatch(
-        request("job.cancel", "systemd-jobs", {"job_id": job_id})
-    )
-    assert cancelled.ok and cancelled.payload is not None
-    assert cancelled.payload.inline["state"]["phase"] == "cancelled"
-    admission = jobs._admission_state()
-    assert cache_key not in admission["active"]
-    assert cache_key not in admission["cache"]
-    assert jobs.store.service_lease_records() == []
-    assert not (jobs.store.leases_root / f"{job_id}.json").exists()
-
-    replacement = service.dispatch(
-        request(
-            "job.start",
-            "systemd-jobs",
-            {"project_id": "fixture", "operation": "service"},
-        )
-    )
-    assert replacement.ok and replacement.payload is not None
-    assert replacement.payload.inline["job_id"] != job_id
-    assert "reused" not in replacement.payload.inline
-    assert replacement.payload.inline["lease"]["ports"][0]["port"] == 41000
-
-
-def test_tree_cached_service_retires_after_terminal_outcome_unknown(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A terminal cancellation-unknown service cannot remain in cache or lease state."""
-    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
-    write_adapter(tmp_path)
-    descriptor = tmp_path / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            'cache = "none"\n\n[operations.service.service]',
-            'cache = "tree+environment"\n\n[operations.service.service]',
-        )
-    )
-    initialize_git_checkout(tmp_path)
-
-    class StopTimesOutThenCollects(FakeSystemdJobs):
-        def stop(self, unit: str) -> None:
-            self.stopped.append(unit)
-            self.properties = {
-                "LoadState": "not-found",
-                "ActiveState": "inactive",
-                "InvocationID": "",
-                "Result": "success",
-                "ExecMainStatus": "0",
-            }
-            raise SystemdJobError("fixture stop timeout")
-
-    systemd = StopTimesOutThenCollects(
-        properties={
-            "LoadState": "loaded",
-            "ActiveState": "active",
-            "InvocationID": "fixture-invocation",
-            "Result": "success",
-        }
-    )
-    jobs = generic_jobs(tmp_path, systemd)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
-
-    started = service.dispatch(
-        request(
-            "job.start",
-            "systemd-jobs",
-            {"project_id": "fixture", "operation": "service"},
-        )
-    )
-    assert started.ok and started.payload is not None
-    job_id = started.payload.inline["job_id"]
-    record = jobs.store.load(job_id)
-    assert record.spec.cache_key is not None and record.spec.lease is not None
-    cache_key = record.spec.cache_key
-    assert jobs._admission_state()["active"][cache_key] == job_id
-
-    cancelled = service.dispatch(
-        request("job.cancel", "systemd-jobs", {"job_id": job_id})
-    )
-    assert cancelled.error is not None
-    jobs.store.save(
-        replace(
-            jobs.store.load(job_id), cancel_requested_at="2000-01-01T00:00:00+00:00"
-        )
-    )
-
-    restarted = GenericJobs(
-        systemd, GenericJobStore(jobs.store.root), wait_poll_seconds=0.001
-    )
-    reconciled = restarted.get(job_id)
-    assert reconciled["state"]["phase"] == "outcome-unknown"
-    assert reconciled["state"]["terminal"]
-    admission = restarted._admission_state()
-    assert cache_key not in admission["active"]
-    assert cache_key not in admission["cache"]
-    assert restarted.store.service_lease_records() == []
-    assert not (restarted.store.leases_root / f"{job_id}.json").exists()
-    assert (restarted.store.leases_root / f"{job_id}.released").exists()
-
-    replacement = SinnixdService(ProjectCatalog([tmp_path]), jobs=restarted).dispatch(
-        request(
-            "job.start",
-            "systemd-jobs",
-            {"project_id": "fixture", "operation": "service"},
-        )
-    )
-    assert replacement.ok and replacement.payload is not None
-    assert replacement.payload.inline["job_id"] != job_id
-    assert "reused" not in replacement.payload.inline
-    assert replacement.payload.inline["lease"]["ports"][0]["port"] == 41000
-
-
-def test_tree_cached_services_isolate_distinct_project_roots_in_one_store(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Identical trees from distinct roots must not coalesce a lease-owning service."""
-    monkeypatch.setattr("sinnixd.jobs._loopback_port_available", lambda _port: True)
-    roots = (tmp_path / "project-a", tmp_path / "project-b")
-    for root in roots:
-        write_adapter(root)
-        descriptor = root / ".agentctl" / "project.toml"
-        descriptor.write_text(
-            descriptor.read_text()
-            .replace(
-                'cache = "none"\n\n[operations.service.service]',
-                'cache = "tree+environment"\n\n[operations.service.service]',
-            )
-            .replace(f'root = "{root / "worktrees"}"', 'root = "/fixture-worktrees"')
-        )
-        initialize_git_checkout(root)
-
-    first_project = ProjectCatalog([roots[0]]).get("fixture")
-    second_project = ProjectCatalog([roots[1]]).get("fixture")
-    assert GenericJobs._cache_tree(first_project.root) == GenericJobs._cache_tree(
-        second_project.root
-    )
-    assert first_project.environment.values() == second_project.environment.values()
-
-    systemd = FakeSystemdJobs()
-    jobs = generic_jobs(tmp_path / "shared-job-state", systemd)
-    first_service = SinnixdService(ProjectCatalog([roots[0]]), jobs=jobs)
-    second_service = SinnixdService(ProjectCatalog([roots[1]]), jobs=jobs)
-    start_arguments = {"project_id": "fixture", "operation": "service"}
-    first = first_service.dispatch(
-        request("job.start", "systemd-jobs", start_arguments)
-    )
-    second = second_service.dispatch(
-        request("job.start", "systemd-jobs", start_arguments)
-    )
-    assert (
-        first.ok
-        and second.ok
-        and first.payload is not None
-        and second.payload is not None
-    )
-    first_id = first.payload.inline["job_id"]
-    second_id = second.payload.inline["job_id"]
-    assert first_id != second_id
-    first_record = jobs.store.load(first_id)
-    second_record = jobs.store.load(second_id)
-    assert (
-        first_record.spec.cache_key is not None
-        and second_record.spec.cache_key is not None
-    )
-    assert first_record.spec.cache_key != second_record.spec.cache_key
-    assert first_record.spec.lease is not None and second_record.spec.lease is not None
-    assert first_record.spec.lease.ports[0].port == 41000
-    assert second_record.spec.lease.ports[0].port == 41001
-    assert jobs._admission_state()["active"] == {
-        first_record.spec.cache_key: first_id,
-        second_record.spec.cache_key: second_id,
-    }
-
-    first_duplicate = first_service.dispatch(
-        request("job.start", "systemd-jobs", start_arguments)
-    )
-    second_duplicate = second_service.dispatch(
-        request("job.start", "systemd-jobs", start_arguments)
-    )
-    assert first_duplicate.ok and second_duplicate.ok
-    assert first_duplicate.payload is not None and second_duplicate.payload is not None
-    assert first_duplicate.payload.inline["job_id"] == first_id
-    assert second_duplicate.payload.inline["job_id"] == second_id
-    assert first_duplicate.payload.inline["coalesced"]
-    assert second_duplicate.payload.inline["coalesced"]
-    assert len(systemd.started) == 2
 
 
 def test_terminal_service_jobs_release_port_leases_for_success_failure_timeout_and_cancellation(
@@ -2108,59 +1311,6 @@ def test_loaded_outcome_unknown_restart_keeps_uncertain_lease_reserved(
     assert operation.service is not None
     replacement = jobs.store.allocate_service_lease(str(uuid4()), operation.service)
     assert replacement.ports[0].port == 41001
-
-
-def test_restart_finalizes_admission_for_a_newly_terminal_active_record(
-    tmp_path: Path,
-) -> None:
-    """A restart must retire only the active cache entry it observes terminal, not rescan historical jobs."""
-    systemd = FakeSystemdJobs(
-        properties={
-            "LoadState": "loaded",
-            "ActiveState": "active",
-            "InvocationID": "fixture-invocation",
-        }
-    )
-    store = GenericJobStore(tmp_path / "state")
-    original = GenericJobs(systemd, store, wait_poll_seconds=0.001)
-    record = store.create(
-        GenericJobSpec(
-            kind="declared-operation",
-            command=("fixture",),
-            working_directory=str(tmp_path),
-            environment={},
-            project_id="fixture",
-            operation="check",
-            parameter_digest="0" * 64,
-            cache_key="a" * 64,
-        )
-    )
-    store.save(
-        original._with_state(
-            record, {"phase": "submitted", "terminal": False, "observed_at": "fixture"}
-        )
-    )
-    original._save_admission_state(
-        {
-            "schema_version": 1,
-            "active": {record.spec.cache_key: record.job_id},
-            "cache": {},
-            "estimates": {},
-        }
-    )
-    systemd.properties = {
-        "LoadState": "loaded",
-        "ActiveState": "inactive",
-        "Result": "success",
-        "ExecMainStatus": "0",
-        "InvocationID": "fixture-invocation",
-    }
-
-    restarted = GenericJobs(systemd, original.store, wait_poll_seconds=0.001)
-
-    admission = restarted._admission_state()
-    assert record.spec.cache_key not in admission["active"]
-    assert admission["cache"][record.spec.cache_key]["job_id"] == record.job_id
 
 
 def test_recovery_and_get_skip_historical_terminal_jobs_but_release_failed_loaded_lease(
@@ -2645,7 +1795,9 @@ def test_queued_service_cancellation_wins_the_admission_start_interleaving(
     admission_thread = threading.Thread(target=admit)
     admission_thread.start()
     assert before_start.wait(1)
-    cancellation_thread = threading.Thread(target=lambda: jobs.cancel(job_id, reason="test-cancel"))
+    cancellation_thread = threading.Thread(
+        target=lambda: jobs.cancel(job_id, reason="test-cancel")
+    )
     cancellation_thread.start()
     assert cancellation_saved.wait(1)
     resume_admission.set()
@@ -3253,1197 +2405,9 @@ class FakeExecution:
         return self.result
 
 
-@dataclass
-class FakeTaskBoundary:
-    results: list[ExecutionResult]
-    calls: list[tuple[tuple[str, ...], Path]] = field(default_factory=list)
-    lock_paths: list[Path | None] = field(default_factory=list)
-    entered: threading.Event | None = None
-    release: threading.Event | None = None
-    active: int = 0
-    max_active: int = 0
-    _guard: threading.Lock = field(default_factory=threading.Lock)
-
-    def run(
-        self,
-        *,
-        argv: tuple[str, ...],
-        cwd: Path,
-        environment: dict[str, str],
-        lock_path: Path | None = None,
-        max_stdout_bytes: int | None = None,
-    ) -> ExecutionResult:
-        self.calls.append((argv, cwd))
-        self.lock_paths.append(lock_path)
-        with self._guard:
-            self.active += 1
-            self.max_active = max(self.max_active, self.active)
-        if self.entered is not None:
-            self.entered.set()
-        if self.release is not None:
-            assert self.release.wait(1), "task command was not released"
-        with self._guard:
-            self.active -= 1
-        return self.results.pop(0)
-
-
-@dataclass
-class CanonicalTaskBoundary:
-    tasks: dict[str, dict[str, object]]
-    calls: list[tuple[tuple[str, ...], Path]] = field(default_factory=list)
-    databases: list[Path] = field(default_factory=list)
-
-    def run(
-        self,
-        *,
-        argv: tuple[str, ...],
-        cwd: Path,
-        environment: dict[str, str],
-        lock_path: Path | None = None,
-        max_stdout_bytes: int | None = None,
-    ) -> ExecutionResult:
-        self.calls.append((argv, cwd))
-        database = Path(environment["BEADS_DIR"]) / "dolt"
-        self.databases.append(database)
-        command_offset = argv.index("--json") + 1
-        if argv[command_offset : command_offset + 1] == ("--readonly",):
-            command_offset += 1
-        command = argv[command_offset:]
-        if command[:1] == ("update",) and command[2:] == ("--claim",):
-            task = self.tasks[command[1]]
-            task["status"] = "claimed"
-            return task_result([dict(task)])
-        if command == ("export",):
-            return ExecutionResult(
-                command=(),
-                exit_status=0,
-                stdout="".join(
-                    json.dumps(dict(task)) + "\n" for task in self.tasks.values()
-                ).encode(),
-                stderr=b"",
-            )
-        raise AssertionError(f"unexpected canonical task command: {command}")
-
-
-def task_result(value: object) -> ExecutionResult:
-    return ExecutionResult(
-        command=(),
-        exit_status=0,
-        stdout=json.dumps(value).encode(),
-        stderr=b"",
-    )
-
-
-def activate_task_authority(
-    project_root: Path,
-    state_root: Path,
-    *,
-    project_id: str = "fixture",
-    source_database: Path | None = None,
-    rows: int = 1,
-    digest: str = "sha256:" + "a" * 64,
-) -> Path:
-    authority_root = state_root / project_id
-    database = authority_root / ".beads" / "dolt"
-    database.mkdir(mode=0o700, parents=True)
-    source_database = source_database or project_root / ".beads" / "dolt"
-    source_database.parent.mkdir(parents=True, exist_ok=True)
-    (source_database.parent / "redirect").write_text(str(database.parent) + "\n")
-    (authority_root / "authority.json").write_text(
-        json.dumps(
-            {
-                "schema": 1,
-                "project_id": project_id,
-                "database": str(database),
-                "source_database": str(source_database),
-                "verification": {
-                    "source_export_sha256": digest,
-                    "destination_export_sha256": digest,
-                    "source_rows": rows,
-                    "destination_rows": rows,
-                },
-            }
-        )
-    )
-    return database
-
-
-def task_service(
-    tmp_path: Path, boundary: FakeTaskBoundary | None = None
-) -> tuple[TaskService, FakeTaskBoundary]:
-    write_adapter(tmp_path)
-    fake = boundary or FakeTaskBoundary([task_result({"ok": True})])
-    task_state_root = tmp_path / "task-state"
-    activate_task_authority(tmp_path, task_state_root)
-    return (
-        TaskService(
-            ProjectCatalog([tmp_path]),
-            generic_jobs(tmp_path),
-            fake,
-            task_state_root=task_state_root,
-        ),
-        fake,
-    )
-
-
 def isolate_job_scratch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("SINNIXD_TMPFS_SCRATCH_ROOT", str(tmp_path / "tmpfs-scratch"))
     monkeypatch.setenv("SINNIXD_NVME_SCRATCH_ROOT", str(tmp_path / "nvme-scratch"))
-
-
-def test_task_reads_route_through_bd_and_snapshot_stays_readonly(
-    tmp_path: Path,
-) -> None:
-    """task.list/task.get are deliberately gone: reads go through bd directly."""
-    service, boundary = task_service(
-        tmp_path,
-        FakeTaskBoundary(
-            [
-                ExecutionResult(
-                    command=(),
-                    exit_status=0,
-                    stdout=b'{"id":"fixture-1"}\n',
-                    stderr=b"",
-                )
-            ]
-        ),
-    )
-
-    for operation, arguments in (
-        ("task.list", {"project_id": "fixture", "status": "open", "limit": 20}),
-        ("task.get", {"project_id": "fixture", "task_id": "fixture-1"}),
-    ):
-        with pytest.raises(TaskError, match="unsupported task operation"):
-            service.execute(
-                operation=operation, arguments=arguments, principal="observer"
-            )
-    assert boundary.calls == []
-
-    snapshot = service.execute(
-        operation="task.snapshot",
-        arguments={"project_id": "fixture"},
-        principal="observer",
-    )
-
-    assert snapshot["result"] == [{"id": "fixture-1"}]
-    assert boundary.calls == [(("--json", "--readonly", "export"), tmp_path)]
-
-
-@pytest.mark.parametrize(
-    ("operation", "arguments", "expected"),
-    (
-        ("task.claim", {"task_id": "fixture-1"}, ("update", "fixture-1", "--claim")),
-        (
-            "task.note",
-            {"task_id": "fixture-1", "text": "append this"},
-            ("note", "fixture-1", "append this"),
-        ),
-        (
-            "task.update",
-            {"task_id": "fixture-1", "metadata": {"write_scope": '["pkgs/sinnixd/"]'}},
-            ("update", "fixture-1", "--set-metadata", 'write_scope=["pkgs/sinnixd/"]'),
-        ),
-        (
-            "task.relate",
-            {"task_id": "fixture-1", "related_task_id": "fixture-2"},
-            ("dep", "relate", "fixture-1", "fixture-2"),
-        ),
-        (
-            "task.complete",
-            {"task_id": "fixture-1", "merge_sha": "a" * 40, "reason": "verified"},
-            ("close", "fixture-1", "--reason", "verified"),
-        ),
-        (
-            "task.release",
-            {"task_id": "fixture-1", "reason": "stopped", "if_assignee": "worker"},
-            ("unclaim", "fixture-1", "--reason", "stopped", "--if-assignee", "worker"),
-        ),
-    ),
-)
-def test_task_mutations_map_to_fixed_beads_argv(
-    tmp_path: Path, operation: str, arguments: dict[str, str], expected: tuple[str, ...]
-) -> None:
-    service, boundary = task_service(
-        tmp_path, FakeTaskBoundary([task_result({"ok": True})])
-    )
-
-    result = service.execute(
-        operation=operation,
-        arguments={"project_id": "fixture", **arguments},
-        principal="agent-control",
-        mutation_id="request-1",
-    )
-
-    assert result["project_id"] == "fixture"
-    assert result["operation"] == operation
-    assert result["result"]["state"] == "applied"
-    assert result["result"]["result"]["bytes"] == len(
-        json.dumps({"ok": True}, sort_keys=True, separators=(",", ":")).encode()
-    )
-    authority_root = tmp_path / "task-state" / "fixture"
-    authority_root / ".beads" / "dolt"
-    assert boundary.calls == [(("--json", *expected), tmp_path)]
-
-
-def test_task_create_returns_a_replay_safe_canonical_ref_and_owner_evidence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Anti-vacuity: the replay reads the durable receipt, so a second backend create would fail this test."""
-    isolate_job_scratch(monkeypatch, tmp_path)
-    boundary = FakeTaskBoundary(
-        [task_result({"id": "fixture-new", "title": "backend-only"})]
-    )
-    service, _ = task_service(tmp_path, boundary)
-    arguments = {
-        "project_id": "fixture",
-        "title": "typed title",
-        "description": "private create description",
-        "issue_type": "feature",
-        "priority": 1,
-        "labels": ["area:agentctl", "lane:agents"],
-        "parent_task_id": "fixture-parent",
-        "dependencies": [
-            {"relation": "depends-on", "task_id": "fixture-blocker"},
-            {"relation": "relates-to", "task_id": "fixture-peer"},
-        ],
-    }
-
-    first = service.execute(
-        operation="task.create",
-        arguments=arguments,
-        principal="agent-control",
-        mutation_id="request-1",
-    )
-    replayed = service.execute(
-        operation="task.create",
-        arguments=arguments,
-        principal="agent-control",
-        mutation_id="request-1",
-    )
-
-    assert first == replayed
-    assert first["task_ref"] == "sinnix://projects/fixture/beads/fixture-new"
-    assert first["owner_evidence"] == {
-        "owner": "task-backend",
-        "state": "applied",
-        "attempts": 1,
-        "result": {
-            "sha256": TaskMutationJournal(
-                TaskAuthority.load(tmp_path / "task-state", "fixture").root
-                / TASK_MUTATION_JOURNAL_DIRECTORY
-            )
-            .records()[0]
-            .result["sha256"],
-            "bytes": len(
-                json.dumps(
-                    {"id": "fixture-new", "title": "backend-only"},
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode()
-            ),
-            "created_task_id": "fixture-new",
-        },
-        "failure": None,
-    }
-    assert boundary.calls == [
-        (
-            (
-                "--json",
-                "create",
-                "--title",
-                "typed title",
-                "--description",
-                "private create description",
-                "--type",
-                "feature",
-                "--priority",
-                "1",
-                "--labels",
-                "area:agentctl,lane:agents",
-                "--parent",
-                "fixture-parent",
-                "--deps",
-                "depends-on:fixture-blocker,relates-to:fixture-peer",
-            ),
-            tmp_path,
-        )
-    ]
-    journal = TaskMutationJournal(
-        TaskAuthority.load(tmp_path / "task-state", "fixture").root
-        / TASK_MUTATION_JOURNAL_DIRECTORY
-    )
-    public_record = next(journal.records_root.glob("*.json"))
-    assert "private create description" not in public_record.read_text()
-
-
-def test_task_create_uses_the_real_beads_result_shape_and_replays_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Production boundary: current bd emits one object for create, and replay must not create twice."""
-    isolate_job_scratch(monkeypatch, tmp_path)
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    write_adapter(project_root)
-    task_state_root = tmp_path / "task-state"
-    authority_root = task_state_root / "fixture"
-    authority_root.mkdir(parents=True)
-    beads_environment = {
-        **os.environ,
-        "HOME": str(authority_root),
-        "XDG_CONFIG_HOME": str(authority_root / ".config"),
-        "XDG_DATA_HOME": str(authority_root / ".local" / "share"),
-        "XDG_STATE_HOME": str(authority_root / ".local" / "state"),
-    }
-    subprocess.run(
-        [
-            "bd",
-            "init",
-            "--skip-agents",
-            "--skip-hooks",
-            "--non-interactive",
-            "--prefix",
-            "fixture",
-        ],
-        cwd=authority_root,
-        check=True,
-        capture_output=True,
-        text=True,
-        env=beads_environment,
-    )
-    activate_task_authority(project_root, task_state_root, rows=0)
-    service = TaskService(
-        ProjectCatalog([project_root]),
-        generic_jobs(tmp_path / "jobs"),
-        BeadsCommandBoundary(execution=OwnerExecution(beads_environment)),
-        task_state_root=task_state_root,
-    )
-    arguments = {
-        "project_id": "fixture",
-        "title": "real boundary task",
-        "description": "created through the production bd boundary",
-        "issue_type": "task",
-        "priority": 2,
-        "labels": [],
-        "dependencies": [],
-    }
-
-    first = service.execute(
-        operation="task.create",
-        arguments=arguments,
-        principal="agent-control",
-        mutation_id="real-boundary-request",
-    )
-    replayed = service.execute(
-        operation="task.create",
-        arguments=arguments,
-        principal="agent-control",
-        mutation_id="real-boundary-request",
-    )
-    exported = service.execute(
-        operation="task.snapshot",
-        arguments={"project_id": "fixture"},
-        principal="observer",
-    )
-
-    assert first == replayed
-    assert first["task_ref"].startswith("sinnix://projects/fixture/beads/fixture-")
-    assert (
-        first["owner_evidence"]["result"]["created_task_id"]
-        == first["task_ref"].rsplit("/", 1)[1]
-    )
-    assert [row["title"] for row in exported["result"]] == ["real boundary task"]
-
-
-def test_task_create_outage_replays_without_dirtying_the_registered_checkout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Anti-vacuity: creation stays pending across an outage, then replays once from the private intent."""
-    isolate_job_scratch(monkeypatch, tmp_path)
-    write_adapter(tmp_path)
-    initialize_git_checkout(tmp_path)
-    task_state_root = tmp_path.parent / f"task-state-{tmp_path.name}"
-    source_database = (
-        tmp_path.parent / f"legacy-task-source-{tmp_path.name}" / ".beads" / "dolt"
-    )
-    activate_task_authority(tmp_path, task_state_root, source_database=source_database)
-    arguments = {
-        "project_id": "fixture",
-        "title": "replayed task",
-        "description": "private replay description",
-        "issue_type": "task",
-        "priority": 2,
-        "labels": [],
-        "dependencies": [],
-    }
-    unavailable = ExecutionResult(
-        command=(),
-        exit_status=None,
-        stdout=b"",
-        stderr=b"",
-        failure_class="command_unavailable:FileNotFoundError",
-    )
-    first_boundary = FakeTaskBoundary([unavailable])
-    first = TaskService(
-        ProjectCatalog([tmp_path]),
-        generic_jobs(tmp_path.parent / f"first-jobs-{tmp_path.name}"),
-        first_boundary,
-        task_state_root=task_state_root,
-    )
-
-    pending = first.execute(
-        operation="task.create",
-        arguments=arguments,
-        principal="agent-control",
-        mutation_id="request-1",
-    )
-
-    assert pending["owner_evidence"] == {
-        "owner": "task-backend",
-        "state": "pending",
-        "attempts": 1,
-        "result": None,
-        "failure": {"code": "OWNER_UNAVAILABLE"},
-    }
-    assert "task_ref" not in pending
-    authority = TaskAuthority.load(task_state_root, "fixture")
-    journal = TaskMutationJournal(authority.root / TASK_MUTATION_JOURNAL_DIRECTORY)
-    assert (
-        "private replay description"
-        not in next(journal.records_root.glob("*.json")).read_text()
-    )
-    assert (
-        subprocess.run(
-            ["git", "-C", str(tmp_path), "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-        == ""
-    )
-
-    second_boundary = FakeTaskBoundary([task_result({"id": "fixture-replayed"})])
-    receipts = reconcile_task_mutations(
-        journal=journal, authority=authority, cwd=tmp_path, boundary=second_boundary
-    )
-    restarted = TaskService(
-        ProjectCatalog([tmp_path]),
-        generic_jobs(tmp_path.parent / f"second-jobs-{tmp_path.name}"),
-        second_boundary,
-        task_state_root=task_state_root,
-    )
-    replayed = restarted.execute(
-        operation="task.create",
-        arguments=arguments,
-        principal="agent-control",
-        mutation_id="request-1",
-    )
-
-    assert receipts[0]["state"] == "applied"
-    assert replayed["task_ref"] == "sinnix://projects/fixture/beads/fixture-replayed"
-    assert len(first_boundary.calls) == 1
-    assert len(second_boundary.calls) == 1
-    assert (
-        subprocess.run(
-            ["git", "-C", str(tmp_path), "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-        == ""
-    )
-
-
-@pytest.mark.parametrize(
-    "arguments",
-    (
-        {
-            "project_id": "missing",
-            "title": "title",
-            "description": "body",
-            "issue_type": "task",
-            "priority": 2,
-            "labels": [],
-            "dependencies": [],
-        },
-        {
-            "project_id": "fixture",
-            "title": "title",
-            "description": "body",
-            "issue_type": "unknown",
-            "priority": 2,
-            "labels": [],
-            "dependencies": [],
-        },
-        {
-            "project_id": "fixture",
-            "title": "title",
-            "description": "body",
-            "issue_type": "task",
-            "priority": True,
-            "labels": [],
-            "dependencies": [],
-        },
-        {
-            "project_id": "fixture",
-            "title": "title",
-            "description": "body",
-            "issue_type": "task",
-            "priority": 2,
-            "labels": ["bad,label"],
-            "dependencies": [],
-        },
-        {
-            "project_id": "fixture",
-            "title": "title",
-            "description": "body",
-            "issue_type": "task",
-            "priority": 2,
-            "labels": [],
-            "parent_task_id": "--invalid",
-            "dependencies": [],
-        },
-        {
-            "project_id": "fixture",
-            "title": "title",
-            "description": "body",
-            "issue_type": "task",
-            "priority": 2,
-            "labels": [],
-            "dependencies": [{"relation": "not-a-relation", "task_id": "fixture-1"}],
-        },
-    ),
-)
-def test_task_create_rejects_invalid_project_parent_and_typed_input(
-    tmp_path: Path, arguments: dict[str, object], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    isolate_job_scratch(monkeypatch, tmp_path)
-    service, boundary = task_service(tmp_path)
-
-    with pytest.raises(TaskError) as error:
-        service.execute(
-            operation="task.create",
-            arguments=arguments,
-            principal="agent-control",
-            mutation_id="request-1",
-        )
-
-    assert error.value.code == ErrorCode.INVALID_ARGUMENT
-    assert not boundary.calls
-
-
-def test_task_create_relation_failure_is_a_failed_journalled_receipt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    isolate_job_scratch(monkeypatch, tmp_path)
-    service, boundary = task_service(
-        tmp_path,
-        FakeTaskBoundary(
-            [
-                ExecutionResult(
-                    command=(), exit_status=1, stdout=b"", stderr=b"parent missing"
-                )
-            ]
-        ),
-    )
-    response = SinnixdService(ProjectCatalog([tmp_path]), tasks=service).dispatch(
-        request(
-            "task.create",
-            "task-backend",
-            {
-                "project_id": "fixture",
-                "title": "relation failure",
-                "description": "body",
-                "issue_type": "task",
-                "priority": 2,
-                "labels": [],
-                "parent_task_id": "fixture-parent",
-                "dependencies": [
-                    {"relation": "depends-on", "task_id": "fixture-blocker"}
-                ],
-            },
-            "agent-control",
-            idempotency_key="request-1",
-        )
-    )
-
-    assert not response.ok and response.error is not None
-    assert response.error.code == ErrorCode.OPERATION_FAILED
-    record = TaskMutationJournal(
-        TaskAuthority.load(tmp_path / "task-state", "fixture").root
-        / TASK_MUTATION_JOURNAL_DIRECTORY
-    ).records()[0]
-    assert record.state == "failed"
-    assert record.failure == {"code": "OPERATION_FAILED"}
-    assert boundary.calls == [
-        (
-            (
-                "--json",
-                "create",
-                "--title",
-                "relation failure",
-                "--description",
-                "body",
-                "--type",
-                "task",
-                "--priority",
-                "2",
-                "--parent",
-                "fixture-parent",
-                "--deps",
-                "depends-on:fixture-blocker",
-            ),
-            tmp_path,
-        )
-    ]
-
-
-def test_task_mutation_outage_survives_restart_and_reconciles_without_git_dirtying(
-    tmp_path: Path,
-) -> None:
-    """Anti-vacuity: an unavailable command becomes pending, then a new service replays it exactly once."""
-    write_adapter(tmp_path)
-    initialize_git_checkout(tmp_path)
-    task_state_root = tmp_path.parent / "task-state"
-    source_database = tmp_path.parent / "legacy-task-source" / ".beads" / "dolt"
-    activate_task_authority(tmp_path, task_state_root, source_database=source_database)
-    unavailable = ExecutionResult(
-        command=(),
-        exit_status=None,
-        stdout=b"",
-        stderr=b"",
-        failure_class="command_unavailable:FileNotFoundError",
-    )
-    first_boundary = FakeTaskBoundary([unavailable])
-    first = TaskService(
-        ProjectCatalog([tmp_path]),
-        generic_jobs(tmp_path.parent / "first-jobs"),
-        first_boundary,
-        task_state_root=task_state_root,
-    )
-    payload = {
-        "project_id": "fixture",
-        "task_id": "fixture-1",
-        "text": "private replay payload",
-    }
-
-    pending = first.execute(
-        operation="task.note",
-        arguments=payload,
-        principal="agent-control",
-        mutation_id="request-1",
-    )
-
-    assert pending["result"]["state"] == "pending"
-    assert pending["result"]["failure"] == {"code": "OWNER_UNAVAILABLE"}
-    authority = TaskAuthority.load(task_state_root, "fixture")
-    journal = TaskMutationJournal(authority.root / TASK_MUTATION_JOURNAL_DIRECTORY)
-    public_records = list(journal.records_root.glob("*.json"))
-    assert len(public_records) == 1
-    assert "private replay payload" not in public_records[0].read_text()
-    assert (
-        subprocess.run(
-            ["git", "-C", str(tmp_path), "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-        == ""
-    )
-
-    second_boundary = FakeTaskBoundary([task_result({"reconciled": True})])
-    receipts = reconcile_task_mutations(
-        journal=journal, authority=authority, cwd=tmp_path, boundary=second_boundary
-    )
-    restarted = TaskService(
-        ProjectCatalog([tmp_path]),
-        generic_jobs(tmp_path.parent / "restart-jobs"),
-        second_boundary,
-        task_state_root=task_state_root,
-    )
-    replayed = restarted.execute(
-        operation="task.note",
-        arguments=payload,
-        principal="agent-control",
-        mutation_id="request-1",
-    )
-
-    assert receipts[0]["state"] == "applied"
-    assert replayed["result"]["state"] == "applied"
-    assert len(first_boundary.calls) == 1
-    assert len(second_boundary.calls) == 1
-    assert not list(journal.intents_root.glob("*.json"))
-    assert (
-        subprocess.run(
-            ["git", "-C", str(tmp_path), "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-        == ""
-    )
-
-
-def test_task_completion_is_idempotent_by_project_task_and_merge_sha(
-    tmp_path: Path,
-) -> None:
-    service, boundary = task_service(
-        tmp_path, FakeTaskBoundary([task_result({"closed": True})])
-    )
-    arguments = {
-        "project_id": "fixture",
-        "task_id": "fixture-1",
-        "merge_sha": "b" * 40,
-        "reason": "merged",
-    }
-
-    first = service.execute(
-        operation="task.complete",
-        arguments=arguments,
-        principal="agent-control",
-        mutation_id="request-1",
-    )
-    replayed = service.execute(
-        operation="task.complete",
-        arguments=arguments,
-        principal="agent-control",
-        mutation_id="request-2",
-    )
-
-    assert first["result"]["state"] == "applied"
-    assert replayed["result"]["state"] == "applied"
-    assert len(boundary.calls) == 1
-    with pytest.raises(TaskError, match="idempotency identity"):
-        service.execute(
-            operation="task.complete",
-            arguments={**arguments, "reason": "conflicting evidence"},
-            principal="agent-control",
-            mutation_id="request-3",
-        )
-
-
-def test_task_mutation_distinct_request_ids_apply_independently(tmp_path: Path) -> None:
-    service, boundary = task_service(
-        tmp_path,
-        FakeTaskBoundary([task_result({"attempt": 1}), task_result({"attempt": 2})]),
-    )
-
-    first = service.execute(
-        operation="task.note",
-        arguments={"project_id": "fixture", "task_id": "fixture-1", "text": "first"},
-        principal="agent-control",
-        mutation_id="request-1",
-    )
-    second = service.execute(
-        operation="task.note",
-        arguments={"project_id": "fixture", "task_id": "fixture-1", "text": "second"},
-        principal="agent-control",
-        mutation_id="request-2",
-    )
-
-    assert first["result"]["state"] == "applied"
-    assert second["result"]["state"] == "applied"
-    assert len(boundary.calls) == 2
-
-
-def test_task_reconcile_returns_a_durable_fixed_command_receipt(tmp_path: Path) -> None:
-    """Anti-vacuity: a slow sync must not run through the 30-second task boundary."""
-    write_adapter(tmp_path)
-    systemd = FakeSystemdJobs()
-    jobs = generic_jobs(tmp_path, systemd)
-    boundary = FakeTaskBoundary([task_result({"ok": True})])
-    task_state_root = tmp_path / "task-state"
-    activate_task_authority(tmp_path, task_state_root)
-    tasks = TaskService(
-        ProjectCatalog([tmp_path]), jobs, boundary, task_state_root=task_state_root
-    )
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs, tasks=tasks)
-
-    claimed = tasks.execute(
-        operation="task.claim",
-        arguments={"project_id": "fixture", "task_id": "fixture-1"},
-        principal="agent-control",
-        mutation_id="request-1",
-    )
-    response = service.dispatch(
-        request(
-            "task.reconcile", "task-backend", {"project_id": "fixture"}, "agent-control"
-        )
-    )
-
-    assert claimed["result"]["state"] == "applied"
-    assert response.ok and response.payload is not None
-    payload = response.payload.inline
-    assert payload["project_id"] == "fixture"
-    assert payload["operation"] == "task.reconcile"
-    receipt = payload["result"]
-    assert isinstance(receipt, dict)
-    job_id = receipt["job_id"]
-    assert isinstance(job_id, str)
-    lock_path = task_state_root / "fixture" / "sinnixd-task-mutations.lock"
-    assert boundary.lock_paths == [None]
-    authority_root = task_state_root / "fixture"
-    authority_root / ".beads" / "dolt"
-    assert boundary.calls == [
-        (
-            (
-                "--json",
-                "update",
-                "fixture-1",
-                "--claim",
-            ),
-            tmp_path,
-        )
-    ]
-    assert len(systemd.started) == 1
-    launched = systemd.started[0]
-    assert launched["unit"] == receipt["unit"]
-    assert launched["command"] == (
-        FLOCK_EXECUTABLE,
-        "--exclusive",
-        str(lock_path),
-        "sinnixd-task-reconcile",
-        "--project-id",
-        "fixture",
-        "--project-root",
-        str(tmp_path),
-        "--task-state-root",
-        str(task_state_root),
-    )
-    assert launched["working_directory"] == str(tmp_path)
-    assert launched["timeout_seconds"] == DEFAULT_TIMEOUT_SECONDS
-    environment = launched["environment"]
-    assert isinstance(environment, dict)
-    assert environment["BEADS_DIR"] == str(authority_root / ".beads")
-    assert environment["SINNIXD_JOB_ID"] == job_id
-    assert environment["SINNIXD_PROJECT_ID"] == "fixture"
-    assert environment["SINNIXD_OPERATION"] == "task.reconcile"
-    record = jobs.store.load(job_id)
-    assert record.spec.project_id == "fixture"
-    assert record.spec.operation == "task.reconcile"
-    assert record.spec.to_dict()["command"]["display"] == "synthetic foreground command"
-
-
-def test_task_snapshot_parses_jsonl_without_writing_a_store(tmp_path: Path) -> None:
-    snapshot = ExecutionResult(
-        command=(),
-        exit_status=0,
-        stdout=b'{"id":"fixture-1"}\n{"id":"fixture-2"}\n',
-        stderr=b"",
-    )
-    service, boundary = task_service(tmp_path, FakeTaskBoundary([snapshot]))
-
-    result = service.execute(
-        operation="task.snapshot",
-        arguments={"project_id": "fixture"},
-        principal="observer",
-    )
-
-    assert result == {
-        "project_id": "fixture",
-        "operation": "task.snapshot",
-        "result": [{"id": "fixture-1"}, {"id": "fixture-2"}],
-    }
-    authority_root = tmp_path / "task-state" / "fixture"
-    authority_root / ".beads" / "dolt"
-    assert boundary.calls == [
-        (
-            ("--json", "--readonly", "export"),
-            tmp_path,
-        )
-    ]
-
-
-def test_task_mutations_are_serialized_per_project(tmp_path: Path) -> None:
-    entered = threading.Event()
-    release = threading.Event()
-    boundary = FakeTaskBoundary(
-        [task_result({"ok": 1}), task_result({"ok": 2})],
-        entered=entered,
-        release=release,
-    )
-    write_adapter(tmp_path)
-    task_state_root = tmp_path / "task-state"
-    activate_task_authority(tmp_path, task_state_root)
-    first_service = TaskService(
-        ProjectCatalog([tmp_path]),
-        generic_jobs(tmp_path / "first-jobs"),
-        boundary,
-        task_state_root=task_state_root,
-    )
-    second_service = TaskService(
-        ProjectCatalog([tmp_path]),
-        generic_jobs(tmp_path / "second-jobs"),
-        boundary,
-        task_state_root=task_state_root,
-    )
-    errors: list[BaseException] = []
-
-    def mutate(service: TaskService, task_id: str) -> None:
-        try:
-            service.execute(
-                operation="task.claim",
-                arguments={"project_id": "fixture", "task_id": task_id},
-                principal="agent-control",
-                mutation_id=f"request-{task_id}",
-            )
-        except BaseException as error:
-            errors.append(error)
-
-    first = threading.Thread(target=mutate, args=(first_service, "fixture-1"))
-    second = threading.Thread(target=mutate, args=(second_service, "fixture-2"))
-    first.start()
-    assert entered.wait(1), "first task mutation did not reach the backend"
-    second.start()
-    assert len(boundary.calls) == 1
-    release.set()
-    first.join(1)
-    second.join(1)
-
-    assert not errors
-    assert boundary.max_active == 1
-    assert len(boundary.calls) == 2
-
-
-def test_divergent_worktrees_share_canonical_authority_and_ignore_stale_jsonl(
-    tmp_path: Path,
-) -> None:
-    repository = tmp_path / "repository"
-    repository.mkdir()
-    write_adapter(repository)
-    (repository / "modules" / "fixture.nix").write_text("{}\n")
-    snapshots = repository / ".beads" / "issues.jsonl"
-    snapshots.parent.mkdir()
-    snapshots.write_text('{"id":"fixture-1","status":"open"}\n')
-    initialize_git_checkout(repository)
-    subprocess.run(
-        ["git", "-C", str(repository), "branch", "stale-checkout"], check=True
-    )
-    snapshots.write_text('{"id":"fixture-1","status":"closed"}\n')
-    subprocess.run(
-        ["git", "-C", str(repository), "add", ".beads/issues.jsonl"], check=True
-    )
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repository),
-            "-c",
-            "user.name=Fixture",
-            "-c",
-            "user.email=fixture@example.test",
-            "commit",
-            "--quiet",
-            "-m",
-            "newer snapshot",
-        ],
-        check=True,
-    )
-    stale_checkout = tmp_path / "stale-checkout"
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repository),
-            "worktree",
-            "add",
-            "--quiet",
-            str(stale_checkout),
-            "stale-checkout",
-        ],
-        check=True,
-    )
-    assert (
-        snapshots.read_text()
-        != (stale_checkout / ".beads" / "issues.jsonl").read_text()
-    )
-
-    task_state_root = tmp_path / "task-state"
-    database = activate_task_authority(repository, task_state_root)
-    boundary = CanonicalTaskBoundary(
-        {"fixture-1": {"id": "fixture-1", "status": "closed"}}
-    )
-    primary = TaskService(
-        ProjectCatalog([repository]),
-        generic_jobs(tmp_path / "primary-jobs"),
-        boundary,
-        task_state_root=task_state_root,
-    )
-    stale = TaskService(
-        ProjectCatalog([stale_checkout]),
-        generic_jobs(tmp_path / "stale-jobs"),
-        boundary,
-        task_state_root=task_state_root,
-    )
-
-    primary.execute(
-        operation="task.claim",
-        arguments={"project_id": "fixture", "task_id": "fixture-1"},
-        principal="agent-control",
-        mutation_id="claim-fixture-1",
-    )
-    observed = stale.execute(
-        operation="task.snapshot",
-        arguments={"project_id": "fixture"},
-        principal="observer",
-    )
-
-    assert observed["result"] == [{"id": "fixture-1", "status": "claimed"}]
-    assert boundary.databases == [database, database]
-    assert [cwd for _, cwd in boundary.calls] == [repository, stale_checkout]
-    assert (
-        json.loads((stale_checkout / ".beads" / "issues.jsonl").read_text())["status"]
-        == "open"
-    )
-
-
-def test_task_authority_refuses_unverified_or_dual_authority(tmp_path: Path) -> None:
-    write_adapter(tmp_path)
-    task_state_root = tmp_path / "task-state"
-    boundary = FakeTaskBoundary([task_result({"id": "fixture-1"})])
-    tasks = TaskService(
-        ProjectCatalog([tmp_path]),
-        generic_jobs(tmp_path),
-        boundary,
-        task_state_root=task_state_root,
-    )
-    request = {
-        "operation": "task.snapshot",
-        "arguments": {"project_id": "fixture"},
-        "principal": "observer",
-    }
-
-    with pytest.raises(TaskError, match="not activated") as missing:
-        tasks.execute(**request)
-    assert missing.value.code == ErrorCode.OWNER_UNAVAILABLE
-
-    database = activate_task_authority(tmp_path, task_state_root)
-    receipt_path = task_state_root / "fixture" / "authority.json"
-    receipt = json.loads(receipt_path.read_text())
-    receipt["verification"]["destination_rows"] = 2
-    receipt_path.write_text(json.dumps(receipt))
-    with pytest.raises(TaskError, match="verification is incomplete") as unverified:
-        tasks.execute(**request)
-    assert unverified.value.code == ErrorCode.OPERATION_FAILED
-
-    receipt["verification"]["destination_rows"] = 1
-    receipt_path.write_text(json.dumps(receipt))
-    source_database = tmp_path / ".beads" / "dolt"
-    source_database.mkdir()
-    with pytest.raises(TaskError, match="ambiguous") as dual:
-        tasks.execute(**request)
-    assert dual.value.code == ErrorCode.OPERATION_FAILED
-    assert database.is_dir()
-    assert not boundary.calls
-
-
-@pytest.mark.parametrize(
-    ("backend_result", "expected_code"),
-    (
-        (
-            ExecutionResult(
-                command=(), exit_status=None, stdout=b"", stderr=b"", timed_out=True
-            ),
-            "OWNER_UNAVAILABLE",
-        ),
-        (
-            ExecutionResult(
-                command=(),
-                exit_status=0,
-                stdout=b"x" * (MAX_TASK_OUTPUT_BYTES + 1),
-                stderr=b"",
-            ),
-            "RESOURCE_EXHAUSTED",
-        ),
-        (
-            ExecutionResult(
-                command=(), exit_status=1, stdout=b"", stderr=b"private backend detail"
-            ),
-            "OPERATION_FAILED",
-        ),
-        (
-            ExecutionResult(command=(), exit_status=0, stdout=b"not-json", stderr=b""),
-            "RESULT_INVALID",
-        ),
-    ),
-)
-def test_task_backend_failures_map_to_clean_error_envelopes(
-    tmp_path: Path, backend_result: ExecutionResult, expected_code: str
-) -> None:
-    write_adapter(tmp_path)
-    task_state_root = tmp_path / "task-state"
-    activate_task_authority(tmp_path, task_state_root)
-    tasks = TaskService(
-        ProjectCatalog([tmp_path]),
-        generic_jobs(tmp_path),
-        FakeTaskBoundary([backend_result]),
-        task_state_root=task_state_root,
-    )
-    service = SinnixdService(ProjectCatalog([tmp_path]), tasks=tasks)
-
-    response = service.dispatch(
-        request(
-            "task.snapshot",
-            "task-backend",
-            {"project_id": "fixture"},
-            "observer",
-        )
-    )
-
-    assert response.error is not None
-    assert response.error.code.value == expected_code
-    assert "private backend detail" not in response.error.message
-
-
-def test_task_rejects_unauthorized_principals_and_invalid_arguments(
-    tmp_path: Path,
-) -> None:
-    write_adapter(tmp_path)
-    task_state_root = tmp_path / "task-state"
-    activate_task_authority(tmp_path, task_state_root)
-    tasks = TaskService(
-        ProjectCatalog([tmp_path]),
-        generic_jobs(tmp_path),
-        FakeTaskBoundary([task_result({"ok": True})]),
-        task_state_root=task_state_root,
-    )
-    service = SinnixdService(ProjectCatalog([tmp_path]), tasks=tasks)
-
-    denied = service.dispatch(
-        request(
-            "task.claim",
-            "task-backend",
-            {"project_id": "fixture", "task_id": "fixture-1"},
-            "observer",
-        )
-    )
-    invalid = service.dispatch(
-        request(
-            "task.get",
-            "task-backend",
-            {"project_id": "fixture", "task_id": "--bad", "extra": True},
-            "observer",
-        )
-    )
-    missing_request_id = service.dispatch(
-        request(
-            "task.claim",
-            "task-backend",
-            {"project_id": "fixture", "task_id": "fixture-1"},
-            "agent-control",
-        )
-    )
-    unknown = service.dispatch(
-        request("task.list", "task-backend", {"project_id": "missing"}, "observer")
-    )
-
-    assert denied.error is not None and denied.error.code.value == "POLICY_DENIED"
-    assert invalid.error is not None and invalid.error.code.value == "INVALID_ARGUMENT"
-    assert (
-        missing_request_id.error is not None
-        and missing_request_id.error.code.value == "INVALID_ARGUMENT"
-    )
-    assert unknown.error is not None and unknown.error.code.value == "INVALID_ARGUMENT"
-    assert not tasks.boundary.calls
 
 
 def start_server(
@@ -4629,7 +2593,6 @@ def test_scheduled_operation_registers_restart_safe_timer_and_preserves_provenan
     )
     assert response.ok
     record = GenericJobStore(state_root).load(response.payload.inline["job_id"])
-    assert record.spec.cache_key is None
     assert record.spec.dimensions == {
         "trigger": "systemd-timer",
         "schedule_id": "fixture:check",
@@ -9994,16 +7957,6 @@ def test_every_operation_has_a_declared_response_budget() -> None:
     """A new dispatch branch without a budget is a red test, not a 5s fallback."""
     budgeted = set(CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS) | WAIT_OPERATIONS
     assert budgeted == SUPPORTED_OPERATIONS
-    # The registry itself must track the dispatch branches in the source.
-    import inspect
-    import re as _re
-
-    import sinnixd.service as service_module
-
-    dispatched = set(
-        _re.findall(r'if operation == "([^"]+)"', inspect.getsource(service_module))
-    )
-    assert dispatched == SUPPORTED_OPERATIONS
     for operation, timeout in CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS.items():
         assert timeout >= 5.0
         assert (
@@ -10398,118 +8351,16 @@ def test_job_owner_boundary_filters_before_pagination_and_denies_cross_principal
     assert agent_denied.error is not None
     assert agent_denied.error.code is ErrorCode.POLICY_DENIED
 
-    seen: list[str] = []
-    cursor: str | None = None
-    while True:
-        arguments: dict[str, object] = {"limit": 1}
-        if cursor is not None:
-            arguments["cursor"] = cursor
-        page = service.dispatch(
-            request("job.list", "systemd-jobs", arguments, principal="operator")
-        )
-        assert page.ok and page.payload is not None
-        seen.extend(row["job_id"] for row in page.payload.inline["jobs"])
-        cursor = page.payload.inline["next_cursor"]
-        if cursor is not None and len(seen) == 1:
-            rebound = service.dispatch(
-                request(
-                    "job.list",
-                    "systemd-jobs",
-                    {"limit": 1, "cursor": cursor},
-                    principal="agent-control",
-                )
-            )
-            assert rebound.error is not None
-            assert rebound.error.code is ErrorCode.INVALID_ARGUMENT
-            changed_filter = service.dispatch(
-                request(
-                    "job.list",
-                    "systemd-jobs",
-                    {"limit": 1, "cursor": cursor, "active_only": True},
-                    principal="operator",
-                )
-            )
-            assert changed_filter.error is not None
-            assert changed_filter.error.code is ErrorCode.INVALID_ARGUMENT
-        if cursor is None:
-            break
+    listing = service.dispatch(
+        request("job.list", "systemd-jobs", {"limit": 100}, principal="operator")
+    )
+    assert listing.ok and listing.payload is not None
+    seen = [row["job_id"] for row in listing.payload.inline["jobs"]]
     assert set(seen) == {agent_job, *operator_jobs}
     assert len(seen) == 3
     assert service.dispatch(
         request("job.get", "systemd-jobs", {"job_id": agent_job}, principal="operator")
     ).ok
-
-
-def test_declared_cache_identities_remain_controllable_by_their_principal(
-    tmp_path: Path,
-) -> None:
-    """A coalesced or reused declared ID must remain usable by its owning principal."""
-    project_root = tmp_path / "project"
-    write_adapter(project_root)
-    descriptor = project_root / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace('exclusive_keys = ["fixture:check"]\n', "")
-    )
-    initialize_git_checkout(project_root)
-    systemd = FakeSystemdJobs()
-    service = SinnixdService(
-        ProjectCatalog([project_root]), jobs=generic_jobs(tmp_path, systemd)
-    )
-
-    def start(principal: str) -> dict[str, object]:
-        response = service.dispatch(
-            request(
-                "job.start",
-                "systemd-jobs",
-                {"project_id": "fixture", "operation": "check"},
-                principal=principal,
-            )
-        )
-        assert response.ok and response.payload is not None
-        return response.payload.inline
-
-    operator_first = start("operator")
-    operator_coalesced = start("operator")
-    agent_first = start("agent-control")
-    agent_coalesced = start("agent-control")
-
-    assert operator_coalesced["job_id"] == operator_first["job_id"]
-    assert operator_coalesced["coalesced"]
-    assert agent_coalesced["job_id"] == agent_first["job_id"]
-    assert agent_coalesced["coalesced"]
-    assert agent_first["job_id"] != operator_first["job_id"]
-    assert len(systemd.started) == 2
-
-    systemd.properties = {
-        "LoadState": "loaded",
-        "ActiveState": "inactive",
-        "Result": "success",
-        "ExecMainStatus": "0",
-    }
-    for principal, launch in (
-        ("operator", operator_first),
-        ("agent-control", agent_first),
-    ):
-        job_id = launch["job_id"]
-        assert isinstance(job_id, str)
-        for operation, arguments in (
-            ("job.get", {"job_id": job_id}),
-            ("job.wait", {"job_id": job_id, "timeout_seconds": 1}),
-            ("job.logs", {"job_id": job_id}),
-            ("job.result", {"job_id": job_id}),
-            ("job.cancel", {"job_id": job_id}),
-        ):
-            response = service.dispatch(
-                request(operation, "systemd-jobs", arguments, principal=principal)
-            )
-            assert response.ok
-
-    operator_reused = start("operator")
-    agent_reused = start("agent-control")
-    assert operator_reused["job_id"] == operator_first["job_id"]
-    assert operator_reused["reused"]
-    assert agent_reused["job_id"] == agent_first["job_id"]
-    assert agent_reused["reused"]
 
 
 def test_real_user_systemd_service_cgroup_cancels_descendants(tmp_path: Path) -> None:
@@ -10561,159 +8412,6 @@ def test_real_user_systemd_service_cgroup_cancels_descendants(tmp_path: Path) ->
                 UserSystemdJobs().stop(str(started["unit"]))
             except SystemdJobError:
                 pass
-
-
-def test_source_scoped_owner_adapter_is_registered_and_forwards_exact_response(
-    tmp_path: Path,
-) -> None:
-    write_owner_adapter(tmp_path)
-    source = SourceBinding(
-        source_ref=SinnixRef.parse("sinnix://polylogue/archive"),
-        generation="fixture-generation",
-        root_digest="sha256:" + "1" * 64,
-    )
-    request_value = request(
-        "polylogue.archive.status",
-        "polylogue-archive",
-        {"scope": "archive"},
-    )
-    owner_response = ResponseEnvelope(
-        request_id=request_value.request_id,
-        correlation_id=request_value.correlation_id,
-        owner="polylogue-archive",
-        payload=OpaquePayload.bounded({"archive": {"sessions": 2}}),
-        source_bindings=(source,),
-    )
-    adapters = FakeOwnerAdapters(owner_response)
-    service = SinnixdService(ProjectCatalog([tmp_path]), owner_adapters=adapters)
-
-    response = service.dispatch(request_value)
-
-    assert response == owner_response
-    assert service.owners.resolve("polylogue.archive.status").source_scoped
-    assert adapters.calls[0]["adapter"].source_ref == source.source_ref
-    assert adapters.calls[0]["project"].project_id == "fixture"
-
-    wrong_owner = service.dispatch(
-        request("polylogue.archive.status", "wrong-owner", {"scope": "archive"})
-    )
-    assert wrong_owner.error is not None
-    assert wrong_owner.error.code.value == "AUTHORITY_MISMATCH"
-
-
-def test_owner_adapters_reject_duplicate_authority_namespaces(tmp_path: Path) -> None:
-    first = tmp_path / "first"
-    second = tmp_path / "second"
-    write_owner_adapter(first)
-    write_owner_adapter(second)
-    descriptor = second / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace('id = "fixture"', 'id = "second"')
-    )
-
-    with pytest.raises(ProjectConfigError, match="duplicate owner namespace"):
-        SinnixdService(ProjectCatalog([first, second]))
-
-
-def test_declared_owner_adapter_runs_fixed_command_and_enforces_source_binding(
-    tmp_path: Path,
-) -> None:
-    write_owner_adapter(tmp_path)
-    project, adapter = ProjectCatalog([tmp_path]).owner_adapter(
-        "polylogue.archive.status"
-    )
-    source = SourceBinding(
-        source_ref=SinnixRef.parse("sinnix://polylogue/archive"),
-        generation="fixture-generation",
-        root_digest="sha256:" + "2" * 64,
-    )
-    request_value = request(
-        "polylogue.archive.status",
-        "polylogue-archive",
-        {"scope": "archive", "expected_source_binding": source.to_dict()},
-    )
-    response = ResponseEnvelope(
-        request_id=request_value.request_id,
-        correlation_id=request_value.correlation_id,
-        owner="polylogue-archive",
-        payload=OpaquePayload.bounded({"archive": {"sessions": 2}}),
-        source_bindings=(source,),
-    )
-    execution = FakeExecution(
-        ExecutionResult(
-            command=(),
-            exit_status=0,
-            stdout=json.dumps(response.to_dict()).encode(),
-            stderr=b"",
-        )
-    )
-
-    result = DeclaredOwnerAdapters(execution).call(
-        project=project,
-        adapter=adapter,
-        request=request_value,
-    )
-
-    command, profile = execution.calls[0]
-    forwarded = json.loads(profile.stdin_bytes)
-    assert result == response
-    assert profile.route.environment_profile is EnvironmentProfile.USER_BUS
-    assert command[:7] == (
-        "/run/current-system/sw/bin/systemd-run",
-        "--user",
-        "--quiet",
-        "--collect",
-        "--wait",
-        "--pipe",
-        f"--unit=sinnixd-owner-{request_value.request_id}.service",
-    )
-    assert command[-3:] == ("fixture-env", "--command", "polylogue-agentctl-adapter")
-    assert forwarded["arguments"] == {"scope": "archive"}
-
-    wrong_precondition = request(
-        "polylogue.archive.status",
-        "polylogue-archive",
-        {
-            "scope": "archive",
-            "expected_source_binding": {
-                **source.to_dict(),
-                "source_ref": "sinnix://polylogue/other",
-            },
-        },
-    )
-    with pytest.raises(OwnerAdapterError, match="different source"):
-        DeclaredOwnerAdapters(execution).call(
-            project=project,
-            adapter=adapter,
-            request=wrong_precondition,
-        )
-    assert len(execution.calls) == 1
-
-    wrong_source = ResponseEnvelope(
-        request_id=request_value.request_id,
-        correlation_id=request_value.correlation_id,
-        owner="polylogue-archive",
-        payload=OpaquePayload.bounded({"archive": {"sessions": 2}}),
-        source_bindings=(
-            SourceBinding(
-                source_ref=SinnixRef.parse("sinnix://polylogue/other"),
-                generation=source.generation,
-                root_digest=source.root_digest,
-            ),
-        ),
-    )
-    execution.result = ExecutionResult(
-        command=(),
-        exit_status=0,
-        stdout=json.dumps(wrong_source.to_dict()).encode(),
-        stderr=b"",
-    )
-    with pytest.raises(OwnerAdapterError, match="wrong source"):
-        DeclaredOwnerAdapters(execution).call(
-            project=project,
-            adapter=adapter,
-            request=request_value,
-        )
 
 
 def test_unix_socket_server_round_trips_the_common_envelope(tmp_path: Path) -> None:
@@ -10908,58 +8606,6 @@ def test_environment_declarations_reject_forged_or_malformed_names(
     ("argv", "operation", "payload"),
     (
         (
-            ("agentctl", "agent", "list", "--active"),
-            "job.list",
-            {
-                "limit": 100,
-                "cursor": None,
-                "project_id": None,
-                "phases": [],
-                "kinds": ["attested-agent"],
-                "active_only": True,
-            },
-        ),
-        (
-            (
-                "agentctl",
-                "agent",
-                "status",
-                "74e64cb4-282e-4b27-b4b1-af052b268161",
-            ),
-            "job.get",
-            {"job_id": "74e64cb4-282e-4b27-b4b1-af052b268161"},
-        ),
-        (
-            (
-                "agentctl",
-                "agent",
-                "wait",
-                "74e64cb4-282e-4b27-b4b1-af052b268161",
-                "84e64cb4-282e-4b27-b4b1-af052b268161",
-                "--any",
-                "--timeout-seconds",
-                "120",
-            ),
-            "job.wait",
-            {
-                "job_ids": [
-                    "74e64cb4-282e-4b27-b4b1-af052b268161",
-                    "84e64cb4-282e-4b27-b4b1-af052b268161",
-                ],
-                "timeout_seconds": 120,
-            },
-        ),
-        (
-            (
-                "agentctl",
-                "agent",
-                "result",
-                "74e64cb4-282e-4b27-b4b1-af052b268161",
-            ),
-            "job.result",
-            {"job_id": "74e64cb4-282e-4b27-b4b1-af052b268161", "max_bytes": 64_000},
-        ),
-        (
             (
                 "agentctl",
                 "job",
@@ -10972,7 +8618,6 @@ def test_environment_declarations_reject_forged_or_malformed_names(
             "job.list",
             {
                 "limit": 100,
-                "cursor": None,
                 "project_id": None,
                 "phases": [],
                 "kinds": ["attested-agent", "declared-operation"],
@@ -11447,37 +9092,6 @@ def test_project_catalog_takes_one_bad_descriptor_out_of_service(
 
     with pytest.raises(projects.ProjectConfigError):
         projects.ProjectCatalog([good, bad])
-
-
-def test_operation_identity_separates_checkouts_with_equal_trees() -> None:
-    """Coalescing must not merge the same operation across two workspaces.
-
-    Anti-vacuity: dropping the checkout from the payload makes both keys equal,
-    which is how a harvest of one worktree returned another worktree's job.
-    """
-    project = types.SimpleNamespace(
-        project_id="fixture", root=Path("/realm/project/fixture")
-    )
-    operation = types.SimpleNamespace(name="harvest", service=None, cache="none")
-
-    def checkout(name: str):
-        return projects.RegisteredCheckout(
-            project_id="fixture",
-            project_path=Path("/realm/project/fixture"),
-            checkout_id=f"worktree-{name}",
-            path=Path(f"/realm/worktrees/{name}"),
-            git_common_dir=Path("/realm/project/fixture/.git"),
-            head="0" * 40,
-        )
-
-    def key(name: str) -> str | None:
-        return jobs_module.GenericJobs._operation_identity_key(
-            project, operation, "d" * 64, "operator", {}, "t" * 40, checkout(name)
-        )
-
-    assert key("alpha") is not None
-    assert key("alpha") != key("beta")
-    assert key("alpha") == key("alpha")
 
 
 def test_worktree_removal_stops_the_type_daemon(tmp_path: Path) -> None:
@@ -12003,7 +9617,9 @@ def test_sub_hourly_timers_are_not_persistent() -> None:
     assert timer_persistent("weekly") is True
 
 
-def test_every_unit_runs_under_its_pool_memory_ceiling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_every_unit_runs_under_its_pool_memory_ceiling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Anti-vacuity: without MemoryMax/MemorySwapMax an agent lane admitted at
     the 1 GiB default reached 19.3 GB and swapped the host to 97% (2026-09-01)."""
     from sinnixd.jobs import MIB, UserSystemdJobs, memory_ceiling
@@ -12014,9 +9630,13 @@ def test_every_unit_runs_under_its_pool_memory_ceiling(tmp_path: Path, monkeypat
 
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        UserSystemdJobs, "_run", lambda self, args, **_kw: calls.append(list(args)) or ""
+        UserSystemdJobs,
+        "_run",
+        lambda self, args, **_kw: calls.append(list(args)) or "",
     )
-    monkeypatch.setattr(UserSystemdJobs, "lane_read_only_paths", staticmethod(lambda: ()))
+    monkeypatch.setattr(
+        UserSystemdJobs, "lane_read_only_paths", staticmethod(lambda: ())
+    )
     UserSystemdJobs().start(
         unit="sinnixd-job-00000000-0000-0000-0000-000000000002.service",
         command=("true",),
@@ -12048,7 +9668,17 @@ def test_default_checkout_operations_refuse_lane_worktrees(tmp_path: Path) -> No
     initialize_git_checkout(tmp_path)
     other_checkout = tmp_path.parent / "lane-checkout"
     subprocess.run(
-        ["git", "-C", str(tmp_path), "worktree", "add", "--quiet", "--detach", str(other_checkout), "HEAD"],
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "worktree",
+            "add",
+            "--quiet",
+            "--detach",
+            str(other_checkout),
+            "HEAD",
+        ],
         check=True,
     )
     catalog = ProjectCatalog([tmp_path])
@@ -12056,7 +9686,9 @@ def test_default_checkout_operations_refuse_lane_worktrees(tmp_path: Path) -> No
     operation = project.operation("check")
     assert operation.checkout == "default"
     lane = next(
-        checkout for checkout in catalog.checkouts("fixture") if checkout.path == other_checkout.resolve()
+        checkout
+        for checkout in catalog.checkouts("fixture")
+        if checkout.path == other_checkout.resolve()
     )
     jobs = generic_jobs(tmp_path.parent / "job-state")
 

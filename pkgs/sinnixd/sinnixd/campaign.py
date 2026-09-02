@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import subprocess
 import uuid
 from dataclasses import dataclass
@@ -22,7 +21,9 @@ RESUME_PREAMBLE = (
 def frontier_order(row: Mapping[str, Any]) -> tuple[int, str]:
     """P0 before P4, then id: a wave limit must spend itself on the most urgent work."""
     priority = row.get("priority")
-    rank = priority if isinstance(priority, int) and not isinstance(priority, bool) else 9
+    rank = (
+        priority if isinstance(priority, int) and not isinstance(priority, bool) else 9
+    )
     return rank, str(row.get("id", ""))
 
 
@@ -42,7 +43,17 @@ def claim_beads(
     for bead_id in bead_ids:
         try:
             result = run(
-                ["bd", "update", bead_id, "-s", "in_progress", "-a", CLAIM_ACTOR, "--actor", CLAIM_ACTOR],
+                [
+                    "bd",
+                    "update",
+                    bead_id,
+                    "-s",
+                    "in_progress",
+                    "-a",
+                    CLAIM_ACTOR,
+                    "--actor",
+                    CLAIM_ACTOR,
+                ],
                 cwd=root,
                 capture_output=True,
                 text=True,
@@ -66,6 +77,8 @@ def held_workspace_names(
         for name, record in existing.items()
         if getattr(record, "workspace_id", None) in held_checkouts
     }
+
+
 from .packets import (
     PacketConfig,
     PacketError,
@@ -471,7 +484,6 @@ class CampaignRunner:
                 dimensions=payload["runtime_dimensions"],
                 dependency_job_ids=dependency_job_ids,
                 exclusive_keys=tuple(payload["dimensions"]["conflict_keys"]),
-                allow_failed_dependencies=True,
                 reject_conflicts=True,
             )
             job_id = str(response["job_id"])
@@ -488,16 +500,9 @@ class CampaignRunner:
             )
             return job_id
 
-        generation = (
-            "ready-"
-            + hashlib.sha256(
-                "\0".join(lane.group for lane in schedule.lanes).encode()
-            ).hexdigest()[:32]
-        )
         plan = self._submit_tolerating_conflicts(
             schedule,
             project_id,
-            generation,
             launch,
             wave_id,
         )
@@ -509,7 +514,6 @@ class CampaignRunner:
         self,
         schedule: CampaignSchedule,
         project_id: str,
-        generation: str,
         launch: Any,
         wave_id: str,
     ) -> dict[str, Any]:
@@ -527,9 +531,7 @@ class CampaignRunner:
         last_deferral: str | None = None
         while lanes:
             try:
-                return self._submit_plan(
-                    lanes, schedule, project_id, generation, launch
-                )
+                return self._submit_plan(lanes, schedule, project_id, launch)
             except WorkspaceError as error:
                 # A workspace that will not provision costs one lane, not the
                 # wave. The lane being provisioned is the one that raised.
@@ -580,13 +582,11 @@ class CampaignRunner:
         lanes: list[CampaignLane],
         schedule: CampaignSchedule,
         project_id: str,
-        generation: str,
         launch: Any,
     ) -> dict[str, Any]:
         return self.plans.submit_external(
             {
                 "project_id": project_id,
-                "input_generation": generation,
                 "checkout_id": "default",
                 "nodes": [
                     {

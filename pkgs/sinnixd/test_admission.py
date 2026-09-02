@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 from sinnixd.jobs import (
-    MEMORY_FULL_BLOCK_THRESHOLD,
     HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS,
     IO_FULL_BLOCK_THRESHOLD,
+    MEMORY_FULL_BLOCK_THRESHOLD,
     AdmissionConflictError,
     GenericJobs,
     GenericJobSpec,
@@ -101,7 +101,7 @@ def project(root: Path, operations: tuple[ProjectOperation, ...]) -> ProjectAdap
 
 
 def operation(name: str, **kwargs: object) -> ProjectOperation:
-    defaults = {"pool": "normal", "result": "exit", "cache": "none"}
+    defaults = {"pool": "normal", "result": "exit"}
     defaults.update(kwargs)
     return ProjectOperation(name=name, description=name, command=(name,), **defaults)
 
@@ -193,7 +193,6 @@ def test_admission_claims_are_durable_and_ledger_explains_queue(
         "job_id": holder["job_id"],
         "pool": "normal",
         "estimate_memory_bytes": 1024 * 1024 * 1024,
-        "measured": {"samples": 0, "p50_bytes": None, "p90_bytes": None},
         "exclusive_keys": ["fixture:store"],
         "created_at": persisted["claims"][holder["job_id"]]["created_at"],
         "project_id": "fixture",
@@ -776,95 +775,6 @@ def test_observed_peak_does_not_change_later_estimates(tmp_path: Path) -> None:
     assert "estimates" not in subject._admission_state()
 
 
-def test_cache_and_coalescing_are_principal_isolated(tmp_path: Path) -> None:
-    adapter = project(
-        tmp_path / "project", (operation("check", cache="tree+environment"),)
-    )
-    systemd = FakeSystemd()
-    subject = jobs(tmp_path, systemd)
-
-    operator_first = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("check"),
-        correlation_id="operator-first",
-        principal="operator",
-        parameters={},
-    )
-    operator_duplicate = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("check"),
-        correlation_id="operator-duplicate",
-        principal="operator",
-        parameters={},
-    )
-    agent_first = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("check"),
-        correlation_id="agent-first",
-        principal="agent-control",
-        parameters={},
-    )
-    agent_duplicate = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("check"),
-        correlation_id="agent-duplicate",
-        principal="agent-control",
-        parameters={},
-    )
-
-    assert operator_duplicate["job_id"] == operator_first["job_id"]
-    assert operator_duplicate["coalesced"]
-    assert agent_duplicate["job_id"] == agent_first["job_id"]
-    assert agent_duplicate["coalesced"]
-    assert agent_first["job_id"] != operator_first["job_id"]
-    assert len(systemd.started) == 2
-
-    operator_record = subject.store.load(operator_first["job_id"])
-    agent_record = subject.store.load(agent_first["job_id"])
-    assert operator_record.spec.principal == "operator"
-    assert agent_record.spec.principal == "agent-control"
-    assert operator_record.spec.cache_key != agent_record.spec.cache_key
-
-    systemd.properties = {
-        "LoadState": "loaded",
-        "ActiveState": "inactive",
-        "Result": "success",
-        "ExecMainStatus": "0",
-    }
-    assert subject.get(operator_first["job_id"])["state"]["phase"] == "succeeded"
-    assert subject.get(agent_first["job_id"])["state"]["phase"] == "succeeded"
-
-    operator_cached = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("check"),
-        correlation_id="operator-cached",
-        principal="operator",
-        parameters={},
-    )
-    agent_cached = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("check"),
-        correlation_id="agent-cached",
-        principal="agent-control",
-        parameters={},
-    )
-    assert (
-        operator_cached["job_id"] == operator_first["job_id"]
-        and operator_cached["reused"]
-    )
-    assert agent_cached["job_id"] == agent_first["job_id"] and agent_cached["reused"]
-
-    (adapter.root / "tracked").write_text("changed\n")
-    uncached = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("check"),
-        correlation_id="operator-uncached",
-        principal="operator",
-        parameters={},
-    )
-    assert uncached["job_id"] != operator_first["job_id"] and len(systemd.started) == 3
-
-
 def test_dependencies_exclusive_keys_defaults_and_pressure_gate(
     tmp_path: Path,
 ) -> None:
@@ -875,7 +785,6 @@ def test_dependencies_exclusive_keys_defaults_and_pressure_gate(
             operation(
                 "check",
                 dependencies=("prepare",),
-                cache="none",
                 exclusive_keys=("fixture:store",),
             ),
             operation("other", exclusive_keys=("fixture:store",)),
@@ -1523,7 +1432,9 @@ def test_cancel_records_a_typed_reason(tmp_path: Path) -> None:
     assert started["state"]["phase"] == "queued"
     subject.cancel(started["job_id"], reason="pressure-preemption:swap-exhaustion")
     record = subject.store.load(started["job_id"])
-    assert record.state["cancellation"]["reason"] == "pressure-preemption:swap-exhaustion"
+    assert (
+        record.state["cancellation"]["reason"] == "pressure-preemption:swap-exhaustion"
+    )
 
 
 def test_agent_fleet_admits_on_default_claims(tmp_path: Path) -> None:
@@ -1584,16 +1495,27 @@ def test_a_long_waiting_bulk_job_reserves_across_pools(tmp_path: Path) -> None:
         "swap_free_bytes": 20 * gib,
         "managed_memory_bytes": 0,
     }
-    adapter = project(tmp_path / "project", (operation("corpus", pool="bulk", estimate_memory_bytes=8 * gib),))
+    adapter = project(
+        tmp_path / "project",
+        (operation("corpus", pool="bulk", estimate_memory_bytes=8 * gib),),
+    )
     systemd = FakeSystemd()
-    subject = GenericJobs(systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure)
+    subject = GenericJobs(
+        systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure
+    )
     corpus = subject.start_declared(
-        project=adapter, operation=adapter.operation("corpus"), correlation_id="corpus", parameters={}
+        project=adapter,
+        operation=adapter.operation("corpus"),
+        correlation_id="corpus",
+        parameters={},
     )
     assert corpus["state"]["phase"] == "queued"
     with subject.store.locked(corpus["job_id"]):
         record = subject.store.load(corpus["job_id"])
-        aged = (datetime.now(UTC) - timedelta(seconds=HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS + 60)).isoformat()
+        aged = (
+            datetime.now(UTC)
+            - timedelta(seconds=HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS + 60)
+        ).isoformat()
         subject.store.save(dataclasses.replace(record, created_at=aged))
 
     lane = subject.start(agent_spec(("table:lane",)))
@@ -1601,7 +1523,9 @@ def test_a_long_waiting_bulk_job_reserves_across_pools(tmp_path: Path) -> None:
     assert subject.get(lane["job_id"])["state"]["phase"] == "queued"
 
 
-def test_a_job_waiting_for_a_pool_worker_does_not_reserve_across_pools(tmp_path: Path) -> None:
+def test_a_job_waiting_for_a_pool_worker_does_not_reserve_across_pools(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: two hourly bulk jobs queued behind the running corpus
     reserved 8 GB each against every pool and held harvests for two hours."""
     import dataclasses
@@ -1626,18 +1550,29 @@ def test_a_job_waiting_for_a_pool_worker_does_not_reserve_across_pools(tmp_path:
         ),
     )
     systemd = FakeSystemd()
-    subject = GenericJobs(systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure)
+    subject = GenericJobs(
+        systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure
+    )
     running = subject.start_declared(
-        project=adapter, operation=adapter.operation("corpus"), correlation_id="corpus", parameters={}
+        project=adapter,
+        operation=adapter.operation("corpus"),
+        correlation_id="corpus",
+        parameters={},
     )
     assert running["state"]["phase"] == "submitted"
     hourly = subject.start_declared(
-        project=adapter, operation=adapter.operation("hourly"), correlation_id="hourly", parameters={}
+        project=adapter,
+        operation=adapter.operation("hourly"),
+        correlation_id="hourly",
+        parameters={},
     )
     assert hourly["state"]["phase"] == "queued"
     with subject.store.locked(hourly["job_id"]):
         record = subject.store.load(hourly["job_id"])
-        aged = (datetime.now(UTC) - timedelta(seconds=HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS + 60)).isoformat()
+        aged = (
+            datetime.now(UTC)
+            - timedelta(seconds=HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS + 60)
+        ).isoformat()
         subject.store.save(dataclasses.replace(record, created_at=aged))
 
     lane = subject.start(agent_spec(("table:lane",)))
@@ -1659,45 +1594,29 @@ def test_a_waiting_harvest_outranks_a_new_lane_launch(tmp_path: Path) -> None:
         "swap_free_bytes": 20 * gib,
         "managed_memory_bytes": 0,
     }
-    adapter = project(tmp_path / "project", (operation("harvest", pool="normal", estimate_memory_bytes=2 * gib),))
-    systemd = FakeSystemd()
-    subject = GenericJobs(systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure)
-    harvest = subject.start_declared(
-        project=adapter, operation=adapter.operation("harvest"), correlation_id="harvest", parameters={}
+    adapter = project(
+        tmp_path / "project",
+        (operation("harvest", pool="normal", estimate_memory_bytes=2 * gib),),
     )
-    assert harvest["state"]["phase"] == "queued", "5 GiB available minus the 4 GiB reserve cannot hold 2 GiB"
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure
+    )
+    harvest = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("harvest"),
+        correlation_id="harvest",
+        parameters={},
+    )
+    assert harvest["state"]["phase"] == "queued", (
+        "5 GiB available minus the 4 GiB reserve cannot hold 2 GiB"
+    )
 
     lane = subject.start(agent_spec(("table:lane",)))
 
-    assert subject.get(lane["job_id"])["state"]["phase"] == "queued", "the lane must not take the harvest's headroom"
-
-
-def test_terminal_peaks_are_recorded_as_measured_envelopes(tmp_path: Path) -> None:
-    """Anti-vacuity: without the record, the admission view can only show
-    the declaration, which is what let a 16 GB claim stand against a 6 GB
-    peak for a day."""
-    systemd = FakeSystemd()
-    subject = GenericJobs(systemd, GenericJobStore(tmp_path / "state"))
-    peaks = [1, 3, 2]
-    for index, gib in enumerate(peaks):
-        job = subject.start(agent_spec((f"table:{index}",)))
-        systemd.unit_properties[job["unit"]] = {
-            "LoadState": "loaded",
-            "ActiveState": "inactive",
-            "Result": "success",
-            "ExecMainStatus": "0",
-            "InvocationID": str(index),
-            "MemoryPeak": str(gib * 1024**3),
-        }
-        subject.get(job["job_id"])
-
-    measured = subject.measured_envelope(agent_spec(("table:x",)))
-    assert measured["samples"] == 3
-    assert measured["p50_bytes"] == 2 * 1024**3
-    assert measured["p90_bytes"] == 3 * 1024**3
-    running = subject.start(agent_spec(("table:live",)))
-    claims = subject.admission_ledger()["claims"]
-    assert claims[running["job_id"]]["measured"]["samples"] == 3
+    assert subject.get(lane["job_id"])["state"]["phase"] == "queued", (
+        "the lane must not take the harvest's headroom"
+    )
 
 
 def test_sustained_io_stall_blocks_new_admissions(tmp_path: Path) -> None:
@@ -1708,7 +1627,16 @@ def test_sustained_io_stall_blocks_new_admissions(tmp_path: Path) -> None:
         FakeSystemd(),
         GenericJobStore(tmp_path / "state"),
         wait_poll_seconds=0.001,
-        pressure_probe=lambda: {"memory_full_avg10": 0.0, "io_full_avg10": 80.0, "io_full_avg60": IO_FULL_BLOCK_THRESHOLD + 5},
+        pressure_probe=lambda: {
+            "memory_full_avg10": 0.0,
+            "io_full_avg10": 80.0,
+            "io_full_avg60": IO_FULL_BLOCK_THRESHOLD + 5,
+        },
     )
-    first = subject.start_declared(project=adapter, operation=adapter.operation("first"), correlation_id="first", parameters={})
+    first = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("first"),
+        correlation_id="first",
+        parameters={},
+    )
     assert first["state"]["phase"] == "queued"

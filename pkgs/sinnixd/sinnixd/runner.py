@@ -277,16 +277,6 @@ def _run_agent(
         "--reasoning-effort",
         value["effort"],
     ]
-    native_session_id = value.get("native_session_id")
-    if native_session_id is not None:
-        if (
-            not isinstance(native_session_id, str)
-            or not native_session_id
-            or len(native_session_id.encode()) > 256
-            or any(char.isspace() for char in native_session_id)
-        ):
-            raise RunnerError("attested agent native session id is invalid")
-        command.extend(("--resume-session-id", native_session_id))
     try:
         completed = subprocess.run(command, cwd=checkout, check=False)
         binding = value.get("bead_binding")

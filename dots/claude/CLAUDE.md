@@ -131,7 +131,7 @@ runtime/workspace operations and `orchestrate` before multi-agent work.
 - Every agent dispatch names backend, model, and effort explicitly.
 - Checkpoint a workspace before risky integration, compaction, or recovery.
 - Authority map: Git = commits/worktrees; systemd = live processes; GitHub =
-  PR/review/merge; the external task backend (`agentctl task …`, Beads per
+  PR/review/merge; the external task backend (`bd`, Beads per
   project under `/realm/state/tasks/`) = task state. Reconcile disagreements;
   never invent a second truth. Feature branches never carry task state.
 - Long-running dispatches carry a time contract: state expected duration with

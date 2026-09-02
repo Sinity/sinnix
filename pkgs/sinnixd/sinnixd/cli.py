@@ -54,20 +54,6 @@ from .projects import ProjectCatalog
 from .service import SinnixdService
 
 
-def _dependency_argument(value: str) -> tuple[str, str]:
-    relation, separator, task_id = value.partition(":")
-    if not separator or not relation or not task_id:
-        raise argparse.ArgumentTypeError("--dependency must be relation:task-id")
-    return relation, task_id
-
-
-def _metadata_argument(value: str) -> tuple[str, str]:
-    key, separator, metadata_value = value.partition("=")
-    if not separator or not key:
-        raise argparse.ArgumentTypeError("--set-metadata must be key=value")
-    return key, metadata_value
-
-
 def _packet_notes(response: dict[str, object]) -> list[dict[str, object]]:
     payload = response.get("payload")
     value = payload.get("value") if isinstance(payload, dict) else None
@@ -241,24 +227,6 @@ def parser() -> argparse.ArgumentParser:
         "launch", help="Dispatch an attested agent job (same as bare `agent`)."
     )
     _add_agent_launch_arguments(launch, required=True)
-    agent_list = agent_subcommands.add_parser("list")
-    agent_list.add_argument("--limit", type=int, choices=range(1, 1001), default=100)
-    agent_list.add_argument("--cursor")
-    agent_list.add_argument("--project")
-    agent_list.add_argument("--phase", action="append", default=[])
-    agent_list.add_argument("--active", action="store_true")
-    agent_status = agent_subcommands.add_parser("status")
-    agent_status.add_argument("job_id")
-    agent_wait = agent_subcommands.add_parser("wait")
-    agent_wait.add_argument("job_ids", nargs="+", metavar="job_id")
-    agent_wait.add_argument("--any", dest="wait_any", action="store_true")
-    agent_wait.add_argument("--timeout-seconds", type=int, default=30)
-    agent_result = agent_subcommands.add_parser("result")
-    agent_result.add_argument("job_id")
-    agent_result.add_argument("--max-bytes", type=int, default=64_000)
-    agent_resume = agent_subcommands.add_parser("resume")
-    agent_resume.add_argument("job_id")
-    agent_resume.add_argument("--session-id", required=True)
     project = subcommands.add_parser("project")
     project_subcommands = project.add_subparsers(dest="project_command", required=True)
     project_subcommands.add_parser("list")
@@ -329,15 +297,9 @@ def parser() -> argparse.ArgumentParser:
     )
     workspace_finish = workspace_subcommands.add_parser("finish")
     workspace_finish.add_argument("workspace_id")
-    workspace_finish.add_argument("--bead", dest="beads", action="append")
-    workspace_finish.add_argument("--receipt", type=Path)
-    workspace_finish.add_argument("--partial-note")
     workspace_finish_integrated = workspace_subcommands.add_parser("finish-integrated")
     workspace_finish_integrated.add_argument("workspace_id")
     workspace_finish_integrated.add_argument("--target", required=True)
-    workspace_finish_integrated.add_argument("--bead", dest="beads", action="append")
-    workspace_finish_integrated.add_argument("--receipt", type=Path)
-    workspace_finish_integrated.add_argument("--partial-note")
     events = subcommands.add_parser("events")
     events_subcommands = events.add_subparsers(dest="events_command", required=True)
     events_tail = events_subcommands.add_parser(
@@ -454,20 +416,8 @@ def parser() -> argparse.ArgumentParser:
     retry = job_subcommands.add_parser("retry")
     retry.add_argument("job_id")
     retry.add_argument("--hint")
-    retry.add_argument("--escalate", action="store_true")
-    resume = job_subcommands.add_parser("resume")
-    resume.add_argument("job_id")
-    resume.add_argument("--session-id", required=True)
-    status = job_subcommands.add_parser("status")
-    status.add_argument("job_id")
-    status.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit JSON (accepted explicitly for scripting; JSON is the default output format).",
-    )
     job_list = job_subcommands.add_parser("list")
     job_list.add_argument("--limit", type=int, choices=range(1, 1001), default=100)
-    job_list.add_argument("--cursor")
     job_list.add_argument("--project")
     job_list.add_argument("--phase", action="append", default=[])
     job_list.add_argument("--kind", action="append", default=[])
@@ -475,13 +425,7 @@ def parser() -> argparse.ArgumentParser:
         "--active", "--active-only", dest="active", action="store_true"
     )
     wait = job_subcommands.add_parser("wait")
-    wait.add_argument("job_ids", nargs="+", metavar="job_id")
-    wait.add_argument(
-        "--any",
-        dest="wait_any",
-        action="store_true",
-        help="With multiple job ids, return when the first reaches a terminal state.",
-    )
+    wait.add_argument("job_id")
     wait.add_argument("--timeout-seconds", type=int, default=30)
     logs = job_subcommands.add_parser("logs")
     logs.add_argument("job_id")
@@ -496,103 +440,19 @@ def parser() -> argparse.ArgumentParser:
         "admission", help="Show admission queue, claims, and blocking arithmetic."
     )
     admission.add_argument("--project")
-    admission_explain = job_subcommands.add_parser(
-        "admission-explain", help="Explain one queued job's admission verdict."
-    )
-    admission_explain.add_argument("job_id")
     plan = subcommands.add_parser("plan")
     plan_subcommands = plan.add_subparsers(dest="plan_command", required=True)
     plan_submit = plan_subcommands.add_parser("submit")
     plan_submit.add_argument("project_id")
-    plan_submit.add_argument("--input-generation", required=True)
     plan_submit.add_argument("--node-operation")
     plan_submit.add_argument("--workspace")
     plan_submit.add_argument("--checkout")
     plan_submit.add_argument("--plan-file", type=Path, required=True)
     plan_get = plan_subcommands.add_parser("get")
     plan_get.add_argument("plan_id")
-    plan_list = plan_subcommands.add_parser("list")
-    plan_list.add_argument("--project")
     plan_wait = plan_subcommands.add_parser("wait")
     plan_wait.add_argument("plan_id")
     plan_wait.add_argument("--timeout-seconds", type=int, default=30)
-    plan_result = plan_subcommands.add_parser("result")
-    plan_result.add_argument("plan_id")
-    plan_result.add_argument("--max-bytes", type=int, default=64_000)
-    owner = subcommands.add_parser("owner")
-    owner_subcommands = owner.add_subparsers(dest="owner_command", required=True)
-    call_owner = owner_subcommands.add_parser("call")
-    call_owner.add_argument("owner")
-    call_owner.add_argument("operation")
-    call_owner.add_argument("--arguments-json", default="{}")
-    task = subcommands.add_parser("task")
-    task_subcommands = task.add_subparsers(dest="task_command", required=True)
-    # task list/get were deliberately removed: read task state through the
-    # task backend CLI (bd) directly; agentctl owns only journalled mutations,
-    # reconcile, and the authority-bound snapshot.
-    task_create = task_subcommands.add_parser("create")
-    task_create.add_argument("project_id")
-    task_create.add_argument("title")
-    task_create.add_argument("--description", required=True)
-    task_create.add_argument(
-        "--type",
-        dest="issue_type",
-        choices=(
-            "bug",
-            "feature",
-            "task",
-            "epic",
-            "chore",
-            "decision",
-            "spike",
-            "story",
-            "milestone",
-        ),
-        required=True,
-    )
-    task_create.add_argument("--priority", type=int, choices=range(5), required=True)
-    task_create.add_argument("--label", action="append", default=[])
-    task_create.add_argument("--parent")
-    task_create.add_argument(
-        "--dependency", action="append", type=_dependency_argument, default=[]
-    )
-    task_create.add_argument("--request-id", required=True)
-    for command in ("claim", "complete", "release"):
-        command_parser = task_subcommands.add_parser(command)
-        command_parser.add_argument("project_id")
-        command_parser.add_argument("task_id")
-        command_parser.add_argument("--request-id", required=True)
-        if command in {"complete", "release"}:
-            command_parser.add_argument("--reason")
-        if command == "complete":
-            command_parser.add_argument("--merge-sha", required=True)
-        if command == "release":
-            command_parser.add_argument("--if-assignee")
-    task_note = task_subcommands.add_parser("note")
-    task_note.add_argument("project_id")
-    task_note.add_argument("task_id")
-    task_note.add_argument("text", nargs="?")
-    task_note.add_argument("--text", dest="text_option")
-    task_note.add_argument("--request-id", required=True)
-    task_update = task_subcommands.add_parser("update")
-    task_update.add_argument("project_id")
-    task_update.add_argument("task_id")
-    task_update.add_argument(
-        "--set-metadata",
-        action="append",
-        type=_metadata_argument,
-        default=[],
-        required=True,
-    )
-    task_update.add_argument("--request-id", required=True)
-    task_relate = task_subcommands.add_parser("relate")
-    task_relate.add_argument("project_id")
-    task_relate.add_argument("task_id")
-    task_relate.add_argument("related_task_id")
-    task_relate.add_argument("--request-id", required=True)
-    for command in ("reconcile", "snapshot"):
-        command_parser = task_subcommands.add_parser(command)
-        command_parser.add_argument("project_id")
     return result
 
 
@@ -808,49 +668,6 @@ def main() -> int:
             },
             "operator",
         )
-    elif arguments.command == "agent" and arguments.agent_command == "list":
-        request = _request(
-            "job.list",
-            "systemd-jobs",
-            {
-                "limit": arguments.limit,
-                "cursor": arguments.cursor,
-                "project_id": arguments.project,
-                "phases": arguments.phase,
-                "kinds": ["attested-agent"],
-                "active_only": arguments.active,
-            },
-        )
-    elif arguments.command == "agent" and arguments.agent_command == "status":
-        request = _request("job.get", "systemd-jobs", {"job_id": arguments.job_id})
-    elif arguments.command == "agent" and arguments.agent_command == "wait":
-        if len(arguments.job_ids) > 1 and not arguments.wait_any:
-            parser().error("waiting on multiple job ids requires --any")
-        request = _request(
-            "job.wait",
-            "systemd-jobs",
-            {
-                **(
-                    {"job_ids": arguments.job_ids}
-                    if arguments.wait_any
-                    else {"job_id": arguments.job_ids[0]}
-                ),
-                "timeout_seconds": arguments.timeout_seconds,
-            },
-        )
-    elif arguments.command == "agent" and arguments.agent_command == "result":
-        request = _request(
-            "job.result",
-            "systemd-jobs",
-            {"job_id": arguments.job_id, "max_bytes": arguments.max_bytes},
-        )
-    elif arguments.command == "agent" and arguments.agent_command == "resume":
-        request = _request(
-            "job.resume",
-            "systemd-jobs",
-            {"job_id": arguments.job_id, "native_session_id": arguments.session_id},
-            "agent-control",
-        )
     elif arguments.command == "agent":
         missing = [
             f"--{name.replace('_', '-')}"
@@ -1064,35 +881,20 @@ def main() -> int:
         arguments.command == "workspace"
         and arguments.workspace_command == "finish-integrated"
     ):
-        settlement = {}
-        if arguments.beads:
-            settlement["beads"] = arguments.beads
-        if arguments.receipt:
-            settlement["receipt"] = json.loads(arguments.receipt.read_text())
-        if arguments.partial_note:
-            settlement["partial_note"] = arguments.partial_note
         request = _request(
             "workspace.finish-integrated",
             "git-workspaces",
             {
                 "workspace_id": arguments.workspace_id,
                 "target_ref": arguments.target,
-                **settlement,
             },
             "agent-control",
         )
     elif arguments.command == "workspace" and arguments.workspace_command == "finish":
-        settlement = {}
-        if arguments.beads:
-            settlement["beads"] = arguments.beads
-        if arguments.receipt:
-            settlement["receipt"] = json.loads(arguments.receipt.read_text())
-        if arguments.partial_note:
-            settlement["partial_note"] = arguments.partial_note
         request = _request(
             "workspace.finish",
             "git-workspaces",
-            {"workspace_id": arguments.workspace_id, **settlement},
+            {"workspace_id": arguments.workspace_id},
             "agent-control",
         )
     elif arguments.command == "events" and arguments.events_command == "tail":
@@ -1173,14 +975,27 @@ def main() -> int:
             None,
         )
         if record is None or not isinstance(record.get("path"), str):
-            print(json.dumps({"ok": False, "error": f"unknown workspace: {arguments.workspace}"}, sort_keys=True))
+            print(
+                json.dumps(
+                    {"ok": False, "error": f"unknown workspace: {arguments.workspace}"},
+                    sort_keys=True,
+                )
+            )
             return 1
         worktree = Path(record["path"])
         head = subprocess.run(
-            ["git", "-C", str(worktree), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+            ["git", "-C", str(worktree), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
         ).stdout.strip()
         if not re.fullmatch(r"[0-9a-f]{40}", head):
-            print(json.dumps({"ok": False, "error": "workspace head is unreadable"}, sort_keys=True))
+            print(
+                json.dumps(
+                    {"ok": False, "error": "workspace head is unreadable"},
+                    sort_keys=True,
+                )
+            )
             return 1
         authorization = {
             "head": head,
@@ -1190,8 +1005,14 @@ def main() -> int:
             "workspace": record.get("name"),
         }
         (worktree / ".lane").mkdir(exist_ok=True)
-        (worktree / ".lane" / "authorization.json").write_text(json.dumps(authorization, sort_keys=True) + "\n")
-        print(json.dumps({"ok": True, "authorization": authorization}, indent=1, sort_keys=True))
+        (worktree / ".lane" / "authorization.json").write_text(
+            json.dumps(authorization, sort_keys=True) + "\n"
+        )
+        print(
+            json.dumps(
+                {"ok": True, "authorization": authorization}, indent=1, sort_keys=True
+            )
+        )
         return 0
     elif arguments.command == "lane" and arguments.lane_command == "publish":
         # The reply always names the harvest job once one exists; a failure
@@ -1692,7 +1513,6 @@ def main() -> int:
             )
         request_arguments: dict[str, object] = {
             "project_id": arguments.project_id,
-            "input_generation": arguments.input_generation,
             "nodes": nodes,
         }
         if arguments.node_operation is not None:
@@ -1704,12 +1524,6 @@ def main() -> int:
         request = _request("plan.submit", "project-plans", request_arguments)
     elif arguments.command == "plan" and arguments.plan_command == "get":
         request = _request("plan.get", "project-plans", {"plan_id": arguments.plan_id})
-    elif arguments.command == "plan" and arguments.plan_command == "list":
-        request = _request(
-            "plan.list",
-            "project-plans",
-            ({"project_id": arguments.project} if arguments.project else {}),
-        )
     elif arguments.command == "plan" and arguments.plan_command == "wait":
         request = _request(
             "plan.wait",
@@ -1719,13 +1533,7 @@ def main() -> int:
                 "timeout_seconds": arguments.timeout_seconds,
             },
         )
-    elif arguments.command == "plan" and arguments.plan_command == "result":
-        request = _request(
-            "plan.result",
-            "project-plans",
-            {"plan_id": arguments.plan_id, "max_bytes": arguments.max_bytes},
-        )
-    elif arguments.command == "job" and arguments.job_command in {"get", "status"}:
+    elif arguments.command == "job" and arguments.job_command == "get":
         request = _request("job.get", "systemd-jobs", {"job_id": arguments.job_id})
     elif arguments.command == "job" and arguments.job_command == "retry":
         request = _request(
@@ -1734,15 +1542,7 @@ def main() -> int:
             {
                 "job_id": arguments.job_id,
                 **({"hint": arguments.hint} if arguments.hint is not None else {}),
-                "escalate": arguments.escalate,
             },
-            "agent-control",
-        )
-    elif arguments.command == "job" and arguments.job_command == "resume":
-        request = _request(
-            "job.resume",
-            "systemd-jobs",
-            {"job_id": arguments.job_id, "native_session_id": arguments.session_id},
             "agent-control",
         )
     elif arguments.command == "job" and arguments.job_command == "list":
@@ -1751,7 +1551,6 @@ def main() -> int:
             "systemd-jobs",
             {
                 "limit": arguments.limit,
-                "cursor": arguments.cursor,
                 "project_id": arguments.project,
                 "phases": arguments.phase,
                 "kinds": arguments.kind,
@@ -1759,17 +1558,11 @@ def main() -> int:
             },
         )
     elif arguments.command == "job" and arguments.job_command == "wait":
-        if len(arguments.job_ids) > 1 and not arguments.wait_any:
-            parser().error("waiting on multiple job ids requires --any")
         request = _request(
             "job.wait",
             "systemd-jobs",
             {
-                **(
-                    {"job_ids": arguments.job_ids}
-                    if arguments.wait_any
-                    else {"job_id": arguments.job_ids[0]}
-                ),
+                "job_id": arguments.job_id,
                 "timeout_seconds": arguments.timeout_seconds,
             },
         )
@@ -1795,79 +1588,10 @@ def main() -> int:
             "systemd-jobs",
             {"project_id": arguments.project} if arguments.project else {},
         )
-    elif arguments.command == "job" and arguments.job_command == "admission-explain":
-        request = _request(
-            "job.admission.explain", "systemd-jobs", {"job_id": arguments.job_id}
-        )
     elif arguments.command == "job":
         request = _request("job.cancel", "systemd-jobs", {"job_id": arguments.job_id})
-    elif arguments.command == "task":
-        task_arguments: dict[str, object] = {"project_id": arguments.project_id}
-        if arguments.task_command == "create":
-            task_arguments.update(
-                {
-                    "title": arguments.title,
-                    "description": arguments.description,
-                    "issue_type": arguments.issue_type,
-                    "priority": arguments.priority,
-                    "labels": arguments.label,
-                    "dependencies": [
-                        {"relation": relation, "task_id": task_id}
-                        for relation, task_id in arguments.dependency
-                    ],
-                }
-            )
-            if arguments.parent is not None:
-                task_arguments["parent_task_id"] = arguments.parent
-        elif arguments.task_command in {
-            "claim",
-            "complete",
-            "release",
-            "note",
-            "relate",
-            "update",
-        }:
-            task_arguments["task_id"] = arguments.task_id
-            if arguments.task_command == "note":
-                if (arguments.text is None) == (arguments.text_option is None):
-                    parser().error(
-                        "task note requires exactly one of positional text or --text"
-                    )
-                task_arguments["text"] = (
-                    arguments.text_option
-                    if arguments.text_option is not None
-                    else arguments.text
-                )
-            elif arguments.task_command == "relate":
-                task_arguments["related_task_id"] = arguments.related_task_id
-            elif arguments.task_command == "update":
-                task_arguments["metadata"] = dict(arguments.set_metadata)
-            elif arguments.task_command in {"complete", "release"}:
-                if arguments.reason is not None:
-                    task_arguments["reason"] = arguments.reason
-                if arguments.task_command == "complete":
-                    task_arguments["merge_sha"] = arguments.merge_sha
-                if (
-                    arguments.task_command == "release"
-                    and arguments.if_assignee is not None
-                ):
-                    task_arguments["if_assignee"] = arguments.if_assignee
-        mutation_id = getattr(arguments, "request_id", None)
-        request = _request(
-            f"task.{arguments.task_command}",
-            "task-backend",
-            task_arguments,
-            "operator",
-            idempotency_key=mutation_id,
-        )
     else:
-        try:
-            owner_arguments = json.loads(arguments.arguments_json)
-        except json.JSONDecodeError as error:
-            parser().error(f"--arguments-json must be valid JSON: {error.msg}")
-        if not isinstance(owner_arguments, dict):
-            parser().error("--arguments-json must be a JSON object")
-        request = _request(arguments.operation, arguments.owner, owner_arguments)
+        parser().error(f"unsupported command: {arguments.command}")
     if not (arguments.command == "packet" and arguments.packet_command == "launch"):
         try:
             response = call(arguments.socket, request)

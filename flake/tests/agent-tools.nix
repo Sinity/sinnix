@@ -708,7 +708,6 @@ in
             ]
             assert operation["pool"] == "bulk"
             assert operation["result"] == "exit"
-            assert operation["cache"] == "none"
             assert operation["exclusive_keys"] == ["sinnix:nix-store-pressure", "sinex:cache-prebuild"]
             assert operation["estimate_memory_bytes"] == 12 * 1024 * 1024 * 1024
             assert operation["scratch"] == "nvme"
