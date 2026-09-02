@@ -1,6 +1,6 @@
 # Sinnixd
 
-`sinnixd` is the host-local runtime behind `agentctl` and the future execution-facing Sinnix MCP routes. It uses a mode-0600 Unix socket at `$XDG_RUNTIME_DIR/sinnixd.sock`. MCP remains a stateless policy frontend. Systemd, Git, project adapters, and task backends remain authoritative for their own state.
+`sinnixd` is the host-local runtime behind `agentctl` and the future execution-facing Sinnix MCP routes. It uses a mode-0600 Unix socket at `$XDG_RUNTIME_DIR/sinnixd.sock`. MCP remains a stateless policy frontend. Systemd, Git, and project adapters remain authoritative for their own state; task state is `bd`'s.
 
 ## Current vertical slice
 
@@ -38,7 +38,6 @@ agentctl job result <job-id> --max-bytes 64000
 agentctl job cancel <job-id>
 agentctl shell --project sinnix --checkout default --cwd . -- printf 'harmless command\n'
 agentctl agent --project sinnix --checkout default --prompt-file ./prompt.md --backend codex --model gpt-5.6-terra --effort high
-agentctl task create sinnix 'Follow-up title' --description 'Bounded task description.' --type task --priority 2 --label area:agentctl --parent sinnix-oy37 --dependency depends-on:sinnix-oy37.9 --request-id 2d8f1e3a-61d0-4d3c-bb9a-9e8baa3a5cac
 ```
 
 The service passes a declarative, non-empty `sinnix.services.sinnixd.projectRoots` list as repeated `--project-root` arguments. It defaults to the registered Sinnix project entries. Sinnixd loads only those `.agentctl/project.toml` adapters and does not scan arbitrary directories. Each descriptor is schema-versioned, identifies its repository root markers, declares the execution environment, and publishes named operation metadata. A descriptor with a `[workspace]` is agent-capable and must declare non-empty shell-free argv lists for both `environment.command` and `environment.preflight`; the latter runs inside the former from the revalidated checkout before any backend starts. `agentctl project get <id>` publishes that capability and both public argv lists.
@@ -61,7 +60,6 @@ description = "Run the project development server"
 exec = ["just", "dev"]
 pool = "interactive"
 result = "exit"
-cache = "none"
 
 [operations.dev_server.service]
 readiness = "project-command"
@@ -80,7 +78,7 @@ The generic job record, private launch input, and lease reservation are publishe
 
 An operation may declare `timeout_seconds` as a positive integer. Omission keeps the 3,600-second default. Declared operations may use at most 28,800 seconds (eight hours), which accommodates finite full suites and long-running source or automaton batches while still providing a fixed systemd deadline. Descriptor parsing rejects booleans, non-integers, zero, negative values, and values above that maximum. The catalog, job response, durable job spec, recovery path, and `RuntimeMaxSec` all carry this one descriptor-owned value. Gateway and MCP clients receive the same catalog and job metadata; they do not accept a second timeout override.
 
-The longer maximum applies only to `declared-operation` jobs. `agentctl shell`, `agentctl agent`, internal foreground commands, and source-scoped owner adapters retain their existing bounds. In particular, shell and attested-agent jobs remain capped at 3,600 seconds, and the contract runner validates that identity before execution. Declared operations execute through the fixed capture launcher rather than that typed-job runner, so extending a suite cannot widen arbitrary command authority.
+The longer maximum applies only to `declared-operation` jobs. `agentctl shell`, `agentctl agent`, and internal foreground commands retain their existing bounds. In particular, shell and attested-agent jobs remain capped at 3,600 seconds, and the contract runner validates that identity before execution. Declared operations execute through the fixed capture launcher rather than that typed-job runner, so extending a suite cannot widen arbitrary command authority.
 
 ## Declared-operation parameters and results
 
@@ -94,7 +92,6 @@ description = "Run Sinex's all-sources foreground operation"
 exec = ["xtask", "run", "all-sources"]
 pool = "normal"
 result = "exit"
-cache = "tree+environment"
 
 [operations.sinex_all_sources.parameters.instance_id]
 type = "string"
@@ -121,7 +118,6 @@ description = "Verify closure work for one Bead"
 exec = ["xtask", "verify", "closure"]
 pool = "normal"
 result = "exit"
-cache = "tree+environment"
 
 [operations.verify_closure.parameters.bead_id]
 type = "string"
@@ -145,111 +141,27 @@ For the all-sources example, `{"instance_id":"operator-source-driver-browser.his
 
 Descriptor `result` is executable contract data. `exit` remains log-only. `json` and `pytest` allocate a bounded result artifact, capture stdout separately from the combined log, and require one UTF-8 JSON object. `agentctl job result` returns that object as typed `value`; malformed, injected trailing output, arrays, and overflowed artifacts are rejected. The record persists `result_kind`, and the result artifact metadata exposes its kind and bound. Polylogue currently declares `verify_affected` and `verify_all` as `pytest`, so their JSON receipts are consumable through this route. Its `verify_quick` still declares `exit`; its descriptor must change to `json` or `pytest` before its receipt is consumable, and this repository does not make that cross-repository declaration change.
 
-## Canonical task authority
+## Task authority
 
-Every registered project has one standalone Beads authority workspace at `$SINNIXD_TASK_STATE_ROOT/<project>`, defaulting to `/realm/state/tasks/<project>`, with its physical database at `<project>/.beads/dolt`. Sinnixd sets `BEADS_DIR` to that canonical `.beads` directory for every task mutation, reconciliation, and snapshot while retaining the registered checkout as the command CWD and project identity. Task reads (`list`/`get`) are deliberately not proxied: read task state through the `bd` CLI directly (the checkout's `.beads/redirect` reaches the same authority); the daemon owns only mutation identity, journaling, reconcile, and the authority-bound snapshot. It never uses `--db`: Beads 1.1 treats an existing path there as a legacy embedded workspace and rejects it. The checkout's `.beads/redirect` points to the same authority for native `bd` clients and worktrees; neither its branch nor `.beads/issues.jsonl` participates in task authority selection. `task.snapshot` remains a read-only export from the canonical workspace. Historical snapshot consumers are a separate product concern and never become live task authority.
-
-Mutations are first recorded under `<project>/sinnixd-task-mutations`. Each record is bounded, atomically replaced, fsynced, and has one explicit state: `pending`, `dispatching`, `applied`, or `failed`. Public receipts contain the project, task, operation, a SHA-256 idempotency digest, attempt count, a bounded result digest, and a typed failure code. They never contain note text, close reasons, backend stderr, or raw request IDs. A mode-0600 private intent stores the fixed Beads argv only while a pending mutation needs replay; it is removed after a confirmed application. The journal is capped at 1,024 records per project, so new mutations fail visibly instead of silently losing idempotency evidence.
-
-An unavailable Beads launch leaves a mutation `pending` and returns that pending receipt. It is not a completed task. `task.reconcile` schedules a fixed, project-serialized runner that replays pending intents and then runs `bd sync --no-adopt`; both use the same owner lock as direct mutations. A crash after durable `dispatching` state is `failed` with `OWNER_UNAVAILABLE` outcome-unknown evidence, rather than issuing the command again. This is deliberately conservative: reconciliation only retries work that never reached a backend process. The authority root, not the Git checkout, contains the journal and Beads database, so replay does not create task-only Git changes.
-
-`task.create` requires a typed title, description, issue type, priority, labels list, optional parent task ID, and typed dependency relations (`relation:task-id` from the CLI). Sinnixd compiles those values into one fixed `bd create` command with `--parent` and `--deps`; the backend owns graph validation and applies it as the one canonical mutation. A successful response carries `task_ref` in the shared `sinnix://projects/<project>/beads/<id>` form plus bounded owner evidence containing only the journal state, attempt count, result digest and byte count, created ID, and failure code. No title or description enters the public journal.
-
-`task.complete` requires both `--request-id` and `--merge-sha`. Its durable identity is `(project, task, merge SHA)`, not the request ID, so retries with a new request ID do not call Beads a second time. Reusing that merge SHA for the same project and task with different completion arguments is rejected. Other mutation kinds use their stable request ID as their durable identity.
-
-An authority remains unavailable until `<project>/authority.json` attests one completed cutover. The receipt binds the project ID, canonical and source database paths, equal SHA-256 digests of source and destination exports, and equal issue-row counts. The source `.beads/dolt` must be absent and the source `.beads/redirect` must resolve to the canonical `.beads` directory. Sinnixd rejects a missing or malformed receipt, unequal verification evidence, a missing canonical database, or an ambiguous source. This makes interrupted bootstrap and dual live authorities fail closed.
-
-The migration is an operator maintenance action and must run once per project. Stop Sinnixd first, ensure no direct `bd` client can write the project, and confirm the source Dolt server is stopped. The following is the exact Sinnix cutover; substitute the project ID and root for Polylogue and Sinex. It retains the original database as `legacy-dolt-pre-cutover` and does not delete either copy.
-
-```bash
-set -euo pipefail
-project_id=sinnix
-project_root=/realm/project/sinnix
-task_state_root=/realm/state/tasks
-authority_root="$task_state_root/$project_id"
-authority_beads="$authority_root/.beads"
-source_database="$project_root/.beads/dolt"
-staging_database="$authority_beads/dolt.staging"
-canonical_database="$authority_beads/dolt"
-scratch_dir="$(mktemp -d "/realm/tmp/work/task-cutover.${project_id}.XXXXXX")"
-
-systemctl --user stop sinnixd.service
-bd --directory "$project_root" dolt stop
-test "$(bd --directory "$project_root" dolt status --json | jq -r .running)" = false
-test -d "$source_database"
-test ! -e "$authority_root"
-install -d -m 0700 "$authority_root" "$authority_beads"
-
-bd --directory "$project_root" --readonly export >"$scratch_dir/source.jsonl"
-source_rows="$(bd --directory "$project_root" --readonly sql 'SELECT COUNT(*) AS row_count FROM issues' --json | jq -er '.[0].row_count')"
-bd --directory "$project_root" dolt stop
-test "$(bd --directory "$project_root" dolt status --json | jq -r .running)" = false
-
-install -m 0600 "$project_root/.beads/config.yaml" "$authority_beads/config.yaml"
-install -m 0600 "$project_root/.beads/metadata.json" "$authority_beads/metadata.json"
-rsync -a --exclude='*/.dolt/git-remote-cache/' -- "$source_database/" "$staging_database/"
-diff --recursive --brief --no-dereference --exclude=git-remote-cache "$source_database" "$staging_database"
-
-mv "$staging_database" "$canonical_database"
-mv "$source_database" "$authority_root/legacy-dolt-pre-cutover"
-printf '1.1.0\n' > "$authority_beads/.local_version"
-printf '%s\n' "$authority_beads" > "$project_root/.beads/redirect"
-bd --directory "$authority_root" dolt start
-bd --directory "$authority_root" --readonly export >"$scratch_dir/destination.jsonl"
-destination_rows="$(bd --directory "$authority_root" --readonly sql 'SELECT COUNT(*) AS row_count FROM issues' --json | jq -er '.[0].row_count')"
-bd --directory "$authority_root" dolt stop
-cmp "$scratch_dir/source.jsonl" "$scratch_dir/destination.jsonl"
-test "$source_rows" -eq "$destination_rows"
-source_digest="sha256:$(sha256sum "$scratch_dir/source.jsonl" | awk '{print $1}')"
-destination_digest="sha256:$(sha256sum "$scratch_dir/destination.jsonl" | awk '{print $1}')"
-test "$source_digest" = "$destination_digest"
-receipt_tmp="$authority_root/.authority.json.tmp"
-jq -n \
-  --arg project_id "$project_id" \
-  --arg database "$canonical_database" \
-  --arg source_database "$source_database" \
-  --arg source_digest "$source_digest" \
-  --arg destination_digest "$destination_digest" \
-  --argjson source_rows "$source_rows" \
-  --argjson destination_rows "$destination_rows" \
-  '{schema: 1, project_id: $project_id, database: $database, source_database: $source_database, verification: {source_export_sha256: $source_digest, destination_export_sha256: $destination_digest, source_rows: $source_rows, destination_rows: $destination_rows}}' \
-  >"$receipt_tmp"
-chmod 0600 "$receipt_tmp"
-mv "$receipt_tmp" "$authority_root/authority.json"
-test ! -e "$source_database"
-test "$(cat "$project_root/.beads/redirect")" = "$authority_beads"
-systemctl --user start sinnixd.service
-```
-
-If any verification or cutover command fails, leave Sinnixd stopped. Before the two `mv` commands, the source remains authoritative and the incomplete destination has no receipt. After those commands, either finish the symlink and receipt or move `legacy-dolt-pre-cutover` back to `.beads/dolt`; Sinnixd will refuse task operations until one state is unambiguous.
-
-## Typed shell and agent contracts
-
-`agentctl shell` is an explicit operator capability. It accepts an exact argv, a relative working directory inside an explicit registered Git checkout, a timeout, and only the `exit-status` result kind. `agentctl agent` is an explicit `agent-control` capability. It accepts a private prompt file plus a declared backend, model, effort, credential profile, timeout, and only the `last-message` result kind. Observer and local-default principals cannot use either route.
-
-Both routes use the same UUID job ID, transient user service, cancellation, reconciliation, `job get/list/logs/result/wait`, and bounded artifact readers as declared operations. Their durable public record contains the principal, job kind, canonical project and checkout identity, redacted argv digest or prompt digest, and bounded artifact references. It never stores raw shell argv arguments after launch, prompt text, environment values, or credentials.
+Task state is `bd`'s alone. The daemon holds no task write path; it sets
+`BEADS_ACTOR=agent-<job id>` in every attested-agent environment so an agent's
+own writes are not attributed to the operator.
 
 Delivery is a precondition of `workspace.publish` and `workspace.land`, not a caller-fed completion route. Ordinary delivery reads the exact-head declared verification job through `job.result`. Packet delivery additionally names the Beads-bound attested-agent job with `--packet-job`. The declared verification job receives the same immutable Beads identity and write-scope binding at dispatch; each job record independently freezes its checkout head, and the contract runner seals the worker's structured report to the Git head observed when the runner exits. Delivery requires the bindings to match, the later semantic verifier to succeed at that same final head, snapshots the packet's initial-to-final Git range, and checks the complete current base-to-head publication diff against the Beads-owned scope. It rejects dirty, divergent, stale, or out-of-scope publication work and repeats the complete precondition after push and after review inspection. The worker report can only tighten acceptance through bounded anti-vacuity, unresolved-work, delegation-visibility, exact deletion evidence, and evidence-only fields. Git owns paths, commits, and heads; the project verifier owns semantic success; GitHub branch protection owns required review state.
 
 Typed jobs accept no environment overlay. The daemon creates the `env -i` environment from the declared project environment and fixed `SINNIXD_*` identity fields. Immediately before execution, the contract runner verifies those fields, rechecks the exact registered project, canonical worktree root, common Git directory, porcelain worktree membership, and recorded HEAD. A changed, missing, symlinked, or spoofed identity fails closed. Every attested agent runs its mandatory environment `preflight` from the revalidated checkout, then invokes the native backend through the same descriptor-owned `environment.command`. A missing, failed, unavailable, or 30-second `agent-preflight-timeout` preflight terminates the typed job before backend implementation starts and retains an actionable runner error in the bounded log. Attested-agent private inputs use schema v2; v1 records fail closed as stale contract input and must be relaunched. The shared transient user service remains the sole process, cgroup, timeout, and cancellation authority. Private launch inputs are mode 0600, removed before shell execution, and removed after handoff or every terminal lifecycle outcome, including confirmed launch failure. Native private logs are removed after handoff; only the bounded shared log and result artifacts remain addressable.
 
-Each record is stored under `$XDG_STATE_HOME/sinnixd` and contains safe operation identity, environment key names, and its bounded-read log artifact path. Record replacement fsyncs the containing directory, and newly created state directories are synchronized before they contain durable evidence. The `sinnixd-job-*.service` dynamic runtime surface and its record capture lane are declared with the daemon, rather than with any MCP frontend. Internal foreground argv is launch-only: the durable record has only a SHA-256 digest and constant display metadata, never raw argv or environment values. The systemd-launched capture helper drains output but writes at most 1 MiB per job; it creates its overflow marker with the first discarded byte, so a live log reader can see truncation before the producer exits. It also fsyncs a completion marker only after the captured process exits successfully and all bounded outputs are durable. It does not own a PID, process state, queue, task, workspace, or retry policy. A job ID deterministically derives its unit name. Every `systemd-run` and `systemctl` call has a short finite bound. `job.wait` caps each reconciliation call to its remaining deadline, so a stalled user manager cannot hold a wait or reserved control worker indefinitely. After a daemon restart, `get`, `list`, `wait`, and `cancel` reload the record and reconcile with the user manager. If `systemd-run` loses its reply but `show` finds the transient unit, `job start` returns the reconciled systemd state. If both the launch reply and its first reconciliation are unavailable, `job start` returns a durable nonterminal `launch-unknown` result with the stable job ID and unit. Later `get`, `wait`, and `cancel` use that same identity to reconcile it. A confirmed absent launch becomes terminal `launch-failed`. A confirmed missing unit after launch remains terminal `missing`; an unreachable or timed-out systemd observation is durable nonterminal `observation-unknown` until a later observation repairs it. Cancellation persists its intent before asking systemd to stop the service, then preserves an observed systemd success, timeout, or failure result. A `cancelled` result needs matching systemd signal evidence, or a durably recorded successful stop acknowledgement for the observed invocation when systemd has already garbage-collected the transient unit. If a stop times out and the unit later disappears, the job remains nonterminal `outcome-unknown` instead of treating the missing unit's default success fields as an exit result. A later authoritative systemd observation can repair that state. A typed result can prove semantic success after collection only when its content is valid and the capture completion marker proves the producer exited successfully; an empty, partial, malformed, or unmarked result is not completion evidence. A schema-v3 attested-agent record also carries forward its native completion only when systemd still reports an inactive loaded success, its durable lifecycle is `succeeded` with exit status zero, its bounded last-message artifact is valid, and no cancellation intent exists. Existing false terminal success or cancellation records without this evidence are reopened lazily by `get`, `list`, `wait`, or `cancel` and reconciled under the same rules. Systemd remains authoritative for the process, cgroup, timeout, terminal result, cancellation, and journal evidence.
+Each record is stored under `$XDG_STATE_HOME/sinnixd` and contains safe operation identity, environment key names, and its bounded-read log artifact path. Record replacement fsyncs the containing directory, and newly created state directories are synchronized before they contain durable evidence. The `sinnixd-job-*.service` dynamic runtime surface and its record capture lane are declared with the daemon, rather than with any MCP frontend. Internal foreground argv is launch-only: the durable record has only a SHA-256 digest and constant display metadata, never raw argv or environment values. The systemd-launched capture helper drains output but writes at most 1 MiB per job; it creates its overflow marker with the first discarded byte, so a live log reader can see truncation before the producer exits. It also fsyncs a completion marker only after the captured process exits successfully and all bounded outputs are durable. It does not own a PID, process state, queue, workspace, or retry policy. A job ID deterministically derives its unit name. Every `systemd-run` and `systemctl` call has a short finite bound. `job.wait` caps each reconciliation call to its remaining deadline, so a stalled user manager cannot hold a wait or reserved control worker indefinitely. After a daemon restart, `get`, `list`, `wait`, and `cancel` reload the record and reconcile with the user manager. If `systemd-run` loses its reply but `show` finds the transient unit, `job start` returns the reconciled systemd state. If both the launch reply and its first reconciliation are unavailable, `job start` returns a durable nonterminal `launch-unknown` result with the stable job ID and unit. Later `get`, `wait`, and `cancel` use that same identity to reconcile it. A confirmed absent launch becomes terminal `launch-failed`. A confirmed missing unit after launch remains terminal `missing`; an unreachable or timed-out systemd observation is durable nonterminal `observation-unknown` until a later observation repairs it. Cancellation persists its intent before asking systemd to stop the service, then preserves an observed systemd success, timeout, or failure result. A `cancelled` result needs matching systemd signal evidence, or a durably recorded successful stop acknowledgement for the observed invocation when systemd has already garbage-collected the transient unit. If a stop times out and the unit later disappears, the job remains nonterminal `outcome-unknown` instead of treating the missing unit's default success fields as an exit result. A later authoritative systemd observation can repair that state. A typed result can prove semantic success after collection only when its content is valid and the capture completion marker proves the producer exited successfully; an empty, partial, malformed, or unmarked result is not completion evidence. Existing false terminal success or cancellation records without this evidence are reopened lazily by `get`, `list`, `wait`, or `cancel` and reconciled under the same rules. Systemd remains authoritative for the process, cgroup, timeout, terminal result, cancellation, and journal evidence.
 
-## Completion events, wait-any, and supervision
+## Completion events and supervision
 
-The capture helper notifies the daemon socket when the captured process exits (both success and failure), so a blocked `job.wait` wakes immediately instead of on its next poll slice. The notification is a best-effort accelerator: systemd observation remains the sole state authority, a missed event is recovered by the fallback observation cadence, and a spurious event costs one bounded extra observation. Server-side waits block on the in-process terminal-event condition (no busy polling), accept up to 3600 seconds, and `job wait <id...> --any` returns the first job of a set to reach a terminal state along with `completed_job_id`. Re-observations that would change nothing but their own timestamp skip the durable record rewrite.
+The capture helper notifies the daemon socket when the captured process exits (both success and failure), so a blocked `job.wait` wakes immediately instead of on its next poll slice. The notification is a best-effort accelerator: systemd observation remains the sole state authority, a missed event is recovered by the fallback observation cadence, and a spurious event costs one bounded extra observation. Server-side waits block on the in-process terminal-event condition (no busy polling) and accept up to 3600 seconds. Re-observations that would change nothing but their own timestamp skip the durable record rewrite.
 
-On each first-observed terminal transition the daemon appends one JSON line — `{job_id, kind, project, phase, completed_at, checkout}` — to the event spool (`--event-spool`, default `/realm/state/agentctl/events.jsonl`). The spool is an append-only advisory watch point for supervisors (tail it instead of polling `job status`); it is never state authority, is written at most once per transition per daemon process, and rolls to `events.jsonl.old` past 64 MiB. The gateway watches complete spool records and sends MCP `resources/updated` notifications for `sinnix://gateway/v2/events`, so subscribed coordinator sessions can read the bounded event page without a per-job watcher. A per-job `on_complete` hook is deliberately not implemented: the spool plus push notification and `wait --any` cover supervision without giving jobs ambient exec authority.
+On each first-observed terminal transition the daemon appends one JSON line — `{job_id, kind, project, phase, completed_at, checkout}` — to the event spool (`--event-spool`, default `/realm/state/agentctl/events.jsonl`). The spool is an append-only advisory watch point for supervisors (tail it instead of polling `job get`); it is never state authority, is written at most once per transition per daemon process, and rolls to `events.jsonl.old` past 64 MiB. The gateway watches complete spool records and sends MCP `resources/updated` notifications for `sinnix://gateway/v2/events`, so subscribed coordinator sessions can read the bounded event page without a per-job watcher. A per-job `on_complete` hook is deliberately not implemented: the spool plus push notification cover supervision without giving jobs ambient exec authority.
 
-`agentctl agent list|status|wait|result` are supervision sugar over the same job routes filtered to `kind=attested-agent`; `agentctl agent launch` is an explicit alias for the bare dispatch form, and `job list --kind` filters any listing by job kind. Agent launches may carry a bounded `--coordinator-label` (also accepted as `--coordinator` or `--campaign-label`); it is recorded in the public job spec and copied to that job's terminal spool events so concurrent campaign monitors can filter their own lanes. Every attested-agent environment carries `BEADS_ACTOR=agent-<job id>` unless the project descriptor declares an explicit value, so task-authority writes from agents never default to the operator's identity. Terminal job records older than the 14-day retention window move to `jobs-archive/` at daemon start; archived records stay loadable by id while listings stop paying for unbounded history.
+`agentctl agent launch` is an explicit alias for the bare dispatch form; supervise agent jobs through the `job` verbs with `job list --kind attested-agent`. Agent launches may carry a bounded `--coordinator-label` (also accepted as `--coordinator` or `--campaign-label`); it is recorded in the public job spec and copied to that job's terminal spool events so concurrent campaign monitors can filter their own lanes. Every attested-agent environment carries `BEADS_ACTOR=agent-<job id>` unless the project descriptor declares an explicit value, so task-authority writes from agents never default to the operator's identity. Terminal job records older than the 14-day retention window move to `jobs-archive/` at daemon start; archived records stay loadable by id while listings stop paying for unbounded history.
 
 Project descriptors may declare `[environment.values]` (explicit variable values) and `environment.require` (names that must be present in the resolved job environment). A required variable that is absent at job build time fails the dispatch loudly with the missing names; the silent inherit-filter drop is reserved for variables nothing requires.
-
-## Source-scoped owner adapters
-
-A project descriptor can declare a source-scoped, read-only owner adapter in `[owner_adapters.<name>]`. Each declaration names a non-overlapping canonical namespace, owner identity, protocol versions, canonical source reference, fixed executable, and bounded timeout. AgentCTL sends the request envelope to that exact executable through a transient user service. It does not pass caller-selected argv.
-
-The first reserved contract is `polylogue.archive.status`, owned by `polylogue-archive` and bound to `sinnix://polylogue/archive`. A successful response must use the same request and correlation IDs, retain the declared owner identity, carry exactly one matching source binding, and use a bounded inline or opaque payload. An optional `expected_source_binding` request field is an AgentCTL precondition. When present, the returned generation and root digest must match it exactly. The adapter owns archive semantics and availability errors. AgentCTL owns transport, validation, systemd lifecycle, and result bounds.
 
 ## Workspace relationships
 
@@ -267,19 +179,19 @@ Publication requires a successful operation listed by the project as a workspace
 
 Declared operations enter one durable admission record before systemd starts anything. Descriptors may declare `dependencies`, `exclusive_keys`, `estimate_memory_bytes`, and `scratch`. Dependencies are other named operations, exclusive keys are project-defined semantic locks, and scratch is `none`, `tmpfs`, or `nvme`. The daemon validates every name and value while loading the descriptor. It does not derive any of them from an executable name.
 
-A dependency that owns a declared development-service lease is satisfied when its systemd job is active, every leased loopback port is bound, and a `project-command` service has atomically published its job-bound readiness marker. The dependent operation receives exactly those descriptor-named port variables in its private launch environment; the allocated values do not enter the tree-and-environment cache identity. Failed or missing service dependencies still fail closed like ordinary dependencies.
+A dependency that owns a declared development-service lease is satisfied when its systemd job is active, every leased loopback port is bound, and a `project-command` service has atomically published its job-bound readiness marker. The dependent operation receives exactly those descriptor-named port variables in its private launch environment. Failed or missing service dependencies still fail closed like ordinary dependencies.
 
 The `interactive`, `normal`, `bulk`, and `agent` pools have separate worker and estimated-memory budgets. Admission also reserves memory for the desktop and blocks non-interactive work under host memory, swap, or I/O pressure. If severe pressure persists, the scheduler cancels the managed non-interactive job with the largest current memory and swap footprint, records the pressure evidence, and reassesses before canceling another. Interactive jobs are never pressure victims. Systemd-oomd is the independent cgroup safety net.
 
-A terminal or pre-cancellation systemd observation records `MemoryPeak` with headroom as the next estimate for that semantic operation. Estimates use a five-run high-water window; a legacy entry without recent samples is replaced by the next observation rather than carried forward. Operators can inspect the durable holder claims, queue order, and blocking arithmetic with `agentctl job admission`, clear one learned estimate with `agentctl job admission-reset <estimate-key>`, or clear all learned estimates with `agentctl job admission-reset --all`. These operations do not alter active jobs or successful-result cache entries. Estimates can rise but never erase a larger declared or learned requirement. Local failures such as OOM kills are terminal; only an ordinary backend exit carrying a recognized provider-capacity response is retryable. Learned estimates, holder claims, and successful-result cache entries are bounded durable state. If that state is malformed or unavailable after restart, it is discarded and durable job records plus systemd remain authoritative.
+A job's memory claim is its declared `estimate_memory_bytes`, or its pool default; there is no learned component. Each terminal record carries the observed `MemoryPeak` as evidence beside the declaration. Operators inspect the durable holder claims, queue order, and blocking arithmetic with `agentctl job admission`; a queued job's own record names what blocks it in `blocked_by`. Local failures such as OOM kills are terminal; only an ordinary backend exit carrying a recognized provider-capacity response is retryable. Holder claims are bounded durable state. If that state is malformed or unavailable after restart, it is discarded and durable job records plus systemd remain authoritative.
 
-`tree+environment` caching uses the declared operation, normalized input digest, clean Git tree, and declared environment. A matching running job has one systemd service and one shared durable job ID for all subscribers, so cancellation is shared too. A matching successful record is returned as a reuse. Dirty or unobservable trees do not reuse results. A failed, cancelled, missing, or unobserved result is never cacheable.
+An operation declaring `supersede = "queued"` cancels its own not-yet-started jobs when a newer request for the same operation, project and principal arrives. Identical requests are otherwise run, not deduplicated.
 
 Scratch is allocated only under the daemon's owned tmpfs or NVMe roots and is passed through `TMPDIR`. The scheduler removes it after every terminal systemd outcome. Startup repeats cleanup only for already-terminal durable records, so recovery never guesses that a live service has stopped.
 
 Result parsing is pure and bounded. `exit` reads the observed systemd exit result, `json` and `pytest` require a JSON object result artifact, and an attested agent returns its bounded final-message artifact. Systemd still owns the process, cgroup, timeout, cancellation, and journal evidence.
 
-The daemon owns bounded descriptor-declared development-service leases and typed shells only through their stated contracts. It does not own arbitrary shells, product readiness, Git history, hosted review state, or merge state. Beads remains the task-state authority and GitHub remains authoritative for reviews and merges. The gateway’s legacy controllers remain downstream and are unchanged here.
+The daemon owns bounded descriptor-declared development-service leases and typed shells only through their stated contracts. It does not own arbitrary shells, product readiness, Git history, hosted review state, or merge state. `bd` remains the task-state authority and GitHub remains authoritative for reviews and merges. The gateway’s legacy controllers remain downstream and are unchanged here.
 
 ## Generic project plans
 
@@ -288,25 +200,23 @@ The daemon owns bounded descriptor-declared development-service leases and typed
 The service API is owned by `project-plans`:
 
 ```text
-plan.submit  {project_id, input_generation, nodes, [node_operation], [workspace_id|checkout_id]}
+plan.submit  {project_id, nodes, [node_operation], [workspace_id|checkout_id]}
 plan.get     {plan_id}
-plan.list    {[project_id]}
 plan.wait    {plan_id, [timeout_seconds]}
-plan.result  {plan_id, [max_bytes]}
 ```
 
-The CLI equivalents are `agentctl plan submit`, `get`, `list`, `wait`, and `result`. `plan submit` reads a bounded JSON node file. A node has `node_id` (or `id`), `depends_on` (or `dependencies`), and either `operation` plus `parameters`, or `payload` when `node_operation` is supplied. The graph is checked for duplicate IDs, undeclared dependencies, cycles, node and edge bounds, and descriptor parameter validity before any job is created.
+The CLI equivalents are `agentctl plan submit`, `get`, and `wait`. `plan submit` reads a bounded JSON node file. A node has `node_id` (or `id`), `depends_on` (or `dependencies`), and either `operation` plus `parameters`, or `payload` when `node_operation` is supplied. The graph is checked for duplicate IDs, undeclared dependencies, cycles, node and edge bounds, and descriptor parameter validity before any job is created.
 
-Each plan node stores only its ID, operation, parameter digest, input generation, dependency node IDs, exact registered checkout identity, job ID, and bounded result references. Its durable job carries the plan and node identity and explicit dependency job IDs. Normal-pool admission therefore starts independent ready nodes concurrently and applies descriptor `exclusive_keys`, including project-defined promotion locks, through the existing scheduler. Systemd remains the process, timeout, cancellation, and terminal-result authority.
+Each plan node stores only its ID, operation, parameter digest, dependency node IDs, exact registered checkout identity, job ID, and bounded result references. Its durable job carries the plan and node identity and explicit dependency job IDs. Normal-pool admission therefore starts independent ready nodes concurrently and applies descriptor `exclusive_keys`, including project-defined promotion locks, through the existing scheduler. Systemd remains the process, timeout, cancellation, and terminal-result authority.
 
-Repeated plans do not use the ordinary operation cache. A completed node is reusable only when the prior plan's project, exact checkout and HEAD, node operation, parameter digest, node input generation, dependency-node list, and authoritative bounded result evidence all match. Running, failed, cancelled, missing, malformed, or artifact-less jobs are never reused. A plan manifest and node jobs survive daemon restart; recovery finds already-created node jobs by their durable plan and node identity, preserving their logs and results.
+A resubmitted plan runs its nodes again; nothing is reused from a prior plan. A plan manifest and node jobs survive daemon restart; recovery finds already-created node jobs by their durable plan and node identity, preserving their logs and results.
 
-For Lynchpin integration, its descriptor must mark the node operation with `plan_node = true`, declare every accepted payload field under `[operations.<node-operation>.parameters]`, and set the operation's `exec`, `pool`, `result`, `cache`, `timeout_seconds`, `exclusive_keys`, `estimate_memory_bytes`, and `scratch` fields as appropriate. Each submission must provide a bounded stable `input_generation` and a node list whose payloads contain no undeclared fields. A node operation should use `result = "json"` or `result = "pytest"` when Lynchpin needs a typed receipt. Lynchpin owns the generation value and convergence semantics; Sinnixd only preserves and compares it.
+For Lynchpin integration, its descriptor must mark the node operation with `plan_node = true`, declare every accepted payload field under `[operations.<node-operation>.parameters]`, and set the operation's `exec`, `pool`, `result`, `timeout_seconds`, `exclusive_keys`, `estimate_memory_bytes`, and `scratch` fields as appropriate. Each submission must provide a node list whose payloads contain no undeclared fields. A node operation should use `result = "json"` or `result = "pytest"` when Lynchpin needs a typed receipt.
 
 ## Shared protocol
 
 All requests and responses use `sinnix-mcp` v1. Every request carries an explicit principal, canonical dotted operation, owner, request ID, and correlation ID. Responses preserve owner identity, typed errors, bounded payloads, and optional source-generation bindings. `OwnerRegistry` rejects overlapping operation namespaces, so a frontend cannot silently choose an owner for a domain operation.
 
-Project adapters are the local semantic boundary. A descriptor declares what an operation means, its pool, timeout, dependencies, result contract, cache policy, exclusivity keys, resource seed, and scratch policy. The daemon supplies admission and lifecycle mechanics. It does not infer semantics from a command basename.
+Project adapters are the local semantic boundary. A descriptor declares what an operation means, its pool, timeout, dependencies, result contract, exclusivity keys, resource seed, and scratch policy. The daemon supplies admission and lifecycle mechanics. It does not infer semantics from a command basename.
 
 The Polylogue adapter can declare the harvest operation with `result = "json"` and executable `sinnixd-harvest`. `agentctl lane publish <workspace> [--close]` is the publication route: one invocation resolves the workspace, derives the lane job and bead from the job records, mints the review receipt, and authorizes it, reading the PR title/body and close reason from the worktree's `.lane/` artifacts. The publication repo comes from the worktree's `origin` remote. Scanner red flags are computed and recorded on the receipt for audit either way. The two-step route (an unauthorised invocation compiling a `review-required` receipt, then a second `--authorize` invocation naming `receipt_ref`) remains for the reactor's judgment path and for coordinators who want to read the receipt before publishing. `HARVEST_OK`, `REBASE_CONFLICT`, and `GATE_RED` are typed JSON outcomes; unexpected dependency failures remain failed jobs. An affected-verification refusal (`unavailable`) is spooled as a `verification-unavailable` event.

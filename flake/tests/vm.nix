@@ -133,8 +133,10 @@ in
             machine.succeed(f"{as_user} systemctl --user cat sinnixd.slice | grep -qx CPUWeight=10")
             machine.succeed("test $(cat /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/cpu.weight) -eq 100")
             machine.succeed(f"{as_user} agentctl project list | jq -e '.ok and ([.payload.value.projects[].id] | sort == [\"polylogue\", \"sinnix\"])' >/dev/null")
-            machine.succeed(f"{as_user} agentctl project get polylogue | jq -e '.ok and .payload.value.id == \"polylogue\" and (.payload.value.owner_adapters | length == 1) and .payload.value.owner_adapters[0].namespace == \"polylogue.archive\" and .payload.value.owner_adapters[0].owner == \"polylogue-archive\" and .payload.value.owner_adapters[0].source_scoped and .payload.value.owner_adapters[0].source_ref == \"sinnix://polylogue/archive\"' >/dev/null")
-            machine.succeed(f"{as_user} agentctl status | jq -e '.ok and ([.payload.value.owners[] | select(.namespace == \"polylogue.archive\" and .owner == \"polylogue-archive\" and .source_scoped)] | length == 1)' >/dev/null")
+            # The descriptor still carries a retired [owner_adapters] table; the
+            # loader must ignore it rather than take the project out of service.
+            machine.succeed(f"{as_user} agentctl project get polylogue | jq -e '.ok and .payload.value.id == \"polylogue\" and (.payload.value | has(\"owner_adapters\") | not)' >/dev/null")
+            machine.succeed(f"{as_user} agentctl status | jq -e '.ok and ([.payload.value.owners[] | select(.source_scoped)] | length == 0)' >/dev/null")
             job_id = machine.succeed(f"{as_user} agentctl job start sinnix descendants | jq -r '.payload.value.job_id'").strip()
             machine.wait_until_succeeds("test -s /home/sinity/.local/state/sinnixd-parent.pid && test -s /home/sinity/.local/state/sinnixd-child.pid")
             parent = machine.succeed("cat /home/sinity/.local/state/sinnixd-parent.pid").strip()

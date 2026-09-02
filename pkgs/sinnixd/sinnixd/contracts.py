@@ -18,21 +18,6 @@ from .projects import ProjectCatalog, RegisteredCheckout
 MAX_PROMPT_BYTES = 200_000
 AGENT_BACKENDS = frozenset({"claude", "codex", "gemini", "grok", "antigravity"})
 CREDENTIAL_PROFILES = frozenset({"subscription", "api"})
-MODEL_ESCALATION = {
-    "codex": {
-        "gpt-5.6-luna": "gpt-5.6-terra",
-        "gpt-5.6-terra": "gpt-5.6-sol",
-        "gpt-5.6-sol": "gpt-5.6-sol",
-    },
-    "claude": {
-        "claude-haiku-4-5": "claude-sonnet-4-5",
-        "claude-sonnet-4-5": "claude-opus-4-1",
-        "claude-opus-4-1": "claude-opus-4-1",
-        "haiku": "sonnet",
-        "sonnet": "opus",
-        "opus": "opus",
-    },
-}
 
 
 class ContractError(ValueError):
@@ -138,7 +123,6 @@ class TypedJobContracts:
         dimensions: Mapping[str, Any] | None = None,
         dependency_job_ids: Sequence[str] = (),
         exclusive_keys: Sequence[str] = (),
-        allow_failed_dependencies: bool = False,
         reject_conflicts: bool = False,
         coordinator_label: str | None = None,
     ) -> dict[str, Any]:
@@ -262,7 +246,6 @@ class TypedJobContracts:
                 dimensions=dimensions,
                 dependency_job_ids=dependency_job_ids,
                 exclusive_keys=exclusive_keys,
-                allow_failed_dependencies=allow_failed_dependencies,
                 reject_conflicts=reject_conflicts,
             )
         except BaseException:
@@ -284,7 +267,6 @@ class TypedJobContracts:
         dimensions: Mapping[str, Any] | None = None,
         dependency_job_ids: Sequence[str] = (),
         exclusive_keys: Sequence[str] = (),
-        allow_failed_dependencies: bool = False,
         reject_conflicts: bool = False,
     ) -> dict[str, Any]:
         maximum_timeout = maximum_timeout_seconds(kind)
@@ -341,7 +323,6 @@ class TypedJobContracts:
                     pool="agent",
                     exclusive_keys=tuple(exclusive_keys),
                     dependency_job_ids=tuple(dependency_job_ids),
-                    allow_failed_dependencies=allow_failed_dependencies,
                     admission_bypass=admission_bypass,
                     dimensions=dimensions or {},
                 ),
@@ -389,8 +370,6 @@ class TypedJobContracts:
         *,
         job_id: str,
         hint: str | None = None,
-        escalate: bool = False,
-        native_session_id: str | None = None,
     ) -> dict[str, Any]:
         record = self.jobs.store.load(job_id)
         if record.spec.kind != "attested-agent" or record.spec.checkout is None:
@@ -414,26 +393,11 @@ class TypedJobContracts:
             not isinstance(hint, str) or not hint.strip() or len(hint.encode()) > 10_000
         ):
             raise ContractError("retry hint must be non-empty and at most 10000 bytes")
-        if native_session_id is not None and (
-            not isinstance(native_session_id, str)
-            or not native_session_id.strip()
-            or len(native_session_id.encode()) > 256
-            or any(char.isspace() for char in native_session_id)
-        ):
-            raise ContractError(
-                "native session id must be non-empty, whitespace-free, and at most 256 bytes"
-            )
         contract = dict(record.spec.contract)
         backend = contract.get("backend")
         model = contract.get("model")
         if not isinstance(backend, str) or not isinstance(model, str):
             raise ContractError("agent retry metadata is unavailable")
-        if escalate:
-            model = MODEL_ESCALATION.get(backend, {}).get(model)
-            if model is None:
-                raise ContractError(
-                    f"no escalation tier is defined for {backend}:{contract.get('model')}"
-                )
         prompt = self._retry_prompt(record)
         if hint is not None:
             prompt = f"{hint.strip()}\n\n{prompt}"
@@ -471,8 +435,6 @@ class TypedJobContracts:
             "credential_profile": contract.get("credential_profile"),
             "prompt_path": str(prompt_path),
         }
-        if native_session_id is not None:
-            private["native_session_id"] = native_session_id
         if isinstance(binding, Mapping):
             private["bead_binding"] = dict(binding)
         if isinstance(parameters, Mapping):
@@ -484,11 +446,7 @@ class TypedJobContracts:
                 "sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                 "bytes": len(prompt.encode()),
             },
-            **(
-                {"resume_of": job_id, "native_session_id": native_session_id}
-                if native_session_id is not None
-                else {"retry_of": job_id, "escalated": escalate}
-            ),
+            "retry_of": job_id,
         }
         self._write_private(prompt_path, prompt.encode())
         try:
@@ -506,19 +464,6 @@ class TypedJobContracts:
         except BaseException:
             prompt_path.unlink(missing_ok=True)
             raise
-
-    def resume_agent(self, *, job_id: str, native_session_id: str) -> dict[str, Any]:
-        record = self.jobs.store.load(job_id)
-        if record.spec.kind != "attested-agent":
-            raise ContractError("only attested-agent jobs can be resumed")
-        if not record.state.get("terminal"):
-            raise ContractError("only terminal attested-agent jobs can be resumed")
-        if record.state.get("phase") == "succeeded":
-            raise ContractError("succeeded attested-agent jobs cannot be resumed")
-        return self.retry_agent(
-            job_id=job_id,
-            native_session_id=native_session_id,
-        )
 
     def _retry_prompt(self, record: Any) -> str:
         candidates = (

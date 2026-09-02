@@ -242,14 +242,10 @@ let
     # PYTHONPATH/PYTHONHOME/… unset, but does NOT cover polylogue-hook, which
     # ships as an unwrapped console_scripts entry point and runs from
     # arbitrary agent-devshell environments. Use symlink trees to expose only
-    # the intended commands per package. AgentCTL's declared Polylogue owner
-    # route also resolves through this curated package, so fail the build when
-    # the pinned Polylogue input predates that executable.
+    # the intended commands per package.
     polylogue-cli = pkgs.runCommand "polylogue-cli" { } ''
-      test -x "${polylogueSrc}/bin/polylogue-agentctl-adapter"
       mkdir -p "$out/bin"
       ln -s "${polylogueSrc}/bin/polylogue" "$out/bin/polylogue"
-      ln -s "${polylogueSrc}/bin/polylogue-agentctl-adapter" "$out/bin/polylogue-agentctl-adapter"
       ln -s "${polylogueSrc}/bin/polylogue-mcp" "$out/bin/polylogue-mcp"
       ln -s "${polylogueSrc}/bin/polylogue-hook" "$out/bin/polylogue-hook"
     '';

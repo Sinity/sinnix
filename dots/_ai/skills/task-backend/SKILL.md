@@ -1,13 +1,13 @@
 ---
 name: task-backend
-description: Read or mutate durable Beads task state: find ready work, claim, note, relate, create, complete, release, reconcile, and snapshot registered project tasks.
+description: Read or mutate durable Beads task state: find ready work, claim, note, relate, create, complete, and release registered project tasks.
 ---
 
 # Task backend
 
 Task state lives OUTSIDE every checkout: canonical Beads/Dolt databases under
 `/realm/state/tasks/<project>`, reached via the repo's `.beads` redirect
-(`bd where` confirms) or `agentctl task ...`. **`bd` routes by cwd** — run it
+(`bd where` confirms). `bd` is the only write path. **`bd` routes by cwd** — run it
 from the owning repo or IDs resolve against the wrong backend (filing
 included: a create from the wrong cwd lands in the wrong project). Set
 `BEADS_ACTOR` in agent sessions; the default records the operator as author.
@@ -19,31 +19,25 @@ beads-in-git snapshots are immutable evidence, never live state.
 
 - `bd ready` / `bd list --status ...` / `bd show <id>` / `bd graph --open
 <epic>` — the graph is the authority; epic child-counts are not closure
-  evidence (membership is dependency-based). All task reads go through `bd`
-  directly; AgentCTL deliberately has no `task list`/`task get` (it owns only
-  journalled mutations, reconcile, and the authority-bound snapshot).
+  evidence (membership is dependency-based).
 - "Ready" means dependency-ready, not necessarily executable now: live-proof
   and operator-window items are ready-for-a-window, not ready-for-a-lane.
   Check the bead's design for window/consent requirements before claiming.
 
 ## Claiming and working
 
-- Claim before working: `agentctl task claim <id> --workspace W` (binds the
-  claim to the workspace) or `bd` claim in-repo. Stale leases with dead
-  heartbeats are the recorded smell of abandoned claims — release what you
-  will not finish (`agentctl task release`).
-- Record as you go: `agentctl task note <id> --commit SHA --text ...` /
-  `bd` notes. Notes carry dated facts and disproved hypotheses — the next
-  session must inherit them, not re-derive them.
-- Relate discovered structure: `agentctl task relate` / `bd dep` — convert
-  prose dependencies into real edges the moment you notice them.
+- Claim before working. Stale leases with dead heartbeats are the recorded
+  smell of abandoned claims — release what you will not finish.
+- Record as you go with `bd` notes. Notes carry dated facts and disproved
+  hypotheses — the next session must inherit them, not re-derive them.
+- Relate discovered structure with `bd dep` — convert prose dependencies into
+  real edges the moment you notice them.
 
 ## Completing
 
 - Complete only with verification evidence: the exact commands run, the PR
-  and merge SHA where applicable (`agentctl task complete <id> --pr N
---merge-sha SHA`). Completion is idempotent after merge and retryable
-  after a backend outage — code merge never embeds tracker transactions.
+  and merge SHA where applicable. Code merge never embeds tracker
+  transactions.
 - **Close discipline**: a bead closes when its acceptance criteria are met,
   not when a harness exists or a mechanism is "structurally tested". Address
   each AC as satisfied / deferred-to-named-successor / misframed. Partial
@@ -58,18 +52,16 @@ beads-in-git snapshots are immutable evidence, never live state.
 
 ## Filing new work
 
-Use `agentctl task create` for typed cross-project creation, with a stable
-request ID so retries are idempotent. Use `bd create` in the owning project
-when direct-owner access is the appropriate route. Follow [[bead-authoring]] for content: a
+Use `bd create` from the owning project's checkout — filing from the wrong
+cwd lands the bead in the wrong project. Follow [[bead-authoring]] for content: a
 follow-up filed in ten seconds with a ritual title is negative-value; a
 two-minute mission-first bead with real edges is how the queue stays
 workable. Discovered follow-ups get filed at discovery time, linked to the
 originating bead, never held in session memory.
 
-## Reconciliation and drift
+## Drift
 
-`agentctl task reconcile` retries failed mutations; `task snapshot` produces
-the portable export. When bead claims disagree with code or receipts,
+When bead claims disagree with code or receipts,
 re-verify and fix the document that states it (see [[investigate]] §verifying claims) —
 never propagate a stale measured claim into new work.
 
