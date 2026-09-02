@@ -220,9 +220,11 @@ def build_campaign_status(
     }
     corpus["failing_gate"] = failing_gate
     lanes_next: list[dict[str, Any]] = []
+    master_corpus: dict[str, Any] | None = None
     if state_root is not None:
-        from .lane_facts import closed_bead_ids, collect, lane_view, latest_sweep_pulls
+        from .lane_facts import closed_bead_ids, collect, lane_view, latest_corpus, latest_sweep_pulls
 
+        master_corpus = latest_corpus(state_root, project_id)
         lanes_next = [
             lane_view(facts)
             for facts in collect(
@@ -235,6 +237,7 @@ def build_campaign_status(
     return {
         "schema": "sinnix.agentctl.campaign-status.v1",
         "project_id": project_id,
+        "master_corpus": master_corpus,
         "lanes_next": lanes_next,
         "coordinator_label": coordinator_label,
         "projects": sorted(

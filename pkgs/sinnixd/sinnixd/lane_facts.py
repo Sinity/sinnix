@@ -538,6 +538,56 @@ def closed_bead_ids(project_root: Path, *, run: Run = subprocess.run, timeout: f
     return known
 
 
+def latest_corpus(state_root: Path, project: str) -> dict[str, Any] | None:
+    """The newest finished complete-corpus run: head, outcome counts, age.
+
+    Read from the verify_all job's result so the number never depends on a
+    memory of what was reported.
+    """
+    newest: tuple[str, Mapping[str, Any]] | None = None
+    for job in _job_records(state_root / "jobs"):
+        spec = job.get("spec") or {}
+        state = job.get("state") or {}
+        if spec.get("operation") != "verify_all" or spec.get("project_id") != project or not state.get("terminal"):
+            continue
+        created = str(job.get("created_at") or "")
+        if newest is None or created > newest[0]:
+            newest = (created, job)
+    if newest is None:
+        return None
+    job = newest[1]
+    artifacts = job.get("artifacts") or {}
+    path = artifacts.get("result") if isinstance(artifacts, Mapping) else None
+    outcomes: Mapping[str, Any] = {}
+    diagnosis = None
+    if isinstance(path, str):
+        try:
+            value = json.loads(Path(path).read_text())
+        except (OSError, json.JSONDecodeError):
+            value = {}
+        if isinstance(value, Mapping) and isinstance(value.get("value"), Mapping):
+            value = value["value"]
+        pytest_outcomes = value.get("pytest_outcomes") if isinstance(value, Mapping) else None
+        if isinstance(pytest_outcomes, Mapping) and isinstance(pytest_outcomes.get("outcomes"), Mapping):
+            outcomes = pytest_outcomes["outcomes"]
+        diagnostics = value.get("diagnostics") if isinstance(value, Mapping) else None
+        if isinstance(diagnostics, Mapping):
+            diagnosis = diagnostics.get("diagnosis")
+    state = job.get("state") or {}
+    checkout = (job.get("spec") or {}).get("checkout") or {}
+    red = int(outcomes.get("failed", 0) or 0) + int(outcomes.get("error", 0) or 0)
+    return {
+        "job_id": str(job.get("job_id") or ""),
+        "head": str(checkout.get("head") or "")[:12],
+        "phase": str(state.get("phase") or ""),
+        "finished_at": str(state.get("completed_at") or state.get("observed_at") or ""),
+        "passed": int(outcomes.get("passed", 0) or 0),
+        "red": red,
+        "diagnosis": diagnosis,
+        "green": bool(outcomes) and red == 0 and str(state.get("phase")) == "succeeded",
+    }
+
+
 def latest_sweep_pulls(state_root: Path) -> dict[str, Pull]:
     """PRs by receipt id from the newest finished publication-sweep job."""
     newest: tuple[str, Mapping[str, Any]] | None = None
@@ -602,6 +652,7 @@ __all__ = [
     "advance",
     "closed_bead_ids",
     "collect",
+    "latest_corpus",
     "derived_checkout_id",
     "lane_view",
     "latest_sweep_pulls",
