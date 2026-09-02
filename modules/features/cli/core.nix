@@ -131,6 +131,17 @@ mkFeatureModule {
               callback_log_lines = 0;
             };
           };
+          # Worktrees for every repo land under /realm/worktrees as
+          # <repo>-<branch>; project hooks live in each repo's .config/wt.toml.
+          xdg.configFile."worktrunk/config.toml".text = ''
+            worktree-path = "/realm/worktrees/{{ repo }}-{{ branch | sanitize }}"
+
+            [list]
+            json-schema = 2
+
+            [remove]
+            delete-branch = true
+          '';
           systemd.user.services.pueued = {
             # Tasks are the daemon's children, so its slice is the job-plane
             # ceiling; app.slice is reserved for the desktop.
