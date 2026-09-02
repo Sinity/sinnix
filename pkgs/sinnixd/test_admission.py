@@ -10,6 +10,7 @@ import pytest
 from sinnixd.jobs import (
     MEMORY_FULL_BLOCK_THRESHOLD,
     MEMORY_FULL_PREEMPT_THRESHOLD,
+    PRESSURE_PREEMPTION_COOLDOWN_SECONDS,
     AdmissionConflictError,
     GenericJobs,
     GenericJobSpec,
@@ -1842,3 +1843,51 @@ def test_pressure_sheds_an_agent_lane_before_the_bulk_corpus(
     clock[0] = 2.1
     assert subject._relieve_active_pressure(pressure) == lane["job_id"]
     assert systemd.stopped == [lane["unit"]]
+
+
+def test_admission_holds_after_a_pressure_preemption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: without the cooldown the relaunched lane is admitted on
+    the next tick and the stall repeats."""
+    pressure = {
+        "memory_full_avg10": 0.0,
+        "memory_full_avg60": 0.0,
+        "io_full_avg10": 0.0,
+        "memory_total_bytes": 32 * 1024**3,
+        "memory_available_bytes": 24 * 1024**3,
+        "swap_total_bytes": 20 * 1024**3,
+        "swap_free_bytes": 20 * 1024**3,
+        "managed_memory_bytes": 0,
+    }
+    clock = [0.0]
+    monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        pressure_probe=lambda: pressure,
+    )
+    first = subject.start(agent_spec(("table:first",)))
+    second = subject.start(agent_spec(("table:second",)))
+    base = {"LoadState": "loaded", "ActiveState": "active", "Result": "success", "ExecMainStatus": "0"}
+    for job, name in ((first, "first"), (second, "second")):
+        systemd.unit_properties[job["unit"]] = {
+            **base,
+            "InvocationID": name,
+            "MemoryCurrent": str(1024**3),
+            "MemorySwapCurrent": "0",
+            "MemoryPeak": str(1024**3),
+        }
+    pressure.update(memory_full_avg10=MEMORY_FULL_PREEMPT_THRESHOLD, memory_available_bytes=3 * 1024**3)
+    subject._relieve_active_pressure(pressure)
+    clock[0] = 2.1
+    assert subject._relieve_active_pressure(pressure) is not None
+
+    pressure.update(memory_full_avg10=0.0, memory_available_bytes=24 * 1024**3)
+    replacement = subject.start(agent_spec(("table:third",)))
+    assert subject.get(replacement["job_id"])["state"]["phase"] == "queued"
+
+    clock[0] = 2.1 + PRESSURE_PREEMPTION_COOLDOWN_SECONDS + 1
+    subject.start(agent_spec(("table:fourth",)))
+    assert subject.get(replacement["job_id"])["state"]["phase"] != "queued"
