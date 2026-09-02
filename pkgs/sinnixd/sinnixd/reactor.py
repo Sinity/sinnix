@@ -2287,11 +2287,39 @@ class CampaignReactor:
             )
         return tuple(self.project_roots)
 
+    def _corpus_pending(self, project: str) -> bool:
+        """Whether a complete-corpus run for the project is queued or running."""
+        if self.jobs_state_dir is None or not self.jobs_state_dir.is_dir():
+            return False
+        for path in self.jobs_state_dir.glob("*.json"):
+            try:
+                value = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            spec = value.get("spec") if isinstance(value, Mapping) else None
+            state = value.get("state") if isinstance(value, Mapping) else None
+            if (
+                isinstance(spec, Mapping)
+                and isinstance(state, Mapping)
+                and spec.get("kind") == "declared-operation"
+                and spec.get("operation") == "verify_all"
+                and spec.get("project_id") == project
+                and not state.get("terminal")
+            ):
+                return True
+        return False
+
     def _dispatch_refill(self, project: str) -> None:
         if project not in self._refill_targets():
             return
         root = self.project_roots.get(project)
         if root is None:
+            return
+        if self._corpus_pending(project):
+            # The corpus run is the master boundary's measurement; lanes
+            # launched beside it swap the host and turn its failures into
+            # load noise (76 of 626 "failures" on 2026-09-02 passed alone).
+            # Running lanes finish; new ones wait for the quiet window.
             return
         target = self.refill_width_target or self.min_active_lanes
         active = _active_lane_count(self.jobs_state_dir, project)
