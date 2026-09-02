@@ -471,6 +471,84 @@ def test_agentctl_job_start_maps_parameters_json_to_the_typed_request(
     }
 
 
+def test_agentctl_job_start_wait_follows_terminal_result(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    responses: list[dict[str, Any]] = [
+        {
+            "schema": 1,
+            "ok": True,
+            "payload": {"value": {"job_id": "job-1", "timeout_seconds": 7200}},
+        },
+        {
+            "schema": 1,
+            "ok": True,
+            "payload": {
+                "value": {
+                    "job_id": "job-1",
+                    "state": {"phase": "succeeded", "terminal": True},
+                }
+            },
+        },
+        {"schema": 1, "ok": True, "payload": {"value": {"status": "succeeded"}}},
+    ]
+    requests: list[RequestEnvelope] = []
+
+    def fake_call(socket_path, request_value):
+        requests.append(request_value)
+        return responses.pop(0)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["agentctl", "job", "start", "lynchpin", "converge", "--wait"],
+    )
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 0
+    assert [request.operation for request in requests] == [
+        "job.start",
+        "job.wait",
+        "job.result",
+    ]
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["payload"]["value"]["status"] == "succeeded"
+
+
+def test_agentctl_job_start_wait_reports_failure_exit_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses: list[dict[str, Any]] = [
+        {
+            "schema": 1,
+            "ok": True,
+            "payload": {"value": {"job_id": "job-1", "timeout_seconds": 60}},
+        },
+        {
+            "schema": 1,
+            "ok": True,
+            "payload": {
+                "value": {
+                    "job_id": "job-1",
+                    "state": {"phase": "failed", "terminal": True},
+                }
+            },
+        },
+    ]
+
+    def fake_call(socket_path, request_value):
+        return responses.pop(0)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["agentctl", "job", "start", "lynchpin", "converge", "--wait"],
+    )
+    monkeypatch.setattr(cli_module, "call", fake_call)
+
+    assert cli_module.main() == 1
+
+
 def write_adapter(root: Path, *, project_id: str = "fixture") -> None:
     (root / "modules").mkdir(parents=True)
     (root / "flake.nix").write_text("{}")
