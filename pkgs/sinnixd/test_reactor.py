@@ -1676,3 +1676,53 @@ def test_a_sweep_conflict_reharvests_the_lane_once_per_head(
     reactor._dispatch_conflict_harvest(event("c" * 40, receipt="session-xyz"))
 
     assert calls == [("polylogue", "packet-p-9", "41")] * 2
+
+
+def test_a_clean_receipt_does_not_publish_under_a_holding_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: the reactor and an integrator both published
+    packet-polylogue-aex0-publication (#4520, 2026-09-02 01:20Z); the
+    integrator's body edit dropped the receipt trailers."""
+    receipt = {
+        "head": "d" * 40,
+        "redflag_status": 0,
+        "lane_trailer": {"LANE-QUICK": "green"},
+        "verification": {"state": "tests-run", "runs": {}},
+    }
+    published: list[str] = []
+    monkeypatch.setattr(
+        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
+    )
+    monkeypatch.setattr(
+        CampaignReactor, "_receipt_payload", staticmethod(lambda r: receipt)
+    )
+    monkeypatch.setattr(
+        CampaignReactor,
+        "_publish",
+        lambda self, project, workspace, ref, key: published.append(key),
+    )
+    monkeypatch.setattr(CampaignReactor, "_checkout_owned", lambda self, cid: True)
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        project_roots={"polylogue": tmp_path / "repo"},
+        integration_dispatcher=lambda *a: None,
+    )
+    event = {
+        "kind": "harvest",
+        "transition": "review-required",
+        "project": "polylogue",
+        "workspace_id": "worktree-abc",
+        "packet_id": "harvest-" + "2" * 32,
+        "job_id": "job-2",
+    }
+
+    reactor._dispatch_integration(event)
+    assert published == []
+    assert not any(key.startswith("publish:") for key in reactor._board.keeper)
+
+    monkeypatch.setattr(CampaignReactor, "_checkout_owned", lambda self, cid: False)
+    reactor._dispatch_integration(event)
+    assert published == ["publish:packet-p-9:harvest-" + "2" * 32]

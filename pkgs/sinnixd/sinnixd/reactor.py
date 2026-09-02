@@ -1485,8 +1485,13 @@ class CampaignReactor:
             # Keyed by receipt, not head: a re-mint at the same head is a
             # deliberate retry after a failed authorize.
             publish_key = f"publish:{workspace}:{str(receipt).rsplit('/', 1)[-1]}"
-            if publish_key not in self._board.keeper:
-                self._publish(str(project), workspace, str(receipt), publish_key)
+            if publish_key in self._board.keeper:
+                return
+            if self._checkout_owned(str(workspace_id)):
+                # An integrator or fix lane holds the worktree and publishes
+                # from it; a second publication races its own PR text.
+                return
+            self._publish(str(project), workspace, str(receipt), publish_key)
             return
         # One integrator per (workspace, reason): an integrator that ran and
         # left the same flags standing has made its judgment; the next
