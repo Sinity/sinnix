@@ -23,7 +23,6 @@ sinnixd-review-route = "sinnixd.review:main"
 sinnixd-publication-sweep = "sinnixd.publication_sweep:main"
 sinnix-retrospective = "sinnixd.retrospective:main"
 sinnixd-project-environment-check = "sinnixd.projects:project_environment_check_main"
-sinnixd-task-reconcile = "sinnixd.tasks:task_reconcile_main"
 
 [tool.setuptools.packages.find]
 include = ["sinnixd*"]

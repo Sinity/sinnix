@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 import tomllib
-from sinnix_mcp import Authority, Lifecycle, OwnerRegistry, OwnerSpec, SinnixRef
 
 from .environment import build_environment
 from .limits import (
@@ -527,23 +526,6 @@ class ProjectOperation:
 
 
 @dataclass(frozen=True)
-class ProjectOwnerAdapter:
-    """One fixed, source-scoped owner process declared by a project."""
-
-    spec: OwnerSpec
-    command: tuple[str, ...]
-    source_ref: SinnixRef
-    timeout_seconds: int = 30
-
-    def catalog_row(self) -> dict[str, Any]:
-        return {
-            **self.spec.catalog_row(),
-            "source_ref": str(self.source_ref),
-            "timeout_seconds": self.timeout_seconds,
-        }
-
-
-@dataclass(frozen=True)
 class ProjectAdapter:
     project_id: str
     display_name: str
@@ -554,7 +536,6 @@ class ProjectAdapter:
     workspace: WorkspacePolicy | None
     conflicts: ConflictPolicy
     operations: tuple[ProjectOperation, ...]
-    owner_adapters: tuple[ProjectOwnerAdapter, ...] = ()
 
     @property
     def agent_capable(self) -> bool:
@@ -593,9 +574,6 @@ class ProjectAdapter:
             "workspace": self.workspace.catalog_row() if self.agent_capable else None,
             "conflicts": self.conflicts.catalog_row(),
             "operations": [operation.catalog_row() for operation in self.operations],
-            "owner_adapters": [
-                adapter.catalog_row() for adapter in self.owner_adapters
-            ],
         }
 
 
@@ -922,111 +900,6 @@ def _bounded_parameter_count(value: Any, maximum: int) -> bool:
     )
 
 
-def _owner_adapters(
-    raw: Mapping[str, Any], descriptor: Path
-) -> tuple[ProjectOwnerAdapter, ...]:
-    definitions = raw.get("owner_adapters", {})
-    if not isinstance(definitions, Mapping):
-        raise ProjectConfigError(f"{descriptor} [owner_adapters] must be a table")
-    adapters: list[ProjectOwnerAdapter] = []
-    for name, definition in sorted(definitions.items()):
-        if (
-            not isinstance(name, str)
-            or not name.isidentifier()
-            or not isinstance(definition, Mapping)
-        ):
-            raise ProjectConfigError(
-                f"{descriptor} contains an invalid owner adapter declaration"
-            )
-        allowed = {
-            "namespace",
-            "owner",
-            "authority",
-            "lifecycle",
-            "protocol_versions",
-            "source_scoped",
-            "source_ref",
-            "exec",
-            "timeout_seconds",
-            "documentation",
-        }
-        if set(definition) - allowed:
-            raise ProjectConfigError(f"owner_adapters.{name} contains unknown fields")
-        namespace = definition.get("namespace")
-        owner = definition.get("owner")
-        documentation = definition.get("documentation", "")
-        versions = definition.get("protocol_versions")
-        if not isinstance(namespace, str) or not isinstance(owner, str):
-            raise ProjectConfigError(
-                f"owner_adapters.{name} requires namespace and owner"
-            )
-        if not isinstance(documentation, str):
-            raise ProjectConfigError(
-                f"owner_adapters.{name}.documentation must be a string"
-            )
-        if (
-            not isinstance(versions, list)
-            or not versions
-            or any(
-                not isinstance(version, int) or isinstance(version, bool)
-                for version in versions
-            )
-        ):
-            raise ProjectConfigError(
-                f"owner_adapters.{name}.protocol_versions must be non-empty integers"
-            )
-        if definition.get("source_scoped") is not True:
-            raise ProjectConfigError(
-                f"owner_adapters.{name} must declare source_scoped = true"
-            )
-        source_ref = definition.get("source_ref")
-        if not isinstance(source_ref, str):
-            raise ProjectConfigError(
-                f"owner_adapters.{name}.source_ref must be a string"
-            )
-        timeout_seconds = definition.get("timeout_seconds", 30)
-        if (
-            not isinstance(timeout_seconds, int)
-            or isinstance(timeout_seconds, bool)
-            or not 1 <= timeout_seconds <= 300
-        ):
-            raise ProjectConfigError(
-                f"owner_adapters.{name}.timeout_seconds must be between 1 and 300"
-            )
-        try:
-            spec = OwnerSpec(
-                namespace=namespace,
-                owner=owner,
-                authority=Authority(definition.get("authority")),
-                lifecycle=Lifecycle(definition.get("lifecycle")),
-                versions=frozenset(versions),
-                source_scoped=True,
-                documentation=documentation,
-            )
-            parsed_source_ref = SinnixRef.parse(source_ref)
-        except (TypeError, ValueError) as error:
-            raise ProjectConfigError(
-                f"owner_adapters.{name} is invalid: {error}"
-            ) from error
-        adapters.append(
-            ProjectOwnerAdapter(
-                spec=spec,
-                command=_string_list(
-                    definition.get("exec"), f"owner_adapters.{name}.exec"
-                ),
-                source_ref=parsed_source_ref,
-                timeout_seconds=timeout_seconds,
-            )
-        )
-    try:
-        OwnerRegistry(adapter.spec for adapter in adapters)
-    except ValueError as error:
-        raise ProjectConfigError(
-            f"{descriptor} owner adapters overlap: {error}"
-        ) from error
-    return tuple(adapters)
-
-
 def load_project_adapter(root: Path) -> ProjectAdapter:
     root = root.resolve()
     descriptor = root / ".agentctl" / "project.toml"
@@ -1241,7 +1114,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         semantic_slots=semantic_slots,
     )
 
-    owner_adapters = _owner_adapters(raw, descriptor)
     raw_operations = raw.get("operations", {})
     if not isinstance(raw_operations, Mapping):
         raise ProjectConfigError(f"{descriptor} [operations] must be a table")
@@ -1439,7 +1311,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         workspace=workspace,
         conflicts=conflicts,
         operations=tuple(operations),
-        owner_adapters=owner_adapters,
     )
 
 
@@ -1601,31 +1472,6 @@ class ProjectCatalog:
             if checkout.checkout_id == checkout_id:
                 return checkout
         raise KeyError(f"unknown registered checkout: {project_id}.{checkout_id}")
-
-    def owner_adapters(self) -> tuple[ProjectOwnerAdapter, ...]:
-        adapters = tuple(
-            owner_adapter
-            for project in self._adapters.values()
-            for owner_adapter in project.owner_adapters
-        )
-        try:
-            OwnerRegistry(adapter.spec for adapter in adapters)
-        except ValueError as error:
-            raise ProjectConfigError(
-                f"project owner adapters overlap: {error}"
-            ) from error
-        return adapters
-
-    def owner_adapter(
-        self, operation: str
-    ) -> tuple[ProjectAdapter, ProjectOwnerAdapter]:
-        registry = OwnerRegistry(adapter.spec for adapter in self.owner_adapters())
-        spec = registry.resolve(operation)
-        for project in self._adapters.values():
-            for adapter in project.owner_adapters:
-                if adapter.spec == spec:
-                    return project, adapter
-        raise KeyError(f"no project owner adapter for {operation!r}")
 
 
 def validate_agent_environment_descriptors(roots: Iterable[Path]) -> None:

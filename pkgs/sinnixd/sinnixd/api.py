@@ -80,7 +80,6 @@ CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS = {
     "job.logs": 60.0,
     "job.result": 60.0,
     "job.cancel": 60.0,
-    "task.complete": 60.0,
     "campaign.status": 30.0,
 }
 WAIT_OPERATIONS = {"job.wait", "plan.wait"}

@@ -17,8 +17,6 @@ from sinnix_mcp import (
     RequestEnvelope,
     ResponseEnvelope,
 )
-from sinnix_mcp.execution import OwnerExecution
-
 from .campaign import CampaignRunner, WaveDrainedError
 from .campaign_status import build_campaign_status
 from .contracts import TypedJobContracts
@@ -40,11 +38,9 @@ from .jobs import (
     scheduled_timer_unit,
 )
 from .limits import MAX_AGENT_TIMEOUT_SECONDS
-from .owner_adapters import DeclaredOwnerAdapters, OwnerAdapterError
 from .project_plans import PlanStore, ProjectPlanExecutor
 from .projects import ProjectCatalog
 from .reactor import CampaignBoard
-from .tasks import TaskError, TaskService
 from .workspaces import GitWorkspaces, WorkspaceError, WorkspaceStore
 
 
@@ -113,7 +109,6 @@ SUPPORTED_OPERATIONS = frozenset(
         "job.logs",
         "job.result",
         "job.cancel",
-        "task.complete",
     }
 )
 
@@ -133,16 +128,12 @@ class SinnixdService:
             UserSystemdJobs(), GenericJobStore(default_state_dir())
         )
     )
-    owner_adapters: DeclaredOwnerAdapters = field(
-        default_factory=lambda: DeclaredOwnerAdapters(OwnerExecution())
-    )
     version: str = "0.2.0"
     native_runner: Path = Path(
         "/home/sinity/.config/hermes/skills/agent-runtime/scripts/run_agent_prompt.sh"
     )
     workspaces: GitWorkspaces | None = None
     delivery: GitHubDelivery | None = None
-    tasks: TaskService | None = None
     plans: ProjectPlanExecutor | None = None
     campaign_board_path: Path = Path("/realm/tmp/work/campaign-board.json")
 
@@ -159,10 +150,6 @@ class SinnixdService:
                 self,
                 "delivery",
                 GitHubDelivery(self.projects, self.workspaces, self.jobs),
-            )
-        if self.tasks is None:
-            object.__setattr__(
-                self, "tasks", TaskService(self.projects, jobs=self.jobs)
             )
         if self.plans is None:
             assert self.workspaces is not None
@@ -233,18 +220,8 @@ class SinnixdService:
                 versions=frozenset({1}),
                 documentation="Durable workspace relationships over Git-owned linked worktrees.",
             ),
-            OwnerSpec(
-                namespace="task",
-                owner="task-backend",
-                authority=Authority.TASK_BACKEND,
-                lifecycle=Lifecycle.DAEMON_OWNED,
-                versions=frozenset({1}),
-                documentation="Backend-neutral AgentCTL task operations through the current task authority.",
-            ),
         )
-        return OwnerRegistry(
-            (*builtin, *(adapter.spec for adapter in self.projects.owner_adapters()))
-        )
+        return OwnerRegistry(builtin)
 
     def dispatch(self, request: RequestEnvelope) -> ResponseEnvelope:
         owner_name = "sinnixd"
@@ -258,11 +235,6 @@ class SinnixdService:
                     ErrorCode.AUTHORITY_MISMATCH,
                     f"operation {request.operation!r} belongs to {owner.owner!r}, not {request.owner!r}",
                 )
-            if owner.source_scoped:
-                project, adapter = self.projects.owner_adapter(request.operation)
-                return self.owner_adapters.call(
-                    project=project, adapter=adapter, request=request
-                )
             payload = self._dispatch(
                 request.operation,
                 request.arguments,
@@ -273,13 +245,6 @@ class SinnixdService:
         except KeyError as error:
             return self._error(
                 request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error)
-            )
-        except OwnerAdapterError as error:
-            return self._error(
-                request,
-                owner_name,
-                ErrorCode(error.code.upper()),
-                str(error),
             )
         except JobResultLimitError as error:
             return self._error(
@@ -307,8 +272,6 @@ class SinnixdService:
             return self._error(
                 request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error)
             )
-        except TaskError as error:
-            return self._error(request, owner_name, error.code, str(error))
         except ValueError as error:
             return self._error(
                 request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error)
@@ -504,14 +467,6 @@ class SinnixdService:
             assert self.plans is not None
             return self.plans.result(
                 self._job_argument(arguments, "plan_id"), max_bytes=max_bytes
-            )
-        if operation.startswith("task."):
-            assert self.tasks is not None
-            return self.tasks.execute(
-                operation=operation,
-                arguments=dict(arguments),
-                principal=principal,
-                mutation_id=idempotency_key,
             )
         if operation == "workspace.list":
             if set(arguments) - {"project_id"}:
@@ -735,38 +690,32 @@ class SinnixdService:
                     "workspace finish requires agent-control or operator principal"
                 )
             assert self.delivery is not None
-            allowed = {"workspace_id", "beads", "receipt", "partial_note"}
-            if set(arguments) - allowed:
+            if set(arguments) - {"workspace_id"}:
                 raise ValueError("workspace.finish received unsupported arguments")
-            self._validate_workspace_settlement(arguments)
-            workspace_id = self._workspace_argument(arguments, "workspace.finish")
-            project_id = self.workspaces.get(workspace_id)["project_id"]
-            result = self.delivery.finish(workspace_id)
-            return self._settle_workspace(result, arguments, project_id)
+            return self._settle_workspace(
+                self.delivery.finish(
+                    self._workspace_argument(arguments, "workspace.finish")
+                ),
+                None,
+            )
         if operation == "workspace.finish-integrated":
             if principal not in {"agent-control", "operator"}:
                 raise ValueError(
                     "workspace.finish-integrated requires agent-control or operator"
                 )
-            allowed = {"workspace_id", "target_ref", "beads", "receipt", "partial_note"}
-            if set(arguments) - allowed or not {
-                "workspace_id",
-                "target_ref",
-            } <= set(arguments):
+            if set(arguments) != {"workspace_id", "target_ref"}:
                 raise ValueError(
                     "workspace.finish-integrated requires workspace_id and target_ref"
                 )
-            self._validate_workspace_settlement(arguments)
             assert self.workspaces is not None
-            workspace_id = self._workspace_argument(
-                arguments, "workspace.finish-integrated"
+            target_ref = self._job_argument(arguments, "target_ref")
+            return self._settle_workspace(
+                self.workspaces.finish_integrated(
+                    self._workspace_argument(arguments, "workspace.finish-integrated"),
+                    target_ref,
+                ),
+                target_ref,
             )
-            project_id = self.workspaces.get(workspace_id)["project_id"]
-            result = self.workspaces.finish_integrated(
-                workspace_id,
-                self._job_argument(arguments, "target_ref"),
-            )
-            return self._settle_workspace(result, arguments, project_id)
         if operation == "job.start":
             if principal not in {"agent-control", "operator"}:
                 raise JobAuthorizationError(
@@ -1211,95 +1160,17 @@ class SinnixdService:
             raise
 
     def _settle_workspace(
-        self,
-        result: dict[str, Any],
-        arguments: Mapping[str, Any],
-        project_id: str,
+        self, result: dict[str, Any], target_ref: str | None
     ) -> dict[str, Any]:
-        """Apply an authored landing receipt and publish one completion event."""
-        self._validate_workspace_settlement(arguments)
-        beads = arguments.get("beads", [])
-        if (
-            not isinstance(beads, list)
-            or not beads
-            or any(not isinstance(item, str) or not item for item in beads)
-        ):
-            if "beads" in arguments:
-                raise ValueError("beads must be a non-empty list of IDs")
-            beads = []
-        receipt = arguments.get("receipt")
-        partial_note = arguments.get("partial_note")
-        if receipt is not None and not isinstance(receipt, Mapping):
-            raise ValueError("receipt must map bead IDs to authored close reasons")
-        if partial_note is not None and (
-            not isinstance(partial_note, str) or not partial_note.strip()
-        ):
-            raise ValueError("partial_note must be a non-empty string")
-        if beads and receipt is None and partial_note is None:
-            raise ValueError("each bead requires an authored receipt or partial note")
-        if receipt is not None and set(receipt) != set(beads):
-            raise ValueError("receipt must contain exactly the beads being settled")
-        settled: list[str] = []
-        if self.tasks is not None:
-            for bead_id in beads:
-                value = receipt[bead_id] if receipt is not None else partial_note
-                if not isinstance(value, str) or not value.strip():
-                    raise ValueError(f"missing authored receipt for bead {bead_id}")
-                operation = "task.complete" if receipt is not None else "task.note"
-                task_args = (
-                    {
-                        "project_id": project_id,
-                        "task_id": bead_id,
-                        "reason": value,
-                        "merge_sha": result["head"],
-                    }
-                    if operation == "task.complete"
-                    else {"project_id": project_id, "task_id": bead_id, "text": value}
-                )
-                self.tasks.execute(
-                    operation=operation,
-                    arguments=task_args,
-                    principal="operator",
-                )
-                settled.append(bead_id)
-        disposition = (
-            "close" if receipt is not None else ("comment" if beads else "none")
-        )
+        """Publish one completion event for a disposed workspace."""
         event = {
             "schema_version": 1,
             "kind": "workspace_completion",
             "workspace_id": result["workspace_id"],
-            "target_ref": arguments.get("target_ref", result.get("head")),
-            "beads_settled": settled,
-            "disposition": disposition,
+            "target_ref": target_ref if target_ref is not None else result.get("head"),
         }
         self.jobs.spool_event(event)
-        return {
-            **result,
-            "beads_settled": settled,
-            "disposition": disposition,
-            "completion_event": event,
-        }
-
-    @staticmethod
-    def _validate_workspace_settlement(arguments: Mapping[str, Any]) -> None:
-        beads = arguments.get("beads", [])
-        if "beads" in arguments and (
-            not isinstance(beads, list)
-            or not beads
-            or any(not isinstance(item, str) or not item for item in beads)
-        ):
-            raise ValueError("beads must be a non-empty list of IDs")
-        receipt = arguments.get("receipt")
-        note = arguments.get("partial_note")
-        if receipt is not None and (
-            not isinstance(receipt, Mapping) or set(receipt) != set(beads)
-        ):
-            raise ValueError("receipt must contain exactly the beads being settled")
-        if note is not None and (not isinstance(note, str) or not note.strip()):
-            raise ValueError("partial_note must be a non-empty string")
-        if beads and receipt is None and note is None:
-            raise ValueError("each bead requires an authored receipt or partial note")
+        return {**result, "completion_event": event}
 
     def _cleanup_terminal(self, response: Mapping[str, Any]) -> dict[str, Any]:
         return self.job_contracts.cleanup_terminal(response)
