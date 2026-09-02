@@ -278,37 +278,6 @@ def test_malformed_spool_line_is_recorded_and_does_not_block_following_events(
     assert board.lanes["lane-2"].review_ready
 
 
-def test_review_dispatch_uses_the_checkout_path_as_the_workspace(
-    tmp_path: Path,
-) -> None:
-    """A lane checkout has no name field; the workspace is its directory.
-
-    Anti-vacuity: reading a "name" key instead leaves calls empty, which is how
-    auto-review silently did nothing for every lane.
-    """
-    calls: list[tuple[str, str]] = []
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        review_dispatcher=lambda project, workspace: calls.append((project, workspace)),
-    )
-    record = LaneRecord(
-        job_id="job-1",
-        project="polylogue",
-        phase="succeeded",
-        checkout={"path": "/realm/worktrees/packet-polylogue-abcd"},
-        completed_at=None,
-        review_ready=True,
-        updated_at="2026-08-27T00:00:00+00:00",
-    )
-
-    reactor._dispatch_review(record)
-    reactor._dispatch_review(record)
-
-    assert calls == [("polylogue", "packet-polylogue-abcd")]
-
-
 def test_lane_terminal_accepts_a_checkout_id_string(tmp_path: Path) -> None:
     """Lane terminals name their checkout by id, not as an object.
 
@@ -358,43 +327,6 @@ def test_workspace_resolves_from_the_durable_job_record(tmp_path: Path) -> None:
     )
 
     assert reactor._workspace_for(record) == "packet-polylogue-wxyz"
-
-
-def test_keeper_prune_keeps_records_of_dispatched_work(tmp_path: Path) -> None:
-    """A dispatched-review record must outlive the keeper's pending-action prune.
-
-    Anti-vacuity: pruning every non-refill key deletes the dedupe entry on the
-    next tick, so the same lane is reviewed again on each restart.
-    """
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-    )
-    recent = _now()
-    reactor._board.keeper["review:job-1"] = {
-        "emitted_at": recent,
-        "backoff_seconds": 0,
-        "next_eligible_at": recent,
-    }
-    reactor._board.keeper["review-fix:o/r#41:aaaaaaaaaaaa"] = {
-        "emitted_at": recent,
-        "backoff_seconds": 0,
-        "next_eligible_at": recent,
-    }
-    reactor._board.keeper["stale-action"] = {
-        "emitted_at": recent,
-        "backoff_seconds": 0,
-        "next_eligible_at": recent,
-    }
-
-    reactor._emit_keeper()
-
-    assert "review:job-1" in reactor._board.keeper
-    # The sweep repeats a findings event every pass; losing this record
-    # launched a second fix lane into the same worktree ten minutes later.
-    assert "review-fix:o/r#41:aaaaaaaaaaaa" in reactor._board.keeper
-    assert "stale-action" not in reactor._board.keeper
 
 
 def test_verify_all_failure_streak_alerts_once_and_preserves_typed_reasons(
@@ -473,197 +405,6 @@ def test_verify_all_failure_streak_alerts_once_and_preserves_typed_reasons(
     assert CampaignBoard.load(board_path).corpus_health["status"] == "healthy"
 
 
-def test_completed_review_dispatches_one_integrator(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Judging a reviewed lane fans out instead of queueing on a coordinator.
-
-    Anti-vacuity: dropping the keeper record dispatches a second integrator for
-    the same review, and dropping the reaction dispatches none.
-    """
-    calls: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(
-        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
-    )
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-        integration_dispatcher=lambda p, w, r: calls.append((p, w, r)),
-    )
-    event = {
-        "kind": "harvest",
-        "transition": "review-required",
-        "project": "polylogue",
-        "workspace_id": "worktree-abc",
-        "receipt_ref": "sinnix://harvest/harvest-" + "0" * 32,
-        "job_id": "job-9",
-        "packet": {"redflag_status": 1, "lane_trailer": {"LANE-QUICK": "green"}},
-    }
-
-    reactor._dispatch_integration(event)
-    reactor._dispatch_integration(event)
-
-    assert [c[1] for c in calls] == ["packet-p-9"]
-
-
-def test_sweep_findings_dispatch_one_review_fix_per_head(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Open findings on a published PR become a fix lane in the PR's worktree.
-
-    Anti-vacuity: dropping the keeper record dispatches a lane on every sweep
-    pass (every ten minutes) for the same commit; keying on the PR alone would
-    never answer findings on a later head.
-    """
-    calls: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(
-        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
-    )
-    monkeypatch.setattr(
-        CampaignReactor, "_receipt_workspace", staticmethod(lambda r: "worktree-abc")
-    )
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-        review_fix_dispatcher=lambda p, w, r: calls.append((p, w, r)),
-    )
-
-    def event(head: str) -> dict[str, object]:
-        return {
-            "kind": "publication-sweep",
-            "outcome": "findings",
-            "project": "polylogue",
-            "repo": "o/r",
-            "pr": 41,
-            "head": head,
-            "findings": 2,
-            "receipt": "harvest-" + "0" * 32,
-        }
-
-    reactor._dispatch_review_fix(event("a" * 40))
-    reactor._dispatch_review_fix(event("a" * 40))
-    reactor._dispatch_review_fix(event("b" * 40))
-
-    assert calls == [("polylogue", "packet-p-9", "41")] * 2
-
-
-def test_review_fix_defers_to_the_agent_holding_the_worktree(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """No fix lane launches into a worktree another agent is still editing.
-
-    Anti-vacuity: dropping the ownership check launched a fix lane beside a
-    running integrator in one worktree (PR 4506, 2026-09-01).
-    """
-    jobs = tmp_path / "jobs"
-    jobs.mkdir()
-    (jobs / "job-int.json").write_text(
-        json.dumps(
-            {
-                "spec": {
-                    "kind": "attested-agent",
-                    "checkout": {"checkout_id": "worktree-abc"},
-                },
-                "state": {"terminal": False},
-            }
-        )
-    )
-    calls: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(
-        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
-    )
-    monkeypatch.setattr(
-        CampaignReactor, "_receipt_workspace", staticmethod(lambda r: "worktree-abc")
-    )
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        jobs_state_dir=jobs,
-        project_roots={"polylogue": tmp_path / "repo"},
-        review_fix_dispatcher=lambda p, w, r: calls.append((p, w, r)),
-    )
-    event = {
-        "kind": "publication-sweep",
-        "outcome": "findings",
-        "project": "polylogue",
-        "repo": "o/r",
-        "pr": 41,
-        "head": "a" * 40,
-        "findings": 2,
-        "receipt": "harvest-" + "0" * 32,
-    }
-
-    reactor._dispatch_review_fix(event)
-    assert calls == []
-    assert not any(k.startswith("review-fix:") for k in reactor._board.keeper)
-
-    (jobs / "job-int.json").write_text(
-        json.dumps(
-            {
-                "spec": {
-                    "kind": "attested-agent",
-                    "checkout": {"checkout_id": "worktree-abc"},
-                },
-                "state": {"terminal": True},
-            }
-        )
-    )
-    reactor._dispatch_review_fix(event)
-    assert calls == [("polylogue", "packet-p-9", "41")]
-
-
-def test_integration_is_keyed_by_workspace_and_head(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A lane that pushed new work after its integration is judged again.
-
-    Anti-vacuity: keying on the workspace alone leaves a re-harvested lane
-    parked behind its first integrator forever.
-    """
-    calls: list[tuple[str, str, str]] = []
-    heads = {"harvest-" + "1" * 32: "a" * 40, "harvest-" + "2" * 32: "b" * 40}
-    monkeypatch.setattr(
-        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
-    )
-    monkeypatch.setattr(
-        CampaignReactor,
-        "_receipt_field",
-        staticmethod(lambda receipt, key: heads.get(receipt.rsplit("/", 1)[-1])),
-    )
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-        integration_dispatcher=lambda p, w, r: calls.append((p, w, r)),
-    )
-
-    def event(receipt: str, packet: dict[str, object]) -> dict[str, object]:
-        return {
-            "kind": "harvest",
-            "transition": "review-required",
-            "project": "polylogue",
-            "workspace_id": "worktree-abc",
-            "receipt_ref": "sinnix://harvest/" + receipt,
-            "job_id": "job-" + receipt[-4:],
-            "packet": packet,
-        }
-
-    flagged = {"redflag_status": 1, "lane_trailer": {"LANE-QUICK": "green"}}
-    red_gate = {"redflag_status": 0, "lane_trailer": {"LANE-QUICK": "red"}}
-    reactor._dispatch_integration(event("harvest-" + "1" * 32, flagged))
-    reactor._dispatch_integration(event("harvest-" + "1" * 32, flagged))
-    # A new head with a different reason is new work for an integrator.
-    reactor._dispatch_integration(event("harvest-" + "2" * 32, red_gate))
-
-    assert len(calls) == 2
-
-
 class FakeBeadReleaser:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Path]] = []
@@ -723,57 +464,6 @@ def test_interrupted_lane_releases_its_claimed_beads(tmp_path: Path) -> None:
     assert releaser.calls == [("polylogue-q1", tmp_path / "repo")]
 
 
-def test_cleared_flag_at_the_same_head_publishes_past_the_integrate_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An integrator that cleared the flag without moving HEAD leads to publication.
-
-    Anti-vacuity: sharing the integrate key for both paths held
-    polylogue-0cm7m unpublished after its evidence became fresh.
-    """
-    published: list[str] = []
-    monkeypatch.setattr(
-        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
-    )
-    monkeypatch.setattr(
-        CampaignReactor, "_receipt_field", staticmethod(lambda r, k: "c" * 40)
-    )
-    monkeypatch.setattr(
-        CampaignReactor,
-        "_publish",
-        lambda self, project, workspace, receipt, key: published.append(key),
-    )
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-        integration_dispatcher=lambda *a: None,
-    )
-    reactor._board.keeper["integrate:packet-p-9:cccccccccccc"] = {
-        "emitted_at": "2026-09-01T00:00:00+00:00",
-        "backoff_seconds": 0,
-        "next_eligible_at": "2026-09-01T00:00:00+00:00",
-    }
-    event = {
-        "kind": "harvest",
-        "transition": "review-required",
-        "project": "polylogue",
-        "workspace_id": "worktree-abc",
-        "receipt_ref": "harvest-" + "3" * 32,
-        "job_id": "job-3",
-        "packet": {
-            "redflag_status": 0,
-            "lane_trailer": {"LANE-QUICK": "green"},
-            "verification": {"state": "tests-run"},
-        },
-    }
-
-    reactor._dispatch_integration(event)
-
-    assert published == ["publish:packet-p-9:harvest-" + "3" * 32]
-
-
 class FakeBeadParker:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
@@ -781,293 +471,6 @@ class FakeBeadParker:
     def park(self, bead_id: str, note: str, *, cwd: Path) -> tuple[bool, str | None]:
         self.calls.append((bead_id, note))
         return True, None
-
-
-def test_a_lane_with_nothing_to_publish_parks_its_bead_for_the_operator(
-    tmp_path: Path,
-) -> None:
-    """Anti-vacuity: without parking, the claim held polylogue-74kj3 forever."""
-    jobs = tmp_path / "jobs"
-    jobs.mkdir()
-    (jobs / "harvest-1.json").write_text(
-        json.dumps(
-            {
-                "job_id": "harvest-1",
-                "spec": {
-                    "kind": "declared-operation",
-                    "checkout": {"checkout_id": "worktree-r"},
-                },
-            }
-        )
-    )
-    (jobs / "lane-1.json").write_text(
-        json.dumps(
-            {
-                "job_id": "lane-1",
-                "created_at": "2026-09-01T21:00:00+00:00",
-                "spec": {
-                    "kind": "attested-agent",
-                    "checkout": {"checkout_id": "worktree-r"},
-                    "contract": {
-                        "parameters": {"campaign": {"bead_ids": ["polylogue-r1"]}}
-                    },
-                },
-            }
-        )
-    )
-    parker = FakeBeadParker()
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        jobs_state_dir=jobs,
-        project_roots={"polylogue": tmp_path / "repo"},
-        bead_parker=parker,
-    )
-    event = {
-        "kind": "harvest",
-        "outcome": "HARVEST_EMPTY",
-        "phase": "nothing-to-publish",
-        "project": "polylogue",
-        "job_id": "harvest-1",
-        "head": "e" * 40,
-        "lane_trailer": {"LANE-CLASSIFICATION": "blocked on unrouted operations"},
-    }
-
-    reactor._park_empty_lane(event)
-    reactor._park_empty_lane(event)
-
-    assert parker.calls == [
-        ("polylogue-r1", "lane had nothing to publish: blocked on unrouted operations")
-    ]
-
-
-def test_fresh_green_quick_evidence_outranks_a_stale_trailer() -> None:
-    """Anti-vacuity: trusting LANE-QUICK alone held polylogue-0cm7m behind an
-    integrator after its quick gate had already passed at that head."""
-    packet = {
-        "redflag_status": 0,
-        "lane_trailer": {"LANE-QUICK": "blocked-env"},
-        "verification": {
-            "state": "tests-run",
-            "runs": {"--quick": {"status": "success", "stale": False}},
-        },
-    }
-    assert CampaignReactor._needs_judgment({"packet": packet}) is None
-    packet["verification"]["runs"]["--quick"]["stale"] = True
-    assert CampaignReactor._needs_judgment({"packet": packet}) == "lane gate blocked-env"
-
-
-def test_judgment_reads_the_receipt_the_event_names(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A review-required event carries only the packet id.
-
-    Anti-vacuity: judging the bare event reads every receipt as "no receipt",
-    which sent every clean lane to an integrator (all of 2026-09-01).
-    """
-    published: list[str] = []
-    receipt = {
-        "head": "d" * 40,
-        "redflag_status": 0,
-        "lane_trailer": {"LANE-QUICK": "green"},
-        "verification": {"state": "tests-run", "runs": {}},
-    }
-    monkeypatch.setattr(
-        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
-    )
-    monkeypatch.setattr(
-        CampaignReactor, "_receipt_payload", staticmethod(lambda r: receipt)
-    )
-    monkeypatch.setattr(
-        CampaignReactor,
-        "_publish",
-        lambda self, project, workspace, receipt_ref, key: published.append(key),
-    )
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-        integration_dispatcher=lambda *a: None,
-    )
-
-    reactor._dispatch_integration(
-        {
-            "kind": "harvest",
-            "transition": "review-required",
-            "project": "polylogue",
-            "workspace_id": "worktree-abc",
-            "packet_id": "harvest-" + "4" * 32,
-            "job_id": "job-4",
-        }
-    )
-
-    assert published == ["publish:packet-p-9:harvest-" + "4" * 32]
-
-
-def test_a_second_receipt_with_the_same_flags_is_the_operators_judgment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Anti-vacuity: keying integrators by head alone ran three integrators
-    on polylogue-1qmz3, each moving the head and none deciding."""
-    calls: list[tuple[str, str, str]] = []
-    heads = iter(["a" * 40, "b" * 40, "c" * 40])
-    monkeypatch.setattr(
-        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
-    )
-    monkeypatch.setattr(
-        CampaignReactor, "_receipt_field", staticmethod(lambda r, k: next(heads))
-    )
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-        integration_dispatcher=lambda p, w, r: calls.append((p, w, r)),
-    )
-
-    def event(n: int) -> dict[str, object]:
-        return {
-            "kind": "harvest",
-            "transition": "review-required",
-            "project": "polylogue",
-            "workspace_id": "worktree-abc",
-            "receipt_ref": "harvest-" + str(n) * 32,
-            "job_id": f"job-{n}",
-            "packet": {
-                "redflag_status": 1,
-                "redflags": ["FLAG: test files deleted"],
-                "lane_trailer": {"LANE-QUICK": "green"},
-            },
-        }
-
-    reactor._dispatch_integration(event(1))
-    reactor._dispatch_integration(event(2))
-    reactor._dispatch_integration(event(3))
-
-    assert len(calls) == 1
-    judgment = reactor._board.keeper["judgment:packet-p-9"]
-    assert "integrator already judged" in judgment["reason"]
-
-
-def test_a_rebase_conflict_dispatches_one_integrator_per_head(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Anti-vacuity: with no reaction, a lane refused for a rebase conflict
-    (polylogue-x1gd, 2026-09-01 22:24Z) sat with nothing to move it."""
-    jobs = tmp_path / "jobs"
-    jobs.mkdir()
-    (jobs / "harvest-2.json").write_text(
-        json.dumps(
-            {
-                "job_id": "harvest-2",
-                "spec": {
-                    "kind": "declared-operation",
-                    "project_id": "polylogue",
-                    "checkout": {"checkout_id": "worktree-x", "head": "e" * 40},
-                },
-            }
-        )
-    )
-    calls: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-x"))
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        jobs_state_dir=jobs,
-        project_roots={"polylogue": tmp_path / "repo"},
-        integration_dispatcher=lambda p, w, r: calls.append((p, w, r)),
-    )
-    # The live refusal event carries only the harvest job id and outcome.
-    event = {"kind": "harvest", "outcome": "REBASE_CONFLICT", "job_id": "harvest-2"}
-
-    reactor._dispatch_rebase(event)
-    reactor._dispatch_rebase(event)
-
-    assert calls == [("polylogue", "packet-x", "rebase:eeeeeeeeeeee")]
-
-
-def test_clean_review_publishes_without_a_reader(tmp_path: Path) -> None:
-    """Judgment is spent on exceptions, not on every lane that passed its scan.
-
-    Anti-vacuity: treating every review as needing judgment makes the first
-    assertion red; ignoring the red flags makes the second one red.
-    """
-    clean = {
-        "packet": {
-            "redflag_status": 0,
-            "redflags": ["diff lines: 12"],
-            "lane_trailer": {"LANE-QUICK": "green"},
-            "verification": {"state": "tests-run"},
-        }
-    }
-    assert CampaignReactor._needs_judgment(clean) is None
-
-    # A green trailer with no test run of this head is an exception: the
-    # trailer is the lane's own prose, the receipt is what ran.
-    unproven = {"packet": {**clean["packet"], "verification": {"state": "static-only"}}}
-    assert "no test evidence" in (CampaignReactor._needs_judgment(unproven) or "")
-
-    flagged = {
-        "packet": {
-            "redflag_status": 1,
-            "redflags": ["FLAG: production definitions removed: helper"],
-            "lane_trailer": {"LANE-QUICK": "green"},
-        }
-    }
-    assert "production definitions removed" in (
-        CampaignReactor._needs_judgment(flagged) or ""
-    )
-
-    for quick in ("red", "blocked-env", None):
-        lane = {
-            "packet": {
-                "redflag_status": 0,
-                "lane_trailer": {"LANE-QUICK": quick},
-                "verification": {"state": "tests-run"},
-            }
-        }
-        assert CampaignReactor._needs_judgment(lane) is not None
-    assert CampaignReactor._needs_judgment({}) is not None
-
-
-def test_integration_is_keyed_by_workspace_not_by_review(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Re-reviewing a lane must not dispatch another integrator for it.
-
-    Anti-vacuity: keying on the review job id makes the second call dispatch
-    again, which is how one workspace collected seventeen integrators.
-    """
-    calls: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(
-        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-1")
-    )
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-        integration_dispatcher=lambda p, w, r: calls.append((p, w, r)),
-    )
-
-    def event(job_id: str) -> dict:
-        return {
-            "kind": "harvest",
-            "transition": "review-required",
-            "project": "polylogue",
-            "workspace_id": "worktree-abc",
-            "receipt_ref": "sinnix://harvest/harvest-" + "0" * 32,
-            "job_id": job_id,
-            "packet": {"redflag_status": 1, "lane_trailer": {"LANE-QUICK": "green"}},
-        }
-
-    reactor._dispatch_integration(event("review-1"))
-    reactor._dispatch_integration(event("review-2"))
-
-    assert [c[1] for c in calls] == ["packet-p-1"]
 
 
 def test_heavy_operation_is_deferred_while_a_lane_is_active(tmp_path: Path) -> None:
@@ -1215,78 +618,6 @@ def test_closed_bead_disposes_its_packet_workspace(tmp_path: Path) -> None:
     )
     reactor.run_once()
     assert disposed == ["packet-polylogue-zzz9"]
-
-
-def test_scope_drift_flags_route_to_coordinator_not_integrator(tmp_path: Path) -> None:
-    """A write-scope flag parks a judgment keeper entry instead of an agent."""
-    spool = tmp_path / "events.jsonl"
-    board_path = tmp_path / "campaign-board.json"
-    dispatched: list[tuple[str, str, str]] = []
-    reactor = CampaignReactor(
-        spool,
-        board_path,
-        tmp_path / "reactor",
-        bead_closer=FakeBeadCloser(),
-        integration_dispatcher=lambda *a: dispatched.append(a),
-    )
-    reactor._workspace_name = lambda checkout: "packet-polylogue-x"  # type: ignore[method-assign]
-    reactor.project_roots = {"polylogue": tmp_path}
-    append(
-        spool,
-        {
-            "kind": "harvest",
-            "transition": "review-required",
-            "project": "polylogue",
-            "workspace_id": "worktree-0000000000000001",
-            "receipt_ref": "harvest-" + "0" * 32,
-            "job_id": "job-x",
-            "packet": {
-                "redflag_status": 1,
-                "redflags": ["touches path outside declared write_scope"],
-                "lane_trailer": {"LANE-QUICK": "green"},
-                "verification": {"state": "tests-run"},
-            },
-        },
-    )
-    reactor.run_once()
-    assert dispatched == []
-    board = json.loads(board_path.read_text())
-    judgment = board["keeper"].get("judgment:packet-polylogue-x")
-    assert judgment is not None and "write_scope" in judgment["reason"]
-
-
-def test_plain_flags_still_dispatch_an_integrator(tmp_path: Path) -> None:
-    spool = tmp_path / "events.jsonl"
-    board_path = tmp_path / "campaign-board.json"
-    dispatched: list[tuple[str, str, str]] = []
-    reactor = CampaignReactor(
-        spool,
-        board_path,
-        tmp_path / "reactor",
-        bead_closer=FakeBeadCloser(),
-        integration_dispatcher=lambda *a: dispatched.append(a),
-    )
-    reactor._workspace_name = lambda checkout: "packet-polylogue-y"  # type: ignore[method-assign]
-    reactor.project_roots = {"polylogue": tmp_path}
-    append(
-        spool,
-        {
-            "kind": "harvest",
-            "transition": "review-required",
-            "project": "polylogue",
-            "workspace_id": "worktree-0000000000000002",
-            "receipt_ref": "harvest-" + "1" * 32,
-            "job_id": "job-y",
-            "packet": {
-                "redflag_status": 1,
-                "redflags": ["diff lines: 500"],
-                "lane_trailer": {"LANE-QUICK": "green"},
-                "verification": {"state": "tests-run"},
-            },
-        },
-    )
-    reactor.run_once()
-    assert dispatched == [("polylogue", "packet-polylogue-y", "harvest-" + "1" * 32)]
 
 
 def test_failure_event_reaches_the_shared_spool(tmp_path: Path) -> None:
@@ -1504,325 +835,6 @@ def test_reconcile_releases_claims_whose_lane_died_unseen(tmp_path: Path) -> Non
     assert releaser.calls == [("polylogue-d1", tmp_path / "repo")]
 
 
-def test_hand_pr_findings_are_not_an_error_every_pass(tmp_path: Path) -> None:
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-        review_fix_dispatcher=lambda *a: None,
-    )
-    reactor._dispatch_review_fix(
-        {
-            "kind": "publication-sweep",
-            "outcome": "findings",
-            "project": "polylogue",
-            "repo": "o/r",
-            "pr": 9,
-            "head": "f" * 40,
-            "findings": 1,
-            "receipt": "session-abc",
-        }
-    )
-    assert reactor._board.errors == []
-
-
-def test_a_clean_receipt_clears_the_workspaces_judgment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Anti-vacuity: without the pop, a lane the operator sent back and that
-    came back clean stayed listed as parked."""
-    receipt = {
-        "head": "d" * 40,
-        "redflag_status": 0,
-        "lane_trailer": {"LANE-QUICK": "green"},
-        "verification": {"state": "tests-run", "runs": {}},
-    }
-    monkeypatch.setattr(
-        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
-    )
-    monkeypatch.setattr(
-        CampaignReactor, "_receipt_payload", staticmethod(lambda r: receipt)
-    )
-    monkeypatch.setattr(
-        CampaignReactor, "_publish", lambda self, project, workspace, ref, key: None
-    )
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-        integration_dispatcher=lambda *a: None,
-    )
-    reactor._board.keeper["judgment:packet-p-9"] = {
-        "emitted_at": _now(),
-        "backoff_seconds": 0,
-        "next_eligible_at": _now(),
-        "reason": "red flags",
-        "receipt": "harvest-" + "1" * 32,
-    }
-
-    reactor._dispatch_integration(
-        {
-            "kind": "harvest",
-            "transition": "review-required",
-            "project": "polylogue",
-            "workspace_id": "worktree-abc",
-            "packet_id": "harvest-" + "2" * 32,
-            "job_id": "job-2",
-        }
-    )
-
-    assert "judgment:packet-p-9" not in reactor._board.keeper
-
-
-def test_a_merge_clears_the_judgment_that_named_its_bead(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Anti-vacuity: polylogue-ksgg.3 merged as #4510 while its judgment
-    entry stayed on the board."""
-    receipts = {
-        "harvest-" + "1" * 32: {"bead_id": "polylogue-a"},
-        "harvest-" + "2" * 32: {"bead_id": "polylogue-b"},
-    }
-    monkeypatch.setattr(
-        CampaignReactor, "_receipt_payload", staticmethod(lambda r: receipts.get(r))
-    )
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-    )
-    for name, receipt in (("a", "1"), ("b", "2")):
-        reactor._board.keeper[f"judgment:packet-{name}"] = {
-            "emitted_at": _now(),
-            "backoff_seconds": 0,
-            "next_eligible_at": _now(),
-            "reason": "red flags",
-            "receipt": "harvest-" + receipt * 32,
-        }
-
-    reactor._clear_judgments("polylogue-a")
-
-    assert "judgment:packet-a" not in reactor._board.keeper
-    assert "judgment:packet-b" in reactor._board.keeper
-
-
-def test_old_dispatch_records_leave_the_board(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Anti-vacuity: 122 integrate records from 2026-08-27 outlived every
-    head they named."""
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-    )
-    old = (datetime.now(UTC) - timedelta(days=10)).isoformat()
-    fresh = _now()
-    reactor._board.keeper["integrate:old"] = {"emitted_at": old, "backoff_seconds": 0, "next_eligible_at": old}
-    reactor._board.keeper["integrate:new"] = {"emitted_at": fresh, "backoff_seconds": 0, "next_eligible_at": fresh}
-    reactor._board.keeper["refill:polylogue"] = {"emitted_at": old, "backoff_seconds": 0, "next_eligible_at": old}
-    monkeypatch.setattr(reactor, "_pending_keeper_actions", lambda: [])
-
-    reactor._emit_keeper()
-
-    assert "integrate:old" not in reactor._board.keeper
-    assert "integrate:new" in reactor._board.keeper
-    assert "refill:polylogue" in reactor._board.keeper
-
-
-def test_a_sweep_conflict_reharvests_the_lane_once_per_head(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A published lane PR that a sibling merge made unmergeable is harvested
-    again, which routes it through the rebase-conflict reaction.
-
-    Anti-vacuity: without the reaction #4513 sat in "conflict" on every
-    sweep pass (2026-09-02); without the key it would be harvested every pass.
-    """
-    calls: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(
-        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
-    )
-    monkeypatch.setattr(
-        CampaignReactor, "_receipt_workspace", staticmethod(lambda r: "worktree-abc")
-    )
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-        harvest_dispatcher=lambda p, w, r: calls.append((p, w, r)),
-    )
-
-    def event(head: str, receipt: str = "harvest-" + "0" * 32) -> dict[str, object]:
-        return {
-            "kind": "publication-sweep",
-            "outcome": "conflict",
-            "project": "polylogue",
-            "repo": "o/r",
-            "pr": 41,
-            "head": head,
-            "receipt": receipt,
-        }
-
-    reactor._dispatch_conflict_harvest(event("a" * 40))
-    reactor._dispatch_conflict_harvest(event("a" * 40))
-    reactor._dispatch_conflict_harvest(event("b" * 40))
-    # A hand PR carries no harvest receipt; its author rebases it.
-    reactor._dispatch_conflict_harvest(event("c" * 40, receipt="session-xyz"))
-
-    assert calls == [("polylogue", "packet-p-9", "41")] * 2
-
-
-def test_a_clean_receipt_does_not_publish_under_a_holding_agent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Anti-vacuity: the reactor and an integrator both published
-    packet-polylogue-aex0-publication (#4520, 2026-09-02 01:20Z); the
-    integrator's body edit dropped the receipt trailers."""
-    receipt = {
-        "head": "d" * 40,
-        "redflag_status": 0,
-        "lane_trailer": {"LANE-QUICK": "green"},
-        "verification": {"state": "tests-run", "runs": {}},
-    }
-    published: list[str] = []
-    monkeypatch.setattr(
-        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
-    )
-    monkeypatch.setattr(
-        CampaignReactor, "_receipt_payload", staticmethod(lambda r: receipt)
-    )
-    monkeypatch.setattr(
-        CampaignReactor,
-        "_publish",
-        lambda self, project, workspace, ref, key: published.append(key),
-    )
-    monkeypatch.setattr(CampaignReactor, "_checkout_owned", lambda self, cid: True)
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-        integration_dispatcher=lambda *a: None,
-    )
-    event = {
-        "kind": "harvest",
-        "transition": "review-required",
-        "project": "polylogue",
-        "workspace_id": "worktree-abc",
-        "packet_id": "harvest-" + "2" * 32,
-        "job_id": "job-2",
-    }
-
-    reactor._dispatch_integration(event)
-    assert published == []
-    assert not any(key.startswith("publish:") for key in reactor._board.keeper)
-
-    monkeypatch.setattr(CampaignReactor, "_checkout_owned", lambda self, cid: False)
-    reactor._dispatch_integration(event)
-    assert published == ["publish:packet-p-9:harvest-" + "2" * 32]
-
-
-def test_static_only_evidence_rebases_once_before_judgment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(CampaignReactor, "_master_head", lambda self, project: "m" * 40)
-    """Anti-vacuity: five lanes parked on "no test evidence" on 2026-09-02
-    because their branches predated the graph reseed; a rebase is what
-    gets them selection."""
-    receipt = {
-        "head": "e" * 40,
-        "redflag_status": 0,
-        "lane_trailer": {"LANE-QUICK": "green"},
-        "verification": {"state": "static-only", "runs": {}},
-    }
-    rebases: list[str] = []
-    monkeypatch.setattr(
-        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
-    )
-    monkeypatch.setattr(
-        CampaignReactor, "_receipt_payload", staticmethod(lambda r: receipt)
-    )
-    monkeypatch.setattr(
-        CampaignReactor,
-        "_dispatch_rebase",
-        lambda self, event, reason="conflict": rebases.append(reason),
-    )
-    integrations: list[tuple[str, str, str]] = []
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-        integration_dispatcher=lambda p, w, r: integrations.append((p, w, r)),
-    )
-    event = {
-        "kind": "harvest",
-        "transition": "review-required",
-        "project": "polylogue",
-        "workspace_id": "worktree-abc",
-        "packet_id": "harvest-" + "3" * 32,
-        "job_id": "job-3",
-    }
-
-    reactor._dispatch_integration(event)
-    assert rebases == ["evidence"]
-    assert integrations == []
-
-    # The rebase ran at this head and the evidence is still static: the
-    # ordinary integrator path takes over.
-    reactor._board.keeper["integrate:packet-p-9:rebase-" + "e" * 12 + ":" + "m" * 12] = {
-        "emitted_at": _now(),
-        "backoff_seconds": 0,
-        "next_eligible_at": _now(),
-    }
-    reactor._dispatch_integration(event)
-    assert rebases == ["evidence"]
-    assert len(integrations) == 1
-
-
-def test_a_conflict_after_master_moves_again_reharvests(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Anti-vacuity: keyed on the lane head alone, #4522 sat in conflict after
-    its rebase because master moved again (2026-09-02 06:50Z)."""
-    calls: list[tuple[str, str, str]] = []
-    masters = iter(["a" * 40, "a" * 40, "b" * 40])
-    monkeypatch.setattr(CampaignReactor, "_master_head", lambda self, project: next(masters))
-    monkeypatch.setattr(
-        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
-    )
-    monkeypatch.setattr(
-        CampaignReactor, "_receipt_workspace", staticmethod(lambda r: "worktree-abc")
-    )
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-        harvest_dispatcher=lambda p, w, r: calls.append((p, w, r)),
-    )
-    event = {
-        "kind": "publication-sweep",
-        "outcome": "conflict",
-        "project": "polylogue",
-        "repo": "o/r",
-        "pr": 41,
-        "head": "c" * 40,
-        "receipt": "harvest-" + "0" * 32,
-    }
-    reactor._dispatch_conflict_harvest(event)
-    reactor._dispatch_conflict_harvest(event)
-    reactor._dispatch_conflict_harvest(event)
-
-    assert calls == [("polylogue", "packet-p-9", "41")] * 2
-
-
 def test_refill_waits_for_a_pending_corpus_run(tmp_path: Path) -> None:
     """Anti-vacuity: lanes launched beside the corpus run turned its
     failures into load noise (2026-09-02)."""
@@ -1863,90 +875,81 @@ def test_refill_waits_for_a_pending_corpus_run(tmp_path: Path) -> None:
     assert reactor._corpus_pending("polylogue") is False
 
 
-def test_publish_synthesizes_lane_text_from_the_bead(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Anti-vacuity: a lane without .lane text could not publish at all
-    (packet-polylogue-1xc.14.1.7, 2026-09-02 07:57Z)."""
-    receipt = {
-        "bead_id": "polylogue-1",
-        "lane_trailer": {"LANE-CLASSIFICATION": "one parser fixed and covered"},
+def _lane_facts(**overrides: object) -> object:
+    from sinnixd.lane_facts import LaneFacts, Receipt
+
+    base: dict[str, object] = {
+        "name": "packet-p-9",
+        "checkout_id": "worktree-abc",
+        "project": "polylogue",
+        "branch": "feature/packet/polylogue-9",
+        "bead": "polylogue-9",
+        "head": "h" * 40,
+        "pushed_head": "h" * 40,
+        "master_head": "m" * 40,
+        "holder": None,
+        "running_ops": (),
+        "lane_phase": "succeeded",
+        "receipt": None,
+        "pull": None,
     }
-    monkeypatch.setattr(CampaignReactor, "_receipt_payload", staticmethod(lambda r: receipt))
+    if overrides.pop("clean_receipt", False):
+        base["receipt"] = Receipt(
+            packet_id="harvest-" + "0" * 32, head="h" * 40, flags=(), flagged=False, authorized=False,
+            verification="tests-run", bead="polylogue-9", created_at="",
+        )
+    if overrides.pop("flagged_receipt", False):
+        base["receipt"] = Receipt(
+            packet_id="harvest-" + "1" * 32, head="h" * 40, flags=("FLAG: production definitions removed: f",),
+            flagged=True, authorized=False, verification="tests-run", bead="polylogue-9", created_at="",
+        )
+    base.update(overrides)
+    return LaneFacts(**base)  # type: ignore[arg-type]
 
-    class Reader:
-        def __init__(self, root: Path) -> None:
-            self.root = root
 
-        def show(self, bead_id: str) -> dict[str, str]:
-            return {"id": bead_id, "title": "fix(sources): keep Codex tool ids"}
-
-    monkeypatch.setattr("sinnixd.reactor.SubprocessBdReader", Reader)
+def test_the_reactor_advances_each_lane_from_its_facts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anti-vacuity: with keyed reactions an unforeseen edge (master moving
+    again, a lane writing no text) stalled until a new key existed; here the
+    same facts always produce the same action and nothing is remembered."""
+    calls: list[tuple[str, ...]] = []
     reactor = CampaignReactor(
         event_spool=tmp_path / "events.jsonl",
         board_path=tmp_path / "board.json",
         state_dir=tmp_path / "state",
+        jobs_state_dir=tmp_path / "state" / "jobs",
         project_roots={"polylogue": tmp_path / "repo"},
+        verify_dispatcher=lambda p, w: calls.append(("verify", w)) or "v-job",
+        harvest_dispatcher=lambda p, w, ref: calls.append(("harvest", w, ref)),
+        integration_dispatcher=lambda p, w, label: calls.append(("agent", w, label)),
     )
-    worktree = tmp_path / "packet-polylogue-x"
-    worktree.mkdir()
+    monkeypatch.setattr(CampaignReactor, "_publish", lambda self, p, w, receipt: calls.append(("publish", w, receipt)))
+    monkeypatch.setattr(CampaignReactor, "_repo_slug", lambda self, project: "o/r")
+    from sinnixd.lane_facts import Pull
 
-    assert reactor._synthesize_lane_text("polylogue", worktree, "harvest-" + "0" * 32) is True
-    assert (worktree / ".lane" / "title").read_text().strip() == "fix(sources): keep Codex tool ids"
-    assert "one parser fixed and covered" in (worktree / ".lane" / "body.md").read_text()
+    scenarios = [
+        (_lane_facts(), ("verify", "packet-p-9")),
+        (_lane_facts(verify_job=("vvvvvvvv-1", "succeeded")), ("harvest", "packet-p-9", "vvvvvvvv-1")),
+        (_lane_facts(clean_receipt=True), ("publish", "packet-p-9", "harvest-" + "0" * 32)),
+        (_lane_facts(flagged_receipt=True), ("agent", "packet-p-9", "integrator")),
+        (_lane_facts(clean_receipt=True, pull=Pull(number=7, head="h" * 40, verdict="conflict", findings=0)), ("agent", "packet-p-9", "rebase")),
+        (_lane_facts(clean_receipt=True, pull=Pull(number=7, head="h" * 40, verdict="findings", findings=2)), ("agent", "packet-p-9", "review-fix")),
+    ]
+    for facts, expected in scenarios:
+        calls.clear()
+        monkeypatch.setattr("sinnixd.lane_facts.collect", lambda *a, **k: [facts])
+        monkeypatch.setattr("sinnixd.lane_facts.latest_sweep_pulls", lambda root: {})
+        reactor._advance_lanes("polylogue")
+        assert calls == [expected], expected
 
-    monkeypatch.setattr(CampaignReactor, "_receipt_payload", staticmethod(lambda r: {}))
-    assert reactor._synthesize_lane_text("polylogue", worktree, "harvest-" + "1" * 32) is False
-
-
-def test_a_finished_lane_is_verified_once_then_harvested(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Anti-vacuity: starting the harvest directly verifies the tree a second
-    time inline (an hour under load) and leaves publish without declared
-    evidence at the head."""
-    verified: list[tuple[str, str]] = []
-    harvested: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(CampaignReactor, "_workspace_for", lambda self, record: "packet-p-9")
-    reactor = CampaignReactor(
-        event_spool=tmp_path / "events.jsonl",
-        board_path=tmp_path / "board.json",
-        state_dir=tmp_path / "state",
-        project_roots={"polylogue": tmp_path / "repo"},
-        verify_dispatcher=lambda project, workspace: verified.append((project, workspace)) or "v" * 8 + "-1111-4111-8111-" + "1" * 12,
-        harvest_dispatcher=lambda project, workspace, ref: harvested.append((project, workspace, ref)),
-    )
-    lane = LaneRecord(
-        job_id="lane-1",
-        project="polylogue",
-        phase="succeeded",
-        checkout={"checkout_id": "worktree-abc"},
-        completed_at=_now(),
-        review_ready=True,
-        updated_at=_now(),
-    )
-
-    reactor._dispatch_review(lane)
-    reactor._dispatch_review(lane)
-    assert verified == [("polylogue", "packet-p-9")]
-    assert harvested == []
-
-    verify_job = reactor._board.keeper["review:lane-1"]["verify_job"]
-    reactor._harvest_after_verification({"kind": "declared-operation", "job_id": verify_job, "phase": "succeeded"})
-    reactor._harvest_after_verification({"kind": "declared-operation", "job_id": verify_job, "phase": "succeeded"})
-    assert harvested == [("polylogue", "packet-p-9", verify_job)]
-
-
-def test_an_operator_authorization_for_the_head_clears_judgment() -> None:
-    """Anti-vacuity: lane publish re-minted the same flags and the reactor
-    parked the lane again (packet-polylogue-a74ru, 2026-09-02)."""
-    flagged = {
-        "packet": {
-            "head": "e" * 40,
-            "redflag_status": 1,
-            "redflags": ["FLAG: production definitions removed: helper"],
-            "lane_trailer": {"LANE-QUICK": "green"},
-            "verification": {"state": "tests-run", "runs": {}},
-        }
-    }
-    assert CampaignReactor._needs_judgment(flagged) is not None
-    authorized = {"packet": {**flagged["packet"], "authorization": {"head": "e" * 40, "by": "operator"}}}
-    assert CampaignReactor._needs_judgment(authorized) is None
-    stale = {"packet": {**flagged["packet"], "authorization": {"head": "f" * 40, "by": "operator"}}}
-    assert CampaignReactor._needs_judgment(stale) is not None
+    # Held or busy lanes are left alone; a parked lane is recorded once per head.
+    calls.clear()
+    monkeypatch.setattr("sinnixd.lane_facts.collect", lambda *a, **k: [_lane_facts(holder="integrator", clean_receipt=True)])
+    reactor._advance_lanes("polylogue")
+    assert calls == []
+    parked = _lane_facts(flagged_receipt=True, integrators_at_head=("integrator",))
+    monkeypatch.setattr("sinnixd.lane_facts.collect", lambda *a, **k: [parked])
+    reactor._advance_lanes("polylogue")
+    reactor._advance_lanes("polylogue")
+    judged = [key for key in reactor._board.keeper if key.startswith("judged:")]
+    assert judged == ["judged:packet-p-9:" + "h" * 12]
+    assert calls == []

@@ -61,6 +61,9 @@ class LaneFacts:
     pull: Pull | None
     integrators_at_head: tuple[str, ...] = ()
     authorization_head: str | None = None
+    verify_job: tuple[str, str] | None = None
+    harvest_at_head: tuple[str, str] | None = None
+    published_at_head: bool = False
     extra: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -92,8 +95,16 @@ def advance(facts: LaneFacts) -> Action:
         return Action("retry", f"lane {facts.lane_phase}")
     receipt = facts.receipt
     if receipt is None or receipt.head != facts.head:
+        if facts.harvest_at_head is not None:
+            return Action("park", f"harvest {facts.harvest_at_head[1]} at this head left no receipt")
+        if facts.verify_job is not None and facts.verify_job[1] != "succeeded":
+            return Action("park", f"affected verification {facts.verify_job[1]} at this head")
+        if facts.verify_job is not None:
+            return Action("harvest", f"verified by {facts.verify_job[0][:8]}")
         return Action("verify", "no receipt at head")
     pull = facts.pull
+    if facts.published_at_head and (pull is None or pull.head != facts.head):
+        return Action("await-sweep", "published; waiting for the sweep to see the head")
     if pull is not None and pull.head == facts.head:
         if pull.verdict == "conflict":
             if any(label == "rebase" for label in facts.integrators_at_head):
@@ -194,6 +205,10 @@ def collect(
         lane_created = ""
         integrators: list[str] = []
         bead: str | None = None
+        verify_job: tuple[str, str] | None = None
+        verify_created = ""
+        harvest_at_head: tuple[str, str] | None = None
+        published_at_head = False
         for job in jobs:
             spec = job.get("spec") or {}
             state = job.get("state") or {}
@@ -216,6 +231,25 @@ def collect(
                     bead = bead or _campaign_bead(spec)
             elif kind == "declared-operation" and not terminal:
                 running_ops.append(str(spec.get("operation") or "operation"))
+            elif (
+                kind == "declared-operation"
+                and spec.get("operation") == "harvest"
+                and checkout.get("head") == head
+            ):
+                outcome, result_phase = _harvest_result(job)
+                if result_phase == "published":
+                    published_at_head = True
+                elif outcome in {"HARVEST_ERROR", "GATE_RED"} or (phase != "succeeded" and outcome is None):
+                    harvest_at_head = (str(job.get("job_id") or ""), outcome or phase)
+            elif (
+                kind == "declared-operation"
+                and spec.get("operation") == "verify_affected"
+                and checkout.get("head") == head
+                and phase in {"succeeded", "failed"}
+            ):
+                created = str(job.get("created_at") or "")
+                if created >= verify_created:
+                    verify_created, verify_job = created, (str(job.get("job_id") or ""), phase)
         receipt = receipts.get(checkout_id)
         pull = None
         if receipt is not None and receipt_pulls:
@@ -240,9 +274,31 @@ def collect(
                 pull=pull,
                 integrators_at_head=tuple(integrators),
                 authorization_head=authorization_head,
+                verify_job=verify_job,
+                harvest_at_head=harvest_at_head,
+                published_at_head=published_at_head,
             )
         )
     return facts
+
+
+def _harvest_result(job: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    """(outcome, phase) from a terminal harvest job's result artifact."""
+    artifacts = job.get("artifacts") or {}
+    path = artifacts.get("result") if isinstance(artifacts, Mapping) else None
+    if not isinstance(path, str):
+        return None, None
+    try:
+        value = json.loads(Path(path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return None, None
+    if isinstance(value, Mapping) and isinstance(value.get("value"), Mapping):
+        value = value["value"]
+    if not isinstance(value, Mapping):
+        return None, None
+    outcome = value.get("outcome")
+    result_phase = value.get("phase")
+    return (outcome if isinstance(outcome, str) else None, result_phase if isinstance(result_phase, str) else None)
 
 
 def _agent_label(spec: Mapping[str, Any]) -> str:

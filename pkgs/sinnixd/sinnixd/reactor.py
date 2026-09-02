@@ -36,15 +36,10 @@ MAX_BOARD_ERRORS = 100
 _DURABLE_KEEPER_PREFIXES = (
     "operation:",
     "refill:",
-    "review:",
-    "integrate:",
-    "judgment:",
     "retry:",
     "dispose:",
-    "review-fix:",
-    "publish:",
     "park:",
-    "rebase:",
+    "judged:",
 )
 MAX_EVENT_BYTES = 1_000_000
 # A dispatch record older than this names a head, receipt, or PR round that
@@ -1332,7 +1327,7 @@ class CampaignReactor:
             return ""
         return PurePosixPath(path).name
 
-    def _publish(self, project: str, workspace: str, receipt: str, key: str) -> None:
+    def _publish(self, project: str, workspace: str, receipt: str) -> None:
         """Publish a lane whose scan is clean, using the text the lane wrote."""
         worktree = Path("/realm/worktrees") / workspace
         parameters: dict[str, Any] = {
@@ -1395,11 +1390,6 @@ class CampaignReactor:
         except (OSError, subprocess.SubprocessError) as error:
             self._board.record_error(-1, f"publish {workspace}: {error}")
             return
-        self._board.keeper[key] = {
-            "emitted_at": _now(),
-            "backoff_seconds": 0,
-            "next_eligible_at": _now(),
-        }
 
     def _synthesize_lane_text(self, project: str, worktree: Path, receipt: str) -> bool:
         """Write .lane/title and .lane/body.md from the bead and receipt."""
@@ -1433,214 +1423,6 @@ class CampaignReactor:
         except OSError:
             return False
         return True
-
-    @staticmethod
-    def _needs_judgment(event: Mapping[str, Any]) -> str | None:
-        """Why this lane cannot publish mechanically, or None if it can.
-
-        Hosted review and CI are the structural check on a published change.
-        A lane whose scan is clean and whose own gate is green adds nothing by
-        waiting for a reader, so judgment is spent on the exceptions instead.
-        """
-        packet = event.get("packet")
-        if not isinstance(packet, Mapping):
-            return "no receipt"
-        authorization = packet.get("authorization")
-        if (
-            isinstance(authorization, Mapping)
-            and authorization.get("head")
-            and authorization.get("head") == packet.get("head")
-        ):
-            # The operator decided this head; flags are recorded, not judged.
-            return None
-        if packet.get("redflag_status"):
-            flags = packet.get("redflags")
-            named = ", ".join(str(f) for f in flags) if isinstance(flags, list) else ""
-            return f"red flags: {named}" or "red flags"
-        # The trailer is the lane's own prose. The receipt says what actually
-        # ran, so evidence decides in both directions: a fresh green quick run
-        # outranks a trailer written before it, and a trailer claiming green
-        # with no test run of its own HEAD is an exception, not a clean publish.
-        evidence = packet.get("verification")
-        runs = evidence.get("runs") if isinstance(evidence, Mapping) else None
-        quick_green = isinstance(runs, Mapping) and any(
-            str(command).endswith("--quick")
-            and isinstance(run, Mapping)
-            and run.get("status") == "success"
-            and not run.get("stale")
-            for command, run in runs.items()
-        )
-        trailer = packet.get("lane_trailer")
-        quick = trailer.get("LANE-QUICK") if isinstance(trailer, Mapping) else None
-        if quick != "green" and not quick_green:
-            return f"lane gate {quick or 'unknown'}"
-        state = evidence.get("state") if isinstance(evidence, Mapping) else None
-        if state != "tests-run":
-            return f"no test evidence for this head ({state or 'missing'})"
-        return None
-
-    _COORDINATOR_FLAG_MARKERS = (
-        "write_scope",
-        "outside declared write_scope",
-        "schema",
-        "migration",
-    )
-
-    @classmethod
-    def _needs_coordinator(cls, reason: str | None, event: Mapping[str, Any]) -> bool:
-        """Scope drift and schema surface changes are decisions, not tasks.
-
-        Every other flag class gets an integrator agent whose publication (or
-        typed report) is itself reviewable; these two change what the bead was
-        allowed to mean, so an agent verdict cannot settle them.
-        """
-        if reason is None:
-            return False
-        packet = event.get("packet")
-        flags = packet.get("redflags") if isinstance(packet, Mapping) else None
-        joined = (
-            " ".join(str(f) for f in flags).lower() if isinstance(flags, list) else ""
-        )
-        return any(marker in joined for marker in cls._COORDINATOR_FLAG_MARKERS)
-
-    def _dispatch_integration(self, event: Mapping[str, Any]) -> None:
-        """Route one reviewed lane: publish it, or hand it to an integrator."""
-        project = event.get("project")
-        workspace_id = event.get("workspace_id")
-        receipt = event.get("receipt_ref") or event.get("packet_id")
-        if not all(isinstance(v, str) and v for v in (project, workspace_id, receipt)):
-            return
-        # One workspace is one unit of integration. Keying on the review job
-        # instead dispatches another agent for every re-review of the same
-        # lane, which is how one workspace collected seventeen integrators.
-        workspace = self._workspace_name(str(workspace_id))
-        if workspace is None:
-            self._board.record_error(
-                -1, f"integrate: no registered workspace for {workspace_id}"
-            )
-            return
-        # One integration per (workspace, head): a re-review of the same
-        # commit is a no-op, and a lane that pushed new work after its first
-        # integration gets judged again rather than parked behind it.
-        if not isinstance(event.get("packet"), Mapping):
-            # Judgment reads the receipt, not the event that names it.
-            payload = self._receipt_payload(str(receipt))
-            if payload is not None:
-                event = {**event, "packet": payload}
-        head = self._receipt_field(str(receipt), "head")
-        suffix = f":{head[:12]}" if head else ""
-        root = self.project_roots.get(str(project))
-        if root is None:
-            return
-        reason = self._needs_judgment(event)
-        if reason is None:
-            # A clean receipt supersedes whatever this workspace was parked
-            # for; the operator's decision has been made by the lane.
-            self._board.keeper.pop(f"judgment:{workspace}", None)
-            # Publication has its own record: an integrator that cleared the
-            # flag without moving the head must not block the publish behind
-            # its own integrate key.
-            # Keyed by receipt, not head: a re-mint at the same head is a
-            # deliberate retry after a failed authorize.
-            publish_key = f"publish:{workspace}:{str(receipt).rsplit('/', 1)[-1]}"
-            if publish_key in self._board.keeper:
-                return
-            if self._checkout_owned(str(workspace_id)):
-                # An integrator or fix lane holds the worktree and publishes
-                # from it; a second publication races its own PR text.
-                return
-            self._publish(str(project), workspace, str(receipt), publish_key)
-            return
-        if reason.startswith("no test evidence"):
-            # A lane whose branch predates the checkout's affected-selection
-            # fix cannot get test evidence until it sits on current master;
-            # one rebase per head is mechanical, and the harvest that follows
-            # runs the tests. Only a lane already rebased at this head parks.
-            head = str(self._receipt_field(str(receipt), "head") or "")
-            rebase_key = f"integrate:{workspace}:rebase-{head[:12]}:{self._master_head(str(project))[:12]}"
-            if rebase_key not in self._board.keeper:
-                self._dispatch_rebase({**event, "head": head, "project": project}, reason="evidence")
-                return
-        # One integrator per (workspace, reason): an integrator that ran and
-        # left the same flags standing has made its judgment; the next
-        # receipt with those flags is the operator's decision, not another
-        # agent's. A different reason (new flags, a red gate) is new work.
-        reason_key = f"integrate:{workspace}:{hashlib.sha256(reason.encode()).hexdigest()[:8]}"
-        if reason_key in self._board.keeper:
-            judgment_key = f"judgment:{workspace}"
-            if judgment_key not in self._board.keeper:
-                self._board.keeper[judgment_key] = {
-                    "emitted_at": _now(),
-                    "backoff_seconds": 0,
-                    "next_eligible_at": _now(),
-                    "reason": f"integrator already judged: {reason}",
-                    "receipt": str(receipt),
-                }
-                self._spool(
-                    {
-                        "kind": "judgment",
-                        "project": str(project),
-                        "workspace": workspace,
-                        "receipt": str(receipt),
-                        "reason": f"integrator already judged: {reason}",
-                    }
-                )
-            return
-        key = f"integrate:{workspace}{suffix}"
-        if key in self._board.keeper:
-            return
-        if self._needs_coordinator(reason, event):
-            judgment_key = f"judgment:{workspace}"
-            if judgment_key not in self._board.keeper:
-                self._board.keeper[judgment_key] = {
-                    "emitted_at": _now(),
-                    "backoff_seconds": 0,
-                    "next_eligible_at": _now(),
-                    "reason": reason,
-                    "receipt": str(receipt),
-                }
-            return
-        try:
-            if self.integration_dispatcher is not None:
-                self.integration_dispatcher(str(project), workspace, str(receipt))
-            else:
-                prompt = self._integration_prompt(root, event, workspace)
-                prompt_path = self.state_dir / f"integrate-{event.get('job_id')}.md"
-                prompt_path.write_text(prompt, encoding="utf-8")
-                subprocess.run(
-                    [
-                        self.agentctl_executable,
-                        "agent",
-                        "launch",
-                        "--project",
-                        str(project),
-                        "--checkout",
-                        str(workspace_id),
-                        "--prompt-file",
-                        str(prompt_path),
-                        "--backend",
-                        self.integrator_backend,
-                        "--model",
-                        self.integrator_model,
-                        "--effort",
-                        self.integrator_effort,
-                        "--coordinator-label",
-                        "integrator",
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-        except (OSError, subprocess.SubprocessError) as error:
-            self._board.record_error(-1, f"integrate {event.get('job_id')}: {error}")
-            return
-        for record_key in (key, reason_key):
-            self._board.keeper[record_key] = {
-                "emitted_at": _now(),
-                "backoff_seconds": 0,
-                "next_eligible_at": _now(),
-            }
 
     @staticmethod
     def _workspace_name(checkout_id: str) -> str | None:
@@ -1692,32 +1474,8 @@ class CampaignReactor:
             f"## Operating rules\n\n{body}\n"
         )
 
-    def _dispatch_rebase(self, event: Mapping[str, Any], *, reason: str = "conflict") -> None:
-        """A publication refused for a rebase conflict gets one agent to rebase it.
-
-        The conflict is mechanical to detect and needs judgment to resolve;
-        one integrator per (workspace, head) rebases, re-verifies, and commits,
-        after which the ordinary harvest runs again.
-        """
-        harvest_job = event.get("job_id")
-        record = self._job_record(str(harvest_job)) if isinstance(harvest_job, str) else None
-        spec = record.get("spec") if isinstance(record, Mapping) else None
-        checkout = spec.get("checkout") if isinstance(spec, Mapping) else None
-        checkout_id = checkout.get("checkout_id") if isinstance(checkout, Mapping) else None
-        # The refusal event names only the harvest job; project and head come
-        # from that job's record.
-        project = event.get("project") or (spec.get("project_id") if isinstance(spec, Mapping) else None)
-        if not isinstance(checkout_id, str) or not isinstance(project, str) or not project:
-            self._board.record_error(-1, f"rebase: no checkout or project for harvest {harvest_job}")
-            return
-        workspace = self._workspace_name(checkout_id)
-        if workspace is None:
-            self._board.record_error(-1, f"rebase: no registered workspace for {checkout_id}")
-            return
-        head = str(event.get("head") or (checkout.get("head") if isinstance(checkout, Mapping) else "") or "")
-        key = f"integrate:{workspace}:rebase-{head[:12]}:{self._master_head(project)[:12]}"
-        if key in self._board.keeper or self._checkout_owned(checkout_id):
-            return
+    def _launch_rebase(self, project: str, workspace: str, checkout_id: str, head: str, *, reason: str) -> None:
+        """One integrator rebases the lane onto master and re-verifies."""
         refusal = (
             "rebasing onto origin/master conflicts"
             if reason == "conflict"
@@ -1732,45 +1490,42 @@ class CampaignReactor:
             "stop. Do not publish; the harvest runs again on your commit. Report the "
             "machine trailer (LANE-BRANCH/COMMIT/QUICK/CLASSIFICATION).\n"
         )
+        self._launch_agent(project, workspace, checkout_id, prompt, label="rebase", name=f"rebase-{workspace}-{head[:12]}")
+
+    def _launch_agent(self, project: str, workspace: str, checkout_id: str, prompt: str, *, label: str, name: str) -> None:
         try:
             if self.integration_dispatcher is not None:
-                self.integration_dispatcher(project, workspace, f"rebase:{head[:12]}")
-            else:
-                prompt_path = self.state_dir / f"rebase-{workspace}-{head[:12]}.md"
-                prompt_path.write_text(prompt, encoding="utf-8")
-                subprocess.run(
-                    [
-                        self.agentctl_executable,
-                        "agent",
-                        "launch",
-                        "--project",
-                        project,
-                        "--checkout",
-                        checkout_id,
-                        "--prompt-file",
-                        str(prompt_path),
-                        "--backend",
-                        self.integrator_backend,
-                        "--model",
-                        self.integrator_model,
-                        "--effort",
-                        self.integrator_effort,
-                        "--coordinator-label",
-                        "integrator",
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
+                self.integration_dispatcher(project, workspace, label)
+                return
+            prompt_path = self.state_dir / f"{name}.md"
+            prompt_path.write_text(prompt, encoding="utf-8")
+            subprocess.run(
+                [
+                    self.agentctl_executable,
+                    "agent",
+                    "launch",
+                    "--project",
+                    project,
+                    "--checkout",
+                    checkout_id,
+                    "--prompt-file",
+                    str(prompt_path),
+                    "--backend",
+                    self.integrator_backend,
+                    "--model",
+                    self.integrator_model,
+                    "--effort",
+                    self.integrator_effort,
+                    "--coordinator-label",
+                    label,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
         except (OSError, subprocess.SubprocessError) as error:
-            self._board.record_error(-1, f"rebase {workspace}: {error}")
-            return
-        self._board.keeper[key] = {
-            "emitted_at": _now(),
-            "backoff_seconds": 0,
-            "next_eligible_at": _now(),
-        }
+            self._board.record_error(-1, f"{label} {workspace}: {error}")
 
     def _park_empty_lane(self, event: Mapping[str, Any]) -> None:
         """A lane with nothing to publish hands its bead back with the reason.
@@ -1921,160 +1676,6 @@ class CampaignReactor:
             if not released:
                 self._board.record_error(-1, f"release {bead_id}: {detail}")
 
-    def _dispatch_conflict_harvest(self, event: Mapping[str, Any]) -> None:
-        """Harvest a published lane PR again once a sibling merge made it unmergeable.
-
-        The sweep reports the conflict every pass; one harvest per (PR, head)
-        re-mints the receipt, the publish path refuses with REBASE_CONFLICT,
-        and the rebase integrator takes it from there. A hand PR carries no
-        harvest receipt and is rebased by its author.
-        """
-        project = event.get("project")
-        repo = event.get("repo")
-        pr = event.get("pr")
-        head = event.get("head")
-        receipt = event.get("receipt")
-        if not (
-            isinstance(project, str)
-            and isinstance(repo, str)
-            and isinstance(head, str)
-            and head
-            and isinstance(receipt, str)
-            and pr is not None
-        ):
-            return
-        if not re.fullmatch(r"harvest-[0-9a-f]{32}", receipt.rsplit("/", 1)[-1]):
-            return
-        # A conflict is a property of (lane head, master head): master
-        # moving again after a rebase is a new conflict at the same lane head.
-        key = f"rebase:{repo}#{pr}:{head[:12]}:{self._master_head(project)[:12]}"
-        if key in self._board.keeper:
-            return
-        workspace_id = self._receipt_workspace(receipt)
-        workspace = (
-            self._workspace_name(workspace_id) if workspace_id is not None else None
-        )
-        if workspace_id is None or workspace is None:
-            self._board.record_error(
-                -1, f"conflict {repo}#{pr}: no workspace for receipt {receipt}"
-            )
-            return
-        if self._checkout_owned(workspace_id):
-            return
-        try:
-            if self.harvest_dispatcher is not None:
-                self.harvest_dispatcher(project, workspace, str(pr))
-            else:
-                subprocess.run(
-                    [
-                        self.agentctl_executable,
-                        "job",
-                        "start",
-                        project,
-                        "harvest",
-                        "--workspace",
-                        workspace,
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                )
-        except (OSError, subprocess.SubprocessError) as error:
-            self._board.record_error(-1, f"conflict {repo}#{pr}: {error}")
-            return
-        self._board.keeper[key] = {
-            "emitted_at": _now(),
-            "backoff_seconds": 0,
-            "next_eligible_at": _now(),
-        }
-
-    def _dispatch_review_fix(self, event: Mapping[str, Any]) -> None:
-        """Answer hosted-review findings on a published PR with a fix lane.
-
-        The sweep holds a PR while its latest review carries findings. One
-        lane per (PR, head) reads the findings, fixes or refutes each with a
-        threaded reply, pushes, and requests re-review; the next sweep pass
-        judges the result. Keying on the head makes a repeated findings event
-        for the same commit a no-op and a new head a new lane.
-        """
-        project = event.get("project")
-        repo = event.get("repo")
-        pr = event.get("pr")
-        head = event.get("head")
-        receipt = event.get("receipt")
-        if not (
-            isinstance(project, str)
-            and isinstance(repo, str)
-            and isinstance(head, str)
-            and head
-            and isinstance(receipt, str)
-            and pr is not None
-        ):
-            return
-        key = f"review-fix:{repo}#{pr}:{head[:12]}"
-        if key in self._board.keeper:
-            return
-        if not re.fullmatch(r"harvest-[0-9a-f]{32}", receipt.rsplit("/", 1)[-1]):
-            # A hand PR carries a non-harvest receipt token; its author
-            # answers findings, and every sweep pass need not say so.
-            return
-        workspace_id = self._receipt_workspace(receipt)
-        workspace = (
-            self._workspace_name(workspace_id) if workspace_id is not None else None
-        )
-        if workspace_id is None or workspace is None:
-            self._board.record_error(
-                -1, f"review-fix {repo}#{pr}: no workspace for receipt {receipt}"
-            )
-            return
-        if self._checkout_owned(workspace_id):
-            # The holder (an integrator, or the previous fix lane) finishes
-            # first; the sweep repeats the findings event afterwards.
-            return
-        try:
-            if self.review_fix_dispatcher is not None:
-                self.review_fix_dispatcher(project, workspace, str(pr))
-            else:
-                prompt_path = self.state_dir / f"review-fix-{pr}-{head[:12]}.md"
-                prompt_path.write_text(
-                    self._review_fix_prompt(repo, str(pr), workspace, event),
-                    encoding="utf-8",
-                )
-                subprocess.run(
-                    [
-                        self.agentctl_executable,
-                        "agent",
-                        "launch",
-                        "--project",
-                        project,
-                        "--checkout",
-                        workspace_id,
-                        "--prompt-file",
-                        str(prompt_path),
-                        "--backend",
-                        self.integrator_backend,
-                        "--model",
-                        self.integrator_model,
-                        "--effort",
-                        self.integrator_effort,
-                        "--coordinator-label",
-                        "review-fix",
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-        except (OSError, subprocess.SubprocessError) as error:
-            self._board.record_error(-1, f"review-fix {repo}#{pr}: {error}")
-            return
-        self._board.keeper[key] = {
-            "emitted_at": _now(),
-            "backoff_seconds": 0,
-            "next_eligible_at": _now(),
-        }
-
     def _checkout_owned(self, checkout_id: str) -> bool:
         """Whether a running attested agent already works in this checkout.
 
@@ -2110,36 +1711,6 @@ class CampaignReactor:
         """The workspace a harvest receipt was published from."""
         return cls._receipt_field(receipt, "workspace_id")
 
-    def _master_head(self, project: str) -> str:
-        """The project's origin/master commit, or "" when it cannot be read."""
-        root = self.project_roots.get(project)
-        if root is None:
-            return ""
-        try:
-            result = subprocess.run(
-                ["git", "-C", str(root), "rev-parse", "origin/master"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return ""
-        value = result.stdout.strip()
-        return value if result.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", value) else ""
-
-    def _clear_judgments(self, bead: object) -> None:
-        """Drop judgment entries whose receipt names a bead that just merged."""
-        if not isinstance(bead, str) or not bead:
-            return
-        for key in list(self._board.keeper):
-            if not key.startswith("judgment:"):
-                continue
-            receipt = self._board.keeper[key].get("receipt")
-            payload = self._receipt_payload(str(receipt)) if receipt else None
-            if payload is not None and payload.get("bead_id") == bead:
-                del self._board.keeper[key]
-
     @classmethod
     def _receipt_field(cls, receipt: str, key: str) -> str | None:
         payload = cls._receipt_payload(receipt)
@@ -2162,6 +1733,112 @@ class CampaignReactor:
         except (OSError, json.JSONDecodeError):
             return None
         return payload if isinstance(payload, Mapping) else None
+
+    def _advance_lanes(self, project: str) -> None:
+        """Advance every lane of the project one step from its facts.
+
+        No dispatch records: an action in flight shows up as a holder or a
+        running operation on the next tick, and an action that already ran
+        at this head shows up as an integrator job bound to it.
+        """
+        from .lane_facts import advance, collect, latest_sweep_pulls
+
+        root = self.project_roots.get(project)
+        if root is None or self.jobs_state_dir is None:
+            return
+        state_root = self.jobs_state_dir.parent
+        try:
+            lanes = collect(project, state_root=state_root, receipt_pulls=latest_sweep_pulls(state_root))
+        except (OSError, ValueError) as error:
+            self._board.record_error(-1, f"advance {project}: {error}")
+            return
+        for facts in lanes:
+            action = advance(facts)
+            self._dispatch_action(project, facts, action)
+
+    def _dispatch_action(self, project: str, facts: Any, action: Any) -> None:
+        workspace = facts.name
+        checkout_id = facts.checkout_id
+        try:
+            if action.kind == "verify":
+                if self.verify_dispatcher is not None:
+                    self.verify_dispatcher(project, workspace)
+                else:
+                    subprocess.run(
+                        [self.agentctl_executable, "job", "start", project, "verify_affected", "--workspace", workspace],
+                        check=True, capture_output=True, text=True, timeout=60,
+                    )
+            elif action.kind == "harvest":
+                verify_job = facts.verify_job[0] if facts.verify_job else ""
+                if self.harvest_dispatcher is not None:
+                    self.harvest_dispatcher(project, workspace, verify_job)
+                else:
+                    parameters = json.dumps({"affected_job": verify_job}, sort_keys=True) if verify_job else "{}"
+                    subprocess.run(
+                        [self.agentctl_executable, "job", "start", project, "harvest", "--workspace", workspace,
+                         "--parameters-json", parameters],
+                        check=True, capture_output=True, text=True, timeout=60,
+                    )
+            elif action.kind == "publish":
+                receipt = facts.receipt.packet_id if facts.receipt else ""
+                if receipt:
+                    self._publish(project, workspace, receipt)
+            elif action.kind == "integrate":
+                packet = self._receipt_payload(facts.receipt.packet_id) if facts.receipt else None
+                root = self.project_roots[project]
+                event = {"project": project, "packet": packet, "receipt_ref": facts.receipt.packet_id if facts.receipt else ""}
+                self._launch_agent(
+                    project, workspace, checkout_id, self._integration_prompt(root, event, workspace),
+                    label="integrator", name=f"integrate-{workspace}-{facts.head[:12]}",
+                )
+            elif action.kind == "rebase":
+                self._launch_rebase(
+                    project, workspace, checkout_id, facts.head,
+                    reason="conflict" if facts.pull is not None else "evidence",
+                )
+            elif action.kind == "review-fix":
+                repo = self._repo_slug(project)
+                pull = facts.pull
+                if repo and pull is not None:
+                    self._launch_agent(
+                        project, workspace, checkout_id,
+                        self._review_fix_prompt(repo, str(pull.number), workspace, {"findings": pull.findings}),
+                        label="review-fix", name=f"review-fix-{pull.number}-{facts.head[:12]}",
+                    )
+            elif action.kind == "park":
+                self._record_judgment(project, facts, action.reason)
+        except (OSError, subprocess.SubprocessError, KeyError) as error:
+            self._board.record_error(-1, f"{action.kind} {workspace}: {error}")
+
+    def _record_judgment(self, project: str, facts: Any, reason: str) -> None:
+        key = f"judged:{facts.name}:{facts.head[:12]}"
+        if key in self._board.keeper:
+            return
+        self._board.keeper[key] = {
+            "emitted_at": _now(),
+            "backoff_seconds": 0,
+            "next_eligible_at": _now(),
+            "reason": reason,
+            "receipt": facts.receipt.packet_id if facts.receipt else None,
+        }
+        self._spool(
+            {"kind": "judgment", "project": project, "workspace": facts.name,
+             "receipt": facts.receipt.packet_id if facts.receipt else None, "reason": reason}
+        )
+
+    def _repo_slug(self, project: str) -> str:
+        root = self.project_roots.get(project)
+        if root is None:
+            return ""
+        try:
+            url = subprocess.run(
+                ["git", "-C", str(root), "remote", "get-url", "origin"],
+                capture_output=True, text=True, timeout=10, check=False,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        match = re.search(r"github\.com[:/]([^/]+/[^/.]+)", url)
+        return match.group(1) if match else ""
 
     @staticmethod
     def _review_fix_prompt(
@@ -2187,98 +1864,6 @@ class CampaignReactor:
             "dispositions with the machine trailer "
             "(LANE-BRANCH/COMMIT/QUICK/CLASSIFICATION).\n"
         )
-
-    def _dispatch_review(self, record: LaneRecord) -> None:
-        """Start the read-mostly harvest review as soon as a lane succeeds.
-
-        The review phase is deterministic and produces a receipt; only
-        authorization needs judgment, so waiting for a coordinator to launch it
-        adds latency without adding a decision.
-        """
-        workspace = self._workspace_for(record)
-        if not workspace:
-            # A silent skip here is indistinguishable from working, which is
-            # how auto-review looked healthy while dispatching nothing.
-            self._board.record_error(
-                -1, f"review {record.job_id}: no workspace path for {record.checkout}"
-            )
-            return
-        key = f"review:{record.job_id}"
-        if key in self._board.keeper:
-            return
-        # Affected verification runs once, as a declared job cached by tree
-        # and environment; the harvest that follows reads its verdict
-        # instead of running the tests again.
-        verify_job: str | None = None
-        try:
-            if self.verify_dispatcher is not None:
-                verify_job = self.verify_dispatcher(record.project, workspace)
-            elif self.review_dispatcher is not None:
-                self.review_dispatcher(record.project, workspace)
-            else:
-                started = subprocess.run(
-                    [
-                        self.agentctl_executable,
-                        "--plain",
-                        "job",
-                        "start",
-                        record.project,
-                        "verify_affected",
-                        "--workspace",
-                        workspace,
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                )
-                verify_job = _job_id_from_output(started.stdout)
-        except (OSError, subprocess.SubprocessError) as error:
-            self._board.record_error(-1, f"review {record.job_id}: {error}")
-            return
-        self._board.keeper[key] = {
-            "emitted_at": _now(),
-            "backoff_seconds": 0,
-            "next_eligible_at": _now(),
-            **({"verify_job": verify_job, "workspace": workspace, "project": record.project} if verify_job else {}),
-        }
-
-    def _harvest_after_verification(self, event: Mapping[str, Any]) -> None:
-        """Start the harvest once the declared verification the review started ends."""
-        job_id = event.get("job_id")
-        if not isinstance(job_id, str) or event.get("phase") not in {"succeeded", "failed"}:
-            return
-        for key, entry in list(self._board.keeper.items()):
-            if not key.startswith("review:") or entry.get("verify_job") != job_id or entry.get("harvest_job"):
-                continue
-            project = str(entry.get("project") or "")
-            workspace = str(entry.get("workspace") or "")
-            parameters = json.dumps({"affected_job": job_id}, sort_keys=True)
-            try:
-                if self.harvest_dispatcher is not None:
-                    self.harvest_dispatcher(project, workspace, job_id)
-                else:
-                    subprocess.run(
-                        [
-                            self.agentctl_executable,
-                            "job",
-                            "start",
-                            project,
-                            "harvest",
-                            "--workspace",
-                            workspace,
-                            "--parameters-json",
-                            parameters,
-                        ],
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                        timeout=60,
-                    )
-            except (OSError, subprocess.SubprocessError) as error:
-                self._board.record_error(-1, f"harvest {workspace}: {error}")
-                return
-            entry["harvest_job"] = job_id
 
     def _dispatch_retry(self, record: LaneRecord) -> None:
         """Re-dispatch an interrupted lane once, from its preserved prompt.
@@ -2697,8 +2282,6 @@ class CampaignReactor:
             else:
                 self.registry.dispatch(event, context)
                 self._record_operation_request(event)
-                if event.get("kind") == "declared-operation":
-                    self._harvest_after_verification(event)
                 if event.get("kind") == "attested-agent":
                     job_id = event.get("job_id")
                     lane = (
@@ -2710,8 +2293,6 @@ class CampaignReactor:
                         # A real completion proves dispatch works again;
                         # collapse any accumulated refill backoff.
                         self._board.keeper.pop(f"refill:{lane.project}", None)
-                    if lane is not None and lane.review_ready:
-                        self._dispatch_review(lane)
                     if lane is not None and lane.phase in {"cancelled", "timeout"}:
                         self._dispatch_retry(lane)
                     if lane is not None and lane.phase in {
@@ -2722,34 +2303,9 @@ class CampaignReactor:
                         self._release_beads(lane)
                 if (
                     event.get("kind") == "harvest"
-                    and event.get("transition") == "review-required"
-                ):
-                    self._dispatch_integration(event)
-                if (
-                    event.get("kind") == "harvest"
                     and event.get("outcome") == "HARVEST_EMPTY"
                 ):
                     self._park_empty_lane(event)
-                if (
-                    event.get("kind") == "harvest"
-                    and event.get("outcome") == "REBASE_CONFLICT"
-                ):
-                    self._dispatch_rebase(event)
-                if (
-                    event.get("kind") == "publication-sweep"
-                    and event.get("outcome") == "findings"
-                ):
-                    self._dispatch_review_fix(event)
-                if (
-                    event.get("kind") == "publication-sweep"
-                    and event.get("outcome") == "merge"
-                ):
-                    self._clear_judgments(event.get("bead"))
-                if (
-                    event.get("kind") == "publication-sweep"
-                    and event.get("outcome") == "conflict"
-                ):
-                    self._dispatch_conflict_harvest(event)
                 pr = self._board.prs.get(f"{event.get('repo')}#{event.get('pr')}")
                 closed = pr is not None and pr.bead_close_status == "closed"
                 if event.get("kind") in {"bead_close", "merge_close"} and (
@@ -2774,6 +2330,11 @@ class CampaignReactor:
             self._board.save(self.board_path)
             self._cursor.save(self.cursor_path)
             processed += 1
+        for project in self._refill_targets():
+            self._advance_lanes(project)
+        if self._board.keeper:
+            self._board.updated_at = _now()
+            self._board.save(self.board_path)
         self._dispatch_pending_operations()
         self._emit_keeper()
         self._check_verify_all_health()
