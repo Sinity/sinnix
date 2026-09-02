@@ -304,14 +304,14 @@ in
         assert lib.assertMsg (
           managedWork.CPUWeight < userSlices.app.CPUWeight
           && managedWork.IOWeight < userSlices.app.IOWeight
-          && managedWork.MemoryHigh == "24G"
+          && managedWork.MemoryHigh == "20G"
           && !(managedWork ? MemoryMax)
           && managedWork.ManagedOOMSwap == "kill"
           && managedWork.ManagedOOMMemoryPressure == "kill"
           && managedWork.ManagedOOMMemoryPressureLimit == "50%"
           && managedWork.ManagedOOMMemoryPressureDurationSec == "30s"
-          && userSlices.app.MemoryLow == "4G"
-          && userSlices.session.MemoryLow == "4G"
+          && userSlices.app.MemoryLow == "6G"
+          && userSlices.session.MemoryLow == "6G"
         ) "sinnixd work must yield to protected interactive slices without a hard CPU or memory cap";
         pkgs.runCommand "sinnix-agent-resource-policy-check" { } ''
           touch "$out"
