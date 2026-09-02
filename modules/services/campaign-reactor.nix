@@ -135,7 +135,9 @@ mkServiceModule {
             })
             // {
               Type = "simple";
-              ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --board ${lib.escapeShellArg cfg.boardPath} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --refill-width-target ${toString cfg.refillWidthTarget} --refill-spacing-seconds ${toString cfg.refillSpacingSeconds} ${lib.concatMapStringsSep " " (name: "--refill-project ${lib.escapeShellArg name}") cfg.refillProjects} ${projectRootArgs}";
+              ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --board ${lib.escapeShellArg cfg.boardPath} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --refill-width-target ${toString cfg.refillWidthTarget} --refill-spacing-seconds ${toString cfg.refillSpacingSeconds} ${
+                lib.concatMapStringsSep " " (name: "--refill-project ${lib.escapeShellArg name}") cfg.refillProjects
+              } ${projectRootArgs}";
               Restart = "on-failure";
               RestartSec = "5s";
               NoNewPrivileges = true;

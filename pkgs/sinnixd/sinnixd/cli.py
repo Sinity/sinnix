@@ -372,11 +372,13 @@ def parser() -> argparse.ArgumentParser:
     campaign_status.add_argument("--project", required=True)
     campaign_status.add_argument("--coordinator-label")
     campaign_view = campaign_subcommands.add_parser(
-        "view", help="One screen for the operator: what needs attention, lanes by next action, active jobs, corpus."
+        "view",
+        help="One screen for the operator: what needs attention, lanes by next action, active jobs, corpus.",
     )
     campaign_view.add_argument("--project", required=True)
     campaign_log = campaign_subcommands.add_parser(
-        "log", help="One lane's timeline: its jobs, the events about it, and its current verdict."
+        "log",
+        help="One lane's timeline: its jobs, the events about it, and its current verdict.",
     )
     campaign_log.add_argument("--project", required=True)
     campaign_log.add_argument("--workspace", required=True)
@@ -554,7 +556,12 @@ def _operator_view(arguments: argparse.Namespace) -> int:
     from .operator_view import load_jobs, render_lane_log, render_overview
     from .publication_sweep import DEFAULT_SPOOL
 
-    request = _request("campaign.status", "campaign-orchestrator", {"project_id": arguments.project}, "operator")
+    request = _request(
+        "campaign.status",
+        "campaign-orchestrator",
+        {"project_id": arguments.project},
+        "operator",
+    )
     try:
         response = call(arguments.socket, request)
     except (OSError, ResponseBudgetExceeded) as error:
@@ -563,15 +570,31 @@ def _operator_view(arguments: argparse.Namespace) -> int:
         print(_render_plain(response))
         return 1
     payload = response.get("payload") or {}
-    status = payload.get("value") if isinstance(payload, Mapping) and isinstance(payload.get("value"), Mapping) else payload
+    status = (
+        payload.get("value")
+        if isinstance(payload, Mapping) and isinstance(payload.get("value"), Mapping)
+        else payload
+    )
     jobs = load_jobs(default_state_dir() / "jobs", arguments.project)
     if arguments.campaign_command == "log":
         print(render_lane_log(arguments.workspace, status, jobs, DEFAULT_SPOOL))
         return 0
-    active = subprocess.run(["systemctl", "--user", "is-active", "sinnixd-reactor"], capture_output=True, text=True, check=False)
+    active = subprocess.run(
+        ["systemctl", "--user", "is-active", "sinnixd-reactor"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     from .operator_view import _reactor_last_dispatch
 
-    print(render_overview(status, jobs, reactor_active=active.stdout.strip() == "active", last_dispatch=_reactor_last_dispatch(DEFAULT_SPOOL)))
+    print(
+        render_overview(
+            status,
+            jobs,
+            reactor_active=active.stdout.strip() == "active",
+            last_dispatch=_reactor_last_dispatch(DEFAULT_SPOOL),
+        )
+    )
     return 0
 
 
@@ -1303,7 +1326,10 @@ def main() -> int:
             },
             "operator",
         )
-    elif arguments.command == "campaign" and arguments.campaign_command in {"view", "log"}:
+    elif arguments.command == "campaign" and arguments.campaign_command in {
+        "view",
+        "log",
+    }:
         return _operator_view(arguments)
     elif arguments.command == "campaign" and arguments.campaign_command == "status":
         request = _request(

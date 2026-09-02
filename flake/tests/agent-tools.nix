@@ -129,11 +129,15 @@ in
               message = "Clodex must run as an advertised local user service for Claude Code child-process routing.";
             }
             {
-              assertion = lib.hasInfix "models --json" (toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre);
+              assertion = lib.hasInfix "models --json" (
+                toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre
+              );
               message = "Clodex startup must inspect aliases through its structured JSON interface.";
             }
             {
-              assertion = lib.hasInfix "patch is stale" (toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre);
+              assertion = lib.hasInfix "patch is stale" (
+                toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre
+              );
               message = "Clodex startup must fail readiness with an actionable stale-patch status.";
             }
             {

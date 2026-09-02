@@ -11,15 +11,44 @@ def test_routed_usage_is_aggregated_without_request_data(tmp_path: Path) -> None
         "\n".join(
             json.dumps(row)
             for row in [
-                {"event": "response_usage", "route": "translated", "inputTokens": 12, "outputTokens": 4, "cacheReadInputTokens": 2, "cacheCreationInputTokens": 1, "timestamp": "2026-09-01T00:00:00Z", "requestPreview": "SECRET"},
-                {"event": "response_usage", "route": "translated", "inputTokens": 8, "outputTokens": 3, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0, "timestamp": "2026-09-01T00:01:00Z"},
-                {"event": "response_usage", "route": "passthrough", "inputTokens": 999, "outputTokens": 999},
+                {
+                    "event": "response_usage",
+                    "route": "translated",
+                    "inputTokens": 12,
+                    "outputTokens": 4,
+                    "cacheReadInputTokens": 2,
+                    "cacheCreationInputTokens": 1,
+                    "timestamp": "2026-09-01T00:00:00Z",
+                    "requestPreview": "SECRET",
+                },
+                {
+                    "event": "response_usage",
+                    "route": "translated",
+                    "inputTokens": 8,
+                    "outputTokens": 3,
+                    "cacheReadInputTokens": 0,
+                    "cacheCreationInputTokens": 0,
+                    "timestamp": "2026-09-01T00:01:00Z",
+                },
+                {
+                    "event": "response_usage",
+                    "route": "passthrough",
+                    "inputTokens": 999,
+                    "outputTokens": 999,
+                },
             ]
         )
         + "\n"
     )
     value, health = clodex_usage(path)
-    assert value == {"requests": 2, "input_tokens": 20, "output_tokens": 7, "cache_read_tokens": 2, "cache_write_tokens": 1, "last_recorded_at": "2026-09-01T00:01:00Z"}
+    assert value == {
+        "requests": 2,
+        "input_tokens": 20,
+        "output_tokens": 7,
+        "cache_read_tokens": 2,
+        "cache_write_tokens": 1,
+        "last_recorded_at": "2026-09-01T00:01:00Z",
+    }
     assert health["status"] == "healthy"
     assert "SECRET" not in json.dumps(value)
 
