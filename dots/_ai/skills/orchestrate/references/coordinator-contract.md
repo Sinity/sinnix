@@ -97,7 +97,7 @@ record → job) and reports a step failure as a redacted `OWNER_UNAVAILABLE`.
 Retry about three times, spaced. A leftover worktree with no workspace record
 is adopted: `agentctl workspace adopt <project> <checkout> <name>`.
 
-**Refill** (keeper tick): read the fleet. Lanes at target with nothing
+**Refill**: read the fleet. Lanes at target with nothing
 review-ready → say so and stop. Otherwise harvest what finished and launch a
 wave sized to free memory — lanes peak near a gigabyte each under verification.
 

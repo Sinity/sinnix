@@ -23,7 +23,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from .review import route_review
 
 HARVEST_OK = "HARVEST_OK"
 REBASE_CONFLICT = "REBASE_CONFLICT"
@@ -278,29 +277,24 @@ def _adopt_open_pull_request(
 def _resolve_publication_text(
     parsed: argparse.Namespace, context: HarvestContext
 ) -> tuple[str, str, str | None]:
-    """Resolve the publication text, preferring what the caller named.
-
-    An explicit file wins, then an explicit value, then the artifact the lane
-    wrote. `--title` and `--body` default to the empty string rather than to
-    None, so absence is falsiness here, not identity.
-    """
+    """Resolve the publication text: a named file, else what the lane wrote."""
     # The receipt binds the stripped artifact text; a file read here must
     # normalize the same way or its trailing newline fails the binding.
-    title = parsed.title
-    if parsed.title_file is not None:
-        title = _read_text(parsed.title_file, "publication title file").strip()
-    elif not title:
-        title = _lane_artifact(context, "title") or title
-    body = parsed.body
-    if parsed.body_file is not None:
-        body = _read_text(parsed.body_file, "publication body file").strip()
-    elif not body:
-        body = _lane_artifact(context, "body.md") or body
-    close_reason = parsed.close_reason
-    if parsed.close_reason_file is not None:
-        close_reason = _read_text(parsed.close_reason_file, "bead close reason file")
-    elif not close_reason:
-        close_reason = _lane_artifact(context, "close-reason.md") or close_reason
+    title = (
+        _read_text(parsed.title_file, "publication title file").strip()
+        if parsed.title_file is not None
+        else (_lane_artifact(context, "title") or "")
+    )
+    body = (
+        _read_text(parsed.body_file, "publication body file").strip()
+        if parsed.body_file is not None
+        else (_lane_artifact(context, "body.md") or "")
+    )
+    close_reason = (
+        _read_text(parsed.close_reason_file, "bead close reason file")
+        if parsed.close_reason_file is not None
+        else _lane_artifact(context, "close-reason.md")
+    )
     return title, body, close_reason
 
 
@@ -442,84 +436,6 @@ def _lane_write_scope(
             continue
         candidates.append((str(record.get("created_at", "")), tuple(scope)))
     return sorted(candidates, key=lambda item: item[0])[-1][1] if candidates else ()
-
-
-def _run_is_stale(worktree: Path, run: Mapping[str, Any], head: str) -> bool:
-    """A run is fresh while the code it tested is the code at HEAD.
-
-    Integrators commit lane metadata after the lane's tests ran; that moves
-    the commit without touching a product line, and reading it as stale sent
-    every such lane to another integrator instead of to publication.
-    """
-    final = run.get("final_git_head")
-    started = run.get("git_head")
-    if final in (None, head) or started == head:
-        return False
-    tested_at = final if isinstance(final, str) else started
-    if not isinstance(tested_at, str) or not tested_at:
-        return True
-    try:
-        result = subprocess.run(
-            ["git", "diff", "--quiet", tested_at, head, "--", ".", ":(exclude).lane"],
-            cwd=worktree,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return True
-    return result.returncode != 0
-
-
-def _verification_evidence(worktree: Path, head: str) -> dict[str, Any]:
-    """Read what the lane's own verification actually did.
-
-    `devtools` writes a receipt per run under `.cache/verify/runs/`. Reading it
-    replaces the lane's self-reported trailer with evidence: which command ran,
-    whether it passed, how many tests, and against which commit -- so a receipt
-    describing a different HEAD is visible as stale rather than counted.
-    """
-    runs = worktree / ".cache/verify/runs"
-    try:
-        records = sorted(runs.glob("*/run.json"))
-    except OSError:
-        return {"state": "unreadable"}
-    if not records:
-        return {"state": "absent"}
-    latest: dict[str, Any] = {}
-    for record in records:
-        try:
-            value = json.loads(record.read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
-        if not isinstance(value, Mapping):
-            continue
-        argv = value.get("argv")
-        command = " ".join(argv) if isinstance(argv, list) else "?"
-        entry = {
-            "status": value.get("status"),
-            "exit_code": value.get("exit_code"),
-            "git_head": value.get("git_head"),
-            "final_git_head": value.get("final_git_head"),
-            "git_dirty": value.get("git_dirty"),
-            "pytest": value.get("pytest_aggregate"),
-            "finished_at": value.get("finished_at"),
-            "stale": _run_is_stale(worktree, value, head),
-        }
-        latest[command] = entry
-    if not latest:
-        return {"state": "unreadable"}
-    tested = any(
-        isinstance(e.get("pytest"), Mapping)
-        and not e["stale"]
-        and e.get("status") == "success"
-        for e in latest.values()
-    )
-    return {
-        "state": "tests-run" if tested else "static-only",
-        "runs": latest,
-    }
 
 
 def _ignored_paths(run: Run, worktree: Path, changed_paths: Sequence[str]) -> tuple[str, ...]:
@@ -723,6 +639,7 @@ def compile_packet(
     lane_job_id: str | None = None,
     bead_id: str | None = None,
     close_reason: str | None = None,
+    affected_job: str | None = None,
     run: Run = subprocess.run,
 ) -> dict[str, Any]:
     """Compile a review packet and stop before any publication side effect."""
@@ -772,10 +689,6 @@ def compile_packet(
         changed_paths=changed_paths,
         ignored_paths=_ignored_paths(run, context.worktree, changed_paths),
     )
-    review_route = route_review(
-        changed_paths=changed_paths,
-        scanner_output="\n".join(redflags),
-    )
     trailer = _lane_trailer(context, lane_job_id=lane_job_id)
     packet_id = _packet_id(context, head)
     diff_path = context.packet_root / f"{packet_id}.diff"
@@ -802,12 +715,12 @@ def compile_packet(
         "diffstat": diffstat,
         "lane_trailer": trailer,
         "write_scope": list(write_scope),
-        "verification": _verification_evidence(context.worktree, head),
+        # Tests run exactly once, as the declared verify_affected job; the
+        # receipt records which verdict it was minted against, never a scrape.
+        "verification": {"state": "from-job" if affected_job else "absent"},
         "redflags": redflags,
         "redflag_status": redflag_status,
         "authorization": _authorization(context, head),
-        "review_route": review_route.to_dict(),
-        "full_diff_ref": f"sinnix://jobs/{context.job_id}/artifacts/{packet_id}.diff",
         "worktree_unstaged_sha256": _digest(unstaged),
         "worktree_staged_sha256": _digest(staged),
         # The reviewed publication text is part of what the receipt binds:
@@ -1141,16 +1054,6 @@ def authorize(
         else ("unavailable", "no affected verification job for this head")
     )
     if tests == "unavailable":
-        _append_event(
-            context.spool,
-            {
-                "kind": "verification-unavailable",
-                "project": context.project_id,
-                "workspace": context.workspace_id,
-                "detail": _bounded_text(tests_output, 4_000),
-                "job_id": context.job_id,
-            },
-        )
         if _authorization(context, current_head) is None:
             # Publication needs test evidence at this head or the operator's
             # recorded decision; the reactor runs verify_affected and harvests
@@ -1418,6 +1321,7 @@ def publish(
         context,
         lane_job_id=lane_job_id,
         bead_id=bead_id,
+        affected_job=affected_job,
         run=run,
     )
     if packet.get("outcome") != HARVEST_OK:
@@ -1473,12 +1377,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
     parser.add_argument("--receipt-ref")
     parser.add_argument("--lane-job-id")
     parser.add_argument("--affected-job")
-    parser.add_argument("--title", default="")
     parser.add_argument("--title-file", type=Path)
-    parser.add_argument("--body", default="")
     parser.add_argument("--body-file", type=Path)
     parser.add_argument("--bead-id")
-    parser.add_argument("--close-reason")
     parser.add_argument("--close-reason-file", type=Path)
     parser.add_argument("--base", default=DEFAULT_BASE)
     parser.add_argument("--event-spool", type=Path, default=DEFAULT_SPOOL)
@@ -1494,7 +1395,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 context,
                 lane_job_id=parsed.lane_job_id,
                 bead_id=parsed.bead_id,
-                close_reason=parsed.close_reason,
+                close_reason=_lane_artifact(context, "close-reason.md"),
+                affected_job=parsed.affected_job,
             )
         else:
             if not parsed.receipt_ref:
