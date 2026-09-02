@@ -101,9 +101,14 @@ mkFeatureModule {
           ...
         }:
         {
+          services.pueue.enable = true;
           home.packages = lib.mkAfter (
             with pkgs;
             [
+              # Agent lanes: worktree lifecycle and the bounded job queue
+              # (target architecture 2026-09-02).
+              worktrunk
+              pueue
               nix-output-monitor
               nvd
               cachix
