@@ -1,6 +1,6 @@
-# Model-free campaign reactor.  It consumes the daemon event spool, owns the
-# externalized campaign board, and performs only typed mechanical reactions.
-# Harvester/reviewer and strategist wakes remain outside this service.
+# Model-free campaign reactor.  Each tick it reads every managed workspace into
+# facts and dispatches the one action they imply; it keeps only dispatch
+# markers and an error log.
 {
   mkServiceModule,
   config,
@@ -30,7 +30,7 @@ mkServiceModule {
     };
     workload = {
       class = "protected";
-      rationale = "Typed campaign state and keeper event publisher owned by sinnixd.";
+      rationale = "Typed campaign lane dispatcher owned by sinnixd.";
       processMatchers = [ "sinnixd-reactor" ];
     };
   };
@@ -55,7 +55,7 @@ mkServiceModule {
           path
         else
           throw "sinnix.services.campaign-reactor.boardPath must be absolute";
-      description = "Versioned JSON campaign board maintained by the reactor.";
+      description = "Reactor dispatch markers and rotating error log.";
     };
     stateDir = lib.mkOption {
       type = lib.types.str;
@@ -76,27 +76,12 @@ mkServiceModule {
     minActiveLanes = lib.mkOption {
       type = lib.types.ints.positive;
       default = 4;
-      description = "Keeper threshold for an under-filled active campaign wave.";
-    };
-    laneGateThreshold = lib.mkOption {
-      type = lib.types.ints.unsigned;
-      default = 0;
-      description = "Maximum active lanes allowed before a heavy operation is deferred.";
-    };
-    keeperBackoffSeconds = lib.mkOption {
-      type = lib.types.ints.positive;
-      default = 600;
-      description = "Initial delay between repeated keeper events for one action.";
-    };
-    prAgeThresholdSeconds = lib.mkOption {
-      type = lib.types.ints.positive;
-      default = 3600;
-      description = "Age after which an open pull request receives a needs-merge keeper event.";
+      description = "Minimum active lanes an automatic refill keeps in flight.";
     };
     refillWidthTarget = lib.mkOption {
       type = lib.types.ints.positive;
       default = 6;
-      description = "Maximum active lanes targeted by automatic refill (keeper tick and bead close).";
+      description = "Maximum active lanes targeted by automatic refill.";
     };
     refillSpacingSeconds = lib.mkOption {
       type = lib.types.ints.positive;
@@ -107,11 +92,6 @@ mkServiceModule {
       type = lib.types.listOf lib.types.str;
       default = [ "polylogue" ];
       description = "Projects automatic refill may dispatch into; board and event consumption stay estate-wide.";
-    };
-    verifyAllFailureThreshold = lib.mkOption {
-      type = lib.types.ints.positive;
-      default = 3;
-      description = "Consecutive verify_all failures required for a corpus alert.";
     };
   };
   configFn =
@@ -155,7 +135,7 @@ mkServiceModule {
             })
             // {
               Type = "simple";
-              ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --board ${lib.escapeShellArg cfg.boardPath} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --lane-gate-threshold ${toString cfg.laneGateThreshold} --keeper-backoff-seconds ${toString cfg.keeperBackoffSeconds} --pr-age-threshold-seconds ${toString cfg.prAgeThresholdSeconds} --refill-width-target ${toString cfg.refillWidthTarget} --refill-spacing-seconds ${toString cfg.refillSpacingSeconds} --verify-all-failure-threshold ${toString cfg.verifyAllFailureThreshold} ${lib.concatMapStringsSep " " (name: "--refill-project ${lib.escapeShellArg name}") cfg.refillProjects} ${projectRootArgs}";
+              ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd-reactor --event-spool ${lib.escapeShellArg cfg.eventSpool} --board ${lib.escapeShellArg cfg.boardPath} --state-dir ${lib.escapeShellArg cfg.stateDir} --jobs-state-dir %S/sinnixd/jobs --interval-seconds ${toString cfg.intervalSeconds} --min-active-lanes ${toString cfg.minActiveLanes} --refill-width-target ${toString cfg.refillWidthTarget} --refill-spacing-seconds ${toString cfg.refillSpacingSeconds} ${lib.concatMapStringsSep " " (name: "--refill-project ${lib.escapeShellArg name}") cfg.refillProjects} ${projectRootArgs}";
               Restart = "on-failure";
               RestartSec = "5s";
               NoNewPrivileges = true;

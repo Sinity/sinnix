@@ -147,8 +147,9 @@ live OUTSIDE your context — read them, never reconstruct:
   — start with its capability table, which names the `agentctl` verb for each
   need so you do not hand-roll a worse copy. Worker rules in its sibling
   `worker-contract.md`.
-- **Live board**: `sinnixd-reactor` maintains `/realm/tmp/work/campaign-board.json`
-  from the event spool and emits keeper events.
+- **Live state**: `agentctl campaign status` is the lane view; `sinnixd-reactor`
+  dispatches each lane's next action and logs its refusals to
+  `/realm/tmp/work/campaign-board.json`.
 - **Dispatch**: `agentctl campaign run` for a wave, `packet launch` for one
   bead. **Harvest**: the declared `harvest` operation — review receipt, then
   authorize to publish. `agentctl --plain` prints payloads as text.

@@ -1,5 +1,0 @@
-#!/usr/bin/env bash
-# Keeper policy and its backoff are owned by sinnixd-reactor.  Keep this name
-# as an explicit manual compatibility front door; it is not a second watcher.
-set -eu
-exec sinnixd-reactor "$@"
