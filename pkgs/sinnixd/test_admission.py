@@ -13,6 +13,7 @@ from sinnixd.jobs import (
     MEMORY_FULL_PREEMPT_THRESHOLD,
     FREEZE_MAX_SECONDS,
     HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS,
+    IO_FULL_BLOCK_THRESHOLD,
     MEMORY_STALL_MAX_AVAILABLE_BYTES,
     PRESSURE_PREEMPTION_COOLDOWN_SECONDS,
     AdmissionConflictError,
@@ -2123,3 +2124,17 @@ def test_terminal_peaks_are_recorded_as_measured_envelopes(tmp_path: Path) -> No
     running = subject.start(agent_spec(("table:live",)))
     claims = subject.admission_ledger()["claims"]
     assert claims[running["job_id"]]["measured"]["samples"] == 3
+
+
+def test_sustained_io_stall_blocks_new_admissions(tmp_path: Path) -> None:
+    """Anti-vacuity: IO was ignored entirely; a sustained stall admitted
+    more disk-bound work into a saturated disk."""
+    adapter = project(tmp_path / "project", (operation("first"), operation("second")))
+    subject = GenericJobs(
+        FakeSystemd(),
+        GenericJobStore(tmp_path / "state"),
+        wait_poll_seconds=0.001,
+        pressure_probe=lambda: {"memory_full_avg10": 0.0, "io_full_avg10": 80.0, "io_full_avg60": IO_FULL_BLOCK_THRESHOLD + 5},
+    )
+    first = subject.start_declared(project=adapter, operation=adapter.operation("first"), correlation_id="first", parameters={})
+    assert first["state"]["phase"] == "queued"

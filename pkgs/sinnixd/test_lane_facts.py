@@ -78,6 +78,8 @@ def test_advance_orders_facts_before_actions() -> None:
     assert advance(_facts(verify_job=("v", "failed"))).kind == "park"
     assert advance(_facts(verify_job=("v", "succeeded"), harvest_at_head=("j", "failed"))).kind == "park"
     assert advance(_facts(receipt=_receipt(), published_at_head=True)).kind == "await-sweep"
+    # A red quick gate at this head parks instead of publishing every tick.
+    assert advance(_facts(receipt=_receipt(), quick_at_head=("q", "failed"))).kind == "park"
     assert advance(_facts(receipt=_receipt(head="x" * 40))).kind == "verify"
     assert advance(_facts(receipt=_receipt())).kind == "publish"
     flagged = _receipt(flags=("FLAG: production definitions removed: f",), flagged=True)
