@@ -74,6 +74,7 @@ class LaneFacts:
     quick_at_head: tuple[str, str] | None = None
     lane_finished_at: str = ""
     bead_closed: bool = False
+    agent_launched_at: str = ""
     extra: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -84,6 +85,22 @@ class Action:
 
     def to_dict(self) -> dict[str, str]:
         return {"kind": self.kind, "reason": self.reason}
+
+
+AGENT_LAUNCH_COOLDOWN_SECONDS = 900.0
+AGENT_ACTIONS = frozenset({"retry", "integrate", "rebase", "review-fix"})
+
+
+def _seconds_since(stamp: str, now: datetime | None) -> float | None:
+    if not stamp:
+        return None
+    try:
+        moment = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return ((now or datetime.now(UTC)) - moment).total_seconds()
 
 
 def _dormant(facts: LaneFacts, now: datetime | None) -> bool:
@@ -108,8 +125,19 @@ def advance(facts: LaneFacts, *, now: datetime | None = None) -> Action:
 
     Ordered by what must be true before anything else may happen; every
     branch names its reason so the status view and the reactor say the same
-    thing.
+    thing. An agent launch within the cooldown blocks the next one whatever
+    its outcome: a launch that died in preflight must not be repeated until
+    the host has had time to change.
     """
+    action = _advance(facts, now)
+    if action.kind in AGENT_ACTIONS:
+        since = _seconds_since(facts.agent_launched_at, now)
+        if since is not None and since < AGENT_LAUNCH_COOLDOWN_SECONDS:
+            return Action("wait", f"agent launched {int(since)}s ago; {action.kind} after cooldown")
+    return action
+
+
+def _advance(facts: LaneFacts, now: datetime | None) -> Action:
     if facts.bead_closed:
         return Action("done", "bead closed")
     if _dormant(facts, now):
@@ -246,6 +274,7 @@ def collect(
         quick_created = ""
         harvest_at_head: tuple[str, str] | None = None
         published_at_head = False
+        agent_launched = ""
         for job in jobs:
             spec = job.get("spec") or {}
             state = job.get("state") or {}
@@ -257,6 +286,7 @@ def collect(
             phase = str(state.get("phase") or "")
             if kind == "attested-agent":
                 label = _agent_label(spec)
+                agent_launched = max(agent_launched, str(job.get("created_at") or ""))
                 if not terminal:
                     holder = label
                 if label in INTEGRATOR_LABELS and checkout.get("head") == head and terminal and phase == "succeeded":
@@ -332,6 +362,7 @@ def collect(
                 quick_at_head=quick_at_head,
                 lane_finished_at=lane_finished,
                 bead_closed=(bead or (receipt.bead if receipt else None)) in set(closed_beads),
+                agent_launched_at=agent_launched,
             )
         )
     return facts

@@ -207,3 +207,14 @@ def test_a_pr_opened_under_an_older_receipt_still_counts_at_the_same_head(tmp_pa
     facts = collect("polylogue", state_root=state, master_head="m" * 40, receipt_pulls={"harvest-" + "1" * 32: older})
 
     assert facts[0].pull == older
+
+
+def test_a_recent_agent_launch_blocks_the_next_one() -> None:
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 9, 2, 13, 30, tzinfo=UTC)
+    failed = _facts(lane_phase="failed", receipt=None, agent_launched_at="2026-09-02T13:29:01+00:00")
+    action = advance(failed, now=now)
+    assert action.kind == "wait" and "cooldown" in action.reason
+    later = datetime(2026, 9, 2, 13, 50, tzinfo=UTC)
+    assert advance(failed, now=later).kind == "retry"

@@ -1780,6 +1780,9 @@ class CampaignReactor:
     def _dispatch_action(self, project: str, facts: Any, action: Any) -> None:
         workspace = facts.name
         checkout_id = facts.checkout_id
+        if action.kind in {"verify", "harvest", "publish", "integrate", "rebase", "review-fix", "retry"}:
+            self._spool({"kind": "dispatch", "project": project, "workspace": workspace,
+                         "head": facts.head[:12], "action": action.kind, "reason": action.reason})
         try:
             if action.kind == "verify":
                 if self.verify_dispatcher is not None:
