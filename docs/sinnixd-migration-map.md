@@ -80,6 +80,23 @@ Deleted verbs and their native replacements:
 | `lane publish \| authorize`                            | Polylogue's declared `harvest` operation                       |
 | freeze / thaw                                          | `pueue pause -g <group>` and `pueue start -g <group>`          |
 
+## Constraints measured during the migration
+
+- **pueue publishes the client's environment.** `pueue status --json` and the
+  state file it is read from carry the full environment of whichever process ran
+  `pueue add`, world-readable. Adding a task from an ordinary interactive shell
+  on this host writes about thirty API keys to disk. Sinnixd therefore runs
+  `pueue add` with a scrubbed client environment and the wrapper rebuilds the
+  declared environment at exec time.
+- **worktrunk's schema is not its default.** `wt list --format=json` emits
+  schema 1 unless configured; schema 2 was reaching sinnixd only through the
+  operator's user config. Every call pins both the schema and the worktree path
+  so sinnixd reads the descriptor's placement, not the invoking user's.
+- **`wt remove` is asynchronous.** A caller that drops a workspace and then
+  reports it gone must pass `--foreground`.
+- **`pueue remove` is not retention.** Tasks are forgotten when the workspace
+  that owns them is dropped, never on a timer.
+
 ## Ordering
 
 1. This map.
