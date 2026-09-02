@@ -67,6 +67,7 @@ from sinnixd.jobs import (
     UserSystemdJobs,
     capture_executable,
     capture_main,
+    scheduled_operation_id,
 )
 from sinnixd.limits import MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
 from sinnixd.projects import (
@@ -420,7 +421,7 @@ def test_agentctl_job_list_accepts_active_only_alias() -> None:
     assert arguments.active is True
 
 
-def test_agentctl_workspace_dispose_maps_to_a_typed_envelope(
+def test_agentctl_workspace_drop_maps_to_a_typed_envelope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, RequestEnvelope] = {}
@@ -429,51 +430,15 @@ def test_agentctl_workspace_dispose_maps_to_a_typed_envelope(
         captured["request"] = request_value
         return {"schema": 1, "ok": True}
 
-    monkeypatch.setattr(
-        sys, "argv", ["agentctl", "workspace", "dispose", "workspace-1"]
-    )
+    monkeypatch.setattr(sys, "argv", ["agentctl", "workspace", "drop", "workspace-1"])
     monkeypatch.setattr(cli_module, "call", fake_call)
 
     assert cli_module.main() == 0
     outbound = captured["request"]
-    assert outbound.operation == "workspace.dispose"
+    assert outbound.operation == "workspace.drop"
     assert outbound.owner == "git-workspaces"
     assert outbound.principal == "agent-control"
     assert dict(outbound.arguments) == {"workspace_id": "workspace-1"}
-
-
-def test_agentctl_workspace_finish_integrated_maps_target_to_a_typed_envelope(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, RequestEnvelope] = {}
-
-    def fake_call(socket_path, request_value):
-        captured["request"] = request_value
-        return {"schema": 1, "ok": True}
-
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "agentctl",
-            "workspace",
-            "finish-integrated",
-            "workspace-1",
-            "--target",
-            "abc123",
-        ],
-    )
-    monkeypatch.setattr(cli_module, "call", fake_call)
-
-    assert cli_module.main() == 0
-    outbound = captured["request"]
-    assert outbound.operation == "workspace.finish-integrated"
-    assert outbound.owner == "git-workspaces"
-    assert outbound.principal == "agent-control"
-    assert dict(outbound.arguments) == {
-        "workspace_id": "workspace-1",
-        "target_ref": "abc123",
-    }
 
 
 def test_agentctl_job_start_maps_parameters_json_to_the_typed_request(
@@ -951,7 +916,6 @@ def test_declared_operation_timeout_defaults_and_survives_launch_recovery(
 @pytest.mark.parametrize(
     "replacement",
     (
-        'readiness = "product-probe"',
         'lifetime = "daemon"',
         'environment = "SINNIXD_JOB_ID"',
         'environment = "HOME"',
@@ -3667,7 +3631,7 @@ def test_workspace_create_is_git_derived_durable_and_restart_safe(
     assert workspace["state"] == "available"
     assert workspace["current_branch"] == "feature/fixture-lane"
     assert workspace["identity_matches"]
-    assert workspace["managed"]
+
     assert Path(workspace["path"]).is_dir()
     porcelain = subprocess.run(
         ["git", "-C", str(tmp_path), "worktree", "list", "--porcelain"],
@@ -4126,52 +4090,6 @@ def test_workspace_provision_exec_schema_rejects_unbounded_values(
         ProjectCatalog([tmp_path]).get("fixture")
 
 
-def test_workspace_adopt_uses_existing_linked_checkout_without_claiming_creation(
-    tmp_path: Path,
-) -> None:
-    write_adapter(tmp_path)
-    initialize_git_checkout(tmp_path)
-    linked = tmp_path / "external-linked"
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(tmp_path),
-            "worktree",
-            "add",
-            "-b",
-            "feature/adopted",
-            str(linked),
-            "HEAD",
-        ],
-        check=True,
-        capture_output=True,
-    )
-    catalog = ProjectCatalog([tmp_path])
-    checkout = next(
-        item for item in catalog.checkouts("fixture") if item.path == linked
-    )
-    service = SinnixdService(catalog, jobs=generic_jobs(tmp_path))
-
-    adopted = service.dispatch(
-        request(
-            "workspace.adopt",
-            "git-workspaces",
-            {
-                "project_id": "fixture",
-                "checkout_id": checkout.checkout_id,
-                "name": "adopted-lane",
-            },
-            "operator",
-        )
-    )
-
-    assert adopted.ok and adopted.payload is not None
-    assert adopted.payload.inline["path"] == str(linked)
-    assert not adopted.payload.inline["managed"]
-    assert adopted.payload.inline["current_branch"] == "feature/adopted"
-
-
 def test_workspace_mutations_reject_weak_principals_paths_refs_and_duplicates(
     tmp_path: Path,
 ) -> None:
@@ -4248,89 +4166,52 @@ def test_workspace_status_exposes_branch_drift_and_dirty_state(tmp_path: Path) -
     assert not observed["identity_matches"]
 
 
-def test_workspace_reap_forgets_missing_and_removes_only_clean_contained_managed_worktrees(
+def test_workspace_drop_gcs_missing_records_with_audit_notes(
     tmp_path: Path,
 ) -> None:
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-    missing = service.workspaces.create(
+    first = service.workspaces.create(
         project_id="fixture",
-        name="missing-lane",
-        branch="feature/missing-lane",
+        name="dead-first",
+        branch="feature/dead-first",
         base="HEAD",
     )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "worktree", "remove", missing["path"]],
-        check=True,
-        capture_output=True,
-    )
-
-    forgotten = service.dispatch(
-        request(
-            "workspace.reap",
-            "git-workspaces",
-            {"workspace_id": missing["workspace_id"]},
-            "operator",
-        )
-    )
-    clean = service.workspaces.create(
+    second = service.workspaces.create(
         project_id="fixture",
-        name="clean-lane",
-        branch="feature/clean-lane",
+        name="dead-second",
+        branch="feature/dead-second",
         base="HEAD",
     )
-    reaped = service.workspaces.reap(clean["workspace_id"])
-
-    assert forgotten.ok and forgotten.payload is not None
-    assert forgotten.payload.inline["relationship_only"]
-    assert reaped["reaped"] and not reaped["relationship_only"]
-    assert not Path(clean["path"]).exists()
-    assert service.workspaces.list("fixture") == {"workspaces": []}
-
-
-def test_workspace_dispose_and_reap_gc_missing_records_with_audit_notes(
-    tmp_path: Path,
-) -> None:
-    write_adapter(tmp_path)
-    initialize_git_checkout(tmp_path)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-    dead_reap = service.workspaces.create(
-        project_id="fixture",
-        name="dead-reap",
-        branch="feature/dead-reap",
-        base="HEAD",
-    )
-    dead_dispose = service.workspaces.create(
-        project_id="fixture",
-        name="dead-dispose",
-        branch="feature/dead-dispose",
-        base="HEAD",
-    )
-    for workspace in (dead_reap, dead_dispose):
+    for workspace in (first, second):
         subprocess.run(
             ["git", "-C", str(tmp_path), "worktree", "remove", workspace["path"]],
             check=True,
             capture_output=True,
         )
 
-    reaped = service.workspaces.reap(dead_reap["workspace_id"])
-    disposed = service.workspaces.dispose(dead_dispose["workspace_id"])
+    dropped = [
+        service.workspaces.drop(first["workspace_id"]),
+        service.workspaces.drop(second["workspace_id"], force=True),
+    ]
 
-    assert reaped == {
-        "workspace_id": dead_reap["workspace_id"],
-        "reaped": True,
-        "relationship_only": True,
-        "state": "missing",
-        "note": "workspace-missing-worktree-gc",
-    }
-    assert disposed == {
-        "workspace_id": dead_dispose["workspace_id"],
-        "disposed": True,
-        "relationship_only": True,
-        "state": "missing",
-        "note": "workspace-missing-worktree-gc",
-    }
+    assert dropped == [
+        {
+            "workspace_id": first["workspace_id"],
+            "dropped": True,
+            "relationship_only": True,
+            "state": "missing",
+            "note": "workspace-missing-worktree-gc",
+        },
+        {
+            "workspace_id": second["workspace_id"],
+            "dropped": True,
+            "relationship_only": True,
+            "state": "missing",
+            "note": "workspace-missing-worktree-gc",
+        },
+    ]
     notes = [
         json.loads(line)
         for line in service.workspaces.store.disposals.read_text().splitlines()
@@ -4375,7 +4256,6 @@ def test_workspace_list_returns_mixed_records_without_git_revalidation(
         branch="feature/invalid-workspace",
         base="HEAD",
         created_at="2026-08-26T00:00:00+00:00",
-        managed=True,
     )
     service.workspaces.store.put(invalid)
 
@@ -4414,7 +4294,6 @@ def test_workspace_list_gc_scales_with_many_dead_records(
             branch=f"feature/dead-{index}",
             base="HEAD",
             created_at="2026-08-26T00:00:00+00:00",
-            managed=True,
         )
         for index in range(1000)
     ]
@@ -4457,87 +4336,10 @@ def test_delivery_rejects_pending_hosted_checks() -> None:
     )
 
 
-def test_workspace_reap_preserves_dirty_divergent_and_adopted_worktrees(
+def test_workspace_drop_deletes_a_clean_no_pr_branch_without_checkpoint_content(
     tmp_path: Path,
 ) -> None:
-    write_adapter(tmp_path)
-    initialize_git_checkout(tmp_path)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-    dirty = service.workspaces.create(
-        project_id="fixture",
-        name="dirty-lane",
-        branch="feature/dirty-lane",
-        base="HEAD",
-    )
-    dirty_path = Path(dirty["path"])
-    (dirty_path / "operator.txt").write_text("preserve\n")
-    divergent = service.workspaces.create(
-        project_id="fixture",
-        name="divergent-lane",
-        branch="feature/divergent-lane",
-        base="HEAD",
-    )
-    divergent_path = Path(divergent["path"])
-    (divergent_path / "committed.txt").write_text("unique\n")
-    subprocess.run(
-        ["git", "-C", str(divergent_path), "add", "committed.txt"], check=True
-    )
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(divergent_path),
-            "-c",
-            "user.name=Fixture",
-            "-c",
-            "user.email=fixture@example.test",
-            "commit",
-            "--quiet",
-            "-m",
-            "diverge",
-        ],
-        check=True,
-    )
-    external = tmp_path / "external-reap"
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(tmp_path),
-            "worktree",
-            "add",
-            "-b",
-            "feature/external-reap",
-            str(external),
-            "HEAD",
-        ],
-        check=True,
-        capture_output=True,
-    )
-    checkout = next(
-        item for item in service.projects.checkouts("fixture") if item.path == external
-    )
-    adopted = service.workspaces.adopt(
-        project_id="fixture", checkout_id=checkout.checkout_id, name="adopted-reap"
-    )
-
-    for workspace_id in (
-        dirty["workspace_id"],
-        divergent["workspace_id"],
-        adopted["workspace_id"],
-    ):
-        with pytest.raises(ValueError):
-            service.workspaces.reap(workspace_id)
-
-    assert (dirty_path / "operator.txt").read_text() == "preserve\n"
-    assert divergent_path.is_dir()
-    assert external.is_dir()
-
-
-def test_workspace_dispose_deletes_a_clean_no_pr_branch_without_checkpoint_content(
-    tmp_path: Path,
-) -> None:
-    """Anti-vacuity: disposal must remove both Git objects, not just the workspace record."""
+    """Anti-vacuity: a drop must remove both Git objects, not just the workspace record."""
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
@@ -4553,7 +4355,7 @@ def test_workspace_dispose_deletes_a_clean_no_pr_branch_without_checkpoint_conte
 
     disposed = service.dispatch(
         request(
-            "workspace.dispose",
+            "workspace.drop",
             "git-workspaces",
             {"workspace_id": workspace["workspace_id"]},
             "operator",
@@ -4561,7 +4363,7 @@ def test_workspace_dispose_deletes_a_clean_no_pr_branch_without_checkpoint_conte
     )
 
     assert disposed.ok and disposed.payload is not None
-    assert disposed.payload.inline["disposed"]
+    assert disposed.payload.inline["dropped"]
     assert disposed.payload.inline["deleted_branch"] == workspace["branch"]
     assert not Path(workspace["path"]).exists()
     assert not (
@@ -4572,7 +4374,7 @@ def test_workspace_dispose_deletes_a_clean_no_pr_branch_without_checkpoint_conte
     assert service.workspaces.list("fixture") == {"workspaces": []}
 
 
-def test_workspace_dispose_squash_equivalence_uses_creation_base_after_unrelated_landing(
+def test_workspace_drop_squash_equivalence_uses_creation_base_after_unrelated_landing(
     tmp_path: Path,
 ) -> None:
     write_adapter(tmp_path)
@@ -4651,103 +4453,12 @@ def test_workspace_dispose_squash_equivalence_uses_creation_base_after_unrelated
         check=True,
     )
 
-    disposed = service.workspaces.dispose(workspace["workspace_id"])
+    disposed = service.workspaces.drop(workspace["workspace_id"])
 
-    assert disposed["disposed"]
+    assert disposed["dropped"]
     assert disposed["publication_evidence"]["branch_owned_paths"] == ["branch.txt"]
     assert not workspace_path.exists()
     assert not service.workspaces.list()["workspaces"]
-
-
-def test_workspace_finish_integrated_accepts_cherry_picked_tree_and_rejects_missing_change(
-    tmp_path: Path,
-) -> None:
-    write_adapter(tmp_path)
-    initialize_git_checkout(tmp_path)
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.name", "Fixture"], check=True
-    )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.email", "fixture@example.test"],
-        check=True,
-    )
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-    workspace = service.workspaces.create(
-        project_id="fixture",
-        name="integrated",
-        branch="feature/integrated",
-        base="HEAD",
-    )
-    workspace_path = Path(workspace["path"])
-    (workspace_path / "integrated.txt").write_text("represented exactly\n")
-    subprocess.run(
-        ["git", "-C", str(workspace_path), "add", "integrated.txt"], check=True
-    )
-    subprocess.run(
-        ["git", "-C", str(workspace_path), "commit", "--quiet", "-m", "integrated"],
-        check=True,
-    )
-
-    with pytest.raises(WorkspaceError, match="not fully represented"):
-        service.workspaces.finish_integrated(workspace["workspace_id"], "master")
-
-    source_head = subprocess.run(
-        ["git", "-C", str(workspace_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "cherry-pick", source_head],
-        check=True,
-        capture_output=True,
-    )
-    target_head = subprocess.run(
-        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(tmp_path),
-            "update-ref",
-            "refs/remotes/origin/master",
-            target_head,
-        ],
-        check=True,
-    )
-    gitdir = replace_worktree_gitfile_with_symlink(workspace_path)
-    assert gitdir.is_dir()
-
-    finished = service.workspaces.finish_integrated(
-        workspace["workspace_id"], target_head
-    )
-
-    assert finished == {
-        "workspace_id": workspace["workspace_id"],
-        "finished": True,
-        "head": source_head,
-        "integration_target": target_head,
-    }
-    assert not workspace_path.exists()
-    assert not service.workspaces.list()["workspaces"]
-    assert (
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(tmp_path),
-                "show-ref",
-                "--verify",
-                "--quiet",
-                f"refs/heads/{workspace['branch']}",
-            ]
-        ).returncode
-        == 1
-    )
 
 
 def test_workspace_gitfile_symlink_rejects_mismatched_and_outside_targets_without_mutation(
@@ -4802,7 +4513,7 @@ def test_workspace_gitfile_symlink_rejects_mismatched_and_outside_targets_withou
     assert Path(second["path"]).is_dir()
 
 
-def test_workspace_dispose_refuses_dirty_divergent_unpublished_and_checkpoint_only_content(
+def test_workspace_drop_refuses_dirty_divergent_unpublished_and_checkpoint_only_content(
     tmp_path: Path,
 ) -> None:
     """Anti-vacuity: each rejection leaves the managed worktree and branch available for recovery."""
@@ -4866,7 +4577,7 @@ def test_workspace_dispose_refuses_dirty_divergent_unpublished_and_checkpoint_on
 
     for workspace in (dirty, divergent, unpublished, checkpoint_only):
         with pytest.raises(ValueError):
-            service.workspaces.dispose(workspace["workspace_id"])
+            service.workspaces.drop(workspace["workspace_id"])
         assert Path(workspace["path"]).is_dir()
         assert (
             subprocess.run(
@@ -4975,7 +4686,7 @@ def test_workspace_restore_rejects_dirty_or_stale_head_targets(tmp_path: Path) -
         service.workspaces.restore(created["workspace_id"], checkpoint["checkpoint_id"])
 
 
-def test_workspace_recover_recreates_missing_exact_head_and_restores_checkpoint(
+def test_workspace_restore_recreates_a_missing_worktree_at_the_checkpoint_head(
     tmp_path: Path,
 ) -> None:
     write_adapter(tmp_path)
@@ -4997,11 +4708,11 @@ def test_workspace_recover_recreates_missing_exact_head_and_restores_checkpoint(
         check=True,
     )
 
-    recovered = service.workspaces.recover(
-        created["workspace_id"], checkpoint["checkpoint_id"]
+    recovered = service.workspaces.restore(
+        created["workspace_id"], checkpoint["checkpoint_id"], recreate=True
     )
 
-    assert recovered["recovered"] and recovered["path"] == str(path)
+    assert recovered["recreated"] and recovered["path"] == str(path)
     assert (path / "flake.nix").read_text() == '{"recovered": true}\n'
     assert (path / "untracked.txt").read_text() == "preserved\n"
     assert (
@@ -5015,279 +4726,111 @@ def test_workspace_recover_recreates_missing_exact_head_and_restores_checkpoint(
     )
 
 
-def test_workspace_stack_restacks_child_onto_parent_and_survives_restart(
+def test_dropping_a_workspace_deletes_its_jobs_records_and_artifacts(
     tmp_path: Path,
 ) -> None:
-    """Anti-vacuity: the durable parent edge drives a real Git rebase after restart."""
+    """A job record lives exactly as long as the checkout it ran in.
+
+    Anti-vacuity: without the ownership deletion in workspace.drop the record
+    and its log survive the worktree that owns them, and nothing else ever
+    removes them.
+    """
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.name", "Fixture"], check=True
-    )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.email", "fixture@example.test"],
-        check=True,
-    )
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-    parent = service.workspaces.create(
-        project_id="fixture", name="parent-lane", branch="feature/parent", base="HEAD"
-    )
-    child = service.workspaces.stack(
-        parent_workspace_id=parent["workspace_id"],
-        name="child-lane",
-        branch="feature/child",
-    )
-    parent_path = Path(parent["path"])
-    child_path = Path(child["path"])
-    (child_path / "child.txt").write_text("child\n")
-    subprocess.run(["git", "-C", str(child_path), "add", "child.txt"], check=True)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(child_path),
-            "-c",
-            "user.name=Fixture",
-            "-c",
-            "user.email=fixture@example.test",
-            "commit",
-            "--quiet",
-            "-m",
-            "child",
-        ],
-        check=True,
-    )
-    child_before = subprocess.run(
-        ["git", "-C", str(child_path), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    (parent_path / "parent.txt").write_text("parent\n")
-    subprocess.run(["git", "-C", str(parent_path), "add", "parent.txt"], check=True)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(parent_path),
-            "-c",
-            "user.name=Fixture",
-            "-c",
-            "user.email=fixture@example.test",
-            "commit",
-            "--quiet",
-            "-m",
-            "parent",
-        ],
-        check=True,
-    )
-
-    restarted = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-    result = restarted.workspaces.restack(child["workspace_id"])
-
-    assert result["restacked"] and result["before_head"] == child_before
-    assert result["parent_workspace_id"] == parent["workspace_id"]
-    assert result["head"] != child_before
-    assert (child_path / "parent.txt").read_text() == "parent\n"
-    with pytest.raises(ValueError, match="stacked children"):
-        restarted.workspaces.reap(parent["workspace_id"])
-
-
-def test_workspace_restack_detaches_child_after_squash_equivalent_parent_disappears(
-    tmp_path: Path,
-) -> None:
-    write_adapter(tmp_path)
-    initialize_git_checkout(tmp_path)
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.name", "Fixture"], check=True
-    )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "config", "user.email", "fixture@example.test"],
-        check=True,
-    )
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-    parent = service.workspaces.create(
+    jobs = generic_jobs(tmp_path)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    workspace = service.workspaces.create(
         project_id="fixture",
-        name="merged-parent",
-        branch="feature/merged-parent",
+        name="owned-lane",
+        branch="feature/owned-lane",
         base="HEAD",
     )
-    child = service.workspaces.stack(
-        parent_workspace_id=parent["workspace_id"],
-        name="surviving-child",
-        branch="feature/surviving-child",
-    )
-    child_path = Path(child["path"])
-    (child_path / "child.txt").write_text("child\n")
-    subprocess.run(["git", "-C", str(child_path), "add", "child.txt"], check=True)
-    subprocess.run(
-        ["git", "-C", str(child_path), "commit", "--quiet", "-m", "child"], check=True
-    )
-    parent_path = Path(parent["path"])
-    (parent_path / "parent.txt").write_text("parent\n")
-    subprocess.run(["git", "-C", str(parent_path), "add", "parent.txt"], check=True)
-    subprocess.run(
-        ["git", "-C", str(parent_path), "commit", "--quiet", "-m", "parent"], check=True
-    )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "merge", "--squash", parent["branch"]],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "commit", "--quiet", "-m", "merged parent"],
-        check=True,
-    )
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(tmp_path),
-            "update-ref",
-            "refs/remotes/origin/master",
-            "HEAD",
-        ],
-        check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "worktree", "remove", "--force", str(parent_path)],
-        check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(tmp_path), "branch", "-D", parent["branch"]], check=True
-    )
-
-    restacked = service.workspaces.restack(child["workspace_id"])
-
-    assert restacked["restacked"] and restacked["detached_merged_parent"]
-    assert (child_path / "parent.txt").read_text() == "parent\n"
-    assert (child_path / "child.txt").read_text() == "child\n"
-    forgotten = service.workspaces.reap(parent["workspace_id"])
-    assert forgotten["relationship_only"]
-
-
-@pytest.mark.parametrize(
-    ("conflict_path", "expected_class"),
-    [
-        ("fixture.lock", "exact-file"),
-        ("generated.json", "generated-surface"),
-        ("ordinary.txt", "hard"),
-    ],
-)
-def test_workspace_restack_reports_declared_collision_without_mutating_child(
-    tmp_path: Path, conflict_path: str, expected_class: str
-) -> None:
-    write_adapter(tmp_path)
-    initialize_git_checkout(tmp_path)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-    parent = service.workspaces.create(
-        project_id="fixture",
-        name="collision-parent",
-        branch="feature/collision-parent",
-        base="HEAD",
-    )
-    child = service.workspaces.stack(
-        parent_workspace_id=parent["workspace_id"],
-        name="collision-child",
-        branch="feature/collision-child",
-    )
-    for workspace, content, message in (
-        (parent, "parent\n", "parent lock"),
-        (child, "child\n", "child lock"),
-    ):
-        path = Path(workspace["path"])
-        (path / conflict_path).write_text(content)
-        subprocess.run(["git", "-C", str(path), "add", conflict_path], check=True)
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(path),
-                "-c",
-                "user.name=Fixture",
-                "-c",
-                "user.email=fixture@example.test",
-                "commit",
-                "--quiet",
-                "-m",
-                message,
-            ],
-            check=True,
+    started = service.dispatch(
+        request(
+            "job.start",
+            "systemd-jobs",
+            {
+                "project_id": "fixture",
+                "operation": "check",
+                "workspace_id": "owned-lane",
+            },
         )
-    child_head = subprocess.run(
-        ["git", "-C", child["path"], "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-    result = service.workspaces.restack(child["workspace_id"])
-
-    assert not result["restacked"]
-    assert result["collisions"] == [{"path": conflict_path, "class": expected_class}]
-    assert (
-        subprocess.run(
-            ["git", "-C", child["path"], "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        == child_head
+    )
+    assert started.ok and started.payload is not None
+    job_id = started.payload.inline["job_id"]
+    record = jobs.store.load(job_id)
+    record.log_path.write_text("lane output\n")
+    other = jobs.start_foreground(
+        command=("fixture",), working_directory=str(tmp_path), environment={}
     )
 
+    dropped = service.dispatch(
+        request(
+            "workspace.drop",
+            "git-workspaces",
+            {"workspace_id": workspace["workspace_id"], "force": True},
+            "operator",
+        )
+    )
 
-def test_workspace_restack_reports_semantic_slot_collision_across_different_paths(
+    assert dropped.ok and dropped.payload is not None
+    assert dropped.payload.inline["deleted_job_records"] == 1
+    assert not (jobs.store.records_root / f"{job_id}.json").exists()
+    assert not record.log_path.exists()
+    assert (jobs.store.records_root / f"{other['job_id']}.json").exists()
+
+
+def test_a_scheduled_runs_superseded_predecessor_is_deleted_with_its_artifacts(
     tmp_path: Path,
 ) -> None:
+    """The previous answer to a recurring question has no reader left.
+
+    Anti-vacuity: without the supersession deletion every timer firing keeps
+    its record and log forever, which is what filled the state root.
+    """
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
-    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
-    parent = service.workspaces.create(
-        project_id="fixture",
-        name="slot-parent",
-        branch="feature/slot-parent",
-        base="HEAD",
-    )
-    child = service.workspaces.stack(
-        parent_workspace_id=parent["workspace_id"],
-        name="slot-child",
-        branch="feature/slot-child",
-    )
-    for workspace, relative, content in (
-        (parent, "registry/parent.toml", "parent = true\n"),
-        (child, "registry/child.toml", "child = true\n"),
-    ):
-        path = Path(workspace["path"])
-        (path / "registry").mkdir()
-        (path / relative).write_text(content)
-        subprocess.run(["git", "-C", str(path), "add", relative], check=True)
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(path),
-                "-c",
-                "user.name=Fixture",
-                "-c",
-                "user.email=fixture@example.test",
-                "commit",
-                "--quiet",
-                "-m",
-                relative,
-            ],
-            check=True,
+    descriptor = tmp_path / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            "[operations.check]\n", '[operations.check]\nschedule = "hourly"\n'
         )
+    )
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    schedule_id = scheduled_operation_id("fixture", "check")
 
-    result = service.workspaces.restack(child["workspace_id"])
+    def fire() -> str:
+        response = service.dispatch(
+            request(
+                "job.fire",
+                "systemd-jobs",
+                {
+                    "project_id": "fixture",
+                    "operation": "check",
+                    "schedule_id": schedule_id,
+                },
+                "operator",
+            )
+        )
+        assert response.ok and response.payload is not None
+        job_id = response.payload.inline["job_id"]
+        systemd.properties.update(
+            {"ActiveState": "inactive", "SubState": "dead", "ExecMainStatus": "0"}
+        )
+        assert jobs.get(job_id)["state"]["terminal"]
+        systemd.properties.update({"ActiveState": "active", "SubState": "running"})
+        return job_id
 
-    assert result["collisions"] == [
-        {
-            "class": "semantic-slot",
-            "slot": "fixture-registry",
-            "child_paths": "registry/child.toml",
-            "parent_paths": "registry/parent.toml",
-        }
-    ]
+    first = fire()
+    log = jobs.store.load(first).log_path
+    log.write_text("first run\n")
+    second = fire()
+
+    assert not (jobs.store.records_root / f"{first}.json").exists()
+    assert not log.exists()
+    assert (jobs.store.records_root / f"{second}.json").exists()
 
 
 def test_declared_job_binds_workspace_and_exact_head(tmp_path: Path) -> None:
@@ -6269,7 +5812,7 @@ def test_exact_head_verified_workspace_publishes_lands_and_finishes_without_a_pr
 
     assert published["published"] and published["created"]
     assert reconciled["published"] and not reconciled["created"]
-    assert landed["landed"] and finished["finished"]
+    assert landed["landed"] and finished["dropped"]
     assert any(
         command[-7:-4] == ["git", "-C", str(path)] and "push" in command
         for command in calls
@@ -9562,7 +9105,6 @@ def _workspace_record(workspace_id: str, name: str, branch: str) -> WorkspaceRec
         branch=branch,
         base="origin/master",
         created_at="2026-08-31T00:00:00+00:00",
-        managed=True,
     )
 
 

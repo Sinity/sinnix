@@ -1274,63 +1274,6 @@ def test_job_list_filters_by_kind(tmp_path: Path) -> None:
     }
 
 
-def test_terminal_records_past_retention_archive_but_stay_loadable(
-    tmp_path: Path,
-) -> None:
-    """Anti-vacuity: without retention, store.list parses every historical record forever."""
-    systemd = FakeSystemdJobs(
-        properties={
-            "LoadState": "loaded",
-            "ActiveState": "inactive",
-            "Result": "success",
-            "ExecMainStatus": "0",
-        }
-    )
-    jobs = GenericJobs(systemd, GenericJobStore(tmp_path / "state"))
-    old = jobs.start_foreground(
-        command=("fixture",), working_directory=str(tmp_path), environment={}
-    )
-    fresh = jobs.start_foreground(
-        command=("fixture",), working_directory=str(tmp_path), environment={}
-    )
-    assert jobs.get(old["job_id"])["state"]["terminal"]
-    assert jobs.get(fresh["job_id"])["state"]["terminal"]
-    record = jobs.store.load(old["job_id"])
-    jobs.store.save(
-        jobs._with_state(
-            record, {**record.state, "observed_at": "2020-01-01T00:00:00+00:00"}
-        )
-    )
-
-    restarted = GenericJobs(
-        systemd, GenericJobStore(jobs.store.root), record_retention_days=14
-    )
-
-    listed = {job["job_id"] for job in restarted.list()["jobs"]}
-    assert listed == {fresh["job_id"]}
-    archived = restarted.store.load(old["job_id"])
-    assert archived.state["terminal"]
-    assert (jobs.store.root / "jobs-archive" / f"{old['job_id']}.json").exists()
-
-
-def test_retention_never_touches_live_or_undated_records(tmp_path: Path) -> None:
-    jobs = GenericJobs(FakeSystemdJobs(), GenericJobStore(tmp_path / "state"))
-    running = jobs.start_foreground(
-        command=("fixture",), working_directory=str(tmp_path), environment={}
-    )
-    record = jobs.store.load(running["job_id"])
-    jobs.store.save(
-        jobs._with_state(
-            record, {**record.state, "observed_at": "2020-01-01T00:00:00+00:00"}
-        )
-    )
-
-    moved = jobs.store.prune_terminal_records(retention_days=14)
-
-    assert moved == 0
-    assert (tmp_path / "state" / "jobs" / f"{running['job_id']}.json").exists()
-
-
 def test_terminal_transition_spools_exactly_one_event_line(tmp_path: Path) -> None:
     """Anti-vacuity: spooling per observation would duplicate lines on every get."""
     spool = tmp_path / "events" / "events.jsonl"

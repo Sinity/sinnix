@@ -19,7 +19,6 @@ from sinnix_mcp import (
 )
 
 from .campaign import CampaignRunner, WaveDrainedError
-from .operator_view import build_campaign_status
 from .contracts import TypedJobContracts
 from .delivery import DeliveryError, GitHubDelivery
 from .delivery_runner import DELIVERY_INPUT_SCHEMA_VERSION, delivery_runner_executable
@@ -38,6 +37,7 @@ from .jobs import (
     scheduled_timer_unit,
 )
 from .limits import MAX_AGENT_TIMEOUT_SECONDS
+from .operator_view import build_campaign_status
 from .project_plans import PlanStore, ProjectPlanExecutor
 from .projects import ProjectCatalog
 from .reactor import CampaignBoard
@@ -530,7 +530,7 @@ class SinnixdService:
             is_live=self._workspace_has_live_job if recover_dead else None,
         )
 
-    def _op_workspace_adopt(
+    def _op_workspace_drop(
         self,
         arguments: Mapping[str, Any],
         correlation_id: str,
@@ -538,57 +538,36 @@ class SinnixdService:
     ) -> dict[str, Any]:
         if principal not in {"agent-control", "operator"}:
             raise ValueError(
-                "workspace adoption requires agent-control or operator principal"
+                "workspace drop requires agent-control or operator principal"
             )
-        required = {"project_id", "checkout_id", "name"}
-        if set(arguments) != required:
+        if set(arguments) - {"workspace_id", "force", "integration_target"}:
             raise ValueError(
-                "workspace.adopt requires project_id, checkout_id, and name"
+                "workspace.drop accepts workspace_id, force, and integration_target"
             )
+        force = arguments.get("force", False)
+        if not isinstance(force, bool):
+            raise ValueError("workspace.drop force must be boolean")
+        target = arguments.get("integration_target")
+        if target is not None and (not isinstance(target, str) or not target):
+            raise ValueError("workspace.drop integration_target must be non-empty")
         assert self.workspaces is not None
-        return self.workspaces.adopt(
-            project_id=self._job_argument(arguments, "project_id"),
-            checkout_id=self._job_argument(arguments, "checkout_id"),
-            name=self._job_argument(arguments, "name"),
+        workspace_id = self._workspace_argument(arguments, "workspace.drop")
+        checkout_path = str(self.workspaces.get(workspace_id).get("path") or "")
+        result = self.workspaces.drop(
+            workspace_id, force=force, integration_target=target
         )
+        return {**result, **self._delete_owned_job_records(checkout_path)}
 
-    def _op_workspace_reap(
-        self,
-        arguments: Mapping[str, Any],
-        correlation_id: str,
-        principal: str,
-    ) -> dict[str, Any]:
-        if principal not in {"agent-control", "operator"}:
-            raise ValueError(
-                "workspace reap requires agent-control or operator principal"
+    def _delete_owned_job_records(self, checkout_path: str) -> dict[str, Any]:
+        """Delete the job records and artifacts owned by a checkout that is gone."""
+        if not checkout_path:
+            return {"deleted_job_records": 0}
+        store = self.jobs.store
+        return {
+            "deleted_job_records": store.delete_records(
+                store.records_for_checkout(checkout_path)
             )
-        assert self.workspaces is not None
-        return self.workspaces.reap(
-            self._workspace_argument(arguments, "workspace.reap")
-        )
-
-    def _op_workspace_dispose(
-        self,
-        arguments: Mapping[str, Any],
-        correlation_id: str,
-        principal: str,
-    ) -> dict[str, Any]:
-        if principal not in {"agent-control", "operator"}:
-            raise ValueError(
-                "workspace disposal requires agent-control or operator principal"
-            )
-        assert self.workspaces is not None
-        if set(arguments) - {"workspace_id", "acknowledge_published"}:
-            raise ValueError(
-                "workspace.dispose accepts workspace_id and optional acknowledge_published"
-            )
-        acknowledge = arguments.get("acknowledge_published", False)
-        if not isinstance(acknowledge, bool):
-            raise ValueError("workspace.dispose acknowledge_published must be boolean")
-        return self.workspaces.dispose(
-            self._workspace_argument(arguments, "workspace.dispose"),
-            acknowledge_published=acknowledge,
-        )
+        }
 
     def _op_workspace_checkpoint(
         self,
@@ -615,72 +594,21 @@ class SinnixdService:
             raise ValueError(
                 "workspace restore requires agent-control or operator principal"
             )
-        if set(arguments) != {"workspace_id", "checkpoint_id"}:
+        if set(arguments) - {"workspace_id", "checkpoint_id", "recreate"} or not {
+            "workspace_id",
+            "checkpoint_id",
+        }.issubset(arguments):
             raise ValueError(
-                "workspace.restore requires workspace_id and checkpoint_id"
+                "workspace.restore requires workspace_id and checkpoint_id, and accepts recreate"
             )
+        recreate = arguments.get("recreate", False)
+        if not isinstance(recreate, bool):
+            raise ValueError("workspace.restore recreate must be boolean")
         assert self.workspaces is not None
         return self.workspaces.restore(
             self._workspace_argument(arguments, "workspace.restore"),
             self._job_argument(arguments, "checkpoint_id"),
-        )
-
-    def _op_workspace_recover(
-        self,
-        arguments: Mapping[str, Any],
-        correlation_id: str,
-        principal: str,
-    ) -> dict[str, Any]:
-        if principal not in {"agent-control", "operator"}:
-            raise ValueError(
-                "workspace recovery requires agent-control or operator principal"
-            )
-        if set(arguments) != {"workspace_id", "checkpoint_id"}:
-            raise ValueError(
-                "workspace.recover requires workspace_id and checkpoint_id"
-            )
-        assert self.workspaces is not None
-        return self.workspaces.recover(
-            self._workspace_argument(arguments, "workspace.recover"),
-            self._job_argument(arguments, "checkpoint_id"),
-        )
-
-    def _op_workspace_stack(
-        self,
-        arguments: Mapping[str, Any],
-        correlation_id: str,
-        principal: str,
-    ) -> dict[str, Any]:
-        if principal not in {"agent-control", "operator"}:
-            raise ValueError(
-                "workspace stacking requires agent-control or operator principal"
-            )
-        if set(arguments) != {"parent_workspace_id", "name", "branch"}:
-            raise ValueError(
-                "workspace.stack requires parent_workspace_id, name, and branch"
-            )
-        assert self.workspaces is not None
-        return self.workspaces.stack(
-            parent_workspace_id=self.workspaces.resolve_id(
-                self._job_argument(arguments, "parent_workspace_id")
-            ),
-            name=self._job_argument(arguments, "name"),
-            branch=self._job_argument(arguments, "branch"),
-        )
-
-    def _op_workspace_restack(
-        self,
-        arguments: Mapping[str, Any],
-        correlation_id: str,
-        principal: str,
-    ) -> dict[str, Any]:
-        if principal not in {"agent-control", "operator"}:
-            raise ValueError(
-                "workspace restacking requires agent-control or operator principal"
-            )
-        assert self.workspaces is not None
-        return self.workspaces.restack(
-            self._workspace_argument(arguments, "workspace.restack")
+            recreate=recreate,
         )
 
     def _op_workspace_publish(
@@ -779,35 +707,12 @@ class SinnixdService:
         assert self.delivery is not None
         if set(arguments) - {"workspace_id"}:
             raise ValueError("workspace.finish received unsupported arguments")
-        return self._settle_workspace(
-            self.delivery.finish(
-                self._workspace_argument(arguments, "workspace.finish")
-            ),
-            None,
-        )
-
-    def _op_workspace_finish_integrated(
-        self,
-        arguments: Mapping[str, Any],
-        correlation_id: str,
-        principal: str,
-    ) -> dict[str, Any]:
-        if principal not in {"agent-control", "operator"}:
-            raise ValueError(
-                "workspace.finish-integrated requires agent-control or operator"
-            )
-        if set(arguments) != {"workspace_id", "target_ref"}:
-            raise ValueError(
-                "workspace.finish-integrated requires workspace_id and target_ref"
-            )
+        workspace_id = self._workspace_argument(arguments, "workspace.finish")
         assert self.workspaces is not None
-        target_ref = self._job_argument(arguments, "target_ref")
+        checkout_path = str(self.workspaces.get(workspace_id).get("path") or "")
+        finished = self.delivery.finish(workspace_id)
         return self._settle_workspace(
-            self.workspaces.finish_integrated(
-                self._workspace_argument(arguments, "workspace.finish-integrated"),
-                target_ref,
-            ),
-            target_ref,
+            {**finished, **self._delete_owned_job_records(checkout_path)}, None
         )
 
     def _op_job_start(
@@ -1367,19 +1272,13 @@ _HANDLERS: dict[
     "workspace.list": SinnixdService._op_workspace_list,
     "workspace.get": SinnixdService._op_workspace_get,
     "workspace.create": SinnixdService._op_workspace_create,
-    "workspace.adopt": SinnixdService._op_workspace_adopt,
-    "workspace.reap": SinnixdService._op_workspace_reap,
-    "workspace.dispose": SinnixdService._op_workspace_dispose,
+    "workspace.drop": SinnixdService._op_workspace_drop,
     "workspace.checkpoint": SinnixdService._op_workspace_checkpoint,
     "workspace.restore": SinnixdService._op_workspace_restore,
-    "workspace.recover": SinnixdService._op_workspace_recover,
-    "workspace.stack": SinnixdService._op_workspace_stack,
-    "workspace.restack": SinnixdService._op_workspace_restack,
     "workspace.publish": SinnixdService._op_workspace_publish,
     "workspace.review-status": SinnixdService._op_workspace_review_status,
     "workspace.land": SinnixdService._op_workspace_land,
     "workspace.finish": SinnixdService._op_workspace_finish,
-    "workspace.finish-integrated": SinnixdService._op_workspace_finish_integrated,
     "job.start": SinnixdService._op_job_start,
     "job.fire": SinnixdService._op_job_fire,
     "job.shell.start": SinnixdService._op_job_shell_start,

@@ -15,7 +15,6 @@ import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 from uuid import uuid4
@@ -33,7 +32,6 @@ from .projects import (
 
 WORKSPACE_SCHEMA_VERSION = 1
 CHECKPOINT_SCHEMA_VERSION = 1
-STACK_SCHEMA_VERSION = 2
 MAX_CHECKPOINT_BYTES = 64 * 1024 * 1024
 MAX_UNTRACKED_FILES = 4096
 MAX_PROVISION_OUTPUT_BYTES = 64 * 1024
@@ -59,7 +57,6 @@ class WorkspaceRecord:
     branch: str
     base: str
     created_at: str
-    managed: bool
     provision_notes: tuple[dict[str, str], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -72,7 +69,6 @@ class WorkspaceRecord:
             "branch": self.branch,
             "base": self.base,
             "created_at": self.created_at,
-            "managed": self.managed,
             "provision_notes": [dict(note) for note in self.provision_notes],
         }
 
@@ -87,19 +83,14 @@ class WorkspaceRecord:
             "branch",
             "base",
             "created_at",
-            "managed",
         }
         if (
-            set(value) not in (required, required | {"provision_notes"})
+            not required.issubset(value)
             or value.get("schema_version") != WORKSPACE_SCHEMA_VERSION
         ):
             raise WorkspaceError("workspace record schema is invalid")
-        strings = {
-            key: value.get(key) for key in required - {"schema_version", "managed"}
-        }
-        if any(
-            not isinstance(item, str) or not item for item in strings.values()
-        ) or not isinstance(value.get("managed"), bool):
+        strings = {key: value.get(key) for key in required - {"schema_version"}}
+        if any(not isinstance(item, str) or not item for item in strings.values()):
             raise WorkspaceError("workspace record fields are invalid")
         raw_notes = value.get("provision_notes", [])
         if not isinstance(raw_notes, list) or any(
@@ -124,7 +115,6 @@ class WorkspaceRecord:
             branch=strings["branch"],
             base=strings["base"],
             created_at=strings["created_at"],
-            managed=value["managed"],
             provision_notes=tuple(dict(note) for note in raw_notes),
         )
 
@@ -158,56 +148,11 @@ class CheckpointRecord:
         }
 
 
-@dataclass(frozen=True)
-class StackRecord:
-    child_workspace_id: str
-    parent_workspace_id: str
-    created_at: str
-    parent_head: str
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": STACK_SCHEMA_VERSION,
-            "child_workspace_id": self.child_workspace_id,
-            "parent_workspace_id": self.parent_workspace_id,
-            "created_at": self.created_at,
-            "parent_head": self.parent_head,
-        }
-
-    @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> StackRecord:
-        required = {
-            "schema_version",
-            "child_workspace_id",
-            "parent_workspace_id",
-            "created_at",
-            "parent_head",
-        }
-        if (
-            set(value) != required
-            or value.get("schema_version") != STACK_SCHEMA_VERSION
-        ):
-            raise WorkspaceError("workspace stack record schema is invalid")
-        fields = tuple(
-            value.get(key)
-            for key in (
-                "child_workspace_id",
-                "parent_workspace_id",
-                "created_at",
-                "parent_head",
-            )
-        )
-        if any(not isinstance(item, str) or not item for item in fields):
-            raise WorkspaceError("workspace stack record fields are invalid")
-        return cls(*fields)
-
-
 class WorkspaceStore:
     def __init__(self, root: Path) -> None:
         self.root = root / "workspaces"
         self.index = self.root / "index.json"
         self.checkpoints_root = self.root / "checkpoints"
-        self.stacks = self.root / "stacks.json"
         self.disposals = self.root / "disposals.jsonl"
 
     def records(self) -> tuple[WorkspaceRecord, ...]:
@@ -281,102 +226,6 @@ class WorkspaceStore:
 
     def checkpoint_path(self, workspace_id: str, checkpoint_id: str) -> Path:
         return self.checkpoints_root / workspace_id / checkpoint_id
-
-    def stack_records(self) -> tuple[StackRecord, ...]:
-        payload = read_json(
-            self.stacks, {"schema_version": STACK_SCHEMA_VERSION, "stacks": []}
-        )
-        if not isinstance(payload, Mapping):
-            raise WorkspaceError("workspace stack index schema is invalid")
-        rows = payload.get("stacks")
-        if not isinstance(rows, list) or any(
-            not isinstance(row, Mapping) for row in rows
-        ):
-            raise WorkspaceError("workspace stack index rows are invalid")
-        if payload.get("schema_version") == 1 and not rows:
-            return ()
-        if payload.get("schema_version") != STACK_SCHEMA_VERSION:
-            raise WorkspaceError("workspace stack index schema is invalid")
-        return tuple(StackRecord.from_dict(row) for row in rows)
-
-    def put_stack(self, record: StackRecord) -> None:
-        default = {"schema_version": STACK_SCHEMA_VERSION, "stacks": []}
-        with modify_json(self.stacks, default, mode=0o600) as payload:
-            rows = payload.get("stacks") if isinstance(payload, dict) else None
-            if not isinstance(rows, list):
-                raise WorkspaceError("workspace stack index rows are invalid")
-            if payload.get("schema_version") == 1 and not rows:
-                payload["schema_version"] = STACK_SCHEMA_VERSION
-            existing = [StackRecord.from_dict(row) for row in rows]
-            if any(
-                item.child_workspace_id == record.child_workspace_id
-                for item in existing
-            ):
-                raise WorkspaceError("workspace already has a stack parent")
-            rows.append(record.to_dict())
-
-    def remove_stack_references(self, workspace_id: str) -> None:
-        self.remove_stack_references_many((workspace_id,))
-
-    def remove_stack_references_many(self, workspace_ids: Sequence[str]) -> None:
-        ids = set(workspace_ids)
-        if not ids:
-            return
-        default = {"schema_version": STACK_SCHEMA_VERSION, "stacks": []}
-        with modify_json(self.stacks, default, mode=0o600) as payload:
-            rows = payload.get("stacks") if isinstance(payload, dict) else None
-            if not isinstance(rows, list):
-                raise WorkspaceError("workspace stack index rows are invalid")
-            if payload.get("schema_version") == 1 and not rows:
-                payload["schema_version"] = STACK_SCHEMA_VERSION
-            payload["stacks"] = [
-                row
-                for row in rows
-                if isinstance(row, Mapping)
-                and row.get("child_workspace_id") not in ids
-                and row.get("parent_workspace_id") not in ids
-            ]
-
-    def update_stack_parent_head(
-        self, child_workspace_id: str, parent_head: str
-    ) -> None:
-        default = {"schema_version": STACK_SCHEMA_VERSION, "stacks": []}
-        with modify_json(self.stacks, default, mode=0o600) as payload:
-            rows = payload.get("stacks") if isinstance(payload, dict) else None
-            if not isinstance(rows, list):
-                raise WorkspaceError("workspace stack index rows are invalid")
-            if payload.get("schema_version") == 1 and not rows:
-                payload["schema_version"] = STACK_SCHEMA_VERSION
-            records = [StackRecord.from_dict(row) for row in rows]
-            if not any(
-                record.child_workspace_id == child_workspace_id for record in records
-            ):
-                raise WorkspaceError("workspace is not a stacked child")
-            payload["stacks"] = [
-                StackRecord(
-                    child_workspace_id=record.child_workspace_id,
-                    parent_workspace_id=record.parent_workspace_id,
-                    created_at=record.created_at,
-                    parent_head=parent_head
-                    if record.child_workspace_id == child_workspace_id
-                    else record.parent_head,
-                ).to_dict()
-                for record in records
-            ]
-
-    def remove_stack_child(self, child_workspace_id: str) -> None:
-        default = {"schema_version": STACK_SCHEMA_VERSION, "stacks": []}
-        with modify_json(self.stacks, default, mode=0o600) as payload:
-            rows = payload.get("stacks") if isinstance(payload, dict) else None
-            if not isinstance(rows, list):
-                raise WorkspaceError("workspace stack index rows are invalid")
-            if payload.get("schema_version") == 1 and not rows:
-                payload["schema_version"] = STACK_SCHEMA_VERSION
-            payload["stacks"] = [
-                row
-                for row in rows
-                if row.get("child_workspace_id") != child_workspace_id
-            ]
 
     def record_disposal_evidence(self, value: Mapping[str, Any]) -> None:
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -623,96 +472,131 @@ class GitWorkspaces:
         checkout, _project = self._available(matches[0])
         return checkout
 
-    def finish_merged(self, workspace_id: str, expected_head: str) -> dict[str, Any]:
-        """Remove an exact GitHub-merged workspace without ancestry inference."""
+    def drop(
+        self,
+        workspace_id: str,
+        *,
+        force: bool = False,
+        expected_head: str | None = None,
+        integration_target: str | None = None,
+    ) -> dict[str, Any]:
+        """Delete a workspace, its worktree, its branch, and its record.
+
+        Without ``force`` the workspace must be clean, hold its declared branch
+        identity, and prove its content is published: contained in the declared
+        base, equal to ``expected_head`` for a merged review, tree-equivalent to
+        ``integration_target``, or squash-equivalent to a base commit. ``force``
+        is the operator's acknowledgement that the content is expendable.
+        """
         with flock(self.mutation_lock):
             record = self._record(workspace_id)
-            if not record.managed:
-                raise WorkspaceError("adopted workspaces cannot be finished")
-            if any(
-                stack.parent_workspace_id == record.workspace_id
-                for stack in self.store.stack_records()
-            ):
-                raise WorkspaceError(
-                    "workspace cannot be finished while stacked children exist"
-                )
+            if self._path_state(record) == "missing":
+                self._gc_missing_locked((record,))
+                return {
+                    "workspace_id": record.workspace_id,
+                    "dropped": True,
+                    "relationship_only": True,
+                    "state": "missing",
+                    "note": MISSING_WORKTREE_GC_NOTE,
+                }
+            status = self._status(record)
             checkout, project = self._available(record)
-            if checkout.head != expected_head:
-                raise WorkspaceError(
-                    "merged review head no longer matches workspace HEAD"
+            assert project.workspace is not None
+            publication_evidence: dict[str, Any] | None = None
+            if not force:
+                if status["state"] != "available" or not status["identity_matches"]:
+                    raise WorkspaceError(
+                        "workspace is unavailable or its branch identity changed"
+                    )
+                if status["dirty"]:
+                    raise WorkspaceError("workspace must be clean before it is dropped")
+                if expected_head is not None and checkout.head != expected_head:
+                    raise WorkspaceError(
+                        "merged review head no longer matches workspace HEAD"
+                    )
+                if integration_target is not None:
+                    publication_evidence = self._integration_evidence(
+                        project, checkout.head, integration_target
+                    )
+                elif (
+                    expected_head is None
+                    and not self._head_is_contained_in_declared_base(
+                        project, checkout.head
+                    )
+                ):
+                    publication_evidence = self._squash_equivalent_evidence(
+                        project, record, checkout.head
+                    )
+                    if publication_evidence is None:
+                        raise WorkspaceError(
+                            "workspace has unpublished committed content"
+                        )
+                self._verify_disposable_checkpoints(workspace_id)
+            elif not self._head_is_contained_in_declared_base(project, checkout.head):
+                publication_evidence = {
+                    "kind": "operator-acknowledged",
+                    "default_base": project.workspace.default_base,
+                    "branch_head": checkout.head,
+                }
+            if publication_evidence is not None:
+                self.store.record_disposal_evidence(
+                    {
+                        "workspace_id": workspace_id,
+                        "branch": record.branch,
+                        "head": checkout.head,
+                        **publication_evidence,
+                    }
                 )
-            if self._git(
-                checkout.path, "status", "--porcelain", "--untracked-files=all"
-            ).stdout:
-                raise WorkspaceError("merged workspace must be clean before finish")
             removed = self._remove_worktree(project, record, checkout)
             if removed.returncode != 0:
                 raise WorkspaceError(
                     removed.stderr.strip() or "git worktree remove failed"
                 )
             self._git(project.root, "branch", "-D", record.branch, check=False)
-            self.store.remove_stack_references(record.workspace_id)
             self.store.remove(record.workspace_id)
             return {
                 "workspace_id": record.workspace_id,
-                "finished": True,
-                "head": expected_head,
+                "dropped": True,
+                "relationship_only": False,
+                "head": checkout.head,
+                "deleted_branch": record.branch,
+                **(
+                    {"publication_evidence": publication_evidence}
+                    if publication_evidence is not None
+                    else {}
+                ),
             }
 
-    def finish_integrated(self, workspace_id: str, target_ref: str) -> dict[str, Any]:
-        """Remove a clean workspace whose tree contribution is present in a declared-base commit."""
-        with flock(self.mutation_lock):
-            record = self._record(workspace_id)
-            if not record.managed:
-                raise WorkspaceError("adopted workspaces cannot be finished")
-            if any(
-                stack.parent_workspace_id == record.workspace_id
-                for stack in self.store.stack_records()
-            ):
-                raise WorkspaceError(
-                    "workspace cannot be finished while stacked children exist"
-                )
-            checkout, project = self._available(record)
-            if self._git(
-                checkout.path, "status", "--porcelain", "--untracked-files=all"
-            ).stdout:
-                raise WorkspaceError("integrated workspace must be clean before finish")
-            self._verify_ref(project.root, target_ref, "integration target")
-            assert project.workspace is not None
-            if (
-                self._git(
-                    project.root,
-                    "merge-base",
-                    "--is-ancestor",
-                    target_ref,
-                    project.workspace.default_base,
-                    check=False,
-                ).returncode
-                != 0
-            ):
-                raise WorkspaceError(
-                    "integration target is not contained in the declared default base"
-                )
-            if not self._tree_equivalent(project.root, target_ref, checkout.head):
-                raise WorkspaceError(
-                    "workspace changes are not fully represented by the integration target"
-                )
-            removed = self._remove_worktree(project, record, checkout)
-            if removed.returncode != 0:
-                raise WorkspaceError(
-                    removed.stderr.strip() or "git worktree remove failed"
-                )
-            self._git(project.root, "branch", "-D", record.branch, check=False)
-            self.store.remove_stack_references(record.workspace_id)
-            self.store.remove(record.workspace_id)
-            return {
-                "workspace_id": record.workspace_id,
-                "finished": True,
-                "head": checkout.head,
-                "integration_target": self._git(
-                    project.root, "rev-parse", f"{target_ref}^{{commit}}"
-                ).stdout.strip(),
-            }
+    def _integration_evidence(
+        self, project: ProjectAdapter, head: str, target_ref: str
+    ) -> dict[str, Any]:
+        """Prove a workspace's tree contribution is present in a declared-base commit."""
+        self._verify_ref(project.root, target_ref, "integration target")
+        assert project.workspace is not None
+        if (
+            self._git(
+                project.root,
+                "merge-base",
+                "--is-ancestor",
+                target_ref,
+                project.workspace.default_base,
+                check=False,
+            ).returncode
+            != 0
+        ):
+            raise WorkspaceError(
+                "integration target is not contained in the declared default base"
+            )
+        if not self._tree_equivalent(project.root, target_ref, head):
+            raise WorkspaceError(
+                "workspace changes are not fully represented by the integration target"
+            )
+        return {
+            "kind": "tree-equivalent-integration",
+            "integration_target": self._git(
+                project.root, "rev-parse", f"{target_ref}^{{commit}}"
+            ).stdout.strip(),
+        }
 
     def create(
         self,
@@ -823,7 +707,6 @@ class GitWorkspaces:
                 name,
                 checkout,
                 resolved_base,
-                managed=True,
                 provision_notes=notes,
             )
         except BaseException:
@@ -1013,322 +896,6 @@ class GitWorkspaces:
                 or "created workspace rollback failed"
             )
 
-    def adopt(self, *, project_id: str, checkout_id: str, name: str) -> dict[str, Any]:
-        project = self._project(project_id)
-        self._validate_name(name)
-        with flock(self.mutation_lock):
-            checkout = self.projects.checkout(project_id, checkout_id)
-            if checkout.path == project.root:
-                raise WorkspaceError(
-                    "the configured project root cannot be adopted as a managed workspace"
-                )
-            branch = self._branch(checkout.path)
-            record = self._new_record(
-                project, name, checkout, checkout.head, managed=False, branch=branch
-            )
-            self.store.put(record)
-        return self._status(record)
-
-    def reap(self, workspace_id: str) -> dict[str, Any]:
-        with flock(self.mutation_lock):
-            record = self._record(workspace_id)
-            if any(
-                stack.parent_workspace_id == record.workspace_id
-                for stack in self.store.stack_records()
-            ):
-                raise WorkspaceError(
-                    "workspace cannot be reaped while stacked children exist"
-                )
-            if self._path_state(record) == "missing":
-                self._gc_missing_locked((record,))
-                return {
-                    "workspace_id": record.workspace_id,
-                    "reaped": True,
-                    "relationship_only": True,
-                    "state": "missing",
-                    "note": MISSING_WORKTREE_GC_NOTE,
-                }
-            status = self._status(record)
-            if status["state"] == "missing":
-                self.store.remove_stack_references(record.workspace_id)
-                self.store.remove(record.workspace_id)
-                return {
-                    "workspace_id": record.workspace_id,
-                    "reaped": True,
-                    "relationship_only": True,
-                }
-            if not record.managed:
-                raise WorkspaceError("adopted workspaces cannot be reaped")
-            if status["dirty"] or not status["identity_matches"]:
-                raise WorkspaceError(
-                    "workspace is dirty or its branch identity changed"
-                )
-            project = self._project(record.project_id)
-            assert project.workspace is not None
-            head = status["head"]
-            if not isinstance(
-                head, str
-            ) or not self._head_is_contained_in_declared_base(project, head):
-                raise WorkspaceError(
-                    "workspace HEAD is not contained in the declared base"
-                )
-            removed = self._remove_worktree(project, record)
-            if removed.returncode != 0:
-                raise WorkspaceError(
-                    removed.stderr.strip() or "git worktree remove failed"
-                )
-            self.store.remove_stack_references(record.workspace_id)
-            self.store.remove(record.workspace_id)
-            return {
-                "workspace_id": record.workspace_id,
-                "reaped": True,
-                "relationship_only": False,
-                "retained_branch": record.branch,
-            }
-
-    def dispose(
-        self, workspace_id: str, *, acknowledge_published: bool = False
-    ) -> dict[str, Any]:
-        """Delete a clean no-review workspace only when every retained artifact is redundant."""
-        with flock(self.mutation_lock):
-            record = self._record(workspace_id)
-            if not record.managed:
-                raise WorkspaceError("adopted workspaces cannot be disposed")
-            if any(
-                stack.parent_workspace_id == record.workspace_id
-                for stack in self.store.stack_records()
-            ):
-                raise WorkspaceError(
-                    "workspace cannot be disposed while stacked children exist"
-                )
-            if self._path_state(record) == "missing":
-                self._gc_missing_locked((record,))
-                return {
-                    "workspace_id": workspace_id,
-                    "disposed": True,
-                    "relationship_only": True,
-                    "state": "missing",
-                    "note": MISSING_WORKTREE_GC_NOTE,
-                }
-            status = self._status(record)
-            if status["state"] != "available" or not status["identity_matches"]:
-                raise WorkspaceError(
-                    "workspace is unavailable or its branch identity changed"
-                )
-            if status["dirty"]:
-                raise WorkspaceError("workspace must be clean before disposal")
-            checkout, project = self._available(record)
-            publication_evidence: dict[str, Any] | None = None
-            if not self._head_is_contained_in_declared_base(project, checkout.head):
-                if acknowledge_published:
-                    publication_evidence = {
-                        "kind": "operator-acknowledged",
-                        "default_base": project.workspace.default_base,
-                        "branch_head": checkout.head,
-                    }
-                else:
-                    publication_evidence = self._squash_equivalent_evidence(
-                        project, record, checkout.head
-                    )
-                    if publication_evidence is None:
-                        raise WorkspaceError(
-                            "workspace has unpublished committed content"
-                        )
-            self._verify_disposable_checkpoints(workspace_id)
-            if publication_evidence is not None:
-                self.store.record_disposal_evidence(
-                    {
-                        "workspace_id": workspace_id,
-                        "branch": record.branch,
-                        "head": checkout.head,
-                        **publication_evidence,
-                    }
-                )
-            removed = self._remove_worktree(project, record, checkout)
-            if removed.returncode != 0:
-                raise WorkspaceError(
-                    removed.stderr.strip() or "git worktree remove failed"
-                )
-            branch = self._git(project.root, "branch", "-D", record.branch, check=False)
-            if branch.returncode != 0:
-                raise WorkspaceError(
-                    branch.stderr.strip() or "git branch deletion failed"
-                )
-            self.store.remove_stack_references(record.workspace_id)
-            self.store.remove(record.workspace_id)
-            return {
-                "workspace_id": record.workspace_id,
-                "disposed": True,
-                "head": checkout.head,
-                "deleted_branch": record.branch,
-                **(
-                    {"publication_evidence": publication_evidence}
-                    if publication_evidence is not None
-                    else {}
-                ),
-            }
-
-    def stack(
-        self, *, parent_workspace_id: str, name: str, branch: str
-    ) -> dict[str, Any]:
-        with flock(self.mutation_lock):
-            parent = self._record(parent_workspace_id)
-            parent_checkout, _project = self._available(parent)
-            created = self._create_locked(
-                project_id=parent.project_id,
-                name=name,
-                branch=branch,
-                base=parent.branch,
-            )
-            relationship = StackRecord(
-                child_workspace_id=created["workspace_id"],
-                parent_workspace_id=parent.workspace_id,
-                created_at=datetime.now(UTC).isoformat(),
-                parent_head=parent_checkout.head,
-            )
-            try:
-                self.store.put_stack(relationship)
-            except BaseException:
-                child = self._record(created["workspace_id"])
-                project = self._project(parent.project_id)
-                self._remove_worktree(project, child)
-                self.store.remove(child.workspace_id)
-                raise
-        return {**created, "parent_workspace_id": parent.workspace_id}
-
-    def restack(self, workspace_id: str) -> dict[str, Any]:
-        with flock(self.mutation_lock):
-            workspace_id = self._record(workspace_id).workspace_id
-            stack = next(
-                (
-                    item
-                    for item in self.store.stack_records()
-                    if item.child_workspace_id == workspace_id
-                ),
-                None,
-            )
-            if stack is None:
-                raise WorkspaceError("workspace is not a stacked child")
-            child = self._record(workspace_id)
-            parent = self._record(stack.parent_workspace_id)
-            if child.project_id != parent.project_id:
-                raise WorkspaceError("stack parent belongs to another project")
-            child_checkout, project = self._available(child)
-            if self._git(
-                child_checkout.path, "status", "--porcelain", "--untracked-files=all"
-            ).stdout:
-                raise WorkspaceError("restack requires a clean child workspace")
-            parent_status = self._status(parent)
-            detached_parent = parent_status["state"] == "missing"
-            if detached_parent:
-                assert project.workspace is not None
-                target_ref = project.workspace.default_base
-                parent_head = stack.parent_head
-                if not self._tree_equivalent(project.root, target_ref, parent_head):
-                    raise WorkspaceError(
-                        "missing stack parent is not represented in the declared base"
-                    )
-            else:
-                parent_checkout, _ = self._available(parent)
-                target_ref = parent.branch
-                parent_head = parent_checkout.head
-            collisions = self._declared_collisions(
-                project, child.branch, target_ref, base_ref=stack.parent_head
-            )
-            if collisions:
-                return {
-                    "workspace_id": workspace_id,
-                    "parent_workspace_id": parent.workspace_id,
-                    "restacked": False,
-                    "collisions": collisions,
-                }
-            before = child_checkout.head
-            arguments = (
-                ("rebase", "--onto", target_ref, stack.parent_head)
-                if detached_parent
-                else ("rebase", target_ref)
-            )
-            result = self._git(child_checkout.path, *arguments, check=False)
-            if result.returncode != 0:
-                self._git(child_checkout.path, "rebase", "--abort", check=False)
-                raise WorkspaceError(result.stderr.strip() or "Git restack failed")
-            after = self._git(child_checkout.path, "rev-parse", "HEAD").stdout.strip()
-            if detached_parent:
-                self.store.remove_stack_child(workspace_id)
-            else:
-                self.store.update_stack_parent_head(workspace_id, parent_head)
-            return {
-                "workspace_id": workspace_id,
-                "parent_workspace_id": parent.workspace_id,
-                "restacked": True,
-                "before_head": before,
-                "head": after,
-                "parent_head": parent_head,
-                "detached_merged_parent": detached_parent,
-                "collisions": [],
-            }
-
-    def _declared_collisions(
-        self,
-        project: ProjectAdapter,
-        child_ref: str,
-        parent_ref: str,
-        *,
-        base_ref: str | None = None,
-    ) -> list[dict[str, str]]:
-        base = (
-            base_ref
-            or self._git(
-                project.root, "merge-base", child_ref, parent_ref
-            ).stdout.strip()
-        )
-        child_paths = set(
-            self._git(
-                project.root, "diff", "--name-only", base, child_ref, "--"
-            ).stdout.splitlines()
-        )
-        parent_paths = set(
-            self._git(
-                project.root, "diff", "--name-only", base, parent_ref, "--"
-            ).stdout.splitlines()
-        )
-        overlap = child_paths & parent_paths
-        exact = set(project.conflicts.exact_files)
-        generated = set(project.conflicts.generated_surfaces)
-        collisions = [
-            {
-                "path": path,
-                "class": "exact-file" if path in exact else "generated-surface",
-            }
-            for path in sorted(overlap)
-            if path in exact or path in generated
-        ]
-        classified = exact | generated
-        collisions.extend(
-            {"path": path, "class": "hard"} for path in sorted(overlap - classified)
-        )
-        for slot, patterns in project.conflicts.semantic_slots.items():
-            child_slot = sorted(
-                path
-                for path in child_paths
-                if any(fnmatch(path, pattern) for pattern in patterns)
-            )
-            parent_slot = sorted(
-                path
-                for path in parent_paths
-                if any(fnmatch(path, pattern) for pattern in patterns)
-            )
-            if child_slot and parent_slot:
-                collisions.append(
-                    {
-                        "class": "semantic-slot",
-                        "slot": slot,
-                        "child_paths": ",".join(child_slot),
-                        "parent_paths": ",".join(parent_slot),
-                    }
-                )
-        return collisions
-
     def _tree_equivalent(self, root: Path, target_ref: str, source_ref: str) -> bool:
         target_tree = self._git(
             root, "rev-parse", f"{target_ref}^{{tree}}", check=False
@@ -1454,9 +1021,34 @@ class GitWorkspaces:
             self.store.put_checkpoint(checkpoint, staged, unstaged, untracked)
             return checkpoint.to_dict()
 
-    def restore(self, workspace_id: str, checkpoint_id: str) -> dict[str, Any]:
+    def restore(
+        self, workspace_id: str, checkpoint_id: str, *, recreate: bool = False
+    ) -> dict[str, Any]:
+        """Apply a checkpoint, recreating the worktree first when it is gone."""
         with flock(self.mutation_lock):
-            return self._restore_locked(workspace_id, checkpoint_id)
+            recreated = False
+            if (
+                recreate
+                and self._status(self._record(workspace_id))["state"] == "missing"
+            ):
+                self._recreate_worktree_locked(workspace_id, checkpoint_id)
+                recreated = True
+            try:
+                restored = self._restore_locked(workspace_id, checkpoint_id)
+            except BaseException:
+                if recreated:
+                    record = self._record(workspace_id)
+                    self._remove_worktree(
+                        self._project(record.project_id), record, "--force"
+                    )
+                raise
+            if not recreated:
+                return restored
+            return {
+                **restored,
+                "recreated": True,
+                "path": str(self._record(workspace_id).path),
+            }
 
     def _restore_locked(self, workspace_id: str, checkpoint_id: str) -> dict[str, Any]:
         record = self._record(workspace_id)
@@ -1494,47 +1086,34 @@ class GitWorkspaces:
             "restored": True,
         }
 
-    def recover(self, workspace_id: str, checkpoint_id: str) -> dict[str, Any]:
-        with flock(self.mutation_lock):
-            record = self._record(workspace_id)
-            if not record.managed:
-                raise WorkspaceError("adopted workspaces cannot be recovered")
-            status = self._status(record)
-            if status["state"] != "missing":
-                raise WorkspaceError("recover requires a missing managed workspace")
-            checkpoint, _root = self.store.checkpoint(workspace_id, checkpoint_id)
-            if (
-                checkpoint.project_id != record.project_id
-                or checkpoint.branch != record.branch
-            ):
-                raise WorkspaceError("checkpoint authority does not match workspace")
-            project = self._project(record.project_id)
-            branch_head = self._git(
-                project.root, "rev-parse", "--verify", f"{record.branch}^{{commit}}"
-            ).stdout.strip()
-            if branch_head != checkpoint.head:
-                raise WorkspaceError(
-                    "workspace branch no longer matches checkpoint HEAD"
-                )
-            self._validate_target(project.workspace.root, record.path)
-            result = self._git(
-                project.root,
-                "worktree",
-                "add",
-                str(record.path),
-                record.branch,
-                check=False,
+    def _recreate_worktree_locked(self, workspace_id: str, checkpoint_id: str) -> None:
+        record = self._record(workspace_id)
+        checkpoint, _root = self.store.checkpoint(workspace_id, checkpoint_id)
+        if (
+            checkpoint.project_id != record.project_id
+            or checkpoint.branch != record.branch
+        ):
+            raise WorkspaceError("checkpoint authority does not match workspace")
+        project = self._project(record.project_id)
+        branch_head = self._git(
+            project.root, "rev-parse", "--verify", f"{record.branch}^{{commit}}"
+        ).stdout.strip()
+        if branch_head != checkpoint.head:
+            raise WorkspaceError("workspace branch no longer matches checkpoint HEAD")
+        assert project.workspace is not None
+        self._validate_target(project.workspace.root, record.path)
+        result = self._git(
+            project.root,
+            "worktree",
+            "add",
+            str(record.path),
+            record.branch,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise WorkspaceError(
+                result.stderr.strip() or "Git workspace recreation failed"
             )
-            if result.returncode != 0:
-                raise WorkspaceError(
-                    result.stderr.strip() or "Git workspace recovery failed"
-                )
-            try:
-                restored = self._restore_locked(workspace_id, checkpoint_id)
-            except BaseException:
-                self._remove_worktree(project, record, "--force")
-                raise
-            return {**restored, "recovered": True, "path": str(record.path)}
 
     @staticmethod
     def _path_state(record: WorkspaceRecord) -> str:
@@ -1581,14 +1160,7 @@ class GitWorkspaces:
         )
         if not candidates:
             return ()
-        parent_ids = {stack.parent_workspace_id for stack in self.store.stack_records()}
-        removed = tuple(
-            record for record in candidates if record.workspace_id not in parent_ids
-        )
-        if not removed:
-            return ()
-        workspace_ids = tuple(record.workspace_id for record in removed)
-        self.store.remove_stack_references_many(workspace_ids)
+        workspace_ids = tuple(record.workspace_id for record in candidates)
         removed = self.store.remove_many(workspace_ids)
         if removed:
             self.store.record_disposal_evidence(
@@ -2014,7 +1586,6 @@ class GitWorkspaces:
         checkout: RegisteredCheckout,
         base: str,
         *,
-        managed: bool,
         branch: str | None = None,
         provision_notes: tuple[dict[str, str], ...] = (),
     ) -> WorkspaceRecord:
@@ -2026,7 +1597,6 @@ class GitWorkspaces:
             branch=branch or GitWorkspaces._branch(checkout.path),
             base=base,
             created_at=datetime.now(UTC).isoformat(),
-            managed=managed,
             provision_notes=provision_notes,
         )
 

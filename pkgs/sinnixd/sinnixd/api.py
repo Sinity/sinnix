@@ -43,19 +43,13 @@ CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS = {
     # a short default and was misreported as "sinnixd is unavailable" (dn4c).
     "workspace.list": 60.0,
     "workspace.get": 60.0,
-    "workspace.adopt": 60.0,
-    "workspace.reap": 60.0,
-    "workspace.dispose": 60.0,
+    "workspace.drop": 60.0,
     "workspace.checkpoint": 120.0,
-    "workspace.restore": 120.0,
-    "workspace.recover": 300.0,
-    "workspace.stack": 120.0,
-    "workspace.restack": 300.0,
+    "workspace.restore": 300.0,
     "workspace.publish": 60.0,
     "workspace.review-status": 65.0,
     "workspace.land": 60.0,
     "workspace.finish": 185.0,
-    "workspace.finish-integrated": 185.0,
     # Creation runs `git worktree add` and then the project's provision exec
     # hook (e.g. uv sync) before answering; `packet launch` dispatches it as
     # its own step, so provisioning must fit this budget.

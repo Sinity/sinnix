@@ -229,29 +229,31 @@ def parser() -> argparse.ArgumentParser:
     workspace_create.add_argument("name")
     workspace_create.add_argument("--branch", required=True)
     workspace_create.add_argument("--base")
-    workspace_adopt = workspace_subcommands.add_parser("adopt")
-    workspace_adopt.add_argument("project_id")
-    workspace_adopt.add_argument("checkout_id")
-    workspace_adopt.add_argument("name")
-    workspace_reap = workspace_subcommands.add_parser("reap")
-    workspace_reap.add_argument("workspace_id")
-    workspace_dispose = workspace_subcommands.add_parser("dispose")
-    workspace_dispose.add_argument("workspace_id")
-    workspace_dispose.add_argument("--acknowledge-published", action="store_true")
+    workspace_drop = workspace_subcommands.add_parser(
+        "drop",
+        help="Delete a workspace, its branch, and every job record and artifact bound to it.",
+    )
+    workspace_drop.add_argument("workspace_id")
+    workspace_drop.add_argument(
+        "--target",
+        dest="integration_target",
+        help="Prove publication by tree-equivalence with this integrated ref.",
+    )
+    workspace_drop.add_argument(
+        "--force",
+        action="store_true",
+        help="Drop without proving the content is published.",
+    )
     workspace_checkpoint = workspace_subcommands.add_parser("checkpoint")
     workspace_checkpoint.add_argument("workspace_id")
     workspace_restore = workspace_subcommands.add_parser("restore")
     workspace_restore.add_argument("workspace_id")
     workspace_restore.add_argument("checkpoint_id")
-    workspace_recover = workspace_subcommands.add_parser("recover")
-    workspace_recover.add_argument("workspace_id")
-    workspace_recover.add_argument("checkpoint_id")
-    workspace_stack = workspace_subcommands.add_parser("stack")
-    workspace_stack.add_argument("parent_workspace_id")
-    workspace_stack.add_argument("name")
-    workspace_stack.add_argument("--branch", required=True)
-    workspace_restack = workspace_subcommands.add_parser("restack")
-    workspace_restack.add_argument("workspace_id")
+    workspace_restore.add_argument(
+        "--recreate",
+        action="store_true",
+        help="Recreate the worktree from the branch when its path is gone.",
+    )
     workspace_publish = workspace_subcommands.add_parser("publish")
     workspace_publish.add_argument("workspace_id")
     workspace_publish.add_argument("--job", required=True)
@@ -276,9 +278,6 @@ def parser() -> argparse.ArgumentParser:
     )
     workspace_finish = workspace_subcommands.add_parser("finish")
     workspace_finish.add_argument("workspace_id")
-    workspace_finish_integrated = workspace_subcommands.add_parser("finish-integrated")
-    workspace_finish_integrated.add_argument("workspace_id")
-    workspace_finish_integrated.add_argument("--target", required=True)
     events = subcommands.add_parser("events")
     events_subcommands = events.add_subparsers(dest="events_command", required=True)
     events_tail = events_subcommands.add_parser(
@@ -286,6 +285,11 @@ def parser() -> argparse.ArgumentParser:
     )
     events_tail.add_argument("--follow", "-f", action="store_true")
     events_tail.add_argument("--kind", help="Comma-separated event kinds to include.")
+    events_tail.add_argument(
+        "--all-kinds",
+        action="store_true",
+        help="Include host-maintenance kinds the agent plane does not act on.",
+    )
     events_tail.add_argument(
         "--since", help="ISO timestamp lower bound (matches the 'at' field)."
     )
@@ -345,7 +349,9 @@ def parser() -> argparse.ArgumentParser:
     campaign_view.add_argument("--project", required=True)
     campaign_view.add_argument("--coordinator-label")
     campaign_view.add_argument(
-        "--json", action="store_true", help="Print the status payload instead of the screen."
+        "--json",
+        action="store_true",
+        help="Print the status payload instead of the screen.",
     )
     campaign_log = campaign_subcommands.add_parser(
         "log",
@@ -547,6 +553,10 @@ def _expand_job_id(value: str) -> str:
     return value
 
 
+#: Spool kinds written by host maintenance rather than the agent plane.
+NON_AGENT_EVENT_KINDS = frozenset({"service_failure"})
+
+
 def _operator_view(arguments: argparse.Namespace) -> int:
     """`campaign view` / `campaign log`: the status payload plus local job and spool reads, rendered for a person."""
     from .jobs import default_state_dir
@@ -557,7 +567,10 @@ def _operator_view(arguments: argparse.Namespace) -> int:
     request = _request(
         "campaign.status",
         "campaign-orchestrator",
-        {"project_id": arguments.project, **({"coordinator_label": label} if label else {})},
+        {
+            "project_id": arguments.project,
+            **({"coordinator_label": label} if label else {}),
+        },
         "operator",
     )
     try:
@@ -788,32 +801,19 @@ def main() -> int:
             },
             "agent-control",
         )
-    elif arguments.command == "workspace" and arguments.workspace_command == "adopt":
+    elif arguments.command == "workspace" and arguments.workspace_command == "drop":
         request = _request(
-            "workspace.adopt",
+            "workspace.drop",
             "git-workspaces",
             {
-                "project_id": arguments.project_id,
-                "checkout_id": arguments.checkout_id,
-                "name": arguments.name,
+                "workspace_id": arguments.workspace_id,
+                **({"force": True} if arguments.force else {}),
+                **(
+                    {"integration_target": arguments.integration_target}
+                    if arguments.integration_target
+                    else {}
+                ),
             },
-            "agent-control",
-        )
-    elif arguments.command == "workspace" and arguments.workspace_command == "reap":
-        request = _request(
-            "workspace.reap",
-            "git-workspaces",
-            {"workspace_id": arguments.workspace_id},
-            "agent-control",
-        )
-    elif arguments.command == "workspace" and arguments.workspace_command == "dispose":
-        payload = {"workspace_id": arguments.workspace_id}
-        if arguments.acknowledge_published:
-            payload["acknowledge_published"] = True
-        request = _request(
-            "workspace.dispose",
-            "git-workspaces",
-            payload,
             "agent-control",
         )
     elif (
@@ -832,35 +832,8 @@ def main() -> int:
             {
                 "workspace_id": arguments.workspace_id,
                 "checkpoint_id": arguments.checkpoint_id,
+                **({"recreate": True} if arguments.recreate else {}),
             },
-            "agent-control",
-        )
-    elif arguments.command == "workspace" and arguments.workspace_command == "recover":
-        request = _request(
-            "workspace.recover",
-            "git-workspaces",
-            {
-                "workspace_id": arguments.workspace_id,
-                "checkpoint_id": arguments.checkpoint_id,
-            },
-            "agent-control",
-        )
-    elif arguments.command == "workspace" and arguments.workspace_command == "stack":
-        request = _request(
-            "workspace.stack",
-            "git-workspaces",
-            {
-                "parent_workspace_id": arguments.parent_workspace_id,
-                "name": arguments.name,
-                "branch": arguments.branch,
-            },
-            "agent-control",
-        )
-    elif arguments.command == "workspace" and arguments.workspace_command == "restack":
-        request = _request(
-            "workspace.restack",
-            "git-workspaces",
-            {"workspace_id": arguments.workspace_id},
             "agent-control",
         )
     elif arguments.command == "workspace" and arguments.workspace_command == "publish":
@@ -904,19 +877,6 @@ def main() -> int:
             },
             "agent-control",
         )
-    elif (
-        arguments.command == "workspace"
-        and arguments.workspace_command == "finish-integrated"
-    ):
-        request = _request(
-            "workspace.finish-integrated",
-            "git-workspaces",
-            {
-                "workspace_id": arguments.workspace_id,
-                "target_ref": arguments.target,
-            },
-            "agent-control",
-        )
     elif arguments.command == "workspace" and arguments.workspace_command == "finish":
         request = _request(
             "workspace.finish",
@@ -930,6 +890,11 @@ def main() -> int:
             if arguments.kind
             else None
         )
+        # The spool is shared with host maintenance, whose failures agents
+        # cannot act on and which outnumber agent events on this host.
+        excluded = (
+            frozenset() if arguments.all_kinds or kinds else NON_AGENT_EVENT_KINDS
+        )
 
         def emit(line: str) -> None:
             line = line.strip()
@@ -942,6 +907,8 @@ def main() -> int:
             if not isinstance(event, dict):
                 return
             if kinds is not None and event.get("kind") not in kinds:
+                return
+            if event.get("kind") in excluded:
                 return
             stamp = str(
                 event.get("at")
@@ -1321,7 +1288,7 @@ def main() -> int:
                 if not isinstance(workspace_id, str) or not workspace_id:
                     return _packet_step_failure(step_response, step)
                 dispose_request = _request(
-                    "workspace.dispose",
+                    "workspace.drop",
                     "git-workspaces",
                     {"workspace_id": workspace_id},
                     "agent-control",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -18,9 +19,25 @@ from .limits import (
     valid_timeout_seconds,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class ProjectConfigError(ValueError):
     """Raised when a project adapter is missing or violates the v1 contract."""
+
+
+def _ignore_retired(
+    value: Mapping[str, Any], field: str, retired: set[str]
+) -> dict[str, Any]:
+    """Drop descriptor keys the daemon no longer reads.
+
+    A descriptor written for an older daemon must keep loading; a field the
+    daemon stopped reading is not a configuration error.
+    """
+    present = retired.intersection(value)
+    if present:
+        logger.warning("%s ignores retired keys: %s", field, ", ".join(sorted(present)))
+    return {key: item for key, item in value.items() if key not in retired}
 
 
 MAX_OPERATION_PARAMETERS = 32
@@ -329,13 +346,11 @@ class ServicePortSlot:
 class OperationService:
     """Closed metadata for a development service owned by one declared operation."""
 
-    readiness: str
     lifetime: str
     ports: tuple[ServicePortSlot, ...]
 
     def catalog_row(self) -> dict[str, Any]:
         return {
-            "readiness": self.readiness,
             "lifetime": self.lifetime,
             "ports": [port.catalog_row() for port in self.ports],
         }
@@ -832,19 +847,13 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
 def _operation_service(value: Any, field: str) -> OperationService | None:
     if value is None:
         return None
-    if not isinstance(value, Mapping) or set(value) != {
-        "readiness",
-        "lifetime",
-        "ports",
-    }:
-        raise ProjectConfigError(
-            f"{field} must contain only readiness, lifetime, and ports"
-        )
-    readiness = value.get("readiness")
+    if not isinstance(value, Mapping):
+        raise ProjectConfigError(f"{field} must be a table")
+    value = _ignore_retired(value, field, {"readiness"})
+    if set(value) != {"lifetime", "ports"}:
+        raise ProjectConfigError(f"{field} must contain only lifetime and ports")
     lifetime = value.get("lifetime")
     ports = value.get("ports")
-    if readiness not in {"none", "project-command"}:
-        raise ProjectConfigError(f"{field}.readiness is invalid")
     if lifetime != "job":
         raise ProjectConfigError(f"{field}.lifetime is invalid")
     if not isinstance(ports, Mapping) or not 1 <= len(ports) <= MAX_SERVICE_PORT_SLOTS:
@@ -889,7 +898,7 @@ def _operation_service(value: Any, field: str) -> OperationService | None:
                 name=name, environment=environment, minimum=minimum, maximum=maximum
             )
         )
-    return OperationService(readiness=readiness, lifetime=lifetime, ports=tuple(slots))
+    return OperationService(lifetime=lifetime, ports=tuple(slots))
 
 
 def _bounded_parameter_count(value: Any, maximum: int) -> bool:
