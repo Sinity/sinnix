@@ -29,7 +29,8 @@ class Reducer:
         max_events: int = 256,
         ambient_source: Callable[[], dict[str, Any]] | None = None,
         agent_jobs_source: Callable[[], dict[str, Any]] | None = None,
-        clodex_usage_source: Callable[[], tuple[dict[str, Any], dict[str, Any]]] | None = None,
+        clodex_usage_source: Callable[[], tuple[dict[str, Any], dict[str, Any]]]
+        | None = None,
     ) -> None:
         self.snapshot_path = snapshot_path
         self.token_path = token_path
@@ -103,7 +104,11 @@ class Reducer:
             "sources": {
                 "sinnix-observe": source_health,
                 "agentctl": agent_jobs_health,
-                **({"clodex": clodex_health} if self.clodex_usage_source is not None else {}),
+                **(
+                    {"clodex": clodex_health}
+                    if self.clodex_usage_source is not None
+                    else {}
+                ),
                 "ambient-intelligence": ambient_health,
             },
             "state": {
@@ -135,14 +140,28 @@ class Reducer:
             self.previous_health["sinnix-observe"] = status
         return snapshot
 
-    def _clodex_snapshot(self, observed_at: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    def _clodex_snapshot(
+        self, observed_at: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         if self.clodex_usage_source is None:
-            return {}, {"status": "disabled", "source": "clodex-inference-accounting", "observed_at": observed_at, "freshness": "unknown", "degradation": "no accounting collector configured"}
+            return {}, {
+                "status": "disabled",
+                "source": "clodex-inference-accounting",
+                "observed_at": observed_at,
+                "freshness": "unknown",
+                "degradation": "no accounting collector configured",
+            }
         try:
             value, health = self.clodex_usage_source()
             return value, {**health, "observed_at": observed_at}
         except Exception as error:
-            return {}, {"status": "unavailable", "source": "clodex-inference-accounting", "observed_at": observed_at, "freshness": "unknown", "degradation": str(error)[:240]}
+            return {}, {
+                "status": "unavailable",
+                "source": "clodex-inference-accounting",
+                "observed_at": observed_at,
+                "freshness": "unknown",
+                "degradation": str(error)[:240],
+            }
 
     def _agent_jobs_snapshot(
         self, observed_at: str

@@ -27,7 +27,7 @@ reference to the full diff.
 5. Test evidence is the declared `verify_affected` job named in the packet
    header (`affected_job`); the harvest reads its verdict and the sweep
    merges nothing without it. Do not run test tiers yourself; `devtools test
-   <sel>` on the suites the diff can break is allowed and bounded.
+<sel>` on the suites the diff can break is allowed and bounded.
 
 ## Publish
 

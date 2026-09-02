@@ -12,8 +12,8 @@ from . import capabilities, feedback, health, pages
 from .actions import ActionService
 from .agent_jobs import AgentCtlClient
 from .ambient import product_source
-from .feedback import CoalescingTrigger, FeedbackSpool
 from .clodex_usage import clodex_usage
+from .feedback import CoalescingTrigger, FeedbackSpool
 from .reducer import Reducer, observe_source
 from .server import FAILURE_PATH, ensure_token, serve
 from .state import StateLayer
@@ -249,7 +249,12 @@ def main() -> None:
             "agentctl",
         ),
     )
-    parser.add_argument("--clodex-usage", type=Path, default=None, help="Clodex routed inference accounting JSONL")
+    parser.add_argument(
+        "--clodex-usage",
+        type=Path,
+        default=None,
+        help="Clodex routed inference accounting JSONL",
+    )
     args = parser.parse_args()
     observe_command = list(args.observe_command)
     if len(observe_command) == 1:

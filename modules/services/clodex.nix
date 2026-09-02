@@ -52,7 +52,12 @@ mkServiceModule {
                 models="$($cli models --json)"
                 for alias in $(printf '%s' "$models" | ${pkgs.jq}/bin/jq -r '.[] | .alias // empty'); do
                   case "$alias" in
-                    ${if cfg.aliases == { } then "__sinnix_no_declared_alias__" else lib.concatStringsSep "|" (lib.attrNames cfg.aliases)}) ;;
+                    ${
+                      if cfg.aliases == { } then
+                        "__sinnix_no_declared_alias__"
+                      else
+                        lib.concatStringsSep "|" (lib.attrNames cfg.aliases)
+                    }) ;;
                     *) "$cli" models --unalias "$alias" >/dev/null 2>&1 || true ;;
                   esac
                 done
@@ -92,7 +97,7 @@ mkServiceModule {
           };
         Install.WantedBy = [ "default.target" ];
       };
-  };
+    };
   extraOptions.aliases = lib.mkOption {
     type = lib.types.attrsOf lib.types.str;
     default = {

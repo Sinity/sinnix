@@ -139,10 +139,15 @@ def tests_evidenced(receipt_ref: str | None, packets_root: Path) -> bool:
     if isinstance(payload.get("authorization"), Mapping):
         return True
     publication = payload.get("publication")
-    return isinstance(publication, Mapping) and publication.get("affected_tests") == "passed"
+    return (
+        isinstance(publication, Mapping)
+        and publication.get("affected_tests") == "passed"
+    )
 
 
-def derive_pull_states(repo: str, run: Run, *, packets_root: Path = DEFAULT_PACKETS_ROOT) -> list[PullState]:
+def derive_pull_states(
+    repo: str, run: Run, *, packets_root: Path = DEFAULT_PACKETS_ROOT
+) -> list[PullState]:
     rows = _gh_json(
         run,
         [
@@ -207,7 +212,16 @@ def _head_pushed_at(repo: str, head: str, run: Run) -> str:
     if not head:
         return ""
     try:
-        value = _gh_json(run, ["gh", "api", f"repos/{repo}/commits/{head}", "--jq", ".commit.committer.date"])
+        value = _gh_json(
+            run,
+            [
+                "gh",
+                "api",
+                f"repos/{repo}/commits/{head}",
+                "--jq",
+                ".commit.committer.date",
+            ],
+        )
     except SweepError:
         return ""
     return value if isinstance(value, str) else ""
@@ -234,7 +248,10 @@ def answered_rounds(findings: Sequence[tuple[str, bool]]) -> int:
     round_start: datetime | None = None
     for stamp, answered in ordered:
         moment = _parse_stamp(stamp)
-        if round_start is None or (round_start - moment).total_seconds() > REVIEW_ROUND_SECONDS:
+        if (
+            round_start is None
+            or (round_start - moment).total_seconds() > REVIEW_ROUND_SECONDS
+        ):
             rounds.append([answered])
             round_start = moment
         else:
@@ -299,7 +316,11 @@ def derive_review(repo: str, number: int, run: Run, *, head: str = "") -> Review
             "[.[] | {id, login: .user.login, reply_to: .in_reply_to_id, at: .created_at}]",
         ],
     )
-    rows = [row for row in (comments if isinstance(comments, list) else []) if isinstance(row, Mapping)]
+    rows = [
+        row
+        for row in (comments if isinstance(comments, list) else [])
+        if isinstance(row, Mapping)
+    ]
     reviewer_logins = {REVIEWER_LOGIN, f"{REVIEWER_LOGIN}[bot]"}
     replied_to = {
         row.get("reply_to")
@@ -315,8 +336,14 @@ def derive_review(repo: str, number: int, run: Run, *, head: str = "") -> Review
         [stamp for stamp in reactions if isinstance(stamp, str)],
         [stamp for stamp, _answered in top_level],
     )
-    latest_clean = max((stamp for stamp in reactions if isinstance(stamp, str)), default="")
-    rounds = answered_rounds([item for item in top_level if item[0] > latest_clean]) if open_findings else 0
+    latest_clean = max(
+        (stamp for stamp in reactions if isinstance(stamp, str)), default=""
+    )
+    rounds = (
+        answered_rounds([item for item in top_level if item[0] > latest_clean])
+        if open_findings
+        else 0
+    )
     reviews = _gh_json(
         run,
         [
@@ -328,7 +355,11 @@ def derive_review(repo: str, number: int, run: Run, *, head: str = "") -> Review
             " | {commit: .commit_id, at: .submitted_at}]",
         ],
     )
-    review_rows = [row for row in (reviews if isinstance(reviews, list) else []) if isinstance(row, Mapping)]
+    review_rows = [
+        row
+        for row in (reviews if isinstance(reviews, list) else [])
+        if isinstance(row, Mapping)
+    ]
     latest = max(review_rows, key=lambda row: str(row.get("at") or ""), default=None)
     reviewed_head = str(latest.get("commit") or "") if latest is not None else ""
     latest_review_at = str(latest.get("at") or "") if latest is not None else ""
@@ -342,10 +373,21 @@ def derive_review(repo: str, number: int, run: Run, *, head: str = "") -> Review
             f'[.[] | select(.body | test("{REVIEW_REQUEST_TEXT}")) | .created_at]',
         ],
     )
-    latest_request = max((stamp for stamp in (requests if isinstance(requests, list) else []) if isinstance(stamp, str)), default="")
+    latest_request = max(
+        (
+            stamp
+            for stamp in (requests if isinstance(requests, list) else [])
+            if isinstance(stamp, str)
+        ),
+        default="",
+    )
     # A head the reviewer has not seen, with no request newer than its last
     # verdict, waits for nobody: the sweep asks.
-    request_pending = bool(head) and reviewed_head not in ("", head) and latest_request <= latest_review_at
+    request_pending = (
+        bool(head)
+        and reviewed_head not in ("", head)
+        and latest_request <= latest_review_at
+    )
     return ReviewState(clean, open_findings, rounds, reviewed_head, request_pending)
 
 
@@ -403,10 +445,23 @@ def sweep(
             "verdict": verdict,
             "bead": pull.bead_id,
         }
-        if pull.review_request_pending and verdict in {"findings", "wait", "merge-answered"}:
+        if pull.review_request_pending and verdict in {
+            "findings",
+            "wait",
+            "merge-answered",
+        }:
             requested = _command(
                 run,
-                ["gh", "pr", "comment", str(pull.number), "--repo", repo, "--body", REVIEW_REQUEST_TEXT],
+                [
+                    "gh",
+                    "pr",
+                    "comment",
+                    str(pull.number),
+                    "--repo",
+                    repo,
+                    "--body",
+                    REVIEW_REQUEST_TEXT,
+                ],
                 timeout=60,
             )
             action["review_requested"] = requested.returncode == 0

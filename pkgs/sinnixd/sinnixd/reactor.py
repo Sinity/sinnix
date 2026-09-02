@@ -161,7 +161,9 @@ class CampaignBoard:
             if key.startswith("refill:"):
                 continue
             try:
-                age = (now - _parse_time(str(self.keeper[key].get("emitted_at")))).total_seconds()
+                age = (
+                    now - _parse_time(str(self.keeper[key].get("emitted_at")))
+                ).total_seconds()
             except (TypeError, ReactorError):
                 continue
             if age > MARKER_MAX_AGE_SECONDS:
@@ -225,7 +227,9 @@ class SubprocessBeadReleaser:
 
 
 class BeadParker(Protocol):
-    def park(self, bead_id: str, note: str, *, cwd: Path) -> tuple[bool, str | None]: ...
+    def park(
+        self, bead_id: str, note: str, *, cwd: Path
+    ) -> tuple[bool, str | None]: ...
 
 
 class SubprocessBeadParker:
@@ -252,12 +256,25 @@ class SubprocessBeadParker:
                 "--actor",
                 self.actor,
             ],
-            [self.executable, "label", "add", bead_id, "needs:operator", "--actor", self.actor],
+            [
+                self.executable,
+                "label",
+                "add",
+                bead_id,
+                "needs:operator",
+                "--actor",
+                self.actor,
+            ],
         ]
         for argv in commands:
             try:
                 result = subprocess.run(
-                    argv, cwd=cwd, capture_output=True, text=True, timeout=30, check=False
+                    argv,
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False,
                 )
             except (OSError, subprocess.SubprocessError) as error:
                 return False, str(error)
@@ -385,7 +402,9 @@ class CampaignReactor:
             return None
         return value if isinstance(value, Mapping) else None
 
-    def _publish(self, project: str, workspace: str, receipt: str, affected_job: str = "") -> None:
+    def _publish(
+        self, project: str, workspace: str, receipt: str, affected_job: str = ""
+    ) -> None:
         """Publish a lane whose scan is clean, using the text the lane wrote."""
         worktree = Path("/realm/worktrees") / workspace
         parameters: dict[str, Any] = {
@@ -400,7 +419,9 @@ class CampaignReactor:
             # The worker contract requires the lane to write its own
             # publication text; a lane that skipped it is parked, not
             # published under text nobody wrote.
-            self._board.record_error(-1, f"publish {workspace}: no .lane publication text")
+            self._board.record_error(
+                -1, f"publish {workspace}: no .lane publication text"
+            )
             return
         parameters["title_file"] = str(title)
         parameters["body_file"] = str(body)
@@ -455,7 +476,9 @@ class CampaignReactor:
             f"## Operating rules\n\n{body}\n"
         )
 
-    def _launch_rebase(self, project: str, workspace: str, checkout_id: str, head: str, *, reason: str) -> None:
+    def _launch_rebase(
+        self, project: str, workspace: str, checkout_id: str, head: str, *, reason: str
+    ) -> None:
         """One integrator rebases the lane onto master and re-verifies."""
         refusal = (
             "rebasing onto origin/master conflicts"
@@ -471,9 +494,25 @@ class CampaignReactor:
             "stop. Do not publish; the harvest runs again on your commit. Report the "
             "machine trailer (LANE-BRANCH/COMMIT/QUICK/CLASSIFICATION).\n"
         )
-        self._launch_agent(project, workspace, checkout_id, prompt, label="rebase", name=f"rebase-{workspace}-{head[:12]}")
+        self._launch_agent(
+            project,
+            workspace,
+            checkout_id,
+            prompt,
+            label="rebase",
+            name=f"rebase-{workspace}-{head[:12]}",
+        )
 
-    def _launch_agent(self, project: str, workspace: str, checkout_id: str, prompt: str, *, label: str, name: str) -> None:
+    def _launch_agent(
+        self,
+        project: str,
+        workspace: str,
+        checkout_id: str,
+        prompt: str,
+        *,
+        label: str,
+        name: str,
+    ) -> None:
         try:
             if self.integration_dispatcher is not None:
                 self.integration_dispatcher(project, workspace, label)
@@ -547,9 +586,13 @@ class CampaignReactor:
                 continue
             trailer = outcome.get("lane_trailer")
             classification = (
-                trailer.get("LANE-CLASSIFICATION") if isinstance(trailer, Mapping) else None
+                trailer.get("LANE-CLASSIFICATION")
+                if isinstance(trailer, Mapping)
+                else None
             )
-            note = f"lane had nothing to publish: {classification or 'no classification'}"
+            note = (
+                f"lane had nothing to publish: {classification or 'no classification'}"
+            )
             for bead_id in self._campaign_beads_for_checkout(checkout_id):
                 parked, detail = self.bead_parker.park(bead_id, note, cwd=root)
                 if not parked:
@@ -570,12 +613,21 @@ class CampaignReactor:
             if not isinstance(spec, Mapping) or spec.get("kind") != "attested-agent":
                 continue
             checkout = spec.get("checkout")
-            if not isinstance(checkout, Mapping) or checkout.get("checkout_id") != checkout_id:
+            if (
+                not isinstance(checkout, Mapping)
+                or checkout.get("checkout_id") != checkout_id
+            ):
                 continue
             contract = spec.get("contract")
-            parameters = contract.get("parameters") if isinstance(contract, Mapping) else None
-            campaign = parameters.get("campaign") if isinstance(parameters, Mapping) else None
-            bead_ids = campaign.get("bead_ids") if isinstance(campaign, Mapping) else None
+            parameters = (
+                contract.get("parameters") if isinstance(contract, Mapping) else None
+            )
+            campaign = (
+                parameters.get("campaign") if isinstance(parameters, Mapping) else None
+            )
+            bead_ids = (
+                campaign.get("bead_ids") if isinstance(campaign, Mapping) else None
+            )
             if not isinstance(bead_ids, list):
                 continue
             created = str(record.get("created_at") or "")
@@ -632,21 +684,31 @@ class CampaignReactor:
             if not isinstance(spec, Mapping) or spec.get("kind") != "attested-agent":
                 continue
             contract = spec.get("contract")
-            parameters = contract.get("parameters") if isinstance(contract, Mapping) else None
-            campaign = parameters.get("campaign") if isinstance(parameters, Mapping) else None
-            bead_ids = campaign.get("bead_ids") if isinstance(campaign, Mapping) else None
+            parameters = (
+                contract.get("parameters") if isinstance(contract, Mapping) else None
+            )
+            campaign = (
+                parameters.get("campaign") if isinstance(parameters, Mapping) else None
+            )
+            bead_ids = (
+                campaign.get("bead_ids") if isinstance(campaign, Mapping) else None
+            )
             state = record.get("state") if isinstance(record, Mapping) else None
             phase = str(state.get("phase")) if isinstance(state, Mapping) else ""
             created = str(record.get("created_at") or "")
             for bead_id in bead_ids if isinstance(bead_ids, list) else []:
-                if isinstance(bead_id, str) and (bead_id not in newest or created > newest[bead_id][0]):
+                if isinstance(bead_id, str) and (
+                    bead_id not in newest or created > newest[bead_id][0]
+                ):
                     newest[bead_id] = (created, phase)
         for bead_id in claimed:
             phase = newest.get(bead_id, ("", ""))[1]
             if phase in {"cancelled", "failed", "timeout", "launch-failed"}:
                 released, detail = self.bead_releaser.release(bead_id, cwd=root)
                 if not released:
-                    self._board.record_error(-1, f"reconcile release {bead_id}: {detail}")
+                    self._board.record_error(
+                        -1, f"reconcile release {bead_id}: {detail}"
+                    )
 
     def _checkout_owned(self, checkout_id: str) -> bool:
         """Whether a running attested agent already works in this checkout.
@@ -721,7 +783,14 @@ class CampaignReactor:
         launched = 0
         for facts in lanes:
             action = advance(facts)
-            if action.kind in {"verify", "harvest", "publish", "integrate", "rebase", "review-fix"}:
+            if action.kind in {
+                "verify",
+                "harvest",
+                "publish",
+                "integrate",
+                "rebase",
+                "review-fix",
+            }:
                 # Smooth bursts: the rest of the backlog advances next tick.
                 if launched >= ADVANCE_DISPATCHES_PER_TICK:
                     continue
@@ -740,46 +809,113 @@ class CampaignReactor:
     def _dispatch_action(self, project: str, facts: Any, action: Any) -> None:
         workspace = facts.name
         checkout_id = facts.checkout_id
-        if action.kind in {"verify", "harvest", "publish", "integrate", "rebase", "review-fix", "retry"}:
-            self._spool({"kind": "dispatch", "project": project, "workspace": workspace,
-                         "head": facts.head[:12], "action": action.kind, "reason": action.reason})
+        if action.kind in {
+            "verify",
+            "harvest",
+            "publish",
+            "integrate",
+            "rebase",
+            "review-fix",
+            "retry",
+        }:
+            self._spool(
+                {
+                    "kind": "dispatch",
+                    "project": project,
+                    "workspace": workspace,
+                    "head": facts.head[:12],
+                    "action": action.kind,
+                    "reason": action.reason,
+                }
+            )
         try:
             if action.kind == "verify":
                 if self.verify_dispatcher is not None:
                     self.verify_dispatcher(project, workspace)
                 else:
                     subprocess.run(
-                        [self.agentctl_executable, "job", "start", project, "verify_affected", "--workspace", workspace],
-                        check=True, capture_output=True, text=True, timeout=60,
+                        [
+                            self.agentctl_executable,
+                            "job",
+                            "start",
+                            project,
+                            "verify_affected",
+                            "--workspace",
+                            workspace,
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
                     )
             elif action.kind == "harvest":
                 verify_job = facts.verify_job[0] if facts.verify_job else ""
                 if self.harvest_dispatcher is not None:
                     self.harvest_dispatcher(project, workspace, verify_job)
                 else:
-                    parameters = json.dumps({"affected_job": verify_job}, sort_keys=True) if verify_job else "{}"
+                    parameters = (
+                        json.dumps({"affected_job": verify_job}, sort_keys=True)
+                        if verify_job
+                        else "{}"
+                    )
                     subprocess.run(
-                        [self.agentctl_executable, "job", "start", project, "harvest", "--workspace", workspace,
-                         "--parameters-json", parameters],
-                        check=True, capture_output=True, text=True, timeout=60,
+                        [
+                            self.agentctl_executable,
+                            "job",
+                            "start",
+                            project,
+                            "harvest",
+                            "--workspace",
+                            workspace,
+                            "--parameters-json",
+                            parameters,
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
                     )
             elif action.kind == "publish":
                 receipt = facts.receipt.packet_id if facts.receipt else ""
                 if receipt:
-                    verified = facts.verify_job[0] if facts.verify_job and facts.verify_job[1] == "succeeded" else ""
+                    verified = (
+                        facts.verify_job[0]
+                        if facts.verify_job and facts.verify_job[1] == "succeeded"
+                        else ""
+                    )
                     self._publish(project, workspace, receipt, verified)
             elif action.kind == "integrate":
-                packet = self._receipt_payload(facts.receipt.packet_id) if facts.receipt else None
+                packet = (
+                    self._receipt_payload(facts.receipt.packet_id)
+                    if facts.receipt
+                    else None
+                )
                 root = self.project_roots[project]
-                verified = facts.verify_job[0] if facts.verify_job and facts.verify_job[1] == "succeeded" else ""
-                event = {"project": project, "packet": packet, "receipt_ref": facts.receipt.packet_id if facts.receipt else "", "affected_job": verified}
+                verified = (
+                    facts.verify_job[0]
+                    if facts.verify_job and facts.verify_job[1] == "succeeded"
+                    else ""
+                )
+                event = {
+                    "project": project,
+                    "packet": packet,
+                    "receipt_ref": facts.receipt.packet_id if facts.receipt else "",
+                    "affected_job": verified,
+                }
                 self._launch_agent(
-                    project, workspace, checkout_id, self._integration_prompt(root, event, workspace),
-                    label="integrator", name=f"integrate-{workspace}-{facts.head[:12]}",
+                    project,
+                    workspace,
+                    checkout_id,
+                    self._integration_prompt(root, event, workspace),
+                    label="integrator",
+                    name=f"integrate-{workspace}-{facts.head[:12]}",
                 )
             elif action.kind == "rebase":
                 self._launch_rebase(
-                    project, workspace, checkout_id, facts.head,
+                    project,
+                    workspace,
+                    checkout_id,
+                    facts.head,
                     reason="conflict" if facts.pull is not None else "evidence",
                 )
             elif action.kind == "review-fix":
@@ -787,9 +923,17 @@ class CampaignReactor:
                 pull = facts.pull
                 if repo and pull is not None:
                     self._launch_agent(
-                        project, workspace, checkout_id,
-                        self._review_fix_prompt(repo, str(pull.number), workspace, {"findings": pull.findings}),
-                        label="review-fix", name=f"review-fix-{pull.number}-{facts.head[:12]}",
+                        project,
+                        workspace,
+                        checkout_id,
+                        self._review_fix_prompt(
+                            repo,
+                            str(pull.number),
+                            workspace,
+                            {"findings": pull.findings},
+                        ),
+                        label="review-fix",
+                        name=f"review-fix-{pull.number}-{facts.head[:12]}",
                     )
             elif action.kind == "retry":
                 self._dispatch_retry(facts)
@@ -816,7 +960,10 @@ class CampaignReactor:
             return
         subprocess.run(
             [self.agentctl_executable, "job", "retry", job_id],
-            check=True, capture_output=True, text=True, timeout=60,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
 
     def _record_judgment(self, project: str, facts: Any, reason: str) -> None:
@@ -829,8 +976,13 @@ class CampaignReactor:
             "receipt": facts.receipt.packet_id if facts.receipt else None,
         }
         self._spool(
-            {"kind": "judgment", "project": project, "workspace": facts.name,
-             "receipt": facts.receipt.packet_id if facts.receipt else None, "reason": reason}
+            {
+                "kind": "judgment",
+                "project": project,
+                "workspace": facts.name,
+                "receipt": facts.receipt.packet_id if facts.receipt else None,
+                "reason": reason,
+            }
         )
 
     def _repo_slug(self, project: str) -> str:
@@ -840,7 +992,10 @@ class CampaignReactor:
         try:
             url = subprocess.run(
                 ["git", "-C", str(root), "remote", "get-url", "origin"],
-                capture_output=True, text=True, timeout=10, check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
             ).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             return ""
@@ -862,11 +1017,11 @@ class CampaignReactor:
             "test, or refute with concrete evidence. Post a threaded reply on every "
             f"open finding (gh api repos/{repo}/pulls/{pr}/comments/<comment_id>/replies "
             "-f body='...'), disposition style: \"Fixed in <sha> - one line.\" or "
-            "\"Refuted: <evidence>.\" with \"[review-fix lane]\" appended. Verify with "
+            '"Refuted: <evidence>." with "[review-fix lane]" appended. Verify with '
             "the project's devtools (devtools test <selection>; devtools verify "
             "--quick); rebase onto origin/master; push the branch. Then request "
-            f"re-review by commenting exactly \"@codex review\" on the PR "
-            f"(gh pr comment {pr} --repo {repo} --body \"@codex review\"). Update "
+            f're-review by commenting exactly "@codex review" on the PR '
+            f'(gh pr comment {pr} --repo {repo} --body "@codex review"). Update '
             ".lane/body.md's disposition table (uncommitted). Report per-finding "
             "dispositions with the machine trailer "
             "(LANE-BRANCH/COMMIT/QUICK/CLASSIFICATION).\n"

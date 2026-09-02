@@ -42,8 +42,7 @@ in
     in
     {
       checks.capture-spotify-static =
-        pkgs.runCommand "capture-spotify-static-check"
-          { nativeBuildInputs = [ pkgs.jq ]; }
+        pkgs.runCommand "capture-spotify-static-check" { nativeBuildInputs = [ pkgs.jq ]; }
           ''
             cat > unit.json <<'EOF_UNIT'
             ${unitJson}

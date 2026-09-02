@@ -14,9 +14,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-
 SCRIPT = Path(__file__).parents[3] / "scripts" / "sinnix-speaker-verify"
-SPEC = importlib.util.spec_from_loader("speaker_verify", SourceFileLoader("speaker_verify", str(SCRIPT)))
+SPEC = importlib.util.spec_from_loader(
+    "speaker_verify", SourceFileLoader("speaker_verify", str(SCRIPT))
+)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
