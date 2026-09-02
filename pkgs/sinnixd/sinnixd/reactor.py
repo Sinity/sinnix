@@ -988,6 +988,7 @@ class CampaignReactor:
     review_fix_dispatcher: IntegrationDispatcher | None = None
     harvest_dispatcher: IntegrationDispatcher | None = None
     verify_dispatcher: Callable[[str, str], str | None] | None = None
+    _closed_beads_cache: dict[str, tuple[float, tuple[str, ...]]] = field(default_factory=dict, init=False, repr=False)
     integrator_backend: str = "codex"
     # Workers default to luna, so the integrator is a sibling rather than the
     # same model judging its own family's output.
@@ -1748,13 +1749,36 @@ class CampaignReactor:
             return
         state_root = self.jobs_state_dir.parent
         try:
-            lanes = collect(project, state_root=state_root, receipt_pulls=latest_sweep_pulls(state_root))
+            lanes = collect(
+                project,
+                state_root=state_root,
+                receipt_pulls=latest_sweep_pulls(state_root),
+                closed_beads=self._closed_beads(project, root),
+            )
         except (OSError, ValueError) as error:
             self._board.record_error(-1, f"advance {project}: {error}")
             return
         for facts in lanes:
             action = advance(facts)
             self._dispatch_action(project, facts, action)
+
+    def _closed_beads(self, project: str, root: Path) -> tuple[str, ...]:
+        """Closed bead ids, read at most once a minute per project."""
+        cached = self._closed_beads_cache.get(project)
+        now = time.monotonic()
+        if cached is not None and now - cached[0] < 60:
+            return cached[1]
+        try:
+            rows = SubprocessBdReader(root).list()
+        except (OSError, subprocess.SubprocessError, ReactorError, ValueError, AttributeError):
+            return cached[1] if cached is not None else ()
+        closed = tuple(
+            str(row.get("id"))
+            for row in rows
+            if isinstance(row, Mapping) and row.get("status") == "closed" and row.get("id")
+        )
+        self._closed_beads_cache[project] = (now, closed)
+        return closed
 
     def _dispatch_action(self, project: str, facts: Any, action: Any) -> None:
         workspace = facts.name

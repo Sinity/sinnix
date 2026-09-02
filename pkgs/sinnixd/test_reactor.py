@@ -924,6 +924,7 @@ def test_the_reactor_advances_each_lane_from_its_facts(tmp_path: Path, monkeypat
     )
     monkeypatch.setattr(CampaignReactor, "_publish", lambda self, p, w, receipt: calls.append(("publish", w, receipt)))
     monkeypatch.setattr(CampaignReactor, "_repo_slug", lambda self, project: "o/r")
+    monkeypatch.setattr(CampaignReactor, "_closed_beads", lambda self, project, root: ())
     from sinnixd.lane_facts import Pull
 
     scenarios = [
