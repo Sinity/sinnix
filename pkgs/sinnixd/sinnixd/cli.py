@@ -361,6 +361,12 @@ def parser() -> argparse.ArgumentParser:
     lane_publish.add_argument("workspace")
     lane_publish.add_argument("--close", action="store_true")
     lane_publish.add_argument("--timeout-seconds", type=int, default=7200)
+    lane_authorize = lane_subcommands.add_parser(
+        "authorize",
+        help="Record the operator's decision for a workspace's current head; the reactor publishes past the scanner on it.",
+    )
+    lane_authorize.add_argument("workspace")
+    lane_authorize.add_argument("--reason", default="")
     for name in ("status", "stuck", "gc"):
         lane_command = lane_subcommands.add_parser(name)
         lane_command.add_argument("--project")
@@ -1110,6 +1116,46 @@ def main() -> int:
                         emit(line)
                     else:
                         _time.sleep(0.5)
+        return 0
+    elif arguments.command == "lane" and arguments.lane_command == "authorize":
+        list_request = _request("workspace.list", "git-workspaces", {})
+        try:
+            listing = call(arguments.socket, list_request)
+        except (OSError, ProtocolError, SinnixdClientError) as error:
+            listing = _client_error_response(list_request, error)
+        workspaces = (
+            listing.get("payload", {}).get("value", {}).get("workspaces", [])
+            if isinstance(listing, dict) and listing.get("ok") is True
+            else []
+        )
+        record = next(
+            (
+                item
+                for item in workspaces
+                if arguments.workspace in {item.get("name"), item.get("workspace_id")}
+            ),
+            None,
+        )
+        if record is None or not isinstance(record.get("path"), str):
+            print(json.dumps({"ok": False, "error": f"unknown workspace: {arguments.workspace}"}, sort_keys=True))
+            return 1
+        worktree = Path(record["path"])
+        head = subprocess.run(
+            ["git", "-C", str(worktree), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+        ).stdout.strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", head):
+            print(json.dumps({"ok": False, "error": "workspace head is unreadable"}, sort_keys=True))
+            return 1
+        authorization = {
+            "head": head,
+            "reason": arguments.reason,
+            "at": datetime.now(UTC).isoformat(),
+            "by": "operator",
+            "workspace": record.get("name"),
+        }
+        (worktree / ".lane").mkdir(exist_ok=True)
+        (worktree / ".lane" / "authorization.json").write_text(json.dumps(authorization, sort_keys=True) + "\n")
+        print(json.dumps({"ok": True, "authorization": authorization}, indent=1, sort_keys=True))
         return 0
     elif arguments.command == "lane" and arguments.lane_command == "publish":
         # The reply always names the harvest job once one exists; a failure
