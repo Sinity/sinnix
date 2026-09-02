@@ -13,7 +13,13 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 import tomllib
-from sinnix_mcp import ErrorCode, ErrorEnvelope, RequestEnvelope, ResponseEnvelope
+from sinnix_mcp import (
+    ErrorCode,
+    ErrorEnvelope,
+    OpaquePayload,
+    RequestEnvelope,
+    ResponseEnvelope,
+)
 
 from .api import (
     ProtocolError,
@@ -508,7 +514,13 @@ def _unavailable_response(request: RequestEnvelope) -> dict[str, object]:
         request_id=request.request_id,
         correlation_id=request.correlation_id,
         owner=request.owner,
-        error=ErrorEnvelope(ErrorCode.OWNER_UNAVAILABLE, "sinnixd is unavailable"),
+        error=ErrorEnvelope(
+            ErrorCode.OWNER_UNAVAILABLE,
+            "sinnixd is unavailable",
+            details=OpaquePayload.bounded(
+                {"operation": request.operation, "effect": "none"}
+            ),
+        ),
     ).to_dict()
 
 
@@ -521,9 +533,29 @@ def _client_error_response(
             request_id=request.request_id,
             correlation_id=request.correlation_id,
             owner=request.owner,
-            error=ErrorEnvelope(ErrorCode.RESPONSE_BUDGET_EXCEEDED, str(error)),
+            error=ErrorEnvelope(
+                ErrorCode.RESPONSE_BUDGET_EXCEEDED,
+                "sinnixd response budget exceeded",
+                details=OpaquePayload.bounded(
+                    {"operation": request.operation, "effect": error.effect}
+                ),
+            ),
         ).to_dict()
-    return _unavailable_response(request)
+    code = getattr(error, "code", ErrorCode.OWNER_UNAVAILABLE)
+    effect = getattr(error, "effect", "none")
+    operation = getattr(error, "operation", request.operation)
+    return ResponseEnvelope(
+        request_id=request.request_id,
+        correlation_id=request.correlation_id,
+        owner=request.owner,
+        error=ErrorEnvelope(
+            code,
+            "sinnixd is unavailable"
+            if code is ErrorCode.OWNER_UNAVAILABLE
+            else "sinnixd request failed",
+            details=OpaquePayload.bounded({"operation": operation, "effect": effect}),
+        ),
+    ).to_dict()
 
 
 _JOB_ID_RE = re.compile(
@@ -603,7 +635,24 @@ def _render_plain(response: Mapping[str, Any]) -> str:
     if response.get("ok") is not True:
         error = response.get("error")
         message = error.get("message") if isinstance(error, Mapping) else None
-        return f"ERROR: {message or 'request failed'}"
+        code = error.get("code") if isinstance(error, Mapping) else None
+        details = error.get("details") if isinstance(error, Mapping) else None
+        detail_value = details.get("value") if isinstance(details, Mapping) else None
+        operation = (
+            detail_value.get("operation") if isinstance(detail_value, Mapping) else None
+        )
+        effect = (
+            detail_value.get("effect") if isinstance(detail_value, Mapping) else None
+        )
+        context = ""
+        if isinstance(code, str):
+            context = f" [{code}"
+            if isinstance(operation, str):
+                context += f" operation={operation}"
+            if isinstance(effect, str):
+                context += f" effect={effect}"
+            context += "]"
+        return f"ERROR{context}: {message or 'request failed'}"
     payload = response.get("payload")
     value = payload.get("value") if isinstance(payload, Mapping) else payload
     if isinstance(value, str):
