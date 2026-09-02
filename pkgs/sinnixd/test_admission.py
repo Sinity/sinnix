@@ -205,6 +205,7 @@ def test_admission_claims_are_durable_and_ledger_explains_queue(
         "job_id": holder["job_id"],
         "pool": "normal",
         "estimate_memory_bytes": 1024 * 1024 * 1024,
+        "measured": {"samples": 0, "p50_bytes": None, "p90_bytes": None},
         "exclusive_keys": ["fixture:store"],
         "created_at": persisted["claims"][holder["job_id"]]["created_at"],
         "project_id": "fixture",
@@ -2094,3 +2095,31 @@ def test_a_lane_frozen_past_the_bound_is_cancelled(tmp_path: Path, monkeypatch: 
     assert systemd.thawed == [second["unit"]]
     assert systemd.stopped == [second["unit"]]
     assert subject.get(second["job_id"])["state"]["cancellation"]["reason"] == "pressure-preemption:frozen-too-long"
+
+
+def test_terminal_peaks_are_recorded_as_measured_envelopes(tmp_path: Path) -> None:
+    """Anti-vacuity: without the record, the admission view can only show
+    the declaration, which is what let a 16 GB claim stand against a 6 GB
+    peak for a day."""
+    systemd = FakeSystemd()
+    subject = GenericJobs(systemd, GenericJobStore(tmp_path / "state"))
+    peaks = [1, 3, 2]
+    for index, gib in enumerate(peaks):
+        job = subject.start(agent_spec((f"table:{index}",)))
+        systemd.unit_properties[job["unit"]] = {
+            "LoadState": "loaded",
+            "ActiveState": "inactive",
+            "Result": "success",
+            "ExecMainStatus": "0",
+            "InvocationID": str(index),
+            "MemoryPeak": str(gib * 1024**3),
+        }
+        subject.get(job["job_id"])
+
+    measured = subject.measured_envelope(agent_spec(("table:x",)))
+    assert measured["samples"] == 3
+    assert measured["p50_bytes"] == 2 * 1024**3
+    assert measured["p90_bytes"] == 3 * 1024**3
+    running = subject.start(agent_spec(("table:live",)))
+    claims = subject.admission_ledger()["claims"]
+    assert claims[running["job_id"]]["measured"]["samples"] == 3

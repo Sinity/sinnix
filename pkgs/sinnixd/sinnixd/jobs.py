@@ -6,6 +6,7 @@ import fcntl
 import contextlib
 import hashlib
 import json
+import logging
 import os
 import re
 import selectors
@@ -102,6 +103,13 @@ PRESSURE_PREEMPTION_COOLDOWN_SECONDS = 300.0
 # cancelled with retry semantics.
 FREEZE_MAX_SECONDS = 1200.0
 FREEZE_THAW_MIN_QUIET_SECONDS = 60.0
+# Measured whole-unit peaks per operation (declared jobs) or pool (agents):
+# evidence beside the declaration, never a claim. A learned claim was tried
+# and removed (one inflated sample serialized a campaign); a declaration
+# more than twice off the measured p90 is logged for the operator instead.
+ENVELOPE_SAMPLES = 50
+ENVELOPE_MIN_SAMPLES = 10
+ENVELOPE_DRIFT_RATIO = 2.0
 # A job blocked on host memory this long reserves its claim across every
 # pool, not just its own: lanes then drain until it fits. Per-pool
 # reservation alone let six agent lanes and eight harvests refill the
@@ -1660,6 +1668,10 @@ class GenericJobStore:
         return self.root / "capacity.json"
 
     @property
+    def envelopes_path(self) -> Path:
+        return self.root / "envelopes.json"
+
+    @property
     def inputs_root(self) -> Path:
         return self.root / "inputs"
 
@@ -2894,12 +2906,12 @@ class GenericJobs:
             ),
         }
 
-    @staticmethod
-    def _admission_claim(record: GenericJobRecord, estimate: int) -> dict[str, Any]:
+    def _admission_claim(self, record: GenericJobRecord, estimate: int) -> dict[str, Any]:
         return {
             "job_id": record.job_id,
             "pool": record.spec.pool,
             "estimate_memory_bytes": estimate,
+            "measured": self.measured_envelope(record.spec),
             "exclusive_keys": list(record.spec.exclusive_keys),
             "created_at": record.created_at,
             "project_id": record.spec.project_id,
@@ -4647,7 +4659,68 @@ class GenericJobs:
         if record.job_id not in self._spooled:
             self._spooled.add(record.job_id)
             self._spool_terminal_event(record)
+            self._record_envelope(record)
         self._terminal_cleanup(record)
+
+    @staticmethod
+    def _envelope_key(spec: GenericJobSpec) -> str:
+        if spec.kind == "declared-operation" and spec.operation:
+            return f"op:{spec.project_id}:{spec.operation}"
+        return f"pool:{spec.pool}"
+
+    def _envelopes(self) -> dict[str, list[int]]:
+        try:
+            value = json.loads(self.store.envelopes_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(value, Mapping):
+            return {}
+        return {
+            str(key): [int(item) for item in items if isinstance(item, (int, float))]
+            for key, items in value.items()
+            if isinstance(items, list)
+        }
+
+    def _record_envelope(self, record: GenericJobRecord) -> None:
+        peak = self._memory_observation(record).get("whole_unit_memory_peak_bytes")
+        if not isinstance(peak, int) or peak <= 0:
+            return
+        key = self._envelope_key(record.spec)
+        envelopes = self._envelopes()
+        samples = (envelopes.get(key) or [])[-(ENVELOPE_SAMPLES - 1) :] + [peak]
+        envelopes[key] = samples
+        try:
+            path = self.store.envelopes_path
+            temporary = path.with_suffix(".json.tmp")
+            temporary.write_text(json.dumps(envelopes, sort_keys=True) + "\n", encoding="utf-8")
+            os.replace(temporary, path)
+        except OSError:
+            return
+        measured = self.measured_envelope(record.spec, envelopes)
+        declared = self._estimate(record.spec, {})
+        if measured["samples"] >= ENVELOPE_MIN_SAMPLES and measured["p90_bytes"]:
+            ratio = declared / measured["p90_bytes"]
+            if ratio >= ENVELOPE_DRIFT_RATIO or ratio <= 1 / ENVELOPE_DRIFT_RATIO:
+                logging.getLogger(__name__).warning(
+                    "declaration drift for %s: declared %d bytes, measured p90 %d bytes over %d runs",
+                    key,
+                    declared,
+                    measured["p90_bytes"],
+                    measured["samples"],
+                )
+
+    def measured_envelope(
+        self, spec: GenericJobSpec, envelopes: Mapping[str, Sequence[int]] | None = None
+    ) -> dict[str, Any]:
+        """The measured peak distribution for this job's kind, or empty."""
+        samples = sorted((envelopes if envelopes is not None else self._envelopes()).get(self._envelope_key(spec)) or [])
+        if not samples:
+            return {"samples": 0, "p50_bytes": None, "p90_bytes": None}
+        return {
+            "samples": len(samples),
+            "p50_bytes": samples[(len(samples) - 1) // 2],
+            "p90_bytes": samples[min(len(samples) - 1, int(len(samples) * 0.9))],
+        }
 
     def _spool_terminal_event(self, record: GenericJobRecord) -> None:
         checkout = record.spec.checkout
