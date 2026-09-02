@@ -94,6 +94,11 @@ MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES = 2
 # held; admitting a replacement at once re-creates the stall and the next
 # probe evicts another lane (eight lanes in forty minutes on 2026-09-02).
 PRESSURE_PREEMPTION_COOLDOWN_SECONDS = 300.0
+# A job blocked on host memory this long reserves its claim across every
+# pool, not just its own: lanes then drain until it fits. Per-pool
+# reservation alone let six agent lanes and eight harvests refill the
+# headroom the corpus run waited for, for hours (2026-09-02).
+HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS = 900.0
 # A memory stall with this much RAM still available is swap-in churn, not
 # scarcity; cancelling a lane frees memory nobody is short of and only
 # destroys the work (five evictions in ten minutes with 6 GB free,
@@ -3774,6 +3779,16 @@ class GenericJobs:
         )
         return max(0, available - reserve)
 
+    @staticmethod
+    def _queued_seconds(record: "GenericJobRecord") -> float:
+        try:
+            started = datetime.fromisoformat(record.created_at)
+        except (TypeError, ValueError):
+            return 0.0
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=UTC)
+        return (datetime.now(UTC) - started).total_seconds()
+
     def _settling_charge(self, record: "GenericJobRecord", state: Mapping[str, Any]) -> int:
         """A job's estimate while it is too young to show in host memory, else 0."""
         try:
@@ -4097,6 +4112,7 @@ class GenericJobs:
                         and host_occupied
                         + estimate
                         + head_of_line_reserved.get(record.spec.pool, 0)
+                        + head_of_line_reserved.get("*", 0)
                         > host_memory_budget
                     )
                     exclusive_blocked = bool(
@@ -4124,6 +4140,11 @@ class GenericJobs:
                         and record.spec.pool not in head_of_line_reserved
                     ):
                         head_of_line_reserved[record.spec.pool] = estimate
+                        if (
+                            "*" not in head_of_line_reserved
+                            and self._queued_seconds(record) >= HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS
+                        ):
+                            head_of_line_reserved["*"] = estimate
                     if blocked_by:
                         admission = {
                             **(

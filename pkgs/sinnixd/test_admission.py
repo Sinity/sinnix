@@ -4,12 +4,14 @@ import subprocess
 import threading
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from sinnixd.jobs import (
     MEMORY_FULL_BLOCK_THRESHOLD,
     MEMORY_FULL_PREEMPT_THRESHOLD,
+    HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS,
     MEMORY_STALL_MAX_AVAILABLE_BYTES,
     PRESSURE_PREEMPTION_COOLDOWN_SECONDS,
     AdmissionConflictError,
@@ -1908,3 +1910,37 @@ def test_a_stall_with_ample_free_memory_is_not_a_preemption_reason() -> None:
 
     scarce = {**churn, "memory_available_bytes": MEMORY_STALL_MAX_AVAILABLE_BYTES - 1024**3}
     assert GenericJobs._active_pressure_reasons(scarce) == ["memory-stall"]
+
+
+def test_a_long_waiting_bulk_job_reserves_across_pools(tmp_path: Path) -> None:
+    """Anti-vacuity: with per-pool reservation only, the small agent lane is
+    admitted into the headroom the corpus run has waited fifteen minutes for."""
+    import dataclasses
+    from datetime import timedelta
+
+    gib = 1024**3
+    pressure = {
+        "memory_full_avg10": 0.0,
+        "memory_full_avg60": 0.0,
+        "io_full_avg10": 0.0,
+        "memory_total_bytes": 32 * gib,
+        "memory_available_bytes": 9 * gib,
+        "swap_total_bytes": 20 * gib,
+        "swap_free_bytes": 20 * gib,
+        "managed_memory_bytes": 0,
+    }
+    adapter = project(tmp_path / "project", (operation("corpus", pool="bulk", estimate_memory_bytes=8 * gib),))
+    systemd = FakeSystemd()
+    subject = GenericJobs(systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure)
+    corpus = subject.start_declared(
+        project=adapter, operation=adapter.operation("corpus"), correlation_id="corpus", parameters={}
+    )
+    assert corpus["state"]["phase"] == "queued"
+    with subject.store.locked(corpus["job_id"]):
+        record = subject.store.load(corpus["job_id"])
+        aged = (datetime.now(UTC) - timedelta(seconds=HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS + 60)).isoformat()
+        subject.store.save(dataclasses.replace(record, created_at=aged))
+
+    lane = subject.start(agent_spec(("table:lane",)))
+
+    assert subject.get(lane["job_id"])["state"]["phase"] == "queued"
