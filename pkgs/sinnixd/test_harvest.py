@@ -311,19 +311,55 @@ def test_unavailable_affected_tests_are_typed_and_spooled(
     }
 
 
-def test_redflags_flags_removed_production_lines_and_assertions() -> None:
+def test_redflags_flags_vanished_definitions_and_net_assertion_loss() -> None:
     status, flags = harvest._redflags(
         "diff --git a/polylogue/module.py b/polylogue/module.py\n"
         "-def removed():\n"
-        "+def retained():\n"
+        "-def renamed():\n"
+        "+def renamed_to():\n"
+        "+def renamed():\n"
         "diff --git a/tests/test_module.py b/tests/test_module.py\n"
         "-    assert old\n"
+        "-    assert older\n"
         "+    assert new\n"
     )
 
     assert status == 1
-    assert "FLAG: production lines removed (polylogue/)" in flags
-    assert "FLAG: test assertions removed" in flags
+    assert "FLAG: production definitions removed: removed" in flags
+    assert "FLAG: test assertions removed: 1 net" in flags
+
+
+def test_redflags_ignores_edits_that_keep_definitions_and_assertions() -> None:
+    """Anti-vacuity: the previous scanner flagged every removed line holding
+    ``self.`` or ``()``, which parked ordinary edits for a reader."""
+    status, flags = harvest._redflags(
+        "diff --git a/polylogue/module.py b/polylogue/module.py\n"
+        "-    value = self.compute()\n"
+        "+    value = self.compute(strict=True)\n"
+        "-def moved():\n"
+        "diff --git a/polylogue/other.py b/polylogue/other.py\n"
+        "+def moved():\n"
+        "diff --git a/tests/test_module.py b/tests/test_module.py\n"
+        "-    assert old\n"
+        "+    assert new\n"
+        "+    assert newer\n"
+    )
+
+    assert status == 0
+    assert not [flag for flag in flags if flag.startswith("FLAG:")]
+
+
+def test_redflags_flags_a_deleted_production_file() -> None:
+    status, flags = harvest._redflags(
+        "diff --git a/polylogue/gone.py b/polylogue/gone.py\n"
+        "deleted file mode 100644\n"
+        "-VALUE = 1\n"
+        "diff --git a/tests/test_gone.py b/tests/test_gone.py\n"
+        "deleted file mode 100644\n"
+    )
+
+    assert status == 1
+    assert "FLAG: production file deleted: polylogue/gone.py" in flags
 
 
 def test_redflags_flags_paths_outside_declared_write_scope() -> None:
@@ -632,8 +668,8 @@ def test_review_route_escalates_uncleared_and_risky_flags() -> None:
     result = route_review(
         changed_paths=("polylogue/module.py",),
         scanner_output=(
-            "FLAG: production lines removed (polylogue/)\n"
-            "EXPLAIN: production lines removed\n"
+            "FLAG: production definitions removed: helper\n"
+            "EXPLAIN: production definitions removed\n"
         ),
     )
     assert result.route == "coordinator"

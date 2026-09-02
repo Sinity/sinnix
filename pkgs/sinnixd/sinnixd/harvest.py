@@ -515,12 +515,15 @@ def _redflags(
 
     production = False
     tests = False
-    production_removed = False
     touched_production_modules: set[str] = set()
-    test_assertion_removed = False
+    removed_definitions: dict[str, str] = {}
+    added_definitions: set[str] = set()
+    assertions_removed = 0
+    assertions_added = 0
     new_modules: list[str] = []
     touched_tests: set[str] = set()
     pending_new_file: str | None = None
+    definition = re.compile(r"^[-+]\s*(?:async\s+)?(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)")
     for line in diff.splitlines():
         if line.startswith("diff --git "):
             path = line.split(" b/", 1)[-1]
@@ -539,15 +542,27 @@ def _redflags(
             and not pathlib.PurePosixPath(pending_new_file).name.startswith("__")
         ):
             new_modules.append(pending_new_file)
-        if production and line.startswith("-") and not line.startswith("---"):
-            if re.search(r"def |self\.|\(\)", line):
-                production_removed = True
-        if tests and line.startswith("-") and "assert " in line:
-            test_assertion_removed = True
+        if production and line.startswith("deleted file mode ") and pending_new_file:
+            flag(f"production file deleted: {pending_new_file}")
+        if production and not line.startswith(("---", "+++")):
+            match = definition.match(line)
+            if match and line.startswith("-"):
+                removed_definitions.setdefault(match.group(1), pending_new_file or "")
+            elif match:
+                added_definitions.add(match.group(1))
+        if tests and "assert " in line and not line.startswith(("---", "+++")):
+            if line.startswith("-"):
+                assertions_removed += 1
+            elif line.startswith("+"):
+                assertions_added += 1
         if tests and line.startswith("deleted file mode "):
             flag("test files deleted")
-    if production_removed:
-        flag("production lines removed (polylogue/)")
+    # Every edit removes lines; a definition that disappears from the diff
+    # without reappearing (rename, move, or plain deletion) is what a reader
+    # has to judge. Edits inside a function are the hosted review's job.
+    gone = sorted(name for name in removed_definitions if name not in added_definitions)
+    if gone:
+        flag("production definitions removed: " + ", ".join(gone[:8]))
     # A new module nothing tests passes every other gate: the scan looks for
     # removals, and affected-test selection has nothing to select.
     for module in new_modules:
@@ -568,8 +583,10 @@ def _redflags(
         re.MULTILINE,
     ):
         flag("assertion polarity change")
-    if test_assertion_removed:
-        flag("test assertions removed")
+    # Rewritten assertions come and go in pairs; only a net loss of
+    # assertions means the diff observes less than it used to.
+    if assertions_removed > assertions_added:
+        flag(f"test assertions removed: {assertions_removed - assertions_added} net")
     if re.search(r"^\+.*(xfail|skipif|pytest\.mark\.skip)", diff, re.MULTILINE):
         flag("new xfail/skip")
     if re.search(

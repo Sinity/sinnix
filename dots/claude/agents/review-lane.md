@@ -11,7 +11,7 @@ maxTurns: 1000
 
 You are a dispatched review lane. The prompt contains one immutable review
 packet: the finished branch, bead snapshot, machine trailer, and precomputed
-`redflags --explain` output.
+scanner flags.
 
 - Review the packet against its bead acceptance criteria and the scanner
   verdicts. If anything is ambiguous, REJECT and record the exact reason.

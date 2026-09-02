@@ -35,7 +35,7 @@ _SAFE_REVIEW_VERDICTS = frozenset(
 
 
 def _flag_cleared(flag: str, verdicts: Sequence[str]) -> bool:
-    if flag.startswith("production lines removed"):
+    if flag.startswith("production definitions removed") or flag.startswith("production file deleted"):
         return "safe deletion" in verdicts
     if flag.startswith("test assertions removed"):
         return "safe deletion" in verdicts
@@ -149,30 +149,6 @@ def route_review(
     )
 
 
-def _scanner(worktree: Path, base: str) -> str:
-    candidates = [
-        *(
-            parent / "dots/_ai/skills/orchestrate/scripts/redflags"
-            for parent in (worktree.resolve(), *worktree.resolve().parents)
-        ),
-        Path("/realm/project/sinnix/dots/_ai/skills/orchestrate/scripts/redflags"),
-    ]
-    script = next((candidate for candidate in candidates if candidate.is_file()), None)
-    if script is None:
-        raise RuntimeError("redflags scanner is unavailable")
-    try:
-        result = subprocess.run(
-            [str(script), "--explain", str(worktree), base],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=120,
-        )
-    except (OSError, subprocess.SubprocessError) as error:
-        raise RuntimeError("redflags scanner is unavailable") from error
-    return result.stdout + result.stderr
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sinnixd-review-route")
     parser.add_argument("worktree", type=Path)
@@ -188,7 +164,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             check=True,
             timeout=60,
         ).stdout.splitlines()
-        output = _scanner(args.worktree, args.base)
+        diff = subprocess.run(
+            ["git", "diff", f"{args.base}...HEAD"],
+            cwd=args.worktree,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout
+        from sinnixd.harvest import _redflags
+
+        _status, flags = _redflags(diff, changed_paths=names)
+        output = "\n".join(flags)
         print(
             json.dumps(
                 route_review(
