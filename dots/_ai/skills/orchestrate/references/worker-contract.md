@@ -15,6 +15,11 @@ repeated here.
    test tiers run once, as declared jobs, after you finish; the harness
    refuses them inside a lane. Fix, test, iterate until green. Do not spawn
    review subagents — hosted PR review and the test oracle are the check.
+   `devtools verify` selects from the checkout's one testmon datafile
+   (`.cache/testmon/testmondata`) and writes back; a corrupt or foreign
+   datafile stops the run with `graph_unusable` — delete the datafile and
+   rerun. A selected green proves the selected scope only; say which
+   selection ran.
 3. **Red first for bug fixes.** Demonstrate the failure, then fix it, then show
    green. Each new test names what mutation would make it red.
 4. **Fail-closed needs a derivation, not a reflex.** Before adding a guard

@@ -9,11 +9,11 @@ Task state lives OUTSIDE every checkout: canonical Beads/Dolt databases under
 `/realm/state/tasks/<project>`, reached via the repo's `.beads` redirect
 (`bd where` confirms). `bd` is the only write path. **`bd` routes by cwd** — run it
 from the owning repo or IDs resolve against the wrong backend (filing
-included: a create from the wrong cwd lands in the wrong project). Set
-`BEADS_ACTOR` in agent sessions; the default records the operator as author.
-Feature branches never touch
-task state; claims, notes, and closures generate no git commits. Historical
-beads-in-git snapshots are immutable evidence, never live state.
+included: a create from the wrong cwd lands in the wrong project). Pass
+`--actor` or set `BEADS_ACTOR`; the default records the operator as author.
+Feature branches never touch task state; claims, notes, and closures generate
+no git commits. Historical beads-in-git snapshots are immutable evidence, never
+live state.
 
 ## Reading work
 
