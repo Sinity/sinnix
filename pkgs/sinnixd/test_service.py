@@ -4771,6 +4771,71 @@ def test_dropping_a_workspace_deletes_its_jobs_records_and_artifacts(
     assert (jobs.store.records_root / f"{other['job_id']}.json").exists()
 
 
+def test_an_ad_hoc_rerun_supersedes_its_predecessor_but_never_a_plan_sibling(
+    tmp_path: Path,
+) -> None:
+    """Supersession follows ownership, not just the operation name.
+
+    Anti-vacuity, both directions: dropping the plan-contract exemption makes
+    node "b" delete its sibling node "a" (they share operation and checkout);
+    dropping the supersession makes the second ad-hoc `check` leave the first
+    one's record and log behind, which is what nothing else deletes.
+    """
+    write_adapter(tmp_path)
+    initialize_git_checkout(tmp_path)
+    systemd = FakeSystemdJobs()
+    jobs = generic_jobs(tmp_path, systemd)
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=jobs)
+    adapter = ProjectCatalog([tmp_path]).get("fixture")
+
+    def finish(job_id: str) -> str:
+        systemd.properties.update(
+            {"ActiveState": "inactive", "SubState": "dead", "ExecMainStatus": "0"}
+        )
+        assert jobs.get(job_id)["state"]["terminal"]
+        systemd.properties.update({"ActiveState": "active", "SubState": "running"})
+        return job_id
+
+    def ad_hoc() -> str:
+        return finish(
+            jobs.start_declared(
+                project=adapter,
+                operation=adapter.operation("check"),
+                correlation_id="ad-hoc",
+                parameters={},
+                checkout=service.projects.checkout("fixture", "default"),
+            )["job_id"]
+        )
+
+    def plan_node(node_id: str) -> str:
+        return finish(
+            jobs.start_declared(
+                project=adapter,
+                operation=adapter.operation("check"),
+                correlation_id="plan",
+                parameters={},
+                checkout=service.projects.checkout("fixture", "default"),
+                contract={"plan": {"plan_id": "plan-1", "node_id": node_id}},
+            )["job_id"]
+        )
+
+    first_node = plan_node("a")
+    second_node = plan_node("b")
+    first_ad_hoc = ad_hoc()
+    log = jobs.store.load(first_ad_hoc).log_path
+    log.write_text("first ad-hoc run\n")
+    second_ad_hoc = ad_hoc()
+
+    # A plan owns its nodes: neither sibling deletes the other, and an ad-hoc
+    # run of the same operation does not delete them either.
+    assert (jobs.store.records_root / f"{first_node}.json").exists()
+    assert (jobs.store.records_root / f"{second_node}.json").exists()
+    # An ad-hoc rerun is the same question re-asked, and answers it.
+    assert not (jobs.store.records_root / f"{first_ad_hoc}.json").exists()
+    assert not log.exists()
+    assert (jobs.store.records_root / f"{second_ad_hoc}.json").exists()
+
+
 def test_a_scheduled_runs_superseded_predecessor_is_deleted_with_its_artifacts(
     tmp_path: Path,
 ) -> None:

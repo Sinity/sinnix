@@ -2406,32 +2406,46 @@ class GenericJobStore:
             and record.spec.checkout.get("path") == checkout_path
         )
 
-    def superseded_records(self, record: GenericJobRecord) -> tuple[str, ...]:
-        """Terminal records this scheduled run replaces.
+    @staticmethod
+    def _owned_elsewhere(record: GenericJobRecord) -> bool:
+        """True when something other than the operation itself owns this record.
 
-        A timer firing is the only job nothing else owns: no workspace to drop
-        it with, no plan or packet holding its id. Its previous terminal run of
-        the same schedule on the same checkout has no reader left. Every other
-        job's record belongs to the workspace, plan, or packet that asked for
-        it and is deleted with that owner.
+        A plan holds its nodes' job ids, so a node's record is deleted with the
+        plan (or with the workspace it ran in), never by a sibling node
+        finishing the same operation on the same checkout.
         """
-        schedule_id = record.spec.dimensions.get("schedule_id")
+        return isinstance(record.spec.contract.get("plan"), Mapping)
+
+    def superseded_records(self, record: GenericJobRecord) -> tuple[str, ...]:
+        """Terminal records this run replaces.
+
+        The same operation, on the same checkout, is the same question: a timer
+        firing hourly and an operator re-running a gate both make the previous
+        terminal answer unreadable. Records a plan owns are exempt — the plan
+        outlives any one node.
+        """
         checkout = (
             record.spec.checkout.get("path")
             if isinstance(record.spec.checkout, Mapping)
             else None
         )
-        if not isinstance(schedule_id, str) or not isinstance(checkout, str):
+        if (
+            record.spec.operation is None
+            or not isinstance(checkout, str)
+            or self._owned_elsewhere(record)
+        ):
             return ()
         return tuple(
             other.job_id
             for other in self.list()
             if other.job_id != record.job_id
             and other.state.get("terminal")
-            and other.spec.dimensions.get("schedule_id") == schedule_id
+            and other.spec.operation == record.spec.operation
+            and other.spec.project_id == record.spec.project_id
             and isinstance(other.spec.checkout, Mapping)
             and other.spec.checkout.get("path") == checkout
             and other.created_at < record.created_at
+            and not self._owned_elsewhere(other)
         )
 
 
@@ -3046,7 +3060,6 @@ class GenericJobs:
         contract: Mapping[str, Any] | None = None,
         dependency_job_ids: Sequence[str] = (),
         dimensions: Mapping[str, Any] | None = None,
-        plan_node: bool = False,
     ) -> dict[str, Any]:
         if principal not in {"agent-control", "operator"}:
             raise ValueError(
@@ -3066,7 +3079,6 @@ class GenericJobs:
                 contract or {},
                 tuple(dependency_job_ids),
                 dimensions,
-                plan_node,
             )
 
     def _start_declared_locked(
@@ -3081,7 +3093,6 @@ class GenericJobs:
         contract: Mapping[str, Any],
         external_dependency_job_ids: tuple[str, ...] = (),
         dimensions: Mapping[str, Any] | None = None,
-        plan_node: bool = False,
     ) -> dict[str, Any]:
         if operation.name in lineage:
             raise ValueError("declared operation dependency cycle")

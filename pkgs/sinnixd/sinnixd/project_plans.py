@@ -636,7 +636,6 @@ class ProjectPlanExecutor:
                             }
                         },
                         dependency_job_ids=dependency_ids,
-                        plan_node=True,
                     )["job_id"]
                     self.store.save(record)
                 pending.pop(node["node_id"])
