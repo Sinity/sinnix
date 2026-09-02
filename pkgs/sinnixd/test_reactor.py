@@ -1931,3 +1931,22 @@ def test_a_finished_lane_is_verified_once_then_harvested(tmp_path: Path, monkeyp
     reactor._harvest_after_verification({"kind": "declared-operation", "job_id": verify_job, "phase": "succeeded"})
     reactor._harvest_after_verification({"kind": "declared-operation", "job_id": verify_job, "phase": "succeeded"})
     assert harvested == [("polylogue", "packet-p-9", verify_job)]
+
+
+def test_an_operator_authorization_for_the_head_clears_judgment() -> None:
+    """Anti-vacuity: lane publish re-minted the same flags and the reactor
+    parked the lane again (packet-polylogue-a74ru, 2026-09-02)."""
+    flagged = {
+        "packet": {
+            "head": "e" * 40,
+            "redflag_status": 1,
+            "redflags": ["FLAG: production definitions removed: helper"],
+            "lane_trailer": {"LANE-QUICK": "green"},
+            "verification": {"state": "tests-run", "runs": {}},
+        }
+    }
+    assert CampaignReactor._needs_judgment(flagged) is not None
+    authorized = {"packet": {**flagged["packet"], "authorization": {"head": "e" * 40, "by": "operator"}}}
+    assert CampaignReactor._needs_judgment(authorized) is None
+    stale = {"packet": {**flagged["packet"], "authorization": {"head": "f" * 40, "by": "operator"}}}
+    assert CampaignReactor._needs_judgment(stale) is not None

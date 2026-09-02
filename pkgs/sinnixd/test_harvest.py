@@ -1121,3 +1121,16 @@ def test_redflags_catches_private_evidence_references() -> None:
     )
     assert status == 1
     assert "FLAG: private evidence reference in tracked text" in flags
+
+
+def test_authorization_binds_the_head(tmp_path: Path) -> None:
+    from sinnixd.harvest import HarvestContext, _authorization
+
+    context = HarvestContext(
+        worktree=tmp_path, project_id="polylogue", workspace_id="worktree-x", job_id="job-1", state_root=tmp_path / "state"
+    )
+    assert _authorization(context, "a" * 40) is None
+    (tmp_path / ".lane").mkdir()
+    (tmp_path / ".lane" / "authorization.json").write_text(json.dumps({"head": "a" * 40, "reason": "reviewed by hand"}))
+    assert _authorization(context, "a" * 40) == {"head": "a" * 40, "reason": "reviewed by hand", "at": "", "by": "operator"}
+    assert _authorization(context, "b" * 40) is None

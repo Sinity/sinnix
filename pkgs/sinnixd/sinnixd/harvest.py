@@ -204,6 +204,27 @@ def _read_text(path: Path, description: str) -> str:
         raise HarvestError(f"{description} is unavailable") from error
 
 
+def _authorization(context: HarvestContext, head: str) -> dict[str, Any] | None:
+    """The operator's authorization for this exact head, if one was recorded.
+
+    `agentctl lane authorize` writes .lane/authorization.json in the
+    worktree; it binds a head, so a later commit needs a fresh decision.
+    """
+    path = context.worktree / ".lane" / "authorization.json"
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(value, Mapping) or value.get("head") != head:
+        return None
+    return {
+        "head": head,
+        "reason": str(value.get("reason") or ""),
+        "at": str(value.get("at") or ""),
+        "by": str(value.get("by") or "operator"),
+    }
+
+
 def _lane_artifact(context: HarvestContext, name: str) -> str | None:
     """Read one of the publication artifacts the worker contract has the lane write.
 
@@ -760,6 +781,7 @@ def compile_packet(
         "verification": _verification_evidence(context.worktree, head),
         "redflags": redflags,
         "redflag_status": redflag_status,
+        "authorization": _authorization(context, head),
         "review_route": review_route.to_dict(),
         "full_diff_ref": f"sinnix://jobs/{context.job_id}/artifacts/{packet_id}.diff",
         "worktree_unstaged_sha256": _digest(unstaged),
@@ -1182,6 +1204,12 @@ def authorize(
     trailer_lines = [f"Receipt: {receipt.get('packet_id', receipt_ref)}"]
     if bead_id:
         trailer_lines.append(f"Bead: {bead_id}")
+    authorization = receipt.get("authorization")
+    if isinstance(authorization, Mapping) and authorization.get("head"):
+        trailer_lines.append(
+            f"Authorized-By: {authorization.get('by') or 'operator'}"
+            + (f" ({authorization['reason']})" if authorization.get("reason") else "")
+        )
     body = body.rstrip() + "\n\n---\n" + "\n".join(trailer_lines) + "\n"
     pre_harvest_head = current_head
     pre_harvest_branch = _git(run, context.worktree, "branch", "--show-current")

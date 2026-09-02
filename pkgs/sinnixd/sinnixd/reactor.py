@@ -1445,6 +1445,14 @@ class CampaignReactor:
         packet = event.get("packet")
         if not isinstance(packet, Mapping):
             return "no receipt"
+        authorization = packet.get("authorization")
+        if (
+            isinstance(authorization, Mapping)
+            and authorization.get("head")
+            and authorization.get("head") == packet.get("head")
+        ):
+            # The operator decided this head; flags are recorded, not judged.
+            return None
         if packet.get("redflag_status"):
             flags = packet.get("redflags")
             named = ", ".join(str(f) for f in flags) if isinstance(flags, list) else ""
