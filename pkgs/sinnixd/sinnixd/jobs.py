@@ -89,6 +89,10 @@ MEMORY_FULL_PREEMPT_THRESHOLD = 25.0
 PREEMPT_SWAP_FREE_FRACTION = 0.10
 ACTIVE_PRESSURE_GRACE_SECONDS = 2.0
 MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES = 2
+# After a pressure preemption the host is still paging out what the victim
+# held; admitting a replacement at once re-creates the stall and the next
+# probe evicts another lane (eight lanes in forty minutes on 2026-09-02).
+PRESSURE_PREEMPTION_COOLDOWN_SECONDS = 300.0
 # Host IO PSI cannot attribute stalls to the managed plane: this host idles
 # with io full avg10 in the teens while managed jobs write megabytes. Gating
 # admission or choosing preemption victims on host IO therefore punishes work
@@ -2618,6 +2622,7 @@ class GenericJobs:
     _admission_lock: RLock = field(default_factory=RLock, init=False, repr=False)
     _spooled: set[str] = field(default_factory=set, init=False, repr=False)
     _active_pressure_since: float | None = field(default=None, init=False, repr=False)
+    _last_pressure_preemption: float | None = field(default=None, init=False, repr=False)
     _memory_full_block_probe_count: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -3806,7 +3811,12 @@ class GenericJobs:
             or self._memory_full_block_probe_count
             >= MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES
         )
-        return swap_exhausted or memory_pressure_sustained
+        cooling = (
+            self._last_pressure_preemption is not None
+            and time.monotonic() - self._last_pressure_preemption
+            < PRESSURE_PREEMPTION_COOLDOWN_SECONDS
+        )
+        return swap_exhausted or memory_pressure_sustained or cooling
 
     @staticmethod
     def _active_pressure_reasons(pressure: Mapping[str, float]) -> list[str]:
@@ -3943,6 +3953,8 @@ class GenericJobs:
             return None
         victim = self._preempt_pressure_victim(pressure, reasons)
         self._active_pressure_since = now
+        if victim is not None:
+            self._last_pressure_preemption = now
         return victim
 
     def _admit_locked(self) -> None:
