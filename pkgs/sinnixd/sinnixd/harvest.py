@@ -173,7 +173,9 @@ def _latest_lane_job(context: HarvestContext) -> tuple[str | None, str | None]:
         bead = _lane_bead(spec.get("contract") or {})
         if newest is None or created > newest[0]:
             newest = (created, job_id)
-        if bead is not None and (newest_with_bead is None or created > newest_with_bead[0]):
+        if bead is not None and (
+            newest_with_bead is None or created > newest_with_bead[0]
+        ):
             newest_with_bead = (created, job_id, bead)
     # Review-fix and integrator lanes share the checkout and carry no bead;
     # the lane that names its bead is the publication's identity.
@@ -437,7 +439,89 @@ def _lane_write_scope(
     return sorted(candidates, key=lambda item: item[0])[-1][1] if candidates else ()
 
 
-def _ignored_paths(run: Run, worktree: Path, changed_paths: Sequence[str]) -> tuple[str, ...]:
+def _lane_oracle_command(
+    context: HarvestContext, *, lane_job_id: str | None
+) -> str | None:
+    """Read the packet-declared oracle from the attested job dimensions."""
+    records_root = context.state_root / "jobs"
+    paths = (
+        [records_root / f"{lane_job_id}.json"]
+        if lane_job_id
+        else sorted(records_root.glob("*.json"))
+    )
+    candidates: list[tuple[str, str]] = []
+    for record_path in paths:
+        try:
+            record = json.loads(record_path.read_text())
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        spec = record.get("spec") if isinstance(record, Mapping) else None
+        checkout = spec.get("checkout") if isinstance(spec, Mapping) else None
+        state = record.get("state") if isinstance(record, Mapping) else None
+        dimensions = spec.get("dimensions") if isinstance(spec, Mapping) else None
+        command = (
+            dimensions.get("oracle_command")
+            if isinstance(dimensions, Mapping)
+            else None
+        )
+        if (
+            isinstance(spec, Mapping)
+            and spec.get("kind") == "attested-agent"
+            and isinstance(checkout, Mapping)
+            and checkout.get("checkout_id") == context.workspace_id
+            and isinstance(state, Mapping)
+            and state.get("phase") == "succeeded"
+            and isinstance(command, str)
+            and command.strip()
+        ):
+            candidates.append((str(record.get("created_at", "")), command.strip()))
+    return sorted(candidates, key=lambda item: item[0])[-1][1] if candidates else None
+
+
+def _oracle_evidence(context: HarvestContext, command: str, run: Run) -> dict[str, Any]:
+    if len(command.encode()) > 4_096 or "\x00" in command:
+        raise HarvestError("harvest oracle command exceeds its bounded limit")
+    result = _command(run, ["bash", "-lc", command], cwd=context.worktree, timeout=60)
+    stdout = result.stdout or ""
+    stderr = result.stderr or ""
+    return {
+        "command": command,
+        "command_sha256": _digest(command),
+        "stdout": stdout,
+        "stderr": stderr,
+        "exit_code": result.returncode,
+        "output_sha256": _digest(
+            json.dumps({"stdout": stdout, "stderr": stderr}, sort_keys=True)
+        ),
+    }
+
+
+def _valid_oracle_receipt(value: Any) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    command = value.get("command")
+    stdout = value.get("stdout")
+    stderr = value.get("stderr")
+    exit_code = value.get("exit_code")
+    return (
+        isinstance(command, str)
+        and bool(command.strip())
+        and len(command.encode()) <= 4_096
+        and "\x00" not in command
+        and isinstance(stdout, str)
+        and isinstance(stderr, str)
+        and isinstance(exit_code, int)
+        and not isinstance(exit_code, bool)
+        and exit_code == 0
+        and value.get("command_sha256") == _digest(command)
+        and value.get("output_sha256")
+        == _digest(json.dumps({"stdout": stdout, "stderr": stderr}, sort_keys=True))
+    )
+
+
+def _ignored_paths(
+    run: Run, worktree: Path, changed_paths: Sequence[str]
+) -> tuple[str, ...]:
     """Changed paths the repository ignores: committed only by force."""
     if not changed_paths:
         return ()
@@ -480,7 +564,9 @@ def _redflags(
     new_modules: list[str] = []
     touched_tests: set[str] = set()
     pending_new_file: str | None = None
-    definition = re.compile(r"^[-+]\s*(?:async\s+)?(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)")
+    definition = re.compile(
+        r"^[-+]\s*(?:async\s+)?(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)"
+    )
     for line in diff.splitlines():
         if line.startswith("diff --git "):
             path = line.split(" b/", 1)[-1]
@@ -536,7 +622,9 @@ def _redflags(
         )
     # A polarity change replaces a success assertion with a failure one; an
     # added ``pytest.raises`` beside untouched assertions is new coverage.
-    if re.search(r"^-\s*assert .*== 0\b|^-.*pytest\.raises", diff, re.MULTILINE) and re.search(
+    if re.search(
+        r"^-\s*assert .*== 0\b|^-.*pytest\.raises", diff, re.MULTILINE
+    ) and re.search(
         r"^\+\s*assert .*exit_code == 1|^\+.*pytest\.raises", diff, re.MULTILINE
     ):
         flag("assertion polarity change")
@@ -548,7 +636,11 @@ def _redflags(
         flag("new xfail/skip")
     # Tracked text is public. A pointer into the operator's private stores
     # is not something a reader can clear from the diff alone.
-    if re.search(r"^\+.*(rawlog|/realm/data/|/realm/state/polylogue|knowledgebase/logs)", diff, re.MULTILINE):
+    if re.search(
+        r"^\+.*(rawlog|/realm/data/|/realm/state/polylogue|knowledgebase/logs)",
+        diff,
+        re.MULTILINE,
+    ):
         flag("private evidence reference in tracked text")
     if re.search(
         r"^diff --git a/devtools/(consumer_reachability|verify\.py|verify_patterns|patterns/baselines)",
@@ -639,6 +731,7 @@ def compile_packet(
     bead_id: str | None = None,
     close_reason: str | None = None,
     affected_job: str | None = None,
+    oracle_command: str | None = None,
     run: Run = subprocess.run,
 ) -> dict[str, Any]:
     """Compile a review packet and stop before any publication side effect."""
@@ -681,6 +774,20 @@ def compile_packet(
         if path
     )
     write_scope = _lane_write_scope(context, lane_job_id=lane_job_id)
+    oracle_command = oracle_command or _lane_oracle_command(
+        context, lane_job_id=lane_job_id
+    )
+    oracle = _oracle_evidence(context, oracle_command, run) if oracle_command else None
+    if oracle is not None and oracle["exit_code"] != 0:
+        result = {
+            "outcome": GATE_RED,
+            "message": "harvest reality oracle is red",
+            "oracle": oracle,
+        }
+        _append_event(
+            context.spool, {"kind": "harvest", **result, "job_id": context.job_id}
+        )
+        return result
     diffstat = _git(run, context.worktree, "diff", "--stat", f"{context.base}...HEAD")
     redflag_status, redflags = _redflags(
         diff,
@@ -717,6 +824,7 @@ def compile_packet(
         # Tests run exactly once, as the declared verify_affected job; the
         # receipt records which verdict it was minted against, never a scrape.
         "verification": {"state": "from-job" if affected_job else "absent"},
+        "oracle": oracle,
         "redflags": redflags,
         "redflag_status": redflag_status,
         "authorization": _authorization(context, head),
@@ -754,7 +862,14 @@ def compile_packet(
     }
 
 
-def _record_publication(context: HarvestContext, reference: str, *, tests: str, affected_job: str | None, pr: str) -> None:
+def _record_publication(
+    context: HarvestContext,
+    reference: str,
+    *,
+    tests: str,
+    affected_job: str | None,
+    pr: str,
+) -> None:
     """Write the publication verdict into the receipt the PR names.
 
     The sweep merges only a PR whose receipt carries passed affected tests
@@ -948,17 +1063,24 @@ def _gate(context: HarvestContext, run: Run) -> tuple[bool, str]:
 _UNAVAILABLE_DIAGNOSES = frozenset({"native_testmon_graph_unavailable"})
 
 
-def _affected_from_job(context: HarvestContext, affected_job: str, *, current_head: str) -> tuple[str, str]:
+def _affected_from_job(
+    context: HarvestContext, affected_job: str, *, current_head: str
+) -> tuple[str, str]:
     """Read a declared verify_affected job's verdict instead of running one.
 
     The reactor runs affected verification as a declared job (cached by tree
     and environment) before the harvest; the job's typed result is the
     evidence, so the same tree is never verified twice.
     """
-    if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", affected_job):
+    if not re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+        affected_job,
+    ):
         raise HarvestError("affected job ID is malformed")
     try:
-        record = json.loads((context.state_root / "jobs" / f"{affected_job}.json").read_text())
+        record = json.loads(
+            (context.state_root / "jobs" / f"{affected_job}.json").read_text()
+        )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise HarvestError("affected job record is unavailable") from error
     spec = record.get("spec") if isinstance(record, Mapping) else None
@@ -985,12 +1107,18 @@ def _affected_from_job(context: HarvestContext, affected_job: str, *, current_he
             payload = {}
     head = str(checkout.get("head") or "")
     if head and head != current_head:
-        return "unavailable", f"affected job {affected_job} verified {head[:12]}, not {current_head[:12]}"
+        return (
+            "unavailable",
+            f"affected job {affected_job} verified {head[:12]}, not {current_head[:12]}",
+        )
     if phase == "succeeded":
         return "passed", f"affected verification: declared job {affected_job} succeeded"
     diagnosis = str(payload.get("diagnosis") or "")
     detail = json.dumps({"job": affected_job, "phase": phase, "diagnosis": diagnosis})
-    if diagnosis in _UNAVAILABLE_DIAGNOSES or diagnosis == "native_testmon_preparation_failed":
+    if (
+        diagnosis in _UNAVAILABLE_DIAGNOSES
+        or diagnosis == "native_testmon_preparation_failed"
+    ):
         return "unavailable", detail
     return "failed", detail
 
@@ -1008,6 +1136,9 @@ def authorize(
 ) -> dict[str, Any]:
     """Publish only from a reviewed receipt, returning typed stop outcomes."""
     receipt = _load_receipt(context, receipt_ref)
+    oracle = receipt.get("oracle")
+    if oracle is not None and not _valid_oracle_receipt(oracle):
+        raise HarvestError("harvest reality oracle receipt is invalid")
     current_head = _git(run, context.worktree, "rev-parse", "HEAD")
     if current_head != receipt["head"]:
         raise HarvestError(
@@ -1062,7 +1193,9 @@ def authorize(
                 "message": "no test evidence at this head",
                 "detail": _bounded_text(tests_output, 4_000),
             }
-            _append_event(context.spool, {"kind": "harvest", **result, "job_id": context.job_id})
+            _append_event(
+                context.spool, {"kind": "harvest", **result, "job_id": context.job_id}
+            )
             return result
     if tests == "failed":
         result = {
@@ -1247,7 +1380,9 @@ def authorize(
             if bead_id and close_reason
             else None
         )
-        _record_publication(context, receipt_ref, tests=tests, affected_job=affected_job, pr=pr)
+        _record_publication(
+            context, receipt_ref, tests=tests, affected_job=affected_job, pr=pr
+        )
         _append_event(
             context.spool,
             {
@@ -1388,7 +1523,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
             Path.cwd(), base=parsed.base, spool=parsed.event_spool
         )
         if parsed.publish:
-            result = publish(context, close=parsed.close, affected_job=parsed.affected_job)
+            result = publish(
+                context, close=parsed.close, affected_job=parsed.affected_job
+            )
         elif not parsed.authorize:
             result = compile_packet(
                 context,
