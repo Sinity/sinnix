@@ -1110,3 +1110,14 @@ def test_redflags_gate_flag_names_gates_not_every_verify_module() -> None:
 
     _, gate = harvest._redflags("diff --git a/devtools/verify.py b/devtools/verify.py\n+    pass\n")
     assert "FLAG: verification gate or baseline edited" in gate
+
+
+def test_redflags_catches_private_evidence_references() -> None:
+    """Anti-vacuity: #4529 published rawlog dates and note categories in
+    docs/ before a reader noticed."""
+    status, flags = harvest._redflags(
+        "diff --git a/docs/queue.md b/docs/queue.md\n"
+        "+| Q01 | ... | Operator rawlog, 2026-07-07, planning note |\n"
+    )
+    assert status == 1
+    assert "FLAG: private evidence reference in tracked text" in flags
