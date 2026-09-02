@@ -1328,13 +1328,15 @@ class CampaignReactor:
             return ""
         return PurePosixPath(path).name
 
-    def _publish(self, project: str, workspace: str, receipt: str) -> None:
+    def _publish(self, project: str, workspace: str, receipt: str, affected_job: str = "") -> None:
         """Publish a lane whose scan is clean, using the text the lane wrote."""
         worktree = Path("/realm/worktrees") / workspace
         parameters: dict[str, Any] = {
             "authorize": True,
             "receipt_ref": receipt.rsplit("/", 1)[-1],
         }
+        if affected_job:
+            parameters["affected_job"] = affected_job
         title = worktree / ".lane/title"
         body = worktree / ".lane/body.md"
         if not title.is_file() or not body.is_file():
@@ -1806,7 +1808,8 @@ class CampaignReactor:
             elif action.kind == "publish":
                 receipt = facts.receipt.packet_id if facts.receipt else ""
                 if receipt:
-                    self._publish(project, workspace, receipt)
+                    verified = facts.verify_job[0] if facts.verify_job and facts.verify_job[1] == "succeeded" else ""
+                    self._publish(project, workspace, receipt, verified)
             elif action.kind == "integrate":
                 packet = self._receipt_payload(facts.receipt.packet_id) if facts.receipt else None
                 root = self.project_roots[project]
