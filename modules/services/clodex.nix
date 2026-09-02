@@ -45,8 +45,10 @@ mkServiceModule {
             # The CLI owns the mutable model registry. Reconcile it before
             # every start, then refuse readiness when the patched Claude
             # binary no longer matches the recorded version and size.
+            # Unit values are single lines: each pre-start step is a store
+            # script, not an inline shell body.
             ExecStartPre = [
-              "${pkgs.bash}/bin/bash -c ${lib.escapeShellArg ''
+              "${pkgs.writeShellScript "sinnix-clodex-aliases" ''
                 set -euo pipefail
                 cli=${lib.escapeShellArg clodex}
                 models="$($cli models --json)"
@@ -65,7 +67,7 @@ mkServiceModule {
                   "$cli" models --alias ${lib.escapeShellArg "${name}=${cfg.aliases.${name}}"}
                 '') (lib.attrNames cfg.aliases)}
               ''}"
-              "${pkgs.bash}/bin/bash -c ${lib.escapeShellArg ''
+              "${pkgs.writeShellScript "sinnix-clodex-patch-check" ''
                 set -euo pipefail
                 manifest="/home/${user}/.clodex/patch-state.json"
                 if [ ! -r "$manifest" ]; then
