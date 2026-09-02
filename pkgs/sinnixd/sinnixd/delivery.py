@@ -184,7 +184,7 @@ class GitHubDelivery:
             raise DeliveryError("workspace review is not merged")
         workspace = self.workspaces.get(workspace_id)
         self._delete_remote_branch(workspace["path"], workspace["branch"])
-        return self.workspaces.finish_merged(workspace_id, status["head"])
+        return self.workspaces.drop(workspace_id, expected_head=status["head"])
 
     def _verified_workspace(
         self, workspace_id: str, job_id: str, packet_job_id: str | None = None

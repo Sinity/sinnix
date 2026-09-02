@@ -22,7 +22,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Condition, Event, Lock, RLock
-from typing import Any, Iterator, Protocol
+from typing import Any, Iterable, Iterator, Protocol
 from uuid import UUID, uuid4
 
 from .limits import (
@@ -218,35 +218,6 @@ class JobResultError(ValueError):
 
 class JobResultLimitError(JobResultError):
     """Raised when a valid declared result exceeds the caller's response bound."""
-
-
-@dataclass(frozen=True)
-class CorruptJobSpec:
-    """Safe metadata exposed for a record that cannot be reconstructed."""
-
-    kind: str = "corrupt-record"
-    project_id: None = None
-    operation: None = None
-    principal: None = None
-    contract: Mapping[str, Any] = field(default_factory=dict)
-    dimensions: Mapping[str, Any] = field(default_factory=dict)
-    lease: None = None
-    scratch: str = "none"
-    admission_bypass: bool = True
-
-
-@dataclass(frozen=True)
-class CorruptJobRecord:
-    """A visible, non-authoritative row for an unreadable record file."""
-
-    job_id: str
-    error: str
-    created_at: str = ""
-    unit: str = ""
-    spec: CorruptJobSpec = field(default_factory=CorruptJobSpec)
-    state: Mapping[str, Any] = field(
-        default_factory=lambda: {"phase": "corrupt-record", "terminal": False}
-    )
 
 
 def _job_order_key(record: "GenericJobRecord") -> tuple[str, str]:
@@ -1049,7 +1020,6 @@ class ServiceLease:
     """Bounded public ownership of declared loopback ports for one generic job."""
 
     lease_id: str
-    readiness: str
     lifetime: str
     ports: tuple[ServiceLeasePort, ...]
     host: str = "127.0.0.1"
@@ -1059,11 +1029,7 @@ class ServiceLease:
             UUID(self.lease_id)
         except (ValueError, AttributeError) as error:
             raise ValueError("service lease ID is invalid") from error
-        if (
-            self.host != "127.0.0.1"
-            or self.readiness not in {"none", "project-command"}
-            or self.lifetime != "job"
-        ):
+        if self.host != "127.0.0.1" or self.lifetime != "job":
             raise ValueError("service lease metadata is invalid")
         if not self.ports or len(self.ports) > 8:
             raise ValueError("service lease ports are invalid")
@@ -1091,14 +1057,13 @@ class ServiceLease:
         return {
             "id": self.lease_id,
             "host": self.host,
-            "readiness": self.readiness,
             "lifetime": self.lifetime,
             "ports": [port.to_dict() for port in self.ports],
         }
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> ServiceLease:
-        if set(value) != {"id", "host", "readiness", "lifetime", "ports"}:
+        if set(value) - {"readiness"} != {"id", "host", "lifetime", "ports"}:
             raise JobRecordError("service lease metadata is invalid")
         raw_ports = value.get("ports")
         if not isinstance(raw_ports, list):
@@ -1121,7 +1086,6 @@ class ServiceLease:
             return cls(
                 lease_id=value["id"],
                 host=value["host"],
-                readiness=value["readiness"],
                 lifetime=value["lifetime"],
                 ports=tuple(ports),
             )
@@ -1452,7 +1416,7 @@ class GenericJobRecord:
         unit = value.get("unit")
         artifacts = value.get("artifacts")
         schema_version = value.get("schema_version")
-        if schema_version not in {2, 3, 4, 5, JOB_SCHEMA_VERSION} or not isinstance(
+        if schema_version not in {4, 5, JOB_SCHEMA_VERSION} or not isinstance(
             job_id, str
         ):
             raise JobRecordError("job record schema or ID is invalid")
@@ -1516,9 +1480,7 @@ class GenericJobRecord:
             )
         ):
             raise JobRecordError("job record timestamps are invalid")
-        parsed_spec = GenericJobSpec.from_dict(
-            spec, require_parameter_digest=schema_version >= 4
-        )
+        parsed_spec = GenericJobSpec.from_dict(spec, require_parameter_digest=True)
         if parsed_spec.lease is not None and parsed_spec.lease.lease_id != job_id:
             raise JobRecordError("service lease ID does not match its job")
         return cls(
@@ -1869,9 +1831,7 @@ class GenericJobStore:
                 )
             occupied.add(port)
             allocations.append(ServiceLeasePort(slot.name, slot.environment, port))
-        return ServiceLease(
-            job_id, service.readiness, service.lifetime, tuple(allocations)
-        )
+        return ServiceLease(job_id, service.lifetime, tuple(allocations))
 
     def service_lease_ports_available(self, lease: ServiceLease | None) -> bool:
         """Confirm the descriptor-owned ports were not claimed before launch.
@@ -2237,32 +2197,27 @@ class GenericJobStore:
         path = self._record_path(job_id)
         try:
             value = json.loads(path.read_text())
-        except FileNotFoundError:
-            try:
-                value = json.loads(self._archived_record_path(job_id).read_text())
-            except FileNotFoundError as error:
-                raise JobRecordError(f"unknown job: {job_id}") from error
-            except (OSError, json.JSONDecodeError) as error:
-                raise JobRecordError(f"malformed job record: {job_id}") from error
+        except FileNotFoundError as error:
+            raise JobRecordError(f"unknown job: {job_id}") from error
         except (OSError, json.JSONDecodeError) as error:
             raise JobRecordError(f"malformed job record: {job_id}") from error
         if not isinstance(value, Mapping):
             raise JobRecordError(f"malformed job record: {job_id}")
         return GenericJobRecord.from_dict(value, self.root)
 
-    def list(
-        self, *, limit: int | None = None
-    ) -> list[GenericJobRecord | CorruptJobRecord]:
+    def list(self, *, limit: int | None = None) -> list[GenericJobRecord]:
         if limit is not None and limit < 1:
             raise ValueError("job record list limit must be positive")
         if not self.records_root.exists():
             return []
-        records: list[GenericJobRecord | CorruptJobRecord] = []
+        records: list[GenericJobRecord] = []
         for path in sorted(self.records_root.glob("*.json")):
             try:
                 records.append(self.load(path.stem))
-            except JobRecordError as error:
-                records.append(CorruptJobRecord(job_id=path.stem, error=str(error)))
+            except JobRecordError:
+                # An unreadable record file is external tampering, not a job
+                # state: it is skipped here and named by _unreadable_record_ids.
+                continue
             if limit is not None and len(records) >= limit:
                 break
         return records
@@ -2285,10 +2240,7 @@ class GenericJobStore:
             if job_ids is None:
                 all_records = self.list()
                 records = [
-                    record
-                    for record in all_records
-                    if isinstance(record, GenericJobRecord)
-                    and not record.state.get("terminal")
+                    record for record in all_records if not record.state.get("terminal")
                 ]
                 self._write_active_record_ids({record.job_id for record in records})
                 if self._service_lease_record_ids() is None:
@@ -2297,8 +2249,7 @@ class GenericJobStore:
                             {
                                 record.job_id
                                 for record in all_records
-                                if isinstance(record, GenericJobRecord)
-                                and record.spec.lease is not None
+                                if record.spec.lease is not None
                                 and not self._service_lease_released(record.job_id)
                             }
                         )
@@ -2366,7 +2317,10 @@ class GenericJobStore:
             self._write_active_record_ids(job_ids)
 
     def _write_active_record_ids(self, job_ids: set[str]) -> None:
-        path = self.active_records_path
+        self._write_job_id_index(self.active_records_path, job_ids)
+
+    @staticmethod
+    def _write_job_id_index(path: Path, job_ids: set[str]) -> None:
         temporary = path.with_suffix(".json.tmp")
         descriptor = os.open(
             temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600
@@ -2394,7 +2348,6 @@ class GenericJobStore:
                 records = [
                     record
                     for record in self.list()
-                    if isinstance(record, GenericJobRecord)
                     if record.spec.lease is not None
                     and not self._service_lease_released(record.job_id)
                 ]
@@ -2454,25 +2407,7 @@ class GenericJobStore:
             self._write_service_lease_record_ids(job_ids)
 
     def _write_service_lease_record_ids(self, job_ids: set[str]) -> None:
-        path = self.service_lease_records_path
-        temporary = path.with_suffix(".json.tmp")
-        descriptor = os.open(
-            temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600
-        )
-        try:
-            with os.fdopen(descriptor, "w") as handle:
-                json.dump(
-                    {"schema_version": 1, "jobs": sorted(job_ids)},
-                    handle,
-                    sort_keys=True,
-                )
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
-            _fsync_directory(path.parent)
-        finally:
-            temporary.unlink(missing_ok=True)
+        self._write_job_id_index(self.service_lease_records_path, job_ids)
 
     def save(self, record: GenericJobRecord) -> None:
         path = self._record_path(record.job_id)
@@ -2523,47 +2458,86 @@ class GenericJobStore:
         _ = job_unit_name(job_id)
         return self.records_root / f"{job_id}.json"
 
-    @property
-    def archived_records_root(self) -> Path:
-        return self.root / "jobs-archive"
+    def delete_records(self, job_ids: Iterable[str]) -> int:
+        """Delete records and every artifact they own.
 
-    def _archived_record_path(self, job_id: str) -> Path:
-        _ = job_unit_name(job_id)
-        return self.archived_records_root / f"{job_id}.json"
-
-    def prune_terminal_records(self, *, retention_days: int) -> int:
-        """Move terminal records past the retention window out of the live set.
-
-        Listing costs one parse per live record file, so an unbounded terminal
-        history degrades every list forever. Archived records stay loadable by
-        id; non-terminal records are never touched, and an unparseable
-        timestamp keeps its record in place rather than guessing.
+        A job record and its artifacts live exactly as long as the thing they
+        served. Nothing here is time-based: the caller has already established
+        that the owner is gone.
         """
-        if retention_days <= 0 or not self.records_root.exists():
-            return 0
-        cutoff = datetime.now(UTC) - timedelta(days=retention_days)
-        moved = 0
-        for path in sorted(self.records_root.glob("*.json")):
+        deleted = 0
+        for job_id in sorted(set(job_ids)):
             try:
-                record = self.load(path.stem)
+                record = self.load(job_id)
             except JobRecordError:
-                continue
-            if not record.state.get("terminal"):
-                continue
-            observed = record.state.get("observed_at") or record.created_at
-            try:
-                stamp = datetime.fromisoformat(str(observed))
-            except ValueError:
-                continue
-            if stamp.tzinfo is None or stamp >= cutoff:
-                continue
-            _ensure_durable_directory(self.archived_records_root)
-            os.replace(path, self._archived_record_path(record.job_id))
-            _fsync_directory(self.archived_records_root)
+                record = None
+            if record is not None:
+                for artifact in (
+                    record.log_path,
+                    record.result_path,
+                    record.handoff_path,
+                ):
+                    if artifact is not None:
+                        artifact.unlink(missing_ok=True)
+                if record.scratch_path is not None:
+                    shutil.rmtree(record.scratch_path, ignore_errors=True)
+            shutil.rmtree(self.job_dirs_root / job_id, ignore_errors=True)
+            shutil.rmtree(self.readiness_root / job_id, ignore_errors=True)
+            for path in (
+                self._record_path(job_id),
+                self.locks_root / f"{job_id}.lock",
+                self.root / "retry-prompts" / f"{job_id}.prompt",
+                self.inputs_root / f"{job_id}.json",
+                self.inputs_root / f"{job_id}.prompt",
+                self.inputs_root / f"{job_id}.launch",
+                self.inputs_root / f"{job_id}.agent-launch",
+                self._service_lease_path(job_id),
+                self._service_lease_released_path(job_id),
+            ):
+                path.unlink(missing_ok=True)
+            self._set_active_record(job_id, active=False)
+            self._set_service_lease_record(job_id, active=False)
+            deleted += 1
+        if deleted and self.records_root.exists():
             _fsync_directory(self.records_root)
-            (self.locks_root / f"{record.job_id}.lock").unlink(missing_ok=True)
-            moved += 1
-        return moved
+        return deleted
+
+    def records_for_checkout(self, checkout_path: str) -> tuple[str, ...]:
+        """Job ids whose declared checkout is this working tree."""
+        return tuple(
+            record.job_id
+            for record in self.list()
+            if isinstance(record.spec.checkout, Mapping)
+            and record.spec.checkout.get("path") == checkout_path
+        )
+
+    def superseded_records(self, record: GenericJobRecord) -> tuple[str, ...]:
+        """Terminal records this scheduled run replaces.
+
+        A timer firing is the only job nothing else owns: no workspace to drop
+        it with, no plan or packet holding its id. Its previous terminal run of
+        the same schedule on the same checkout has no reader left. Every other
+        job's record belongs to the workspace, plan, or packet that asked for
+        it and is deleted with that owner.
+        """
+        schedule_id = record.spec.dimensions.get("schedule_id")
+        checkout = (
+            record.spec.checkout.get("path")
+            if isinstance(record.spec.checkout, Mapping)
+            else None
+        )
+        if not isinstance(schedule_id, str) or not isinstance(checkout, str):
+            return ()
+        return tuple(
+            other.job_id
+            for other in self.list()
+            if other.job_id != record.job_id
+            and other.state.get("terminal")
+            and other.spec.dimensions.get("schedule_id") == schedule_id
+            and isinstance(other.spec.checkout, Mapping)
+            and other.spec.checkout.get("path") == checkout
+            and other.created_at < record.created_at
+        )
 
 
 @dataclass
@@ -2577,7 +2551,6 @@ class GenericJobs:
     pressure_probe: Callable[[], Mapping[str, float]] = _unmetered_pressure
     before_admission_start: Callable[[str], None] | None = None
     notify_socket: Path | None = None
-    record_retention_days: int = 14
     event_spool_path: Path | None = None
     recover_on_init: bool = True
     events: TerminalEvents = field(default_factory=TerminalEvents, repr=False)
@@ -2624,7 +2597,6 @@ class GenericJobs:
                 state = self._admission_state()
                 for record in finalized:
                     self._finish_admission(record, state)
-        self.store.prune_terminal_records(retention_days=self.record_retention_days)
 
     def register_schedules(
         self,
@@ -3318,7 +3290,6 @@ class GenericJobs:
         readiness_path = (
             self.store.prepare_service_readiness(job_id)
             if operation.service is not None
-            and operation.service.readiness == "project-command"
             else None
         )
         environment.update(
@@ -4258,7 +4229,7 @@ class GenericJobs:
                 if (
                     lease is not None
                     and dependency["state"].get("phase") in {"submitted", "running"}
-                    and (lease.readiness == "none" or self.store.service_ready(job_id))
+                    and self.store.service_ready(job_id)
                     and all(
                         not _loopback_port_available(port.port) for port in lease.ports
                     )
@@ -4294,6 +4265,7 @@ class GenericJobs:
             self._spooled.add(record.job_id)
             self._spool_terminal_event(record)
         self._terminal_cleanup(record)
+        self.store.delete_records(self.store.superseded_records(record))
 
     def _spool_terminal_event(self, record: GenericJobRecord) -> None:
         checkout = record.spec.checkout
@@ -5488,10 +5460,7 @@ class GenericJobs:
         """
         enrichment = "reconciliation"
         try:
-            # A corrupt record has no unit to reconcile: rendering it keeps the
-            # typed corrupt-record phase instead of degrading it to a generic
-            # per-row fault.
-            if record.state.get("terminal") or isinstance(record, CorruptJobRecord):
+            if record.state.get("terminal"):
                 enrichment = "render"
                 return self._public(record, record.state)
             return self.get(record.job_id)
@@ -5516,14 +5485,6 @@ class GenericJobs:
     def _public(
         self, record: GenericJobRecord, state: Mapping[str, Any]
     ) -> dict[str, Any]:
-        if isinstance(record, CorruptJobRecord):
-            return {
-                "job_id": record.job_id,
-                "unit": record.unit,
-                "kind": record.spec.kind,
-                "state": dict(record.state),
-                "error": record.error,
-            }
         checkout_status = self._checkout_status(record)
         return {
             "job_id": record.job_id,

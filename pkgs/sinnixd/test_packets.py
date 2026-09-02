@@ -340,7 +340,7 @@ def test_launch_creates_then_dispatches_with_dimensions(
     )
 
 
-def test_launch_agent_failure_disposes_created_workspace_and_labels_step(
+def test_launch_agent_failure_drops_created_workspace_and_labels_step(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -369,7 +369,7 @@ def test_launch_agent_failure_disposes_created_workspace_and_labels_step(
                     "message": "sinnixd is unavailable",
                 },
             }
-        assert request.operation == "workspace.dispose"
+        assert request.operation == "workspace.drop"
         return {"ok": True, "payload": {"value": {"disposed": True}}}
 
     monkeypatch.setattr(cli_module, "resolve_project_root", lambda _project: root)
@@ -384,7 +384,7 @@ def test_launch_agent_failure_disposes_created_workspace_and_labels_step(
     assert [request.operation for request in calls] == [
         "workspace.create",
         "job.agent.start",
-        "workspace.dispose",
+        "workspace.drop",
     ]
     response = json.loads(capsys.readouterr().out)
     assert response["error"] == {
@@ -396,7 +396,7 @@ def test_launch_agent_failure_disposes_created_workspace_and_labels_step(
     }
 
 
-def test_launch_workspace_lookup_failure_disposes_created_workspace(
+def test_launch_workspace_lookup_failure_drops_created_workspace(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -417,7 +417,7 @@ def test_launch_workspace_lookup_failure_disposes_created_workspace(
                 "ok": False,
                 "error": {"code": "OWNER_UNAVAILABLE", "message": "lookup lost"},
             }
-        assert request.operation == "workspace.dispose"
+        assert request.operation == "workspace.drop"
         return {"ok": True}
 
     monkeypatch.setattr(cli_module, "resolve_project_root", lambda _project: root)
@@ -432,7 +432,7 @@ def test_launch_workspace_lookup_failure_disposes_created_workspace(
     assert [request.operation for request in calls] == [
         "workspace.create",
         "workspace.get",
-        "workspace.dispose",
+        "workspace.drop",
     ]
     response = json.loads(capsys.readouterr().out)
     assert response["error"]["code"] == "OWNER_UNAVAILABLE"
