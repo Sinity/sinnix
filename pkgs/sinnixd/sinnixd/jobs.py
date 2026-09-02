@@ -4145,10 +4145,18 @@ class GenericJobs:
                         # draining the other pools (two hourly bulk jobs
                         # behind the corpus run held every harvest for two
                         # hours, 2026-09-02).
+                        # Normal-pool work (harvests, gates) finishes and
+                        # publishes what lanes produced; it outranks a new
+                        # lane launch at once, while a bulk job earns the
+                        # cross-pool claim by waiting.
+                        waited = self._queued_seconds(record)
                         if (
                             "*" not in head_of_line_reserved
                             and "pool-workers" not in blocked_by
-                            and self._queued_seconds(record) >= HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS
+                            and (
+                                record.spec.pool == "normal"
+                                or waited >= HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS
+                            )
                         ):
                             head_of_line_reserved["*"] = estimate
                     if blocked_by:
