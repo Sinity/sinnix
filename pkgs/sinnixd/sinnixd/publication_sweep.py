@@ -54,6 +54,7 @@ class PullState:
     answered_rounds: int = 0
     reviewed_head: str = ""
     review_request_pending: bool = False
+    head_pushed_at: str = ""
 
     @property
     def review_arrived(self) -> bool:
@@ -86,7 +87,10 @@ def decide(pull: PullState, *, now: datetime) -> str:
         return "findings"
     if pull.review_clean:
         return "merge"
-    created = datetime.fromisoformat(pull.created_at.replace("Z", "+00:00"))
+    # The grace runs from the head under review, not from the PR's birth: a
+    # rebased head is new work the reviewer has not seen.
+    since = max(pull.created_at, pull.head_pushed_at or "")
+    created = datetime.fromisoformat(since.replace("Z", "+00:00"))
     if (now - created).total_seconds() >= REVIEW_ABSENT_GRACE_SECONDS:
         # A third party's outage must not stall publication; merging with the
         # flag on record is fail-open with the failure named, never silent.
@@ -169,9 +173,20 @@ def derive_pull_states(repo: str, run: Run) -> list[PullState]:
                 answered_rounds=review.answered_rounds,
                 reviewed_head=review.reviewed_head,
                 review_request_pending=review.request_pending,
+                head_pushed_at=_head_pushed_at(repo, head, run),
             )
         )
     return states
+
+
+def _head_pushed_at(repo: str, head: str, run: Run) -> str:
+    if not head:
+        return ""
+    try:
+        value = _gh_json(run, ["gh", "api", f"repos/{repo}/commits/{head}", "--jq", ".commit.committer.date"])
+    except SweepError:
+        return ""
+    return value if isinstance(value, str) else ""
 
 
 @dataclass(frozen=True)

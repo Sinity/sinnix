@@ -140,8 +140,11 @@ POOL_POLICIES = {
     "normal": {
         # Harvests hold a worker for minutes; three of them starved the
         # sweep and every quick gate behind them while 6 GB of headroom sat
-        # idle. Memory admission bounds this pool; the cap only guards CPU.
-        "workers": 8,
+        # idle. Eight saturated the disk instead (io-full 25% over five
+        # minutes, the operator's desktop lagging, 2026-09-02 11:30Z): this
+        # pool is IO-bound, and the cap is the IO budget until admission
+        # measures IO per job.
+        "workers": 5,
         "memory_budget": 8 * 1024 * MIB,
         "default_estimate": 1024 * MIB,
         "memory_max": 6 * 1024 * MIB,

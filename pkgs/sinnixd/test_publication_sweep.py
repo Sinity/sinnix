@@ -111,6 +111,8 @@ class FakeRun:
             return subprocess.CompletedProcess(argv, 0, json.dumps([{"commit": "a" * 40, "at": "T1"}]), "")
         if "issues/41/comments" in joined:
             return subprocess.CompletedProcess(argv, 0, json.dumps([]), "")
+        if "/commits/" in joined:
+            return subprocess.CompletedProcess(argv, 0, json.dumps("T1"), "")
         if argv[:3] == ["gh", "pr", "merge"]:
             self.merged.append(int(argv[3]))
             return subprocess.CompletedProcess(argv, 0, "", "")
@@ -180,3 +182,12 @@ def test_two_answered_rounds_bound_review() -> None:
     assert decide(pull(review_findings=1, answered_rounds=2), now=NOW) == "merge-answered"
     assert decide(pull(review_findings=1, answered_rounds=1), now=NOW) == "findings"
     assert decide(pull(review_findings=1, answered_rounds=2, ci_red=True), now=NOW) == "ci-red"
+
+
+def test_review_absent_grace_runs_from_the_latest_push() -> None:
+    """Anti-vacuity: #4516 merged unreviewed minutes after a rebase because
+    the grace was measured from the PR's creation (2026-09-02 11:20Z)."""
+    old = (NOW - timedelta(hours=2)).isoformat()
+    fresh = (NOW - timedelta(minutes=5)).isoformat()
+    assert decide(pull(created_at=old, head_pushed_at=fresh), now=NOW) == "wait"
+    assert decide(pull(created_at=old, head_pushed_at=old), now=NOW) == "merge-review-absent"
