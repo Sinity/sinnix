@@ -323,7 +323,7 @@ class TypedJobContracts:
                     pool="agent",
                     exclusive_keys=tuple(exclusive_keys),
                     dependency_job_ids=tuple(dependency_job_ids),
-                        admission_bypass=admission_bypass,
+                    admission_bypass=admission_bypass,
                     dimensions=dimensions or {},
                 ),
                 job_id,

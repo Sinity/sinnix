@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import base64
-import fcntl
 import contextlib
+import fcntl
 import hashlib
 import json
-import logging
 import os
 import re
 import selectors
@@ -496,7 +494,11 @@ class UserSystemdJobs:
                 if memory_max_bytes
                 else []
             ),
-            *([f"--property=MemorySwapMax={swap_max_bytes}"] if swap_max_bytes is not None else []),
+            *(
+                [f"--property=MemorySwapMax={swap_max_bytes}"]
+                if swap_max_bytes is not None
+                else []
+            ),
             *(
                 f"--property=ReadOnlyPaths={path}"
                 for path in self.lane_read_only_paths()
@@ -2787,7 +2789,9 @@ class GenericJobs:
             ),
         }
 
-    def _admission_claim(self, record: GenericJobRecord, estimate: int) -> dict[str, Any]:
+    def _admission_claim(
+        self, record: GenericJobRecord, estimate: int
+    ) -> dict[str, Any]:
         return {
             "job_id": record.job_id,
             "pool": record.spec.pool,
@@ -2836,7 +2840,9 @@ class GenericJobs:
             ]
             pressure = self.pressure_probe()
             host_budget = self._host_memory_budget(pressure)
-            host_occupied = sum(self._settling_charge(record, state) for record in active)
+            host_occupied = sum(
+                self._settling_charge(record, state) for record in active
+            )
             holders = [
                 {
                     **dict(state["claims"].get(record.job_id, {})),
@@ -3110,7 +3116,7 @@ class GenericJobs:
                             "phase": "queued",
                             "terminal": False,
                             "observed_at": _timestamp(),
-                                        "admission": {
+                            "admission": {
                                 "pool": spec.pool,
                                 "estimate_memory_bytes": self._estimate(
                                     spec, self._admission_state()
@@ -3155,8 +3161,12 @@ class GenericJobs:
                     timeout_seconds=spec.timeout_seconds,
                     log_path=record.log_path,
                     pool=spec.pool,
-                    memory_max_bytes=memory_ceiling(spec.pool, spec.estimate_memory_bytes)[0],
-                    swap_max_bytes=memory_ceiling(spec.pool, spec.estimate_memory_bytes)[1],
+                    memory_max_bytes=memory_ceiling(
+                        spec.pool, spec.estimate_memory_bytes
+                    )[0],
+                    swap_max_bytes=memory_ceiling(
+                        spec.pool, spec.estimate_memory_bytes
+                    )[1],
                     json_result_path=record.result_path
                     if spec.result_kind in {"json", "pytest"}
                     else None,
@@ -3498,7 +3508,9 @@ class GenericJobs:
             started = started.replace(tzinfo=UTC)
         return (datetime.now(UTC) - started).total_seconds()
 
-    def _settling_charge(self, record: "GenericJobRecord", state: Mapping[str, Any]) -> int:
+    def _settling_charge(
+        self, record: "GenericJobRecord", state: Mapping[str, Any]
+    ) -> int:
         """A job's estimate while it is too young to show in host memory, else 0."""
         try:
             started = datetime.fromisoformat(record.created_at)
@@ -3507,7 +3519,9 @@ class GenericJobs:
         if started.tzinfo is None:
             started = started.replace(tzinfo=UTC)
         age = (datetime.now(UTC) - started).total_seconds()
-        return self._estimate(record.spec, state) if age < ADMISSION_SETTLE_SECONDS else 0
+        return (
+            self._estimate(record.spec, state) if age < ADMISSION_SETTLE_SECONDS else 0
+        )
 
     def _host_pressure_blocks(self, pressure: Mapping[str, float]) -> bool:
         swap_total = float(pressure.get("swap_total_bytes", 0.0))
@@ -3541,7 +3555,9 @@ class GenericJobs:
             or self._memory_full_block_probe_count
             >= MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES
         )
-        io_saturated = float(pressure.get("io_full_avg60", 0.0)) >= IO_FULL_BLOCK_THRESHOLD
+        io_saturated = (
+            float(pressure.get("io_full_avg60", 0.0)) >= IO_FULL_BLOCK_THRESHOLD
+        )
         return swap_exhausted or memory_pressure_sustained or io_saturated
 
     @staticmethod
@@ -4023,8 +4039,12 @@ class GenericJobs:
                         timeout_seconds=current.spec.timeout_seconds,
                         log_path=current.log_path,
                         pool=current.spec.pool,
-                        memory_max_bytes=memory_ceiling(current.spec.pool, current.spec.estimate_memory_bytes)[0],
-                        swap_max_bytes=memory_ceiling(current.spec.pool, current.spec.estimate_memory_bytes)[1],
+                        memory_max_bytes=memory_ceiling(
+                            current.spec.pool, current.spec.estimate_memory_bytes
+                        )[0],
+                        swap_max_bytes=memory_ceiling(
+                            current.spec.pool, current.spec.estimate_memory_bytes
+                        )[1],
                         json_result_path=current.result_path
                         if current.spec.result_kind in {"json", "pytest"}
                         else None,

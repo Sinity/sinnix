@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 from sinnixd.jobs import (
-    MEMORY_FULL_BLOCK_THRESHOLD,
     HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS,
     IO_FULL_BLOCK_THRESHOLD,
+    MEMORY_FULL_BLOCK_THRESHOLD,
     AdmissionConflictError,
     GenericJobs,
     GenericJobSpec,
@@ -1432,7 +1432,9 @@ def test_cancel_records_a_typed_reason(tmp_path: Path) -> None:
     assert started["state"]["phase"] == "queued"
     subject.cancel(started["job_id"], reason="pressure-preemption:swap-exhaustion")
     record = subject.store.load(started["job_id"])
-    assert record.state["cancellation"]["reason"] == "pressure-preemption:swap-exhaustion"
+    assert (
+        record.state["cancellation"]["reason"] == "pressure-preemption:swap-exhaustion"
+    )
 
 
 def test_agent_fleet_admits_on_default_claims(tmp_path: Path) -> None:
@@ -1493,16 +1495,27 @@ def test_a_long_waiting_bulk_job_reserves_across_pools(tmp_path: Path) -> None:
         "swap_free_bytes": 20 * gib,
         "managed_memory_bytes": 0,
     }
-    adapter = project(tmp_path / "project", (operation("corpus", pool="bulk", estimate_memory_bytes=8 * gib),))
+    adapter = project(
+        tmp_path / "project",
+        (operation("corpus", pool="bulk", estimate_memory_bytes=8 * gib),),
+    )
     systemd = FakeSystemd()
-    subject = GenericJobs(systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure)
+    subject = GenericJobs(
+        systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure
+    )
     corpus = subject.start_declared(
-        project=adapter, operation=adapter.operation("corpus"), correlation_id="corpus", parameters={}
+        project=adapter,
+        operation=adapter.operation("corpus"),
+        correlation_id="corpus",
+        parameters={},
     )
     assert corpus["state"]["phase"] == "queued"
     with subject.store.locked(corpus["job_id"]):
         record = subject.store.load(corpus["job_id"])
-        aged = (datetime.now(UTC) - timedelta(seconds=HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS + 60)).isoformat()
+        aged = (
+            datetime.now(UTC)
+            - timedelta(seconds=HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS + 60)
+        ).isoformat()
         subject.store.save(dataclasses.replace(record, created_at=aged))
 
     lane = subject.start(agent_spec(("table:lane",)))
@@ -1510,7 +1523,9 @@ def test_a_long_waiting_bulk_job_reserves_across_pools(tmp_path: Path) -> None:
     assert subject.get(lane["job_id"])["state"]["phase"] == "queued"
 
 
-def test_a_job_waiting_for_a_pool_worker_does_not_reserve_across_pools(tmp_path: Path) -> None:
+def test_a_job_waiting_for_a_pool_worker_does_not_reserve_across_pools(
+    tmp_path: Path,
+) -> None:
     """Anti-vacuity: two hourly bulk jobs queued behind the running corpus
     reserved 8 GB each against every pool and held harvests for two hours."""
     import dataclasses
@@ -1535,18 +1550,29 @@ def test_a_job_waiting_for_a_pool_worker_does_not_reserve_across_pools(tmp_path:
         ),
     )
     systemd = FakeSystemd()
-    subject = GenericJobs(systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure)
+    subject = GenericJobs(
+        systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure
+    )
     running = subject.start_declared(
-        project=adapter, operation=adapter.operation("corpus"), correlation_id="corpus", parameters={}
+        project=adapter,
+        operation=adapter.operation("corpus"),
+        correlation_id="corpus",
+        parameters={},
     )
     assert running["state"]["phase"] == "submitted"
     hourly = subject.start_declared(
-        project=adapter, operation=adapter.operation("hourly"), correlation_id="hourly", parameters={}
+        project=adapter,
+        operation=adapter.operation("hourly"),
+        correlation_id="hourly",
+        parameters={},
     )
     assert hourly["state"]["phase"] == "queued"
     with subject.store.locked(hourly["job_id"]):
         record = subject.store.load(hourly["job_id"])
-        aged = (datetime.now(UTC) - timedelta(seconds=HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS + 60)).isoformat()
+        aged = (
+            datetime.now(UTC)
+            - timedelta(seconds=HEAD_OF_LINE_CROSS_POOL_AFTER_SECONDS + 60)
+        ).isoformat()
         subject.store.save(dataclasses.replace(record, created_at=aged))
 
     lane = subject.start(agent_spec(("table:lane",)))
@@ -1568,17 +1594,29 @@ def test_a_waiting_harvest_outranks_a_new_lane_launch(tmp_path: Path) -> None:
         "swap_free_bytes": 20 * gib,
         "managed_memory_bytes": 0,
     }
-    adapter = project(tmp_path / "project", (operation("harvest", pool="normal", estimate_memory_bytes=2 * gib),))
-    systemd = FakeSystemd()
-    subject = GenericJobs(systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure)
-    harvest = subject.start_declared(
-        project=adapter, operation=adapter.operation("harvest"), correlation_id="harvest", parameters={}
+    adapter = project(
+        tmp_path / "project",
+        (operation("harvest", pool="normal", estimate_memory_bytes=2 * gib),),
     )
-    assert harvest["state"]["phase"] == "queued", "5 GiB available minus the 4 GiB reserve cannot hold 2 GiB"
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd, GenericJobStore(tmp_path / "state"), pressure_probe=lambda: pressure
+    )
+    harvest = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("harvest"),
+        correlation_id="harvest",
+        parameters={},
+    )
+    assert harvest["state"]["phase"] == "queued", (
+        "5 GiB available minus the 4 GiB reserve cannot hold 2 GiB"
+    )
 
     lane = subject.start(agent_spec(("table:lane",)))
 
-    assert subject.get(lane["job_id"])["state"]["phase"] == "queued", "the lane must not take the harvest's headroom"
+    assert subject.get(lane["job_id"])["state"]["phase"] == "queued", (
+        "the lane must not take the harvest's headroom"
+    )
 
 
 def test_sustained_io_stall_blocks_new_admissions(tmp_path: Path) -> None:
@@ -1589,7 +1627,16 @@ def test_sustained_io_stall_blocks_new_admissions(tmp_path: Path) -> None:
         FakeSystemd(),
         GenericJobStore(tmp_path / "state"),
         wait_poll_seconds=0.001,
-        pressure_probe=lambda: {"memory_full_avg10": 0.0, "io_full_avg10": 80.0, "io_full_avg60": IO_FULL_BLOCK_THRESHOLD + 5},
+        pressure_probe=lambda: {
+            "memory_full_avg10": 0.0,
+            "io_full_avg10": 80.0,
+            "io_full_avg60": IO_FULL_BLOCK_THRESHOLD + 5,
+        },
     )
-    first = subject.start_declared(project=adapter, operation=adapter.operation("first"), correlation_id="first", parameters={})
+    first = subject.start_declared(
+        project=adapter,
+        operation=adapter.operation("first"),
+        correlation_id="first",
+        parameters={},
+    )
     assert first["state"]["phase"] == "queued"

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import subprocess
 import uuid
 from dataclasses import dataclass
@@ -22,7 +21,9 @@ RESUME_PREAMBLE = (
 def frontier_order(row: Mapping[str, Any]) -> tuple[int, str]:
     """P0 before P4, then id: a wave limit must spend itself on the most urgent work."""
     priority = row.get("priority")
-    rank = priority if isinstance(priority, int) and not isinstance(priority, bool) else 9
+    rank = (
+        priority if isinstance(priority, int) and not isinstance(priority, bool) else 9
+    )
     return rank, str(row.get("id", ""))
 
 
@@ -42,7 +43,17 @@ def claim_beads(
     for bead_id in bead_ids:
         try:
             result = run(
-                ["bd", "update", bead_id, "-s", "in_progress", "-a", CLAIM_ACTOR, "--actor", CLAIM_ACTOR],
+                [
+                    "bd",
+                    "update",
+                    bead_id,
+                    "-s",
+                    "in_progress",
+                    "-a",
+                    CLAIM_ACTOR,
+                    "--actor",
+                    CLAIM_ACTOR,
+                ],
                 cwd=root,
                 capture_output=True,
                 text=True,
@@ -66,6 +77,8 @@ def held_workspace_names(
         for name, record in existing.items()
         if getattr(record, "workspace_id", None) in held_checkouts
     }
+
+
 from .packets import (
     PacketConfig,
     PacketError,

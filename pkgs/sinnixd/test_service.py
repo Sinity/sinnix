@@ -9,7 +9,6 @@ import subprocess
 import sys
 import threading
 import time
-import types
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
@@ -28,10 +27,8 @@ from sinnix_mcp import (
     OpaquePayload,
     RequestEnvelope,
     ResponseEnvelope,
-    SinnixRef,
-    SourceBinding,
 )
-from sinnix_mcp.execution import EnvironmentProfile, ExecutionResult, OwnerExecution
+from sinnix_mcp.execution import ExecutionResult
 from sinnixd.api import (
     CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS,
     MAX_JSON_RPC_ERROR_MESSAGE_BYTES,
@@ -75,7 +72,6 @@ from sinnixd.limits import MAX_DECLARED_OPERATION_TIMEOUT_SECONDS
 from sinnixd.projects import (
     ProjectCatalog,
     ProjectConfigError,
-    RegisteredCheckout,
     parse_worktree_records,
     validate_agent_environment_descriptors,
 )
@@ -1007,7 +1003,9 @@ def test_declared_service_dependency_supplies_lease_and_unblocks_when_bound(
     assert len(systemd.started) == 1
 
     port_available = False
-    jobs.ADMISSION_OBSERVE_INTERVAL_SECONDS = 0.0  # every poll re-evaluates readiness here
+    jobs.ADMISSION_OBSERVE_INTERVAL_SECONDS = (
+        0.0  # every poll re-evaluates readiness here
+    )
     jobs.get(check_id)
     assert len(systemd.started) == 1, "a transient port bind is not readiness"
 
@@ -1797,7 +1795,9 @@ def test_queued_service_cancellation_wins_the_admission_start_interleaving(
     admission_thread = threading.Thread(target=admit)
     admission_thread.start()
     assert before_start.wait(1)
-    cancellation_thread = threading.Thread(target=lambda: jobs.cancel(job_id, reason="test-cancel"))
+    cancellation_thread = threading.Thread(
+        target=lambda: jobs.cancel(job_id, reason="test-cancel")
+    )
     cancellation_thread.start()
     assert cancellation_saved.wait(1)
     resume_admission.set()
@@ -9617,7 +9617,9 @@ def test_sub_hourly_timers_are_not_persistent() -> None:
     assert timer_persistent("weekly") is True
 
 
-def test_every_unit_runs_under_its_pool_memory_ceiling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_every_unit_runs_under_its_pool_memory_ceiling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Anti-vacuity: without MemoryMax/MemorySwapMax an agent lane admitted at
     the 1 GiB default reached 19.3 GB and swapped the host to 97% (2026-09-01)."""
     from sinnixd.jobs import MIB, UserSystemdJobs, memory_ceiling
@@ -9628,9 +9630,13 @@ def test_every_unit_runs_under_its_pool_memory_ceiling(tmp_path: Path, monkeypat
 
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        UserSystemdJobs, "_run", lambda self, args, **_kw: calls.append(list(args)) or ""
+        UserSystemdJobs,
+        "_run",
+        lambda self, args, **_kw: calls.append(list(args)) or "",
     )
-    monkeypatch.setattr(UserSystemdJobs, "lane_read_only_paths", staticmethod(lambda: ()))
+    monkeypatch.setattr(
+        UserSystemdJobs, "lane_read_only_paths", staticmethod(lambda: ())
+    )
     UserSystemdJobs().start(
         unit="sinnixd-job-00000000-0000-0000-0000-000000000002.service",
         command=("true",),
@@ -9662,7 +9668,17 @@ def test_default_checkout_operations_refuse_lane_worktrees(tmp_path: Path) -> No
     initialize_git_checkout(tmp_path)
     other_checkout = tmp_path.parent / "lane-checkout"
     subprocess.run(
-        ["git", "-C", str(tmp_path), "worktree", "add", "--quiet", "--detach", str(other_checkout), "HEAD"],
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "worktree",
+            "add",
+            "--quiet",
+            "--detach",
+            str(other_checkout),
+            "HEAD",
+        ],
         check=True,
     )
     catalog = ProjectCatalog([tmp_path])
@@ -9670,7 +9686,9 @@ def test_default_checkout_operations_refuse_lane_worktrees(tmp_path: Path) -> No
     operation = project.operation("check")
     assert operation.checkout == "default"
     lane = next(
-        checkout for checkout in catalog.checkouts("fixture") if checkout.path == other_checkout.resolve()
+        checkout
+        for checkout in catalog.checkouts("fixture")
+        if checkout.path == other_checkout.resolve()
     )
     jobs = generic_jobs(tmp_path.parent / "job-state")
 

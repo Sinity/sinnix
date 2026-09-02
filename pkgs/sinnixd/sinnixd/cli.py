@@ -939,14 +939,27 @@ def main() -> int:
             None,
         )
         if record is None or not isinstance(record.get("path"), str):
-            print(json.dumps({"ok": False, "error": f"unknown workspace: {arguments.workspace}"}, sort_keys=True))
+            print(
+                json.dumps(
+                    {"ok": False, "error": f"unknown workspace: {arguments.workspace}"},
+                    sort_keys=True,
+                )
+            )
             return 1
         worktree = Path(record["path"])
         head = subprocess.run(
-            ["git", "-C", str(worktree), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+            ["git", "-C", str(worktree), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
         ).stdout.strip()
         if not re.fullmatch(r"[0-9a-f]{40}", head):
-            print(json.dumps({"ok": False, "error": "workspace head is unreadable"}, sort_keys=True))
+            print(
+                json.dumps(
+                    {"ok": False, "error": "workspace head is unreadable"},
+                    sort_keys=True,
+                )
+            )
             return 1
         authorization = {
             "head": head,
@@ -956,8 +969,14 @@ def main() -> int:
             "workspace": record.get("name"),
         }
         (worktree / ".lane").mkdir(exist_ok=True)
-        (worktree / ".lane" / "authorization.json").write_text(json.dumps(authorization, sort_keys=True) + "\n")
-        print(json.dumps({"ok": True, "authorization": authorization}, indent=1, sort_keys=True))
+        (worktree / ".lane" / "authorization.json").write_text(
+            json.dumps(authorization, sort_keys=True) + "\n"
+        )
+        print(
+            json.dumps(
+                {"ok": True, "authorization": authorization}, indent=1, sort_keys=True
+            )
+        )
         return 0
     elif arguments.command == "lane" and arguments.lane_command == "publish":
         # The reply always names the harvest job once one exists; a failure

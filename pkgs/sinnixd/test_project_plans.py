@@ -264,7 +264,7 @@ def test_plan_service_routes_preserve_typed_owner_surface(tmp_path: Path) -> Non
             principal="operator",
             arguments={
                 "project_id": "fixture",
-                    "nodes": [{"id": "n", "operation": "prepare"}],
+                "nodes": [{"id": "n", "operation": "prepare"}],
             },
         )
     )
