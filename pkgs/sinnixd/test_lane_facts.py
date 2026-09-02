@@ -60,6 +60,10 @@ def test_advance_orders_facts_before_actions() -> None:
     assert advance(_facts(lane_phase=None)).kind == "wait"
     assert advance(_facts(lane_phase="cancelled")).kind == "retry"
     assert advance(_facts()).kind == "verify"
+    assert advance(_facts(verify_job=("v", "succeeded"))).kind == "harvest"
+    assert advance(_facts(verify_job=("v", "failed"))).kind == "park"
+    assert advance(_facts(verify_job=("v", "succeeded"), harvest_at_head=("j", "failed"))).kind == "park"
+    assert advance(_facts(receipt=_receipt(), published_at_head=True)).kind == "await-sweep"
     assert advance(_facts(receipt=_receipt(head="x" * 40))).kind == "verify"
     assert advance(_facts(receipt=_receipt())).kind == "publish"
     flagged = _receipt(flags=("FLAG: production definitions removed: f",), flagged=True)
@@ -122,6 +126,19 @@ def test_collect_reads_the_daemon_state(tmp_path: Path) -> None:
             }
         )
     )
+    (state / "results").mkdir()
+    (state / "results" / "published.result").write_text(json.dumps({"value": {"outcome": "HARVEST_OK", "phase": "published"}}))
+    (state / "jobs" / "authorize.json").write_text(
+        json.dumps(
+            {
+                "job_id": "authorize",
+                "created_at": "2026-09-02T10:06:00+00:00",
+                "spec": {"kind": "declared-operation", "operation": "harvest", "checkout": {"checkout_id": checkout_id, "head": head}},
+                "state": {"phase": "succeeded", "terminal": True},
+                "artifacts": {"result": str(state / "results" / "published.result")},
+            }
+        )
+    )
     (state / "harvest-packets").mkdir()
     (state / "harvest-packets" / ("harvest-" + "1" * 32 + ".json")).write_text(
         json.dumps({"packet_id": "harvest-" + "1" * 32, "workspace_id": checkout_id, "head": head, "redflags": [], "redflag_status": 0, "bead_id": "polylogue-1"})
@@ -134,6 +151,7 @@ def test_collect_reads_the_daemon_state(tmp_path: Path) -> None:
     assert lane.head == head and lane.bead == "polylogue-1" and lane.lane_phase == "succeeded"
     assert lane.running_ops == ("harvest",)
     assert lane.receipt is not None and lane.receipt.head == head
+    assert lane.published_at_head is True
     view = lane_view(lane)
     assert view["next"] == {"kind": "wait", "reason": "running: harvest"}
 
