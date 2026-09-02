@@ -266,13 +266,15 @@ rec {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 300;
-        MemoryLow = "4G";
+        # Batch under sinnixd.slice grows into swap; the desktop's working
+        # set must not be what gets reclaimed to make room for it.
+        MemoryLow = "6G";
       };
       session = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 300;
-        MemoryLow = "4G";
+        MemoryLow = "6G";
       };
       desktop-shell = {
         IOAccounting = true;
@@ -307,7 +309,7 @@ rec {
         IOAccounting = true;
         CPUWeight = 10;
         IOWeight = 10;
-        MemoryHigh = "24G";
+        MemoryHigh = "20G";
         ManagedOOMSwap = "kill";
         # Same reasoning as background.slice above: kill a wedged scope, not a
         # busy one. Lane verification phases legitimately stall past 10% for
