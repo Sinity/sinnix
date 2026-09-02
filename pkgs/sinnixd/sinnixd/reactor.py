@@ -44,8 +44,12 @@ _DURABLE_KEEPER_PREFIXES = (
     "review-fix:",
     "publish:",
     "park:",
+    "rebase:",
 )
 MAX_EVENT_BYTES = 1_000_000
+# A dispatch record older than this names a head, receipt, or PR round that
+# no longer exists; keeping it only hides the live entries on the board.
+DURABLE_KEEPER_MAX_AGE_SECONDS = 3 * 24 * 60 * 60
 DEFAULT_REFILL_SPACING_SECONDS = 300
 MAX_REFILL_BACKOFF_SECONDS = 3600
 DEFAULT_PR_AGE_THRESHOLD_SECONDS = 60 * 60
@@ -973,6 +977,7 @@ class CampaignReactor:
     dispose_dispatcher: Callable[[str], None] | None = None
     integration_dispatcher: IntegrationDispatcher | None = None
     review_fix_dispatcher: IntegrationDispatcher | None = None
+    harvest_dispatcher: IntegrationDispatcher | None = None
     integrator_backend: str = "codex"
     # Workers default to luna, so the integrator is a sibling rather than the
     # same model judging its own family's output.
@@ -1228,12 +1233,21 @@ class CampaignReactor:
         # Only pending-action entries are pruned here. Prefixed entries are
         # durable records of work already dispatched; deleting one re-dispatches
         # it on the next tick.
+        now = datetime.now(UTC)
         for key in list(self._board.keeper):
             if key.startswith(_DURABLE_KEEPER_PREFIXES):
+                if key.startswith("refill:"):
+                    continue
+                emitted = self._board.keeper[key].get("emitted_at")
+                try:
+                    age = (now - _parse_time(str(emitted))).total_seconds()
+                except (TypeError, ValueError):
+                    continue
+                if age > DURABLE_KEEPER_MAX_AGE_SECONDS:
+                    del self._board.keeper[key]
                 continue
             if key not in active_keys:
                 del self._board.keeper[key]
-        now = datetime.now(UTC)
         for key, action in actions:
             prior = self._board.keeper.get(key)
             if prior is not None and now < _parse_time(str(prior["next_eligible_at"])):
@@ -1462,6 +1476,9 @@ class CampaignReactor:
             return
         reason = self._needs_judgment(event)
         if reason is None:
+            # A clean receipt supersedes whatever this workspace was parked
+            # for; the operator's decision has been made by the lane.
+            self._board.keeper.pop(f"judgment:{workspace}", None)
             # Publication has its own record: an integrator that cleared the
             # flag without moving the head must not block the publish behind
             # its own integrate key.
@@ -1826,6 +1843,72 @@ class CampaignReactor:
             if not released:
                 self._board.record_error(-1, f"release {bead_id}: {detail}")
 
+    def _dispatch_conflict_harvest(self, event: Mapping[str, Any]) -> None:
+        """Harvest a published lane PR again once a sibling merge made it unmergeable.
+
+        The sweep reports the conflict every pass; one harvest per (PR, head)
+        re-mints the receipt, the publish path refuses with REBASE_CONFLICT,
+        and the rebase integrator takes it from there. A hand PR carries no
+        harvest receipt and is rebased by its author.
+        """
+        project = event.get("project")
+        repo = event.get("repo")
+        pr = event.get("pr")
+        head = event.get("head")
+        receipt = event.get("receipt")
+        if not (
+            isinstance(project, str)
+            and isinstance(repo, str)
+            and isinstance(head, str)
+            and head
+            and isinstance(receipt, str)
+            and pr is not None
+        ):
+            return
+        if not re.fullmatch(r"harvest-[0-9a-f]{32}", receipt.rsplit("/", 1)[-1]):
+            return
+        key = f"rebase:{repo}#{pr}:{head[:12]}"
+        if key in self._board.keeper:
+            return
+        workspace_id = self._receipt_workspace(receipt)
+        workspace = (
+            self._workspace_name(workspace_id) if workspace_id is not None else None
+        )
+        if workspace_id is None or workspace is None:
+            self._board.record_error(
+                -1, f"conflict {repo}#{pr}: no workspace for receipt {receipt}"
+            )
+            return
+        if self._checkout_owned(workspace_id):
+            return
+        try:
+            if self.harvest_dispatcher is not None:
+                self.harvest_dispatcher(project, workspace, str(pr))
+            else:
+                subprocess.run(
+                    [
+                        self.agentctl_executable,
+                        "job",
+                        "start",
+                        project,
+                        "harvest",
+                        "--workspace",
+                        workspace,
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+        except (OSError, subprocess.SubprocessError) as error:
+            self._board.record_error(-1, f"conflict {repo}#{pr}: {error}")
+            return
+        self._board.keeper[key] = {
+            "emitted_at": _now(),
+            "backoff_seconds": 0,
+            "next_eligible_at": _now(),
+        }
+
     def _dispatch_review_fix(self, event: Mapping[str, Any]) -> None:
         """Answer hosted-review findings on a published PR with a fix lane.
 
@@ -1946,6 +2029,18 @@ class CampaignReactor:
     def _receipt_workspace(cls, receipt: str) -> str | None:
         """The workspace a harvest receipt was published from."""
         return cls._receipt_field(receipt, "workspace_id")
+
+    def _clear_judgments(self, bead: object) -> None:
+        """Drop judgment entries whose receipt names a bead that just merged."""
+        if not isinstance(bead, str) or not bead:
+            return
+        for key in list(self._board.keeper):
+            if not key.startswith("judgment:"):
+                continue
+            receipt = self._board.keeper[key].get("receipt")
+            payload = self._receipt_payload(str(receipt)) if receipt else None
+            if payload is not None and payload.get("bead_id") == bead:
+                del self._board.keeper[key]
 
     @classmethod
     def _receipt_field(cls, receipt: str, key: str) -> str | None:
@@ -2469,6 +2564,16 @@ class CampaignReactor:
                     and event.get("outcome") == "findings"
                 ):
                     self._dispatch_review_fix(event)
+                if (
+                    event.get("kind") == "publication-sweep"
+                    and event.get("outcome") == "merge"
+                ):
+                    self._clear_judgments(event.get("bead"))
+                if (
+                    event.get("kind") == "publication-sweep"
+                    and event.get("outcome") == "conflict"
+                ):
+                    self._dispatch_conflict_harvest(event)
                 pr = self._board.prs.get(f"{event.get('repo')}#{event.get('pr')}")
                 closed = pr is not None and pr.bead_close_status == "closed"
                 if event.get("kind") in {"bead_close", "merge_close"} and (
