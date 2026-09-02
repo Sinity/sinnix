@@ -129,27 +129,17 @@ in
               message = "Clodex must run as an advertised local user service for Claude Code child-process routing.";
             }
             {
-              assertion = lib.hasInfix "models --json" (
-                toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre
-              );
-              message = "Clodex startup must inspect aliases through its structured JSON interface.";
-            }
-            {
-              assertion = lib.hasInfix "patch is stale" (
-                toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre
-              );
-              message = "Clodex startup must fail readiness with an actionable stale-patch status.";
-            }
-            {
+              # Pre-start steps are store scripts (unit values are single
+              # lines); the alias reconciliation and the stale-patch check
+              # are asserted by script identity.
               assertion =
                 let
                   preStart = toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre;
                 in
-                lib.hasInfix "models --unalias" preStart
-                && lib.hasInfix "luna=clodex:openai-oauth:gpt-5.6-luna" preStart
-                && lib.hasInfix "sol=clodex:openai-oauth:gpt-5.6-sol" preStart
-                && lib.hasInfix "terra=clodex:openai-oauth:gpt-5.6-terra" preStart;
-              message = "Clodex startup must converge the complete declared alias set.";
+                lib.hasInfix "sinnix-clodex-aliases" preStart
+                && lib.hasInfix "sinnix-clodex-patch-check" preStart
+                && !(lib.hasInfix "\n" preStart);
+              message = "Clodex startup must run alias reconciliation and the stale-patch check as one-line store scripts.";
             }
             {
               assertion =
