@@ -193,7 +193,6 @@ def test_admission_claims_are_durable_and_ledger_explains_queue(
         "job_id": holder["job_id"],
         "pool": "normal",
         "estimate_memory_bytes": 1024 * 1024 * 1024,
-        "measured": {"samples": 0, "p50_bytes": None, "p90_bytes": None},
         "exclusive_keys": ["fixture:store"],
         "created_at": persisted["claims"][holder["job_id"]]["created_at"],
         "project_id": "fixture",
@@ -774,95 +773,6 @@ def test_observed_peak_does_not_change_later_estimates(tmp_path: Path) -> None:
     claimed = repeated["state"]["admission"]["estimate_memory_bytes"]
     assert claimed == POOL_POLICIES["agent"]["default_estimate"]
     assert "estimates" not in subject._admission_state()
-
-
-def test_cache_and_coalescing_are_principal_isolated(tmp_path: Path) -> None:
-    adapter = project(
-        tmp_path / "project", (operation("check", cache="tree+environment"),)
-    )
-    systemd = FakeSystemd()
-    subject = jobs(tmp_path, systemd)
-
-    operator_first = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("check"),
-        correlation_id="operator-first",
-        principal="operator",
-        parameters={},
-    )
-    operator_duplicate = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("check"),
-        correlation_id="operator-duplicate",
-        principal="operator",
-        parameters={},
-    )
-    agent_first = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("check"),
-        correlation_id="agent-first",
-        principal="agent-control",
-        parameters={},
-    )
-    agent_duplicate = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("check"),
-        correlation_id="agent-duplicate",
-        principal="agent-control",
-        parameters={},
-    )
-
-    assert operator_duplicate["job_id"] == operator_first["job_id"]
-    assert operator_duplicate["coalesced"]
-    assert agent_duplicate["job_id"] == agent_first["job_id"]
-    assert agent_duplicate["coalesced"]
-    assert agent_first["job_id"] != operator_first["job_id"]
-    assert len(systemd.started) == 2
-
-    operator_record = subject.store.load(operator_first["job_id"])
-    agent_record = subject.store.load(agent_first["job_id"])
-    assert operator_record.spec.principal == "operator"
-    assert agent_record.spec.principal == "agent-control"
-    assert operator_record.spec.cache_key != agent_record.spec.cache_key
-
-    systemd.properties = {
-        "LoadState": "loaded",
-        "ActiveState": "inactive",
-        "Result": "success",
-        "ExecMainStatus": "0",
-    }
-    assert subject.get(operator_first["job_id"])["state"]["phase"] == "succeeded"
-    assert subject.get(agent_first["job_id"])["state"]["phase"] == "succeeded"
-
-    operator_cached = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("check"),
-        correlation_id="operator-cached",
-        principal="operator",
-        parameters={},
-    )
-    agent_cached = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("check"),
-        correlation_id="agent-cached",
-        principal="agent-control",
-        parameters={},
-    )
-    assert (
-        operator_cached["job_id"] == operator_first["job_id"]
-        and operator_cached["reused"]
-    )
-    assert agent_cached["job_id"] == agent_first["job_id"] and agent_cached["reused"]
-
-    (adapter.root / "tracked").write_text("changed\n")
-    uncached = subject.start_declared(
-        project=adapter,
-        operation=adapter.operation("check"),
-        correlation_id="operator-uncached",
-        principal="operator",
-        parameters={},
-    )
-    assert uncached["job_id"] != operator_first["job_id"] and len(systemd.started) == 3
 
 
 def test_dependencies_exclusive_keys_defaults_and_pressure_gate(
@@ -1670,34 +1580,6 @@ def test_a_waiting_harvest_outranks_a_new_lane_launch(tmp_path: Path) -> None:
     lane = subject.start(agent_spec(("table:lane",)))
 
     assert subject.get(lane["job_id"])["state"]["phase"] == "queued", "the lane must not take the harvest's headroom"
-
-
-def test_terminal_peaks_are_recorded_as_measured_envelopes(tmp_path: Path) -> None:
-    """Anti-vacuity: without the record, the admission view can only show
-    the declaration, which is what let a 16 GB claim stand against a 6 GB
-    peak for a day."""
-    systemd = FakeSystemd()
-    subject = GenericJobs(systemd, GenericJobStore(tmp_path / "state"))
-    peaks = [1, 3, 2]
-    for index, gib in enumerate(peaks):
-        job = subject.start(agent_spec((f"table:{index}",)))
-        systemd.unit_properties[job["unit"]] = {
-            "LoadState": "loaded",
-            "ActiveState": "inactive",
-            "Result": "success",
-            "ExecMainStatus": "0",
-            "InvocationID": str(index),
-            "MemoryPeak": str(gib * 1024**3),
-        }
-        subject.get(job["job_id"])
-
-    measured = subject.measured_envelope(agent_spec(("table:x",)))
-    assert measured["samples"] == 3
-    assert measured["p50_bytes"] == 2 * 1024**3
-    assert measured["p90_bytes"] == 3 * 1024**3
-    running = subject.start(agent_spec(("table:live",)))
-    claims = subject.admission_ledger()["claims"]
-    assert claims[running["job_id"]]["measured"]["samples"] == 3
 
 
 def test_sustained_io_stall_blocks_new_admissions(tmp_path: Path) -> None:

@@ -227,24 +227,6 @@ def parser() -> argparse.ArgumentParser:
         "launch", help="Dispatch an attested agent job (same as bare `agent`)."
     )
     _add_agent_launch_arguments(launch, required=True)
-    agent_list = agent_subcommands.add_parser("list")
-    agent_list.add_argument("--limit", type=int, choices=range(1, 1001), default=100)
-    agent_list.add_argument("--cursor")
-    agent_list.add_argument("--project")
-    agent_list.add_argument("--phase", action="append", default=[])
-    agent_list.add_argument("--active", action="store_true")
-    agent_status = agent_subcommands.add_parser("status")
-    agent_status.add_argument("job_id")
-    agent_wait = agent_subcommands.add_parser("wait")
-    agent_wait.add_argument("job_ids", nargs="+", metavar="job_id")
-    agent_wait.add_argument("--any", dest="wait_any", action="store_true")
-    agent_wait.add_argument("--timeout-seconds", type=int, default=30)
-    agent_result = agent_subcommands.add_parser("result")
-    agent_result.add_argument("job_id")
-    agent_result.add_argument("--max-bytes", type=int, default=64_000)
-    agent_resume = agent_subcommands.add_parser("resume")
-    agent_resume.add_argument("job_id")
-    agent_resume.add_argument("--session-id", required=True)
     project = subcommands.add_parser("project")
     project_subcommands = project.add_subparsers(dest="project_command", required=True)
     project_subcommands.add_parser("list")
@@ -425,20 +407,8 @@ def parser() -> argparse.ArgumentParser:
     retry = job_subcommands.add_parser("retry")
     retry.add_argument("job_id")
     retry.add_argument("--hint")
-    retry.add_argument("--escalate", action="store_true")
-    resume = job_subcommands.add_parser("resume")
-    resume.add_argument("job_id")
-    resume.add_argument("--session-id", required=True)
-    status = job_subcommands.add_parser("status")
-    status.add_argument("job_id")
-    status.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit JSON (accepted explicitly for scripting; JSON is the default output format).",
-    )
     job_list = job_subcommands.add_parser("list")
     job_list.add_argument("--limit", type=int, choices=range(1, 1001), default=100)
-    job_list.add_argument("--cursor")
     job_list.add_argument("--project")
     job_list.add_argument("--phase", action="append", default=[])
     job_list.add_argument("--kind", action="append", default=[])
@@ -446,13 +416,7 @@ def parser() -> argparse.ArgumentParser:
         "--active", "--active-only", dest="active", action="store_true"
     )
     wait = job_subcommands.add_parser("wait")
-    wait.add_argument("job_ids", nargs="+", metavar="job_id")
-    wait.add_argument(
-        "--any",
-        dest="wait_any",
-        action="store_true",
-        help="With multiple job ids, return when the first reaches a terminal state.",
-    )
+    wait.add_argument("job_id")
     wait.add_argument("--timeout-seconds", type=int, default=30)
     logs = job_subcommands.add_parser("logs")
     logs.add_argument("job_id")
@@ -467,29 +431,19 @@ def parser() -> argparse.ArgumentParser:
         "admission", help="Show admission queue, claims, and blocking arithmetic."
     )
     admission.add_argument("--project")
-    admission_explain = job_subcommands.add_parser(
-        "admission-explain", help="Explain one queued job's admission verdict."
-    )
-    admission_explain.add_argument("job_id")
     plan = subcommands.add_parser("plan")
     plan_subcommands = plan.add_subparsers(dest="plan_command", required=True)
     plan_submit = plan_subcommands.add_parser("submit")
     plan_submit.add_argument("project_id")
-    plan_submit.add_argument("--input-generation", required=True)
     plan_submit.add_argument("--node-operation")
     plan_submit.add_argument("--workspace")
     plan_submit.add_argument("--checkout")
     plan_submit.add_argument("--plan-file", type=Path, required=True)
     plan_get = plan_subcommands.add_parser("get")
     plan_get.add_argument("plan_id")
-    plan_list = plan_subcommands.add_parser("list")
-    plan_list.add_argument("--project")
     plan_wait = plan_subcommands.add_parser("wait")
     plan_wait.add_argument("plan_id")
     plan_wait.add_argument("--timeout-seconds", type=int, default=30)
-    plan_result = plan_subcommands.add_parser("result")
-    plan_result.add_argument("plan_id")
-    plan_result.add_argument("--max-bytes", type=int, default=64_000)
     return result
 
 
@@ -677,49 +631,6 @@ def main() -> int:
                 "result": "exit-status",
             },
             "operator",
-        )
-    elif arguments.command == "agent" and arguments.agent_command == "list":
-        request = _request(
-            "job.list",
-            "systemd-jobs",
-            {
-                "limit": arguments.limit,
-                "cursor": arguments.cursor,
-                "project_id": arguments.project,
-                "phases": arguments.phase,
-                "kinds": ["attested-agent"],
-                "active_only": arguments.active,
-            },
-        )
-    elif arguments.command == "agent" and arguments.agent_command == "status":
-        request = _request("job.get", "systemd-jobs", {"job_id": arguments.job_id})
-    elif arguments.command == "agent" and arguments.agent_command == "wait":
-        if len(arguments.job_ids) > 1 and not arguments.wait_any:
-            parser().error("waiting on multiple job ids requires --any")
-        request = _request(
-            "job.wait",
-            "systemd-jobs",
-            {
-                **(
-                    {"job_ids": arguments.job_ids}
-                    if arguments.wait_any
-                    else {"job_id": arguments.job_ids[0]}
-                ),
-                "timeout_seconds": arguments.timeout_seconds,
-            },
-        )
-    elif arguments.command == "agent" and arguments.agent_command == "result":
-        request = _request(
-            "job.result",
-            "systemd-jobs",
-            {"job_id": arguments.job_id, "max_bytes": arguments.max_bytes},
-        )
-    elif arguments.command == "agent" and arguments.agent_command == "resume":
-        request = _request(
-            "job.resume",
-            "systemd-jobs",
-            {"job_id": arguments.job_id, "native_session_id": arguments.session_id},
-            "agent-control",
         )
     elif arguments.command == "agent":
         missing = [
@@ -1545,7 +1456,6 @@ def main() -> int:
             )
         request_arguments: dict[str, object] = {
             "project_id": arguments.project_id,
-            "input_generation": arguments.input_generation,
             "nodes": nodes,
         }
         if arguments.node_operation is not None:
@@ -1557,12 +1467,6 @@ def main() -> int:
         request = _request("plan.submit", "project-plans", request_arguments)
     elif arguments.command == "plan" and arguments.plan_command == "get":
         request = _request("plan.get", "project-plans", {"plan_id": arguments.plan_id})
-    elif arguments.command == "plan" and arguments.plan_command == "list":
-        request = _request(
-            "plan.list",
-            "project-plans",
-            ({"project_id": arguments.project} if arguments.project else {}),
-        )
     elif arguments.command == "plan" and arguments.plan_command == "wait":
         request = _request(
             "plan.wait",
@@ -1572,13 +1476,7 @@ def main() -> int:
                 "timeout_seconds": arguments.timeout_seconds,
             },
         )
-    elif arguments.command == "plan" and arguments.plan_command == "result":
-        request = _request(
-            "plan.result",
-            "project-plans",
-            {"plan_id": arguments.plan_id, "max_bytes": arguments.max_bytes},
-        )
-    elif arguments.command == "job" and arguments.job_command in {"get", "status"}:
+    elif arguments.command == "job" and arguments.job_command == "get":
         request = _request("job.get", "systemd-jobs", {"job_id": arguments.job_id})
     elif arguments.command == "job" and arguments.job_command == "retry":
         request = _request(
@@ -1587,15 +1485,7 @@ def main() -> int:
             {
                 "job_id": arguments.job_id,
                 **({"hint": arguments.hint} if arguments.hint is not None else {}),
-                "escalate": arguments.escalate,
             },
-            "agent-control",
-        )
-    elif arguments.command == "job" and arguments.job_command == "resume":
-        request = _request(
-            "job.resume",
-            "systemd-jobs",
-            {"job_id": arguments.job_id, "native_session_id": arguments.session_id},
             "agent-control",
         )
     elif arguments.command == "job" and arguments.job_command == "list":
@@ -1604,7 +1494,6 @@ def main() -> int:
             "systemd-jobs",
             {
                 "limit": arguments.limit,
-                "cursor": arguments.cursor,
                 "project_id": arguments.project,
                 "phases": arguments.phase,
                 "kinds": arguments.kind,
@@ -1612,17 +1501,11 @@ def main() -> int:
             },
         )
     elif arguments.command == "job" and arguments.job_command == "wait":
-        if len(arguments.job_ids) > 1 and not arguments.wait_any:
-            parser().error("waiting on multiple job ids requires --any")
         request = _request(
             "job.wait",
             "systemd-jobs",
             {
-                **(
-                    {"job_ids": arguments.job_ids}
-                    if arguments.wait_any
-                    else {"job_id": arguments.job_ids[0]}
-                ),
+                "job_id": arguments.job_id,
                 "timeout_seconds": arguments.timeout_seconds,
             },
         )
@@ -1647,10 +1530,6 @@ def main() -> int:
             "job.admission",
             "systemd-jobs",
             {"project_id": arguments.project} if arguments.project else {},
-        )
-    elif arguments.command == "job" and arguments.job_command == "admission-explain":
-        request = _request(
-            "job.admission.explain", "systemd-jobs", {"job_id": arguments.job_id}
         )
     elif arguments.command == "job":
         request = _request("job.cancel", "systemd-jobs", {"job_id": arguments.job_id})
