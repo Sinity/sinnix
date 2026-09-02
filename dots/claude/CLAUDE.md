@@ -153,13 +153,17 @@ live OUTSIDE your context — read them, never reconstruct:
   — start with its capability table, which names the `agentctl` verb for each
   need so you do not hand-roll a worse copy. Worker rules in its sibling
   `worker-contract.md`.
-- **Live state**: `agentctl campaign view` is the lane screen (`--json` for the
-  payload); `sinnixd-reactor`
-  dispatches each lane's next action and logs its refusals to
-  `/realm/tmp/work/campaign-board.json`.
+- **Live state**: `agentctl campaign view --project <p>` is the lane screen
+  (`--json` for the payload); `agentctl campaign log` is the event history.
+- **Who drives**: the operator or the coordinating agent. `sinnixd-reactor`
+  is stopped after every deploy and refill is opt-in; nothing advances on
+  its own.
 - **Dispatch**: `agentctl campaign run` for a wave, `packet launch` for one
-  bead. **Harvest**: the declared `harvest` operation — review receipt, then
-  authorize to publish. `agentctl --plain` prints payloads as text.
+  bead. **Harvest**: the declared `harvest` operation; it refuses without
+  test evidence (an affected-verification job or operator authorization).
+  `agentctl --plain` prints payloads as text.
+- **Operating loop**: merge everything in progress, then ONE corpus run
+  (`agentctl job start <project> verify_all`); never per-lane corpus runs.
 - A fresh session resumes a campaign from those files plus the project's
   memory index; nothing campaign-critical may live only in a chat context.
 
