@@ -15,7 +15,6 @@ let
   projectRootArgs = lib.concatMapStringsSep " " (
     project: "--project-root ${lib.escapeShellArg "${project.name}=${project.value.path}"}"
   ) (lib.attrsToList config.sinnix.projects.entries);
-  plannerOutput = "/realm/tmp/work/dispatch-plan.json";
 in
 mkServiceModule {
   name = "campaign-reactor";
@@ -155,28 +154,5 @@ mkServiceModule {
           Install.WantedBy = [ "default.target" ];
         };
       }
-      # The planner is a scheduled, read-only snapshot producer.  It emits the
-      # artifact consumed by refill; launching remains the campaign runner's
-      # typed admission path.
-      (lib.sinnix.mkScheduledJob
-        {
-          inherit config;
-          unitName = "sinnixd-campaign-planner";
-          description = "Sinnix campaign dispatch-plan snapshot";
-        }
-        {
-          manager = "user";
-          resourceClass = "background-maintenance";
-          execStart = "${scriptPkgs.sinnixd}/bin/sinnixd-planner --output ${lib.escapeShellArg plannerOutput} ${projectRootArgs}";
-          serviceConfig = {
-            ReadWritePaths = [ (builtins.dirOf plannerOutput) ];
-          };
-          timer = {
-            intervalSec = 900;
-            persistent = true;
-            description = "Periodic campaign frontier planning";
-          };
-        }
-      )
     ];
 } args

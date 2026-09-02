@@ -51,7 +51,7 @@ It returned 129 hits in 46 files. Seventeen hits are in this decision record its
 - `docs/sinnixd.md:44,46,167`: current project-root registration and examples. Documentation and live configuration example.
 - `flake/command-registry.nix:118`: generated command reads configured `projectRoots`. Nix service integration.
 - `modules/services/sinnixd.nix:16,26,57,59,104`: project-root option, uniqueness check, and daemon arguments. Service authority.
-- `modules/services/campaign-reactor.nix:15,153,183`: reactor and planner receive registered project roots. Service authority.
+- `modules/services/campaign-reactor.nix:15,153`: reactor receives registered project roots. Service authority.
 - `pkgs/sinnixd/sinnixd/projects.py:204,216,1118,1129,1130,1137,1138,1143,1145,1193,1194`: descriptor schema and project/workspace root parsing. Runtime project discovery.
 - `pkgs/sinnixd/sinnixd/workspaces.py:688,752,1126,1225,1355,1373,1386,1399`: default checkout, base resolution, and default-base checks. Workspace/Git authority.
 - `pkgs/sinnixd/sinnixd/delivery.py:49,241,415,416,419`: publication base and default-base validation. Delivery authority.
