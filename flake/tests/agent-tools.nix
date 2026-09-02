@@ -1014,6 +1014,24 @@ in
             ${pkgs.bash}/bin/bash ${../../flake/tests/skill-authoring.sh} "$validator"
             touch "$out"
           '';
+      chatgptConversationsFixture =
+        pkgs.runCommand "chatgpt-conversations-fixture"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.nodejs
+            ];
+          }
+          ''
+            skill="$TMPDIR/chatgpt-conversations"
+            mkdir -p "$skill/scripts"
+            cp ${../../dots/_ai/skills/chatgpt-conversations/scripts/sinnix-chatgpt-conversations} "$skill/scripts/sinnix-chatgpt-conversations"
+            cp ${../../dots/_ai/skills/chatgpt-conversations/tests.sh} "$skill/tests.sh"
+            chmod -R u+w "$skill"
+            ${pkgs.bash}/bin/bash "$skill/tests.sh"
+            touch "$out"
+          '';
       desktopCaptureFixture =
         pkgs.runCommand "desktop-capture-fixture"
           {
@@ -1148,6 +1166,7 @@ in
         bd-dolt-authority = bdDoltAuthorityFixture;
         context-handoff = contextHandoffFixture;
         skill-authoring = skillAuthoringFixture;
+        chatgpt-conversations = chatgptConversationsFixture;
         desktop-capture = desktopCaptureFixture;
         recovery-skills = recoverySkillsFixture;
         hooks-harness = hooksHarnessFixture;
