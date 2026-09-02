@@ -1499,7 +1499,7 @@ class CampaignReactor:
             # one rebase per head is mechanical, and the harvest that follows
             # runs the tests. Only a lane already rebased at this head parks.
             head = str(self._receipt_field(str(receipt), "head") or "")
-            rebase_key = f"integrate:{workspace}:rebase-{head[:12]}"
+            rebase_key = f"integrate:{workspace}:rebase-{head[:12]}:{self._master_head(str(project))[:12]}"
             if rebase_key not in self._board.keeper:
                 self._dispatch_rebase({**event, "head": head, "project": project}, reason="evidence")
                 return
@@ -1657,7 +1657,7 @@ class CampaignReactor:
             self._board.record_error(-1, f"rebase: no registered workspace for {checkout_id}")
             return
         head = str(event.get("head") or (checkout.get("head") if isinstance(checkout, Mapping) else "") or "")
-        key = f"integrate:{workspace}:rebase-{head[:12]}"
+        key = f"integrate:{workspace}:rebase-{head[:12]}:{self._master_head(project)[:12]}"
         if key in self._board.keeper or self._checkout_owned(checkout_id):
             return
         refusal = (
@@ -1887,7 +1887,9 @@ class CampaignReactor:
             return
         if not re.fullmatch(r"harvest-[0-9a-f]{32}", receipt.rsplit("/", 1)[-1]):
             return
-        key = f"rebase:{repo}#{pr}:{head[:12]}"
+        # A conflict is a property of (lane head, master head): master
+        # moving again after a rebase is a new conflict at the same lane head.
+        key = f"rebase:{repo}#{pr}:{head[:12]}:{self._master_head(project)[:12]}"
         if key in self._board.keeper:
             return
         workspace_id = self._receipt_workspace(receipt)
@@ -2049,6 +2051,24 @@ class CampaignReactor:
     def _receipt_workspace(cls, receipt: str) -> str | None:
         """The workspace a harvest receipt was published from."""
         return cls._receipt_field(receipt, "workspace_id")
+
+    def _master_head(self, project: str) -> str:
+        """The project's origin/master commit, or "" when it cannot be read."""
+        root = self.project_roots.get(project)
+        if root is None:
+            return ""
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "origin/master"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        value = result.stdout.strip()
+        return value if result.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", value) else ""
 
     def _clear_judgments(self, bead: object) -> None:
         """Drop judgment entries whose receipt names a bead that just merged."""

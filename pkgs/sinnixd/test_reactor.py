@@ -1731,6 +1731,7 @@ def test_a_clean_receipt_does_not_publish_under_a_holding_agent(
 def test_static_only_evidence_rebases_once_before_judgment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(CampaignReactor, "_master_head", lambda self, project: "m" * 40)
     """Anti-vacuity: five lanes parked on "no test evidence" on 2026-09-02
     because their branches predated the graph reseed; a rebase is what
     gets them selection."""
@@ -1775,7 +1776,7 @@ def test_static_only_evidence_rebases_once_before_judgment(
 
     # The rebase ran at this head and the evidence is still static: the
     # ordinary integrator path takes over.
-    reactor._board.keeper["integrate:packet-p-9:rebase-" + "e" * 12] = {
+    reactor._board.keeper["integrate:packet-p-9:rebase-" + "e" * 12 + ":" + "m" * 12] = {
         "emitted_at": _now(),
         "backoff_seconds": 0,
         "next_eligible_at": _now(),
@@ -1783,3 +1784,40 @@ def test_static_only_evidence_rebases_once_before_judgment(
     reactor._dispatch_integration(event)
     assert rebases == ["evidence"]
     assert len(integrations) == 1
+
+
+def test_a_conflict_after_master_moves_again_reharvests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: keyed on the lane head alone, #4522 sat in conflict after
+    its rebase because master moved again (2026-09-02 06:50Z)."""
+    calls: list[tuple[str, str, str]] = []
+    masters = iter(["a" * 40, "a" * 40, "b" * 40])
+    monkeypatch.setattr(CampaignReactor, "_master_head", lambda self, project: next(masters))
+    monkeypatch.setattr(
+        CampaignReactor, "_workspace_name", staticmethod(lambda cid: "packet-p-9")
+    )
+    monkeypatch.setattr(
+        CampaignReactor, "_receipt_workspace", staticmethod(lambda r: "worktree-abc")
+    )
+    reactor = CampaignReactor(
+        event_spool=tmp_path / "events.jsonl",
+        board_path=tmp_path / "board.json",
+        state_dir=tmp_path / "state",
+        project_roots={"polylogue": tmp_path / "repo"},
+        harvest_dispatcher=lambda p, w, r: calls.append((p, w, r)),
+    )
+    event = {
+        "kind": "publication-sweep",
+        "outcome": "conflict",
+        "project": "polylogue",
+        "repo": "o/r",
+        "pr": 41,
+        "head": "c" * 40,
+        "receipt": "harvest-" + "0" * 32,
+    }
+    reactor._dispatch_conflict_harvest(event)
+    reactor._dispatch_conflict_harvest(event)
+    reactor._dispatch_conflict_harvest(event)
+
+    assert calls == [("polylogue", "packet-p-9", "41")] * 2
