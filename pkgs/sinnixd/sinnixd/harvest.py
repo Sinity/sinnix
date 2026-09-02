@@ -23,7 +23,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-
 HARVEST_OK = "HARVEST_OK"
 REBASE_CONFLICT = "REBASE_CONFLICT"
 GATE_RED = "GATE_RED"
