@@ -96,7 +96,7 @@ MEMORY_FULL_BLOCK_CONSECUTIVE_PROBES = 2
 # are disk-bound, and admitting into a saturated disk only lengthens every
 # queue, the operator's desktop included (io-full 76% avg10, 2026-09-02
 # 12:29Z). Ambient io-full on an idle host measures single digits.
-IO_FULL_BLOCK_THRESHOLD = 40.0
+IO_FULL_BLOCK_THRESHOLD = 25.0
 # After a pressure preemption the host is still paging out what the victim
 # held; admitting a replacement at once re-creates the stall and the next
 # probe evicts another lane (eight lanes in forty minutes on 2026-09-02).
@@ -2669,6 +2669,8 @@ class GenericJobs:
     recover_on_init: bool = True
     events: TerminalEvents = field(default_factory=TerminalEvents, repr=False)
     _admission_lock: RLock = field(default_factory=RLock, init=False, repr=False)
+    _admission_written: str | None = field(default=None, init=False, repr=False)
+    _admission_observed_at: float = field(default=0.0, init=False, repr=False)
     _spooled: set[str] = field(default_factory=set, init=False, repr=False)
     _active_pressure_since: float | None = field(default=None, init=False, repr=False)
     _last_pressure_preemption: float | None = field(default=None, init=False, repr=False)
@@ -3116,16 +3118,27 @@ class GenericJobs:
         raise JobRecordError(f"job {job_id} is not queued for admission")
 
     def _save_admission_state(self, value: Mapping[str, Any]) -> None:
+        """Persist the admission snapshot when it changed.
+
+        Observe paths recompute admission on every call; an unchanged
+        snapshot must not cost two fsyncs on the state disk each time.
+        """
         path = self.store.admission_path
+        text = json.dumps(value, sort_keys=True) + "\n"
+        if self._admission_written is None and path.exists():
+            with contextlib.suppress(OSError):
+                self._admission_written = path.read_text()
+        if text == self._admission_written:
+            return
         _ensure_durable_directory(path.parent)
         temporary = path.with_suffix(".json.tmp")
         with open(temporary, "w", encoding="utf-8") as handle:
-            json.dump(value, handle, sort_keys=True)
-            handle.write("\n")
+            handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
         _fsync_directory(path.parent)
+        self._admission_written = text
 
     def _capacity_state(self) -> dict[str, Any]:
         path = self.store.capacity_path
@@ -4090,6 +4103,20 @@ class GenericJobs:
             self._last_pressure_preemption = now
         return victim
 
+    ADMISSION_OBSERVE_INTERVAL_SECONDS = 2.0
+
+    def _admit_observed(self) -> None:
+        """Admission for read paths: at most once per interval.
+
+        Reads carry no new admission evidence of their own; a poll storm
+        must not turn into a full admission pass per request.
+        """
+        now = time.monotonic()
+        if now - self._admission_observed_at < self.ADMISSION_OBSERVE_INTERVAL_SECONDS:
+            return
+        self._admission_observed_at = now
+        self._admit_locked()
+
     def _admit_locked(self) -> None:
         state = self._admission_state()
         records = self.store.active_records()
@@ -4979,7 +5006,9 @@ class GenericJobs:
         with self._admission_lock:
             if status["state"].get("terminal"):
                 self._finish_admission(self.store.load(job_id), self._admission_state())
-            self._admit_locked()
+                self._admit_locked()
+            else:
+                self._admit_observed()
         return status
 
     def list(
@@ -5010,7 +5039,7 @@ class GenericJobs:
             "project_id": project_id,
         }
         with self._admission_lock:
-            self._admit_locked()
+            self._admit_observed()
         source_records = (
             self.store.active_records() if active_only else self.store.list()
         )

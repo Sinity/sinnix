@@ -1408,6 +1408,7 @@ def test_declared_service_dependency_supplies_lease_and_unblocks_when_bound(
     assert len(systemd.started) == 1
 
     port_available = False
+    jobs.ADMISSION_OBSERVE_INTERVAL_SECONDS = 0.0  # every poll re-evaluates readiness here
     jobs.get(check_id)
     assert len(systemd.started) == 1, "a transient port bind is not readiness"
 

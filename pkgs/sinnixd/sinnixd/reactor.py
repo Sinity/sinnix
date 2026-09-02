@@ -989,7 +989,6 @@ class CampaignReactor:
     review_fix_dispatcher: IntegrationDispatcher | None = None
     harvest_dispatcher: IntegrationDispatcher | None = None
     verify_dispatcher: Callable[[str, str], str | None] | None = None
-    _closed_beads_cache: dict[str, tuple[float, tuple[str, ...]]] = field(default_factory=dict, init=False, repr=False)
     integrator_backend: str = "codex"
     # Workers default to luna, so the integrator is a sibling rather than the
     # same model judging its own family's output.
@@ -1770,18 +1769,12 @@ class CampaignReactor:
             self._dispatch_action(project, facts, action)
 
     def _closed_beads(self, project: str, root: Path) -> tuple[str, ...]:
-        """Closed bead ids, read at most once a minute per project."""
-        cached = self._closed_beads_cache.get(project)
-        now = time.monotonic()
-        if cached is not None and now - cached[0] < 300:
-            return cached[1]
+        """Closed bead ids; the facts module owns the cache and refresh."""
         from .lane_facts import closed_bead_ids
 
         closed = closed_bead_ids(root)
         if not closed:
             self._board.record_error(-1, f"closed beads {project}: bd answered nothing")
-            return cached[1] if cached is not None else ()
-        self._closed_beads_cache[project] = (now, closed)
         return closed
 
     def _dispatch_action(self, project: str, facts: Any, action: Any) -> None:

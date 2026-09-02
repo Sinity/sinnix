@@ -13,6 +13,8 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -445,8 +447,13 @@ def pulls_from_sweep_actions(actions: Sequence[Mapping[str, Any]]) -> dict[str, 
     return pulls
 
 
-def closed_bead_ids(project_root: Path, *, run: Run = subprocess.run, timeout: float = 180) -> tuple[str, ...]:
-    """Closed bead ids for the project, or () when bd cannot answer."""
+_CLOSED_BEADS_TTL_SECONDS = 300.0
+_closed_beads_lock = threading.Lock()
+_closed_beads_cache: dict[Path, tuple[float, tuple[str, ...]]] = {}
+_closed_beads_refreshing: set[Path] = set()
+
+
+def _query_closed_beads(project_root: Path, run: Run, timeout: float) -> tuple[str, ...] | None:
     try:
         result = run(
             ["bd", "list", "--status", "closed", "--json"],
@@ -454,8 +461,47 @@ def closed_bead_ids(project_root: Path, *, run: Run = subprocess.run, timeout: f
         )
         rows = json.loads(result.stdout)
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
-        return ()
+        return None
     return tuple(str(row.get("id")) for row in (rows if isinstance(rows, list) else []) if isinstance(row, Mapping) and row.get("id"))
+
+
+def closed_bead_ids(project_root: Path, *, run: Run = subprocess.run, timeout: float = 180, wait: bool | None = None) -> tuple[str, ...]:
+    """Closed bead ids for the project.
+
+    The cached answer is returned and refreshed on a background thread once
+    it is older than five minutes, so a slow ``bd`` never stalls the caller.
+    ``wait=None`` (default) answers the first call for a root inline;
+    ``wait=False`` never blocks; ``wait=True`` always refreshes inline.
+    ``()`` means bd has not answered yet.
+    """
+    root = project_root.resolve()
+    now = time.monotonic()
+    with _closed_beads_lock:
+        cached = _closed_beads_cache.get(root)
+        fresh = cached is not None and now - cached[0] < _CLOSED_BEADS_TTL_SECONDS
+        known = cached[1] if cached is not None else ()
+        if cached is not None and fresh and wait is not True:
+            return known
+        inline = wait is True or (wait is None and cached is None)
+        if not inline and root in _closed_beads_refreshing:
+            return known
+        if not inline:
+            _closed_beads_refreshing.add(root)
+
+    def refresh() -> tuple[str, ...]:
+        answer = _query_closed_beads(root, run, timeout)
+        with _closed_beads_lock:
+            _closed_beads_refreshing.discard(root)
+            if answer is not None:
+                _closed_beads_cache[root] = (time.monotonic(), answer)
+                return answer
+            previous = _closed_beads_cache.get(root)
+            return previous[1] if previous is not None else ()
+
+    if inline:
+        return refresh()
+    threading.Thread(target=refresh, name="closed-beads", daemon=True).start()
+    return known
 
 
 def latest_sweep_pulls(state_root: Path) -> dict[str, Pull]:
