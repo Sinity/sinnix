@@ -183,9 +183,12 @@ def _advance(facts: LaneFacts, now: datetime | None) -> Action:
             return Action("park", "integrator ran at this head and flags remain: " + ", ".join(receipt.flags[:4]))
         return Action("integrate", ", ".join(receipt.flags[:4]))
     if receipt.verification in {"static-only", "unavailable"} and not receipt.authorized:
-        if facts.master_head and facts.master_head[:12] in facts.extra.get("rebased_on", ()):
-            return Action("park", f"no test evidence after rebase ({receipt.verification})")
-        return Action("rebase", f"no test evidence ({receipt.verification}); rebase onto master")
+        # Test evidence comes only from the declared verify_affected job.
+        if facts.verify_job is None:
+            return Action("verify", f"receipt has no test evidence ({receipt.verification})")
+        if facts.verify_job[1] != "succeeded":
+            return Action("park", f"affected verification {facts.verify_job[1]} at this head")
+        return Action("harvest", f"re-mint with verdict {facts.verify_job[0][:8]}")
     if facts.quick_at_head is not None and facts.quick_at_head[1] != "succeeded":
         return Action("park", f"quick gate {facts.quick_at_head[1]} at this head")
     return Action("publish", "clean receipt at head")
