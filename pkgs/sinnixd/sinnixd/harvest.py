@@ -522,17 +522,38 @@ def _verification_evidence(worktree: Path, head: str) -> dict[str, Any]:
     }
 
 
+def _ignored_paths(run: Run, worktree: Path, changed_paths: Sequence[str]) -> tuple[str, ...]:
+    """Changed paths the repository ignores: committed only by force."""
+    if not changed_paths:
+        return ()
+    result = _command(
+        run,
+        ["git", "check-ignore", "--no-index", "--", *changed_paths],
+        cwd=worktree,
+        timeout=60,
+    )
+    if result.returncode not in (0, 1):
+        return ()
+    return tuple(line.strip() for line in result.stdout.splitlines() if line.strip())
+
+
 def _redflags(
     diff: str,
     write_scope: Sequence[str] = (),
     *,
     changed_paths: Sequence[str] | None = None,
+    ignored_paths: Sequence[str] = (),
 ) -> tuple[int, list[str]]:
     """Port the deterministic coordinator red-flag scanner."""
     flags: list[str] = []
 
     def flag(message: str) -> None:
         flags.append(f"FLAG: {message}")
+
+    # A path the repository ignores reaches a commit only through a forced
+    # add; the lane is publishing something the project chose not to track.
+    if ignored_paths:
+        flag("ignored paths committed: " + ", ".join(sorted(ignored_paths)[:6]))
 
     production = False
     tests = False
@@ -746,7 +767,10 @@ def compile_packet(
     write_scope = _lane_write_scope(context, lane_job_id=lane_job_id)
     diffstat = _git(run, context.worktree, "diff", "--stat", f"{context.base}...HEAD")
     redflag_status, redflags = _redflags(
-        diff, write_scope=write_scope, changed_paths=changed_paths
+        diff,
+        write_scope=write_scope,
+        changed_paths=changed_paths,
+        ignored_paths=_ignored_paths(run, context.worktree, changed_paths),
     )
     review_route = route_review(
         changed_paths=changed_paths,
