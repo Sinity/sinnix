@@ -28,6 +28,7 @@ from .review import route_review
 HARVEST_OK = "HARVEST_OK"
 REBASE_CONFLICT = "REBASE_CONFLICT"
 GATE_RED = "GATE_RED"
+NO_TEST_EVIDENCE = "NO_TEST_EVIDENCE"
 HARVEST_ERROR = "HARVEST_ERROR"
 HARVEST_EMPTY = "HARVEST_EMPTY"
 
@@ -1115,9 +1116,6 @@ def authorize(
         else ("unavailable", "no affected verification job for this head")
     )
     if tests == "unavailable":
-        # polylogue lanes have shipped static-only green for days because this
-        # classification stayed inside the job result. The reactor and the
-        # coordinator see it as a spool event from here on.
         _append_event(
             context.spool,
             {
@@ -1128,6 +1126,17 @@ def authorize(
                 "job_id": context.job_id,
             },
         )
+        if _authorization(context, current_head) is None:
+            # Publication needs test evidence at this head or the operator's
+            # recorded decision; the reactor runs verify_affected and harvests
+            # again with its verdict.
+            result = {
+                "outcome": NO_TEST_EVIDENCE,
+                "message": "no test evidence at this head",
+                "detail": _bounded_text(tests_output, 4_000),
+            }
+            _append_event(context.spool, {"kind": "harvest", **result, "job_id": context.job_id})
+            return result
     if tests == "failed":
         result = {
             "outcome": GATE_RED,

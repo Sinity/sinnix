@@ -51,6 +51,22 @@ def _context(
     )
 
 
+
+def _verified_job(root: Path, state: Path, context: harvest.HarvestContext) -> str:
+    """Plant a succeeded verify_affected job for the workspace at its current HEAD."""
+    job_id = "0f7d4d0e-2f6a-4b1e-9c0a-3d1e5a6b7c8d"
+    (state / "jobs").mkdir(parents=True, exist_ok=True)
+    (state / "jobs" / f"{job_id}.json").write_text(json.dumps({
+        "spec": {
+            "operation": "verify_affected",
+            "checkout": {"checkout_id": context.workspace_id, "head": harvest._git(subprocess.run, root, "rev-parse", "HEAD")},
+        },
+        "state": {"phase": "succeeded", "terminal": True},
+        "artifacts": {},
+    }))
+    return job_id
+
+
 def test_compile_packet_halts_before_publication_and_spools_review_evidence(
     tmp_path: Path,
 ) -> None:
@@ -97,16 +113,7 @@ def test_authorize_requires_receipt_and_runs_publish_pipeline(
                 return subprocess.CompletedProcess(argv, 0, "", "")
         return subprocess.run(argv, **kwargs)
 
-    verified = "0f7d4d0e-2f6a-4b1e-9c0a-3d1e5a6b7c8d"
-    (state / "jobs").mkdir(parents=True, exist_ok=True)
-    (state / "jobs" / f"{verified}.json").write_text(json.dumps({
-        "spec": {
-            "operation": "verify_affected",
-            "checkout": {"checkout_id": context.workspace_id, "head": harvest._git(subprocess.run, root, "rev-parse", "HEAD")},
-        },
-        "state": {"phase": "succeeded", "terminal": True},
-        "artifacts": {},
-    }))
+    verified = _verified_job(root, state, context)
     result = harvest.authorize(
         context,
         receipt_ref=packet,
@@ -165,6 +172,7 @@ def test_cancelled_harvest_restores_rebased_workspace(
     with pytest.raises(KeyboardInterrupt):
         harvest.authorize(
             context,
+        affected_job=_verified_job(root, state, context),
             receipt_ref=receipt,
             title="fix: restore cancelled harvest workspaces",
             body="Reviewed packet.",
@@ -211,6 +219,7 @@ def test_authorize_returns_after_pr_creation_and_emits_merge_handoff(
 
     result = harvest.authorize(
         context,
+        affected_job=_verified_job(root, state, context),
         receipt_ref=receipt,
         title="fix: publish the harvested lane branch",
         body="Reviewed packet.",
@@ -258,6 +267,7 @@ def test_gate_red_is_typed_and_never_pushes(
 
     result = harvest.authorize(
         context,
+        affected_job=_verified_job(root, state, context),
         receipt_ref=receipt,
         title="fix: publish the harvested lane branch",
         body="Reviewed packet.",
@@ -290,31 +300,27 @@ def test_unavailable_affected_tests_are_typed_and_spooled(
         },
     )
 
-    def stop_before_lock(path, timeout=900):
-        raise harvest.HarvestError("stop before repository lock")
-
-    monkeypatch.setattr(harvest, "_lock", stop_before_lock)
-
-    with pytest.raises(harvest.HarvestError, match="stop before repository lock"):
-        harvest.authorize(
-            context,
-            receipt_ref=receipt,
-            title="fix(harvest): report unavailable test selection",
-            body="Reviewed packet.",
-        )
+    result = harvest.authorize(
+        context,
+        receipt_ref=receipt,
+        title="fix(harvest): report unavailable test selection",
+        body="Reviewed packet.",
+    )
+    assert result["outcome"] == harvest.NO_TEST_EVIDENCE
 
     events = [
         json.loads(row) for row in (state / "events.jsonl").read_text().splitlines()
     ]
-    final = dict(events[-1])
-    assert final.pop("emitted_at")
-    assert final == {
+    unavailable = dict(events[-2])
+    assert unavailable.pop("emitted_at")
+    assert unavailable == {
         "detail": "no affected verification job for this head",
         "job_id": "unavailable-job",
         "kind": "verification-unavailable",
         "project": "polylogue",
         "workspace": "worktree-1",
     }
+    assert events[-1]["outcome"] == harvest.NO_TEST_EVIDENCE
 
 
 def test_redflags_flags_vanished_definitions_and_net_assertion_loss() -> None:
@@ -848,7 +854,7 @@ def test_publish_derives_identity_and_authorizes_in_one_pass(
         return {"outcome": harvest.HARVEST_OK, "phase": "published"}
 
     monkeypatch.setattr(harvest, "authorize", fake_authorize)
-    result = harvest.publish(context, close=True)
+    result = harvest.publish(context, close=True, affected_job=_verified_job(root, state, context))
     assert result["outcome"] == harvest.HARVEST_OK
     assert captured.get("lane_job_id", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa") == (
         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -874,44 +880,6 @@ def test_publish_without_close_reason_artifact_refuses_close(
     )
     with pytest.raises(harvest.HarvestError, match="close-reason"):
         harvest.publish(context, close=True)
-
-
-def test_unavailable_affected_verification_reaches_the_spool(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Anti-vacuity: dropping the spool append makes this red."""
-    root, _remote = _repository(tmp_path)
-    state = tmp_path / "state"
-    context = _context(root, state)
-    monkeypatch.setattr(
-        harvest,
-        "_load_receipt",
-        lambda ctx, ref: {
-            "head": harvest._git(subprocess.run, root, "rev-parse", "HEAD"),
-            "worktree_unstaged_sha256": harvest._digest(
-                harvest._git(subprocess.run, root, "diff", "HEAD")
-            ),
-            "worktree_staged_sha256": harvest._digest(
-                harvest._git(subprocess.run, root, "diff", "--cached")
-            ),
-        },
-    )
-
-    def stop_before_lock(path, timeout=900):
-        raise harvest.HarvestError("stop before repository lock")
-
-    monkeypatch.setattr(harvest, "_lock", stop_before_lock)
-    with pytest.raises(harvest.HarvestError, match="stop before repository lock"):
-        harvest.authorize(
-            context,
-            receipt_ref="harvest-" + "0" * 32,
-            title="fix: publish the harvested lane branch",
-            body="Reviewed.",
-        )
-    events = [
-        json.loads(row) for row in (state / "events.jsonl").read_text().splitlines()
-    ]
-    assert any(event["kind"] == "verification-unavailable" for event in events)
 
 
 def test_reminting_binds_the_currently_edited_publication_text(
