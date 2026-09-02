@@ -17,6 +17,7 @@ from sinnix_mcp import (
     RequestEnvelope,
     ResponseEnvelope,
 )
+
 from .campaign import CampaignRunner, WaveDrainedError
 from .campaign_status import build_campaign_status
 from .contracts import TypedJobContracts
@@ -300,9 +301,7 @@ class SinnixdService:
         return {
             "project_id": project.project_id,
             "descriptor_status": project.descriptor_status(),
-            "operations": [
-                operation.catalog_row() for operation in project.operations
-            ],
+            "operations": [operation.catalog_row() for operation in project.operations],
         }
 
     def _op_plan_submit(
@@ -338,9 +337,7 @@ class SinnixdService:
             "credential_profile",
             "timeout_seconds",
         }
-        if set(arguments) - allowed or not isinstance(
-            arguments.get("project_id"), str
-        ):
+        if set(arguments) - allowed or not isinstance(arguments.get("project_id"), str):
             raise ValueError(
                 "campaign.run requires project_id and accepts limit, dry_run, credential_profile, and timeout_seconds"
             )
@@ -360,9 +357,7 @@ class SinnixdService:
         if not isinstance(dry_run, bool):
             raise ValueError("campaign.run dry_run must be boolean")
         credential_profile = arguments.get("credential_profile", "subscription")
-        timeout_seconds = arguments.get(
-            "timeout_seconds", MAX_AGENT_TIMEOUT_SECONDS
-        )
+        timeout_seconds = arguments.get("timeout_seconds", MAX_AGENT_TIMEOUT_SECONDS)
         if not isinstance(credential_profile, str) or not isinstance(
             timeout_seconds, int
         ):
@@ -395,9 +390,7 @@ class SinnixdService:
             )
         allowed = {"project_id", "coordinator_label"}
         if set(arguments) - allowed:
-            raise ValueError(
-                "campaign.status accepts project_id and coordinator_label"
-            )
+            raise ValueError("campaign.status accepts project_id and coordinator_label")
         project_id = arguments.get("project_id")
         if not isinstance(project_id, str) or not project_id:
             raise ValueError("campaign.status requires project_id")
@@ -436,13 +429,9 @@ class SinnixdService:
             set(arguments) - {"plan_id", "timeout_seconds"}
             or "plan_id" not in arguments
         ):
-            raise ValueError(
-                "plan.wait requires plan_id and optional timeout_seconds"
-            )
+            raise ValueError("plan.wait requires plan_id and optional timeout_seconds")
         timeout_seconds = arguments.get("timeout_seconds", 30)
-        if not isinstance(timeout_seconds, int) or isinstance(
-            timeout_seconds, bool
-        ):
+        if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool):
             raise ValueError("plan.wait timeout_seconds must be an integer")
         assert self.plans is not None
         return self.plans.wait(
@@ -472,9 +461,7 @@ class SinnixdService:
         principal: str,
     ) -> dict[str, Any]:
         assert self.workspaces is not None
-        return self.workspaces.get(
-            self._workspace_argument(arguments, "workspace.get")
-        )
+        return self.workspaces.get(self._workspace_argument(arguments, "workspace.get"))
 
     def _op_workspace_create(
         self,
@@ -563,9 +550,7 @@ class SinnixdService:
             )
         acknowledge = arguments.get("acknowledge_published", False)
         if not isinstance(acknowledge, bool):
-            raise ValueError(
-                "workspace.dispose acknowledge_published must be boolean"
-            )
+            raise ValueError("workspace.dispose acknowledge_published must be boolean")
         return self.workspaces.dispose(
             self._workspace_argument(arguments, "workspace.dispose"),
             acknowledge_published=acknowledge,
@@ -737,9 +722,7 @@ class SinnixdService:
             principal,
             self._workspace_argument(arguments, "workspace.land"),
             {
-                "workspace_id": self._workspace_argument(
-                    arguments, "workspace.land"
-                ),
+                "workspace_id": self._workspace_argument(arguments, "workspace.land"),
                 "job_id": self._job_argument(arguments, "job_id"),
                 **(
                     {"packet_job_id": packet_job_id}
@@ -871,9 +854,7 @@ class SinnixdService:
                 "scheduled operation firing requires the operator principal"
             )
         if set(arguments) != {"project_id", "operation", "schedule_id"}:
-            raise ValueError(
-                "job.fire requires project_id, operation, and schedule_id"
-            )
+            raise ValueError("job.fire requires project_id, operation, and schedule_id")
         project_id = self._job_argument(arguments, "project_id")
         operation_name = self._job_argument(arguments, "operation")
         schedule_id = self._job_argument(arguments, "schedule_id")
@@ -881,9 +862,7 @@ class SinnixdService:
         declared = project.operation(operation_name)
         expected_id = scheduled_operation_id(project_id, operation_name)
         if declared.schedule is None or schedule_id != expected_id:
-            raise ValueError(
-                "job.fire does not match a declared operation schedule"
-            )
+            raise ValueError("job.fire does not match a declared operation schedule")
         checkout = self.projects.checkout(project_id, "default")
         return self._cleanup_terminal(
             self.jobs.start_declared(
@@ -930,9 +909,7 @@ class SinnixdService:
                 checkout_id=self._job_argument(arguments, "checkout_id"),
                 argv=argv,
                 cwd=self._job_argument(arguments, "cwd"),
-                timeout_seconds=self._integer_argument(
-                    arguments, "timeout_seconds"
-                ),
+                timeout_seconds=self._integer_argument(arguments, "timeout_seconds"),
                 result=self._job_argument(arguments, "result"),
             )
         )
@@ -978,12 +955,8 @@ class SinnixdService:
                 backend=self._job_argument(arguments, "backend"),
                 model=self._job_argument(arguments, "model"),
                 effort=self._job_argument(arguments, "effort"),
-                credential_profile=self._job_argument(
-                    arguments, "credential_profile"
-                ),
-                timeout_seconds=self._integer_argument(
-                    arguments, "timeout_seconds"
-                ),
+                credential_profile=self._job_argument(arguments, "credential_profile"),
+                timeout_seconds=self._integer_argument(arguments, "timeout_seconds"),
                 result=self._job_argument(arguments, "result"),
                 bead_binding=arguments.get("bead_binding"),
                 parameters=arguments.get("parameters"),
@@ -1065,9 +1038,7 @@ class SinnixdService:
             "kinds",
             "active_only",
         }:
-            raise ValueError(
-                "job.list accepts only pagination and filter arguments"
-            )
+            raise ValueError("job.list accepts only pagination and filter arguments")
         limit = arguments.get("limit", 100)
         if not isinstance(limit, int) or isinstance(limit, bool):
             raise ValueError("job.list limit must be an integer")
@@ -1105,13 +1076,9 @@ class SinnixdService:
         principal: str,
     ) -> dict[str, Any]:
         timeout_seconds = arguments.get("timeout_seconds", 30)
-        if not isinstance(timeout_seconds, int) or isinstance(
-            timeout_seconds, bool
-        ):
+        if not isinstance(timeout_seconds, int) or isinstance(timeout_seconds, bool):
             raise ValueError("job.wait timeout_seconds must be an integer")
-        job_id = self._authorize_job(
-            principal, self._job_argument(arguments, "job_id")
-        )
+        job_id = self._authorize_job(principal, self._job_argument(arguments, "job_id"))
         if set(arguments) - {"job_id", "timeout_seconds"}:
             raise ValueError("job.wait accepts job_id and optional timeout_seconds")
         return self._cleanup_terminal(self.jobs.wait(job_id, timeout_seconds))
@@ -1139,9 +1106,7 @@ class SinnixdService:
         correlation_id: str,
         principal: str,
     ) -> dict[str, Any]:
-        job_id = self._authorize_job(
-            principal, self._job_argument(arguments, "job_id")
-        )
+        job_id = self._authorize_job(principal, self._job_argument(arguments, "job_id"))
         offset = arguments.get("offset", 0)
         max_bytes = arguments.get("max_bytes", 64_000)
         if set(arguments) - {"job_id", "offset", "max_bytes"}:
@@ -1161,9 +1126,7 @@ class SinnixdService:
         correlation_id: str,
         principal: str,
     ) -> dict[str, Any]:
-        job_id = self._authorize_job(
-            principal, self._job_argument(arguments, "job_id")
-        )
+        job_id = self._authorize_job(principal, self._job_argument(arguments, "job_id"))
         max_bytes = arguments.get("max_bytes", 64_000)
         if set(arguments) - {"job_id", "max_bytes"}:
             raise ValueError("job.result accepts job_id and optional max_bytes")
@@ -1343,7 +1306,9 @@ class SinnixdService:
 
 # The dispatchable operation surface. api.py's response-budget table must
 # cover exactly these keys.
-_HANDLERS: dict[str, Callable[[SinnixdService, Mapping[str, Any], str, str], dict[str, Any]]] = {
+_HANDLERS: dict[
+    str, Callable[[SinnixdService, Mapping[str, Any], str, str], dict[str, Any]]
+] = {
     "runtime.status": SinnixdService._op_runtime_status,
     "project.list": SinnixdService._op_project_list,
     "project.reload": SinnixdService._op_project_reload,
