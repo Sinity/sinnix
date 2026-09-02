@@ -3883,8 +3883,8 @@ class GenericJobs:
             estimate = self._estimate(record.spec, admission)
             candidates.append(
                 (
-                    observed or estimate,
                     pool_priority.get(record.spec.pool, 0),
+                    observed or estimate,
                     record.created_at,
                     record,
                 )

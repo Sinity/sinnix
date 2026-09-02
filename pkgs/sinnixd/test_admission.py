@@ -116,7 +116,7 @@ def jobs(tmp_path: Path, systemd: FakeSystemd, pressure: float = 0.0) -> Generic
     )
 
 
-def agent_spec(keys: tuple[str, ...]) -> GenericJobSpec:
+def agent_spec(keys: tuple[str, ...], *, pool: str = "agent") -> GenericJobSpec:
     return GenericJobSpec(
         kind="attested-agent",
         command=("agent",),
@@ -134,7 +134,7 @@ def agent_spec(keys: tuple[str, ...]) -> GenericJobSpec:
         },
         contract={"parameters": {"campaign": {"group": "lane"}}},
         result_kind="last-message",
-        pool="agent",
+        pool=pool,
         exclusive_keys=keys,
     )
 
@@ -1789,3 +1789,56 @@ def test_agent_fleet_admits_on_default_claims(tmp_path: Path) -> None:
         item for item in heavy_started if item["state"]["phase"] != "queued"
     ]
     assert len(heavy_running) <= 3
+
+
+def test_pressure_sheds_an_agent_lane_before_the_bulk_corpus(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Anti-vacuity: ordering victims by memory first cancelled the nightly
+    corpus run sixteen minutes in (job 270ed2f2, 2026-09-02 01:36Z) while six
+    agent lanes kept running."""
+    pressure = {
+        "memory_full_avg10": 0.0,
+        "io_full_avg10": 0.0,
+        "memory_total_bytes": 32 * 1024**3,
+        "memory_available_bytes": 24 * 1024**3,
+        "swap_total_bytes": 20 * 1024**3,
+        "swap_free_bytes": 20 * 1024**3,
+        "managed_memory_bytes": 0,
+    }
+    clock = [0.0]
+    monkeypatch.setattr("sinnixd.jobs.time.monotonic", lambda: clock[0])
+    systemd = FakeSystemd()
+    subject = GenericJobs(
+        systemd,
+        GenericJobStore(tmp_path / "state"),
+        pressure_probe=lambda: pressure,
+    )
+    corpus = subject.start(agent_spec(("table:corpus",), pool="bulk"))
+    lane = subject.start(agent_spec(("table:lane",)))
+    base = {"LoadState": "loaded", "ActiveState": "active", "Result": "success", "ExecMainStatus": "0"}
+    systemd.unit_properties[corpus["unit"]] = {
+        **base,
+        "InvocationID": "corpus",
+        "MemoryCurrent": str(12 * 1024**3),
+        "MemorySwapCurrent": "0",
+        "MemoryPeak": str(12 * 1024**3),
+    }
+    systemd.unit_properties[lane["unit"]] = {
+        **base,
+        "InvocationID": "lane",
+        "MemoryCurrent": str(1024**3),
+        "MemorySwapCurrent": "0",
+        "MemoryPeak": str(1024**3),
+    }
+
+    pressure.update(
+        memory_full_avg10=MEMORY_FULL_PREEMPT_THRESHOLD,
+        memory_available_bytes=3 * 1024**3,
+        swap_free_bytes=4 * 1024**3,
+        managed_memory_bytes=13 * 1024**3,
+    )
+    assert subject._relieve_active_pressure(pressure) is None
+    clock[0] = 2.1
+    assert subject._relieve_active_pressure(pressure) == lane["job_id"]
+    assert systemd.stopped == [lane["unit"]]
