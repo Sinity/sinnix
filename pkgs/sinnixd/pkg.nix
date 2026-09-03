@@ -1,7 +1,5 @@
 {
   python3Packages,
-  sinnix-mcp,
-  sinnix-lib,
   git,
   beads,
   worktrunk,
@@ -15,10 +13,6 @@ python3Packages.buildPythonApplication {
   src = ./.;
 
   build-system = [ python3Packages.setuptools ];
-  dependencies = [
-    sinnix-mcp
-    sinnix-lib
-  ];
   nativeCheckInputs = [
     python3Packages.pytest
     git
@@ -36,7 +30,7 @@ python3Packages.buildPythonApplication {
   pythonImportsCheck = [ "sinnixd" ];
 
   meta = {
-    description = "Sinnix local runtime daemon and agentctl client";
+    description = "agentctl: jobs over pueue, lanes over worktrunk, gh and bd";
     mainProgram = "agentctl";
   };
 }

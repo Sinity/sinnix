@@ -60,8 +60,6 @@ def test_a_successful_command_spools_its_start_and_reports_its_status(
     assert started[0]["kind"] == "queue-task"
     assert started[0]["job_id"] == "job-a"
     assert started[0]["label"] == "fixture:check:job-a"
-    # The private input carries a resolved environment and must not outlive it.
-    assert not launch.exists()
 
 
 def test_a_failing_command_reports_its_own_exit_status(tmp_path: Path) -> None:
@@ -176,27 +174,27 @@ def test_an_absent_launch_input_refuses(tmp_path: Path) -> None:
     assert main([str(tmp_path / "absent.json")]) == REFUSED_EXIT_CODE
 
 
-def test_a_checkout_that_no_longer_matches_its_binding_refuses(
-    tmp_path: Path,
-) -> None:
-    """The binding is frozen at dispatch; a moved or spoofed checkout fails closed."""
+def test_a_vanished_working_directory_refuses_before_running(tmp_path: Path) -> None:
+    """A lane worktree removed between add and exec must not run in a cwd guess."""
     launch = write_launch(
         tmp_path,
-        argv=["true"],
-        checkout={
-            "project_id": "fixture",
-            "project_path": str(tmp_path),
-            "checkout_id": "worktree-0123456789abcdef",
-            "path": str(tmp_path / "absent"),
-            "git_common_dir": str(tmp_path / ".git"),
-            "head": "0" * 40,
-        },
+        argv=["sh", "-c", "echo ran > ran"],
+        working_directory=str(tmp_path / "gone"),
     )
 
     assert main([str(launch)]) == REFUSED_EXIT_CODE
 
-    assert "checkout revalidation failed" in (tmp_path / "log").read_text()
-    assert events(tmp_path) == []
+    assert "working directory is gone" in (tmp_path / "log").read_text()
+    assert not (tmp_path / "ran").exists()
+
+
+def test_the_launch_input_survives_for_a_restart(tmp_path: Path) -> None:
+    """`pueue restart` re-runs the same command line; it needs the same input."""
+    launch = write_launch(tmp_path)
+
+    assert main([str(launch)]) == 0
+    assert launch.exists()
+    assert main([str(launch)]) == 0
 
 
 def test_the_wrapper_records_the_group_its_command_leads(tmp_path: Path) -> None:

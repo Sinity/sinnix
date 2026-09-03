@@ -1,4 +1,8 @@
-"""Compile a bead group into one dispatchable agent packet."""
+"""Compile a bead (and its dispatch group) into one agent prompt.
+
+No external tool does this: Beads holds the task text, the repository holds
+the worker contract and atlas sheets, and the prompt is the join.
+"""
 
 from __future__ import annotations
 
@@ -12,9 +16,10 @@ from typing import Any, Mapping, Protocol, Sequence
 import tomllib
 
 TEMPLATE_VERSION = "v2"
-# A compiled packet travels as a plan-node payload, so the prompt has to fit
-# inside that budget with room for the node's own fields.
 MAX_PROMPT_BYTES = 200_000
+# A PR title is the squash subject; GitHub wraps past this, and the
+# repository's commit convention stops here.
+MAX_SUBJECT_LENGTH = 72
 DEFAULT_BACKEND = "codex"
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_EFFORT = "medium"
@@ -28,237 +33,17 @@ DEFAULT_POLICY_MAP: dict[str, tuple[str, str]] = {
     "provider-pinned-v1": ("codex", "gpt-5.6-luna"),
 }
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._/-]+")
-_PATH_TOKEN = re.compile(
-    r"(?<![A-Za-z0-9_./-])"
-    r"(?:[A-Za-z0-9_-]+/)+[A-Za-z0-9_.-]+"
-    r"|(?<![A-Za-z0-9_./-])[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"
-    r"(?![A-Za-z0-9_./-])"
-)
-_MIGRATION_FILE = re.compile(
-    r"(?<![A-Za-z0-9_])(?P<slot>[0-9]{3})_[A-Za-z0-9][A-Za-z0-9_.-]*\.sql"
-    r"(?![A-Za-z0-9_])"
-)
-# Address- and URL-shaped tokens are not modules: adjacency to @ or /
-# excludes email parts and URL hosts, and a public-suffix tail excludes
-# bare hostnames mentioned in prose (sinnix-8l2p).
-_DOTTED_MODULE = re.compile(
-    r"(?<![A-Za-z0-9_.@/-])"
-    r"(?P<module>[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)"
-    r"(?![A-Za-z0-9_.@/-])"
-)
-_HOST_SUFFIXES = frozenset(
-    {"com", "net", "org", "edu", "gov", "mil", "int", "info", "biz"}
-)
-_QUOTED_IDENTIFIER = re.compile(r"`([^`]+)`|\"([^\"]+)\"|'([^']+)'")
-_PATH_EXTENSIONS = frozenset(
-    {
-        "c",
-        "cc",
-        "cpp",
-        "h",
-        "hpp",
-        "js",
-        "json",
-        "md",
-        "mjs",
-        "nix",
-        "py",
-        "rs",
-        "sh",
-        "sql",
-        "toml",
-        "ts",
-        "tsx",
-        "yaml",
-        "yml",
-    }
-)
-_TABLE_CONTEXT = re.compile(
-    r"\b(?:table|tables|relation|query|select|insert|update|delete|from|into|join|"
-    r"alter|create|drop|index)\b",
-    re.IGNORECASE,
-)
-_TABLE_STOPWORDS = frozenset(
-    {
-        "a",
-        "and",
-        "file",
-        "hello",
-        "module",
-        "no",
-        "not",
-        "or",
-        "path",
-        "plain",
-        "table",
-        "text",
-        "the",
-        "this",
-        "that",
-        "with",
-    }
-)
+_SUBJECT_PREFIXES = {"bug": "fix", "feature": "feat"}
 
 
 class PacketError(ValueError):
     """A packet cannot be compiled or dispatched safely."""
 
 
-@dataclass(frozen=True)
-class PacketReferences:
-    """Repository references found in one bead's human-authored text."""
-
-    paths: tuple[str, ...] = ()
-    modules: tuple[str, ...] = ()
-    migrations: tuple[str, ...] = ()
-    tables: tuple[str, ...] = ()
-
-
-def _valid_repo_path(value: str) -> bool:
-    if (
-        not value
-        or value.startswith(("/", "./", "../"))
-        or ".." in value
-        or "://" in value
-    ):
-        return False
-    parts = value.split("/")
-    if any(not part or part in {".", ".."} for part in parts):
-        return False
-    if any(re.fullmatch(r"[A-Za-z0-9_.-]+", part) is None for part in parts):
-        return False
-    suffix = parts[-1].rsplit(".", 1)[-1].lower() if "." in parts[-1] else ""
-    # A slash alone is not enough: prose contains many ``and/or``-shaped
-    # fragments. References are repository files, so require a known file
-    # suffix (migration slots are included by ``sql``).
-    return suffix in _PATH_EXTENSIONS
-
-
-def _quoted_spans(text: str) -> tuple[tuple[int, int], ...]:
-    return tuple(match.span() for match in _QUOTED_IDENTIFIER.finditer(text))
-
-
-def _in_quoted_context(text: str, start: int, end: int) -> bool:
-    return any(left <= start and end <= right for left, right in _quoted_spans(text))
-
-
-def extract_references(text: str) -> PacketReferences:
-    """Extract conservative path, module, migration, and table references.
-
-    The input is deliberately treated as prose rather than executable syntax:
-    URLs, absolute paths, traversal paths, ordinary words, and unquoted table
-    names do not become conflict keys.
-    """
-    if not isinstance(text, str) or not text:
-        return PacketReferences()
-
-    paths: set[str] = set()
-    modules: set[str] = set()
-    migrations: set[str] = set()
-    for match in _PATH_TOKEN.finditer(text):
-        path = match.group(0).rstrip(".,;:)]}")
-        if not _valid_repo_path(path):
-            continue
-        paths.add(path)
-        migration = _MIGRATION_FILE.search(path)
-        if migration is not None:
-            migrations.add(migration.group("slot"))
-
-    for match in _DOTTED_MODULE.finditer(text):
-        module = match.group("module")
-        if module.split(".", 1)[0] in {"e", "g", "i"}:
-            continue
-        if module.rsplit(".", 1)[-1] in _HOST_SUFFIXES:
-            continue
-        if _in_quoted_context(text, *match.span()) or re.search(
-            r"\b(?:module|package|import|from|namespace)\b",
-            text[max(0, match.start() - 40) : match.end() + 40],
-            re.IGNORECASE,
-        ):
-            modules.add(module)
-
-    tables: set[str] = set()
-    for match in _QUOTED_IDENTIFIER.finditer(text):
-        identifier = next((item for item in match.groups() if item is not None), "")
-        if (
-            re.fullmatch(
-                r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?", identifier
-            )
-            is None
-        ):
-            continue
-        if "." in identifier or identifier.lower() in _TABLE_STOPWORDS:
-            continue
-        context = text[max(0, match.start() - 48) : match.end() + 48]
-        if (
-            _TABLE_CONTEXT.search(context)
-            or "_" in identifier
-            or identifier.endswith("s")
-        ):
-            tables.add(identifier.lower())
-
-    return PacketReferences(
-        paths=tuple(sorted(paths)),
-        modules=tuple(sorted(modules)),
-        migrations=tuple(sorted(migrations)),
-        tables=tuple(sorted(tables)),
-    )
-
-
-def infer_conflict_keys(value: str | PacketReferences) -> tuple[str, ...]:
-    """Lower extracted references into stable, specific conflict keys."""
-    references = extract_references(value) if isinstance(value, str) else value
-    # A path identifies the file that can be changed. Inferring its containing
-    # directory as a module serializes unrelated files in shared test trees.
-    keys = {
-        f"file:{path}" for path in references.paths if not _MIGRATION_FILE.search(path)
-    }
-    # A dotted reference already names the leaf module. Ancestor prefixes are
-    # too broad: ``tests.unit`` should not lock every test in that directory.
-    keys.update(f"module:{module}" for module in references.modules)
-    keys.update(f"schema:{slot}" for slot in references.migrations)
-    keys.update(f"table:{table}" for table in references.tables)
-    return tuple(sorted(keys))
-
-
-def _bead_reference_text(bead: Mapping[str, Any]) -> str:
-    values = [bead.get("description"), bead.get("design")]
-    metadata = _metadata(bead)
-    values.append(metadata.get("design"))
-    return "\n\n".join(value for value in values if isinstance(value, str) and value)
-
-
-def resolve_project_root(project: str | None, *, cwd: Path | None = None) -> Path:
-    """Resolve a project selector without asking the daemon to infer cwd."""
-    current = (cwd or Path.cwd()).resolve()
-    candidates: list[Path] = []
-    if project:
-        selected = Path(project).expanduser()
-        if selected.is_dir():
-            candidates.append(selected.resolve())
-        candidates.extend(
-            path
-            for path in (
-                Path("/realm/project") / project,
-                Path("/realm/worktrees") / project,
-            )
-            if path.is_dir()
-        )
-    else:
-        candidates.extend((current, *current.parents))
-    for candidate in candidates:
-        descriptor = candidate / ".agentctl" / "project.toml"
-        if descriptor.is_file():
-            return candidate
-    selector = project or str(current)
-    raise PacketError(f"could not resolve an AgentCTL project for {selector}")
-
-
 def project_id_from_descriptor(root: Path) -> str:
     try:
         raw = tomllib.loads((root / ".agentctl" / "project.toml").read_text())
-        project = raw["project"]
-        project_id = project["id"]
+        project_id = raw["project"]["id"]
     except (KeyError, OSError, TypeError, tomllib.TOMLDecodeError) as error:
         raise PacketError(f"project descriptor is invalid: {root}") from error
     if not isinstance(project_id, str) or not project_id:
@@ -276,6 +61,8 @@ class BdReader(Protocol):
 
 @dataclass(frozen=True)
 class SubprocessBdReader:
+    """`bd` resolves its database from the working directory: run it in the project."""
+
     root: Path
     executable: str = "bd"
 
@@ -287,10 +74,10 @@ class SubprocessBdReader:
                 check=True,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=60,
             )
         except (OSError, subprocess.SubprocessError) as error:
-            raise PacketError(f"bd command failed in {self.root}") from error
+            raise PacketError(f"bd {' '.join(arguments)} failed in {self.root}") from error
         try:
             return json.loads(result.stdout)
         except json.JSONDecodeError as error:
@@ -300,24 +87,20 @@ class SubprocessBdReader:
         return _one_bead(self._run(("show", bead_id, "--json")), bead_id)
 
     def list(self) -> Sequence[Mapping[str, Any]]:
-        value = self._run(("list", "--all", "--json"))
-        if not isinstance(value, list) or any(
-            not isinstance(item, Mapping) for item in value
-        ):
-            raise PacketError("bd list returned an invalid bead list")
-        return value
+        return _bead_list(self._run(("list", "--all", "--limit", "0", "--json")), "list")
 
     def ready(self) -> Sequence[Mapping[str, Any]]:
-        value = self._run(("ready", "--json"))
-        if not isinstance(value, list) or any(
-            not isinstance(item, Mapping) for item in value
-        ):
-            raise PacketError("bd ready returned an invalid bead list")
-        return value
+        return _bead_list(self._run(("ready", "--limit", "0", "--json")), "ready")
+
+
+def _bead_list(value: Any, what: str) -> Sequence[Mapping[str, Any]]:
+    if not isinstance(value, list) or any(not isinstance(item, Mapping) for item in value):
+        raise PacketError(f"bd {what} returned an invalid bead list")
+    return value
 
 
 def _one_bead(value: Any, bead_id: str) -> Mapping[str, Any]:
-    if isinstance(value, Mapping):
+    if isinstance(value, Mapping) and "error" not in value:
         bead = value
     elif isinstance(value, list) and len(value) == 1 and isinstance(value[0], Mapping):
         bead = value[0]
@@ -333,12 +116,25 @@ def _metadata(bead: Mapping[str, Any]) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
+def bead_subject(bead: Mapping[str, Any]) -> str:
+    """The PR title: the bead title behind its type prefix, within the subject limit."""
+    kind = str(bead.get("issue_type") or bead.get("type") or "").lower()
+    prefix = _SUBJECT_PREFIXES.get(kind, "chore")
+    title = " ".join(str(bead.get("title") or "").split())
+    if re.match(r"^(fix|feat|chore|refactor|docs|test|perf|build|ci)(\([^)]*\))?!?:", title):
+        subject = title
+    else:
+        subject = f"{prefix}: {title}" if title else prefix
+    if len(subject) > MAX_SUBJECT_LENGTH:
+        subject = subject[: MAX_SUBJECT_LENGTH - 1].rstrip() + "…"
+    return subject
+
+
 @dataclass(frozen=True)
 class PacketConfig:
     template_path: Path
     atlas_dir: Path
-    project_root: Path | None = None
-    envelope_aggregates: Path | None = None
+    project_root: Path
     template_version: str = TEMPLATE_VERSION
     branch_prefix: str = "feature/packet"
     default_backend: str = DEFAULT_BACKEND
@@ -354,9 +150,7 @@ class PacketConfig:
         try:
             raw = tomllib.loads(descriptor.read_text())
         except (OSError, tomllib.TOMLDecodeError) as error:
-            raise PacketError(
-                f"could not read project descriptor {descriptor}"
-            ) from error
+            raise PacketError(f"could not read project descriptor {descriptor}") from error
         packets = raw.get("packets", {})
         if not isinstance(packets, Mapping):
             raise PacketError("[packets] must be a table")
@@ -365,8 +159,7 @@ class PacketConfig:
             raise PacketError("[packets.defaults] must be a table")
 
         def path_value(name: str, fallback: str) -> Path:
-            aliases = {"template": "template_path"}
-            value = packets.get(name, packets.get(aliases.get(name, ""), fallback))
+            value = packets.get(name, fallback)
             if not isinstance(value, str) or not value:
                 raise PacketError(f"packets.{name} must be a non-empty path")
             path = Path(value)
@@ -375,11 +168,13 @@ class PacketConfig:
             local = root / path
             if local.exists() or name != "template":
                 return local
+            # The worker contract lives in sinnix; other projects reference it
+            # by the same relative path.
             shared = Path("/realm/project/sinnix") / path
             return shared if shared.exists() else local
 
         def string_value(name: str, fallback: str) -> str:
-            value = packets.get(name, fallback)
+            value = packets.get(name, defaults.get(name, fallback))
             if not isinstance(value, str) or not value:
                 raise PacketError(f"packets.{name} must be a non-empty string")
             return value
@@ -396,31 +191,20 @@ class PacketConfig:
             if not isinstance(backend, str) or not isinstance(model, str):
                 raise PacketError("packets.model_policy entries need backend and model")
             policy_map[policy] = (backend, model)
-
-        aggregate_value = packets.get("envelope_aggregates")
-        aggregates = None
-        if aggregate_value is not None:
-            if not isinstance(aggregate_value, str) or not aggregate_value:
-                raise PacketError("packets.envelope_aggregates must be a path")
-            aggregates = Path(aggregate_value)
-            if not aggregates.is_absolute():
-                aggregates = root / aggregates
         return cls(
             template_path=path_value("template", DEFAULT_TEMPLATE_RELATIVE_PATH),
             atlas_dir=path_value("atlas_dir", DEFAULT_ATLAS_RELATIVE_PATH),
             project_root=root,
-            envelope_aggregates=aggregates,
             template_version=string_value("template_version", TEMPLATE_VERSION),
             branch_prefix=string_value("branch_prefix", "feature/packet"),
-            default_backend=string_value(
-                "backend", defaults.get("backend", DEFAULT_BACKEND)
-            ),
-            default_model=string_value("model", defaults.get("model", DEFAULT_MODEL)),
-            default_effort=string_value(
-                "effort", defaults.get("effort", DEFAULT_EFFORT)
-            ),
+            default_backend=string_value("backend", DEFAULT_BACKEND),
+            default_model=string_value("model", DEFAULT_MODEL),
+            default_effort=string_value("effort", DEFAULT_EFFORT),
             policy_map=policy_map,
         )
+
+    def branch_for(self, bead_id: str) -> str:
+        return f"{self.branch_prefix}/{_safe_name(bead_id)}"
 
 
 @dataclass(frozen=True)
@@ -431,11 +215,7 @@ class PacketDimensions:
     effort: str
     model_policy: str
     verification_commands: tuple[str, ...]
-    conflict_keys: tuple[str, ...]
     affected_paths: tuple[str, ...]
-    packet_intent: tuple[str, ...]
-    oracle_command: str | None = None
-    inferred_conflict_keys: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -445,26 +225,8 @@ class PacketDimensions:
             "effort": self.effort,
             "model_policy": self.model_policy,
             "verification_commands": list(self.verification_commands),
-            "conflict_keys": list(self.conflict_keys),
-            "inferred_conflict_keys": list(self.inferred_conflict_keys),
             "affected_paths": list(self.affected_paths),
-            "packet_intent": list(self.packet_intent),
-            "oracle_command": self.oracle_command,
         }
-
-
-def runtime_dimensions(dimensions: PacketDimensions) -> dict[str, str | int]:
-    """Project packet dimensions into the scalar job-record metadata shape."""
-    return {
-        "template_version": dimensions.template_version,
-        "backend": dimensions.backend,
-        "model": dimensions.model,
-        "effort": dimensions.effort,
-        "model_policy": dimensions.model_policy,
-        "oracle_command": dimensions.oracle_command or "",
-        "conflict_keys": ";".join(dimensions.conflict_keys),
-        "inferred_conflict_keys": ";".join(dimensions.inferred_conflict_keys),
-    }
 
 
 @dataclass(frozen=True)
@@ -473,7 +235,7 @@ class PacketSnapshot:
     leader_id: str
     bead_ids: tuple[str, ...]
     beads: tuple[Mapping[str, Any], ...]
-    group: str
+    branch: str
     dimensions: PacketDimensions
     atlas_refs: tuple[str, ...]
     worker_contract_path: str
@@ -481,12 +243,12 @@ class PacketSnapshot:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "template_version": self.dimensions.template_version,
             "project_id": self.project_id,
             "leader_id": self.leader_id,
             "bead_ids": list(self.bead_ids),
-            "group": self.group,
+            "branch": self.branch,
             "beads": [dict(bead) for bead in self.beads],
             "dimensions": self.dimensions.to_dict(),
             "atlas_refs": list(self.atlas_refs),
@@ -494,36 +256,17 @@ class PacketSnapshot:
         }
 
 
-def _oracle_command(beads: Sequence[Mapping[str, Any]]) -> str | None:
-    commands = {
-        value.strip()
-        for bead in beads
-        for value in [_metadata(bead).get("oracle_command")]
-        if isinstance(value, str) and value.strip()
-    }
-    if len(commands) > 1:
-        raise PacketError("packets in one lane must declare one oracle_command")
-    command = next(iter(commands), None)
-    if command is not None and (len(command.encode()) > 4_096 or "\x00" in command):
-        raise PacketError("oracle_command exceeds its bounded command limit")
-    return command
-
-
 def resolve_group(bead_id: str, reader: BdReader) -> tuple[str, tuple[str, ...]]:
     seed = reader.show(bead_id)
-    seed_metadata = _metadata(seed)
-    group = seed_metadata.get("dispatch_group")
+    group = _metadata(seed).get("dispatch_group")
     leader_id = group if isinstance(group, str) and group else bead_id
-    rows = reader.list()
     member_ids = {
         row.get("id")
-        for row in rows
+        for row in reader.list()
         if isinstance(row.get("id"), str)
         and _metadata(row).get("dispatch_group") == leader_id
-        # A dispatch group is co-executed OPEN work. Closed members are done
-        # (or deliberately voided); shipping them into the packet resurrects
-        # retired specs as instructions (282KB packet from closed void
-        # beads, 2026-09-01).
+        # A dispatch group is co-executed OPEN work; closed members are done
+        # and their specs must not be reissued as instructions.
         and row.get("status") not in {"closed", "deferred"}
     }
     member_ids.add(leader_id)
@@ -534,17 +277,22 @@ def resolve_group(bead_id: str, reader: BdReader) -> tuple[str, tuple[str, ...]]
 
 
 def _policy_dimensions(
-    beads: Sequence[Mapping[str, Any]], config: PacketConfig
+    beads: Sequence[Mapping[str, Any]],
+    config: PacketConfig,
+    *,
+    backend: str | None,
+    model: str | None,
+    effort: str | None,
 ) -> PacketDimensions:
     leader_metadata = _metadata(beads[0])
     policy = leader_metadata.get("model_policy", "")
     policy_name = policy if isinstance(policy, str) and policy else "default"
-    backend, model = config.policy_map.get(
+    policy_backend, policy_model = config.policy_map.get(
         policy_name, (config.default_backend, config.default_model)
     )
-    effort = leader_metadata.get("effort", config.default_effort)
-    if not isinstance(effort, str) or not effort:
-        effort = config.default_effort
+    declared_effort = leader_metadata.get("effort")
+    if not isinstance(declared_effort, str) or not declared_effort:
+        declared_effort = config.default_effort
 
     def values(name: str) -> tuple[str, ...]:
         result: set[str] = set()
@@ -556,30 +304,14 @@ def _policy_dimensions(
                 result.update(item for item in value if isinstance(item, str) and item)
         return tuple(sorted(result))
 
-    intents = tuple(
-        intent
-        for bead in beads
-        for intent in [_metadata(bead).get("packet_intent")]
-        if isinstance(intent, str) and intent
-    )
-    declared_keys = set(values("conflict_keys"))
-    inferred_keys = {
-        key for bead in beads for key in infer_conflict_keys(_bead_reference_text(bead))
-    }
     return PacketDimensions(
         template_version=config.template_version,
-        backend=backend,
-        model=model,
-        effort=effort,
+        backend=backend or policy_backend,
+        model=model or policy_model,
+        effort=effort or declared_effort,
         model_policy=policy_name,
         verification_commands=values("verification_commands"),
-        conflict_keys=tuple(sorted(declared_keys | inferred_keys)),
         affected_paths=values("affected_paths"),
-        packet_intent=intents,
-        oracle_command=_oracle_command(beads),
-        # An explicit declaration owns the source label when it repeats an
-        # inferred key; this makes the plan's annotation useful for overrides.
-        inferred_conflict_keys=tuple(sorted(inferred_keys - declared_keys)),
     )
 
 
@@ -590,9 +322,7 @@ def _atlas_refs(
         return ()
     tokens = {Path(path).parts[0] for path in affected_paths if Path(path).parts}
     sheets = sorted(atlas_dir.glob("*.md"))
-    relevant = [sheet for sheet in sheets if sheet.stem in tokens]
-    if not relevant:
-        relevant = sheets
+    relevant = [sheet for sheet in sheets if sheet.stem in tokens] or sheets
     return tuple(str(sheet.relative_to(root)) for sheet in relevant)
 
 
@@ -601,34 +331,54 @@ def _safe_name(value: str) -> str:
     return cleaned or "packet"
 
 
+def _bounded(prompt: str) -> str:
+    if len(prompt.encode()) > MAX_PROMPT_BYTES:
+        raise PacketError(
+            f"compiled prompt is {len(prompt.encode())} bytes, over the "
+            f"{MAX_PROMPT_BYTES}-byte budget"
+        )
+    return prompt
+
+
 def _render_prompt(snapshot: PacketSnapshot, template: str) -> str:
     payload = json.dumps(snapshot.to_dict(), indent=2, sort_keys=True)
-    prompt = (
+    return _bounded(
         f"# Dispatch packet ({snapshot.dimensions.template_version})\n\n"
-        "The following is the immutable dispatch-time snapshot. Implement every bead in this lane, "
-        "run the listed verification commands, and report once with exact results.\n\n"
+        "The following is the immutable dispatch-time snapshot. Implement every "
+        "bead in this lane, run the listed verification commands, and report "
+        "once with exact results.\n\n"
         "## Launch snapshot\n\n"
         f"```json\n{payload}\n```\n\n"
         f"## Operating rules (`{snapshot.worker_contract_path}`)\n\n"
         f"{template}\n"
     )
-    if len(prompt.encode()) > MAX_PROMPT_BYTES:
+
+
+def _template(config: PacketConfig) -> tuple[str, str]:
+    try:
+        template = config.template_path.read_text()
+    except OSError as error:
         raise PacketError(
-            f"compiled packet prompt is {len(prompt.encode())} bytes, "
-            f"over the {MAX_PROMPT_BYTES}-byte plan-node budget it travels in"
-        )
-    return prompt
+            f"worker-contract template is unavailable: {config.template_path}"
+        ) from error
+    contract_path = (
+        str(config.template_path.relative_to(config.project_root))
+        if config.template_path.is_relative_to(config.project_root)
+        else str(config.template_path)
+    )
+    return template, contract_path
 
 
 def compile_launch_snapshot(
     bead_id: str,
     *,
-    project_root: Path,
     project_id: str,
     reader: BdReader,
-    config: PacketConfig | None = None,
+    config: PacketConfig,
+    backend: str | None = None,
+    model: str | None = None,
+    effort: str | None = None,
 ) -> PacketSnapshot:
-    config = config or PacketConfig.load(project_root)
     leader_id, bead_ids = resolve_group(bead_id, reader)
     beads = tuple(reader.show(item) for item in bead_ids)
     ordered = tuple(
@@ -637,140 +387,60 @@ def compile_launch_snapshot(
             key=lambda bead: (str(bead.get("id")) != leader_id, str(bead.get("id"))),
         )
     )
-    dimensions = _policy_dimensions(ordered, config)
-    atlas_refs = _atlas_refs(project_root, config.atlas_dir, dimensions.affected_paths)
-    try:
-        template = config.template_path.read_text()
-    except OSError as error:
-        raise PacketError(
-            f"worker-contract template is unavailable: {config.template_path}"
-        ) from error
-    contract_path = (
-        str(config.template_path.relative_to(project_root))
-        if config.template_path.is_relative_to(project_root)
-        else str(config.template_path)
+    dimensions = _policy_dimensions(
+        ordered, config, backend=backend, model=model, effort=effort
+    )
+    template, contract_path = _template(config)
+    branch_value = _metadata(ordered[0]).get("branch")
+    branch = (
+        branch_value
+        if isinstance(branch_value, str) and branch_value
+        else config.branch_for(leader_id)
     )
     snapshot = PacketSnapshot(
         project_id=project_id,
         leader_id=leader_id,
         bead_ids=bead_ids,
         beads=ordered,
-        group=leader_id,
+        branch=branch,
         dimensions=dimensions,
-        atlas_refs=atlas_refs,
+        atlas_refs=_atlas_refs(
+            config.project_root, config.atlas_dir, dimensions.affected_paths
+        ),
         worker_contract_path=contract_path,
         prompt="",
     )
-    return PacketSnapshot(
-        **{**snapshot.__dict__, "prompt": _render_prompt(snapshot, template)}
+    return PacketSnapshot(**{**snapshot.__dict__, "prompt": _render_prompt(snapshot, template)})
+
+
+def rebase_prompt(
+    *,
+    config: PacketConfig,
+    bead: Mapping[str, Any],
+    branch: str,
+    base: str,
+    worktree: Path,
+) -> str:
+    """The prompt for an agent that brings an existing lane back onto its base."""
+    template, contract_path = _template(config)
+    snapshot = json.dumps(
+        {
+            "bead": dict(bead),
+            "branch": branch,
+            "base": base,
+            "worktree": str(worktree),
+        },
+        indent=2,
+        sort_keys=True,
     )
-
-
-def derived_workspace(
-    snapshot: PacketSnapshot, config: PacketConfig
-) -> tuple[str, str]:
-    name = f"packet-{_safe_name(snapshot.leader_id)}"
-    leader = snapshot.beads[0]
-    branch_value = _metadata(leader).get("branch")
-    branch = (
-        branch_value
-        if isinstance(branch_value, str) and branch_value
-        else f"{config.branch_prefix}/{_safe_name(snapshot.leader_id)}"
-    )
-    return name, branch
-
-
-def checkout_id_from_workspace_response(response: Mapping[str, Any]) -> str:
-    payload = response.get("payload")
-    value = payload.get("value") if isinstance(payload, Mapping) else None
-    checkout_id = value.get("checkout_id") if isinstance(value, Mapping) else None
-    if not isinstance(checkout_id, str) or not checkout_id:
-        raise PacketError("workspace.create did not return CHECKOUT_ID")
-    return checkout_id
-
-
-def load_envelope_aggregate(
-    config: PacketConfig, snapshot: PacketSnapshot
-) -> Mapping[str, Any] | None:
-    path = config.envelope_aggregates
-    if path is None:
-        candidate = (
-            config.project_root / ".agentctl" / "envelope-aggregates.json"
-            if config.project_root is not None
-            else Path(".agentctl/envelope-aggregates.json")
-        )
-        path = candidate if candidate.is_file() else None
-    if path is None or not path.is_file():
-        return None
-    try:
-        value = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(value, Mapping):
-        return None
-    keys = (
-        f"{snapshot.dimensions.backend}/{snapshot.dimensions.model}/{snapshot.dimensions.effort}",
-        snapshot.dimensions.model,
-        snapshot.leader_id,
-    )
-    for key in keys:
-        aggregate = value.get(key)
-        if isinstance(aggregate, Mapping):
-            return aggregate
-    aggregates = value.get("aggregates")
-    if isinstance(aggregates, Mapping):
-        for key in keys:
-            aggregate = aggregates.get(key)
-            if isinstance(aggregate, Mapping):
-                return aggregate
-    return None
-
-
-def plan_row(snapshot: PacketSnapshot, config: PacketConfig) -> dict[str, Any]:
-    aggregate = load_envelope_aggregate(config, snapshot) or {}
-    inferred = set(snapshot.dimensions.inferred_conflict_keys)
-    rendered_keys = tuple(
-        f"{key} (inferred)" if key in inferred else key
-        for key in snapshot.dimensions.conflict_keys
-    )
-    return {
-        "beads": ",".join(snapshot.bead_ids),
-        "group": snapshot.group,
-        "model": snapshot.dimensions.model,
-        "effort": snapshot.dimensions.effort,
-        "conflict_keys": ",".join(rendered_keys) or "-",
-        "predicted_duration": aggregate.get("duration_seconds", "?"),
-        "predicted_rss": aggregate.get("rss_bytes", "?"),
-    }
-
-
-def plan_table(snapshot: PacketSnapshot, config: PacketConfig) -> str:
-    row = plan_row(snapshot, config)
-    headers = (
-        "BEADS",
-        "GROUP",
-        "MODEL/EFFORT",
-        "CONFLICT KEYS",
-        "PREDICTED DURATION",
-        "PREDICTED RSS",
-    )
-    values = (
-        row["beads"],
-        row["group"],
-        f"{row['model']}/{row['effort']}",
-        row["conflict_keys"],
-        str(row["predicted_duration"]),
-        str(row["predicted_rss"]),
-    )
-    widths = [
-        max(len(header), len(str(value)))
-        for header, value in zip(headers, values, strict=True)
-    ]
-    line = "  ".join(
-        header.ljust(width) for header, width in zip(headers, widths, strict=True)
-    )
-    separator = "  ".join("-" * width for width in widths)
-    return (
-        f"{line}\n{separator}\n"
-        f"{'  '.join(str(value).ljust(width) for value, width in zip(values, widths, strict=True))}"
+    return _bounded(
+        "# Rebase packet\n\n"
+        f"The lane below lives in `{worktree}` on `{branch}`. Fetch, rebase it "
+        f"onto `{base}`, resolve every conflict against the bead's intent, run "
+        "the quick gate in the rebased state, and push with `--force-with-lease`. "
+        "Any uncommitted work in the worktree is yours. A conflict you cannot "
+        "resolve honestly is reported, never forced to green.\n\n"
+        f"```json\n{snapshot}\n```\n\n"
+        f"## Operating rules (`{contract_path}`)\n\n"
+        f"{template}\n"
     )
