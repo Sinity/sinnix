@@ -617,9 +617,13 @@ BEAD_SHOW_JSON = json.dumps(
 )
 
 
-def _bd_run(title: str = "fix(storage): restore the sidecar blob owner"):  # type: ignore[no-untyped-def]
+def _bd_run(  # type: ignore[no-untyped-def]
+    title: str = "fix(storage): restore the sidecar blob owner", issue_type: str = "bug"
+):
     """A `run` that answers `bd show <id> --json` and defers the rest."""
-    payload = json.dumps([{"id": "polylogue-3af3o", "title": title}])
+    payload = json.dumps(
+        [{"id": "polylogue-3af3o", "title": title, "issue_type": issue_type}]
+    )
 
     def run(argv, **kwargs):  # type: ignore[no-untyped-def]
         if argv[:2] == ["bd", "show"]:
@@ -1218,15 +1222,29 @@ def test_a_worktree_without_a_lane_title_still_publishes_its_own_subject(
     assert title == "fix(harvest): derive the subject from the bead"
 
 
-def test_a_bead_title_that_is_not_a_conventional_subject_refuses(
+def test_a_plain_bead_title_is_published_under_its_bead_type(
     tmp_path: Path,
 ) -> None:
-    """The bead title becomes permanent history, so it must already be one."""
+    """Beads are titled in plain words; the squash subject carries the type.
+
+    Anti-vacuity: no tracker bead is titled as a conventional subject, so a
+    harvest that demanded one refused every lane in a wave.
+    """
     context = _context(tmp_path, tmp_path / "state")
 
-    with pytest.raises(harvest.HarvestError, match="conventional subject"):
+    for issue_type, expected in (
+        ("bug", "fix: make the manifests canonical"),
+        ("feature", "feat: make the manifests canonical"),
+        ("task", "chore: make the manifests canonical"),
+    ):
+        title, _body, _close = harvest._resolve_publication_text(
+            _parsed(), context, _bd_run("Make the manifests canonical", issue_type)
+        )
+        assert title == expected
+
+    with pytest.raises(harvest.HarvestError, match="max 72"):
         harvest._resolve_publication_text(
-            _parsed(), context, _bd_run("make the manifests canonical")
+            _parsed(), context, _bd_run("Make " + "the manifests canonical " * 4)
         )
 
 
