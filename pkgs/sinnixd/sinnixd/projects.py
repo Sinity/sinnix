@@ -26,20 +26,6 @@ class ProjectConfigError(ValueError):
     """Raised when a project adapter is missing or violates the v1 contract."""
 
 
-def _ignore_retired(
-    value: Mapping[str, Any], field: str, retired: set[str]
-) -> dict[str, Any]:
-    """Drop descriptor keys the daemon no longer reads.
-
-    A descriptor written for an older daemon must keep loading; a field the
-    daemon stopped reading is not a configuration error.
-    """
-    present = retired.intersection(value)
-    if present:
-        logger.warning("%s ignores retired keys: %s", field, ", ".join(sorted(present)))
-    return {key: item for key, item in value.items() if key not in retired}
-
-
 # pueue's group name grammar; the daemon only validates shape and passes the
 # value through as the pueue group / systemd cgroup slice suffix.
 _POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}")
@@ -1045,23 +1031,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             "schedule",
             "checkout",
         }
-        definition = _ignore_retired(
-            definition,
-            f"operations.{name}",
-            {
-                "estimate_memory_bytes",
-                "exclusive_keys",
-                "dependencies",
-                "scratch",
-                "supersede",
-                # Polylogue (dev_loop_proof, deployment_browser_smoke,
-                # live_provider_proof) and Sinex (dev_services) still declare
-                # `service` port leases. Nothing allocates ports now; those
-                # operations must take their ports from the environment or be
-                # withdrawn, and this key goes when they do.
-                "service",
-            },
-        )
         if set(definition) - allowed_operation:
             raise ProjectConfigError(
                 f"{descriptor} operation {name} contains unknown fields"

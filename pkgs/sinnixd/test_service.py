@@ -532,7 +532,6 @@ exec = ["fixture-check"]
 pool = "normal"
 result = "exit"
 cache = "tree+environment"
-exclusive_keys = ["fixture:check"]
 
 [operations.service]
 description = "Run a fixture development service"
@@ -727,8 +726,8 @@ def test_declared_operation_timeout_must_be_a_positive_bounded_integer(
     descriptor = tmp_path / ".agentctl" / "project.toml"
     descriptor.write_text(
         descriptor.read_text().replace(
-            'exclusive_keys = ["fixture:check"]',
-            f'timeout_seconds = {value}\nexclusive_keys = ["fixture:check"]',
+            'description = "Run fixture checks"\n',
+            f'description = "Run fixture checks"\ntimeout_seconds = {value}\n',
         )
     )
 
@@ -743,8 +742,8 @@ def test_declared_operation_timeout_defaults_and_survives_launch_recovery(
     descriptor = tmp_path / ".agentctl" / "project.toml"
     descriptor.write_text(
         descriptor.read_text().replace(
-            'exclusive_keys = ["fixture:check"]',
-            f'timeout_seconds = {MAX_DECLARED_OPERATION_TIMEOUT_SECONDS}\nexclusive_keys = ["fixture:check"]',
+            'description = "Run fixture checks"\n',
+            f'description = "Run fixture checks"\ntimeout_seconds = {MAX_DECLARED_OPERATION_TIMEOUT_SECONDS}\n',
         )
     )
     catalog = ProjectCatalog([tmp_path])
@@ -5801,8 +5800,8 @@ def test_default_checkout_operations_refuse_lane_worktrees(tmp_path: Path) -> No
     descriptor = tmp_path / ".agentctl" / "project.toml"
     descriptor.write_text(
         descriptor.read_text().replace(
-            'exclusive_keys = ["fixture:check"]',
-            'checkout = "default"\nexclusive_keys = ["fixture:check"]',
+            'description = "Run fixture checks"\n',
+            'description = "Run fixture checks"\ncheckout = "default"\n',
         )
     )
     initialize_git_checkout(tmp_path)
@@ -5855,8 +5854,8 @@ def test_operation_checkout_policy_is_closed(tmp_path: Path) -> None:
     descriptor = tmp_path / ".agentctl" / "project.toml"
     descriptor.write_text(
         descriptor.read_text().replace(
-            'exclusive_keys = ["fixture:check"]',
-            'checkout = "lane"\nexclusive_keys = ["fixture:check"]',
+            'description = "Run fixture checks"\n',
+            'description = "Run fixture checks"\ncheckout = "lane"\n',
         )
     )
     with pytest.raises(ProjectConfigError, match="operations.check.checkout"):
