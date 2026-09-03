@@ -219,9 +219,6 @@ mkServiceModule (mkCaptureLane {
     "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.activityRoot}"
     "SINNIX_CAPTURE_PRIMARY_STATE_DIR=${stateDir}"
     "SINNIX_CAPTURE_PRIMARY_DEBOUNCE_MS=${toString cfg.debounceMs}"
-    # Session TMPDIR (/realm/tmp/shell) is read-only inside the strict
-    # sandbox, so mktemp fails on every event.
-    "TMPDIR=/tmp"
   ];
   privateTmp = true;
   umask = "0077";

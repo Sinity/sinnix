@@ -124,6 +124,11 @@ mkServiceModule {
             # User=, so the paths are literal.
             HOME = "/home/${userName}";
             XDG_RUNTIME_DIR = "/run/user/${toString config.users.users.${userName}.uid}";
+            # The unit starts outside any login session and outside the user
+            # manager, so it inherits neither place's TMPDIR. Without this the
+            # workflow's `nix develop` puts its scratch tree, and the seeded
+            # archives of every xdist worker, on the 6 GiB /tmp tmpfs.
+            TMPDIR = "/realm/tmp/${userName}";
             SSL_CERT_FILE = "/etc/ssl/certs/ca-certificates.crt";
             NIX_SSL_CERT_FILE = "/etc/ssl/certs/ca-certificates.crt";
           };

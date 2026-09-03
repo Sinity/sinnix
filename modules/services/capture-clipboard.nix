@@ -190,11 +190,6 @@ mkServiceModule (mkCaptureLane {
   environment = [
     "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.activityRoot}"
     "SINNIX_CAPTURE_CLIPBOARD_STATE_DIR=${stateDir}"
-    # The session exports TMPDIR=/realm/tmp/shell, which is read-only
-    # inside this unit's ProtectSystem=strict namespace, so every mktemp
-    # fails and the lane silently captures nothing. Pin tmp inside the
-    # sandbox instead.
-    "TMPDIR=/tmp"
   ];
   privateTmp = true;
   umask = "0077";
