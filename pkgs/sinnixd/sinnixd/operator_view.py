@@ -23,7 +23,6 @@ STALE_RUNNING_SECONDS = {
     "verify_affected": 90 * 60,
     "verify_all": 120 * 60,
 }
-STALE_LANE_WAIT_SECONDS = 6 * 60 * 60
 GHOST_SECONDS = 24 * 60 * 60
 
 ACTIVE_PHASES = frozenset(
