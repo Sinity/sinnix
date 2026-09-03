@@ -172,6 +172,8 @@ def test_authorize_requires_receipt_and_runs_publish_pipeline(
     monkeypatch.setattr(harvest, "LOCK_PATH", tmp_path / "harvest.lock")
 
     def run(argv, **kwargs):
+        if argv[:2] == ["bd", "show"]:
+            return subprocess.CompletedProcess(argv, 0, BEAD_SHOW_JSON, "")
         if argv[:2] == ["devtools", "verify"] and len(argv) == 2:
             return subprocess.CompletedProcess(
                 argv, 0, "affected verification passed", ""
@@ -235,6 +237,8 @@ def test_cancelled_harvest_restores_rebased_workspace(
     monkeypatch.setattr(harvest, "LOCK_PATH", tmp_path / "harvest.lock")
 
     def run(argv, **kwargs):
+        if argv[:2] == ["bd", "show"]:
+            return subprocess.CompletedProcess(argv, 0, BEAD_SHOW_JSON, "")
         if argv[:2] == ["devtools", "verify"] and len(argv) == 2:
             return subprocess.CompletedProcess(
                 argv, 0, "affected verification passed", ""
@@ -274,6 +278,8 @@ def test_authorize_arms_auto_merge_after_pr_creation(
     merged: list[list[str]] = []
 
     def run(argv, **kwargs):
+        if argv[:2] == ["bd", "show"]:
+            return subprocess.CompletedProcess(argv, 0, BEAD_SHOW_JSON, "")
         if argv[:2] == ["devtools", "verify"] and len(argv) == 2:
             return subprocess.CompletedProcess(
                 argv, 0, "affected verification passed", ""
@@ -317,6 +323,8 @@ def test_authorize_records_refused_auto_merge_and_leaves_pr_open(
     monkeypatch.setattr(harvest, "LOCK_PATH", tmp_path / "harvest.lock")
 
     def run(argv, **kwargs):
+        if argv[:2] == ["bd", "show"]:
+            return subprocess.CompletedProcess(argv, 0, BEAD_SHOW_JSON, "")
         if argv[:2] == ["devtools", "verify"] and len(argv) == 2:
             return subprocess.CompletedProcess(
                 argv, 0, "affected verification passed", ""
@@ -599,6 +607,28 @@ def test_a_docs_only_change_is_not_flagged_for_missing_tests() -> None:
     assert not any("no test in the diff" in f for f in flags)
 
 
+BEAD_SHOW_JSON = json.dumps(
+    [
+        {
+            "id": "polylogue-3af3o",
+            "title": "fix(storage): restore the sidecar blob owner",
+        }
+    ]
+)
+
+
+def _bd_run(title: str = "fix(storage): restore the sidecar blob owner"):  # type: ignore[no-untyped-def]
+    """A `run` that answers `bd show <id> --json` and defers the rest."""
+    payload = json.dumps([{"id": "polylogue-3af3o", "title": title}])
+
+    def run(argv, **kwargs):  # type: ignore[no-untyped-def]
+        if argv[:2] == ["bd", "show"]:
+            return subprocess.CompletedProcess(argv, 0, payload, "")
+        return subprocess.run(argv, **kwargs)
+
+    return run
+
+
 def _parsed(**overrides: object) -> object:
     """The argparse defaults of the publication-text flags."""
     import argparse
@@ -607,22 +637,32 @@ def _parsed(**overrides: object) -> object:
         "title_file": None,
         "body_file": None,
         "close_reason_file": None,
+        "bead_id": "polylogue-3af3o",
     }
     values.update(overrides)
     return argparse.Namespace(**values)
 
 
-def test_publication_text_falls_back_to_the_lane_artifacts(tmp_path: Path) -> None:
-    """Publication text comes from the lane's own artifacts when no file is named."""
+def test_the_title_comes_from_the_bead_and_never_from_a_lane_file(
+    tmp_path: Path,
+) -> None:
+    """`.lane/title` is untracked, so a lane inherits the last tracked copy.
+
+    Anti-vacuity: this worktree holds the stale subject every lane branched
+    after #4531 inherits. Reading it would publish that name again; the bead
+    is the only per-lane title that history cannot supply.
+    """
     root, _remote = _repository(tmp_path)
     lane = root / ".lane"
     lane.mkdir()
-    (lane / "title").write_text("fix(storage): restore the sidecar blob owner\n")
+    (lane / "title").write_text("refactor(test): make corpus manifests canonical\n")
     (lane / "body.md").write_text("## Summary\n\nRestores the owner.\n")
     (lane / "close-reason.md").write_text("Merged: owner restored.\n")
     context = _context(root, tmp_path / "state")
 
-    title, body, close_reason = harvest._resolve_publication_text(_parsed(), context)
+    title, body, close_reason = harvest._resolve_publication_text(
+        _parsed(), context, _bd_run()
+    )
 
     assert title == "fix(storage): restore the sidecar blob owner"
     assert body == "## Summary\n\nRestores the owner."
@@ -817,13 +857,17 @@ def test_publish_derives_identity_and_authorizes_in_one_pass(
 
     monkeypatch.setattr(harvest, "authorize", fake_authorize)
     result = harvest.publish(
-        context, close=True, affected_job=_verified_job(root, state, context)
+        context,
+        close=True,
+        affected_job=_verified_job(root, state, context),
+        run=_bd_run("fix: publish the harvested lane branch"),
     )
     assert result["outcome"] == harvest.HARVEST_OK
     assert captured.get("lane_job_id", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa") == (
         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     )
     assert captured["bead_id"] == "polylogue-zzz1"
+    # The subject is the bead's, not the worktree's .lane/title.
     assert captured["title"] == "fix: publish the harvested lane branch"
     assert captured["close_reason"] == "Delivered and verified."
     receipt_ref = captured["receipt_ref"]
@@ -843,7 +887,7 @@ def test_publish_without_close_reason_artifact_refuses_close(
         harvest, "authorize", lambda ctx, **k: {"outcome": harvest.HARVEST_OK}
     )
     with pytest.raises(harvest.HarvestError, match="close-reason"):
-        harvest.publish(context, close=True)
+        harvest.publish(context, close=True, run=_bd_run())
 
 
 def test_reminting_binds_the_currently_edited_publication_text(
@@ -859,14 +903,14 @@ def test_reminting_binds_the_currently_edited_publication_text(
     (lane_dir / "body.md").write_text("Original body.")
     state = tmp_path / "state"
     context = _context(root, state)
-    first = harvest.compile_packet(context)
+    first = harvest.compile_packet(context, bead_id="polylogue-3af3o", run=_bd_run())
     first_receipt = json.loads(
         (state / "harvest-packets" / f"{first['packet']['packet_id']}.json").read_text()
     )
 
     (lane_dir / "title").write_text("fix: corrected subject after review")
     (lane_dir / "body.md").write_text("Corrected body.")
-    second = harvest.compile_packet(context)
+    second = harvest.compile_packet(context, bead_id="polylogue-3af3o", run=_bd_run())
     second_receipt = json.loads(
         (
             state / "harvest-packets" / f"{second['packet']['packet_id']}.json"
@@ -878,12 +922,11 @@ def test_reminting_binds_the_currently_edited_publication_text(
     def digest(text: str) -> str:
         return hashlib.sha256(text.encode()).hexdigest()
 
-    assert first_receipt["publication_text"]["title_sha256"] == digest(
-        "fix: original reviewed subject"
-    )
-    assert second_receipt["publication_text"]["title_sha256"] == digest(
-        "fix: corrected subject after review"
-    )
+    # The subject is the bead's, so editing .lane/title cannot move it; the
+    # body is the lane's and the re-mint must bind the edited one.
+    bead_subject = digest("fix(storage): restore the sidecar blob owner")
+    assert first_receipt["publication_text"]["title_sha256"] == bead_subject
+    assert second_receipt["publication_text"]["title_sha256"] == bead_subject
     assert second_receipt["publication_text"]["body_sha256"] == digest(
         "Corrected body."
     )
@@ -1139,3 +1182,57 @@ def test_a_colliding_title_refuses_before_pushing(
         if '"title-collision"' in line
     ]
     assert spooled and spooled[-1]["job_id"] == "collision-job"
+
+
+def test_a_worktree_without_a_lane_title_still_publishes_its_own_subject(
+    tmp_path: Path,
+) -> None:
+    """The shape #4531 left behind: no `.lane/title`, but history has one.
+
+    Anti-vacuity: reading the title through git — `git show HEAD:.lane/title`,
+    a checkout of the tracked file, or a stale copy left in the worktree —
+    hands every lane branched after the untracking the same subject. Nothing
+    here may consult git for it.
+    """
+    root, _remote = _repository(tmp_path)
+    lane = root / ".lane"
+    lane.mkdir()
+    (lane / "title").write_text("refactor(test): make corpus manifests canonical\n")
+    _run_git(root, "add", "-f", ".lane/title")
+    assert _run_git(root, "commit", "--quiet", "-m", "tracked title").returncode == 0
+    _run_git(root, "rm", "--cached", "-q", ".lane/title")
+    assert (
+        _run_git(root, "commit", "--quiet", "-m", "untrack lane text").returncode == 0
+    )
+    (lane / "title").unlink()
+    tracked = _run_git(root, "show", "HEAD~1:.lane/title")
+    assert "corpus manifests canonical" in tracked.stdout, (
+        "the fixture must reproduce a history that still carries the title"
+    )
+    context = _context(root, tmp_path / "state")
+
+    title, _body, _close = harvest._resolve_publication_text(
+        _parsed(), context, _bd_run("fix(harvest): derive the subject from the bead")
+    )
+
+    assert title == "fix(harvest): derive the subject from the bead"
+
+
+def test_a_bead_title_that_is_not_a_conventional_subject_refuses(
+    tmp_path: Path,
+) -> None:
+    """The bead title becomes permanent history, so it must already be one."""
+    context = _context(tmp_path, tmp_path / "state")
+
+    with pytest.raises(harvest.HarvestError, match="conventional subject"):
+        harvest._resolve_publication_text(
+            _parsed(), context, _bd_run("make the manifests canonical")
+        )
+
+
+def test_a_lane_with_no_bead_cannot_derive_a_title(tmp_path: Path) -> None:
+    """Anti-vacuity: falling back to a file here is the defect itself."""
+    context = _context(tmp_path, tmp_path / "state")
+
+    with pytest.raises(harvest.HarvestError, match="names no bead"):
+        harvest._resolve_publication_text(_parsed(bead_id=None), context, _bd_run())
