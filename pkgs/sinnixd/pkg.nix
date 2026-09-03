@@ -5,6 +5,7 @@
   git,
   beads,
   worktrunk,
+  pueue,
   ...
 }:
 python3Packages.buildPythonApplication {
@@ -23,6 +24,7 @@ python3Packages.buildPythonApplication {
     git
     beads
     worktrunk
+    pueue
   ];
 
   checkPhase = ''

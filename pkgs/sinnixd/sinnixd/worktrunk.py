@@ -46,8 +46,10 @@ class WorktrunkError(RuntimeError):
 class Worktree:
     """One item of ``wt list --format=json``, reduced to what sinnixd reads."""
 
-    branch: str
-    path: Path
+    # A detached worktree publishes no branch and a branch with no worktree
+    # publishes no path. Both are ordinary listing entries, not read failures.
+    branch: str | None
+    path: Path | None
     head: str
     main: bool
     dirty: bool
@@ -62,12 +64,12 @@ class Worktree:
         worktree = item.get("worktree") or {}
         path = worktree.get("path")
         branch = item.get("branch")
-        if not isinstance(path, str) or not isinstance(branch, str):
-            raise WorktrunkError("wt list item has no branch or worktree path")
+        if not isinstance(path, str) and not isinstance(branch, str):
+            raise WorktrunkError("wt list item has neither a branch nor a path")
         changes = worktree.get("changes") or {}
         return cls(
-            branch=branch,
-            path=Path(path),
+            branch=branch if isinstance(branch, str) else None,
+            path=Path(path) if isinstance(path, str) else None,
             head=str((item.get("head") or {}).get("sha") or ""),
             main=bool(worktree.get("main")),
             dirty=any(
