@@ -515,8 +515,13 @@ class CampaignRunner:
         result["schedule"] = schedule.to_dict()
         return result
 
-    def advance(self, project_id: str) -> dict[str, Any]:
+    def advance(self, project_id: str, *, dry_run: bool = False) -> dict[str, Any]:
         """Dispatch each managed lane's next action once, from fresh facts.
+
+        ``dry_run`` plans and returns without any side effect: no job record,
+        no queued task, no agent launch, no workspace mutation. Its lanes are
+        reported under ``planned`` rather than ``dispatched``, because a plan
+        that reported job ids would read exactly like work that ran.
 
         Reads exactly what ``campaign.status`` reads (``lane_facts.collect``
         and ``advance``), so a dispatched action and the reason a lane shows
@@ -544,25 +549,40 @@ class CampaignRunner:
             closed_beads=closed_bead_ids(project.root),
         )
         dispatched: list[dict[str, Any]] = []
+        planned: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         for facts in lanes:
             action = next_action(facts)
+            entry = {
+                "workspace": facts.name,
+                "action": action.kind,
+                "reason": action.reason,
+            }
+            if action.kind not in DISPATCHABLE_ACTIONS:
+                skipped.append(entry)
+                continue
+            if dry_run:
+                planned.append(entry)
+                continue
             job_id: str | None = None
             reason = action.reason
-            if action.kind in DISPATCHABLE_ACTIONS:
-                try:
-                    job_id = self._dispatch(project_id, project, facts, action)
-                except (ValueError, KeyError, OSError) as error:
-                    reason = str(error)
+            try:
+                job_id = self._dispatch(project_id, project, facts, action)
+            except (ValueError, KeyError, OSError) as error:
+                reason = str(error)
             if job_id is None:
-                skipped.append(
-                    {"workspace": facts.name, "action": action.kind, "reason": reason}
-                )
+                skipped.append({**entry, "reason": reason})
             else:
                 dispatched.append(
                     {"workspace": facts.name, "action": action.kind, "job_id": job_id}
                 )
-        return {"project_id": project_id, "dispatched": dispatched, "skipped": skipped}
+        return {
+            "project_id": project_id,
+            "dry_run": dry_run,
+            "dispatched": dispatched,
+            "planned": planned,
+            "skipped": skipped,
+        }
 
     def _dispatch(
         self, project_id: str, project: Any, facts: Any, action: Any
