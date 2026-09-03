@@ -259,6 +259,16 @@ def live_pueue(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
     environment = {"HOME": str(home), "PATH": os.environ["PATH"]}
+    # Every call below must reach this daemon and no other. A config or runtime
+    # directory inherited from the invoking user resolves to the operator's
+    # live socket, where `shutdown` stops the machine's real queue.
+    resolved = subprocess.run(
+        ["pueue", "status", "--json"], env=environment, capture_output=True, text=True
+    )
+    assert resolved.returncode != 0, (
+        "a daemon answered before this fixture started one: the environment "
+        "still points at someone else's pueued"
+    )
     # pueued daemonises but its child inherits the parent's stdio; capturing
     # into a pipe would block until that child exits, which is never.
     with open(root / "daemon.log", "w") as daemon_log:
