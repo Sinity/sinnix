@@ -386,6 +386,10 @@ mkServiceModule {
               NoNewPrivileges = true;
               PrivateTmp = true;
               ProtectSystem = "strict";
+              # The user manager's TMPDIR is the NVMe scratch root, read-only
+              # under strict; the private /tmp is where this unit's temporary
+              # files belong.
+              Environment = [ "TMPDIR=/tmp" ];
             };
             Install.WantedBy = lib.optionals endpoint.autoStart [ "default.target" ];
           }

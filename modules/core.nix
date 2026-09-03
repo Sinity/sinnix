@@ -74,7 +74,7 @@ in
         # created root-side (a sudo mkdir, a recut), keeps its wrong owner
         # until someone chowns it once. 2026-08-17: exactly that had
         # re-sprinkled root ownership across /realm, /realm/state,
-        # /realm/library, /realm/tmp/{work,shell}, and five recut subject
+        # /realm/library, /realm/tmp/work, and five recut subject
         # roots; repaired by one-shot chown, and the roots are declared below
         # so new hosts start correct. Service-state dirs root daemons own
         # (state/journal, state/containers, backup targets, swap, .btrfs)
@@ -84,7 +84,6 @@ in
         "d /realm/library 0755 ${username} users -"
         "d /realm/library/datasets 0755 ${username} users -"
         "d /realm/tmp/work 0755 ${username} users -"
-        "d /realm/tmp/shell 0755 ${username} users -"
         "d ${paths.dataRoot}/accounts 0755 ${username} users -"
         "d ${paths.dataRoot}/code 0755 ${username} users -"
         "d ${paths.dataRoot}/notes 0755 ${username} users -"
