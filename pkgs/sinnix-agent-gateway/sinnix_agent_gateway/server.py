@@ -6,13 +6,10 @@ import hashlib
 import hmac
 import inspect
 import json
-from contextlib import asynccontextmanager
 from typing import Any, Callable, Mapping, cast
 
-import anyio
 from mcp.server import MCPServer
 from mcp.server.mcpserver.context import Context
-from mcp.server.subscriptions import InMemorySubscriptionBus
 from mcp.types import (
     ListResourceTemplatesResult,
     PaginatedRequestParams,
@@ -23,7 +20,6 @@ from .bindings import TargetToolBinding, TargetToolBindings
 from .config import GatewayConfig
 from .contracts import ActionSpec, EffectMode, OwnerRoute, VerbFamily
 from .mcp_broker import McpEnvironmentError
-from .prompts import PROMPT_SPECS, PromptGenerator
 from .registry import REGISTRY, CatalogSearch, RegistryError
 from .results import ProtocolError, derive_cursor_key
 from .runtime import (
@@ -36,11 +32,6 @@ from .runtime import (
     v2_tool_result,
 )
 from .schemas import V2ManifestEnvelope
-from .subscriptions import (
-    EVENTS_RESOURCE_URI,
-    EventSpoolPublisher,
-    OwnerRevisionPublisher,
-)
 
 
 def _bounded_resource_json(runtime: Runtime, payload: Any, kind: str) -> str:
@@ -418,18 +409,6 @@ async def _query_owner(
 
 def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     runtime = Runtime.create(config, principal_name)
-    subscription_bus = InMemorySubscriptionBus()
-    revision_publisher = OwnerRevisionPublisher(runtime, subscription_bus)
-    event_publisher = EventSpoolPublisher(config.event_spool, subscription_bus)
-
-    @asynccontextmanager
-    async def gateway_lifespan(_server: MCPServer):
-        async with anyio.create_task_group() as task_group:
-            task_group.start_soon(revision_publisher.run, 1.0)
-            task_group.start_soon(event_publisher.run, 1.0)
-            yield {}
-            task_group.cancel_scope.cancel()
-
     mcp = MCPServer(
         name="sinnix-agent-gateway",
         title="Sinnix Agent Gateway",
@@ -439,11 +418,7 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
             "All outputs are bounded; unavailable evidence is reported explicitly."
         ),
         version="0.2.0",
-        subscriptions=subscription_bus,
-        lifespan=gateway_lifespan,
     )
-    mcp._sinnix_revision_publisher = revision_publisher
-    mcp._sinnix_event_publisher = event_publisher
 
     @mcp.resource("sinnix://gateway/instructions")
     def gateway_instructions() -> str:
@@ -465,11 +440,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
         return _bounded_resource_json(
             runtime, REGISTRY.documentation_rows(principal_name), "documentation"
         )
-
-    @mcp.resource(EVENTS_RESOURCE_URI)
-    def gateway_v2_events() -> str:
-        """Return the bounded event page signalled by completion pushes."""
-        return _bounded_resource_json(runtime, runtime.v2_events(100), "events")
 
     @mcp.resource("sinnix://gateway/v2/actions/{action_name}")
     def gateway_v2_action_schema(action_name: str) -> str:
@@ -649,26 +619,6 @@ def create_server(config: GatewayConfig, principal_name: str) -> MCPServer:
     mcp._lowlevel_server.add_request_handler(
         "resources/templates/list", PaginatedRequestParams, list_resource_templates
     )
-
-    prompt_generator = PromptGenerator(
-        principal=principal_name,
-        catalog=lambda principal: REGISTRY.search(CatalogSearch(principal=principal)),
-    )
-    for prompt_spec in PROMPT_SPECS:
-
-        def make_prompt(name: str):
-            def generated_prompt(
-                ref: str, job_ref: str | None = None
-            ) -> list[dict[str, Any]]:
-                return prompt_generator.generate(name, {"ref": ref, "job_ref": job_ref})
-
-            generated_prompt.__name__ = name
-            return generated_prompt
-
-        mcp.prompt(
-            name=prompt_spec.name,
-            description=prompt_spec.description,
-        )(make_prompt(prompt_spec.name))
 
     target_bindings = TargetToolBindings(
         REGISTRY,

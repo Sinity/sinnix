@@ -53,9 +53,7 @@ let
     }
     // lib.optionalAttrs (!brokered) {
       reason =
-        if name == "agent-control" then
-          "excluded to avoid recursive gateway job authority"
-        else if name == "chrome-devtools" then
+        if name == "chrome-devtools" then
           "excluded to preserve gateway-owned browser-target isolation"
         else if server.transport != "stdio" then
           "transport requires an explicit remote credential contract"
@@ -181,19 +179,6 @@ mkServiceModule {
           inherit mcpBrokerServers;
         }
         // approvals;
-      localAgentControlConfig = jsonFormat.generate "sinnix-agent-gateway.json" (mkGatewayConfig {
-        stateDir = cfg.stateDir;
-        projects = config.sinnix.projects.entries;
-        endpoint = {
-          name = "agent-control";
-          label = "Local agent control";
-          principal = "agent-control";
-          scope = {
-            projects = [ ];
-            captures = [ ];
-          };
-        };
-      });
       endpointProjects =
         endpoint:
         lib.filterAttrs (
@@ -305,7 +290,6 @@ mkServiceModule {
       );
 
       environment.etc = {
-        "sinnix/agent-gateway.json".source = localAgentControlConfig;
       }
       // lib.mapAttrs' (
         name: _:

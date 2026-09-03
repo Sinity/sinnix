@@ -301,15 +301,6 @@ let
       doCheck = false;
     });
     sinnix-agent-gateway = agentGatewayPackage;
-    sinnix-agent-control-mcp = pkgs.writeShellApplication {
-      name = "sinnix-agent-control-mcp";
-      runtimeInputs = [ agentGatewayPackage ];
-      text = ''
-        config="''${SINNIX_AGENT_GATEWAY_CONFIG:-/etc/sinnix/agent-gateway.json}"
-        exec sinnix-agent-gateway --config "$config" --principal agent-control serve
-      '';
-      meta.description = "Local agent-control principal of the shared Sinnix MCP gateway";
-    };
     tunnel-client = pkgs.callPackage ../pkgs/tunnel-client { };
 
     chatgpt-app = pkgs.callPackage ../pkgs/chatgpt-app { };

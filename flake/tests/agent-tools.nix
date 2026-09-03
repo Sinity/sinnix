@@ -525,8 +525,6 @@ in
                     assert f'- {toolset}' not in profile_config, (profile, toolset)
             research = (pathlib.Path.home() / '.hermes/profiles/research/config.yaml').read_text()
             assert 'firecrawl:' in research
-            orchestrate = (pathlib.Path.home() / '.hermes/profiles/orchestrate/config.yaml').read_text()
-            assert 'agent-control:' in orchestrate
             PYCODE
 
             bash -n "$HOME/.local/bin/claude-clodex"
@@ -699,11 +697,6 @@ in
               fi
               bash -n "$helper"
             done
-            agent_control_mcp=${
-              inputs.self.packages.${system}.sinnix-agent-control-mcp
-            }/bin/sinnix-agent-control-mcp
-            test -x "$agent_control_mcp"
-            grep -Fq '/etc/sinnix/agent-gateway.json' "$agent_control_mcp"
           '';
         }
       );

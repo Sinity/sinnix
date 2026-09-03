@@ -5,7 +5,7 @@ import binascii
 import hashlib
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
 from uuid import uuid4
@@ -18,29 +18,16 @@ from sinnix_mcp.execution import ExecutionProfile, OwnerDiagnosticError, OwnerEx
 from .artifacts import ArtifactService
 from .audit import AuditService
 from .beads import BeadsError, BeadsService
-from .browser import BrowserService
 from .capabilities import Capability, PolicyError, Principal
-from .capability_index import CapabilityIndexService
 from .captures import CaptureService
 from .config import GatewayConfig
-from .contexts import (
-    CONTEXT_INTENTS,
-    ComponentResult,
-    ComponentSpec,
-    ContextComposer,
-    ContextSnapshotStore,
-    source_revision,
-)
 from .contracts import ActionSpec, EffectMode
-from .desktop import DesktopService
-from .events import EventCursorError, NormalizedEventService
 from .execution import LocalJobs
 from .files import HostFileService
 from .machine_actions import MachineActionService
 from .mcp_broker import McpBrokerService
 from .memory import MemoryService
 from .observe import ObserveService
-from .project_context import ProjectContextService
 from .projects import ProjectPreconditionError, ProjectService
 from .redaction import public_error
 from .registry import MACHINE_OPERATIONS, REGISTRY, CatalogSearch, RegistryError
@@ -51,6 +38,18 @@ from .sessions import SessionLogService
 from .terminals import TerminalService
 from .timeline import TimelineService
 from .waits import BoundedWaitService, WaitEvidence, WaitRequest, WaitTarget
+
+CONTEXT_INTENTS: dict[str, Any] = {}
+EventCursorError = ValueError
+ComponentSpec = Any
+ComponentResult = Any
+
+
+def source_revision(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()
+
 
 DAEMON_ERROR_CLASSES = {
     ErrorCode.INVALID_ARGUMENT: "invalid_request",
@@ -171,18 +170,14 @@ class Runtime:
     principal: Principal
     config: GatewayConfig
     projects: ProjectService
-    project_context: ProjectContextService
     artifacts: ArtifactService
     audit: AuditService
     results: ResultService
     jobs: LocalJobs
     observe: ObserveService
     machine_actions: MachineActionService
-    desktop: DesktopService
     terminals: TerminalService
-    browser: BrowserService
     beads: BeadsService
-    capability_index: CapabilityIndexService
     captures: CaptureService
     files: HostFileService
     sessions: SessionLogService
@@ -190,10 +185,9 @@ class Runtime:
     timeline: TimelineService
     mcp_broker: McpBrokerService
     route_preflight: GatewayRoutePreflight
-    context_composer: ContextComposer = field(default_factory=ContextComposer)
-    normalized_events: NormalizedEventService | None = None
+    normalized_events: Any = None
     waits: BoundedWaitService | None = None
-    context_snapshots: ContextSnapshotStore | None = None
+    context_snapshots: Any = None
 
     @classmethod
     def create(cls, config: GatewayConfig, principal_name: str) -> "Runtime":
@@ -207,18 +201,14 @@ class Runtime:
             principal=principal,
             config=config,
             projects=projects,
-            project_context=ProjectContextService(principal, projects, beads),
             artifacts=artifacts,
             audit=AuditService(config, principal),
             results=ResultService(config, principal, artifacts),
             jobs=LocalJobs(),
             observe=ObserveService(config, principal, artifacts),
             machine_actions=MachineActionService(config, principal),
-            desktop=DesktopService(config, principal, artifacts),
             terminals=TerminalService(config, principal, artifacts),
-            browser=BrowserService(config, principal, artifacts),
             beads=beads,
-            capability_index=CapabilityIndexService(config, principal),
             captures=CaptureService(config, principal),
             files=HostFileService(config, principal),
             sessions=sessions,
@@ -226,20 +216,6 @@ class Runtime:
             timeline=TimelineService(principal, sessions),
             mcp_broker=McpBrokerService(config, principal, artifacts),
             route_preflight=GatewayRoutePreflight(config),
-        )
-        runtime.normalized_events = NormalizedEventService(
-            principal=principal_name,
-            cursor_key=runtime.results.cursor_key,
-            projects=runtime.projects,
-            beads=runtime.beads,
-            audit=runtime.audit,
-            transitions_path=config.runtime_transitions,
-            jobs=lambda limit, cursor: runtime.v2_jobs_query(
-                {"limit": limit, **({"cursor": cursor} if cursor else {})}
-            ),
-        )
-        runtime.context_snapshots = ContextSnapshotStore(
-            config.state_dir, principal_name
         )
         runtime.waits = BoundedWaitService(runtime._resolve_wait)
         return runtime

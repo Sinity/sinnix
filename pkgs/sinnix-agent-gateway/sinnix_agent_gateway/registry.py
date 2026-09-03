@@ -2038,11 +2038,41 @@ def build_registry() -> CatalogRegistry:
         schema["properties"] = properties
         return replace(action, input_schema=schema, failure_codes=frozenset(failures))
 
+    retired_actions = {
+        "projects.context",
+        "beads.changeset",
+        "beads.operate",
+        "capabilities.query",
+        "desktop.query",
+        "desktop.operate",
+        "browser.query",
+        "browser.operate",
+    }
+    retired_resources = {
+        "browser_page",
+        "browser_workspace",
+        "desktop",
+        "capability",
+        "context_snapshot",
+    }
+    resources = tuple(
+        resource for resource in resources if resource.kind not in retired_resources
+    )
     return CatalogRegistry(
         resources,
         tuple(
-            with_failure_contract(action)
+            with_failure_contract(
+                replace(
+                    action,
+                    resource_kinds=tuple(
+                        kind
+                        for kind in action.resource_kinds
+                        if kind not in retired_resources
+                    ),
+                )
+            )
             for action in (*actions, *_owner_query_actions())
+            if action.name not in retired_actions
         ),
     )
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -101,50 +102,45 @@ def _is_canonical_job_record(value: dict[str, Any]) -> bool:
 def collect_agent_gateway(
     limit: int = 20, below: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    """Read daemon-owned job records. `below` remains a caller-compatible input."""
+    """Read the canonical job plane through agentctl."""
 
     _ = below
-    root = Path(
-        os.environ.get("SINNIXD_STATE_DIR", str(Path.home() / ".local/state/sinnixd"))
-    )
-    records_root = root / "jobs"
-    malformed: list[str] = []
-    jobs: list[dict[str, Any]] = []
     try:
-        paths = sorted(
-            records_root.glob("*.json"),
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )[: max(1, min(limit, 100))]
-    except OSError:
-        paths = []
-    for path in paths:
-        row = _json(path)
-        if row is None or not _is_canonical_job_record(row):
-            malformed.append(path.name)
-            continue
-        job = _public_agent_record(row)
-        if job is not None:
-            jobs.append(job)
+        command = os.environ.get("SINNIX_AGENTCTL_COMMAND", "agentctl")
+        result = subprocess.run(
+            [command, "--json", "job", "list"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        value = json.loads(result.stdout)
+        rows = value if isinstance(value, list) else []
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        rows = []
+    jobs = [
+        row
+        for row in rows[: max(1, min(limit, 100))]
+        if isinstance(row, dict) and row.get("kind") == "attested-agent"
+    ]
     history, polylogue_error = _polylogue_sessions([str(job["job_id"]) for job in jobs])
     correlations = []
     for job in jobs:
-        state = job["state"]
-        systemd = state.get("systemd") if isinstance(state.get("systemd"), dict) else {}
+        state = job
         correlations.append(
             {
                 "job_id": job["job_id"],
-                "unit": job["unit"],
-                "cgroup": systemd.get("ControlGroup"),
+                "unit": job.get("label"),
+                "cgroup": job.get("cgroup"),
                 "terminal": bool(state.get("terminal")),
                 "polylogue": history.get(job["job_id"]),
             }
         )
     return {
         "schema": "sinnix-observe-agentctl-v1",
-        "available": records_root.exists(),
+        "available": bool(jobs),
         "jobs": jobs,
-        "malformed_records": malformed,
+        "malformed_records": [],
         "correlations": correlations,
         "polylogue_error": polylogue_error,
     }

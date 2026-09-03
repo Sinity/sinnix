@@ -22,7 +22,6 @@
         "polylogue-python"
         "polylogued"
         "sinnix"
-        "sinnix-agent-control-mcp"
         "sinnix-agent-environment-doc"
         "sinnix-agent-gateway"
         "sinnix-mcp"
