@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -1851,6 +1852,7 @@ class GenericJobs:
             "project_id": spec.project_id,
             "operation": spec.operation,
             "kind": spec.kind,
+            "label": self._pueue_label(spec, record.job_id),
             "argv": list(resolved_command),
             "environment": dict(resolved_environment),
             "working_directory": spec.working_directory,
@@ -2359,6 +2361,7 @@ class GenericJobs:
                 )
                 self.store.save(intent)
                 self._stop_queue_task(record.queue_task_id)
+                self._reap_command_group(record)
                 response = {
                     **self._get_locked(job_id),
                     "cancel_requested": True,
@@ -2378,6 +2381,14 @@ class GenericJobs:
         with self.store.locked(job_id):
             record = self.store.load(job_id)
         content = _read_private_artifact(record.log_path, max_bytes, offset=offset)
+        if not content and record.queue_task_id is not None:
+            # A killed wrapper never finishes its artifact, but pueued captured
+            # the same output. A timed-out or cancelled job must still be
+            # readable, or its failure has no evidence.
+            with contextlib.suppress(PueueError):
+                captured = pueue.log(record.queue_task_id).encode()
+                if captured:
+                    content = captured[offset : offset + max_bytes]
         if content is None:
             raise JobResultError("job log artifact is unavailable")
         overflowed = record.log_path.with_suffix(".overflow").exists()
@@ -2566,28 +2577,38 @@ class GenericJobs:
         return self._public(updated, state)
 
     @staticmethod
-    def _stop_queue_task(task_id: int) -> None:
-        """Stop a task whether or not it has started.
+    def _reap_command_group(record: GenericJobRecord) -> None:
+        """Kill the session the wrapper detached for its command.
 
-        `kill` signals a running process and does nothing to a task still
-        waiting for a slot, which then runs after its cancellation was
-        reported. A task that has not started is removed from the queue
-        instead; the removal races the scheduler, so a task that started in
-        between is killed.
+        `pueue kill` sends SIGKILL to its own process group, which the command
+        left, so without this a cancelled job's process tree keeps running.
         """
+        group_path = Path(f"{record.log_path}.pgid")
         try:
-            current = pueue.task(task_id)
-        except PueueError:
-            current = None
-        if current is not None and current.status == "Running":
-            with contextlib.suppress(PueueError):
-                pueue.kill(task_id)
+            pgid = int(group_path.read_text().strip())
+        except (OSError, ValueError):
             return
-        try:
+        for signum in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(pgid, signum)
+            except (ProcessLookupError, PermissionError):
+                return
+            time.sleep(0.2)
+        group_path.unlink(missing_ok=True)
+
+    @staticmethod
+    def _stop_queue_task(task_id: int) -> None:
+        """Stop a task whether or not it has started, then take its slot back.
+
+        `kill` reaches the task's process group but leaves a queued task in
+        the queue, so it runs later. `remove` frees the slot but does not stop
+        a process, so removing a running task orphans it. Killing first and
+        removing second is correct in both states.
+        """
+        with contextlib.suppress(PueueError):
+            pueue.kill(task_id)
+        with contextlib.suppress(PueueError):
             pueue.remove([task_id])
-        except PueueError:
-            with contextlib.suppress(PueueError):
-                pueue.kill(task_id)
 
     def _refuse_dependency(
         self, record: GenericJobRecord, message: str

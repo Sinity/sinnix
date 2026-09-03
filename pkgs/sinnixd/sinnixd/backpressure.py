@@ -1,0 +1,150 @@
+"""Freeze the queue under host pressure instead of killing what is running.
+
+One pass: read the host's pressure, pause or resume one pueue group, record
+the transition, exit. A timer runs it. Nothing here loops or sleeps, and
+nothing is cancelled — a frozen group's tasks keep their work and resume.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import time
+from pathlib import Path
+from typing import Mapping, Sequence
+
+from . import pueue
+from .pueue import PueueError
+
+# Measured 2026-09-02 12:29Z: io full avg10 reached 76% under eight concurrent
+# normal-pool jobs, against single digits on an idle host. 25% was the point
+# where new work stopped being admitted, and it is the point where the queue
+# now freezes instead.
+IO_FULL_FREEZE = 25.0
+
+# systemd-oomd on this host kills at memory full 50% sustained 30s. Freezing at
+# half of that leaves the queue a margin to go quiet before oomd chooses a
+# victim, which is the whole difference between freezing and thrashing.
+MEMORY_FULL_FREEZE = 25.0
+
+# Resuming at the freeze threshold would thaw straight back into the pressure
+# that caused the freeze. Both signals must fall well clear first.
+RESUME_BELOW = 10.0
+
+# Frozen in this order and thawed in reverse: agent lanes are the largest and
+# the most restartable, bulk is the work the operator is most likely waiting
+# on being able to finish.
+FREEZE_ORDER = ("agent", "normal", "bulk")
+
+
+def read_pressure(root: Path = Path("/proc/pressure")) -> dict[str, float]:
+    """The host's `full` stall averages. Absent PSI reads as no pressure."""
+    values = {"memory_full_avg60": 0.0, "io_full_avg60": 0.0}
+    for resource in ("memory", "io"):
+        try:
+            content = (root / resource).read_text()
+        except OSError:
+            continue
+        for line in content.splitlines():
+            fields = line.split()
+            if not fields or fields[0] != "full":
+                continue
+            for field in fields[1:]:
+                key, _, raw = field.partition("=")
+                if key == "avg60":
+                    try:
+                        values[f"{resource}_full_avg60"] = float(raw)
+                    except ValueError:
+                        pass
+    return values
+
+
+def over_threshold(pressure: Mapping[str, float]) -> str | None:
+    """The signal that says freeze, or None."""
+    if pressure.get("io_full_avg60", 0.0) >= IO_FULL_FREEZE:
+        return "io"
+    if pressure.get("memory_full_avg60", 0.0) >= MEMORY_FULL_FREEZE:
+        return "memory"
+    return None
+
+
+def clear(pressure: Mapping[str, float]) -> bool:
+    return (
+        pressure.get("io_full_avg60", 0.0) < RESUME_BELOW
+        and pressure.get("memory_full_avg60", 0.0) < RESUME_BELOW
+    )
+
+
+def _append(spool: Path | None, event: Mapping[str, object]) -> None:
+    if spool is None:
+        return
+    line = json.dumps(
+        {
+            "schema_version": 1,
+            "emitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "kind": "backpressure",
+            **dict(event),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    try:
+        spool.parent.mkdir(parents=True, exist_ok=True)
+        with open(spool, "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except OSError:
+        return
+
+
+def tick(*, spool: Path | None, pressure_root: Path = Path("/proc/pressure")) -> dict:
+    """Freeze one more group, thaw one, or do nothing. Never cancels."""
+    pressure = read_pressure(pressure_root)
+    try:
+        groups = pueue.groups_status()
+    except PueueError as error:
+        return {"action": "unavailable", "error": str(error), "pressure": pressure}
+
+    paused = [name for name in FREEZE_ORDER if groups.get(name) == "Paused"]
+    running = [name for name in FREEZE_ORDER if groups.get(name) == "Running"]
+    signal = over_threshold(pressure)
+
+    if signal is not None and running:
+        target = running[0]
+        try:
+            pueue.pause(target)
+        except PueueError as error:
+            return {"action": "failed", "group": target, "error": str(error)}
+        event = {"action": "froze", "group": target, "signal": signal, **pressure}
+        _append(spool, event)
+        return event
+
+    if signal is None and clear(pressure) and paused:
+        target = paused[-1]
+        try:
+            pueue.resume(target)
+        except PueueError as error:
+            return {"action": "failed", "group": target, "error": str(error)}
+        event = {"action": "thawed", "group": target, **pressure}
+        _append(spool, event)
+        return event
+
+    return {
+        "action": "hold",
+        "frozen": paused,
+        "signal": signal,
+        **pressure,
+    }
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="sinnixd-backpressure")
+    parser.add_argument(
+        "--event-spool", type=Path, default=Path("/realm/state/agentctl/events.jsonl")
+    )
+    parsed = parser.parse_args(argv)
+    print(json.dumps(tick(spool=parsed.event_spool), sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - console entry point
+    raise SystemExit(main())
