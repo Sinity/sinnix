@@ -65,6 +65,8 @@ mkServiceModule {
         {
           manager = "user";
           resourceClass = "background-maintenance";
+          # The pass pauses and resumes pueue groups through the pueue client.
+          path = [ pkgs.pueue ];
           execStart = "${scriptPkgs.sinnixd}/bin/sinnixd-backpressure --event-spool ${lib.escapeShellArg eventSpool}";
           serviceConfig = {
             TimeoutStartSec = "30s";
