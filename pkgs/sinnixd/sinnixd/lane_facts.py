@@ -1,11 +1,12 @@
 """Per-lane facts and the one next action they imply.
 
-Every lane decision the reactor makes can be computed from facts read fresh
-each tick: the worktree head, the pushed head, who holds the worktree, the
-newest receipt, the PR the sweep sees, and master. ``advance`` is the pure
-function from those facts to the next action; it keeps no dispatch records,
-because an action already in flight is itself a fact (a running job on the
-checkout). ``collect`` reads the facts from the daemon's own state.
+Every lane decision follows from facts read fresh: the worktree head, the
+pushed head, who holds the worktree, the newest receipt, the PR the sweep
+sees, and master. ``advance`` is the pure function from those facts to the
+next action; it keeps no dispatch records, because an action already in
+flight is itself a fact (a running job on the checkout). ``collect`` reads
+the facts from the daemon's own state, so `campaign view` and `campaign run`
+cannot disagree about a lane.
 """
 
 from __future__ import annotations

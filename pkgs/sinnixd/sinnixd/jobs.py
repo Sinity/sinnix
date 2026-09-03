@@ -2156,13 +2156,9 @@ class GenericJobs:
         """Append one bounded advisory event to the existing event spool."""
         if self.event_spool_path is None:
             return
-        # Every daemon-owned spool record carries the reactor event schema;
-        # legacy producers may omit it and are still accepted by the reactor
-        # during the one-way v0 migration.
+        # Every event carries its schema and its own timestamp: a reader
+        # reconstructing a lane's history has nothing else to order it by.
         line = json.dumps(
-            # Every event dates itself: campaign/harvest kinds shipped
-            # without any timestamp for a week and their history had to be
-            # reconstructed by interpolation.
             {"schema_version": 1, "emitted_at": _timestamp(), **dict(event)},
             sort_keys=True,
             separators=(",", ":"),
