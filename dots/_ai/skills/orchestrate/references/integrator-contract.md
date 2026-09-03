@@ -59,7 +59,7 @@ rejected even when its tests are green.
 Your run ends in exactly one of two acts, and a report without either is a
 failed integration: the harvest authorize command above (publish), or a note
 on the bead naming the unmet criterion (send back). Editing the lane and
-stopping is neither; the reactor does not dispatch a second integrator for
+stopping is neither; `campaign run` does not dispatch a second integrator for
 the same reason, it hands the lane to the operator.
 
 End with `INTEGRATION: published <pr>` or `INTEGRATION: rejected <reason>`,

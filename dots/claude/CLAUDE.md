@@ -155,9 +155,9 @@ live OUTSIDE your context — read them, never reconstruct:
   `worker-contract.md`.
 - **Live state**: `agentctl campaign view --project <p>` is the lane screen
   (`--json` for the payload); `agentctl campaign log` is the event history.
-- **Who drives**: the operator or the coordinating agent. `sinnixd-reactor`
-  is stopped after every deploy and refill is opt-in; nothing advances on
-  its own.
+- **Who drives**: the operator or the coordinating agent. `agentctl campaign
+run` is a one-shot planner — each invocation dispatches every managed
+  lane's next action once and exits; nothing advances on its own.
 - **Dispatch**: `agentctl campaign run` for a wave, `packet launch` for one
   bead. **Harvest**: the declared `harvest` operation; it refuses without
   test evidence (an affected-verification job or operator authorization).
