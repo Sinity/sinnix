@@ -37,15 +37,10 @@ Look for the verb before writing any procedure: `agentctl <verb> --help`.
 | explain one lane                          | `agentctl campaign log --project <p> --workspace <ws>`                                                          |
 | schedule a dispatch wave                  | `agentctl campaign run --project <p> [--limit N] [--bead ID …] [--dry-run]`                                     |
 | dispatch one bead                         | `agentctl packet launch <bead> --project <p>`                                                                   |
-| group unintegrated lanes into batches     | `agentctl campaign integrate --project <p> [--assemble N --name B]`                                             |
 | publish a finished lane                   | `agentctl lane publish <ws> [--close]`                                                                          |
 | record the operator's decision at a head  | `agentctl lane authorize <ws> [--reason R]`                                                                     |
 | continue an interrupted lane              | `agentctl agent launch --project <p> --checkout <worktree-id> --prompt-file F --backend B --model M --effort E` |
-| open a PR outside the harvest flow        | `agentctl workspace publish <ws> --job <verify-job> --title T [--body F] [--wait]`                              |
-| land a workspace                          | `agentctl workspace land <ws> --job <verify-job>`                                                               |
-| dispose after a GitHub merge              | `agentctl workspace finish <ws>`                                                                                |
 | delete a workspace and everything it owns | `agentctl workspace drop <ws> [--force]`                                                                        |
-| review state of a workspace               | `agentctl workspace review-status <ws>`                                                                         |
 | run a declared operation                  | `agentctl job start <p> <operation> [--workspace <ws>] [--wait]`                                                |
 | wait on work                              | `agentctl job wait <id>`, `agentctl plan wait <id>`                                                             |
 
@@ -83,8 +78,8 @@ back, so nothing publishes unreviewed.
    with `NO_TEST_EVIDENCE` unless it is given a succeeded `verify_affected`
    job for the current head (`affected_job`) or the operator has recorded an
    authorization for that head (`agentctl lane authorize`, which writes
-   `.lane/authorization.json`). The publication sweep reports the same state as
-   the verdict `no-test-evidence` and merges nothing on it.
+   `.lane/authorization.json`). Harvest reports this as the verdict
+   `no-test-evidence` and merges nothing on it.
 3. Routing: docs- or tests-only with a clean scan publishes without a reader.
    An ordinary production diff with a clean scan routes to a cross-family
    review lane the coordinator dispatches. Migrations, gate or baseline edits,
@@ -99,8 +94,8 @@ back, so nothing publishes unreviewed.
 5. A receipt binds workspace HEAD at minting; a failed authorize invalidates
    it — re-mint before retrying.
 6. Drop after the content check: `workspace drop <ws>` once worktrunk reports
-   the branch `integrated`, `workspace finish` for the merged case. Both delete
-   the lane's job records and artifacts with it.
+   the branch `integrated`. It deletes the lane's job records and artifacts
+   with it.
 
 **Launch wedges**: `packet launch` advances one step per attempt (worktree →
 record → job) and reports a step failure as a redacted `OWNER_UNAVAILABLE`.
