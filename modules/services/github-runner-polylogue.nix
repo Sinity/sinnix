@@ -139,7 +139,7 @@ mkServiceModule {
             Slice = "sinnixd-work.slice";
             # A selected verify opens the seeded archives of every xdist worker at
             # once; the default 1024 gave EMFILE on the first real run.
-            LimitNOFILE = 65536;
+            LimitNOFILE = 524288;
 
             DynamicUser = false;
             # A CI runner needs the user's caches, the nix daemon socket, the
