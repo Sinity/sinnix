@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-import argparse
 import fcntl
 import hashlib
 import json
 import os
 import re
-import selectors
 import shutil
-import socket
 import stat
-import struct
 import subprocess
 import sys
 import time
@@ -21,9 +17,10 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Condition, Event, Lock, RLock
-from typing import Any, Iterable, Iterator, Protocol
+from typing import Any, Iterable, Iterator
 from uuid import UUID, uuid4
 
+from . import pueue, queue_run
 from .limits import (
     DEFAULT_TIMEOUT_SECONDS,
     maximum_timeout_seconds,
@@ -36,28 +33,26 @@ from .projects import (
     RegisteredCheckout,
     revalidate_registered_checkout,
 )
+from .pueue import PueueError, Task
 
 DEFAULT_WAIT_SECONDS = 30
 MAX_WAIT_SECONDS = 3600
 MAX_TERMINAL_EVENT_ENTRIES = 4096
-NOTIFY_TIMEOUT_SECONDS = 2.0
 MAX_EVENT_SPOOL_BYTES = 64 * 1024 * 1024
 SYSTEMD_COMMAND_TIMEOUT_SECONDS = 0.25
-CGROUP_ROOT = Path("/sys/fs/cgroup")
-CANCEL_OUTCOME_RECONCILIATION_GRACE_SECONDS = 300
 MAX_LOG_BYTES = 64_000
 MAX_LOG_ARTIFACT_BYTES = 1_048_576
 MAX_RESULT_BYTES = 64_000
 MAX_HANDOFF_BYTES = 64_000
-JOB_SCHEMA_VERSION = 6
+JOB_SCHEMA_VERSION = 7
 JOB_UNIT_PREFIX = "sinnixd-job-"
-SYSTEMD_ERROR_CODE = "systemd-job-error"
+QUEUE_ERROR_CODE = "queue-job-error"
 SCHEDULE_STATE_SCHEMA_VERSION = 1
 SCHEDULE_UNIT_PREFIX = "sinnixd-schedule-"
 CAPACITY_SCHEMA_VERSION = 1
 CAPACITY_RETRY_DELAYS_SECONDS = (5, 30, 120)
 # pueue's group name grammar; sinnixd only validates shape and passes it
-# through as the systemd cgroup slice suffix.
+# through as the pueue group name.
 _POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}")
 
 
@@ -66,14 +61,6 @@ def default_state_dir() -> Path:
         Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
         / "sinnixd"
     )
-
-
-class SystemdJobError(RuntimeError):
-    """Raised when systemd cannot create or inspect a transient job service."""
-
-
-class SystemdJobTimeout(SystemdJobError):
-    """Raised only when the bounded systemd subprocess times out."""
 
 
 def scheduled_operation_id(project_id: str, operation_name: str) -> str:
@@ -160,7 +147,7 @@ def _open_private_artifact(path: Path) -> Any:
 
 
 def _open_preallocated_private_artifact(path: Path) -> Any:
-    """Open the store-reserved log artifact without accepting a replacement link."""
+    """Open a store-reserved artifact without accepting a replacement link."""
     parent_descriptor = _open_private_parent(path)
     try:
         descriptor = os.open(
@@ -207,17 +194,6 @@ def _read_private_artifact(
         os.close(parent_descriptor)
 
 
-def _write_private_marker(path: Path) -> None:
-    with _open_private_artifact(path) as handle:
-        handle.flush()
-        os.fsync(handle.fileno())
-    _fsync_directory(path.parent)
-
-
-def _completion_marker_path(log_path: Path) -> Path:
-    return log_path.with_suffix(".complete")
-
-
 def _fsync_directory(path: Path) -> None:
     descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:
@@ -242,42 +218,6 @@ def _ensure_durable_directory(path: Path) -> None:
         _fsync_directory(directory.parent)
 
 
-class SystemdJobs(Protocol):
-    """The systemd boundary for every durable Sinnixd job."""
-
-    def start(
-        self,
-        *,
-        unit: str,
-        command: Sequence[str],
-        working_directory: str,
-        environment: Mapping[str, str],
-        timeout_seconds: int,
-        log_path: Path,
-        json_result_path: Path | None = None,
-        notify_socket: Path | None = None,
-        notify_job_id: str | None = None,
-        pool: str,
-    ) -> None: ...
-
-    def show(
-        self,
-        unit: str,
-        *,
-        timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
-    ) -> Mapping[str, str]: ...
-
-    def stop(self, unit: str) -> None: ...
-
-    def schedule_timer(
-        self, *, unit: str, on_calendar: str, command: Sequence[str]
-    ) -> None: ...
-
-    def timer_exists(self, unit: str) -> bool: ...
-
-    def unschedule_timer(self, unit: str) -> None: ...
-
-
 def timer_persistent(on_calendar: str) -> bool:
     """Catch up a missed daily or weekly run; never a sub-hourly one.
 
@@ -290,134 +230,18 @@ def timer_persistent(on_calendar: str) -> bool:
     return not (spec.startswith("*:") or spec.startswith("*-*-* *:"))
 
 
+class TimerError(RuntimeError):
+    """Raised when systemd cannot register or inspect a calendar timer."""
+
+
 @dataclass(frozen=True)
 class UserSystemdJobs:
-    """Launch and inspect transient user services through the user manager."""
+    """Register and reconcile calendar timers through the user manager.
 
-    # Lane jobs may read operator tooling, configuration, and durable runtime
-    # state, but those paths must remain owned by the host and its services.
-    @staticmethod
-    def lane_read_only_paths() -> tuple[str, ...]:
-        home = Path.home()
-        config = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
-        return (
-            str(home / ".local" / "bin"),
-            str(home / ".claude"),
-            str(config),
-            "/realm/state",
-        )
-
-    def start(
-        self,
-        *,
-        unit: str,
-        command: Sequence[str],
-        working_directory: str,
-        environment: Mapping[str, str],
-        timeout_seconds: int,
-        log_path: Path,
-        json_result_path: Path | None = None,
-        notify_socket: Path | None = None,
-        notify_job_id: str | None = None,
-        pool: str,
-    ) -> None:
-        args = [
-            "systemd-run",
-            "--user",
-            "--quiet",
-            f"--unit={unit}",
-            f"--slice=sinnixd-work-{pool}.slice",
-            f"--property=WorkingDirectory={working_directory}",
-            f"--property=RuntimeMaxSec={timeout_seconds}s",
-            *(
-                f"--property=ReadOnlyPaths={path}"
-                for path in self.lane_read_only_paths()
-            ),
-            # The event spool is the one /realm/state path jobs may append:
-            # harvest and sibling operations emit their typed transitions
-            # there, and the blanket ReadOnlyPaths silently swallowed every
-            # such event from 2026-08-27 (declared-harvest cutover) to
-            # 2026-09-01 — the reactor never saw a review-required receipt.
-            "--property=ReadWritePaths=/realm/state/agentctl",
-            "--property=StandardOutput=journal",
-            "--property=StandardError=journal",
-            "--",
-            str(capture_executable()),
-            "--log-path",
-            str(log_path),
-            "--overflow-path",
-            str(log_path.with_suffix(".overflow")),
-            "--max-bytes",
-            str(MAX_LOG_ARTIFACT_BYTES),
-        ]
-        if json_result_path is not None:
-            args.extend(
-                [
-                    "--result-path",
-                    str(json_result_path),
-                    "--result-overflow-path",
-                    str(json_result_path.with_suffix(".overflow")),
-                ]
-            )
-        if notify_socket is not None and notify_job_id is not None:
-            args.extend(
-                [
-                    "--notify-socket",
-                    str(notify_socket),
-                    "--notify-job-id",
-                    notify_job_id,
-                ]
-            )
-        args.extend(["--", "/run/current-system/sw/bin/env", "-i"])
-        args.extend(f"{key}={value}" for key, value in sorted(environment.items()))
-        args.extend(command)
-        self._run(args)
-
-    def show(
-        self,
-        unit: str,
-        *,
-        timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
-    ) -> Mapping[str, str]:
-        output = self._run(
-            [
-                "systemctl",
-                "--user",
-                "show",
-                unit,
-                "--property=LoadState",
-                "--property=ActiveState",
-                "--property=SubState",
-                "--property=MainPID",
-                "--property=Result",
-                "--property=ExecMainCode",
-                "--property=ExecMainStatus",
-                "--property=ControlGroup",
-                "--property=InvocationID",
-                "--property=MemoryCurrent",
-                "--property=MemoryPeak",
-                "--property=MemorySwapCurrent",
-                "--property=CPUUsageNSec",
-                "--property=IOReadBytes",
-                "--property=IOWriteBytes",
-            ],
-            timeout_seconds=timeout_seconds,
-        )
-        properties: dict[str, str] = {}
-        for line in output.splitlines():
-            key, separator, value = line.partition("=")
-            if not key or not separator:
-                raise SystemdJobError("systemd show output is malformed")
-            properties[key] = value
-        if "LoadState" not in properties:
-            raise SystemdJobError("systemd show output is malformed")
-        return properties
-
-    def stop(self, unit: str) -> None:
-        # Stopping is a request, not a wait. A blocking stop runs until the
-        # unit's own shutdown finishes, which for an agent unit is seconds --
-        # far past the command budget every other systemd call is sized for.
-        self._run(["systemctl", "--user", "--no-block", "stop", unit])
+    pueue executes and observes every job; systemd's only remaining role is
+    the durable wake-up a calendar schedule needs, which pueue does not
+    provide.
+    """
 
     def schedule_timer(
         self, *, unit: str, on_calendar: str, command: Sequence[str]
@@ -446,7 +270,7 @@ class UserSystemdJobs:
                     "--property=LoadState",
                 ]
             )
-        except SystemdJobError:
+        except TimerError:
             return False
         return output.strip() == "LoadState=loaded"
 
@@ -461,7 +285,7 @@ class UserSystemdJobs:
                     f"{unit}.service",
                 ]
             )
-        except SystemdJobError:
+        except TimerError:
             # Registration is reconciled from the durable schedule map. A
             # missing transient unit is already the desired state.
             return
@@ -470,9 +294,6 @@ class UserSystemdJobs:
     def _run(
         args: Sequence[str], *, timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS
     ) -> str:
-        timeout_seconds = min(timeout_seconds, SYSTEMD_COMMAND_TIMEOUT_SECONDS)
-        if timeout_seconds <= 0:
-            raise ValueError("systemd command timeout must be positive")
         try:
             result = subprocess.run(
                 args,
@@ -482,18 +303,14 @@ class UserSystemdJobs:
                 timeout=timeout_seconds,
             )
         except FileNotFoundError as error:
-            raise SystemdJobError(
-                f"systemd command is unavailable: {args[0]}"
-            ) from error
+            raise TimerError(f"systemd command is unavailable: {args[0]}") from error
         except subprocess.TimeoutExpired as error:
-            raise SystemdJobTimeout("systemd command timed out") from error
+            raise TimerError("systemd command timed out") from error
         except OSError as error:
-            raise SystemdJobError(
-                f"systemd command failed: {args[0]}: {error}"
-            ) from error
+            raise TimerError(f"systemd command failed: {args[0]}: {error}") from error
         except subprocess.CalledProcessError as error:
             detail = error.stderr.strip() or error.stdout.strip() or str(error)
-            raise SystemdJobError(detail) from error
+            raise TimerError(detail) from error
         return result.stdout
 
 
@@ -514,8 +331,8 @@ class TerminalEvents:
 
     Events only accelerate observation: firing is best-effort, a missed event
     is recovered by the fallback observation cadence, and a spurious event
-    costs one extra bounded observation. Systemd observation remains the sole
-    state authority.
+    costs one extra bounded observation. pueue's own task state remains the
+    sole state authority.
     """
 
     def __init__(self) -> None:
@@ -540,98 +357,6 @@ class TerminalEvents:
             if seconds > 0:
                 self._condition.wait(seconds)
             return any(job_id in self._fired for job_id in job_ids)
-
-
-def notify_job_exit(
-    socket_path: Path,
-    job_id: str,
-    exit_code: int,
-    dimensions: Mapping[str, Any] | None = None,
-) -> None:
-    """Best-effort daemon wake-up sent by the capture wrapper at process exit.
-
-    Failure is silent by design: the daemon may be down or restarting, and the
-    observation path recovers the outcome without this accelerator.
-    """
-    request_id = str(uuid4())
-    payload = json.dumps(
-        {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": "dispatch",
-            "params": {
-                "request_id": request_id,
-                "correlation_id": str(uuid4()),
-                "operation": "job.notify-exit",
-                "owner": "systemd-jobs",
-                "principal": "agent-control",
-                "arguments": {
-                    "job_id": job_id,
-                    "exit_code": exit_code,
-                    **(
-                        {"dimensions": dict(dimensions)}
-                        if dimensions is not None
-                        else {}
-                    ),
-                },
-            },
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode()
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-        connection.settimeout(NOTIFY_TIMEOUT_SECONDS)
-        connection.connect(str(socket_path))
-        connection.sendall(struct.pack("!I", len(payload)) + payload)
-        connection.recv(4)
-
-
-def _cgroup_inactive_file(properties: Mapping[str, str]) -> int:
-    """Reclaimable page cache charged to the unit; 0 when unobservable."""
-    control_group = properties.get("ControlGroup")
-    if not (isinstance(control_group, str) and control_group.startswith("/")):
-        return 0
-    relative = Path(control_group.lstrip("/"))
-    if ".." in relative.parts:
-        return 0
-    try:
-        stat = (CGROUP_ROOT / relative / "memory.stat").read_text()
-    except OSError:
-        return 0
-    for line in stat.splitlines():
-        if line.startswith("inactive_file "):
-            try:
-                return max(0, int(line.split()[1]))
-            except (IndexError, ValueError):
-                return 0
-    return 0
-
-
-def _terminal_resources(properties: Mapping[str, str]) -> dict[str, Any]:
-    """Capture bounded terminal resource evidence without making it authoritative."""
-    pressure: str | None = None
-    control_group = properties.get("ControlGroup")
-    if isinstance(control_group, str) and control_group.startswith("/"):
-        relative = Path(control_group.lstrip("/"))
-        if ".." not in relative.parts:
-            try:
-                pressure = (CGROUP_ROOT / relative / "memory.pressure").read_text()
-            except OSError:
-                pass
-
-    def integer(name: str) -> int | None:
-        try:
-            value = int(properties.get(name, ""))
-        except (TypeError, ValueError):
-            return None
-        return value if value >= 0 else None
-
-    return {
-        "cpu_usage_nsec": integer("CPUUsageNSec"),
-        "io_read_bytes": integer("IOReadBytes"),
-        "io_write_bytes": integer("IOWriteBytes"),
-        "memory_pressure": pressure,
-    }
 
 
 _USAGE_NUMBER = r"([0-9][0-9,]*)"
@@ -781,6 +506,15 @@ def _run_telemetry(
         "backend": backend if isinstance(backend, str) else None,
         "backend_usage": state.get("usage"),
     }
+
+
+# GenericJobSpec.result_kind names to queue_run.py's RESULT_KINDS.
+_QUEUE_RESULT_KINDS = {
+    "exit-status": "exit",
+    "last-message": "last-message",
+    "json": "json",
+    "pytest": "pytest",
+}
 
 
 @dataclass(frozen=True)
@@ -1039,10 +773,11 @@ class GenericJobRecord:
     handoff_path: Path | None
     created_at: str
     cancel_requested_at: str | None = None
-    cancel_requested_invocation_id: str | None = None
-    cancel_stop_acknowledged_at: str | None = None
-    cancel_stop_acknowledged_invocation_id: str | None = None
     admission_estimate_recorded: bool = False
+    # The pueue task handle for this job's current launch attempt. Internal
+    # only: a job that has never launched, or whose handle pueue has
+    # forgotten, is resolved by scanning tasks() for the job's label.
+    queue_task_id: int | None = None
     state: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -1065,10 +800,8 @@ class GenericJobRecord:
             },
             "created_at": self.created_at,
             "cancel_requested_at": self.cancel_requested_at,
-            "cancel_requested_invocation_id": self.cancel_requested_invocation_id,
-            "cancel_stop_acknowledged_at": self.cancel_stop_acknowledged_at,
-            "cancel_stop_acknowledged_invocation_id": self.cancel_stop_acknowledged_invocation_id,
             "admission_estimate_recorded": self.admission_estimate_recorded,
+            "queue_task_id": self.queue_task_id,
             "state": dict(self.state),
         }
 
@@ -1078,7 +811,7 @@ class GenericJobRecord:
         unit = value.get("unit")
         artifacts = value.get("artifacts")
         schema_version = value.get("schema_version")
-        if schema_version not in {4, 5, JOB_SCHEMA_VERSION} or not isinstance(
+        if schema_version not in {4, 5, 6, JOB_SCHEMA_VERSION} or not isinstance(
             job_id, str
         ):
             raise JobRecordError("job record schema or ID is invalid")
@@ -1122,23 +855,18 @@ class GenericJobRecord:
             raise JobRecordError("job record spec or state is invalid")
         created_at = value.get("created_at")
         cancelled = value.get("cancel_requested_at")
-        invocation = value.get("cancel_requested_invocation_id")
-        stop_acknowledged = value.get("cancel_stop_acknowledged_at")
-        stop_invocation = value.get("cancel_stop_acknowledged_invocation_id")
         admission_estimate_recorded = value.get("admission_estimate_recorded", False)
+        queue_task_id = value.get("queue_task_id")
         if (
             not isinstance(created_at, str)
             or (cancelled is not None and not isinstance(cancelled, str))
-            or (invocation is not None and not isinstance(invocation, str))
-            or (
-                stop_acknowledged is not None and not isinstance(stop_acknowledged, str)
-            )
-            or (stop_invocation is not None and not isinstance(stop_invocation, str))
             or not isinstance(admission_estimate_recorded, bool)
-            or (stop_acknowledged is None) != (stop_invocation is None)
             or (
-                stop_acknowledged is not None
-                and (cancelled is None or stop_invocation != invocation)
+                queue_task_id is not None
+                and (
+                    not isinstance(queue_task_id, int)
+                    or isinstance(queue_task_id, bool)
+                )
             )
         ):
             raise JobRecordError("job record timestamps are invalid")
@@ -1153,10 +881,8 @@ class GenericJobRecord:
             handoff_path=handoff_path,
             created_at=created_at,
             cancel_requested_at=cancelled,
-            cancel_requested_invocation_id=invocation,
-            cancel_stop_acknowledged_at=stop_acknowledged,
-            cancel_stop_acknowledged_invocation_id=stop_invocation,
             admission_estimate_recorded=admission_estimate_recorded,
+            queue_task_id=queue_task_id,
             state=dict(state),
         )
 
@@ -1458,6 +1184,31 @@ class GenericJobStore:
         if self.inputs_root.exists():
             _fsync_directory(self.inputs_root)
 
+    def write_queue_launch(self, job_id: str, launch: Mapping[str, Any]) -> Path:
+        """Persist the private launch input the queued ``sinnixd-queue-run`` reads.
+
+        Rewritten on every launch attempt (initial submit, capacity retry,
+        recovered restart), so an existing file is replaced rather than
+        treated as a collision.
+        """
+        _ = job_unit_name(job_id)
+        _ensure_durable_directory(self.inputs_root)
+        path = self.inputs_root / f"{job_id}.queue-launch.json"
+        payload = json.dumps(dict(launch), sort_keys=True).encode()
+        path.unlink(missing_ok=True)
+        with _open_private_artifact(path) as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _fsync_directory(self.inputs_root)
+        return path
+
+    def cleanup_queue_launch(self, job_id: str) -> None:
+        path = self.inputs_root / f"{job_id}.queue-launch.json"
+        path.unlink(missing_ok=True)
+        if self.inputs_root.exists():
+            _fsync_directory(self.inputs_root)
+
     @contextmanager
     def locked(self, job_id: str) -> Iterator[None]:
         _ = job_unit_name(job_id)
@@ -1664,12 +1415,15 @@ class GenericJobStore:
         that the owner is gone.
         """
         deleted = 0
+        owned_tasks: list[int] = []
         for job_id in sorted(set(job_ids)):
             try:
                 record = self.load(job_id)
             except JobRecordError:
                 record = None
             if record is not None:
+                if record.queue_task_id is not None:
+                    owned_tasks.append(record.queue_task_id)
                 for artifact in (
                     record.log_path,
                     record.result_path,
@@ -1688,9 +1442,17 @@ class GenericJobStore:
                 self.inputs_root / f"{job_id}.prompt",
                 self.inputs_root / f"{job_id}.launch",
                 self.inputs_root / f"{job_id}.agent-launch",
+                self.inputs_root / f"{job_id}.queue-launch.json",
             ):
                 path.unlink(missing_ok=True)
             self._set_active_record(job_id, active=False)
+        if owned_tasks:
+            try:
+                pueue.remove(owned_tasks)
+            except PueueError:
+                # The store owns these records regardless; a queue that
+                # cannot be reached still leaves a consistent durable state.
+                pass
             deleted += 1
         if deleted and self.records_root.exists():
             _fsync_directory(self.records_root)
@@ -1752,10 +1514,9 @@ class GenericJobStore:
 class GenericJobs:
     """Common durable job route for declared operations and foreground commands."""
 
-    systemd: SystemdJobs
+    systemd: UserSystemdJobs
     store: GenericJobStore
     wait_poll_seconds: float = 1.0
-    notify_socket: Path | None = None
     event_spool_path: Path | None = None
     recover_on_init: bool = True
     events: TerminalEvents = field(default_factory=TerminalEvents, repr=False)
@@ -1906,20 +1667,17 @@ class GenericJobs:
     def _recover_unpublished_declared_locked(
         self, record: GenericJobRecord
     ) -> GenericJobRecord:
-        """Recover the record/input publication window without guessing at systemd.
+        """Recover the record/input publication window without guessing at pueue.
 
         A complete private input proves the durable intent can launch. An
-        incomplete input is terminal only when systemd authoritatively reports
-        that no unit exists; otherwise recovery retains the record.
+        incomplete input is terminal only when this job never reached pueue
+        (no queue_task_id was ever recorded); otherwise recovery retains the
+        record.
         """
         try:
             self.store.declared_launch(record.job_id)
         except JobRecordError:
-            try:
-                properties = self.systemd.show(record.unit)
-            except SystemdJobError:
-                return record
-            if properties.get("LoadState") != "not-found":
+            if record.queue_task_id is not None:
                 return record
             failed = self._with_state(
                 record,
@@ -1927,7 +1685,6 @@ class GenericJobs:
                     "phase": "launch-failed",
                     "terminal": True,
                     "error": {"code": "declared-launch-input-incomplete"},
-                    "systemd": dict(properties),
                     "observed_at": _timestamp(),
                 },
             )
@@ -2004,7 +1761,6 @@ class GenericJobs:
         if record.result_path:
             record.result_path.unlink(missing_ok=True)
             record.result_path.with_suffix(".overflow").unlink(missing_ok=True)
-            _completion_marker_path(record.log_path).unlink(missing_ok=True)
         self._launch(record, record.spec, command=command, environment=environment)
         return self.store.load(record.job_id)
 
@@ -2048,6 +1804,26 @@ class GenericJobs:
             return None
         return target
 
+    def _pueue_label(self, spec: GenericJobSpec, job_id: str) -> str:
+        return f"{spec.project_id}:{spec.operation}:{job_id}"
+
+    def _dependency_task_ids(self, dependency_job_ids: Sequence[str]) -> list[int]:
+        """Task ids for a job's already-terminal dependencies, where known.
+
+        Dependencies are resolved by `_dependency_block` before `_launch` ever
+        runs, so `after=` is a redundant structural guard, not the mechanism
+        that makes launch wait for them.
+        """
+        task_ids: list[int] = []
+        for dependency_id in dependency_job_ids:
+            try:
+                dependency = self.store.load(dependency_id)
+            except JobRecordError:
+                continue
+            if dependency.queue_task_id is not None:
+                task_ids.append(dependency.queue_task_id)
+        return task_ids
+
     def _launch(
         self,
         record: GenericJobRecord,
@@ -2056,37 +1832,53 @@ class GenericJobs:
         command: Sequence[str] | None = None,
         environment: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
+        resolved_command = tuple(command) if command is not None else spec.command
+        resolved_environment = self._job_environment(record, environment)
+        launch_input: dict[str, Any] = {
+            "job_id": record.job_id,
+            "project_id": spec.project_id,
+            "operation": spec.operation,
+            "kind": spec.kind,
+            "argv": list(resolved_command),
+            "environment": dict(resolved_environment),
+            "working_directory": spec.working_directory,
+            "timeout_seconds": spec.timeout_seconds,
+            "result_kind": _QUEUE_RESULT_KINDS[spec.result_kind],
+            "log_path": str(record.log_path),
+        }
+        if record.result_path is not None:
+            launch_input["result_path"] = str(record.result_path)
+        if self.event_spool_path is not None:
+            launch_input["event_spool_path"] = str(self.event_spool_path)
+        if spec.checkout is not None:
+            launch_input["checkout"] = dict(spec.checkout)
+        input_path = self.store.write_queue_launch(record.job_id, launch_input)
         try:
-            self.systemd.start(
-                unit=record.unit,
-                command=command if command is not None else spec.command,
-                working_directory=spec.working_directory,
-                environment=self._job_environment(record, environment),
-                timeout_seconds=spec.timeout_seconds,
-                log_path=record.log_path,
-                pool=spec.pool,
-                json_result_path=record.result_path
-                if spec.result_kind in {"json", "pytest"}
-                else None,
-                **self._notify_arguments(record.job_id),
+            task_id = pueue.add(
+                group=spec.pool,
+                label=self._pueue_label(spec, record.job_id),
+                command=("sinnixd-queue-run", str(input_path)),
+                working_directory=Path(spec.working_directory),
+                after=self._dependency_task_ids(spec.dependency_job_ids),
             )
-        except SystemdJobError:
+        except PueueError:
             return self._reconcile_launch_error(record)
-        submitted = self._with_state(
-            record,
-            {"phase": "submitted", "terminal": False, "observed_at": _timestamp()},
+        queued = replace(record, queue_task_id=task_id)
+        queued = self._with_state(
+            queued,
+            {"phase": "queued", "terminal": False, "observed_at": _timestamp()},
         )
-        self.store.save(submitted)
-        return self._public(submitted, submitted.state)
+        self.store.save(queued)
+        return self._public(queued, queued.state)
 
     def _launch_declared(
         self, record: GenericJobRecord, spec: GenericJobSpec
     ) -> dict[str, Any]:
-        """Launch a declared operation through the contract runner.
+        """Launch a declared operation.
 
-        The runner re-validates the bound checkout at its own exec boundary,
-        closing the check-to-exec interval instead of trusting the checkout
-        binding captured when the record was created.
+        `sinnixd-queue-run` re-validates the bound checkout at its own exec
+        boundary, closing the check-to-exec interval instead of trusting the
+        checkout binding captured when the record was created.
         """
         try:
             command, environment = self.store.declared_launch(record.job_id)
@@ -2127,20 +1919,6 @@ class GenericJobs:
                             "SINNIXD_CHECKOUT_HEAD": refreshed,
                         }
                 revalidate_registered_checkout(checkout_binding)
-                from .contracts import contract_runner_executable
-
-                command = (
-                    str(contract_runner_executable()),
-                    "--declared",
-                    "--job-id",
-                    record.job_id,
-                    "--unit",
-                    record.unit,
-                    "--state-root",
-                    str(self.store.root),
-                )
-        except SystemdJobError:
-            return self._reconcile_launch_error(record)
         except (JobRecordError, ProjectConfigError) as launch_error:
             terminal = self._with_state(
                 record,
@@ -2231,7 +2009,7 @@ class GenericJobs:
                     "declared-operation",
                     "attested-agent",
                 }:
-                    raise SystemdJobError(
+                    raise ValueError(
                         "immediate job dependencies are not terminal; "
                         "use a queued job kind for dependency waiting"
                     )
@@ -2328,62 +2106,6 @@ class GenericJobs:
                 self._finalize_terminal(blocked_record)
             return self._public(blocked_record, blocked_record.state)
         return self._launch_declared(record, spec)
-
-    @classmethod
-    def _memory_observation(cls, record: GenericJobRecord) -> dict[str, Any]:
-        state_observation = record.state.get("memory_observation")
-        if isinstance(state_observation, Mapping) and str(
-            state_observation.get("attribution_source", "")
-        ).startswith("explicit-"):
-            observation = dict(state_observation)
-            observation.setdefault("attribution_source", "explicit-phase-observation")
-            return observation
-        phase_peaks = record.state.get("memory_peaks")
-        if isinstance(phase_peaks, Mapping):
-            return {
-                "whole_unit_memory_peak_bytes": cls._memory_peak(
-                    record.state.get("systemd", {})
-                ),
-                "agent_memory_peak_bytes": phase_peaks.get("agent"),
-                "verification_memory_peak_bytes": phase_peaks.get("verification"),
-                "attribution_source": "explicit-phase-peaks",
-            }
-        whole = max(
-            (
-                value
-                for value in (
-                    cls._memory_peak(record.state.get("systemd", {})),
-                    cls._memory_peak(record.state.get("pre_stop_systemd", {})),
-                )
-                if value is not None
-            ),
-            default=None,
-        )
-        return {
-            "whole_unit_memory_peak_bytes": whole,
-            "agent_memory_peak_bytes": whole if record.spec.pool == "agent" else None,
-            "verification_memory_peak_bytes": (
-                whole if record.spec.pool != "agent" else None
-            ),
-            "attribution_source": "systemd-unit-pool-attribution",
-        }
-
-    @staticmethod
-    def _systemd_memory(properties: Mapping[str, str]) -> int:
-        values: list[int] = []
-        for name in ("MemoryCurrent", "MemorySwapCurrent"):
-            try:
-                value = int(properties.get(name, ""))
-            except (TypeError, ValueError):
-                continue
-            if value > 0:
-                values.append(value)
-        if values:
-            # Page cache is reclaimed under pressure, not held; counting it
-            # taught inflated estimates for IO-heavy jobs.
-            return max(0, sum(values) - _cgroup_inactive_file(properties))
-        peak = GenericJobs._memory_peak(properties)
-        return peak or 0
 
     SCHEDULE_RECONCILE_INTERVAL_SECONDS = 300.0
     schedule_reconcile: Callable[[], None] | None = None
@@ -2511,130 +2233,11 @@ class GenericJobs:
     def _terminal_cleanup(self, record: GenericJobRecord) -> None:
         self.events.fire(record.job_id)
         self.store.cleanup_scratch(record)
+        self.store.cleanup_queue_launch(record.job_id)
         if record.spec.kind == "declared-operation":
             self.store.cleanup_declared_launch(record.job_id)
         elif record.spec.kind == "attested-agent":
             self.store.cleanup_agent_launch(record.job_id)
-
-    def _preserve_timeout(self, record: GenericJobRecord) -> dict[str, Any]:
-        checkout = record.spec.checkout
-        checkout_path: Path | None = None
-        error: str | None = None
-        diffstat = ""
-        wip_commit: str | None = None
-        dirty = False
-        if record.spec.kind == "attested-agent" and isinstance(checkout, Mapping):
-            try:
-                checkout_path = revalidate_registered_checkout(checkout)
-                status = subprocess.run(
-                    ["git", "status", "--porcelain", "--untracked-files=all"],
-                    cwd=checkout_path,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    check=False,
-                )
-                if status.returncode != 0:
-                    raise OSError(status.stderr.strip() or "git status failed")
-                dirty = bool(status.stdout)
-                if dirty:
-                    staged = subprocess.run(
-                        ["git", "add", "-A"],
-                        cwd=checkout_path,
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                        check=False,
-                    )
-                    if staged.returncode != 0:
-                        raise OSError(staged.stderr.strip() or "git add failed")
-                diff = subprocess.run(
-                    ["git", "diff", "--stat", "--cached" if dirty else "HEAD"],
-                    cwd=checkout_path,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    check=False,
-                )
-                if diff.returncode == 0:
-                    diffstat = diff.stdout.strip()
-                if dirty:
-                    committed = subprocess.run(
-                        [
-                            "git",
-                            "commit",
-                            "--quiet",
-                            "-m",
-                            f"wip: preserved at timeout {record.job_id}",
-                        ],
-                        cwd=checkout_path,
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                        check=False,
-                    )
-                    if committed.returncode != 0:
-                        raise OSError(committed.stderr.strip() or "git commit failed")
-                    head = subprocess.run(
-                        ["git", "rev-parse", "HEAD"],
-                        cwd=checkout_path,
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                        check=False,
-                    )
-                    if head.returncode == 0:
-                        wip_commit = head.stdout.strip()
-            except (
-                OSError,
-                subprocess.SubprocessError,
-                ProjectConfigError,
-                JobRecordError,
-            ) as caught:
-                error = str(caught)
-
-        content = _read_private_artifact(record.log_path, MAX_LOG_ARTIFACT_BYTES)
-        log_tail = (
-            content.decode(errors="replace").splitlines()[-100:]
-            if content is not None
-            else []
-        )
-        payload: dict[str, Any] = {
-            "schema_version": 1,
-            "job_id": record.job_id,
-            "dirty": dirty,
-            "wip_commit": wip_commit,
-            "diffstat": diffstat,
-            "log_tail": log_tail,
-        }
-        if error is not None:
-            payload["error"] = error
-        try:
-            self.store.write_handoff(record, payload)
-            handoff_written = record.handoff_path is not None
-        except (JobRecordError, OSError) as caught:
-            handoff_written = False
-            error = error or str(caught)
-        details = {
-            "dirty": dirty,
-            "wip_commit": wip_commit,
-            "diffstat": diffstat,
-            "handoff_written": handoff_written,
-        }
-        if error is not None:
-            details["error"] = error
-        return details
-
-    @staticmethod
-    def _memory_peak(properties: Any) -> int | None:
-        if not isinstance(properties, Mapping):
-            return None
-        value = properties.get("MemoryPeak")
-        try:
-            peak = int(value)
-        except (TypeError, ValueError):
-            return None
-        return peak if peak > 0 else None
 
     def start_foreground(
         self,
@@ -2737,9 +2340,6 @@ class GenericJobs:
             with self.store.locked(job_id):
                 status = self._get_locked(
                     job_id,
-                    systemd_timeout_seconds=min(
-                        SYSTEMD_COMMAND_TIMEOUT_SECONDS, remaining
-                    ),
                     wait_deadline=deadline,
                 )
             if status["state"]["terminal"]:
@@ -2751,51 +2351,17 @@ class GenericJobs:
                 min(self.wait_poll_seconds, max(0.0, deadline - time.monotonic())),
             )
 
-    def _notify_arguments(self, job_id: str) -> dict[str, Any]:
-        """Capture notify args only when configured, so fakes with strict
-        start signatures keep proving the unextended launch contract."""
-        if self.notify_socket is None:
-            return {}
-        return {"notify_socket": self.notify_socket, "notify_job_id": job_id}
-
-    def notify_exit(
-        self, job_id: str, dimensions: Mapping[str, Any] | None = None
-    ) -> dict[str, Any]:
-        """Record a capture-reported exit as a wake-up; observation stays authoritative."""
-        _ = job_unit_name(job_id)
-        with self.store.locked(job_id):
-            record = self.store.load(job_id)
-            if dimensions is not None:
-                amended = _dimensions(dimensions)
-                self.store.save(
-                    self._with_state(
-                        record,
-                        {
-                            **record.state,
-                            "dimensions": {
-                                **record.spec.dimensions,
-                                **record.state.get("dimensions", {}),
-                                **amended,
-                            },
-                        },
-                    )
-                )
-        self.events.fire(job_id)
-        return {
-            "job_id": job_id,
-            "notified": True,
-            **({"dimensions": dict(dimensions)} if dimensions is not None else {}),
-        }
-
     def cancel(self, job_id: str, *, reason: str) -> dict[str, Any]:
         terminal: GenericJobRecord | None = None
-        pre_stop_systemd: Mapping[str, str] | None = None
         with self.store.locked(job_id):
             status = self._get_locked(job_id)
             if status["state"]["terminal"]:
                 return {**status, "cancel_requested": False, "already_terminal": True}
             record = self.store.load(job_id)
-            if record.state.get("phase") in {"queued", "waiting-dependencies"}:
+            if record.queue_task_id is None:
+                # Never reached pueue: blocked on dependencies, or a launch
+                # attempt whose task id has not yet been observed. There is
+                # no queued process to kill.
                 cancelled = self._with_state(
                     record,
                     {
@@ -2809,6 +2375,7 @@ class GenericJobs:
                         "observed_at": _timestamp(),
                     },
                 )
+                cancelled = replace(cancelled, cancel_requested_at=_timestamp())
                 self.store.save(cancelled)
                 terminal = cancelled
                 response = {
@@ -2817,43 +2384,30 @@ class GenericJobs:
                     "already_terminal": False,
                 }
             else:
-                observed = status["state"].get("systemd")
-                if isinstance(observed, Mapping):
-                    pre_stop_systemd = {
-                        str(key): str(value) for key, value in observed.items()
-                    }
-                intent = self._with_cancel_intent(
+                intent = self._with_state(
                     record,
-                    status["state"].get("systemd", {}).get("InvocationID"),
-                    reason=reason,
+                    {
+                        **record.state,
+                        "cancellation": {
+                            "reason": reason,
+                            "requested_at": record.cancel_requested_at or _timestamp(),
+                        },
+                    },
+                )
+                intent = replace(
+                    intent,
+                    cancel_requested_at=record.cancel_requested_at or _timestamp(),
                 )
                 self.store.save(intent)
-                self.systemd.stop(intent.unit)
-                acknowledged = self._with_stop_acknowledgement(
-                    intent,
-                    status["state"].get("systemd", {}).get("InvocationID"),
-                )
-                self.store.save(acknowledged)
+                try:
+                    pueue.kill(record.queue_task_id)
+                except PueueError:
+                    pass
                 response = {
                     **self._get_locked(job_id),
                     "cancel_requested": True,
                     "already_terminal": False,
                 }
-                if pre_stop_systemd is not None:
-                    observed_record = self.store.load(job_id)
-                    observed_record = self._with_state(
-                        observed_record,
-                        {
-                            **observed_record.state,
-                            "pre_stop_systemd": dict(pre_stop_systemd),
-                        },
-                    )
-                    self.store.save(observed_record)
-                    response = {
-                        **self._public(observed_record, observed_record.state),
-                        "cancel_requested": True,
-                        "already_terminal": False,
-                    }
         if terminal is not None:
             self._finalize_terminal(terminal)
         return response
@@ -2947,40 +2501,46 @@ class GenericJobs:
 
     def _parse_exit_result(self, record: GenericJobRecord) -> dict[str, Any]:
         state = record.state
-        properties = state.get("systemd")
         phase = state.get("phase")
-        if (
-            isinstance(properties, Mapping)
-            and properties.get("LoadState") == "loaded"
-            and phase
-            in {
-                "succeeded",
-                "failed",
-                "timed_out",
-                "cancelled",
-            }
-        ):
-            status = properties.get("ExecMainStatus")
-            result = properties.get("Result")
-            if not isinstance(result, str) or not result:
-                raise JobResultError("job exit result is unavailable")
-            try:
-                return {"code": int(status), "result": result}
-            except (TypeError, ValueError) as error:
-                raise JobResultError("job exit result is malformed") from error
-        if (
-            phase == "succeeded"
-            and state.get("result_evidence") == "completed"
-            and self._has_authoritative_result(record)
-        ):
+        error = state.get("error")
+        exit_code = error.get("exit_code") if isinstance(error, Mapping) else None
+        if phase == "succeeded":
             return {"code": 0, "result": "success"}
+        if phase == "timeout":
+            return {"code": queue_run.TIMEOUT_EXIT_CODE, "result": "timeout"}
+        if phase == "launch-failed":
+            return {
+                "code": exit_code
+                if exit_code is not None
+                else queue_run.REFUSED_EXIT_CODE,
+                "result": "launch-failed",
+            }
+        if phase == "cancelled":
+            return {
+                "code": exit_code if exit_code is not None else -1,
+                "result": "killed",
+            }
+        if phase == "failed" and isinstance(exit_code, int):
+            return {"code": exit_code, "result": "failed"}
         raise JobResultError("job exit result is unavailable")
+
+    def _resolve_task(self, record: GenericJobRecord) -> Task | None:
+        """Return this job's pueue task, resolving a forgotten handle by label."""
+        tasks = pueue.tasks()
+        if record.queue_task_id is not None:
+            task = tasks.get(record.queue_task_id)
+            if task is not None:
+                return task
+        label = self._pueue_label(record.spec, record.job_id)
+        for task in tasks.values():
+            if task.label == label:
+                return task
+        return None
 
     def _get_locked(
         self,
         job_id: str,
         *,
-        systemd_timeout_seconds: float = SYSTEMD_COMMAND_TIMEOUT_SECONDS,
         wait_deadline: float | None = None,
     ) -> dict[str, Any]:
         record = self.store.load(job_id)
@@ -3002,23 +2562,16 @@ class GenericJobs:
                 self.store.save(record)
                 self._finalize_terminal(record)
             return self._public(record, record.state)
-        if record.state.get(
-            "terminal"
-        ) and not self._terminal_state_requires_reconciliation(record):
+        if record.state.get("terminal"):
             self._terminal_cleanup(record)
             return self._public(record, record.state)
+        task: Task | None = None
         try:
-            properties = dict(
-                self.systemd.show(record.unit, timeout_seconds=systemd_timeout_seconds)
-            )
-        except SystemdJobTimeout:
-            if wait_deadline is not None and time.monotonic() >= wait_deadline:
-                return self._public(record, record.state)
-            state = self._observation_unknown_state()
-        except SystemdJobError:
+            task = self._resolve_task(record)
+        except PueueError:
             state = self._observation_unknown_state()
         else:
-            state = self._classify(properties, record)
+            state = self._classify(task, record)
         if state.get("terminal"):
             state["telemetry"] = _run_telemetry(record, state)
         if isinstance(record.state.get("dimensions"), Mapping):
@@ -3027,6 +2580,10 @@ class GenericJobs:
                 **record.state["dimensions"],
             }
         updated = self._with_state(record, state)
+        if task is not None and updated.queue_task_id != task.task_id:
+            # A forgotten handle was resolved by label; persist it so the
+            # next observation does not need to scan every task again.
+            updated = replace(updated, queue_task_id=task.task_id)
         if self._observation_unchanged(record, updated):
             return self._public(record, state)
         self.store.save(updated)
@@ -3043,6 +2600,8 @@ class GenericJobs:
         Skipping the durable save then spares an fsync pair per poll on the
         wear-limited state volume without dropping any state transition.
         """
+        if record.queue_task_id != updated.queue_task_id:
+            return False
         before = {
             key: value for key, value in record.state.items() if key != "observed_at"
         }
@@ -3052,205 +2611,148 @@ class GenericJobs:
         return before == after
 
     def _reconcile_launch_error(self, record: GenericJobRecord) -> dict[str, Any]:
-        try:
-            properties = dict(self.systemd.show(record.unit))
-        except SystemdJobError:
-            state = {
-                "phase": "launch-unknown",
-                "error": {"code": SYSTEMD_ERROR_CODE},
-                "terminal": False,
-                "observed_at": _timestamp(),
-            }
-            updated = self._with_state(record, state)
-            self.store.save(updated)
-            return self._public(updated, state)
-        if properties.get("LoadState") == "not-found":
-            state = {
-                "phase": "launch-failed",
-                "error": {"code": SYSTEMD_ERROR_CODE},
-                "terminal": True,
-                "systemd": dict(properties),
-                "terminal_cause": {
-                    "kind": "runner-refusal",
-                    "stderr_tail": [],
-                },
-                "observed_at": _timestamp(),
-            }
-            state["telemetry"] = _run_telemetry(record, state)
-            updated = self._with_state(record, state)
-            self.store.save(updated)
-            self._finalize_terminal(updated)
-            return self._public(updated, state)
-        state = self._classify(properties, record)
+        """Keep a failed pueue.add retryable: a wedged queue is not proof the job is dead."""
+        # The launch input was written before pueue.add was attempted; it
+        # describes a task pueue never queued and must not linger.
+        self.store.cleanup_queue_launch(record.job_id)
+        state = {
+            "phase": "launch-unknown",
+            "error": {"code": QUEUE_ERROR_CODE},
+            "terminal": False,
+            "observed_at": _timestamp(),
+        }
         updated = self._with_state(record, state)
         self.store.save(updated)
-        if state.get("terminal"):
-            self._finalize_terminal(updated)
         return self._public(updated, state)
 
     @staticmethod
     def _observation_unknown_state() -> dict[str, Any]:
-        """Keep transport failures retryable until systemd supplies an observation."""
+        """Keep transport failures retryable until pueue supplies an observation."""
         return {
             "phase": "observation-unknown",
-            "error": {"code": SYSTEMD_ERROR_CODE},
+            "error": {"code": QUEUE_ERROR_CODE},
             "terminal": False,
             "observed_at": _timestamp(),
         }
 
-    def _classify(
-        self, properties: Mapping[str, str], record: GenericJobRecord
-    ) -> dict[str, Any]:
-        # Observation rebuilds phase state from systemd truth, but the
-        # cancellation/preemption blocks are decision evidence recorded by the
-        # actor that stopped the job; rebuilding must not erase them.
+    def _classify(self, task: Task | None, record: GenericJobRecord) -> dict[str, Any]:
+        # Observation rebuilds phase state from pueue truth, but the
+        # cancellation block is decision evidence recorded by the actor that
+        # stopped the job; rebuilding must not erase it.
         forensic = {
             key: dict(record.state[key])
-            for key in ("cancellation", "preemption")
+            for key in ("cancellation",)
             if isinstance(record.state.get(key), Mapping)
         }
-        if self._is_authoritative_not_started_cancellation(record):
-            return dict(record.state)
-        if properties.get("LoadState") != "loaded":
-            if record.spec.kind == "declared-operation" and record.state.get(
-                "phase"
-            ) in {
-                "launching",
-                "queued",
-                "waiting-dependencies",
-            }:
+        if task is None:
+            if record.queue_task_id is None:
                 return {
                     **forensic,
-                    "phase": record.state["phase"],
+                    "phase": "launch-unknown",
                     "terminal": False,
-                    "systemd": dict(properties),
-                    "observed_at": _timestamp(),
-                }
-            if record.state.get("phase") == "launch-unknown":
-                return {
-                    **forensic,
-                    "phase": "launch-failed",
-                    "error": {"code": SYSTEMD_ERROR_CODE},
-                    "terminal": True,
-                    "systemd": dict(properties),
-                    "terminal_cause": self._terminal_cause(
-                        record, properties, "failed"
-                    ),
-                    "observed_at": _timestamp(),
-                }
-            if self._has_authoritative_result(record):
-                return {
-                    **forensic,
-                    "phase": "succeeded",
-                    "terminal": True,
-                    "systemd": dict(properties),
-                    "result_evidence": "completed",
-                    "observed_at": _timestamp(),
-                }
-            if self._stop_acknowledgement_matches(record):
-                return {
-                    **forensic,
-                    "phase": "cancelled",
-                    "terminal": True,
-                    "systemd": dict(properties),
-                    "cancellation": self._stop_acknowledgement(record),
-                    "observed_at": _timestamp(),
-                }
-            if record.cancel_requested_at is not None:
-                terminal = self._cancellation_reconciliation_grace_expired(record)
-                return {
-                    **forensic,
-                    "phase": "outcome-unknown",
-                    "terminal": terminal,
-                    "systemd": dict(properties),
-                    "cancellation": self._cancel_intent(record),
-                    **(
-                        {"outcome_evidence": "unit-collected-after-cancellation-grace"}
-                        if terminal
-                        else {}
-                    ),
                     "observed_at": _timestamp(),
                 }
             return {
                 **forensic,
                 "phase": "missing",
                 "terminal": True,
-                "systemd": dict(properties),
                 "observed_at": _timestamp(),
             }
-        semantic = self._declared_json_verdict(record, properties)
+        if task.status in {"Queued", "Stashed", "Paused"}:
+            return {
+                **forensic,
+                "phase": "queued",
+                "terminal": False,
+                "observed_at": _timestamp(),
+            }
+        if task.status == "Running":
+            return {
+                **forensic,
+                "phase": "running",
+                "terminal": False,
+                "observed_at": _timestamp(),
+            }
+        semantic = self._declared_json_verdict(record, task)
         if semantic is not None:
             phase, verdict, error = semantic
             state = {
                 **forensic,
                 "phase": phase,
                 "terminal": True,
-                "systemd": dict(properties),
                 "verdict": verdict,
                 "result_evidence": "declared-verdict",
                 "observed_at": _timestamp(),
             }
             if error is not None:
                 state["error"] = {"code": "RESULT_INVALID", "message": error}
-            state["resources"] = _terminal_resources(properties)
             state["usage"] = _terminal_usage(record)
-            state["terminal_cause"] = self._terminal_cause(record, properties, phase)
+            state["terminal_cause"] = self._terminal_cause(record, task, phase)
             return state
-        active = properties.get("ActiveState", "unknown")
-        if active in {"active", "activating", "reloading"}:
-            phase = "running"
-            terminal = False
-        elif active == "deactivating":
-            phase = (
-                "cancelling" if record.cancel_requested_at is not None else "stopping"
-            )
-            terminal = False
-        elif (
-            properties.get("Result") == "success"
-            and properties.get("ExecMainStatus") == "0"
-        ):
-            phase = "succeeded"
-            terminal = True
-        elif properties.get("Result") == "timeout":
-            phase = "timed_out"
-            terminal = True
-        elif self._cancel_matches(properties, record):
-            phase = "cancelled"
-            terminal = True
-        else:
-            phase = "failed"
-            terminal = True
+        if task.succeeded:
+            if record.spec.result_kind in {
+                "last-message",
+                "json",
+                "pytest",
+            } and not self._has_valid_result_artifact(record):
+                phase = "failed"
+                error: Mapping[str, Any] | None = {
+                    "code": "RESULT_INVALID",
+                    "message": "declared result artifact is unavailable or invalid",
+                }
+            else:
+                phase = "succeeded"
+                error = None
+            state = {
+                **forensic,
+                "phase": phase,
+                "terminal": True,
+                "observed_at": _timestamp(),
+            }
+            if error is not None:
+                state["error"] = error
+            state["usage"] = _terminal_usage(record)
+            state["terminal_cause"] = self._terminal_cause(record, task, phase)
+            return state
         capacity_reason = None
         capacity_attempt = int(record.state.get("capacity_attempt", 0))
-        if (
-            phase == "failed"
-            and record.spec.kind == "attested-agent"
-            and properties.get("Result") == "exit-code"
-        ):
-            backend = record.spec.contract.get("backend")
-            content = _read_private_artifact(record.log_path, MAX_LOG_ARTIFACT_BYTES)
-            capacity_reason = backend_capacity_event(
-                backend if isinstance(backend, str) else "",
-                content.decode(errors="replace") if content is not None else "",
-            )
-            if capacity_reason is not None:
-                capacity_attempt += 1
-                terminal = capacity_attempt > len(CAPACITY_RETRY_DELAYS_SECONDS)
-                retry_at = None
-                if not terminal:
-                    retry_at = (
-                        datetime.now(UTC)
-                        + timedelta(
-                            seconds=CAPACITY_RETRY_DELAYS_SECONDS[capacity_attempt - 1]
-                        )
-                    ).isoformat()
-                self._record_capacity_event(record, capacity_reason, retry_at)
-                phase = "capacity"
+        retry_at: str | None = None
+        if task.result == "Failed":
+            if task.exit_code == queue_run.TIMEOUT_EXIT_CODE:
+                phase = "timeout"
+            elif task.exit_code == queue_run.REFUSED_EXIT_CODE:
+                phase = "launch-failed"
+            else:
+                phase = "failed"
+                if record.spec.kind == "attested-agent":
+                    backend = record.spec.contract.get("backend")
+                    content = _read_private_artifact(
+                        record.log_path, MAX_LOG_ARTIFACT_BYTES
+                    )
+                    capacity_reason = backend_capacity_event(
+                        backend if isinstance(backend, str) else "",
+                        content.decode(errors="replace") if content is not None else "",
+                    )
+        elif task.result == "Killed":
+            phase = "cancelled"
+        else:  # DependencyFailed, FailedToSpawn, or an unrecognized result
+            phase = "launch-failed"
+        terminal = True
+        if capacity_reason is not None:
+            capacity_attempt += 1
+            terminal = capacity_attempt > len(CAPACITY_RETRY_DELAYS_SECONDS)
+            if not terminal:
+                retry_at = (
+                    datetime.now(UTC)
+                    + timedelta(
+                        seconds=CAPACITY_RETRY_DELAYS_SECONDS[capacity_attempt - 1]
+                    )
+                ).isoformat()
+            self._record_capacity_event(record, capacity_reason, retry_at)
+            phase = "capacity"
         state = {
             **forensic,
             "phase": phase,
             "terminal": terminal,
-            "systemd": dict(properties),
             **(
                 {
                     "capacity_attempt": capacity_attempt,
@@ -3266,31 +2768,25 @@ class GenericJobs:
             ),
             "observed_at": _timestamp(),
         }
-        state["memory_observation"] = self._memory_observation(
-            replace(record, state=state)
-        )
         if state.get("terminal"):
-            state["resources"] = _terminal_resources(properties)
+            if task.exit_code is not None:
+                state["error"] = {"code": "EXIT_CODE", "exit_code": task.exit_code}
             state["usage"] = _terminal_usage(record)
-            state["terminal_cause"] = self._terminal_cause(record, properties, phase)
-            if state.get("phase") == "timed_out":
-                state["timeout_wip"] = self._preserve_timeout(record)
+            state["terminal_cause"] = self._terminal_cause(record, task, phase)
         return state
 
     def _declared_json_verdict(
-        self, record: GenericJobRecord, properties: Mapping[str, str]
+        self, record: GenericJobRecord, task: Task
     ) -> tuple[str, str | None, str | None] | None:
         """Classify a declared JSON operation from its bounded outcome field."""
         if (
             record.spec.kind != "declared-operation"
             or record.spec.result_kind != "json"
             or not record.spec.result_verdict
-            or properties.get("ActiveState") not in {"inactive", "failed"}
-            or properties.get("Result") != "success"
-            or properties.get("ExecMainStatus") != "0"
+            or not task.succeeded
         ):
             return None
-        if not self._has_authoritative_result(record):
+        if not self._has_valid_result_artifact(record):
             return "failed", None, "declared JSON result is unavailable or incomplete"
         try:
             assert record.result_path is not None
@@ -3317,7 +2813,7 @@ class GenericJobs:
 
     @staticmethod
     def _terminal_cause(
-        record: GenericJobRecord, properties: Mapping[str, str], phase: str
+        record: GenericJobRecord, task: Task, phase: str
     ) -> dict[str, Any]:
         """Keep the small failure explanation operators need beside the phase."""
         content = _read_private_artifact(record.log_path, MAX_LOG_ARTIFACT_BYTES)
@@ -3325,13 +2821,8 @@ class GenericJobs:
             content.decode(errors="replace").splitlines() if content is not None else []
         )
         tail = [line for line in lines if line.strip()][-8:]
-        if phase == "timed_out" or properties.get("Result") == "timeout":
+        if phase == "timeout":
             return {"kind": "timeout", "stderr_tail": tail}
-        status = properties.get("ExecMainStatus")
-        try:
-            exit_code: int | None = int(status) if status is not None else None
-        except (TypeError, ValueError):
-            exit_code = None
         if record.spec.kind == "attested-agent" and any(
             marker in "\n".join(tail).lower()
             for marker in ("checkout", "preflight", "typed-job", "usage:", "runner")
@@ -3339,36 +2830,7 @@ class GenericJobs:
             kind = "runner-refusal"
         else:
             kind = "exit-code"
-        return {"kind": kind, "exit_code": exit_code, "stderr_tail": tail}
-
-    @staticmethod
-    def _cancellation_reconciliation_grace_expired(record: GenericJobRecord) -> bool:
-        if record.cancel_requested_at is None:
-            return False
-        try:
-            requested_at = datetime.fromisoformat(record.cancel_requested_at)
-        except ValueError:
-            return False
-        if requested_at.tzinfo is None:
-            return False
-        return (
-            datetime.now(UTC) - requested_at
-        ).total_seconds() >= CANCEL_OUTCOME_RECONCILIATION_GRACE_SECONDS
-
-    def _terminal_state_requires_reconciliation(self, record: GenericJobRecord) -> bool:
-        if self._is_authoritative_not_started_cancellation(record):
-            return False
-        phase = record.state.get("phase")
-        properties = record.state.get("systemd")
-        if not isinstance(properties, Mapping):
-            properties = {}
-        if phase == "succeeded" and properties.get("LoadState") != "loaded":
-            return not self._has_authoritative_result(record)
-        if phase == "cancelled" and not self._stop_acknowledgement_matches(record):
-            return properties.get("LoadState") != "loaded" or not self._cancel_matches(
-                properties, record
-            )
-        return False
+        return {"kind": kind, "exit_code": task.exit_code, "stderr_tail": tail}
 
     @staticmethod
     def _has_valid_result_artifact(record: GenericJobRecord) -> bool:
@@ -3392,12 +2854,6 @@ class GenericJobs:
             return False
         return isinstance(value, dict)
 
-    def _has_authoritative_result(self, record: GenericJobRecord) -> bool:
-        completed = _completion_marker_path(record.log_path).is_file()
-        if record.spec.result_kind == "exit-status":
-            return completed
-        return completed and self._has_valid_result_artifact(record)
-
     @staticmethod
     def _with_state(
         record: GenericJobRecord, state: Mapping[str, Any]
@@ -3412,148 +2868,10 @@ class GenericJobs:
             handoff_path=record.handoff_path,
             created_at=record.created_at,
             cancel_requested_at=record.cancel_requested_at,
-            cancel_requested_invocation_id=record.cancel_requested_invocation_id,
-            cancel_stop_acknowledged_at=record.cancel_stop_acknowledged_at,
-            cancel_stop_acknowledged_invocation_id=(
-                record.cancel_stop_acknowledged_invocation_id
-            ),
             admission_estimate_recorded=record.admission_estimate_recorded,
+            queue_task_id=record.queue_task_id,
             state=dict(state),
         )
-
-    @staticmethod
-    def _with_cancel_intent(
-        record: GenericJobRecord, invocation_id: Any, *, reason: str = "operator-cancel"
-    ) -> GenericJobRecord:
-        existing_intent = record.cancel_requested_at is not None
-        record = GenericJobs._with_state(
-            record,
-            {
-                **record.state,
-                "cancellation": {
-                    **(
-                        dict(record.state.get("cancellation", {}))
-                        if isinstance(record.state.get("cancellation"), Mapping)
-                        else {}
-                    ),
-                    "reason": (
-                        dict(record.state.get("cancellation", {})).get("reason")
-                        if existing_intent
-                        and isinstance(record.state.get("cancellation"), Mapping)
-                        and dict(record.state.get("cancellation", {})).get("reason")
-                        else reason
-                    ),
-                    "requested_at": record.cancel_requested_at or _timestamp(),
-                },
-            },
-        )
-        observed_invocation = (
-            invocation_id if isinstance(invocation_id, str) and invocation_id else None
-        )
-        return GenericJobRecord(
-            job_id=record.job_id,
-            unit=record.unit,
-            spec=record.spec,
-            log_path=record.log_path,
-            result_path=record.result_path,
-            scratch_path=record.scratch_path,
-            handoff_path=record.handoff_path,
-            created_at=record.created_at,
-            cancel_requested_at=record.cancel_requested_at or _timestamp(),
-            cancel_requested_invocation_id=(
-                record.cancel_requested_invocation_id
-                if existing_intent
-                else observed_invocation
-            ),
-            cancel_stop_acknowledged_at=record.cancel_stop_acknowledged_at,
-            cancel_stop_acknowledged_invocation_id=(
-                record.cancel_stop_acknowledged_invocation_id
-            ),
-            admission_estimate_recorded=record.admission_estimate_recorded,
-            state=dict(record.state),
-        )
-
-    @staticmethod
-    def _with_stop_acknowledgement(
-        record: GenericJobRecord, invocation_id: Any
-    ) -> GenericJobRecord:
-        invocation = invocation_id if isinstance(invocation_id, str) else None
-        if invocation is None or invocation != record.cancel_requested_invocation_id:
-            return record
-        return GenericJobRecord(
-            job_id=record.job_id,
-            unit=record.unit,
-            spec=record.spec,
-            log_path=record.log_path,
-            result_path=record.result_path,
-            scratch_path=record.scratch_path,
-            handoff_path=record.handoff_path,
-            created_at=record.created_at,
-            cancel_requested_at=record.cancel_requested_at,
-            cancel_requested_invocation_id=record.cancel_requested_invocation_id,
-            cancel_stop_acknowledged_at=_timestamp(),
-            cancel_stop_acknowledged_invocation_id=invocation,
-            admission_estimate_recorded=record.admission_estimate_recorded,
-            state=dict(record.state),
-        )
-
-    @staticmethod
-    def _cancel_matches(
-        properties: Mapping[str, str], record: GenericJobRecord
-    ) -> bool:
-        if record.cancel_requested_at is None:
-            return False
-        invocation = properties.get("InvocationID")
-        return (
-            isinstance(invocation, str)
-            and invocation == record.cancel_requested_invocation_id
-            and properties.get("Result") == "signal"
-        )
-
-    @staticmethod
-    def _stop_acknowledgement_matches(record: GenericJobRecord) -> bool:
-        return (
-            record.cancel_stop_acknowledged_at is not None
-            and record.cancel_stop_acknowledged_invocation_id is not None
-            and record.cancel_stop_acknowledged_invocation_id
-            == record.cancel_requested_invocation_id
-        )
-
-    @staticmethod
-    def _is_authoritative_not_started_cancellation(record: GenericJobRecord) -> bool:
-        return (
-            record.state.get("phase") == "cancelled"
-            and record.state.get("terminal") is True
-            and record.state.get("launch_evidence") == "not-started"
-        )
-
-    @staticmethod
-    def _stop_acknowledgement(record: GenericJobRecord) -> dict[str, str]:
-        assert record.cancel_stop_acknowledged_at is not None
-        assert record.cancel_stop_acknowledged_invocation_id is not None
-        acknowledgement = {
-            "stop_acknowledged_at": record.cancel_stop_acknowledged_at,
-            "invocation_id": record.cancel_stop_acknowledged_invocation_id,
-        }
-        cancellation = record.state.get("cancellation")
-        if isinstance(cancellation, Mapping) and isinstance(
-            cancellation.get("reason"), str
-        ):
-            acknowledgement["reason"] = cancellation["reason"]
-        return acknowledgement
-
-    @staticmethod
-    def _cancel_intent(record: GenericJobRecord) -> dict[str, str]:
-        assert record.cancel_requested_at is not None
-        intent = {"requested_at": record.cancel_requested_at}
-        if record.cancel_requested_invocation_id is not None:
-            intent["invocation_id"] = record.cancel_requested_invocation_id
-        cancellation = record.state.get("cancellation")
-        if isinstance(cancellation, Mapping) and isinstance(
-            cancellation.get("reason"), str
-        ):
-            intent["reason"] = cancellation["reason"]
-        return intent
 
     def _list_row(self, record: GenericJobRecord) -> dict[str, Any]:
         """Render one listing row inside a per-row fault boundary.
@@ -3679,127 +2997,3 @@ def _parameter_digest(parameters: Mapping[str, Any]) -> str:
             parameters, sort_keys=True, separators=(",", ":"), ensure_ascii=True
         ).encode()
     ).hexdigest()
-
-
-def capture_executable() -> Path:
-    module_path = Path(__file__).resolve()
-    if len(module_path.parents) > 4 and module_path.parents[3].name == "lib":
-        return module_path.parents[4] / "bin" / "sinnixd-capture"
-    return Path(sys.executable).with_name("sinnixd-capture")
-
-
-def _capture_dimensions() -> dict[str, Any] | None:
-    job_dir = os.environ.get("SINNIXD_JOB_DIR")
-    if not job_dir:
-        return None
-    path = Path(job_dir) / "dimensions.json"
-    try:
-        value = json.loads(path.read_text())
-        return _dimensions(value)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
-        return None
-
-
-def capture_main(arguments: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="sinnixd-capture")
-    parser.add_argument("--log-path", type=Path, required=True)
-    parser.add_argument("--overflow-path", type=Path, required=True)
-    parser.add_argument("--max-bytes", type=int, required=True)
-    parser.add_argument("--result-path", type=Path)
-    parser.add_argument("--result-overflow-path", type=Path)
-    parser.add_argument("--notify-socket", type=Path)
-    parser.add_argument("--notify-job-id")
-    parser.add_argument("command", nargs=argparse.REMAINDER)
-    parsed = parser.parse_args(arguments)
-    if (
-        not parsed.command
-        or parsed.command[0] != "--"
-        or not 1 <= parsed.max_bytes <= MAX_LOG_ARTIFACT_BYTES
-        or (parsed.result_path is None) != (parsed.result_overflow_path is None)
-        or (parsed.notify_socket is None) != (parsed.notify_job_id is None)
-    ):
-        parser.error(
-            "requires --max-bytes within the artifact cap and a command after --"
-        )
-    command = parsed.command[1:]
-    remaining = parsed.max_bytes
-    overflowed = False
-    log_handle = _open_preallocated_private_artifact(parsed.log_path)
-    result_handle = (
-        _open_private_artifact(parsed.result_path)
-        if parsed.result_path is not None
-        else None
-    )
-    result_remaining = MAX_RESULT_BYTES
-    result_overflowed = False
-    try:
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=(
-                subprocess.PIPE if parsed.result_path is not None else subprocess.STDOUT
-            ),
-        )
-        assert process.stdout is not None
-        streams = selectors.DefaultSelector()
-        streams.register(process.stdout, selectors.EVENT_READ, "stdout")
-        if process.stderr is not None:
-            streams.register(process.stderr, selectors.EVENT_READ, "stderr")
-        try:
-            while streams.get_map():
-                for key, _ in streams.select():
-                    chunk = key.fileobj.read1(65_536)
-                    if not chunk:
-                        streams.unregister(key.fileobj)
-                        continue
-                    accepted = chunk[:remaining]
-                    log_handle.write(accepted)
-                    remaining -= len(accepted)
-                    if len(chunk) > len(accepted) and not overflowed:
-                        _write_private_marker(parsed.overflow_path)
-                        overflowed = True
-                    if key.data == "stdout" and result_handle is not None:
-                        accepted_result = chunk[:result_remaining]
-                        result_handle.write(accepted_result)
-                        result_remaining -= len(accepted_result)
-                        if len(chunk) > len(accepted_result) and not result_overflowed:
-                            assert parsed.result_overflow_path is not None
-                            _write_private_marker(parsed.result_overflow_path)
-                            result_overflowed = True
-            log_handle.flush()
-            os.fsync(log_handle.fileno())
-        finally:
-            streams.close()
-        if result_handle is not None:
-            result_handle.flush()
-            os.fsync(result_handle.fileno())
-        return_code = process.wait()
-    finally:
-        log_handle.close()
-        if result_handle is not None:
-            result_handle.close()
-    if return_code == 0:
-        _write_private_marker(_completion_marker_path(parsed.log_path))
-    if parsed.notify_socket is not None and parsed.notify_job_id is not None:
-        try:
-            notify_job_exit(
-                parsed.notify_socket,
-                parsed.notify_job_id,
-                return_code,
-                _capture_dimensions(),
-            )
-        except (OSError, ValueError):
-            pass
-    return return_code
-
-
-def capture_cli() -> None:
-    raise SystemExit(capture_main())
-
-
-if __name__ == "__main__":
-    raise SystemExit(
-        capture_main(
-            sys.argv[2:] if len(sys.argv) > 1 and sys.argv[1] == "capture" else None
-        )
-    )

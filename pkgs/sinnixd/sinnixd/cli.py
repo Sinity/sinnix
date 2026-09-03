@@ -1612,7 +1612,6 @@ def daemon_main() -> None:
         jobs=GenericJobs(
             UserSystemdJobs(),
             GenericJobStore(arguments.state_dir),
-            notify_socket=arguments.socket,
             event_spool_path=arguments.event_spool,
         ),
         native_runner=arguments.native_runner,

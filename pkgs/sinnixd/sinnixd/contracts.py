@@ -327,7 +327,7 @@ class TypedJobContracts:
             if isinstance(prompt_path, str):
                 Path(prompt_path).unlink(missing_ok=True)
             raise
-        if response["state"]["phase"] == "launch-failed":
+        if response["state"]["phase"] in {"launch-failed", "launch-unknown"}:
             input_path.unlink(missing_ok=True)
             if kind == "attested-agent":
                 self.jobs.store.cleanup_agent_launch(job_id)

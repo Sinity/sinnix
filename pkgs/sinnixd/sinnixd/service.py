@@ -29,7 +29,6 @@ from .jobs import (
     JobRecordError,
     JobResultError,
     JobResultLimitError,
-    SystemdJobError,
     UserSystemdJobs,
     default_state_dir,
     scheduled_operation_id,
@@ -39,6 +38,7 @@ from .limits import MAX_AGENT_TIMEOUT_SECONDS
 from .operator_view import build_campaign_status
 from .project_plans import PlanStore, ProjectPlanExecutor
 from .projects import ProjectCatalog
+from .pueue import PueueError
 from .reactor import CampaignBoard
 from .workspaces import GitWorkspaces, WorkspaceError, WorkspaceStore
 
@@ -231,7 +231,7 @@ class SinnixdService:
             return self._error(
                 request, owner_name, ErrorCode.RESOURCE_DEFERRED, str(error)
             )
-        except (JobRecordError, SystemdJobError) as error:
+        except (JobRecordError, PueueError) as error:
             return self._error(
                 request, owner_name, ErrorCode.OPERATION_FAILED, str(error)
             )
@@ -981,23 +981,6 @@ class SinnixdService:
             raise ValueError("job.wait accepts job_id and optional timeout_seconds")
         return self._cleanup_terminal(self.jobs.wait(job_id, timeout_seconds))
 
-    def _op_job_notify_exit(
-        self,
-        arguments: Mapping[str, Any],
-        correlation_id: str,
-        principal: str,
-    ) -> dict[str, Any]:
-        if set(arguments) - {"job_id", "exit_code", "dimensions"}:
-            raise ValueError(
-                "job.notify-exit accepts job_id, exit_code, and optional dimensions"
-            )
-        dimensions = arguments.get("dimensions")
-        if dimensions is not None and not isinstance(dimensions, Mapping):
-            raise ValueError("job.notify-exit dimensions must be an object")
-        return self.jobs.notify_exit(
-            self._job_argument(arguments, "job_id"), dimensions
-        )
-
     def _op_job_logs(
         self,
         arguments: Mapping[str, Any],
@@ -1233,7 +1216,6 @@ _HANDLERS: dict[
     "job.retry": SinnixdService._op_job_retry,
     "job.list": SinnixdService._op_job_list,
     "job.wait": SinnixdService._op_job_wait,
-    "job.notify-exit": SinnixdService._op_job_notify_exit,
     "job.logs": SinnixdService._op_job_logs,
     "job.result": SinnixdService._op_job_result,
     "job.cancel": SinnixdService._op_job_cancel,
