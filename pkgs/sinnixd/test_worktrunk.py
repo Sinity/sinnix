@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from sinnixd.worktrunk import (
     LIST_SCHEMA_VERSION,
+    Worktree,
     WorktrunkError,
     worktrunk_create,
     worktrunk_find,
@@ -105,3 +106,62 @@ def test_an_unpublished_branch_is_not_integrated(tmp_path: Path) -> None:
 def test_a_missing_repository_is_a_typed_refusal(tmp_path: Path) -> None:
     with pytest.raises(WorktrunkError):
         worktrunk_list(tmp_path / "absent")
+
+
+# Recorded from the live listing that broke the first `workspace create`: a
+# detached worktree publishes `"branch": null` beside a valid path.
+DETACHED_ITEM = {
+    "branch": None,
+    "head": {"sha": "dcc57853aedd35fb76cb18665016cfa51eac0cac"},
+    "worktree": {
+        "path": "/realm/worktrees/packet-polylogue-f16gi",
+        "main": False,
+        "detached": True,
+        "changes": {"modified": True},
+    },
+    "display": {"state": "detached"},
+}
+
+BRANCH_ONLY_ITEM = {
+    "branch": "feature/no-worktree",
+    "head": {"sha": "3b56bb02205963d7edea903e0abfca8f02b6897a"},
+    "display": {"state": "ahead"},
+}
+
+
+def test_a_detached_or_branch_only_item_is_read_not_refused() -> None:
+    """Anti-vacuity: refusing either one failed the whole 84-item listing.
+
+    One detached worktree anywhere in the repository made every workspace
+    create, drop, and integrated check raise before doing anything.
+    """
+    detached = Worktree.from_item(DETACHED_ITEM)
+    assert detached.branch is None
+    assert detached.path == Path("/realm/worktrees/packet-polylogue-f16gi")
+    assert detached.dirty is True
+
+    branch_only = Worktree.from_item(BRANCH_ONLY_ITEM)
+    assert branch_only.branch == "feature/no-worktree"
+    assert branch_only.path is None
+    assert branch_only.dirty is False
+
+
+def test_an_item_with_neither_branch_nor_path_is_a_typed_refusal() -> None:
+    with pytest.raises(WorktrunkError):
+        Worktree.from_item({"display": {"state": "ahead"}})
+
+
+def test_find_skips_items_that_carry_no_branch(tmp_path: Path) -> None:
+    """A detached worktree must not shadow or break a lookup by branch."""
+    root = _repository(tmp_path / "repo")
+    target = tmp_path / "worktrees" / "lane"
+    worktrunk_create(root, "feature/lane", path=target, base="master")
+    subprocess.run(["git", "-C", str(target), "checkout", "-q", "--detach"], check=True)
+
+    listed = worktrunk_list(root)
+
+    assert any(tree.branch is None for tree in listed), (
+        "the fixture must actually produce a branchless item"
+    )
+    assert worktrunk_find(root, "feature/lane") is None
+    assert worktrunk_find(root, "master") is not None
