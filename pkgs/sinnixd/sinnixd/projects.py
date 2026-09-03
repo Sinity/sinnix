@@ -48,12 +48,8 @@ MAX_OPERATION_SCHEDULE_LENGTH = 256
 MAX_OPERATION_VERDICT_OUTCOMES = 32
 MIN_PARAMETER_INTEGER = -(2**31)
 MAX_PARAMETER_INTEGER = 2**31 - 1
-MAX_SERVICE_PORT_SLOTS = 8
-MAX_SERVICE_PORT_RANGE = 256
 DEFAULT_WORKSPACE_PROVISION_TIMEOUT_SECONDS = 600
 _PARAMETER_FLAG = re.compile(r"--[a-z][a-z0-9-]*\Z")
-_SERVICE_PORT_SLOT = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
-_SERVICE_ENVIRONMENT = re.compile(r"(?:[A-Z][A-Z0-9_]*_)?PORT\Z")
 _ENVIRONMENT_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
 _PARAMETER_GRAMMARS = {
     "identifier": re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z"),
@@ -326,37 +322,6 @@ class ProjectEnvironment:
 
 
 @dataclass(frozen=True)
-class ServicePortSlot:
-    """One descriptor-owned loopback port and the sole environment name it injects."""
-
-    name: str
-    environment: str
-    minimum: int
-    maximum: int
-
-    def catalog_row(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "environment": self.environment,
-            "range": [self.minimum, self.maximum],
-        }
-
-
-@dataclass(frozen=True)
-class OperationService:
-    """Closed metadata for a development service owned by one declared operation."""
-
-    lifetime: str
-    ports: tuple[ServicePortSlot, ...]
-
-    def catalog_row(self) -> dict[str, Any]:
-        return {
-            "lifetime": self.lifetime,
-            "ports": [port.catalog_row() for port in self.ports],
-        }
-
-
-@dataclass(frozen=True)
 class OperationParameter:
     """A fixed descriptor-owned mapping from a typed value to argv entries."""
 
@@ -455,7 +420,6 @@ class ProjectOperation:
     dependencies: tuple[str, ...] = ()
     scratch: str = "none"
     parameters: tuple[OperationParameter, ...] = ()
-    service: OperationService | None = None
     plan_node: bool = False
     schedule: str | None = None
     # "queued": starting this operation cancels its own earlier queued jobs.
@@ -528,7 +492,6 @@ class ProjectOperation:
             "dependencies": list(self.dependencies),
             "scratch": self.scratch,
             "parameters": [parameter.catalog_row() for parameter in self.parameters],
-            "service": self.service.catalog_row() if self.service is not None else None,
             "plan_node": self.plan_node,
             "schedule": self.schedule,
             "supersede": self.supersede,
@@ -842,63 +805,6 @@ def _operation_parameters(value: Any, field: str) -> tuple[OperationParameter, .
     return tuple(parameters)
 
 
-def _operation_service(value: Any, field: str) -> OperationService | None:
-    if value is None:
-        return None
-    if not isinstance(value, Mapping):
-        raise ProjectConfigError(f"{field} must be a table")
-    value = _ignore_retired(value, field, {"readiness"})
-    if set(value) != {"lifetime", "ports"}:
-        raise ProjectConfigError(f"{field} must contain only lifetime and ports")
-    lifetime = value.get("lifetime")
-    ports = value.get("ports")
-    if lifetime != "job":
-        raise ProjectConfigError(f"{field}.lifetime is invalid")
-    if not isinstance(ports, Mapping) or not 1 <= len(ports) <= MAX_SERVICE_PORT_SLOTS:
-        raise ProjectConfigError(f"{field}.ports must be a bounded table")
-    slots: list[ServicePortSlot] = []
-    environments: set[str] = set()
-    for name, definition in sorted(ports.items()):
-        if (
-            not isinstance(name, str)
-            or _SERVICE_PORT_SLOT.fullmatch(name) is None
-            or not isinstance(definition, Mapping)
-            or set(definition) != {"environment", "range"}
-        ):
-            raise ProjectConfigError(f"{field}.ports contains an invalid slot")
-        environment = definition.get("environment")
-        port_range = definition.get("range")
-        if (
-            not isinstance(environment, str)
-            or _SERVICE_ENVIRONMENT.fullmatch(environment) is None
-            or environment.startswith("SINNIXD_")
-            or environment in environments
-        ):
-            raise ProjectConfigError(f"{field}.ports.{name}.environment is invalid")
-        if (
-            not isinstance(port_range, list)
-            or len(port_range) != 2
-            or any(
-                not isinstance(port, int) or isinstance(port, bool)
-                for port in port_range
-            )
-        ):
-            raise ProjectConfigError(f"{field}.ports.{name}.range is invalid")
-        minimum, maximum = port_range
-        if (
-            not 1024 <= minimum <= maximum <= 65535
-            or maximum - minimum + 1 > MAX_SERVICE_PORT_RANGE
-        ):
-            raise ProjectConfigError(f"{field}.ports.{name}.range is invalid")
-        environments.add(environment)
-        slots.append(
-            ServicePortSlot(
-                name=name, environment=environment, minimum=minimum, maximum=maximum
-            )
-        )
-    return OperationService(lifetime=lifetime, ports=tuple(slots))
-
-
 def _bounded_parameter_count(value: Any, maximum: int) -> bool:
     return (
         isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= maximum
@@ -1145,7 +1051,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             "scratch",
             "parameters",
             "timeout_seconds",
-            "service",
             "plan_node",
             "schedule",
             "supersede",
@@ -1187,9 +1092,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         scratch = definition.get("scratch", "none")
         if scratch not in {"none", "tmpfs", "nvme"}:
             raise ProjectConfigError(f"operations.{name}.scratch is invalid")
-        service = _operation_service(
-            definition.get("service"), f"operations.{name}.service"
-        )
         plan_node = definition.get("plan_node", False)
         if not isinstance(plan_node, bool):
             raise ProjectConfigError(f"operations.{name}.plan_node is invalid")
@@ -1230,7 +1132,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 parameters=_operation_parameters(
                     definition.get("parameters"), f"operations.{name}.parameters"
                 ),
-                service=service,
                 plan_node=plan_node,
                 supersede=supersede,
                 schedule=schedule,

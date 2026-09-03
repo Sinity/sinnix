@@ -31,7 +31,6 @@ from .limits import (
     valid_timeout_seconds,
 )
 from .projects import (
-    OperationService,
     ProjectAdapter,
     ProjectConfigError,
     ProjectOperation,
@@ -905,103 +904,6 @@ def _run_telemetry(
     }
 
 
-def _loopback_port_available(port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        try:
-            probe.bind(("127.0.0.1", port))
-        except OSError:
-            return False
-    return True
-
-
-@dataclass(frozen=True)
-class ServiceLeasePort:
-    name: str
-    environment: str
-    port: int
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"name": self.name, "environment": self.environment, "port": self.port}
-
-
-@dataclass(frozen=True)
-class ServiceLease:
-    """Bounded public ownership of declared loopback ports for one generic job."""
-
-    lease_id: str
-    lifetime: str
-    ports: tuple[ServiceLeasePort, ...]
-    host: str = "127.0.0.1"
-
-    def __post_init__(self) -> None:
-        try:
-            UUID(self.lease_id)
-        except (ValueError, AttributeError) as error:
-            raise ValueError("service lease ID is invalid") from error
-        if self.host != "127.0.0.1" or self.lifetime != "job":
-            raise ValueError("service lease metadata is invalid")
-        if not self.ports or len(self.ports) > 8:
-            raise ValueError("service lease ports are invalid")
-        names = [port.name for port in self.ports]
-        environments = [port.environment for port in self.ports]
-        ports = [port.port for port in self.ports]
-        if (
-            len(set(names)) != len(names)
-            or len(set(environments)) != len(environments)
-            or len(set(ports)) != len(ports)
-            or any(
-                not isinstance(port.name, str)
-                or not port.name
-                or not isinstance(port.environment, str)
-                or not port.environment
-                or not isinstance(port.port, int)
-                or isinstance(port.port, bool)
-                or not 1024 <= port.port <= 65535
-                for port in self.ports
-            )
-        ):
-            raise ValueError("service lease ports are invalid")
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.lease_id,
-            "host": self.host,
-            "lifetime": self.lifetime,
-            "ports": [port.to_dict() for port in self.ports],
-        }
-
-    @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> ServiceLease:
-        if set(value) - {"readiness"} != {"id", "host", "lifetime", "ports"}:
-            raise JobRecordError("service lease metadata is invalid")
-        raw_ports = value.get("ports")
-        if not isinstance(raw_ports, list):
-            raise JobRecordError("service lease ports are invalid")
-        ports: list[ServiceLeasePort] = []
-        for port in raw_ports:
-            if not isinstance(port, Mapping) or set(port) != {
-                "name",
-                "environment",
-                "port",
-            }:
-                raise JobRecordError("service lease ports are invalid")
-            try:
-                ports.append(
-                    ServiceLeasePort(port["name"], port["environment"], port["port"])
-                )
-            except (KeyError, TypeError) as error:
-                raise JobRecordError("service lease ports are invalid") from error
-        try:
-            return cls(
-                lease_id=value["id"],
-                host=value["host"],
-                lifetime=value["lifetime"],
-                ports=tuple(ports),
-            )
-        except (KeyError, TypeError, ValueError) as error:
-            raise JobRecordError("service lease metadata is invalid") from error
-
-
 @dataclass(frozen=True)
 class GenericJobSpec:
     """Reconstructible launch metadata for one systemd-owned job."""
@@ -1025,7 +927,6 @@ class GenericJobSpec:
     exclusive_keys: tuple[str, ...] = ()
     dependency_job_ids: tuple[str, ...] = ()
     scratch: str = "none"
-    lease: ServiceLease | None = None
     dimensions: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -1138,12 +1039,6 @@ class GenericJobSpec:
             raise ValueError(str(error)) from error
         if self.scratch not in {"none", "tmpfs", "nvme"}:
             raise ValueError("job scratch is invalid")
-        if self.lease is not None and (
-            self.kind != "declared-operation"
-            or not self.project_id
-            or not self.operation
-        ):
-            raise ValueError("only declared operations may own service leases")
         if self.kind == "operator-shell" and self.result_kind != "exit-status":
             raise ValueError("operator shell jobs only support exit-status results")
         if self.kind == "attested-agent" and self.result_kind != "last-message":
@@ -1166,7 +1061,6 @@ class GenericJobSpec:
             "result_verdict": {
                 key: list(value) for key, value in self.result_verdict.items()
             },
-            "lease": self.lease.to_dict() if self.lease is not None else None,
             "admission": {
                 "pool": self.pool,
                 "exclusive_keys": list(self.exclusive_keys),
@@ -1225,9 +1119,6 @@ class GenericJobSpec:
         admission = value.get("admission", {})
         if not isinstance(admission, Mapping):
             raise JobRecordError("job admission metadata is invalid")
-        raw_lease = value.get("lease")
-        if raw_lease is not None and not isinstance(raw_lease, Mapping):
-            raise JobRecordError("job service lease metadata is invalid")
         try:
             return cls(
                 kind=kind,
@@ -1253,9 +1144,6 @@ class GenericJobSpec:
                 dependency_job_ids=tuple(admission.get("dependencies", ())),
                 scratch=admission.get("scratch", "none"),
                 dimensions=_dimensions(value.get("dimensions", {})),
-                lease=(
-                    ServiceLease.from_dict(raw_lease) if raw_lease is not None else None
-                ),
             )
         except ValueError as error:
             raise JobRecordError(str(error)) from error
@@ -1376,8 +1264,6 @@ class GenericJobRecord:
         ):
             raise JobRecordError("job record timestamps are invalid")
         parsed_spec = GenericJobSpec.from_dict(spec, require_parameter_digest=True)
-        if parsed_spec.lease is not None and parsed_spec.lease.lease_id != job_id:
-            raise JobRecordError("service lease ID does not match its job")
         return cls(
             job_id=job_id,
             unit=unit,
@@ -1425,10 +1311,6 @@ class GenericJobStore:
         return self.root / "job-dirs"
 
     @property
-    def readiness_root(self) -> Path:
-        return self.root / "readiness"
-
-    @property
     def tmpfs_scratch_root(self) -> Path:
         configured = os.environ.get("SINNIXD_TMPFS_SCRATCH_ROOT")
         return Path(configured) if configured else Path("/dev/shm/sinnixd")
@@ -1451,20 +1333,12 @@ class GenericJobStore:
         return self.root / "inputs"
 
     @property
-    def leases_root(self) -> Path:
-        return self.root / "leases"
-
-    @property
     def locks_root(self) -> Path:
         return self.root / "locks"
 
     @property
     def active_records_path(self) -> Path:
         return self.root / "active-jobs.json"
-
-    @property
-    def service_lease_records_path(self) -> Path:
-        return self.root / "unreleased-service-leases.json"
 
     @contextmanager
     def locked_active_records(self) -> Iterator[None]:
@@ -1477,326 +1351,6 @@ class GenericJobStore:
         finally:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
-
-    @contextmanager
-    def locked_service_lease_records(self) -> Iterator[None]:
-        _ensure_durable_directory(self.root)
-        lock_path = self.root / "unreleased-service-leases.lock"
-        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
-            yield
-        finally:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-            os.close(descriptor)
-
-    @contextmanager
-    def locked_service_leases(self) -> Iterator[None]:
-        _ensure_durable_directory(self.leases_root)
-        lock_path = self.leases_root / ".lock"
-        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
-            yield
-        finally:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-            os.close(descriptor)
-
-    def allocate_service_lease(
-        self, job_id: str, service: OperationService
-    ) -> ServiceLease:
-        _ = job_unit_name(job_id)
-        with self.locked(job_id):
-            with self.locked_service_leases():
-                lease = self._allocate_service_lease_locked(job_id, service)
-                self._save_service_lease(lease)
-                return lease
-
-    def create_declared_service_record(
-        self,
-        *,
-        job_id: str,
-        service: OperationService,
-        build_spec: Callable[[ServiceLease], GenericJobSpec],
-    ) -> GenericJobRecord:
-        """Create one recoverable declared-service intent before its first launch.
-
-        The lock order is per-job, then the cross-process lease lock.  A
-        failed private-input write is known to precede any systemd start, so
-        this method can terminalize and discard that intent safely.
-        """
-        with self.locked(job_id):
-            with self.locked_service_leases():
-                lease = self._allocate_service_lease_locked(job_id, service)
-                record = self.create(build_spec(lease), job_id)
-                try:
-                    self.write_declared_launch(
-                        record.job_id, record.spec.command, record.spec.environment
-                    )
-                    self._save_service_lease(lease)
-                except BaseException:
-                    failed = replace(
-                        record,
-                        state={
-                            "phase": "launch-failed",
-                            "terminal": True,
-                            "observed_at": _timestamp(),
-                        },
-                    )
-                    self.save(failed)
-                    self.cleanup_scratch(failed)
-                    self.cleanup_declared_launch(failed.job_id)
-                    self._mark_service_lease_released(lease.lease_id)
-                    raise
-                return record
-
-    def reconcile_service_leases(
-        self,
-        records: Sequence[GenericJobRecord],
-        observe_unit: Callable[[str], Mapping[str, str]],
-    ) -> list[GenericJobRecord]:
-        with self.locked_service_leases():
-            return self._reconcile_service_leases_locked(records, observe_unit)
-
-    def recover_service_leases(
-        self,
-        observe_unit: Callable[[str], Mapping[str, str]],
-    ) -> list[GenericJobRecord]:
-        """Recover live leases without serializing historical terminal jobs."""
-        return self.reconcile_service_leases(self.active_records(), observe_unit)
-
-    def _reconcile_service_leases_locked(
-        self,
-        records: Sequence[GenericJobRecord],
-        observe_unit: Callable[[str], Mapping[str, str]],
-    ) -> list[GenericJobRecord]:
-        active = {
-            record.job_id: record.spec.lease
-            for record in records
-            if not record.state.get("terminal") and record.spec.lease is not None
-        }
-        existing = self._service_leases()
-        protected: dict[str, ServiceLease] = {}
-        recovered = list(records)
-        for lease_id, lease in existing.items():
-            if lease_id in active:
-                continue
-            try:
-                record = self.load(lease_id)
-            except JobRecordError:
-                record = None
-            if record is not None and record.spec.lease == lease:
-                if not record.state.get("terminal"):
-                    active[lease_id] = lease
-                    recovered.append(record)
-                    self._set_active_record(record.job_id, active=True)
-                    continue
-                if self._terminal_service_lease_releasable(record):
-                    self._mark_service_lease_released(lease_id)
-                    continue
-            try:
-                properties = observe_unit(job_unit_name(lease_id))
-            except SystemdJobError:
-                protected[lease_id] = lease
-                continue
-            if properties.get("LoadState") != "not-found":
-                protected[lease_id] = lease
-            else:
-                if record is None or record.spec.lease != lease:
-                    self._mark_service_lease_released(lease_id)
-                else:
-                    protected[lease_id] = lease
-        occupied: set[int] = set()
-        for lease in protected.values():
-            ports = {port.port for port in lease.ports}
-            if occupied.intersection(ports):
-                raise JobRecordError(
-                    "protected service lease ports collide during recovery"
-                )
-            occupied.update(ports)
-        for lease_id, lease in sorted(active.items()):
-            assert lease is not None
-            ports = {port.port for port in lease.ports}
-            if occupied.intersection(ports):
-                raise JobRecordError(
-                    "active service lease ports collide during recovery"
-                )
-            occupied.update(ports)
-            self._service_lease_released_path(lease_id).unlink(missing_ok=True)
-            if existing.get(lease_id) != lease:
-                self._save_service_lease(lease)
-        for lease_id, lease in protected.items():
-            self._service_lease_released_path(lease_id).unlink(missing_ok=True)
-            if existing.get(lease_id) != lease:
-                self._save_service_lease(lease)
-        _fsync_directory(self.leases_root)
-        return recovered
-
-    @staticmethod
-    def _terminal_service_lease_releasable(record: GenericJobRecord) -> bool:
-        """Accept only durable, unit-bound evidence that a lease-owning job ended."""
-        if record.spec.lease is None or not record.state.get("terminal"):
-            return False
-        phase = record.state.get("phase")
-        properties = record.state.get("systemd")
-        if not isinstance(properties, Mapping):
-            return record.state.get("launch_evidence") == "not-started"
-        load_state = properties.get("LoadState")
-        if load_state == "not-found":
-            cancellation = record.state.get("cancellation")
-            return (
-                phase in {"missing", "launch-failed"}
-                or (
-                    phase == "succeeded"
-                    and record.state.get("result_evidence") == "completed"
-                )
-                or (
-                    phase == "cancelled"
-                    and record.cancel_stop_acknowledged_invocation_id
-                    == record.cancel_requested_invocation_id
-                    and record.cancel_stop_acknowledged_invocation_id is not None
-                )
-                or (
-                    phase == "outcome-unknown"
-                    and record.state.get("outcome_evidence")
-                    == "unit-collected-after-cancellation-grace"
-                    and record.cancel_requested_at is not None
-                    and isinstance(cancellation, Mapping)
-                    and cancellation.get("requested_at") == record.cancel_requested_at
-                )
-            )
-        if load_state != "loaded":
-            return False
-        invocation = properties.get("InvocationID")
-        if not isinstance(invocation, str) or not invocation:
-            return False
-        bound = record.state.get("lease_invocation_id", invocation)
-        if bound != invocation:
-            return False
-        active = properties.get("ActiveState")
-        result = properties.get("Result")
-        status = properties.get("ExecMainStatus")
-        if phase == "succeeded":
-            return active == "inactive" and result == "success" and status == "0"
-        if phase == "timed_out":
-            return active in {"inactive", "failed"} and result == "timeout"
-        if phase == "cancelled":
-            return (
-                active == "inactive"
-                and result == "signal"
-                and record.cancel_stop_acknowledged_invocation_id == invocation
-            )
-        return (
-            phase == "failed"
-            and active in {"inactive", "failed"}
-            and status not in {None, "0"}
-        )
-
-    def release_terminal_service_lease(self, record: GenericJobRecord) -> None:
-        if not self._terminal_service_lease_releasable(record):
-            return
-        assert record.spec.lease is not None
-        with self.locked_service_leases():
-            self._mark_service_lease_released(record.spec.lease.lease_id)
-
-    def _allocate_service_lease_locked(
-        self, job_id: str, service: OperationService
-    ) -> ServiceLease:
-        occupied = {
-            port.port
-            for lease in self._service_leases().values()
-            for port in lease.ports
-        }
-        for record in self.service_lease_records():
-            assert record.spec.lease is not None
-            occupied.update(port.port for port in record.spec.lease.ports)
-        allocations: list[ServiceLeasePort] = []
-        for slot in service.ports:
-            port = next(
-                (
-                    candidate
-                    for candidate in range(slot.minimum, slot.maximum + 1)
-                    if candidate not in occupied and _loopback_port_available(candidate)
-                ),
-                None,
-            )
-            if port is None:
-                raise JobRecordError(
-                    f"no loopback port is available for service slot {slot.name}"
-                )
-            occupied.add(port)
-            allocations.append(ServiceLeasePort(slot.name, slot.environment, port))
-        return ServiceLease(job_id, service.lifetime, tuple(allocations))
-
-    def service_lease_ports_available(self, lease: ServiceLease | None) -> bool:
-        """Confirm the descriptor-owned ports were not claimed before launch.
-
-        A declared command binds its own port, so Sinnixd cannot retain the
-        socket without imposing a socket-activation protocol on every project.
-        This last check turns a claim between allocation and systemd launch
-        into a terminal launch failure that releases the durable lease.
-        """
-        if lease is None:
-            return True
-        with self.locked_service_leases():
-            return all(_loopback_port_available(port.port) for port in lease.ports)
-
-    def _service_leases(self) -> dict[str, ServiceLease]:
-        leases: dict[str, ServiceLease] = {}
-        for path in sorted(self.leases_root.glob("*.json")):
-            try:
-                value = json.loads(path.read_text())
-                if not isinstance(value, Mapping):
-                    raise JobRecordError("service lease metadata is invalid")
-                lease = ServiceLease.from_dict(value)
-            except (OSError, json.JSONDecodeError, JobRecordError):
-                path.unlink(missing_ok=True)
-                continue
-            if path != self._service_lease_path(lease.lease_id):
-                path.unlink(missing_ok=True)
-                continue
-            leases[lease.lease_id] = lease
-        return leases
-
-    def _save_service_lease(self, lease: ServiceLease) -> None:
-        path = self._service_lease_path(lease.lease_id)
-        temporary = path.with_suffix(".json.tmp")
-        descriptor = os.open(
-            temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600
-        )
-        try:
-            with os.fdopen(descriptor, "w") as handle:
-                json.dump(lease.to_dict(), handle, sort_keys=True)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
-            _fsync_directory(self.leases_root)
-        finally:
-            temporary.unlink(missing_ok=True)
-
-    def _service_lease_path(self, lease_id: str) -> Path:
-        _ = job_unit_name(lease_id)
-        return self.leases_root / f"{lease_id}.json"
-
-    def _service_lease_released_path(self, lease_id: str) -> Path:
-        _ = job_unit_name(lease_id)
-        return self.leases_root / f"{lease_id}.released"
-
-    def _service_lease_released(self, lease_id: str) -> bool:
-        return (
-            _read_private_artifact(self._service_lease_released_path(lease_id), 1)
-            == b""
-        )
-
-    def _mark_service_lease_released(self, lease_id: str) -> None:
-        self._service_lease_path(lease_id).unlink(missing_ok=True)
-        marker = self._service_lease_released_path(lease_id)
-        if not self._service_lease_released(lease_id):
-            marker.unlink(missing_ok=True)
-            _write_private_marker(marker)
-        self._set_service_lease_record(lease_id, active=False)
-        _fsync_directory(self.leases_root)
 
     def create(
         self, spec: GenericJobSpec, job_id: str | None = None
@@ -1936,47 +1490,6 @@ class GenericJobStore:
                     and not path.is_symlink()
                 ):
                     self._cleanup_scratch_path(resolved_root, path)
-
-    def prepare_service_readiness(self, job_id: str) -> Path:
-        _ = job_unit_name(job_id)
-        _ensure_durable_directory(self.readiness_root)
-        path = self.readiness_root / job_id
-        path.unlink(missing_ok=True)
-        return path
-
-    def service_ready(self, job_id: str) -> bool:
-        _ = job_unit_name(job_id)
-        path = self.readiness_root / job_id
-        try:
-            return (
-                not path.is_symlink()
-                and path.is_file()
-                and path.read_text() == f"{job_id}\n"
-            )
-        except OSError:
-            return False
-
-    def cleanup_service_readiness(self, job_id: str) -> None:
-        _ = job_unit_name(job_id)
-        path = self.readiness_root / job_id
-        if path.exists() or path.is_symlink():
-            path.unlink()
-            _fsync_directory(self.readiness_root)
-
-    def cleanup_inactive_readiness(self, records: Sequence[GenericJobRecord]) -> None:
-        if not self.readiness_root.exists():
-            return
-        active = {
-            record.job_id for record in records if not record.state.get("terminal")
-        }
-        protected = active | self._unreadable_record_ids()
-        for path in sorted(self.readiness_root.iterdir()):
-            try:
-                _ = job_unit_name(path.name)
-            except (ValueError, JobRecordError):
-                continue
-            if path.name not in protected:
-                path.unlink(missing_ok=True)
 
     @staticmethod
     def _cleanup_scratch_path(root: Path, path: Path) -> None:
@@ -2138,16 +1651,6 @@ class GenericJobStore:
                     record for record in all_records if not record.state.get("terminal")
                 ]
                 self._write_active_record_ids({record.job_id for record in records})
-                if self._service_lease_record_ids() is None:
-                    with self.locked_service_lease_records():
-                        self._write_service_lease_record_ids(
-                            {
-                                record.job_id
-                                for record in all_records
-                                if record.spec.lease is not None
-                                and not self._service_lease_released(record.job_id)
-                            }
-                        )
                 return records
             records: list[GenericJobRecord] = []
             recovered_ids: set[str] = set(job_ids)
@@ -2235,86 +1738,11 @@ class GenericJobStore:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def service_lease_records(self) -> list[GenericJobRecord]:
-        """Return the bounded set whose ports remain reserved despite missing artifacts."""
-        with self.locked_service_lease_records():
-            job_ids = self._service_lease_record_ids()
-            if job_ids is None:
-                records = [
-                    record
-                    for record in self.list()
-                    if record.spec.lease is not None
-                    and not self._service_lease_released(record.job_id)
-                ]
-                self._write_service_lease_record_ids(
-                    {record.job_id for record in records}
-                )
-                return records
-            records: list[GenericJobRecord] = []
-            recovered_ids: set[str] = set()
-            for job_id in job_ids:
-                try:
-                    record = self.load(job_id)
-                except JobRecordError:
-                    continue
-                if record.spec.lease is None or self._service_lease_released(job_id):
-                    continue
-                records.append(record)
-                recovered_ids.add(job_id)
-            if recovered_ids != job_ids:
-                self._write_service_lease_record_ids(recovered_ids)
-            return records
-
-    def _service_lease_record_ids(self) -> set[str] | None:
-        path = self.service_lease_records_path
-        if not path.exists():
-            return None
-        try:
-            value = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError):
-            return None
-        raw_ids = (
-            value.get("jobs")
-            if isinstance(value, Mapping) and value.get("schema_version") == 1
-            else None
-        )
-        if not isinstance(raw_ids, list) or any(
-            not isinstance(job_id, str) for job_id in raw_ids
-        ):
-            return None
-        try:
-            return {str(UUID(job_id)) for job_id in raw_ids}
-        except ValueError:
-            return None
-
-    def _set_service_lease_record(self, job_id: str, *, active: bool) -> None:
-        _ = job_unit_name(job_id)
-        with self.locked_service_lease_records():
-            existing = self._service_lease_record_ids()
-            job_ids = existing or set()
-            was_active = job_id in job_ids
-            if existing is not None and was_active == active:
-                return
-            if active:
-                job_ids.add(job_id)
-            else:
-                job_ids.discard(job_id)
-            self._write_service_lease_record_ids(job_ids)
-
-    def _write_service_lease_record_ids(self, job_ids: set[str]) -> None:
-        self._write_job_id_index(self.service_lease_records_path, job_ids)
-
     def save(self, record: GenericJobRecord) -> None:
         path = self._record_path(record.job_id)
         _ensure_durable_directory(path.parent)
         if not record.state.get("terminal"):
             self._set_active_record(record.job_id, active=True)
-        if not self.service_lease_records_path.exists():
-            self._set_service_lease_record(record.job_id, active=False)
-        if record.spec.lease is not None and not self._service_lease_released(
-            record.job_id
-        ):
-            self._set_service_lease_record(record.job_id, active=True)
         temporary = path.with_suffix(".json.tmp")
         descriptor = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
         try:
@@ -2377,7 +1805,6 @@ class GenericJobStore:
                 if record.scratch_path is not None:
                     shutil.rmtree(record.scratch_path, ignore_errors=True)
             shutil.rmtree(self.job_dirs_root / job_id, ignore_errors=True)
-            shutil.rmtree(self.readiness_root / job_id, ignore_errors=True)
             for path in (
                 self._record_path(job_id),
                 self.locks_root / f"{job_id}.lock",
@@ -2386,12 +1813,9 @@ class GenericJobStore:
                 self.inputs_root / f"{job_id}.prompt",
                 self.inputs_root / f"{job_id}.launch",
                 self.inputs_root / f"{job_id}.agent-launch",
-                self._service_lease_path(job_id),
-                self._service_lease_released_path(job_id),
             ):
                 path.unlink(missing_ok=True)
             self._set_active_record(job_id, active=False)
-            self._set_service_lease_record(job_id, active=False)
             deleted += 1
         if deleted and self.records_root.exists():
             _fsync_directory(self.records_root)
@@ -2469,20 +1893,17 @@ class GenericJobs:
     _spooled: set[str] = field(default_factory=set, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        # Recovery observes only the durable nonterminal set. Terminal lease
-        # artifacts carry their own bounded reconciliation path, so a daemon
+        # Recovery observes only the durable nonterminal set, so a daemon
         # restart cannot serialize systemd calls or per-job locks across the
         # historical corpus. Auxiliary processes (the delivery runner) open
         # the store read-mostly with recover_on_init=False so they never race
         # the daemon's recovery, scratch cleanup, or retention.
         if not self.recover_on_init:
             return
-        if self.store.records_root.exists() or self.store.leases_root.exists():
-            records = self.store.recover_service_leases(self.systemd.show)
-        else:
-            records = []
+        records = (
+            self.store.active_records() if self.store.records_root.exists() else []
+        )
         self.store.cleanup_inactive_scratch(records)
-        self.store.cleanup_inactive_readiness(records)
         finalized: list[GenericJobRecord] = []
         for record in records:
             with self.store.locked(record.job_id):
@@ -2629,7 +2050,7 @@ class GenericJobs:
 
         A complete private input proves the durable intent can be queued.  An
         incomplete input is terminal only when systemd authoritatively reports
-        that no unit exists; otherwise recovery retains the record and lease.
+        that no unit exists; otherwise recovery retains the record.
         """
         try:
             self.store.declared_launch(record.job_id)
@@ -3022,10 +2443,6 @@ class GenericJobs:
                 self._finalize_terminal(blocked_record)
                 return self._public(blocked_record, blocked_record.state)
             try:
-                if not self.store.service_lease_ports_available(spec.lease):
-                    raise SystemdJobError(
-                        "leased loopback port became unavailable before launch"
-                    )
                 self.systemd.start(
                     unit=record.unit,
                     command=spec.command,
@@ -3126,18 +2543,6 @@ class GenericJobs:
         for dependency_id in external_ids:
             self.store.load(dependency_id)
         dependency_ids = (*external_ids, *dependency_ids)
-        dependency_environment: dict[str, str] = {}
-        for dependency_id in dependency_ids:
-            dependency = self.store.load(dependency_id)
-            if dependency.spec.lease is None:
-                continue
-            for port in dependency.spec.lease.ports:
-                existing = dependency_environment.get(port.environment)
-                if existing is not None and existing != str(port.port):
-                    raise ValueError(
-                        f"declared operation dependencies provide conflicting {port.environment} leases"
-                    )
-                dependency_environment[port.environment] = str(port.port)
         operation_argv, parameter_digest = operation.derive_argv(parameters)
         workdir = checkout.path if checkout is not None else project.root
         environment = project.environment.values()
@@ -3145,11 +2550,6 @@ class GenericJobs:
         if operation.supersede == "queued":
             self._supersede_queued(project.project_id, operation.name, principal, state)
         job_id = str(uuid4())
-        readiness_path = (
-            self.store.prepare_service_readiness(job_id)
-            if operation.service is not None
-            else None
-        )
         environment.update(
             {
                 "SINNIXD_JOB_ID": job_id,
@@ -3166,17 +2566,8 @@ class GenericJobs:
                 }
             )
 
-        def build_spec(lease: ServiceLease | None) -> GenericJobSpec:
+        def build_spec() -> GenericJobSpec:
             launch_environment = dict(environment)
-            launch_environment.update(dependency_environment)
-            if lease is not None:
-                launch_environment.update(
-                    {port.environment: str(port.port) for port in lease.ports}
-                )
-                if readiness_path is not None:
-                    launch_environment["SINNIXD_SERVICE_READY_FILE"] = str(
-                        readiness_path
-                    )
             scratch_path = self.store.scratch_path_for(operation.scratch, job_id)
             payload_overrides: dict[str, str] = {}
             if scratch_path is not None:
@@ -3203,27 +2594,15 @@ class GenericJobs:
                 exclusive_keys=operation.exclusive_keys,
                 dependency_job_ids=dependency_ids,
                 scratch=operation.scratch,
-                lease=lease,
                 dimensions=_dimensions(dimensions or {}) if not lineage else {},
             )
 
-        spec = build_spec(None)
+        spec = build_spec()
+        record = self.store.create(spec, job_id)
         try:
-            if operation.service is None:
-                record = self.store.create(spec, job_id)
-            else:
-                record = self.store.create_declared_service_record(
-                    job_id=job_id,
-                    service=operation.service,
-                    build_spec=build_spec,
-                )
-        except BaseException:
-            raise
-        try:
-            if operation.service is None:
-                self.store.write_declared_launch(
-                    job_id, record.spec.command, record.spec.environment
-                )
+            self.store.write_declared_launch(
+                job_id, record.spec.command, record.spec.environment
+            )
         except BaseException:
             self.store.cleanup_scratch(record)
             raise
@@ -3501,10 +2880,6 @@ class GenericJobs:
                 }:
                     continue
                 try:
-                    if not self.store.service_lease_ports_available(current.spec.lease):
-                        raise SystemdJobError(
-                            "leased loopback port became unavailable before launch"
-                        )
                     if current.spec.kind == "declared-operation":
                         command, environment = self.store.declared_launch(
                             current.job_id
@@ -3661,43 +3036,6 @@ class GenericJobs:
         }
         self._save_admission_state(state)
 
-    # A unit's lease outlives its process by the time systemd takes to report
-    # the unit inactive; reaping sooner frees a port still bound.
-    LEASE_REAP_GRACE_SECONDS = 120.0
-
-    def _reap_orphaned_leases(self) -> None:
-        """Cancel service-lease jobs nothing depends on any more.
-
-        lifetime=job binds a lease to the service job's own life, so leases
-        outlived their lanes and held whole pools (three dev_services jobs
-        blocked every harvest on pool-workers, 2026-09-01). A young lease is
-        left alone: its dependent may still be queuing.
-        """
-        records = self.store.active_records()
-        depended_on: set[str] = set()
-        for record in records:
-            if not record.state.get("terminal"):
-                depended_on.update(record.spec.dependency_job_ids)
-        now = time.time()
-        for record in records:
-            if (
-                record.spec.lease is None
-                or record.state.get("terminal")
-                or record.job_id in depended_on
-            ):
-                continue
-            try:
-                created = datetime.fromisoformat(record.created_at).timestamp()
-            except (TypeError, ValueError):
-                continue
-            if now - created < self.LEASE_REAP_GRACE_SECONDS:
-                continue
-            try:
-                self.cancel(record.job_id, reason="lease-released")
-            except Exception:
-                print("lease reap failed for", record.job_id, file=sys.stderr)
-                traceback.print_exc()
-
     SCHEDULE_RECONCILE_INTERVAL_SECONDS = 300.0
     schedule_reconcile: Callable[[], None] | None = None
 
@@ -3732,11 +3070,6 @@ class GenericJobs:
             except Exception:
                 print("admission scheduler: admission sweep failed", file=sys.stderr)
                 traceback.print_exc()
-            try:
-                self._reap_orphaned_leases()
-            except Exception:
-                print("admission scheduler: lease reap failed", file=sys.stderr)
-                traceback.print_exc()
             stop_event.wait(self.admission_retry_seconds)
 
     def _dependency_block(self, spec: GenericJobSpec) -> Mapping[str, Any] | None:
@@ -3763,17 +3096,6 @@ class GenericJobs:
                     "dependencies": list(spec.dependency_job_ids),
                 }
             if not dependency["state"].get("terminal"):
-                dependency_record = self.store.load(job_id)
-                lease = dependency_record.spec.lease
-                if (
-                    lease is not None
-                    and dependency["state"].get("phase") in {"submitted", "running"}
-                    and self.store.service_ready(job_id)
-                    and all(
-                        not _loopback_port_available(port.port) for port in lease.ports
-                    )
-                ):
-                    continue
                 return {
                     "phase": "waiting-dependencies",
                     "terminal": False,
@@ -3900,12 +3222,10 @@ class GenericJobs:
     def _terminal_cleanup(self, record: GenericJobRecord) -> None:
         self.events.fire(record.job_id)
         self.store.cleanup_scratch(record)
-        self.store.cleanup_service_readiness(record.job_id)
         if record.spec.kind == "declared-operation":
             self.store.cleanup_declared_launch(record.job_id)
         elif record.spec.kind == "attested-agent":
             self.store.cleanup_agent_launch(record.job_id)
-        self.store.release_terminal_service_lease(record)
 
     def _preserve_timeout(self, record: GenericJobRecord) -> dict[str, Any]:
         checkout = record.spec.checkout
@@ -4576,19 +3896,6 @@ class GenericJobs:
                 "systemd": dict(properties),
                 "observed_at": _timestamp(),
             }
-        if record.spec.lease is not None:
-            bound = record.state.get("lease_invocation_id")
-            invocation = properties.get("InvocationID")
-            if isinstance(bound, str) and bound and bound != invocation:
-                return {
-                    **forensic,
-                    "phase": "observation-unknown",
-                    "error": {"code": SYSTEMD_ERROR_CODE},
-                    "terminal": False,
-                    "systemd": dict(properties),
-                    "lease_invocation_id": bound,
-                    "observed_at": _timestamp(),
-                }
         semantic = self._declared_json_verdict(record, properties)
         if semantic is not None:
             phase, verdict, error = semantic
@@ -4606,7 +3913,7 @@ class GenericJobs:
             state["resources"] = _terminal_resources(properties)
             state["usage"] = _terminal_usage(record)
             state["terminal_cause"] = self._terminal_cause(record, properties, phase)
-            return self._with_service_lease_invocation(record, properties, state)
+            return state
         active = properties.get("ActiveState", "unknown")
         if active in {"active", "activating", "reloading"}:
             phase = "running"
@@ -4657,30 +3964,26 @@ class GenericJobs:
                     ).isoformat()
                 self._record_capacity_event(record, capacity_reason, retry_at)
                 phase = "capacity"
-        state = self._with_service_lease_invocation(
-            record,
-            properties,
-            {
-                **forensic,
-                "phase": phase,
-                "terminal": terminal,
-                "systemd": dict(properties),
-                **(
-                    {
-                        "capacity_attempt": capacity_attempt,
-                        "capacity": {
-                            "backend": record.spec.contract.get("backend"),
-                            "reason": capacity_reason,
-                            "retry_at": retry_at,
-                            "exhausted": terminal,
-                        },
-                    }
-                    if capacity_reason is not None
-                    else {}
-                ),
-                "observed_at": _timestamp(),
-            },
-        )
+        state = {
+            **forensic,
+            "phase": phase,
+            "terminal": terminal,
+            "systemd": dict(properties),
+            **(
+                {
+                    "capacity_attempt": capacity_attempt,
+                    "capacity": {
+                        "backend": record.spec.contract.get("backend"),
+                        "reason": capacity_reason,
+                        "retry_at": retry_at,
+                        "exhausted": terminal,
+                    },
+                }
+                if capacity_reason is not None
+                else {}
+            ),
+            "observed_at": _timestamp(),
+        }
         state["memory_observation"] = self._memory_observation(
             replace(record, state=state)
         )
@@ -4757,19 +4060,6 @@ class GenericJobs:
         return {"kind": kind, "exit_code": exit_code, "stderr_tail": tail}
 
     @staticmethod
-    def _with_service_lease_invocation(
-        record: GenericJobRecord,
-        properties: Mapping[str, str],
-        state: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        if record.spec.lease is None:
-            return dict(state)
-        invocation = properties.get("InvocationID")
-        if not isinstance(invocation, str) or not invocation:
-            return dict(state)
-        return {**state, "lease_invocation_id": invocation}
-
-    @staticmethod
     def _cancellation_reconciliation_grace_expired(record: GenericJobRecord) -> bool:
         if record.cancel_requested_at is None:
             return False
@@ -4786,12 +4076,6 @@ class GenericJobs:
     def _terminal_state_requires_reconciliation(self, record: GenericJobRecord) -> bool:
         if self._is_authoritative_not_started_cancellation(record):
             return False
-        if (
-            record.spec.lease is not None
-            and not self.store._service_lease_released(record.spec.lease.lease_id)
-            and not self.store._terminal_service_lease_releasable(record)
-        ):
-            return True
         phase = record.state.get("phase")
         properties = record.state.get("systemd")
         if not isinstance(properties, Mapping):
@@ -5056,21 +4340,6 @@ class GenericJobs:
             },
             "created_at": record.created_at,
             "timeout_seconds": record.spec.timeout_seconds,
-            "lease": (
-                {
-                    **record.spec.lease.to_dict(),
-                    "state": (
-                        "released"
-                        if state.get("terminal")
-                        and self.store._service_lease_released(
-                            record.spec.lease.lease_id
-                        )
-                        else "active"
-                    ),
-                }
-                if record.spec.lease is not None
-                else None
-            ),
             "artifacts": {
                 "log": {
                     "ref": f"sinnix://jobs/{record.job_id}/artifacts/log",

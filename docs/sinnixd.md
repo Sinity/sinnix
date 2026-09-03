@@ -46,30 +46,6 @@ The optional `sinnixd-reactor` user service is the model-free owner of campaign 
 
 An operation may also declare `schedule = "OnCalendar expression"`. Sinnixd registers each such operation as a persistent transient user-manager timer and reconciles the timer set from a durable schedule map at daemon startup, so a daemon restart does not lose a calendar firing. The timer only invokes the daemon's schedule-fire route; Sinnixd validates the declared schedule and submits an ordinary admitted declared-operation job. Its durable dimensions record the schedule ID, expression, timer unit, and `systemd-timer` trigger, so scheduled work has the same records, events, and admission path as an explicit start. Scheduled operations cannot require parameters.
 
-## Declared development-service leases
-
-A declared operation may add one closed `[operations.<name>.service]` contract for a bounded development service. It carries readiness metadata (`none` or `project-command`), `lifetime = "job"`, and one through eight named loopback port slots. Each slot declares one `PORT` or `*_PORT` environment-variable name and an inclusive 1024 through 65535 range of at most 256 ports. The descriptor is static. `job start` accepts no port, environment, readiness, lifetime, or service-command arguments.
-
-```toml
-[operations.dev_server]
-description = "Run the project development server"
-exec = ["just", "dev"]
-pool = "interactive"
-result = "exit"
-
-[operations.dev_server.service]
-readiness = "project-command"
-lifetime = "job"
-
-[operations.dev_server.service.ports.http]
-environment = "DEV_SERVER_PORT"
-range = [41000, 41031]
-```
-
-Sinnixd allocates distinct available ports under the durable generic-job ID, injects only the declared slot variables, and launches through the existing transient user-service path. The job record and its `job start`, `job get`, `job list`, and Gateway projections expose only bounded public lease metadata: lease ID, `127.0.0.1`, readiness and lifetime labels, slot names, environment names, allocated ports, and active or released state. Raw argv, environment values outside the allocated ports, prompts, and secrets remain absent from durable public state.
-
-The generic job record, private launch input, and lease reservation are published before systemd launch. A failed input publication terminalizes the record before launch. Startup treats an incomplete private input as failed only after systemd proves the unit absent, otherwise it preserves the record for safe reconciliation. Allocation derives occupied ports from valid nonterminal records and unreleased terminal records as well as lease files. A terminal record retains its reservation until systemd proves the unit absent, then recovery records its release and reclaims it. An unavailable systemd observation retains the lease. The project command owns readiness and convergence. Sinnixd does not add probes, PID tracking, archive semantics, or a second scheduler.
-
 ## Declared-operation timeout contract
 
 An operation may declare `timeout_seconds` as a positive integer. Omission keeps the 3,600-second default. Declared operations may use at most 28,800 seconds (eight hours), which accommodates finite full suites and long-running source or automaton batches while still providing a fixed systemd deadline. Descriptor parsing rejects booleans, non-integers, zero, negative values, and values above that maximum. The catalog, job response, durable job spec, recovery path, and `RuntimeMaxSec` all carry this one descriptor-owned value. Gateway and MCP clients receive the same catalog and job metadata; they do not accept a second timeout override.
@@ -177,8 +153,6 @@ Drop is the general deletion path. Without `force` the workspace must be clean, 
 
 Declared operations enter one durable admission record before systemd starts anything. Descriptors may declare `dependencies`, `exclusive_keys`, and `scratch`. Dependencies are other named operations, exclusive keys are project-defined semantic locks, and scratch is `none`, `tmpfs`, or `nvme`. The daemon validates every name and value while loading the descriptor. It does not derive any of them from an executable name.
 
-A dependency that owns a declared development-service lease is satisfied when its systemd job is active, every leased loopback port is bound, and a `project-command` service has atomically published its job-bound readiness marker. The dependent operation receives exactly those descriptor-named port variables in its private launch environment. Failed or missing service dependencies still fail closed like ordinary dependencies.
-
 Concurrency is the only per-pool bound: `interactive` 4, `normal` 5, `bulk` 1, `pytest` 1, `agent` 16 workers. Admission does no memory arithmetic. Memory belongs to the slice hierarchy — `sinnixd.slice` carries `MemoryHigh` and `MemorySwapMax` for the whole job plane and the desktop slices carry `MemoryLow` — so jobs collectively use what is left. Systemd-oomd is the independent cgroup safety net. Sustained host IO stall (`io_full_avg60` at or above 25%) blocks new non-interactive admissions and never cancels running work.
 
 Each terminal record carries the observed `MemoryPeak` as evidence. Operators inspect the durable holder claims, queue order, and blocking arithmetic with `agentctl job admission`; a queued job's own record names what blocks it in `blocked_by`. Local failures such as OOM kills are terminal; only an ordinary backend exit carrying a recognized provider-capacity response is retryable. Holder claims are bounded durable state. If that state is malformed or unavailable after restart, it is discarded and durable job records plus systemd remain authoritative.
@@ -189,7 +163,7 @@ Scratch is allocated only under the daemon's owned tmpfs or NVMe roots and is pa
 
 Result parsing is pure and bounded. `exit` reads the observed systemd exit result, `json` and `pytest` require a JSON object result artifact, and an attested agent returns its bounded final-message artifact. Systemd still owns the process, cgroup, timeout, cancellation, and journal evidence.
 
-The daemon owns bounded descriptor-declared development-service leases and typed shells only through their stated contracts. It does not own arbitrary shells, product readiness, Git history, hosted review state, or merge state. `bd` remains the task-state authority and GitHub remains authoritative for reviews and merges. The gateway’s legacy controllers remain downstream and are unchanged here.
+The daemon owns typed shells only through their stated contracts. It does not own arbitrary shells, product readiness, Git history, hosted review state, or merge state. `bd` remains the task-state authority and GitHub remains authoritative for reviews and merges. The gateway’s legacy controllers remain downstream and are unchanged here.
 
 ## Generic project plans
 
