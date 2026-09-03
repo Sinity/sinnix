@@ -20,13 +20,6 @@ def default_ops_socket_path() -> Path:
     )
 
 
-def default_sinnixd_socket_path() -> Path:
-    return (
-        Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
-        / "sinnixd.sock"
-    )
-
-
 @dataclass(frozen=True)
 class TaskAuthorityConfig:
     owner: str
@@ -56,7 +49,6 @@ class GatewayConfig:
     runtime_transitions: Path = Path("/run/sinnix/health-transitions.jsonl")
     event_spool: Path = Path("/realm/state/agentctl/events.jsonl")
     capability_index: Path = Path("/etc/sinnix/capability-index.json")
-    sinnixd_socket: Path = field(default_factory=default_sinnixd_socket_path)
     observe_command: str = "sinnix-observe"
     max_result_bytes: int = 262_144
     approved_manifest_hash: str | None = None
@@ -190,9 +182,6 @@ class GatewayConfig:
             ),
             capability_index=Path(
                 raw.get("capabilityIndex", "/etc/sinnix/capability-index.json")
-            ),
-            sinnixd_socket=Path(
-                raw.get("sinnixdSocket", default_sinnixd_socket_path())
             ),
             observe_command=raw.get("observeCommand", "sinnix-observe"),
             max_result_bytes=int(raw.get("maxResultBytes", 262_144)),

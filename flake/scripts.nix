@@ -128,6 +128,7 @@ let
   };
   agentGatewayPackage = pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix {
     sinnix-mcp = sinnixMcpPackage;
+    sinnix-lib = externalPackages.sinnix-lib;
     sinnixd = sinnixdPackage;
   };
 

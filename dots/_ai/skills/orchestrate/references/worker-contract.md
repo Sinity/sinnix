@@ -28,13 +28,19 @@ repeated here.
    refuses real production records is a defect, not safety. Where behavior
    differs between synthetic fixtures and the live archive, run the relevant
    reader against the live archive read-only and report the counts.
-5. **Commit by path, push, never merge.**
+5. **Commit by path, push, publish.** When the work is complete and the
+   quick gate is green in the rebased state, run `lane publish` (or
+   `agentctl lane publish <worktree>`): it pushes, opens the PR under the
+   bead's type-prefixed subject, and arms `gh pr merge --auto --squash`.
+   Branch protection and the required check decide when it lands; never
+   merge by hand.
 6. **Report once, honestly.** Per-bead and per-acceptance-criterion
    disposition, the exact commands and the result line that matters, diffstat,
    residual risk. Refuting a finding needs evidence. The report is the
    deliverable: going idle without one is a contract violation. Report in the
-   job result only. Piped exit codes lie (`cmd | tail` reports tail's status);
-   use pipestatus or capture to a file before claiming a gate passed.
+   job result only (`lane done report.md` emits it). Piped exit codes lie
+   (`cmd | tail` reports tail's status); use pipestatus or capture to a file
+   before claiming a gate passed.
 7. **No scope expansion.** Discoveries become filings or report notes, never
    inline extra work.
 8. **Exit at current master.** Before reporting, fetch, rebase onto
@@ -48,13 +54,11 @@ repeated here.
 9. **Machine trailer.** End the report with exact lines `LANE-BRANCH: <branch>`
    / `LANE-COMMIT: <sha>` / `LANE-QUICK: green|red|blocked-env` /
    `LANE-CLASSIFICATION: <one line per finding>`.
-10. **Write the publication text.** A conventional squash subject of at most
-    72 characters, a body giving Summary, Problem with its evidence, Solution,
+10. **Write the PR body.** Summary, Problem with its evidence, Solution,
     Verification with the exact commands and the line that matters, and
-    honest residual risk. Add a close reason only when a bead genuinely
-    closes. Write them to `.lane/title`, `.lane/body.md` and
-    `.lane/close-reason.md` in your worktree and leave them uncommitted. You
-    do not publish; the harvest judges the change against the diff.
+    honest residual risk, in `.lane/body.md` in your worktree (uncommitted;
+    `.lane/` is never committed). The subject is derived from the bead; the
+    body file is what `lane publish` sends.
 11. **Do not damage live operator state.** Forbidden: deleting or overwriting
     installed tools, dotfiles, or anything under `$HOME` outside your
     workspace; `switch`/`boot` or any system or Home-Manager rebuild; stopping,

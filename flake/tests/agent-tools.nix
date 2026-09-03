@@ -735,93 +735,59 @@ in
             ]
             assert operation["pool"] == "bulk"
             assert operation["result"] == "exit"
-            assert operation["exclusive_keys"] == ["sinnix:nix-store-pressure", "sinex:cache-prebuild"]
-            assert operation["estimate_memory_bytes"] == 12 * 1024 * 1024 * 1024
-            assert operation["scratch"] == "nvme"
             assert operation["timeout_seconds"] == 7200
             PY
             touch "$out"
           '';
+      # The launch route on this repository's own descriptor: the queued
+      # command is the descriptor's exec inside its environment, in its pool,
+      # under its label, with its timeout.
       agentctlOperationLaunchFixture =
         pkgs.runCommand "agentctl-operation-launch-fixture"
           {
             nativeBuildInputs = [ pkgs.python3 ];
           }
           ''
-            export PYTHONPATH="${
-              lib.concatStringsSep ":" (
-                map (package: "${package}/${pkgs.python3.sitePackages}") [
-                  scriptRegistry.packageSet.sinnixd
-                  scriptRegistry.packageSet.sinnix-mcp
-                  scriptRegistry.packageSet.sinnix-lib
-                ]
-              )
-            }"
+            export PYTHONPATH="${scriptRegistry.packageSet.sinnixd}/${pkgs.python3.sitePackages}"
             ${pkgs.python3}/bin/python - <<'PY'
-            import os
+            import json
             from pathlib import Path
             from tempfile import TemporaryDirectory
 
-            from sinnixd.jobs import GenericJobStore, GenericJobs
+            from sinnixd import launch, pueue
+            from sinnixd.config import Config
             from sinnixd.projects import ProjectCatalog
-
-
-            class FakeSystemd:
-                def __init__(self):
-                    self.started = []
-
-                def start(self, **kwargs):
-                    self.started.append(kwargs)
-
-                def show(self, _unit, *, timeout_seconds=0.25):
-                    return {
-                        "LoadState": "loaded",
-                        "ActiveState": "active",
-                        "SubState": "running",
-                        "MainPID": "42",
-                        "Result": "success",
-                    }
-
-                def stop(self, _unit):
-                    pass
-
 
             root = Path("${inputs.self}")
             project = ProjectCatalog([root]).get("sinnix")
             operation = project.operation("sinex_cache_prebuild")
             assert operation.timeout_seconds == 7200
-            assert operation.command == (
-                "sinnix-sinex-cache-prebuild",
-                "--flake-dir",
-                "/realm/project/sinnix",
-                "--system",
-                "x86_64-linux",
-            )
+
+            added = []
+
+            def add(*, group, label, command, working_directory, after=()):
+                added.append({"group": group, "label": label, "command": command})
+                return 7
+
+            pueue.add = add
+            pueue.task = lambda task_id: None
             with TemporaryDirectory() as state:
-                os.environ["SINNIXD_NVME_SCRATCH_ROOT"] = str(Path(state) / "nvme-scratch")
-                systemd = FakeSystemd()
-                jobs = GenericJobs(
-                    systemd,
-                    GenericJobStore(Path(state)),
-                    pressure_probe=lambda: {"memory_full_avg10": 0.0},
+                config = Config(
+                    project_roots=(root,),
+                    agent_runner=Path("/nonexistent"),
+                    event_spool=Path(state) / "events.jsonl",
+                    state_dir=Path(state),
+                    agentctl_executable="agentctl",
                 )
-                started = jobs.start_declared(
-                    project=project,
-                    operation=operation,
-                    correlation_id="fixture",
-                    parameters={},
-                )
-                record = jobs.store.load(started["job_id"])
-                expected = project.environment.command_for(
-                    operation.command,
-                    overrides={"TMPDIR": str(jobs.store.scratch_path_for(operation.scratch, record.job_id))},
-                )
-                declared_command, _ = jobs.store.declared_launch(record.job_id)
-                assert started["kind"] == "declared-operation"
-                assert record.spec.timeout_seconds == 7200
-                assert declared_command == expected
-                assert systemd.started[0]["command"] == expected
-                assert systemd.started[0]["timeout_seconds"] == 7200
+                started = launch.start_operation(config, project, operation)
+                written = json.loads(Path(added[0]["command"][1]).read_text())
+            assert started["job_id"] == 7
+            assert added[0]["group"] == "bulk"
+            assert added[0]["label"] == "sinnix:sinex_cache_prebuild"
+            assert added[0]["command"][0] == "sinnixd-queue-run"
+            assert tuple(written["argv"]) == project.environment.command_for(operation.command)
+            assert written["timeout_seconds"] == 7200
+            assert written["result_kind"] == "exit"
             PY
             touch "$out"
           '';

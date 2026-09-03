@@ -32,28 +32,32 @@ def cli_config(tmp_path: Path, config: Config, monkeypatch: pytest.MonkeyPatch) 
 def test_job_start_get_logs_and_wait_round_trip(
     fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert cli.main(["job", "start", "fixture", "check", "--", "--flag"]) == 0
+    assert cli.main(["--json", "job", "start", "fixture", "check", "--", "--flag"]) == 0
     started = json.loads(capsys.readouterr().out)
     assert started["job_id"] == 1 and started["phase"] == "running"
     assert fake_pueue.added[0]["label"] == "fixture:check"
 
-    assert cli.main(["--plain", "job", "list", "--project", "fixture"]) == 0
-    assert "fixture:check" in capsys.readouterr().out
+    assert cli.main(["job", "list", "--project", "fixture"]) == 0
+    listed = capsys.readouterr().out
+    assert "fixture:check" in listed and "elapsed" in listed
+    assert cli.main(["--json", "job", "list", "--project", "fixture"]) == 0
+    assert json.loads(capsys.readouterr().out)[0]["label"] == "fixture:check"
 
     fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
-    assert cli.main(["job", "wait", "1"]) == 0
+    assert cli.main(["--json", "job", "wait", "1"]) == 0
     assert json.loads(capsys.readouterr().out)["phase"] == "succeeded"
 
     assert cli.main(["job", "get", "1"]) == 0
-    assert json.loads(capsys.readouterr().out)["terminal"] is True
+    line = capsys.readouterr().out
+    assert line.startswith("job 1 fixture:check succeeded finished ")
 
 
 def test_job_start_with_wait_reports_a_failure_in_the_exit_status(
     fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake_pueue.finish_when_waited(1, lambda fake: fake.fail(1, exit_code=3))
-    assert cli.main(["job", "start", "fixture", "check", "--wait"]) == 1
-    assert json.loads(capsys.readouterr().out)["phase"] == "failed"
+    assert cli.main(["job", "start", "fixture", "check", "--wait"]) == cli.EXIT_JOB_NOT_SUCCEEDED
+    assert "failed exit 3" in capsys.readouterr().out
 
 
 def test_errors_are_one_line_on_stderr_and_a_nonzero_status(
@@ -68,10 +72,10 @@ def test_errors_are_one_line_on_stderr_and_a_nonzero_status(
 
 
 def test_project_verbs_read_the_catalog(cli_config: Config, capsys: pytest.CaptureFixture[str]) -> None:
-    assert cli.main(["project", "list"]) == 0
+    assert cli.main(["--json", "project", "list"]) == 0
     listed = json.loads(capsys.readouterr().out)
     assert [row["id"] for row in listed["projects"]] == ["fixture"]
-    assert cli.main(["--plain", "project", "operations", "fixture"]) == 0
+    assert cli.main(["project", "operations", "fixture"]) == 0
     assert "nightly" in capsys.readouterr().out
 
 
@@ -79,14 +83,19 @@ def test_events_tail_prints_the_last_lines_filtered_by_project(
     cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:
     cli_config.event_spool.write_text(
-        '{"kind":"queue-task","label":"fixture:check","result":"Success"}\n'
-        '{"kind":"queue-task","label":"other:check","result":"Failed"}\n'
-        '{"kind":"backpressure","action":"froze","group":"agent"}\n'
+        '{"kind":"queue-task","emitted_at":"2026-09-03T08:00:00+00:00","label":"fixture:check","phase":"started"}\n'
+        '{"kind":"queue-task","emitted_at":"2026-09-03T08:05:00+00:00","label":"fixture:check","result":"Failed","exit_code":"2","task_id":4}\n'
+        '{"kind":"queue-task","emitted_at":"2026-09-03T08:06:00+00:00","label":"other:check","result":"Success","exit_code":"0","task_id":5}\n'
+        '{"kind":"backpressure","emitted_at":"2026-09-03T08:07:00+00:00","action":"froze","group":"agent"}\n'
     )
     assert cli.main(["events", "tail", "--project", "fixture"]) == 0
     out = capsys.readouterr().out
-    assert "fixture:check" in out and "other:check" not in out
+    assert "fixture:check started" in out
+    assert "fixture:check finished Failed exit 2 (task 4)" in out
+    assert "other:check" not in out
     assert cli.main(["events", "tail", "--lines", "1"]) == 0
+    assert "backpressure froze agent" in capsys.readouterr().out
+    assert cli.main(["--json", "events", "tail", "--lines", "1"]) == 0
     assert capsys.readouterr().out.strip().startswith('{"kind":"backpressure"')
 
 
@@ -100,8 +109,11 @@ def test_view_json_is_the_snapshot(
 ) -> None:
     monkeypatch.setattr(cli.operator_view, "lane_rows", lambda project, full=False: [])
     monkeypatch.setattr(cli.operator_view, "SubprocessBdReader", lambda root: type("R", (), {"ready": lambda self: []})())
-    assert cli.main(["view", "fixture", "--json"]) == 0
+    assert cli.main(["--json", "view", "fixture"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["project"] == "fixture"
     assert cli.main(["view", "fixture"]) == 0
+    assert "== fixture at" in capsys.readouterr().out
+    monkeypatch.chdir(cli_config.project_roots[0])
+    assert cli.main(["view"]) == 0
     assert "== fixture at" in capsys.readouterr().out

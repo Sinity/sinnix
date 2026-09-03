@@ -136,6 +136,7 @@ def test_lane_start_creates_the_worktree_and_queues_a_bounded_agent_scope(
     assert written["result_kind"] == "last-message"
     assert written["timeout_seconds"] == lanes.MAX_AGENT_TIMEOUT_SECONDS
     assert started["worktree"] == str(created["path"])
+    assert started["job"]["kind"] == "attested-agent"
 
 
 def test_lane_start_refuses_a_bead_that_already_has_a_worktree(

@@ -1,122 +1,90 @@
 # Coordinator contract
 
-A fresh session takes over a running campaign from this document plus the live
-state below. It holds no campaign state itself.
+A fresh session takes over running lanes from this document plus the live
+state below. It holds no campaign state itself; `agentctl` holds none either.
 
 ## Where state lives
 
-- **Lanes and jobs**: `agentctl campaign view --project <p>` is the screen;
-  `campaign view --json` is the same payload; `campaign log --project <p>
---workspace <ws>` is one lane's timeline; `agentctl job result <id>` is one
-  job's outcome. Job ids may be abbreviated to any unambiguous prefix.
-  `--plain` prints the payload as text.
-- **Workspaces**: `agentctl workspace list`.
+- **Lanes and jobs**: `agentctl view <project>` is the screen (`--json view`
+  is the same payload); `agentctl job get|logs|result <id>` is one job. Job
+  ids are pueue task ids.
+- **Worktrees**: `wt list` in the project, or the lanes section of the view.
 - **Task authority**: external Beads per project. `bd` resolves its database
   from the working directory, so mind your cwd.
-- **Events**: one persistent watch on `agentctl events tail --follow` (spool:
-  `/realm/state/agentctl/events.jsonl`), filtered to judgment signals:
-  failures, timeouts, harvest terminals, and review or needs-merge events.
+- **Events**: one persistent watch on `agentctl events tail --follow
+--project <p>` (spool: `/realm/state/agentctl/events.jsonl`): every task's
+  start and finish, and backpressure freezes, in local time.
 - **History**: per-project memory (`~/.claude/projects/<p>/memory/MEMORY.md`)
   and the repo's `docs/atlas/`.
 
 ## Who drives
 
-`campaign run` is a one-shot planner: it dispatches every managed lane's next
-action once and exits. The operator or the coordinating agent takes every
-step by hand: `campaign view` to see what needs attention, `campaign run` or
-`packet launch` to dispatch, the declared `harvest` operation to publish,
-`campaign log` to explain one lane.
+The operator or the coordinating agent takes every step by hand; `agentctl`
+dispatches what it is told and reports. A lane's "next" column on the view
+is a description of its state, not something the CLI will do.
 
 ## Capability map
 
 Look for the verb before writing any procedure: `agentctl <verb> --help`.
 
-| Need                                      | Verb                                                                                                            |
-| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| see the campaign                          | `agentctl campaign view --project <p> [--json]`                                                                 |
-| explain one lane                          | `agentctl campaign log --project <p> --workspace <ws>`                                                          |
-| schedule a dispatch wave                  | `agentctl campaign run --project <p> [--limit N] [--bead ID …] [--dry-run]`                                     |
-| dispatch one bead                         | `agentctl packet launch <bead> --project <p>`                                                                   |
-| publish a finished lane                   | `agentctl lane publish <ws> [--close]`                                                                          |
-| record the operator's decision at a head  | `agentctl lane authorize <ws> [--reason R]`                                                                     |
-| continue an interrupted lane              | `agentctl agent launch --project <p> --checkout <worktree-id> --prompt-file F --backend B --model M --effort E` |
-| delete a workspace and everything it owns | `agentctl workspace drop <ws> [--force]`                                                                        |
-| run a declared operation                  | `agentctl job start <p> <operation> [--workspace <ws>] [--wait]`                                                |
-| wait on work                              | `agentctl job wait <id>`, `agentctl plan wait <id>`                                                             |
+| Need                                      | Verb                                                              |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| see the lanes, queue and ready work       | `agentctl view <p>`                                               |
+| watch what happens                        | `agentctl events tail --follow --project <p>`                     |
+| start lanes for ready beads               | `agentctl refill <p> --limit N [--dry-run]`                       |
+| start one lane                            | `agentctl lane start <p> <bead> [--backend B --model M --effort E]` |
+| re-queue an agent into an existing lane   | `agentctl lane rebase <p> <bead> [--model M --effort E]`          |
+| publish a finished lane                   | `agentctl lane publish <worktree>` (or the worker's `lane publish`) |
+| close merged beads, remove their worktrees| `agentctl lane sync <p>`                                          |
+| run a declared operation                  | `agentctl job start <p> <operation> [--workspace <path>] [--wait]` |
+| read a job                                | `agentctl job get\|logs\|result <id>`                             |
+| stop a job                                | `agentctl job cancel <id>`                                        |
+| run it again                              | `agentctl job retry <id>`                                         |
 
 Task mutations go through `bd` directly; see [[task-backend]].
 
 A missing capability is a bead against the substrate. Declared operations are
-the extension point: `.agentctl/project.toml` in the repo, live after
-`agentctl project reload`.
+the extension point: `.agentctl/project.toml` in the repo, live on the next
+call.
 
 Publication policy is per-repository: polylogue lands via `lane publish`
-(PR + auto-merge); **sinnix publishes from `master` directly** — verify at
-exact head, merge or fast-forward, push.
+(PR + auto-merge behind the required verify check); **sinnix publishes from
+`master` directly** — verify at exact head, merge or fast-forward, push.
 
 ## The operating loop
 
-1. Merge everything in progress. Excisions land as whole merges.
+1. `agentctl lane sync <p>`: merged lanes close their beads and lose their
+   worktrees. Excisions land as whole merges.
 2. Run the corpus once at the master boundary:
    `agentctl job start polylogue verify_all`. Never a corpus run per lane.
-3. Read the result, decide, dispatch the next wave.
+3. `agentctl view <p>`; decide; `refill` or `lane start` the next wave.
 
-**Dispatch**: `campaign run` resolves the ready set, dedupes dispatch groups,
-serializes on conflict keys, and skips beads whose workspace is already live.
-`--dry-run` shows the schedule; `--limit` bounds the wave; everything deferred
-is reported with a reason.
+**Stages on the view** and what follows mechanically: `lane queued/running`
+→ wait; `unpublished` (agent done, no PR) → `lane publish`; `pr open` →
+`gh pr merge --auto --squash` (the worker should have armed it);
+`auto-merge armed` / `checks running` → wait; `checks failing` or `changes
+requested` → fix in the lane, push; `conflicting` → `lane rebase`;
+`lane failed/timed-out` → `job logs`, then `lane rebase`; `merged` →
+`lane sync`.
 
-**Harvest** is a declared two-phase operation. The review phase is read-mostly
-and produces a receipt; publication is reachable only by quoting that receipt
-back, so nothing publishes unreviewed.
-
-1. `agentctl lane publish <ws> [--close]` runs the whole pass: mints the
-   receipt (lane trailer, diffstat, red-flag scan, full-diff ref), routes it,
-   and — when the route clears — authorizes, pushes, arms auto-merge, and
-   releases. `agentctl job result <harvest-job>` reads the receipt.
-2. **Publication needs test evidence at the exact head.** The harvest refuses
-   with `NO_TEST_EVIDENCE` unless it is given a succeeded `verify_affected`
-   job for the current head (`affected_job`) or the operator has recorded an
-   authorization for that head (`agentctl lane authorize`, which writes
-   `.lane/authorization.json`). Harvest reports this as the verdict
-   `no-test-evidence` and merges nothing on it.
-3. Routing: docs- or tests-only with a clean scan publishes without a reader.
-   An ordinary production diff with a clean scan routes to a cross-family
-   review lane the coordinator dispatches. Migrations, gate or baseline edits,
-   security and excision work, large deletions, legacy shims, and uncleared
-   flags route to the coordinator.
-4. Judge a coordinator-routed receipt: no flags plus a small diff → stat-level
-   skim; flags → read the full diff. Flags mark deleted production lines,
-   inverted or removed assertions, new xfail or skip, gate, baseline, migration
-   or sidecar edits, and deleted test files. Rewrite `.lane/title` and
-   `.lane/body.md` immediately before re-running `lane publish` — harvest
-   restores `.lane/` from lane artifacts, so earlier edits are clobbered.
-5. A receipt binds workspace HEAD at minting; a failed authorize invalidates
-   it — re-mint before retrying.
-6. Drop after the content check: `workspace drop <ws>` once worktrunk reports
-   the branch `integrated`. It deletes the lane's job records and artifacts
-   with it.
-
-**Launch wedges**: `packet launch` advances one step per attempt (worktree →
-record → job) and reports a step failure as a redacted `OWNER_UNAVAILABLE`.
-Retry about three times, spaced. A leftover worktree with no workspace record
-is not a workspace: remove it with `git worktree remove` and relaunch.
+**Refill** skips epics, beads with a worktree, and beads with an open PR; it
+dedupes nothing else. `--dry-run` lists the candidates.
 
 **Verification**: lanes run `verify_affected`; the corpus runs once at the
-master boundary as `verify_all`. `devtools verify` selects from the checkout's
-one testmon datafile and writes back; `--all` runs everything; a corrupt or
-foreign datafile stops with `graph_unusable` (delete it and rerun). Wrongly
-skipped tests are acceptable, a refusal is not. A package or interpreter change
-is a reported full run. Read `.cache/verify/runs/<id>/run.json` receipts.
+master boundary as `verify_all`. `devtools verify` selects from the
+checkout's one testmon datafile and writes back; `--all` runs everything; a
+corrupt or foreign datafile stops with `graph_unusable` (delete it and
+rerun). Wrongly skipped tests are acceptable, a refusal is not. A package or
+interpreter change is a reported full run. Read
+`.cache/verify/runs/<id>/run.json` receipts.
 
 **Fix loops belong in lanes.** Lanes exit rebased on current master with the
-quick gate green. A returning branch failing gates on trivia may be patched at
-harvest; one failing on semantics goes back as a completion lane on the same
-branch, in the same worktree.
+quick gate green. A PR failing checks goes back to its lane (`lane rebase`
+with the finding in the bead note), never fixed at the coordinator's desk.
 
 **Substrate defects** are next work items: file instances in the owning
-project's Beads with reproduction evidence. Deploy sinnixd through the devshell
-`switch` wrapper while no lane is mid-launch; jobs survive daemon restarts.
+project's Beads with reproduction evidence. Deploy sinnix through the devshell
+`switch` wrapper; running pueue tasks survive it.
 
 ## Cost discipline
 
@@ -139,3 +107,5 @@ frontier strategy. File product defects freely, process beads sparingly.
 - **Co-execution via dispatch groups.** Beads sharing a file, area, fix
   pattern, or required context get `dispatch_group=<leader-id>`; one lane
   executes the group and each bead keeps its own verifiable close.
+- **Bead type names the PR subject prefix**: `bug` → `fix:`, `feature` →
+  `feat:`, anything else → `chore:`.

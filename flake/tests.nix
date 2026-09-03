@@ -32,7 +32,6 @@ in
     ./tests/capture-primary.nix
     ./tests/capture-spotify.nix
     ./tests/backup.nix
-    ./tests/command-registry.nix
     ./tests/agent-environment.nix
     ./tests/lane-toolbelt.nix
     ./tests/agent-parity.nix
@@ -44,7 +43,6 @@ in
     ./tests/vm.nix
     ./tests/host-build.nix
     ./tests/runtime.nix
-    ./tests/campaign-consumers.nix
     ./tests/script-suites.nix
     ./tests/pkg-suites.nix
     ./tests/lifecycle-manifest.nix

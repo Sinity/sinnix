@@ -56,7 +56,7 @@ grep -Fq 'INCOMPLETE HANDOFF' "$incomplete"
 grep -Fq '# fixture report' "$incomplete"
 test -n "$(git -C "$repo" status --porcelain)"
 
-mkdir -p "$repo/.agentctl" "$state/sinnixd/inputs"
+mkdir -p "$repo/.agentctl" "$repo/.lane"
 cat >"$repo/.agentctl/project.toml" <<'EOF'
 schema = 1
 
@@ -72,12 +72,13 @@ EOF
 printf '#!%s\n' "$BASH" >"$bin/agentctl"
 cat >>"$bin/agentctl" <<'EOF'
 set -euo pipefail
+printf '%s\n' "$*" >> "${AGENTCTL_CALLS:?}"
 case "$1 $2" in
   job\ start)
-    printf '{"ok":true,"payload":{"value":{"job_id":"fixture-verification"}}}\n'
+    printf '{"job_id": 7, "phase": "succeeded", "terminal": true}\n'
     ;;
-  job\ wait)
-    printf '{"ok":true,"payload":{"value":{"state":{"phase":"succeeded"}}}}\n'
+  lane\ publish)
+    printf '{"pr": 41, "auto_merge": true}\n'
     ;;
   *)
     exit 2
@@ -85,11 +86,20 @@ case "$1 $2" in
 esac
 EOF
 chmod +x "$bin/agentctl"
-verify_output=$(cd "$repo" && PATH="$bin:$PATH" SINNIXD_JOB_ID=job-1 SINNIXD_PROJECT_ID=fixture SINNIXD_CHECKOUT_ID=default SINNIXD_TIMEOUT_SECONDS=60 "$lane" verify)
+export AGENTCTL_CALLS=$root/agentctl.calls
+verify_output=$(cd "$repo" && PATH="$bin:$PATH" SINNIXD_TIMEOUT_SECONDS=60 "$lane" verify)
 grep -Fq 'succeeded' <<<"$verify_output"
+grep -Fq "job start fixture verify_quick --workspace $repo --wait --timeout-seconds 60" "$AGENTCTL_CALLS"
 
-printf 'launch snapshot\n' >"$state/sinnixd/inputs/job-1.prompt"
-task_output=$(cd "$repo" && HOME="$root/home" XDG_STATE_HOME="$state" SINNIXD_JOB_ID=job-1 SINNIXD_PROJECT_ID=fixture SINNIXD_CHECKOUT_ID=default "$lane" task)
+publish_output=$(cd "$repo" && PATH="$bin:$PATH" "$lane" publish)
+grep -Fq '"pr": 41' <<<"$publish_output"
+grep -Fq "lane publish $repo" "$AGENTCTL_CALLS"
+
+printf 'launch snapshot\n' >"$repo/.lane/prompt.md"
+task_output=$(cd "$repo" && "$lane" task)
 test "$task_output" = 'launch snapshot'
+printf 'named prompt\n' >"$root/named.md"
+task_output=$(cd "$repo" && SINNIXD_JOB_PROMPT_FILE="$root/named.md" "$lane" task)
+test "$task_output" = 'named prompt'
 
 printf 'lane toolbelt fixture passed\n'

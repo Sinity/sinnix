@@ -17,6 +17,7 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
     assert project.environment.command == ("env",)
     assert project.workspace is not None
     assert project.workspace.default_base == "origin/master"
+    assert project.workspace.agent_memory_max == "10G"
     nightly = project.operation("nightly")
     assert nightly.schedule == "*-*-* 03:17:00"
     assert nightly.checkout == "default"
@@ -60,6 +61,14 @@ def test_malformed_operations_are_typed_refusals(tmp_path: Path, fragment: str, 
     descriptor = root / ".agentctl" / "project.toml"
     descriptor.write_text(descriptor.read_text() + "\n" + fragment)
     with pytest.raises(ProjectConfigError, match=message):
+        load_project_adapter(root)
+
+
+def test_a_malformed_agent_ceiling_is_a_typed_refusal(tmp_path: Path) -> None:
+    root = write_project(tmp_path / "p")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(descriptor.read_text().replace('agent_memory_max = "10G"', 'agent_memory_max = "lots"'))
+    with pytest.raises(ProjectConfigError, match="agent_memory_max"):
         load_project_adapter(root)
 
 

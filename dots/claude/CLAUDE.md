@@ -118,20 +118,25 @@ or `cd /realm/project/sinnix && nix develop --command switch`) — never bare
 
 ## Runtime and workspaces
 
-`agentctl` is the one interface for durable machine work, workspaces,
-coding-agent jobs, and task backends (verb surface: `agentctl --help` — it
-grows; don't cache it). Load the `agent-runtime` skill before nontrivial
-runtime/workspace operations and `orchestrate` before multi-agent work.
+`agentctl` is an in-process CLI over pueue (the queue), worktrunk (worktrees),
+`gh` (PRs) and `bd` (tasks); there is no daemon. Load the `agent-runtime`
+skill before nontrivial runtime/workspace operations and `orchestrate` before
+multi-agent work. `agentctl --help` is the verb surface.
 
 - Ordinary short foreground commands run directly. Detached, queued,
   resource-heavy, or shared work goes through declared project operations:
-  `agentctl job start <project> <operation>`.
+  `agentctl job start <project> <operation> [--workspace <path>] [--wait]`.
+  A job is a pueue task labelled `<project>:<operation>`; its id is the
+  pueue task id.
 - Never hand-construct `systemd-run`, cgroup placement, memory envelopes, or
   background reapers; never infer ownership from process names — act on
-  returned job/workspace/session IDs and preserve them in reports.
-- Don't duplicate a heavy job; attach to the identical active operation.
-- Every agent dispatch names backend, model, and effort explicitly.
-- Checkpoint a workspace before risky integration, compaction, or recovery.
+  returned task ids and worktree paths and preserve them in reports.
+- Don't duplicate a heavy job; `agentctl job list --active` shows what is
+  running. `agentctl job fire` (timers) skips while the same operation is
+  active.
+- Every agent dispatch names backend, model, and effort explicitly
+  (`agentctl lane start <project> <bead> --backend B --model M --effort E`).
+- Commit before risky integration or recovery; Git is the checkpoint.
 - Authority map: Git/worktrunk = commits/worktrees; pueue = live processes
   and terminal results; systemd = only calendar-timer wake-ups; GitHub =
   PR/review/merge; the external task backend (`bd`, Beads per
@@ -145,30 +150,31 @@ runtime/workspace operations and `orchestrate` before multi-agent work.
   that understood them does not.
 - Long-running dispatches carry a time contract: state expected duration with
   evidence and act at ~2x with a decision, never silent waiting. Completion
-  notifications are authoritative; do not poll.
+  events (`agentctl events tail --follow`) are authoritative; do not poll.
 
-## Campaign coordination (stateless takeover)
+## Lane coordination (stateless takeover)
 
-When coordinating a lane campaign (any project), the protocol and live state
-live OUTSIDE your context — read them, never reconstruct:
+A lane is a worktree with an agent in it and a PR that merges itself. The
+protocol and live state live OUTSIDE your context — read them, never
+reconstruct:
 
 - **Protocol**: `/realm/project/sinnix/dots/_ai/skills/orchestrate/references/coordinator-contract.md`
   — start with its capability table, which names the `agentctl` verb for each
-  need so you do not hand-roll a worse copy. Worker rules in its sibling
-  `worker-contract.md`.
-- **Live state**: `agentctl campaign view --project <p>` is the lane screen
-  (`--json` for the payload); `agentctl campaign log` is the event history.
-- **Who drives**: the operator or the coordinating agent. `agentctl campaign
-run` is a one-shot planner — each invocation dispatches every managed
-  lane's next action once and exits; nothing advances on its own.
-- **Dispatch**: `agentctl campaign run` for a wave, `packet launch` for one
-  bead. **Harvest**: the declared `harvest` operation; it refuses without
-  test evidence (an affected-verification job or operator authorization).
-  `agentctl --plain` prints payloads as text.
+  need. Worker rules in its sibling `worker-contract.md`.
+- **Live state**: `agentctl view <project>` is the one screen (`--json` for
+  the payload); `agentctl events tail` is the event history.
+- **Who drives**: the operator or the coordinating agent. Nothing advances on
+  its own: `agentctl refill <project> --limit N` starts lanes for ready beads,
+  `agentctl lane start <project> <bead>` starts one, `agentctl lane rebase`
+  re-queues an agent into a conflicted lane, `agentctl lane sync` closes what
+  merged and removes its worktree.
+- **Merge gate**: branch protection + the required verify check +
+  `gh pr merge --auto --squash`, armed by `agentctl lane publish <worktree>`.
+  There are no receipts, authorizations, or integrators.
 - **Operating loop**: merge everything in progress, then ONE corpus run
   (`agentctl job start <project> verify_all`); never per-lane corpus runs.
-- A fresh session resumes a campaign from those files plus the project's
-  memory index; nothing campaign-critical may live only in a chat context.
+- A fresh session resumes from those verbs plus the project's memory index;
+  nothing campaign-critical may live only in a chat context.
 
 ## Ambient control (browser, desktop, terminal)
 
@@ -207,8 +213,8 @@ memory, or the owning CLAUDE.md) instead of re-deriving next session.
 - Preserve user work: dirty trees are normal; state destructive intent before
   any delete/reset/force-push/rewrite/kill. Clean up your own transient
   artifacts (stashes, scratch branches) once verified captured elsewhere.
-- Publish through `agentctl lane publish` where the project adapter provides
-  it; never bypass hosted checks or protected-branch policy. Load
+- Publish through `agentctl lane publish <worktree>` where the repository
+  lands via PRs; never bypass hosted checks or protected-branch policy. Load
   `review-land` for adversarial review + publication procedure.
 
 ## Verification

@@ -1,261 +1,223 @@
-# Sinnixd
+# agentctl
 
-`sinnixd` is the host-local runtime behind `agentctl` and the future execution-facing Sinnix MCP routes. It uses a mode-0600 Unix socket at `$XDG_RUNTIME_DIR/sinnixd.sock`. MCP remains a stateless policy frontend. pueue, Git, and project adapters remain authoritative for their own state; task state is `bd`'s.
+`agentctl` is an in-process CLI. There is no daemon and no socket. Four
+external tools own the state it reads and writes:
 
-## Current vertical slice
+| Authority | Owns                                                                | Read through                          |
+| --------- | ------------------------------------------------------------------- | ------------------------------------- |
+| pueue     | the queue, its groups (pools), every process, its terminal result   | `pueue status --json`, `pueue log`    |
+| worktrunk | worktree creation, provisioning (`.config/wt.toml` hooks), removal  | `wt list --format=json` (schema 2)    |
+| GitHub    | PRs, review, required checks, merge                                 | `gh pr list/view/create/merge`        |
+| Beads     | tasks                                                               | `bd ready/show/close --json`          |
+| systemd   | only the calendar wake-up a declared `schedule` needs               | transient user timers                 |
 
-The deployed slice discovers explicit project adapters and can launch only their declared operations:
+What agentctl owns outright: the project descriptors, the prompt compiled
+from a bead, the launch-input and result-artifact contract of a queued
+command, and one operator screen.
+
+## Verbs
+
+| Verb                                                             | Does                                                                                                                                                                       |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project list \| get <p> \| operations <p>`                      | the configured descriptors (`/etc/sinnix/agentctl.json` lists the roots)                                                                                                   |
+| `job start <p> <op> [--workspace <path>] [--wait] [-- args…]`   | `pueue add` in the operation's pool, label `<p>:<op>`, running `sinnixd-queue-run <launch.json>`; extra arguments are appended to the declared `exec`                     |
+| `job fire <p> <op>`                                              | what a schedule timer runs: `job start` on the main checkout, skipped while the same label is queued or running                                                            |
+| `job list [--project p] [--active]`                              | `pueue status --json` reduced to job rows                                                                                                                                  |
+| `job get \| logs \| result \| cancel \| retry \| wait <id>`      | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` kills the task and its process group, `retry` is `pueue restart --in-place`     |
+| `lane start <p> <bead> [--backend --model --effort]`            | compile the prompt, `wt switch --create feature/packet/<bead>`, queue the agent in group `agent` (label `<p>:lane:<bead>`)                                                  |
+| `lane publish [<worktree>] [--bead --title --body-file]`        | push, `gh pr create` under the bead's type-prefixed subject, `gh pr merge --auto --squash`; refuses a dirty worktree; the worktree defaults to cwd                        |
+| `lane rebase <p> <bead>`                                         | queue an agent with the rebase prompt into the bead's existing worktree (label `<p>:rebase:<bead>`)                                                                        |
+| `lane sync <p>`                                                  | worktrees whose PR merged (or `wt` reports integrated): `bd close`, `wt remove`; the rest are reported                                                                     |
+| `refill <p> --limit N [--dry-run]`                               | `bd ready` minus beads that already have a worktree or an open PR, minus epics → `lane start`                                                                              |
+| `view [<p>]`                                                     | queue groups (running/queued/paused), what needs attention, active jobs with start and elapsed, every lane with bead, stage, since/elapsed, agent job, PR and what follows, ready beads |
+| `events tail [--lines N] [--follow] [--project p]`               | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                     |
+| `schedule apply`                                                 | make the transient timer set equal the declared schedules                                                                                                                  |
+
+Reads print tables in local time; `agentctl --json <verb>` prints the
+document. A project argument defaults to the checkout enclosing the working
+directory where the table says so. Exit status: 0 done, 1 refused or failed,
+2 usage, 3 the waited job (`job wait`, `job start --wait`) did not succeed.
+The CLI decides nothing: it dispatches what it is told and reports; a lane's
+"next" on the view describes its state.
+
+## Jobs
+
+A job is a pueue task. Its id is pueue's task id, its pool is pueue's group,
+its state is pueue's state. `job start` writes a private launch input
+(`$XDG_STATE_HOME/sinnixd/inputs/<ref>.json`, mode 0600) carrying the argv
+inside the declared environment, the resolved environment, the working
+directory, the timeout, the result kind and the artifact paths, then runs
+`pueue add --escape -g <pool> -l <label> -- sinnixd-queue-run <input>`.
+
+`sinnixd-queue-run` is the command every task runs. It appends a `started`
+event to the spool, runs the argv with the launch environment in its own
+session, enforces the declared timeout (exit 124), refuses a vanished working
+directory (exit 125), writes the combined log to `jobs/<ref>.log` and — for
+`json`/`pytest` results — stdout alone to `jobs/<ref>.result`, both bounded at
+64,000 bytes with an overflow marker. pueue's completion callback (declared by
+the CLI feature) appends the finish event. `job logs` and `job result` find
+the artifacts by the launch reference in the task's own command line; there
+is no job ledger. The launch input stays so `pueue restart` re-runs the same
+command.
+
+`pueue add` publishes the adding client's environment into world-readable
+state, so every add goes through the adapter's scrubbed environment (`HOME`,
+`PATH`, `XDG_RUNTIME_DIR`, `XDG_DATA_HOME`); the launch input carries the
+real one. Add tasks by hand with `sinnix-pueue-add`, which scrubs the same
+way.
+
+Groups are the whole admission policy: `agent:4 pytest:1 bulk:1 normal:5
+interactive:4`, created on pueued start. Memory is the slice hierarchy's
+(`sinnixd.slice` MemoryHigh 20G). `sinnixd-backpressure.timer` pauses one
+group per minute while the host's `full` IO or memory stall stays above
+threshold and resumes in reverse order once clear; a paused task keeps its
+work.
+
+## Lanes
+
+A lane is a worktree with an agent in it and a PR that merges itself.
+
+`lane start` compiles the prompt (`packets.py`): the bead and its open
+dispatch-group members from `bd`, backend/model/effort from the bead's
+`model_policy` metadata or the descriptor's `[packets.defaults]` (an explicit
+flag wins), the atlas sheets matching the affected paths, and the worker
+contract appended verbatim. It creates
+`<workspace.root>/<repo>-feature-packet-<bead>` through `wt switch --create`
+(the project's own hooks provision it), writes the prompt to
+`.lane/prompt.md` (0600), and queues in group `agent`:
 
 ```text
-agentctl status
-agentctl project list
-agentctl project get sinnix
-agentctl project operations sinnix
-agentctl workspace list --project sinnix
-agentctl workspace create sinnix my-lane --branch feature/my-lane
-agentctl workspace get <workspace-id>
-agentctl workspace checkpoint <workspace-id>
-agentctl workspace restore <workspace-id> <checkpoint-id>
-agentctl workspace restore <workspace-id> <checkpoint-id> --recreate
-agentctl workspace drop <workspace-id>
-agentctl job start sinnix lint
-agentctl job start sinnix sinex_cache_prebuild
-agentctl job start sinex check_default --parameters-json '{"full":true,"package":["sinexd","xtask"]}'
-agentctl job start polylogue verify_quick --workspace <workspace-id>
-agentctl job get <job-id>
-agentctl job list
-agentctl job wait <job-id>
-agentctl job logs <job-id> --max-bytes 64000
-agentctl job result <job-id> --max-bytes 64000
-agentctl job cancel <job-id>
-agentctl shell --project sinnix --checkout default --cwd . -- printf 'harmless command\n'
-agentctl agent --project sinnix --checkout default --prompt-file ./prompt.md --backend codex --model gpt-5.6-terra --effort high
+<environment.command> systemd-run --user --scope --slice=sinnixd-work.slice \
+  -p MemoryMax=10G -- run_agent_prompt.sh --agent B --workdir W \
+  --prompt-file W/.lane/prompt.md --last-file W/.lane/prompt.result.md \
+  --model M --reasoning-effort E
 ```
 
-The service passes a declarative, non-empty `sinnix.services.sinnixd.projectRoots` list as repeated `--project-root` arguments. It defaults to the registered Sinnix project entries. Sinnixd loads only those `.agentctl/project.toml` adapters and does not scan arbitrary directories. Each descriptor is schema-versioned, identifies its repository root markers, declares the execution environment, and publishes named operation metadata. A descriptor with a `[workspace]` is agent-capable and must declare non-empty shell-free argv lists for both `environment.command` and `environment.preflight`; the latter runs inside the former from the revalidated checkout before any backend starts. `agentctl project get <id>` publishes that capability and both public argv lists.
+The scope keeps the agent inside the job plane under the descriptor's
+`workspace.agent_memory_max` (default 10G), the descriptor's only say in an
+agent's resources; the adapter (`agentRunner`) turns the prompt into one
+backend invocation. Provisioning the worktree (dependencies, the testmon seed
+copied from the primary checkout) is the project's `wt.toml` hooks' job. The
+environment carries `BEADS_ACTOR=agent-<bead>` so an agent's task writes are
+its own. Agent jobs cap at four hours.
 
-The environment contract gate evaluates the configured `sinnix.services.sinnixd.projectRoots` and runs `sinnixd-project-environment-check` against the real descriptors. It reports every missing or invalid required declaration and stops before a host configuration is built or activated. The gate runs for `nix run .#switch`, `nix run .#boot`, `nix run .#test-system`, and the devshell `switch`, `boot`, and `test-system` commands. `test-vm` remains separate because it only builds a guest image and does not activate the live host. Roll out descriptor commits before this Sinnix commit. The minimum declaration for every external agent-capable descriptor is `preflight = ["true"]` under `[environment]`; a project may use a stronger cheap project-native readiness argv instead. The current external prerequisites are Polylogue, Sinex, and Lynchpin, and all three descriptors must satisfy this contract before any gated command is run.
+The worker ends its lane with `lane publish` (the toolbelt) or
+`agentctl lane publish <worktree>`: push, PR titled by the bead (`fix:` for
+bugs, `feat:` for features, `chore:` otherwise, at most 72 characters), body
+from `.lane/body.md`, auto-merge armed. Branch protection, the required verify
+check and review decide when it lands. `lane sync` then closes the bead and
+removes the worktree. Nothing dispatches on its own: `refill` and `lane start`
+are explicit, and a declared `schedule` is the one autonomous driver a project
+can choose.
 
-`agentctl campaign run --project <id>` is the one-shot campaign planner. It reads every managed workspace's facts (worktree head, pushed head, holder, newest receipt, the PR `wt list --full` reports, GitHub's review decision) and dispatches the one action `lane_facts.advance` names — verify, harvest, publish, integrate, rebase, review-fix, or retry — through the same job route as any other start, then exits. A lane whose action is not dispatchable (wait, idle, done, park, await-merge) is simply left alone; `agentctl campaign view` reads the same facts and shows the reason. Nothing loops, sleeps, or keeps dispatch markers between invocations. It does not review or select work; those remain fresh-context harvester and strategist responsibilities.
+## Descriptors
 
-Nothing dispatches work on its own. Every job begins at an explicit `agentctl job start`, `agentctl campaign run`, or `agentctl packet launch`. A declared `schedule` is the one exception and it is a deliberate declaration: a project that adds one is choosing an autonomous driver, and its firings dispatch whatever the operation dispatches. Read a schedule as that choice before adding it.
-
-`job start` accepts a project ID, one declared operation name, an optional workspace binding, and an optional JSON parameters object. It never accepts an arbitrary command. Its optional workspace binding launches in that registered checkout and durably records the checkout ID and exact starting HEAD, so later publication can reject stale verification. Declared operations and internal synthetic foreground commands construct the same durable generic-job spec, record, queued launch, log artifact, observation, wait, and cancellation route. A descriptor may set a bounded `timeout_seconds`; `sinnixd-queue-run` enforces it, rather than a caller-controlled duration. The typed attested-agent contract also accepts an optional validated Beads binding from the gateway. It is public durable provenance, not prompt material: canonical bead/project/checkout refs, launch task revision and etag, optional claim receipt, request ID, and display-only work item. The only additional public starts are the constrained typed contracts below.
-
-An operation may also declare `schedule = "OnCalendar expression"`. Sinnixd registers each such operation as a persistent transient user-manager timer and reconciles the timer set from a durable schedule map at daemon startup, so a daemon restart does not lose a calendar firing. The timer only invokes the daemon's schedule-fire route; Sinnixd validates the declared schedule and submits an ordinary declared-operation job. Its durable dimensions record the schedule ID, expression, timer unit, and `systemd-timer` trigger, so scheduled work has the same records and events as an explicit start. Scheduled operations cannot require parameters.
-
-## Declared-operation timeout contract
-
-An operation may declare `timeout_seconds` as a positive integer. Omission keeps the 3,600-second default. Declared operations may use at most 28,800 seconds (eight hours), which accommodates finite full suites and long-running source or automaton batches while still providing a fixed deadline. Descriptor parsing rejects booleans, non-integers, zero, negative values, and values above that maximum. The catalog, job response, durable job spec, and recovery path all carry this one descriptor-owned value; `sinnixd-queue-run` — the command every pueue task runs — enforces it directly. Gateway and MCP clients receive the same catalog and job metadata; they do not accept a second timeout override.
-
-The longer maximum applies only to `declared-operation` jobs. `agentctl shell`, `agentctl agent`, and internal foreground commands retain their existing bounds. In particular, shell and attested-agent jobs remain capped at 3,600 seconds, and the contract runner validates that identity before execution. Declared operations execute through `sinnixd-queue-run` directly rather than that typed-job runner, so extending a suite cannot widen arbitrary command authority.
-
-## Declared-operation parameters and results
-
-Operation parameters are descriptor-owned. The server accepts only parameter names and types declared under that operation, converts them to a fixed argument vector without a shell, and rejects unknown fields, malformed values, missing bounds, and values beyond those bounds. There is no caller-controlled argv, environment, working directory, or timeout on this route.
-
-Each parameter declares exactly one mapping: a long `flag`, or a required `position`. Positional parameters are scalar `string`, `enum`, or `integer` values. They must set `required = true`; optional, list, and boolean positional declarations are invalid. Positions are positive, unique, and contiguous from `1`, so descriptor table order can never choose a positional argv order. Flag parameters retain the existing optional behavior and their descriptor-table order controls only their flag order, regardless of JSON object ordering. The server never invokes a shell.
+`.agentctl/project.toml`, schema 1:
 
 ```toml
-[operations.sinex_all_sources]
-description = "Run Sinex's all-sources foreground operation"
-exec = ["xtask", "run", "all-sources"]
-pool = "normal"
-result = "exit"
+schema = 1
 
-[operations.sinex_all_sources.parameters.instance_id]
-type = "string"
-flag = "--instance-id"
-max_length = 128
-grammar = "safe-token"
+[project]
+id = "polylogue"
+display_name = "Polylogue"
+root_markers = ["pyproject.toml", "polylogue"]
 
-[operations.sinex_all_sources.parameters.reconcile]
-type = "bool"
-flag = "--reconcile"
+[environment]
+kind = "nix-develop"
+command = ["nix", "develop", "--accept-flake-config", "--command"]
+inherit = ["HOME", "USER", "PATH", "SSH_AUTH_SOCK", "XDG_RUNTIME_DIR"]
+unset = ["PYTHONPATH"]
+require = ["POLYLOGUE_ARCHIVE_ROOT"]
 
-[operations.sinex_all_sources.parameters.service_name]
-type = "string"
-flag = "--service-name"
-max_length = 128
-grammar = "safe-token"
+[environment.values]
+POLYLOGUE_ARCHIVE_ROOT = "/realm/state/polylogue"
 
-[operations.sinex_all_sources.parameters.include_default_excluded]
-type = "bool"
-flag = "--include-default-excluded"
+[workspace]
+root = "/realm/worktrees"
+default_base = "origin/master"
+agent_memory_max = "10G"
 
-[operations.verify_closure]
-description = "Verify closure work for one Bead"
-exec = ["xtask", "verify", "closure"]
-pool = "normal"
-result = "exit"
+[packets]
+branch_prefix = "feature/packet"
 
-[operations.verify_closure.parameters.bead_id]
-type = "string"
-position = 1
-required = true
-max_length = 128
-grammar = "safe-token"
+[packets.defaults]
+backend = "codex"
+model = "gpt-5.6-luna"
+effort = "medium"
 
-[operations.verify_closure.parameters.json]
-type = "bool"
-flag = "--json"
-
-[operations.verify_closure.parameters.dry_run]
-type = "bool"
-flag = "--dry-run"
+[operations.verify_all]
+description = "Run the complete corpus"
+exec = ["devtools", "verify", "--all"]
+pool = "pytest"
+result = "pytest"
+timeout_seconds = 14400
+checkout = "default"
+schedule = "*-*-* 03:17:00"
 ```
 
-`bool` emits its flag only when true. Flag-mapped `string`, `enum`, and `integer` values emit one flag-value pair. `string-list` and `enum-list` require non-empty arrays, deduplicate and sort their values, then repeat the fixed flag once per canonical value. False booleans and absent flag parameters emit nothing. A required positional scalar emits exactly one argv item. Derived argv is always `exec`, then positional values in ascending `position`, then present flags in descriptor-table order. Scalar strings require `max_length`; the optional `grammar` selects one safe grammar, with `safe-token` as the default. The supported grammars are `safe-token` (`[A-Za-z0-9][A-Za-z0-9._:+@=-]*`), `identifier` (`[A-Za-z_][A-Za-z0-9_]*`), `package-name` (`[A-Za-z0-9][A-Za-z0-9_-]*`), and `duration` (`[1-9][0-9]{0,8}(ms|s|m|h)`). Arbitrary descriptor regexes are not accepted. Enum values must be a non-empty, unique safe-token set. Integers require inclusive `min` and `max` within signed 32-bit range. Lists require `max_items` from 1 through 32; strings and enum values are limited to 128 characters, and declared `max_length` must be from 1 through 128. An operation has at most 16 parameters and an enum has at most 64 values. Unknown descriptor fields, malformed definitions, duplicate flags or positional positions, gapped positions, booleans supplied as integers, unsafe strings, empty lists, and out-of-range values are rejected before launch.
+An operation declares `description`, `exec` (argv, no shell), `pool` (a
+pueue group), `result` (`exit`, `json`, `pytest`), `timeout_seconds` (1 to
+28,800; default 3,600), `checkout` (`any`, or `default` for operations that
+run only on the main checkout) and `schedule` (an `OnCalendar` expression).
+`cache` is accepted and ignored. Any other operation field takes the project
+out of service with the field named. The retired tables `[conflicts]`,
+`[owner_adapters]` and the extra `[workspace]` fields are ignored.
+`[environment]` declares `kind`, `command`, `inherit`, `unset`, `values` and
+`require`; a required variable missing at launch fails the launch with its
+name. `[workspace]` declares `root`, `default_base` and `agent_memory_max`
+(a systemd size). `[packets]` declares `template`, `atlas_dir`,
+`branch_prefix` and `[packets.defaults]` (`backend`, `model`, `effort`).
 
-For the all-sources example, `{"instance_id":"operator-source-driver-browser.history-3","reconcile":true,"service_name":"source-driver-browser.history-3","include_default_excluded":true}` produces `xtask run all-sources --instance-id operator-source-driver-browser.history-3 --reconcile --service-name source-driver-browser.history-3 --include-default-excluded` before the declared environment prefix. These names match Sinex's source-binding identities, whose defaults are `source-driver-<source_id>-<instance_idx>`. If a project declares the shown closure operation, `{"bead_id":"sinex-a1b2","json":true,"dry_run":true}` produces `xtask verify closure sinex-a1b2 --json --dry-run`; the current Sinex descriptor does not publish that operation. The normalized non-default object, including required positional values, is encoded as sorted compact JSON and SHA-256 hashed. Each declared job record and `job start`, `job get`, and `job list` response exposes only `parameters.digest`, a lowercase 64-hex digest. Raw parameter values are absent from public durable job metadata. The private launch intent may temporarily retain the derived argv and environment while a job needs recovery. Operations with no `[operations.<name>.parameters]` table remain fixed and reject every non-empty parameters object.
+Descriptor changes take effect on the next call; timers follow on the next
+`schedule apply` (every fifteen minutes and at login).
 
-Descriptor `result` is executable contract data. `exit` remains log-only. `json` and `pytest` allocate a bounded result artifact, capture stdout separately from the combined log, and require one UTF-8 JSON object. `agentctl job result` returns that object as typed `value`; malformed, injected trailing output, arrays, and overflowed artifacts are rejected. The record persists `result_kind`, and the result artifact metadata exposes its kind and bound. Polylogue currently declares `verify_affected` and `verify_all` as `pytest`, so their JSON receipts are consumable through this route. Its `verify_quick` still declares `exit`; its descriptor must change to `json` or `pytest` before its receipt is consumable, and this repository does not make that cross-repository declaration change.
+## Schedules
 
-## Task authority
+Each declared `schedule` is one transient user timer,
+`sinnixd-schedule-<sha256(project:operation:expression)[:24]>.timer`, running
+`agentctl job fire <project> <operation>`. `schedule apply` lists the live
+timers, stops the ones no descriptor declares, and starts the missing ones;
+a changed expression is a new unit. Daily or rarer timers are `Persistent`
+(a missed firing catches up); sub-hourly ones are not.
 
-Task state is `bd`'s alone. The daemon holds no task write path; it sets
-`BEADS_ACTOR=agent-<job id>` in every attested-agent environment so an agent's
-own writes are not attributed to the operator.
-
-Delivery is a precondition `sinnixd-harvest` checks before it will mint a receipt, not a caller-fed completion route. It reads the packet's Beads-bound attested-agent job for its immutable Beads identity and declared write-scope binding, rereads the affected-verification job's result at the same head, and diffs the checkout's base-to-head range against that write scope. It rejects dirty, divergent, stale, or out-of-scope work. Git owns paths, commits, and heads; the project verifier owns semantic success; GitHub branch protection owns required review state.
-
-Typed jobs accept no environment overlay. The daemon creates the `env -i` environment from the declared project environment and fixed `SINNIXD_*` identity fields. Immediately before execution, the contract runner verifies those fields, rechecks the exact registered project, canonical worktree root, common Git directory, porcelain worktree membership, and recorded HEAD. A changed, missing, symlinked, or spoofed identity fails closed. Every attested agent runs its mandatory environment `preflight` from the revalidated checkout, then invokes the native backend through the same descriptor-owned `environment.command`. A missing, failed, unavailable, or 30-second `agent-preflight-timeout` preflight terminates the typed job before backend implementation starts and retains an actionable runner error in the bounded log. Attested-agent private inputs use schema v2; v1 records fail closed as stale contract input and must be relaunched. `sinnixd-queue-run` — the command every pueue task runs — is the sole process, timeout, and cancellation authority; it revalidates the bound checkout at its own exec boundary, closing the check-to-exec interval instead of trusting the checkout binding captured when the record was created. Private launch inputs are mode 0600, removed before shell execution, and removed after handoff or every terminal lifecycle outcome, including confirmed launch failure. Native private logs are removed after handoff; only the bounded shared log and result artifacts remain addressable.
-
-Each record is stored under `$XDG_STATE_HOME/sinnixd` and contains safe operation identity, environment key names, and its bounded-read log artifact path. Record replacement fsyncs the containing directory, and newly created state directories are synchronized before they contain durable evidence. Internal foreground argv is launch-only: the durable record has only a SHA-256 digest and constant display metadata, never raw argv or environment values. `sinnixd-queue-run` drains the queued process's output into the bounded shared log, enforces the declared timeout, and writes the typed result artifact when the operation declares one; it owns no PID, process state, queue, workspace, or retry policy beyond the one task pueue gave it. A job's durable identity is a UUID minted by sinnixd; the pueue label `<project_id>:<operation>:<job_id>` and an internal task-id handle carry that identity into pueue, resolved by scanning pueue's tasks by label when the handle is absent or forgotten. Every `pueue` call has a short finite bound. After a daemon restart, `get`, `list`, `wait`, and `cancel` reload the record and reconcile against pueue's own task state, which is the sole state authority. If `pueue add` fails outright, `job start` returns a durable nonterminal `launch-unknown` result; later `get`, `wait`, and `cancel` use the same job ID to retry the observation. A task pueue no longer recognizes (forgotten across a pueue restart, or genuinely never queued) is terminal `missing`; an unreachable pueue observation is durable nonterminal `observation-unknown` until a later observation repairs it. Cancellation persists its intent, then kills pueue's task; a job that never reached pueue (still blocked on dependencies) needs no kill and becomes terminal `cancelled` immediately. A typed result can prove semantic success only when its content is valid; pueue's own `Done`/`Success` result is the completion evidence, so no separate completion marker is needed. Systemd's only remaining role is the calendar-timer wake-up described below; pueue owns the process, timeout, terminal result, and cancellation for every job.
-
-Terminal records also carry the versioned `state.telemetry` machine-run projection. It contains only safe command shape, start and finish timestamps, duration, and explicit backend usage. Project verifiers retain ownership of semantic receipts; Sinnixd does not create a second verification-history store or spool.
-
-## Completion events and supervision
-
-Server-side waits poll pueue's task state on a bounded cadence and block on the in-process terminal-event condition between polls (no busy waiting), accepting up to 3600 seconds. Re-observations that would change nothing but their own timestamp skip the durable record rewrite.
-
-On each first-observed terminal transition the daemon appends one JSON line — `{job_id, kind, project, phase, completed_at, checkout}` — to the event spool (`--event-spool`, default `/realm/state/agentctl/events.jsonl`). The spool is an append-only advisory watch point for supervisors (tail it instead of polling `job get`); it is never state authority, is written at most once per transition per daemon process, and rolls to `events.jsonl.old` past 64 MiB. The gateway watches complete spool records and sends MCP `resources/updated` notifications for `sinnix://gateway/v2/events`, so subscribed coordinator sessions can read the bounded event page without a per-job watcher. A per-job `on_complete` hook is deliberately not implemented: the spool plus push notification cover supervision without giving jobs ambient exec authority.
-
-`agentctl agent launch` is an explicit alias for the bare dispatch form; supervise agent jobs through the `job` verbs with `job list --kind attested-agent`. Agent launches may carry a bounded `--coordinator-label` (also accepted as `--coordinator` or `--campaign-label`); it is recorded in the public job spec and copied to that job's terminal spool events so concurrent campaign monitors can filter their own lanes. Every attested-agent environment carries `BEADS_ACTOR=agent-<job id>` unless the project descriptor declares an explicit value, so task-authority writes from agents never default to the operator's identity. A job record and its artifacts live exactly as long as the thing they served: the workspace that owned the checkout is dropped or finished, the plan that owns the node is gone, or the next terminal run of the same operation on the same checkout supersedes the record. Nothing is deleted on a clock.
-
-Project descriptors may declare `[environment.values]` (explicit variable values) and `environment.require` (names that must be present in the resolved job environment). A required variable that is absent at job build time fails the dispatch loudly with the missing names; the silent inherit-filter drop is reserved for variables nothing requires.
-
-## Workspace relationships
-
-Projects may declare a `git-worktree` policy with one absolute workspace root, a default base, an identity check, and checkpoint intent. `workspace create` runs `wt switch --create <branch> --no-cd -y --format json` in the project's primary checkout with `worktree-path` pinned to the declared root, so the placement is the descriptor's rather than the invoking user's worktrunk config. worktrunk owns creation, the project's own `.config/wt.toml` hooks own provisioning, and `wt remove --reap --foreground` owns removal; a `[workspace.provision]` declaration is parsed but no longer executed by sinnixd. AgentCTL stores only the durable relationship: project, stable workspace ID, canonical path, branch, base, and creation time. `workspace.list` serves the stored relationship with a bounded filesystem-only state (`available`, `missing`, or `invalid`) and does not revalidate Git identity; `workspace.get` and mutating operations remain authoritative for refs, HEAD, worktree membership, and dirty state.
-
-Create, checkpoint, restore, and drop require the `agent-control` or `operator` principal. Names are bounded path-safe identifiers, branches pass `git check-ref-format`, bases must resolve to commits, the configured root cannot be used, and a name or branch that is already registered fails closed under a shared mutation lock without adopting or replacing the registered workspace. A daemon restart reloads the relationship index. List sweeps missing relationships under that lock, preserves them in the response as `missing`, removes eligible records, and appends one audit note listing the removed IDs and paths. Drop forgets a missing relationship without attempting Git branch deletion.
-
-Checkpoint stores separate binary patches for the index and working tree plus a bounded private archive of policy-allowed untracked regular files. Every artifact has a SHA-256 digest and is bound to the workspace, project, branch, and exact source HEAD. Restore requires a clean target at that same HEAD and branch, reruns the descriptor identity check, verifies every artifact digest and archive member, then reconstructs staged, unstaged, and untracked state. It never creates a stash or commit.
-
-`agentctl lane publish` pushes the branch, runs `gh pr create`, and requests `gh pr merge --squash --auto`; AgentCTL stores no PR ledger. Review status, mergeability, checks status, and merge state are queried fresh — `wt list --full` for mergeability and checks, `gh pr view --json reviewDecision` for the one review-decision call this daemon makes. GitHub branch protection and its required checks decide when the auto-merge actually lands; nothing in sinnixd requests the merge a second time.
-
-Drop is the general deletion path, and the only removal route left. Without `force` the workspace must be clean, hold its declared branch identity, and prove its content is published: contained in the declared base, or carrying worktrunk's `integrated` verdict, which runs six checks including squash patch-id equality. `force` is the operator's acknowledgement that the content is expendable. Drop deletes every job record and artifact bound to that checkout.
-
-## Result parsing
-
-A declared operation's `pool` names its pueue group; pueue owns queueing and per-group parallelism. A job with unmet `dependency_job_ids` (set by a caller, not a descriptor field) holds `waiting-dependencies` until every dependency succeeds, then launches; a failed dependency terminalizes it as `dependency-failed`. Local failures such as OOM kills are terminal; only an ordinary backend exit carrying a recognized provider-capacity response is retryable, with a bounded retry delay.
-
-Result parsing is pure and bounded. `exit` reads the observed pueue exit result, `json` and `pytest` require a JSON object result artifact, and an attested agent returns its bounded final-message artifact. pueue still owns the process, timeout, cancellation, and terminal-result evidence.
-
-The daemon owns typed shells only through their stated contracts. It does not own arbitrary shells, product readiness, Git history, hosted review state, or merge state. `bd` remains the task-state authority and GitHub remains authoritative for reviews and merges. The gateway’s legacy controllers remain downstream and are unchanged here.
-
-## Generic project plans
-
-`plan.submit` accepts one bounded serializable DAG and materializes every node as an ordinary inspectable `declared-operation` job. Nodes may name different operations, or the plan may name one operation with `plan_node = true` and supply one validated `payload` object per node. Payload validation and fixed argv derivation reuse the operation's descriptor-owned parameter schema. Sinnixd does not interpret the payload or result domain.
-
-The service API is owned by `project-plans`:
-
-```text
-plan.submit  {project_id, nodes, [node_operation], [workspace_id|checkout_id]}
-plan.get     {plan_id}
-plan.wait    {plan_id, [timeout_seconds]}
-```
-
-The CLI equivalents are `agentctl plan submit`, `get`, and `wait`. `plan submit` reads a bounded JSON node file. A node has `node_id` (or `id`), `depends_on` (or `dependencies`), and either `operation` plus `parameters`, or `payload` when `node_operation` is supplied. The graph is checked for duplicate IDs, undeclared dependencies, cycles, node and edge bounds, and descriptor parameter validity before any job is created.
-
-Each plan node stores only its ID, operation, parameter digest, dependency node IDs, exact registered checkout identity, job ID, and bounded result references. Its durable job carries the plan and node identity and explicit dependency job IDs: a node with unmet dependencies holds `waiting-dependencies` until they succeed, then launches; independent ready nodes launch concurrently, bounded by pueue's per-group parallelism. pueue remains the process, timeout, cancellation, and terminal-result authority.
-
-A resubmitted plan runs its nodes again; nothing is reused from a prior plan. A plan manifest and node jobs survive daemon restart; recovery finds already-created node jobs by their durable plan and node identity, preserving their logs and results.
-
-For Lynchpin integration, its descriptor must mark the node operation with `plan_node = true`, declare every accepted payload field under `[operations.<node-operation>.parameters]`, and set the operation's `exec`, `pool`, `result`, and `timeout_seconds` fields as appropriate. Each submission must provide a node list whose payloads contain no undeclared fields. A node operation should use `result = "json"` or `result = "pytest"` when Lynchpin needs a typed receipt.
+An opt-in refill timer per project (`sinnix.services.sinnixd.refill.<id> =
+{ limit; onCalendar; }`) runs `agentctl refill <id> --limit N`; it is the only
+timer that starts lanes.
 
 ## Limits
 
-Every numeric or duration constant that survives in `pkgs/sinnixd/sinnixd/`.
+| constant                                   | origin                                                                  | stands for                                                       |
+| ------------------------------------------ | ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `limits.DEFAULT_TIMEOUT_SECONDS` (3,600)   | arbitrary bound                                                         | the job timeout when an operation declares none                  |
+| `limits.MAX_AGENT_TIMEOUT_SECONDS` (14,400)| measurement (a 1h ceiling forced serial re-launch rounds on real lanes) | the agent job timeout                                            |
+| `limits.MAX_DECLARED_OPERATION_TIMEOUT_SECONDS` (28,800) | arbitrary bound                                           | the ceiling on a declared `timeout_seconds`                      |
+| `limits.AGENT_MEMORY_MAX` (10G)            | half of the job plane's MemoryHigh                                      | the hard ceiling of one agent's scope                            |
+| `pueue.CALL_TIMEOUT_SECONDS` (60)          | arbitrary bound (a minute distinguishes a wedged daemon from a slow one) | max time for one `pueue` round trip                              |
+| `worktrunk.LIST_SCHEMA_VERSION` (2)        | external tool's contract                                                | the `wt list` JSON schema this module parses                     |
+| `worktrunk.CALL_TIMEOUT_SECONDS` (60)      | arbitrary bound (covers one cold forge round trip)                      | max time for one `wt` round trip                                 |
+| `queue_run.MAX_LOG_BYTES` / `MAX_RESULT_BYTES` (64,000) | arbitrary bound                                            | caps on the captured log and typed result                        |
+| `queue_run.TIMEOUT_EXIT_CODE` (124)        | external tool's contract (`timeout(1)`)                                 | the wrapper enforced the declared timeout                        |
+| `queue_run.REFUSED_EXIT_CODE` (125)        | arbitrary bound                                                         | a pre-run refusal (vanished working directory, unreadable input) |
+| `lanes.PUSH_TIMEOUT_SECONDS` (2,400)       | arbitrary bound (the push runs the repository's pre-push gate)          | timeout for `git push` during publication                        |
+| `lanes.GH_TIMEOUT_SECONDS` (60)            | arbitrary bound                                                         | timeout for one `gh`/`git` call                                  |
+| `packets.MAX_PROMPT_BYTES` (200,000)       | arbitrary bound                                                         | cap on a compiled prompt                                         |
+| `packets.MAX_SUBJECT_LENGTH` (72)          | repository commit convention                                            | cap on a PR subject                                              |
+| `backpressure.IO_FULL_FREEZE` (25%)        | measurement (io full avg10 reached 76% under eight normal-pool jobs)    | the IO stall that freezes a group                                |
+| `backpressure.MEMORY_FULL_FREEZE` (25%)    | half of systemd-oomd's kill threshold                                   | the memory stall that freezes a group                            |
+| `backpressure.RESUME_BELOW` (10%)          | arbitrary bound                                                         | both stalls must fall below this before a group thaws            |
+| `schedule.SYSTEMCTL_TIMEOUT_SECONDS` (10)  | arbitrary bound                                                         | timeout for one `systemctl`/`systemd-run` call                   |
+| `operator_view.MAX_READY_SHOWN` (8) / `MAX_FAILED_SHOWN` (6) | arbitrary bound                                       | rows the screen shows                                            |
 
-| constant                                                                                                              | origin                                                                                                                                                           | stands for                                                                              | action when exceeded                                                                        |
-| --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `limits.DEFAULT_TIMEOUT_SECONDS` (3,600)                                                                              | arbitrary bound                                                                                                                                                  | the job timeout used when an operation declares none                                    | jobs run with this ceiling instead of an unbounded one                                      |
-| `limits.MAX_AGENT_TIMEOUT_SECONDS` (14,400)                                                                           | measurement (a 1h ceiling forced serial re-launch rounds on real implementation lanes)                                                                           | the timeout ceiling for shell and attested-agent jobs                                   | `valid_timeout_seconds` rejects a declared value above it                                   |
-| `limits.MAX_DECLARED_OPERATION_TIMEOUT_SECONDS` (28,800)                                                              | arbitrary bound (fits full test suites and long source/automaton batches under one fixed deadline `sinnixd-queue-run` enforces)                                  | the timeout ceiling for `declared-operation` jobs                                       | descriptor parsing rejects a value above it                                                 |
-| `pueue.CALL_TIMEOUT_SECONDS` (60)                                                                                     | arbitrary bound (a minute distinguishes a wedged daemon from a slow one)                                                                                         | max time to wait for one `pueue` CLI round trip                                         | `PueueError` naming the call as timed out                                                   |
-| `worktrunk.LIST_SCHEMA_VERSION` (2)                                                                                   | external tool's contract (`wt`'s `list --format=json` schema)                                                                                                    | the `wt list` JSON schema this module parses                                            | `WorktrunkError` if `wt` publishes a different schema                                       |
-| `worktrunk.CALL_TIMEOUT_SECONDS` (60)                                                                                 | arbitrary bound (covers one cold forge round trip)                                                                                                               | max time to wait for one `wt` CLI round trip                                            | `WorktrunkError` naming the call as timed out                                               |
-| `queue_run.MAX_LOG_BYTES` (64,000)                                                                                    | arbitrary bound                                                                                                                                                  | cap on a queued command's captured combined log                                         | output past the bound is truncated with `OVERFLOW_MARKER`                                   |
-| `queue_run.MAX_RESULT_BYTES` (64,000)                                                                                 | arbitrary bound                                                                                                                                                  | cap on a queued command's typed result artifact                                         | oversized result is rejected/truncated with `OVERFLOW_MARKER`                               |
-| `queue_run.TIMEOUT_EXIT_CODE` (124)                                                                                   | external tool's contract (`timeout(1)`'s own exit code)                                                                                                          | the exit status reported when the wrapper enforces the declared timeout                 | job recorded with this exit code, read as timed out                                         |
-| `queue_run.REFUSED_EXIT_CODE` (125)                                                                                   | arbitrary bound (a sentinel distinct from any real command exit code)                                                                                            | the exit status for a pre-run refusal (stale checkout binding, unreadable launch input) | job recorded as refused, never executed                                                     |
-| `jobs.DEFAULT_WAIT_SECONDS` (30)                                                                                      | arbitrary bound                                                                                                                                                  | default `job.wait` duration when the caller specifies none                              | used as the default `timeout_seconds`                                                       |
-| `jobs.MAX_WAIT_SECONDS` (3,600)                                                                                       | arbitrary bound                                                                                                                                                  | ceiling on `job.wait`'s `timeout_seconds`                                               | rejected with "wait timeout_seconds must be between 1 and …"                                |
-| `jobs.MAX_TERMINAL_EVENT_ENTRIES` (4,096)                                                                             | arbitrary bound                                                                                                                                                  | cap on retained terminal-event dedupe entries                                           | oldest entries beyond the cap are dropped                                                   |
-| `jobs.MAX_EVENT_SPOOL_BYTES` (64 MiB)                                                                                 | arbitrary bound                                                                                                                                                  | cap on the completion-event spool file size                                             | the file is rolled to `events.jsonl.old` before the next append                             |
-| `jobs.SYSTEMD_COMMAND_TIMEOUT_SECONDS` (0.25)                                                                         | measurement (a local systemd unit call is sub-second; this budget catches a hang quickly)                                                                        | timeout for local `systemctl` calendar-timer commands                                   | `TimerError` naming the command as timed out                                                |
-| `jobs.MAX_LOG_BYTES` (64,000)                                                                                         | arbitrary bound, matches `queue_run.MAX_LOG_BYTES`                                                                                                               | cap on job log bytes served over `job.logs`                                             | output past the bound is truncated                                                          |
-| `jobs.MAX_LOG_ARTIFACT_BYTES` (1,048,576)                                                                             | arbitrary bound                                                                                                                                                  | cap on bytes read from a private log artifact on disk                                   | `_read_private_artifact` reads only up to the bound                                         |
-| `jobs.MAX_RESULT_BYTES` (64,000)                                                                                      | arbitrary bound                                                                                                                                                  | cap on job result bytes served over `job.result`                                        | oversized result artifact is rejected                                                       |
-| `jobs.MAX_HANDOFF_BYTES` (64,000)                                                                                     | arbitrary bound                                                                                                                                                  | cap on a job's handoff payload                                                          | `write_handoff` raises `JobRecordError`                                                     |
-| `jobs.JOB_SCHEMA_VERSION` (7)                                                                                         | internal schema contract (durable job record format)                                                                                                             | the current job record schema version                                                   | a record whose stored version is outside the accepted set fails to load                     |
-| `jobs.SCHEDULE_STATE_SCHEMA_VERSION` (1)                                                                              | internal schema contract                                                                                                                                         | the durable schedule-map record format                                                  | a mismatched record fails to load                                                           |
-| `jobs.CAPACITY_SCHEMA_VERSION` (1)                                                                                    | internal schema contract                                                                                                                                         | the durable capacity-retry state format                                                 | a mismatched record fails to load                                                           |
-| `jobs.SCHEDULE_RECONCILE_INTERVAL_SECONDS` (300.0)                                                                    | arbitrary bound                                                                                                                                                  | poll interval for the schedule-timer reconciliation loop                                | the loop wakes and reconciles at this cadence, no faster                                    |
-| `jobs.CAPACITY_RETRY_DELAYS_SECONDS` (5, 30, 120)                                                                     | arbitrary bound (a backoff schedule)                                                                                                                             | retry delays after a provider-capacity failure                                          | once the attempt count exceeds the tuple's length the job is terminal                       |
-| `contracts.MAX_PROMPT_BYTES` (200,000)                                                                                | arbitrary bound                                                                                                                                                  | cap on an attested-agent prompt                                                         | rejected as invalid before launch                                                           |
-| `packets.MAX_PROMPT_BYTES` (200,000)                                                                                  | arbitrary bound (a compiled packet travels as a plan-node payload and must fit under `project_plans.MAX_NODE_PAYLOAD_BYTES` with room for the node's own fields) | cap on a compiled packet's prompt                                                       | packet compilation raises an error naming the byte budget                                   |
-| `harvest.RECEIPT_SCHEMA_VERSION` (1)                                                                                  | internal schema contract                                                                                                                                         | the harvest receipt record format                                                       | a mismatched or missing version makes the receipt invalid                                   |
-| `harvest.MAX_RECEIPT_BYTES` (64,000)                                                                                  | arbitrary bound                                                                                                                                                  | cap on the serialized harvest receipt                                                   | `HarvestError` before the receipt is written                                                |
-| `harvest.MAX_DIFF_BYTES` (2,000,000)                                                                                  | arbitrary bound                                                                                                                                                  | cap on the captured review diff                                                         | `HarvestError` before the receipt is written                                                |
-| `harvest.MAX_COMMAND_OUTPUT_BYTES` (256,000)                                                                          | arbitrary bound                                                                                                                                                  | cap on captured stdout/stderr from one harvest command                                  | output past the bound is truncated                                                          |
-| `harvest.PUSH_TIMEOUT_SECONDS` (2,400)                                                                                | arbitrary bound (the push runs the repository's own pre-push verification gate, not a bare network call)                                                         | timeout for `git push` during publication                                               | the push is treated as failed                                                               |
-| `project_plans.MAX_PLAN_NODES` (256)                                                                                  | arbitrary bound                                                                                                                                                  | max nodes in one submitted plan                                                         | plan submission rejected as malformed                                                       |
-| `project_plans.MAX_PLAN_DEPENDENCIES` (1,024)                                                                         | arbitrary bound                                                                                                                                                  | max total dependency edges in one plan                                                  | plan submission rejected as malformed                                                       |
-| `project_plans.MAX_PLAN_ID_BYTES` (64)                                                                                | arbitrary bound                                                                                                                                                  | max length of a plan or node ID                                                         | ID rejected as malformed                                                                    |
-| `project_plans.MAX_PLAN_RESULT_BYTES` (64,000)                                                                        | arbitrary bound                                                                                                                                                  | cap on a plan node's stored result reference                                            | oversized result rejected                                                                   |
-| `project_plans.MAX_NODE_PAYLOAD_BYTES` (256,000)                                                                      | arbitrary bound (decides whether a large bead can be dispatched as a plan node at all)                                                                           | cap on one plan node's encoded payload                                                  | node submission rejected as malformed                                                       |
-| `operator_view.STALE_QUEUED_SECONDS` (1,200)                                                                          | arbitrary bound                                                                                                                                                  | how long a queued job may wait before the operator view flags it as stuck               | job listed under the view's stale-wait section                                              |
-| `operator_view.STALE_RUNNING_SECONDS` (harvest 1,800 / verify_quick 1,200 / verify_affected 5,400 / verify_all 7,200) | arbitrary bound, per operation kind                                                                                                                              | how long each operation kind may run before the operator view flags it as stuck         | job listed under the view's stale-wait section                                              |
-| `operator_view.GHOST_SECONDS` (86,400)                                                                                | arbitrary bound                                                                                                                                                  | how long an active job may go without a fresh record before the view calls it a ghost   | job listed under the view's ghost section                                                   |
-| `operator_view.MAX_LANES` (64)                                                                                        | arbitrary bound                                                                                                                                                  | cap on lanes rendered in the operator view's timeline                                   | listing truncated to the most recent entries                                                |
-| `lane_facts.DORMANT_AFTER_SECONDS` (259,200 = 3 days)                                                                 | measurement (the first fact-driven tick verified and harvested dozens of abandoned worktrees, 2026-09-02 12:19Z)                                                 | how long since a lane finished, with no open PR, before it is treated as dormant        | dormant workspaces are excluded from advancement                                            |
-| `lane_facts.REVIEW_DECISION_TIMEOUT_SECONDS` (15)                                                                     | arbitrary bound                                                                                                                                                  | timeout for the `gh pr view --json reviewDecision` call                                 | the call is treated as failed; review decision reads as unknown                             |
-| `lane_facts._CLOSED_BEADS_TTL_SECONDS` (300.0)                                                                        | arbitrary bound                                                                                                                                                  | how long a closed-bead lookup is cached                                                 | cache entry is treated as stale and re-fetched                                              |
-| `workspaces.WORKSPACE_SCHEMA_VERSION` (1)                                                                             | internal schema contract                                                                                                                                         | the durable workspace-relationship record format                                        | a mismatched record fails to load                                                           |
-| `workspaces.CHECKPOINT_SCHEMA_VERSION` (1)                                                                            | internal schema contract                                                                                                                                         | the durable checkpoint record format                                                    | a mismatched record fails to load                                                           |
-| `workspaces.MAX_CHECKPOINT_BYTES` (64 MiB)                                                                            | arbitrary bound                                                                                                                                                  | cap on one checkpoint's stored diff/archive content                                     | checkpoint creation or restore raises `WorkspaceError`                                      |
-| `workspaces.MAX_UNTRACKED_FILES` (4,096)                                                                              | arbitrary bound                                                                                                                                                  | cap on untracked files a checkpoint will archive                                        | checkpoint creation raises `WorkspaceError`                                                 |
-| `runner.AGENT_PREFLIGHT_TIMEOUT_SECONDS` (30)                                                                         | arbitrary bound                                                                                                                                                  | timeout for a project's declared `environment.preflight` before an agent backend starts | typed job terminates before the backend runs, with a runner error                           |
-| `retrospective.MAX_SOURCE_BYTES` (128,000)                                                                            | arbitrary bound                                                                                                                                                  | cap on the source evidence bundle handed to the retrospective model                     | input rejected before the model call                                                        |
-| `retrospective.MAX_PROMPT_BYTES` (180,000)                                                                            | arbitrary bound                                                                                                                                                  | cap on the retrospective model prompt                                                   | input rejected before the model call                                                        |
-| `retrospective.MAX_PROPOSALS` (12)                                                                                    | arbitrary bound                                                                                                                                                  | cap on Beads proposals filed from one retrospective run                                 | proposals past the cap are dropped                                                          |
-| `retrospective.MAX_FIELD_LENGTH` (4,000)                                                                              | arbitrary bound                                                                                                                                                  | cap on one proposal field's length                                                      | proposal rejected as malformed                                                              |
-| `api.MAX_FRAME_BYTES` (1,048,576)                                                                                     | protocol limit (the daemon's own JSON-RPC framing)                                                                                                               | cap on one request/response frame over the Unix socket                                  | connection closed as a protocol violation                                                   |
-| `api.CONNECTION_TIMEOUT_SECONDS` (5.0)                                                                                | arbitrary bound                                                                                                                                                  | timeout for accepting/reading a new client connection                                   | connection dropped                                                                          |
-| `api.WAIT_TRANSPORT_MARGIN_SECONDS` (5.0)                                                                             | arbitrary bound                                                                                                                                                  | extra time added to a wait operation's transport budget beyond its declared wait window | response returned before the client's own timeout fires                                     |
-| `api.DEFAULT_RESPONSE_BUDGET_SECONDS` (15.0)                                                                          | arbitrary bound                                                                                                                                                  | default per-operation response budget for operations that don't declare their own       | server drops the request as overdue                                                         |
-| `api.ACCEPT_POLL_SECONDS` (0.1)                                                                                       | arbitrary bound                                                                                                                                                  | poll cadence for the connection-accept loop                                             | loop wakes and checks for new connections at this cadence                                   |
-| `api.RESERVED_CONTROL_WORKERS` (2)                                                                                    | arbitrary bound                                                                                                                                                  | worker threads reserved for control operations, held back from the wait pool            | wait requests beyond the remaining pool are queued or rejected                              |
-| `api.MAX_JSON_RPC_ERROR_MESSAGE_BYTES` (1,024)                                                                        | arbitrary bound                                                                                                                                                  | cap on a JSON-RPC error message returned to a client                                    | message truncated to the bound                                                              |
-| `api.max_workers` (18)                                                                                                | arbitrary bound (event-driven waits park a thread on a condition, so a wide pool is cheap)                                                                       | size of the connection-handling thread pool                                             | connections beyond the pool queue for a worker                                              |
-| `projects.MAX_OPERATION_PARAMETERS` (32)                                                                              | arbitrary bound                                                                                                                                                  | max parameters one declared operation may define                                        | descriptor parsing rejects the operation                                                    |
-| `projects.MAX_PARAMETER_LIST_ITEMS` (32)                                                                              | arbitrary bound                                                                                                                                                  | max items in a `string-list`/`enum-list` parameter value                                | value rejected as malformed                                                                 |
-| `projects.MAX_PARAMETER_STRING_LENGTH` (128)                                                                          | arbitrary bound                                                                                                                                                  | max length of a `string`/`enum` parameter value                                         | value rejected as malformed                                                                 |
-| `projects.MAX_PARAMETER_ENUM_VALUES` (64)                                                                             | arbitrary bound                                                                                                                                                  | max values in a declared `enum` parameter                                               | descriptor parsing rejects the operation                                                    |
-| `projects.MAX_OPERATION_SCHEDULE_LENGTH` (256)                                                                        | arbitrary bound                                                                                                                                                  | max length of a declared `schedule` (`OnCalendar`) expression                           | descriptor parsing rejects the operation                                                    |
-| `projects.MAX_OPERATION_VERDICT_OUTCOMES` (32)                                                                        | arbitrary bound                                                                                                                                                  | max named outcomes a declared verdict may enumerate                                     | descriptor parsing rejects the operation                                                    |
-| `projects.MIN_PARAMETER_INTEGER` / `MAX_PARAMETER_INTEGER` (signed 32-bit range)                                      | protocol limit (systemd/pueue argv and job records carry these as signed 32-bit integers)                                                                        | the inclusive range a declared `integer` parameter's `min`/`max` must fall within       | descriptor parsing rejects the operation                                                    |
-| `projects.DEFAULT_WORKSPACE_PROVISION_TIMEOUT_SECONDS` (600)                                                          | arbitrary bound                                                                                                                                                  | default timeout for a `[workspace.provision]` declaration                               | provisioning treated as timed out (declaration is parsed but no longer executed by sinnixd) |
+## Host wiring
 
-Constants with no defensible origin beyond an arbitrary bound are marked as such above rather than assigned a false measurement or protocol source; none of them lacked a reader. `operator_view.STALE_LANE_WAIT_SECONDS` had no reader anywhere in the tree and has been deleted.
+`modules/services/sinnixd.nix` renders `/etc/sinnix/agentctl.json`
+(`project_roots`, `agent_runner`, `event_spool`, `agentctl`), installs
+`agentctl`, `wt`, `pueue` and `gh` as system packages, persists
+`~/.local/state/sinnixd`, and declares the timers: `sinnixd-backpressure`
+(every minute), `sinnixd-schedule` (every fifteen minutes, and two minutes
+after login), and one `sinnixd-refill-<project>` per opt-in refill entry. pueued itself, its groups, its completion callback and the
+`sinnixd-work.slice` placement are declared by the CLI feature
+(`modules/features/cli/core.nix`).
 
-## Shared protocol
-
-All requests and responses use `sinnix-mcp` v1. Every request carries an explicit principal, canonical dotted operation, owner, request ID, and correlation ID. Responses preserve owner identity, typed errors, bounded payloads, and optional source-generation bindings. `OwnerRegistry` rejects overlapping operation namespaces, so a frontend cannot silently choose an owner for a domain operation.
-
-Project adapters are the local semantic boundary. A descriptor declares what an operation means: its pool, timeout, and result contract. The daemon supplies launch and lifecycle mechanics. It does not infer semantics from a command basename.
-
-The Polylogue adapter can declare the harvest operation with `result = "json"` and executable `sinnixd-harvest`. `agentctl lane publish <workspace> [--close]` is the publication route: one invocation resolves the workspace, derives the lane job and bead from the job records, mints the review receipt, and authorizes it, reading the PR title/body and close reason from the worktree's `.lane/` artifacts. The publication repo comes from the worktree's `origin` remote. Scanner red flags are computed and recorded on the receipt for audit either way. The two-step route (an unauthorised invocation compiling a `review-required` receipt, then a second `--authorize` invocation naming `receipt_ref`) remains for coordinators who want to read the receipt before publishing. `HARVEST_OK`, `REBASE_CONFLICT`, and `GATE_RED` are typed JSON outcomes; unexpected dependency failures remain failed jobs. An affected-verification refusal (`unavailable`) is spooled as a `verification-unavailable` event.
+`nix build .#sinnixd` runs the package suite, which drives a private pueued
+end to end for the adapter and fakes it for the launch and lane routes.

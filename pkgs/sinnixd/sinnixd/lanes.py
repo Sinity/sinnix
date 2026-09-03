@@ -17,7 +17,7 @@ from typing import Any, Mapping, Sequence
 
 from . import launch, worktrunk
 from .config import Config
-from .limits import AGENT_MEMORY_MAX, MAX_AGENT_TIMEOUT_SECONDS
+from .limits import MAX_AGENT_TIMEOUT_SECONDS
 from .packets import (
     PacketConfig,
     PacketError,
@@ -148,9 +148,10 @@ def queue_agent(
     backend: str,
     model: str,
     effort: str,
-    memory_max: str = AGENT_MEMORY_MAX,
     timeout_seconds: int = MAX_AGENT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
+    if project.workspace is None:
+        raise LaneError(f"project {project.project_id} declares no [workspace]")
     prompt_path = _write_prompt(worktree, prompt_name, prompt)
     result_path = worktree / ".lane" / f"{prompt_name.rsplit('.', 1)[0]}.result.md"
     label = f"{project.project_id}:{operation}:{bead_id}"
@@ -174,7 +175,7 @@ def queue_agent(
             backend=backend,
             model=model,
             effort=effort,
-            memory_max=memory_max,
+            memory_max=project.workspace.agent_memory_max,
         ),
         working_directory=worktree,
         timeout_seconds=timeout_seconds,
@@ -192,7 +193,6 @@ def lane_start(
     backend: str | None = None,
     model: str | None = None,
     effort: str | None = None,
-    memory_max: str = AGENT_MEMORY_MAX,
 ) -> dict[str, Any]:
     """Compile the prompt, create the worktree, queue the agent."""
     packets = PacketConfig.load(project.root)
@@ -230,7 +230,6 @@ def lane_start(
         backend=snapshot.dimensions.backend,
         model=snapshot.dimensions.model,
         effort=snapshot.dimensions.effort,
-        memory_max=memory_max,
     )
     return {
         "bead": snapshot.leader_id,
@@ -364,7 +363,6 @@ def lane_rebase(
     backend: str | None = None,
     model: str | None = None,
     effort: str | None = None,
-    memory_max: str = AGENT_MEMORY_MAX,
 ) -> dict[str, Any]:
     """Queue an agent with the rebase prompt into the bead's existing worktree."""
     packets = PacketConfig.load(project.root)
@@ -388,7 +386,6 @@ def lane_rebase(
         backend=backend or packets.default_backend,
         model=model or packets.default_model,
         effort=effort or packets.default_effort,
-        memory_max=memory_max,
     )
     return {"bead": bead_id, "branch": branch, "worktree": str(tree.path), "job": job}
 

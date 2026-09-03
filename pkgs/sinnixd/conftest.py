@@ -242,6 +242,7 @@ inherit = ["PATH"]
 [workspace]
 root = "{worktrees}"
 default_base = "origin/master"
+agent_memory_max = "10G"
 
 [packets]
 template = "contract.md"

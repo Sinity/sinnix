@@ -43,22 +43,20 @@ agents report patches or commit only by explicit instruction.
    (not the main checkout), and is on the expected branch before trusting
    any output — `isolation: "worktree"` can silently fail to create one, in
    which case the agent runs directly in the main checkout and its diff is
-   not isolated, and its writes land in the live tree. For AgentCTL-managed
-   workspaces, use
-   `agentctl workspace get <workspace-id>` and require `identity_matches`,
-   the expected path and branch, and the exact reported HEAD.
+   not isolated, and its writes land in the live tree. For lanes started by
+   `agentctl lane start`, `wt list --format=json` in the project names the
+   worktree, its branch and its HEAD.
 
 ### Post-agent merge checklist
 
-1. Verify the workspace's reported exact HEAD and clean/dirty state with
-   `agentctl workspace get <workspace-id>`.
-2. Checkpoint dirty work before recovery or integration; do not copy changes
+1. Verify the worktree's HEAD and clean/dirty state (`git status`, `wt list`).
+2. Commit dirty work before recovery or integration; do not copy changes
    between checkouts as a substitute for preserving their Git identity.
-3. Use `agentctl lane publish <workspace-id> [--close]` for delivery;
-   dependent histories rebase onto their parent branch by hand.
-4. After GitHub merges the PR, use `agentctl workspace drop <workspace-id>`;
-   for abandoned work drop with `--force` once its checkpoint and divergence
-   evidence is resolved.
+3. `agentctl lane publish <worktree>` delivers: push, PR, auto-merge.
+   Dependent histories rebase onto their parent branch by hand.
+4. After GitHub merges the PR, `agentctl lane sync <project>` closes the bead
+   and removes the worktree; abandoned work is `wt remove --force` once its
+   divergence evidence is resolved.
 
 ### Foreground-only execution
 

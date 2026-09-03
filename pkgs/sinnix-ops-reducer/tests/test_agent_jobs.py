@@ -12,74 +12,52 @@ from sinnix_ops_reducer.agent_jobs import (
 )
 
 
-def response(value: dict) -> subprocess.CompletedProcess[str]:
-    return subprocess.CompletedProcess(
-        ["agentctl"],
-        0,
-        stdout=json.dumps({"ok": True, "payload": {"kind": "inline", "value": value}}),
-    )
+def response(value: object) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(["agentctl"], 0, stdout=json.dumps(value))
 
 
-def test_list_preserves_daemon_order_and_paging_for_an_exactly_bounded_page() -> None:
+def test_list_keeps_the_newest_bounded_page_in_queue_order() -> None:
     calls: list[list[str]] = []
-    jobs = [
-        {
-            "job_id": f"job-{number}",
-            "created_at": f"2026-08-23T{10 + number // 60:02d}:{number % 60:02d}:00Z",
-        }
-        for number in range(MAX_SNAPSHOT_JOBS)
-    ]
+    jobs = [{"job_id": number, "label": "p:op"} for number in range(MAX_SNAPSHOT_JOBS + 5)]
 
     def runner(command, **_kwargs):
         calls.append(command)
-        return response(
-            {"jobs": jobs, "truncated": True, "next_cursor": "cursor-page-2"}
-        )
+        return response(jobs)
 
     listed = AgentCtlClient("fixture-agentctl", runner=runner).list()
     assert calls == [["fixture-agentctl", "job", "list"]]
     assert listed["truncated"] is True
-    assert listed["next_cursor"] == "cursor-page-2"
     assert len(listed["jobs"]) == MAX_SNAPSHOT_JOBS
-    assert listed["jobs"][0]["job_id"] == "job-0"
+    assert listed["jobs"][0]["job_id"] == 5
+    assert listed["jobs"][-1]["job_id"] == MAX_SNAPSHOT_JOBS + 4
 
 
-@pytest.mark.parametrize(
-    "value",
-    [
-        {"jobs": [], "truncated": True, "next_cursor": None},
-        {"jobs": [], "truncated": False, "next_cursor": "unexpected"},
-        {"jobs": ["not-a-job"], "truncated": False, "next_cursor": None},
-        {
-            "jobs": [{}] * (MAX_SNAPSHOT_JOBS + 1),
-            "truncated": False,
-            "next_cursor": None,
-        },
-    ],
-)
-def test_list_rejects_contradictory_or_unbounded_pages(value: dict) -> None:
+@pytest.mark.parametrize("value", [{"jobs": []}, ["not-a-job"], "x"])
+def test_list_rejects_anything_but_a_job_array(value: object) -> None:
     client = AgentCtlClient(
         "fixture-agentctl", runner=lambda *_args, **_kwargs: response(value)
     )
-
     with pytest.raises(AgentCtlError):
         client.list()
 
 
-def test_get_and_cancel_require_a_typed_inline_job_response() -> None:
+def test_get_and_cancel_require_a_job_object_with_an_id() -> None:
     calls: list[list[str]] = []
 
     def runner(command, **_kwargs):
         calls.append(command)
-        return response({"job_id": command[-1], "state": {"terminal": False}})
+        return response({"job_id": int(command[-1]), "phase": "running"})
 
     client = AgentCtlClient("fixture-agentctl", runner=runner)
-    assert client.get("job-1")["job_id"] == "job-1"
-    assert client.cancel("job-1")["job_id"] == "job-1"
+    assert client.get(3)["job_id"] == 3
+    assert client.cancel("3")["job_id"] == 3
     assert calls == [
-        ["fixture-agentctl", "job", "get", "job-1"],
-        ["fixture-agentctl", "job", "cancel", "job-1"],
+        ["fixture-agentctl", "job", "get", "3"],
+        ["fixture-agentctl", "job", "cancel", "3"],
     ]
+    bare = AgentCtlClient(runner=lambda *_a, **_k: response({"phase": "running"}))
+    with pytest.raises(AgentCtlError, match="no job ID"):
+        bare.get(3)
 
 
 def test_rejects_unbounded_and_unsuccessful_cli_output() -> None:
@@ -89,6 +67,6 @@ def test_rejects_unbounded_and_unsuccessful_cli_output() -> None:
     with pytest.raises(AgentCtlError, match="exceeds"):
         AgentCtlClient(runner=lambda *_args, **_kwargs: oversized).list()
 
-    rejected = subprocess.CompletedProcess(["agentctl"], 1, stdout="{}")
+    rejected = subprocess.CompletedProcess(["agentctl"], 1, stdout="[]")
     with pytest.raises(AgentCtlError, match="rejected"):
         AgentCtlClient(runner=lambda *_args, **_kwargs: rejected).list()
