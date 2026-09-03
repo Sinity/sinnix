@@ -1,138 +1,181 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 # @sinnix-package
 # description: Remove unheld nix-shell.* scratch directories from TMPDIR and /tmp
-# runtimeInputs: bash coreutils psmisc
+# runtimeInputs: coreutils
+"""Reclaim leaked devshell scratch trees.
 
-set -euo pipefail
+Every `nix develop` creates a `nix-shell.*` directory as the devshell's
+TMPDIR and removes it only on a clean exit, so a killed shell leaks one. The
+population is bounded by cleanup, not by age: the criterion here is solely
+whether a live process holds the tree.
 
-usage() {
-  cat >&2 <<'EOF'
-usage: sinnix-tmp-sweep [--dry-run]
+A directory is held when a process has it, or anything beneath it, as cwd,
+root, executable, an open descriptor, or the value of TMPDIR / TMP / TEMP /
+NIX_BUILD_TOP in its environment. Environment ownership is the case an
+open-file probe cannot see: an idle devshell whose shell sits in another cwd
+still owns its scratch tree.
+
+/proc is walked exactly once, after the candidate list is taken. Once, because
+a probe repeated per candidate rescans every process on the host and turns a
+few thousand directories into minutes of CPU. After, because a directory
+created later is then not a candidate at all, which is what keeps a devshell
+starting mid-sweep safe.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import sys
+
+HOLDER_VARS = (b"TMPDIR=", b"TMP=", b"TEMP=", b"NIX_BUILD_TOP=")
+PREFIX = "nix-shell."
+
+USAGE = """usage: sinnix-tmp-sweep [--dry-run]
 
 Remove `nix-shell.*` scratch directories that no live process holds, from
-$TMPDIR and from /tmp. Every `nix develop` invocation creates one such
-directory as the devshell's TMPDIR and removes it only on a clean exit; a
-killed shell leaks it, so the population is bounded by cleanup, not by age.
+$TMPDIR and from /tmp. Only directories owned by the invoking user are
+considered; anything else is counted as skipped.
+"""
 
-A directory is held when a live process has it (or anything beneath it) as
-cwd, root, executable, an open descriptor, or the value of TMPDIR / TMP /
-TEMP / NIX_BUILD_TOP in its environment. Environment ownership is the case
-`fuser` cannot see: an idle devshell whose shell sits in another cwd still
-owns its scratch tree.
 
-Only directories owned by the invoking user are considered; anything else is
-counted as skipped.
-EOF
-}
+def roots() -> list[str]:
+    found: list[str] = []
+    for candidate in (os.environ.get("TMPDIR"), "/tmp"):
+        if not candidate:
+            continue
+        try:
+            resolved = os.path.realpath(candidate)
+        except OSError:
+            continue
+        if os.path.isdir(resolved) and resolved not in found:
+            found.append(resolved)
+    return found
 
-dry_run=0
-case "${1:-}" in
-  -h | --help)
-    usage
-    exit 0
-    ;;
-  --dry-run)
-    dry_run=1
-    ;;
-  "") ;;
-  *)
-    usage
-    exit 64
-    ;;
-esac
 
-roots=()
-add_root() {
-  local candidate=$1 existing
-  [ -n "$candidate" ] || return 0
-  [ -d "$candidate" ] || return 0
-  for existing in ${roots[@]+"${roots[@]}"}; do
-    [ "$existing" = "$candidate" ] && return 0
-  done
-  roots+=("$candidate")
-}
-add_root "${TMPDIR:-}"
-add_root /tmp
+def collect_candidates(root: str, uid: int) -> tuple[list[str], int]:
+    """Owned `nix-shell.*` directories directly under root, plus a skip count."""
+    candidates: list[str] = []
+    skipped = 0
+    try:
+        entries = list(os.scandir(root))
+    except OSError:
+        return candidates, skipped
+    for entry in entries:
+        if not entry.name.startswith(PREFIX):
+            continue
+        try:
+            if not entry.is_dir(follow_symlinks=False):
+                continue
+            if entry.stat(follow_symlinks=False).st_uid != uid:
+                skipped += 1
+                continue
+        except OSError:
+            continue
+        candidates.append(entry.path)
+    return candidates, skipped
 
-# Candidates first, then the /proc scan: a directory created after this
-# listing is never a deletion candidate, which is what keeps a devshell that
-# starts mid-sweep safe.
-candidates=()
-declare -A skipped=()
-for root in "${roots[@]}"; do
-  skipped["$root"]=0
-  for dir in "$root"/nix-shell.*; do
-    [ -d "$dir" ] || continue
-    if [ ! -O "$dir" ]; then
-      skipped["$root"]=$((skipped["$root"] + 1))
-      continue
-    fi
-    candidates+=("$dir")
-  done
-done
 
-declare -A held=()
-mark() {
-  local path=$1 root rest
-  case $path in
-    /*) ;;
-    *) return 0 ;;
-  esac
-  for root in "${roots[@]}"; do
-    case $path in
-      "$root"/nix-shell.*)
-        rest=${path#"$root"/}
-        held["$root/${rest%%/*}"]=1
-        return 0
-        ;;
-    esac
-  done
-}
+def held_directories(candidates: set[str], root_list: list[str]) -> set[str]:
+    """One /proc walk; every path seen is reduced to the candidate containing it."""
+    held: set[str] = set()
 
-scan_proc() {
-  local proc link fd
-  for proc in /proc/[0-9]*; do
-    for link in cwd root exe; do
-      mark "$(readlink "$proc/$link" 2>/dev/null || true)"
-    done
-    for fd in "$proc"/fd/*; do
-      mark "$(readlink "$fd" 2>/dev/null || true)"
-    done
-    # Unreadable environ (another user's process) simply contributes nothing;
-    # such a process cannot hold a directory this sweep is allowed to remove.
-    while IFS= read -r entry; do
-      case $entry in
-        TMPDIR=* | TMP=* | TEMP=* | NIX_BUILD_TOP=*) mark "${entry#*=}" ;;
-      esac
-    done < <({ tr '\0' '\n' <"$proc/environ"; } 2>/dev/null || true)
-  done
-}
+    def claim(path: str) -> None:
+        for root in root_list:
+            if not path.startswith(root + "/"):
+                continue
+            segment = path[len(root) + 1 :].partition("/")[0]
+            owner = root + "/" + segment
+            if owner in candidates:
+                held.add(owner)
+            return
 
-if [ ${#candidates[@]} -gt 0 ]; then
-  scan_proc
-fi
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        proc = "/proc/" + pid
+        for link in ("cwd", "root", "exe"):
+            try:
+                claim(os.readlink(proc + "/" + link))
+            except OSError:
+                pass
+        try:
+            fds = os.listdir(proc + "/fd")
+        except OSError:
+            fds = []
+        for fd in fds:
+            try:
+                claim(os.readlink(proc + "/fd/" + fd))
+            except OSError:
+                pass
+        # An unreadable environ (another user's process) contributes nothing;
+        # such a process cannot hold a directory this sweep may remove.
+        try:
+            with open(proc + "/environ", "rb") as handle:
+                blob = handle.read()
+        except OSError:
+            continue
+        for item in blob.split(b"\0"):
+            if item.startswith(HOLDER_VARS):
+                value = item.partition(b"=")[2]
+                try:
+                    claim(os.fsdecode(value))
+                except (UnicodeDecodeError, ValueError):
+                    pass
+        if held == candidates:
+            break
 
-declare -A removed=() kept=()
-for root in "${roots[@]}"; do
-  removed["$root"]=0
-  kept["$root"]=0
-done
+    return held
 
-for dir in ${candidates[@]+"${candidates[@]}"}; do
-  root=${dir%/nix-shell.*}
-  if [ -n "${held[$dir]:-}" ] || fuser -s "$dir" 2>/dev/null; then
-    kept["$root"]=$((kept["$root"] + 1))
-    continue
-  fi
-  if [ "$dry_run" -eq 1 ]; then
-    printf 'sinnix-tmp-sweep: would remove %s\n' "$dir"
-  else
-    rm -rf --one-file-system -- "$dir" || continue
-  fi
-  removed["$root"]=$((removed["$root"] + 1))
-done
 
-for root in "${roots[@]}"; do
-  printf 'sinnix-tmp-sweep: root=%s removed=%d held=%d skipped=%d\n' \
-    "$root" "${removed[$root]}" "${kept[$root]}" "${skipped[$root]}"
-done
+def main(argv: list[str]) -> int:
+    dry_run = False
+    if len(argv) > 1:
+        if argv[1] in ("-h", "--help"):
+            sys.stdout.write(USAGE)
+            return 0
+        if argv[1] == "--dry-run":
+            dry_run = True
+        else:
+            sys.stderr.write(USAGE)
+            return 64
+
+    uid = os.getuid()
+    root_list = roots()
+
+    candidates: dict[str, list[str]] = {}
+    skipped: dict[str, int] = {}
+    for root in root_list:
+        candidates[root], skipped[root] = collect_candidates(root, uid)
+
+    every = {path for paths in candidates.values() for path in paths}
+    held = held_directories(every, root_list) if every else set()
+
+    for root in root_list:
+        removed = 0
+        kept = 0
+        for path in candidates[root]:
+            if path in held:
+                kept += 1
+                continue
+            if dry_run:
+                print(f"sinnix-tmp-sweep: would remove {path}")
+            else:
+                errors: list[BaseException] = []
+                shutil.rmtree(path, onerror=lambda _f, _p, info: errors.append(info[1]))
+                if errors:
+                    print(
+                        f"sinnix-tmp-sweep: could not remove {path}: {errors[0]}",
+                        file=sys.stderr,
+                    )
+                    continue
+            removed += 1
+        print(
+            f"sinnix-tmp-sweep: root={root} removed={removed} "
+            f"held={kept} skipped={skipped[root]}"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
