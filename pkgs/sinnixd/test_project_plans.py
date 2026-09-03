@@ -139,10 +139,21 @@ def test_ready_nodes_run_concurrently_and_keep_dependency_job_ids(
             {"id": "c", "operation": "prepare", "depends_on": ["a", "b"]},
         ],
     )
-    assert len(fake_pueue.added) == 2
+    # Every node is submitted at once; pueue holds the dependent behind its
+    # `--after` edges rather than sinnixd withholding the submission.
+    assert len(fake_pueue.added) == 3
     nodes = {node["node_id"]: node for node in result["nodes"]}
     child = jobs.store.load(nodes["c"]["job_id"])
     assert child.spec.dependency_job_ids == (nodes["a"]["job_id"], nodes["b"]["job_id"])
+    child_task = next(
+        added
+        for added in fake_pueue.added
+        if added["label"].endswith(nodes["c"]["job_id"])
+    )
+    assert set(child_task["after"]) == {
+        jobs.store.load(nodes["a"]["job_id"]).queue_task_id,
+        jobs.store.load(nodes["b"]["job_id"]).queue_task_id,
+    }
     assert child.spec.exclusive_keys == ()
 
 
