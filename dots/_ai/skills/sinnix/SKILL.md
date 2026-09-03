@@ -1,13 +1,13 @@
 ---
 name: sinnix
-description: Work on Sinnix NixOS configuration, modules, scripts, dotfiles, AgentCTL, Sinnixd, the agent gateway, rebuilds, activation, or live workstation verification.
+description: Work on Sinnix NixOS configuration, modules, scripts, dotfiles, agentctl, the agent gateway, rebuilds, activation, or live workstation verification.
 ---
 
 # Sinnix
 
-Sinnix declares the workstation, user environment, fixed services, and the
-common local AgentCTL runtime. Read the root `CLAUDE.md` before editing; use
-`docs/sinnixd.md` and `docs/agent-gateway.md` for those contracts.
+Sinnix declares the workstation, user environment, fixed services, and
+`agentctl`. Read the root `CLAUDE.md` before editing; use `docs/sinnixd.md`
+and `docs/agent-gateway.md` for those contracts.
 
 ## Map
 
@@ -15,7 +15,7 @@ common local AgentCTL runtime. Read the root `CLAUDE.md` before editing; use
   profiles, and module factories.
 - `flake/`: host construction, data registries, script discovery, packages,
   and checks.
-- `pkgs/`: real packages, including Sinnixd and the agent gateway.
+- `pkgs/`: real packages, including agentctl and the agent gateway.
 - `scripts/`: auto-discovered small tools with required frontmatter.
 - `dots/`: live Home Manager out-of-store links, including shared skills and
   agent instructions.
@@ -32,7 +32,7 @@ lanes use `mkCaptureLane`. A bypass needs a structural reason.
 `modules/features/dev/agents/` renders them. The bare `claude` wrapper is lean;
 the upstream installer owns `~/.local/bin/claude`.
 
-Sinnixd and AgentCTL are in `pkgs/sinnixd/`; the gateway is in
+agentctl is in `pkgs/sinnixd/`; the gateway is in
 `pkgs/sinnix-agent-gateway/`. Inspect `.agentctl/project.toml` and
 `agentctl project operations sinnix` rather than restating operation names.
 

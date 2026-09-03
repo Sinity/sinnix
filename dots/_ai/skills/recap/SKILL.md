@@ -46,8 +46,8 @@ Prepare for session end:
 - Suggested next steps
 - Worth remembering (for CLAUDE.md or scratch)
 
-Before compaction or interruption, include active AgentCTL job and workspace
-IDs, Beads IDs and claims, exact Git state, changed files, verification already
+Before compaction or interruption, include active `agentctl` job ids and lane
+worktrees, Beads IDs and claims, exact Git state, changed files, verification already
 run, and the single next action. On re-entry, verify those records before
 continuing instead of reconstructing state from prose alone.
 

@@ -19,9 +19,8 @@ scanner flags.
   all cleared. Never publish migrations, gates/baselines, security or excision
   work, large deletions, retained compatibility code, or uncleared verdicts;
   recommend escalation instead.
-- Use the existing typed harvest authorization route for publication. Include
-  this reviewer identity (`review-lane`, model family, and model) in the
-  publication body. Do not close a bead without a literal `DISPOSITION: close`
-  decision-time receipt.
+- Publish through `agentctl lane publish <worktree>`. Include this reviewer
+  identity (`review-lane`, model family, and model) in the PR body. Do not
+  close a bead without a literal `DISPOSITION: close` decision.
 - Report once with disposition, evidence, exact commands, and the required
   machine trailer. Do not spawn another reviewer or a fix loop.

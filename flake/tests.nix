@@ -35,7 +35,6 @@ in
     ./tests/agent-environment.nix
     ./tests/lane-toolbelt.nix
     ./tests/agent-parity.nix
-    ./tests/swarm-fixture.nix
     ./tests/observability.nix
     ./tests/cli.nix
     ./tests/git-languages.nix

@@ -5,9 +5,9 @@
 # demand by AI agent runtimes via the stdio transport registered in
 # mcp-registry.nix.
 #
-# A daily oneshot starts one bounded convergence operation. The runtime owns
-# admission, logs, cancellation, and the exclusive promotion lease; the
-# operation returns only after materialization, verification, and publication.
+# A daily oneshot queues one bounded convergence operation. pueue owns the
+# pool, logs and cancellation; the operation returns only after
+# materialization, verification, and publication.
 #
 # Enable with:
 #   sinnix.services.lynchpin.enable = true;

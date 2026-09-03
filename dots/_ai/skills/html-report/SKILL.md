@@ -286,9 +286,7 @@ dashboard, a filesystem census — should be emitted by a script, not hand-writt
 each time. Hand-authored recurring reports rot in a specific way: sections get
 updated at different moments and start contradicting each other, and claims
 outlive the evidence that once supported them. The generator genre fixes both
-structurally. Reference implementation: polylogue's
-`devtools workspace beads-state-report` (the "Beads backlog — state of the
-graph" artifact), which demonstrates every rule below at 1,500-entity scale.
+structurally.
 
 - **Findings are conditional predicates, not prose.** Each finding is emitted
   by a condition the generator checks at render time — a claim that stops being
