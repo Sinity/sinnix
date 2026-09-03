@@ -1054,6 +1054,12 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 "dependencies",
                 "scratch",
                 "supersede",
+                # Polylogue (dev_loop_proof, deployment_browser_smoke,
+                # live_provider_proof) and Sinex (dev_services) still declare
+                # `service` port leases. Nothing allocates ports now; those
+                # operations must take their ports from the environment or be
+                # withdrawn, and this key goes when they do.
+                "service",
             },
         )
         if set(definition) - allowed_operation:
