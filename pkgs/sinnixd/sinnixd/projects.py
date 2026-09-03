@@ -1227,6 +1227,16 @@ class ProjectCatalog:
                     ) from error
             raise KeyError(f"unknown project: {project_id}") from error
 
+    def declared_pools(self) -> dict[str, tuple[str, ...]]:
+        """Every pueue group the loaded descriptors name, and who names it."""
+        pools: dict[str, set[str]] = {}
+        for project in self._adapters.values():
+            for operation in project.operations:
+                pools.setdefault(operation.pool, set()).add(
+                    f"{project.project_id}.{operation.name}"
+                )
+        return {pool: tuple(sorted(names)) for pool, names in sorted(pools.items())}
+
     def scheduled_operations(
         self,
     ) -> tuple[tuple[ProjectAdapter, ProjectOperation], ...]:

@@ -31,6 +31,17 @@ class PueueError(RuntimeError):
     """pueue refused a request or published output this module cannot read."""
 
 
+class PueueGroupError(PueueError):
+    """The named group does not exist. A configuration defect, never transient."""
+
+    def __init__(self, group: str) -> None:
+        self.group = group
+        super().__init__(
+            f"pueue has no group {group!r}; create it with "
+            f"`pueue group add {group}` and set its parallelism"
+        )
+
+
 @dataclass(frozen=True)
 class Task:
     """One entry of ``pueue status --json``, reduced to what sinnixd reads."""
@@ -158,7 +169,14 @@ def add(
         arguments.extend(["--after", str(dependency)])
     arguments.append("--")
     arguments.extend(command)
-    printed = _run(arguments).strip()
+    try:
+        printed = _run(arguments).strip()
+    except PueueError:
+        # A missing group is the one add failure that retrying cannot fix.
+        # Ask pueue which groups exist rather than matching its error text.
+        if group not in groups():
+            raise PueueGroupError(group) from None
+        raise
     try:
         return int(printed.splitlines()[-1])
     except (IndexError, ValueError) as error:

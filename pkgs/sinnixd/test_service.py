@@ -1431,8 +1431,10 @@ def test_declared_and_foreground_jobs_share_the_generic_route(
     assert fake_task_id(jobs, launch["job_id"]) in fake_pueue.killed
 
 
-def test_declared_operation_timeout_contract_reaches_systemd(tmp_path: Path) -> None:
-    """Anti-vacuity: a descriptor timeout must become the transient unit bound."""
+def test_declared_operation_timeout_contract_reaches_the_queued_command(
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: a descriptor timeout must reach the wrapper that enforces it."""
     write_adapter(tmp_path)
     descriptor = tmp_path / ".agentctl" / "project.toml"
     descriptor.write_text(
@@ -6738,3 +6740,112 @@ def test_operation_checkout_policy_is_closed(tmp_path: Path) -> None:
     )
     with pytest.raises(ProjectConfigError, match="operations.check.checkout"):
         ProjectCatalog([tmp_path])
+
+
+def test_wait_blocks_in_pueue_until_the_task_is_terminal(
+    tmp_path: Path, fake_pueue: FakePueue
+) -> None:
+    """Anti-vacuity: sampling the record instead of waiting returns `running`.
+
+    The fake only finishes the task when someone actually waits on it, so a
+    wait that polls observation returns the non-terminal phase and fails here.
+    """
+    jobs = generic_jobs(tmp_path)
+    started = jobs.start_foreground(
+        command=("fixture",),
+        working_directory=str(tmp_path),
+        environment={"PATH": ""},
+    )
+    task_id = fake_task_id(jobs, started["job_id"])
+    fake_pueue.running(task_id)
+    fake_pueue.finish_when_waited(task_id, lambda pueue: pueue.succeed(task_id))
+
+    status = jobs.wait(started["job_id"], timeout_seconds=5)
+
+    assert fake_pueue.waited == [task_id]
+    assert status["state"]["terminal"]
+    assert status["state"]["phase"] == "succeeded"
+    assert "wait_timed_out" not in status
+
+
+def test_wait_reports_a_timeout_without_claiming_a_terminal_phase(
+    tmp_path: Path, fake_pueue: FakePueue
+) -> None:
+    jobs = generic_jobs(tmp_path)
+    started = jobs.start_foreground(
+        command=("fixture",),
+        working_directory=str(tmp_path),
+        environment={"PATH": ""},
+    )
+    fake_pueue.running(fake_task_id(jobs, started["job_id"]))
+
+    status = jobs.wait(started["job_id"], timeout_seconds=1)
+
+    assert status["wait_timed_out"] is True
+    assert status["state"]["phase"] == "running"
+    assert not status["state"]["terminal"]
+
+
+def test_an_unknown_pool_refuses_the_launch_and_names_the_repair(
+    tmp_path: Path, fake_pueue: FakePueue
+) -> None:
+    """A group pueue does not have is a configuration defect; retrying cannot fix it.
+
+    Anti-vacuity: treating it as a transient launch error leaves the job
+    non-terminal and silent, which is how the first live job reported nothing.
+    """
+    del fake_pueue.groups["interactive"]
+    jobs = generic_jobs(tmp_path)
+
+    started = jobs.start_foreground(
+        command=("fixture",),
+        working_directory=str(tmp_path),
+        environment={"PATH": ""},
+    )
+
+    assert started["state"]["terminal"]
+    assert started["state"]["phase"] == "launch-failed"
+    message = started["state"]["error"]["message"]
+    assert "interactive" in message
+    assert "pueue group add interactive" in message
+
+
+def test_a_launch_error_survives_re_observation(
+    tmp_path: Path, fake_pueue: FakePueue
+) -> None:
+    """Anti-vacuity: rebuilding state from an absent task dropped the only
+    account of why the job never started, leaving a bare launch-unknown."""
+    fake_pueue.fail_add = True
+    jobs = generic_jobs(tmp_path)
+    started = jobs.start_foreground(
+        command=("fixture",),
+        working_directory=str(tmp_path),
+        environment={"PATH": ""},
+    )
+    assert started["state"]["phase"] == "launch-unknown"
+
+    observed = jobs.get(started["job_id"])
+
+    assert observed["state"]["phase"] == "launch-unknown"
+    assert observed["state"]["error"] == started["state"]["error"]
+
+
+def test_status_names_every_declared_pool_pueue_cannot_provide(
+    tmp_path: Path, fake_pueue: FakePueue
+) -> None:
+    """Anti-vacuity: without this, a missing group is discovered by a failed job.
+
+    The fixture's operations name `normal`; removing the group must surface in
+    status with the operations that need it and the command that repairs it.
+    """
+    write_adapter(tmp_path)
+    del fake_pueue.groups["normal"]
+    service = SinnixdService(ProjectCatalog([tmp_path]), jobs=generic_jobs(tmp_path))
+
+    status = service.dispatch(request("runtime.status", "sinnixd", {}, "operator"))
+
+    assert status.ok and status.payload is not None
+    missing = status.payload.inline["queue"]["missing_pools"]
+    assert [entry["pool"] for entry in missing] == ["normal"]
+    assert missing[0]["repair"] == "pueue group add normal"
+    assert missing[0]["declared_by"]

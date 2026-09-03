@@ -18,6 +18,7 @@ from sinnix_mcp import (
     ResponseEnvelope,
 )
 
+from . import pueue
 from .campaign import CampaignRunner, WaveDrainedError
 from .contracts import TypedJobContracts
 from .delivery import DeliveryError, GitHubDelivery
@@ -280,6 +281,38 @@ class SinnixdService:
             "owners": self.owners.catalog(),
             "projects": len(self.projects.list()),
             "backend_capacity": self.jobs.capacity_status(),
+            "queue": self._queue_status(),
+        }
+
+    def _queue_status(self) -> dict[str, Any]:
+        """Whether pueue can run what the descriptors declare.
+
+        A pool no group provides fails every launch that names it, so status
+        reports the gap rather than leaving it to the first dispatch.
+        """
+        declared = self.projects.declared_pools()
+        try:
+            available = pueue.groups()
+        except PueueError as error:
+            return {
+                "available": False,
+                "error": str(error),
+                "declared_pools": sorted(declared),
+            }
+        missing = {
+            pool: names for pool, names in declared.items() if pool not in available
+        }
+        return {
+            "available": True,
+            "groups": available,
+            "missing_pools": [
+                {
+                    "pool": pool,
+                    "declared_by": list(names),
+                    "repair": f"pueue group add {pool}",
+                }
+                for pool, names in sorted(missing.items())
+            ],
         }
 
     def _op_project_list(
