@@ -142,16 +142,6 @@ in
               message = "Clodex startup must run alias reconciliation and the stale-patch check as one-line store scripts.";
             }
             {
-              assertion =
-                let
-                  preStart = toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre;
-                in
-                lib.hasInfix ".claudeVersion" preStart
-                && lib.hasInfix ".patchedSize" preStart
-                && lib.hasInfix "run clodex patch" preStart;
-              message = "Clodex startup must validate the structured patch manifest without rewriting the CLI.";
-            }
-            {
               assertion = lib.any (
                 entry: (if builtins.isAttrs entry then entry.directory else entry) == ".clodex"
               ) config.sinnix.persistence.home.directories;
@@ -273,6 +263,10 @@ in
         '';
       };
       agentToolsRuntimeConfig = (evalTestSpec system devAgentToolsRuntimeSpec).config;
+      clodexPatchCheck =
+        builtins.elemAt
+          agentToolsRuntimeConfig.home-manager.users.${agentToolsRuntimeConfig.sinnix.user.name}.systemd.user.services.sinnix-clodex.Service.ExecStartPre
+          1;
       agentToolsCodexConfigSource =
         agentToolsRuntimeConfig.sinnix.features.dev.mcp-servers.codexConfigSource;
       agentToolsCodexFullConfigSource =
@@ -475,6 +469,11 @@ in
             test -L "$HOME/.gemini/config/AGENTS.md"
             test -L "$HOME/.config/claude/mcp.json"
             test -L "$HOME/.config/hermes/skills"
+            patch_check=${clodexPatchCheck}
+            test -x "$patch_check"
+            grep -Fq '.claudeVersion' "$patch_check"
+            grep -Fq '.patchedSize' "$patch_check"
+            grep -Fq 'run clodex patch' "$patch_check"
             test -x "$HOME/.local/bin/lane"
             bash -n "$HOME/.local/bin/lane"
             python3 - "$HOME/.hermes/config.yaml" <<'PYCODE'
