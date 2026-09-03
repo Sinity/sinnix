@@ -42,22 +42,25 @@ def _commit(root: Path, message: str, *, allow_empty: bool = False) -> None:
     )
 
 
-def test_list_pins_the_schema_it_parses_rather_than_reading_user_config(
-    tmp_path: Path,
+def test_list_pins_its_schema_over_a_user_config_that_selects_another(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Anti-vacuity: wt defaults to schema 1, so an unpinned call returns a list.
+    """Anti-vacuity: a user config selecting schema 1 must not reach the adapter.
 
-    Reading schema 1 would make every field access below silently wrong, which
-    is exactly what happens when sinnixd inherits the invoking user's config.
+    Schema 1 is a bare list with differently named fields, so reading it would
+    make every access below silently wrong. The config here selects it
+    explicitly, and the raw probe proves the config is in force, so dropping
+    the per-call pin turns this red on any machine.
     """
+    home = tmp_path / "home"
+    (home / ".config" / "worktrunk").mkdir(parents=True)
+    (home / ".config" / "worktrunk" / "config.toml").write_text(
+        "[list]\njson-schema = 1\n"
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
     root = _repository(tmp_path / "repo")
 
-    trees = worktrunk_list(root)
-
-    assert [tree.branch for tree in trees] == ["master"]
-    assert trees[0].main is True
-    assert trees[0].path == root
-    assert LIST_SCHEMA_VERSION == 2
     unpinned = subprocess.run(
         ["wt", "-C", str(root), "list", "--format=json"],
         capture_output=True,
@@ -65,8 +68,15 @@ def test_list_pins_the_schema_it_parses_rather_than_reading_user_config(
         check=True,
     )
     assert unpinned.stdout.lstrip().startswith("["), (
-        "wt's default is no longer schema 1; the pin may be re-examined"
+        "the fixture config must actually put wt on schema 1"
     )
+
+    trees = worktrunk_list(root)
+
+    assert LIST_SCHEMA_VERSION == 2
+    assert [tree.branch for tree in trees] == ["master"]
+    assert trees[0].main is True
+    assert trees[0].path == root
 
 
 def test_create_places_the_worktree_at_the_requested_path_and_remove_reverses_it(
