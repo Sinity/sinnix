@@ -1,8 +1,8 @@
 """The command every queued task runs.
 
 pueue owns the queue, the process, and the terminal result. It knows nothing
-about project descriptors, checkout bindings, result artifacts, or the event
-spool, so one wrapper carries those between the daemon and the command:
+about project descriptors, result artifacts, or the event spool, so one
+wrapper carries those between agentctl and the command:
 
     sinnixd-queue-run <private-input-path>
 
@@ -23,8 +23,6 @@ import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from .projects import ProjectConfigError, revalidate_registered_checkout
-
 # The bounded artifacts a queued command may leave behind. A command that
 # prints more is truncated with a marker, never allowed to fill the disk.
 MAX_LOG_BYTES = 64_000
@@ -35,8 +33,8 @@ OVERFLOW_MARKER = "\n[sinnixd: output truncated]\n"
 # 124 is what timeout(1) uses, so a reader needs no sinnixd-specific table.
 TIMEOUT_EXIT_CODE = 124
 
-# The status for a refusal before the command ran at all: a checkout that no
-# longer matches its binding, or an unreadable launch input.
+# The status for a refusal before the command ran at all: a working directory
+# that no longer exists, or an unreadable launch input.
 REFUSED_EXIT_CODE = 125
 
 RESULT_KINDS = frozenset({"exit", "json", "pytest", "last-message"})
@@ -152,15 +150,13 @@ def run(launch: Mapping[str, Any]) -> int:
     )
     result_kind = launch["result_kind"]
     result_path = Path(launch["result_path"]) if launch.get("result_path") else None
-    checkout = launch.get("checkout")
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    if checkout is not None:
-        try:
-            revalidate_registered_checkout(checkout)
-        except (ProjectConfigError, ValueError) as error:
-            log_path.write_text(f"checkout revalidation failed: {error}\n")
-            return REFUSED_EXIT_CODE
+    if not Path(launch["working_directory"]).is_dir():
+        log_path.write_text(
+            f"working directory is gone: {launch['working_directory']}\n"
+        )
+        return REFUSED_EXIT_CODE
 
     append_event(
         spool_path,
@@ -174,7 +170,7 @@ def run(launch: Mapping[str, Any]) -> int:
             "project": launch["project_id"],
             "operation": launch["operation"],
             "phase": "started",
-            **({"checkout": checkout.get("checkout_id")} if checkout else {}),
+            "working_directory": launch["working_directory"],
         },
     )
 
@@ -206,7 +202,7 @@ def run(launch: Mapping[str, Any]) -> int:
 
         # `pueue kill` sends SIGKILL, so no handler here can ever run and the
         # command's own session would outlive a cancel. Record the group the
-        # command leads; the daemon reaps it after asking pueue to kill.
+        # command leads; `agentctl job cancel` reaps it after pueue kills.
         group_path = Path(f"{log_path}.pgid")
         try:
             group_path.write_text(str(os.getpgid(process.pid)))
@@ -238,12 +234,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
     except QueueInputError as error:
         print(str(error), file=sys.stderr)
         return REFUSED_EXIT_CODE
-    # The private input carries the resolved environment; it must not outlive
-    # the exec that consumes it.
-    try:
-        parsed.launch_input.unlink()
-    except OSError:
-        pass
+    # The input stays for `pueue restart`: a retry re-executes this same
+    # command line. It is mode 0600 and lives with the task that names it.
     return run(launch)
 
 

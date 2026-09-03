@@ -1,6 +1,5 @@
-"""Local Sinnix runtime daemon and its agentctl frontend."""
+"""agentctl: jobs over pueue, lanes over worktrunk, gh and bd."""
 
 from .projects import ProjectAdapter, ProjectCatalog, ProjectOperation
-from .service import SinnixdService
 
-__all__ = ["ProjectAdapter", "ProjectCatalog", "ProjectOperation", "SinnixdService"]
+__all__ = ["ProjectAdapter", "ProjectCatalog", "ProjectOperation"]

@@ -1,157 +1,152 @@
+"""The operator screen renders pueue, worktrunk, gh and bd facts and nothing else."""
+
 from __future__ import annotations
 
-import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
-from sinnixd.operator_view import checks, load_jobs, render_lane_log, render_overview
+import pytest
+from conftest import FakeBd, FakePueue, bead
+from sinnixd import operator_view
+from sinnixd.config import Config
+from sinnixd.lanes import LaneRow
+from sinnixd.projects import load_project_adapter
+from sinnixd.pueue import Task
+from sinnixd.worktrunk import Worktree
 
-NOW = datetime(2026, 9, 2, 16, 0, tzinfo=UTC)
-
-
-def _job(
-    job_id: str,
-    operation: str,
-    phase: str,
-    workspace: str,
-    minutes_ago: int,
-    *,
-    terminal: bool = False,
-) -> dict:
-    created = (NOW - timedelta(minutes=minutes_ago)).isoformat()
-    return {
-        "job_id": job_id,
-        "created_at": created,
-        "spec": {
-            "project_id": "polylogue",
-            "kind": "declared-operation",
-            "operation": operation,
-            "checkout": {"path": f"/realm/worktrees/{workspace}"},
-        },
-        "state": {
-            "phase": phase,
-            "terminal": terminal,
-            "observed_at": NOW.isoformat(),
-            "blocked_by": ["pool-workers"],
-        },
-    }
+NOW = datetime(2026, 9, 3, 9, 0, tzinfo=UTC)
 
 
-STATUS = {
-    "project_id": "polylogue",
-    "master_corpus": {
-        "green": False,
-        "red": 398,
-        "passed": 20654,
-        "head": "966b7e0fb065",
-        "finished_at": (NOW - timedelta(minutes=10)).isoformat(),
-        "job_id": "4f98e6cc",
-    },
-    "lanes_next": [
-        {
-            "workspace": "packet-polylogue-a",
-            "bead": "polylogue-a",
-            "next": {"kind": "park", "reason": "CI red on the PR"},
-            "pr": {"number": 7, "checks_status": "failed", "mergeable": True},
-            "receipt": {"flags": ["FLAG: x"]},
-        },
-        {
-            "workspace": "packet-polylogue-b",
-            "bead": "polylogue-b",
-            "next": {"kind": "verify", "reason": "no receipt at head"},
-        },
-        {
-            "workspace": "packet-polylogue-c",
-            "bead": None,
-            "next": {"kind": "idle", "reason": "dormant workspace"},
-        },
-    ],
-    "errors": [],
-}
-
-
-def test_checks_name_every_stuck_thing_and_nothing_else() -> None:
-    """Anti-vacuity: each check has one fixture that trips it and one that does not."""
-    jobs = [
-        _job("11111111", "verify_affected", "queued", "packet-polylogue-b", 25),
-        _job("22222222", "harvest", "running", "packet-polylogue-a", 45),
-        _job("33333333", "verify_quick", "running", "packet-polylogue-a", 3),
-    ]
-    problems = checks(STATUS, jobs, now=NOW)
-    assert any("master corpus is RED: 398" in p for p in problems)
-    assert any("verify_affected packet-polylogue-b queued 25m" in p for p in problems)
-    assert any("harvest packet-polylogue-a running 45m" in p for p in problems)
-    assert not any("verify_quick" in p for p in problems)
-    assert any("packet-polylogue-a PARKED" in p for p in problems)
-    quiet = checks(
-        {
-            **STATUS,
-            "master_corpus": {
-                "green": True,
-                "red": 0,
-                "passed": 1,
-                "head": "x",
-                "finished_at": NOW.isoformat(),
-            },
-            "lanes_next": [],
-        },
-        [],
-        now=NOW,
+def task(task_id: int, label: str, *, status: str = "Running", result: str | None = None, exit_code: int | None = None, group: str = "normal") -> Task:
+    return Task(
+        task_id=task_id,
+        label=label,
+        group=group,
+        status=status,
+        result=result,
+        exit_code=exit_code,
+        path="/x",
+        dependencies=(),
+        command="sinnixd-queue-run /s/inputs/ref.json",
+        enqueued_at="2026-09-03T08:00:00+00:00",
+        started_at="2026-09-03T08:30:00+00:00",
+        ended_at="2026-09-03T08:40:00+00:00" if status == "Done" else None,
     )
-    assert quiet == []
 
 
-def test_overview_orders_lanes_by_urgency_and_hides_idle() -> None:
-    text = render_overview(STATUS, [], now=NOW)
-    assert text.index("packet-polylogue-a") < text.index("packet-polylogue-b")
-    assert "1 idle/done: packet-polylogue-c" in text
-    assert "PR 7 failed 1 flags" in text
-    ghost = _job("99999999", "harvest", "capacity", "packet-polylogue-old", 60 * 48)
-    text = render_overview(STATUS, [ghost], now=NOW)
-    assert "0 active, 1 ghosts older than a day" in text
-
-
-def test_lane_log_lists_jobs_and_events_in_time_order(tmp_path: Path) -> None:
-    spool = tmp_path / "events.jsonl"
-    spool.write_text(
-        json.dumps(
-            {
-                "kind": "dispatch",
-                "emitted_at": (NOW - timedelta(minutes=30)).isoformat(),
-                "workspace": "packet-polylogue-a",
-                "action": "verify",
-                "reason": "no receipt at head",
-            }
-        )
-        + "\n"
+def lane(branch: str, bead_id: str, *, pr: dict[str, Any] | None = None, state: str = "ahead", dirty: bool = False) -> LaneRow:
+    return LaneRow(
+        worktree=Worktree(branch=branch, path=Path("/w") / branch.replace("/", "-"), head="h", main=False, dirty=dirty, state=state),
+        bead=bead_id,
+        pr=pr,
     )
-    jobs = [
-        _job(
-            "22222222",
-            "verify_affected",
-            "succeeded",
-            "packet-polylogue-a",
-            29,
-            terminal=True,
+
+
+def snapshot(**overrides: Any) -> operator_view.Snapshot:
+    values: dict[str, Any] = {
+        "project_id": "fixture",
+        "now": NOW,
+        "tasks": (
+            task(1, "fixture:verify_all", group="pytest"),
+            task(2, "fixture:lane:fx-1", group="agent"),
+            task(3, "fixture:check", status="Done", result="Failed", exit_code=2),
+            task(4, "fixture:lane:fx-2", status="Done", result="Success", exit_code=0, group="agent"),
         ),
-        _job("44444444", "harvest", "running", "packet-polylogue-a", 5),
-        _job("55555555", "harvest", "running", "packet-polylogue-zzz", 5),
-    ]
-    text = render_lane_log("packet-polylogue-a", STATUS, jobs, spool, now=NOW)
-    assert "next: park — CI red on the PR" in text
-    body = text.split("== timeline")[1]
-    assert (
-        body.index("dispatch") < body.index("verify_affected") < body.index("harvest")
-    )
-    assert "zzz" not in text and "… running for 5m" in text
+        "groups": {"agent": "Running", "normal": "Paused", "pytest": "Running"},
+        "lanes": (
+            lane(
+                "feature/packet/fx-1",
+                "fx-1",
+                pr={
+                    "number": 41,
+                    "state": "OPEN",
+                    "mergeable": "CONFLICTING",
+                    "autoMergeRequest": {"enabledAt": "x"},
+                    "statusCheckRollup": [{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"}],
+                },
+            ),
+            lane(
+                "feature/packet/fx-2",
+                "fx-2",
+                pr={
+                    "number": 42,
+                    "state": "OPEN",
+                    "mergeable": "MERGEABLE",
+                    "statusCheckRollup": [
+                        {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "FAILURE"},
+                        {"__typename": "StatusContext", "state": "SUCCESS"},
+                    ],
+                },
+            ),
+            lane("feature/packet/fx-3", "fx-3", dirty=True),
+        ),
+        "ready": (bead("fx-9", "Ready work"),),
+    }
+    values.update(overrides)
+    return operator_view.Snapshot(**values)
 
 
-def test_load_jobs_filters_by_project(tmp_path: Path) -> None:
-    (tmp_path / "a.json").write_text(
-        json.dumps(_job("a", "harvest", "running", "w", 1))
-    )
-    other = _job("b", "harvest", "running", "w", 1)
-    other["spec"]["project_id"] = "sinex"
-    (tmp_path / "b.json").write_text(json.dumps(other))
-    (tmp_path / "c.json").write_text("{not json")
-    assert [j["job_id"] for j in load_jobs(tmp_path, "polylogue")] == ["a"]
+def test_render_shows_queue_groups_attention_items_active_jobs_lanes_and_ready() -> None:
+    """Breaks if a failed job, a conflicting PR, or red checks stop being flagged."""
+    text = operator_view.render(snapshot())
+
+    assert "== fixture at" in text
+    assert "normal idle PAUSED" in text
+    assert "agent 1 running" in text
+    assert "! job 3 fixture:check failed exit 2" in text
+    assert "! PR #41 feature/packet/fx-1 CONFLICTING" in text
+    assert "! PR #42 feature/packet/fx-2 checks failing" in text
+    assert "== jobs: 2 active" in text
+    assert "== lanes: 3" in text
+    assert "lane running #2" in text
+    assert "lane succeeded #4" in text
+    assert "PR #42 OPEN checks:fail mergeable" in text
+    assert "PR #41 OPEN checks:pass conflicting auto" in text
+    assert "ahead dirty" in text
+    assert "no PR" in text
+    assert "== ready: 1 beads" in text and "fx-9" in text
+
+
+def test_render_says_nothing_needs_attention_when_nothing_does() -> None:
+    text = operator_view.render(snapshot(tasks=(), lanes=(), ready=()))
+    assert "== nothing needs attention" in text
+    assert "== lanes: 0" in text
+
+
+def test_checks_summary_orders_fail_over_pending_over_pass() -> None:
+    assert operator_view._checks({"statusCheckRollup": []}) == "none"
+    assert operator_view._checks({"statusCheckRollup": [{"status": "IN_PROGRESS"}, {"conclusion": "SUCCESS", "status": "COMPLETED"}]}) == "pending"
+    assert operator_view._checks({"statusCheckRollup": [{"status": "IN_PROGRESS"}, {"conclusion": "FAILURE", "status": "COMPLETED"}]}) == "fail"
+    assert operator_view._checks({"statusCheckRollup": [{"state": "SUCCESS"}]}) == "pass"
+
+
+def test_collect_reads_each_source_and_keeps_going_when_one_is_down(
+    fake_pueue: FakePueue, config: Config, project_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = load_project_adapter(project_root)
+    fake_pueue.add(group="normal", label="fixture:check", command=("true",), working_directory=project_root)
+    fake_pueue.add(group="normal", label="other:check", command=("true",), working_directory=project_root)
+    monkeypatch.setattr(operator_view, "lane_rows", lambda project, full=False: [lane("feature/packet/fx-1", "fx-1")])
+    monkeypatch.setattr(operator_view, "SubprocessBdReader", lambda root: FakeBd(beads={"fx-1": bead("fx-1", "One")}))
+
+    collected = operator_view.collect(config, project, now=NOW)
+    assert [item.label for item in collected.tasks] == ["fixture:check"]
+    assert [row.bead for row in collected.lanes] == ["fx-1"]
+    assert [item["id"] for item in collected.ready] == ["fx-1"]
+    assert collected.errors == ()
+
+    fake_pueue.fail_tasks = True
+    degraded = operator_view.collect(config, project, now=NOW)
+    assert degraded.tasks == ()
+    assert degraded.errors and degraded.errors[0].startswith("pueue:")
+    assert "! pueue:" in operator_view.render(degraded)
+
+
+def test_to_dict_is_the_same_facts_as_json() -> None:
+    payload = snapshot().to_dict()
+    assert payload["schema"] == "sinnix.agentctl.view.v2"
+    assert [job["job_id"] for job in payload["jobs"]] == [1, 2, 3, 4]
+    assert payload["lanes"][0]["pr"]["checks"] == "pass"
+    assert payload["lanes"][1]["pr"]["checks"] == "fail"
+    assert payload["lanes"][2]["pr"] is None

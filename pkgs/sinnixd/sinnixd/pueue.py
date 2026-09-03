@@ -1,6 +1,6 @@
 """The pueue adapter: the queue, its groups, and one task's observable state.
 
-Sinnixd does not queue, admit, throttle, retry, or reap. pueued does, and its
+agentctl does not queue, admit, throttle, retry, or reap. pueued does, and its
 own state is the record. This module is the only place that shells out to it.
 """
 
@@ -54,6 +54,12 @@ class Task:
     exit_code: int | None
     path: str
     dependencies: tuple[int, ...]
+    # The queued command line as pueue stores it. The wrapper's launch-input
+    # path inside it is how a task's artifacts are found without a ledger.
+    command: str = ""
+    enqueued_at: str | None = None
+    started_at: str | None = None
+    ended_at: str | None = None
 
     @property
     def terminal(self) -> bool:
@@ -80,7 +86,15 @@ class Task:
             exit_code=exit_code,
             path=str(entry.get("path") or ""),
             dependencies=tuple(int(value) for value in entry.get("dependencies") or ()),
+            command=str(entry.get("command") or ""),
+            enqueued_at=_stamp(detail.get("enqueued_at")),
+            started_at=_stamp(detail.get("start")),
+            ended_at=_stamp(detail.get("end")),
         )
+
+
+def _stamp(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
 
 
 def _variant(value: Any) -> tuple[str, Mapping[str, Any]]:
