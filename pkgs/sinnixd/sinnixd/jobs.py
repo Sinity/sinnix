@@ -33,7 +33,7 @@ from .projects import (
     RegisteredCheckout,
     revalidate_registered_checkout,
 )
-from .pueue import PueueError, Task
+from .pueue import PueueError, PueueGroupError, Task
 
 DEFAULT_WAIT_SECONDS = 30
 MAX_WAIT_SECONDS = 3600
@@ -47,6 +47,7 @@ MAX_HANDOFF_BYTES = 64_000
 JOB_SCHEMA_VERSION = 7
 JOB_UNIT_PREFIX = "sinnixd-job-"
 QUEUE_ERROR_CODE = "queue-job-error"
+QUEUE_CONFIGURATION_ERROR_CODE = "queue-configuration-error"
 SCHEDULE_STATE_SCHEMA_VERSION = 1
 SCHEDULE_UNIT_PREFIX = "sinnixd-schedule-"
 CAPACITY_SCHEMA_VERSION = 1
@@ -1861,6 +1862,8 @@ class GenericJobs:
                 working_directory=Path(spec.working_directory),
                 after=self._dependency_task_ids(spec.dependency_job_ids),
             )
+        except PueueGroupError as error:
+            return self._refuse_launch(record, str(error))
         except PueueError:
             return self._reconcile_launch_error(record)
         queued = replace(record, queue_task_id=task_id)
@@ -2329,23 +2332,34 @@ class GenericJobs:
             )
         deadline = time.monotonic() + timeout_seconds
         while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                with self.store.locked(job_id):
-                    record = self.store.load(job_id)
-                    return {
-                        **self._public(record, record.state),
-                        "wait_timed_out": True,
-                    }
             with self.store.locked(job_id):
-                status = self._get_locked(
-                    job_id,
-                    wait_deadline=deadline,
-                )
+                status = self._get_locked(job_id)
+                queue_task_id = self.store.load(job_id).queue_task_id
             if status["state"]["terminal"]:
                 return status
-            if time.monotonic() >= deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 return {**status, "wait_timed_out": True}
+            if queue_task_id is not None:
+                # pueue holds the task until it reaches a final state, so the
+                # wait blocks there rather than sampling the record. Polling
+                # returns a running phase to a caller that asked for the
+                # terminal one.
+                try:
+                    pueue.wait(queue_task_id, timeout_seconds=remaining)
+                except PueueError:
+                    # A wait that could not be placed is not evidence about the
+                    # job; re-observe after a bounded pause.
+                    self.events.wait_terminal(
+                        (job_id,),
+                        min(
+                            self.wait_poll_seconds,
+                            max(0.0, deadline - time.monotonic()),
+                        ),
+                    )
+                continue
+            # Nothing is queued yet: the job is waiting on a dependency or on a
+            # launch that failed, and only re-observation can advance it.
             self.events.wait_terminal(
                 (job_id,),
                 min(self.wait_poll_seconds, max(0.0, deadline - time.monotonic())),
@@ -2537,12 +2551,7 @@ class GenericJobs:
                 return task
         return None
 
-    def _get_locked(
-        self,
-        job_id: str,
-        *,
-        wait_deadline: float | None = None,
-    ) -> dict[str, Any]:
+    def _get_locked(self, job_id: str) -> dict[str, Any]:
         record = self.store.load(job_id)
         if record.state.get("phase") == "capacity":
             retry_at = self._capacity_retry_at(record)
@@ -2625,6 +2634,20 @@ class GenericJobs:
         self.store.save(updated)
         return self._public(updated, state)
 
+    def _refuse_launch(self, record: GenericJobRecord, message: str) -> dict[str, Any]:
+        """Terminalize a launch no retry can fix, naming what to repair."""
+        self.store.cleanup_queue_launch(record.job_id)
+        state = {
+            "phase": "launch-failed",
+            "error": {"code": QUEUE_CONFIGURATION_ERROR_CODE, "message": message},
+            "terminal": True,
+            "observed_at": _timestamp(),
+        }
+        updated = self._with_state(record, state)
+        self.store.save(updated)
+        self._finalize_terminal(updated)
+        return self._public(updated, state)
+
     @staticmethod
     def _observation_unknown_state() -> dict[str, Any]:
         """Keep transport failures retryable until pueue supplies an observation."""
@@ -2646,10 +2669,19 @@ class GenericJobs:
         }
         if task is None:
             if record.queue_task_id is None:
+                # The job never reached pueue, so pueue has nothing to say
+                # about it. The recorded launch error is the only account of
+                # why, and it holds until a retry replaces this state.
+                launch_error = record.state.get("error")
                 return {
                     **forensic,
-                    "phase": "launch-unknown",
-                    "terminal": False,
+                    "phase": record.state.get("phase") or "launch-unknown",
+                    **(
+                        {"error": dict(launch_error)}
+                        if isinstance(launch_error, Mapping)
+                        else {}
+                    ),
+                    "terminal": bool(record.state.get("terminal")),
                     "observed_at": _timestamp(),
                 }
             return {

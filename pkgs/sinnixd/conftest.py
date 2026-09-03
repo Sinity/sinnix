@@ -6,11 +6,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import pytest
 from sinnixd import pueue as pueue_module
-from sinnixd.pueue import PueueError, Task
+from sinnixd.pueue import PueueError, PueueGroupError, Task
 
 
 @dataclass
@@ -22,12 +22,19 @@ class FakePueue:
     added: list[dict[str, Any]] = field(default_factory=list)
     killed: list[int] = field(default_factory=list)
     removed: list[int] = field(default_factory=list)
+    waited: list[int] = field(default_factory=list)
+    _on_wait: dict[int, Callable[["FakePueue"], None]] = field(default_factory=dict)
     groups: dict[str, int] = field(
+        # The groups the deployed pueued creates. A pool outside this set is
+        # a configuration defect and the launch must refuse, exactly as it
+        # does on the machine.
         default_factory=lambda: {
             "default": 1,
-            "agent": 1,
+            "agent": 4,
             "interactive": 1,
             "normal": 1,
+            "pytest": 1,
+            "bulk": 1,
         }
     )
     fail_add: bool = False
@@ -44,6 +51,8 @@ class FakePueue:
     ) -> int:
         if self.fail_add:
             raise PueueError("fixture pueue add failed")
+        if group not in self.groups:
+            raise PueueGroupError(group)
         task_id = self.next_id
         self.next_id += 1
         self._tasks[task_id] = Task(
@@ -99,10 +108,21 @@ class FakePueue:
         self.removed.extend(task_ids)
 
     def wait(self, task_id: int, *, timeout_seconds: float) -> Task:
+        """Block like pueued does: run the pending transition, then answer."""
+        self.waited.append(task_id)
+        transition = self._on_wait.pop(task_id, None)
+        if transition is not None:
+            transition(self)
         task = self._tasks.get(task_id)
         if task is None or not task.terminal:
             raise PueueError(f"fixture task {task_id} never reached a terminal state")
         return task
+
+    def finish_when_waited(
+        self, task_id: int, transition: Callable[["FakePueue"], None]
+    ) -> None:
+        """Make a task terminal only when someone actually waits on it."""
+        self._on_wait[task_id] = transition
 
     def set_group(self, group: str, parallel_tasks: int) -> None:
         self.groups[group] = parallel_tasks
