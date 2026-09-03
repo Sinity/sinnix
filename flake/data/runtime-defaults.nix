@@ -254,6 +254,20 @@ rec {
         IOWeight = 300;
         MemoryLow = "2G";
       };
+      # System-manager counterparts of the user-side job plane below, for
+      # system units that participate in it. The memory ceiling stays on the
+      # user side alone: their heavy phases execute as pueue tasks there, and
+      # a second MemoryHigh here would double the plane's declared budget.
+      sinnixd = {
+        IOAccounting = true;
+        CPUWeight = 10;
+        IOWeight = 10;
+      };
+      sinnixd-work = {
+        IOAccounting = true;
+        CPUWeight = 100;
+        IOWeight = 100;
+      };
     };
     user = {
       agent = {
