@@ -15,7 +15,9 @@ refuses three things every conventional monitor shows:
     time and no verb fast enough, and the page says so instead of pretending.
 
 The action surface is the existing bounded API: `park` with a deadline on the
-scheduled backup units and `stop` on an admitted individual process.
+scheduled backup units, `stop` on an admitted individual process, and
+`interrupt` on a queued job. The queue card is pueue's groups: a paused group
+is the backpressure timer holding new work back.
 Where the taxonomy named an action the API cannot express -- a process-level
 stop, a MemoryHigh change on a slice -- the page names the gap. That is the
 /shaders/ doctrine: report, and say why the button is absent.
@@ -28,6 +30,7 @@ from typing import Any
 
 from .. import pressure as pressure_model
 from ..actions import process_admitted_slices
+from .queue import queue_card
 from .shell import (
     ACTION_SCRIPT,
     badge,
@@ -241,10 +244,8 @@ def available_card(reading: pressure_model.Sample) -> str:
 
 def hog_row(
     process: pressure_model.Process,
-    jobs_by_id: dict[str, dict[str, Any]],
     admitted_slices: frozenset[str] | set[str] = frozenset(),
 ) -> str:
-    lane = pressure_model.lane_of(process.unit, jobs_by_id)
     meta = [
         badge(process.cheapness, CHEAPNESS_TONE.get(process.cheapness, "muted")),
         f"{esc(bytes_human(process.rss_kb * 1024))} resident",
@@ -252,8 +253,8 @@ def hog_row(
         f"costs {esc(CHEAPNESS_NOTE.get(process.cheapness, 'unknown'))}",
         f"pid {process.pid}",
     ]
-    if lane:
-        meta.insert(1, f"<code>{esc(lane)}</code>")
+    if process.unit:
+        meta.insert(1, f"<code>{esc(process.unit)}</code>")
     if process.slice_unit:
         meta.append(esc(process.slice_unit))
     controls = ""
@@ -309,7 +310,6 @@ def session_summary(processes: list[pressure_model.Process]) -> str:
 
 def hogs_card(
     processes: list[pressure_model.Process],
-    jobs_by_id: dict[str, dict[str, Any]],
     admitted_slices: frozenset[str] | set[str] = frozenset(),
 ) -> str:
     if not processes:
@@ -325,8 +325,7 @@ def hogs_card(
         if process.cheapness == pressure_model.CHEAPNESS_SESSION
     ]
     blocks = "".join(
-        hog_row(process, jobs_by_id, admitted_slices)
-        for process in actionable[:HOG_ROWS]
+        hog_row(process, admitted_slices) for process in actionable[:HOG_ROWS]
     )
     blocks += session_summary(session)
     return (
@@ -430,18 +429,12 @@ def render_pressure(
 
     state = (snapshot or {}).get("state")
     state = state if isinstance(state, dict) else {}
-    gateway = state.get("agent_gateway") if isinstance(state, dict) else None
-    jobs = gateway.get("jobs") if isinstance(gateway, dict) else None
-    jobs_by_id = {
-        str(job["job_id"]): job
-        for job in (jobs if isinstance(jobs, list) else [])
-        if isinstance(job, dict) and job.get("job_id")
-    }
     body = regime_banner(regime)
     body += headroom_card(reading)
     body += stall_card(reading)
     body += io_card(reading)
-    body += hogs_card(processes, jobs_by_id, process_admitted_slices(inventory))
+    body += queue_card(state)
+    body += hogs_card(processes, process_admitted_slices(inventory))
     body += scheduled_card(runs, parkable_units(inventory))
     body += available_card(reading)
     body += log_card()

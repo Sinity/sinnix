@@ -765,38 +765,3 @@ def unit_run_facts(
             "active": properties.get("ActiveState") in {"active", "activating"},
         }
     return found
-
-
-AGENT_JOB_SERVICE = re.compile(r"^sinnixd-job-(?P<job>.+)\.service$")
-
-
-def lane_of(
-    unit: str,
-    jobs_by_id: dict[str, dict[str, Any]] | None = None,
-) -> str:
-    """An AgentCTL service unit resolved to a human-recognisable job lane."""
-    if not unit:
-        return ""
-    job_match = AGENT_JOB_SERVICE.match(unit)
-    if job_match:
-        job = (jobs_by_id or {}).get(job_match.group("job"))
-        if isinstance(job, dict):
-            checkout = (
-                job.get("checkout") if isinstance(job.get("checkout"), dict) else {}
-            )
-            contract = (
-                job.get("contract") if isinstance(job.get("contract"), dict) else {}
-            )
-            worktree = str(checkout.get("path") or job.get("worktree") or "")
-            where = Path(worktree).name if worktree else ""
-            named = " ".join(
-                part
-                for part in (
-                    str(contract.get("backend") or job.get("backend") or "agent"),
-                    str(contract.get("model") or job.get("model") or ""),
-                )
-                if part
-            )
-            return f"{named} in {where}" if where else named
-        return f"AgentCTL job {job_match.group('job')}"
-    return unit

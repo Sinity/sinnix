@@ -166,21 +166,26 @@ class Reducer:
     def _agent_jobs_snapshot(
         self, observed_at: str
     ) -> tuple[dict[str, Any], dict[str, Any]]:
+        empty = {"groups": {}, "jobs": [], "truncated": False}
         if self.agent_jobs_source is None:
             return (
-                {"jobs": [], "truncated": False},
+                empty,
                 {
                     "status": "disabled",
                     "source": "agentctl",
                     "observed_at": observed_at,
                     "freshness": "unknown",
-                    "degradation": "no AgentCTL client configured",
+                    "degradation": "no agentctl client configured",
                 },
             )
         try:
             value = self.agent_jobs_source()
-            if not isinstance(value, dict) or not isinstance(value.get("jobs"), list):
-                raise ValueError("AgentCTL collector returned an invalid jobs payload")
+            if (
+                not isinstance(value, dict)
+                or not isinstance(value.get("jobs"), list)
+                or not isinstance(value.get("groups"), dict)
+            ):
+                raise ValueError("job plane collector returned an invalid payload")
             return (
                 value,
                 {
@@ -193,7 +198,7 @@ class Reducer:
             )
         except Exception as error:
             return (
-                {"jobs": [], "truncated": False},
+                empty,
                 {
                     "status": "unavailable",
                     "source": "agentctl",

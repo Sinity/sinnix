@@ -425,6 +425,7 @@ class Handler(BaseHTTPRequestHandler):
                 error,
                 capability_index_path=self.server.capability_index_path,  # type: ignore[attr-defined]
                 usage_census_path=self.server.usage_census_path,  # type: ignore[attr-defined]
+                lanes_source=getattr(self.server, "lanes_source", None),
             ),
         )
 
@@ -634,6 +635,7 @@ def serve(
     sweep_interval: float = health.SWEEP_INTERVAL_SECONDS,
     capability_index_path: Path | None = capabilities.DEFAULT_INDEX,
     usage_census_path: Path | None = capabilities.DEFAULT_CENSUS,
+    lanes_source: pages.LanesSource | None = None,
 ) -> None:
     def stamp(server: ThreadingHTTPServer, is_unix: bool) -> None:
         server.reducer = reducer  # type: ignore[attr-defined]
@@ -643,6 +645,7 @@ def serve(
         server.inventory_path = inventory_path  # type: ignore[attr-defined]
         server.capability_index_path = capability_index_path  # type: ignore[attr-defined]
         server.usage_census_path = usage_census_path  # type: ignore[attr-defined]
+        server.lanes_source = lanes_source  # type: ignore[attr-defined]
         server.feedback = feedback  # type: ignore[attr-defined]
         server.elicit_model_dir = elicit_model_dir  # type: ignore[attr-defined]
         server.emitter_factory = emitter_factory  # type: ignore[attr-defined]

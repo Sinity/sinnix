@@ -22,7 +22,8 @@ from .shell import (
     row,
     tile,
 )
-from .work import agentctl_jobs, live_work_card, running_ledger
+from .queue import active_jobs
+from .work import live_work_card, running_ledger
 
 
 def psi_avg10(pressure: dict[str, Any], key: str) -> float | None:
@@ -145,7 +146,7 @@ def verdict(
         problems.append("memory is nearly exhausted")
 
     in_flight = running_ledger(state)
-    jobs = agentctl_jobs(state)
+    jobs = active_jobs(state)
     activity: list[str] = []
     if in_flight:
         named = ", ".join(
@@ -158,7 +159,7 @@ def verdict(
         )
         activity.append(f"running {named}")
     if jobs:
-        activity.append(f"{len(jobs)} AgentCTL job{'s' if len(jobs) != 1 else ''}")
+        activity.append(f"{len(jobs)} job{'s' if len(jobs) != 1 else ''} queued or running")
     if not activity:
         activity.append("no named work is running")
 
@@ -420,7 +421,7 @@ def render_dashboard(
     body = f'<div class="verdict {tone}"><p>{esc(sentence)}</p><p class="sub">{esc(detail)}</p></div>'
 
     in_flight = running_ledger(state)
-    jobs = agentctl_jobs(state)
+    jobs = active_jobs(state)
     cpu = psi_avg10(pressure, "cpu")
     tiles = [
         tile(str(len(failed)), "failed units", "bad" if failed else "ok", "/services/"),
@@ -430,7 +431,7 @@ def render_dashboard(
             "info" if in_flight else "",
             "/work/#running",
         ),
-        tile(str(len(jobs)), "AgentCTL jobs", "info" if jobs else "", "/work/"),
+        tile(str(len(jobs)), "jobs queued or running", "info" if jobs else "", "/work/"),
     ]
     if memory:
         share = memory[0] / memory[1]

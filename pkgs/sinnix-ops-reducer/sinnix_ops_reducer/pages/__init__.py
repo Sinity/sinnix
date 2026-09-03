@@ -46,7 +46,7 @@ from .probes import load_json
 from .services import render_services
 from .shaders import render_shaders
 from .shell import PAGES
-from .work import render_work
+from .work import LanesSource, render_work
 
 MANIFEST_SCHEMA = "sinnix-hub-manifest-v1"
 
@@ -127,13 +127,14 @@ def render(
     snapshot_error: str | None = None,
     capability_index_path: Path | None = capability_index.DEFAULT_INDEX,
     usage_census_path: Path | None = capability_index.DEFAULT_CENSUS,
+    lanes_source: LanesSource | None = None,
 ) -> str:
     generated = (
         dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
     )
     route = canonical(path)
     if route == "/work/":
-        return render_work(manifest, snapshot, inventory, generated)
+        return render_work(manifest, snapshot, inventory, generated, lanes_source)
     if route == "/pressure/":
         return render_pressure(manifest, snapshot, inventory, generated)
     if route == "/services/":
@@ -153,6 +154,7 @@ def render(
 
 __all__ = [
     "ALIASES",
+    "LanesSource",
     "MANIFEST_SCHEMA",
     "PAGES",
     "ROUTES",

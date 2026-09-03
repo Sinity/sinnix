@@ -121,39 +121,103 @@ def test_policy_controls_only_offer_declared_properties() -> None:
     assert "act('reset_policy','unit','x.service'" in controls
 
 
-def test_work_page_uses_agentctl_lifecycle_and_keeps_live_job_interrupts() -> None:
+def test_work_page_renders_the_queue_jobs_and_lanes_and_interrupts_live_jobs() -> None:
     snapshot = {
         "state": {
             "agentctl": {
+                "groups": {
+                    "agent": {
+                        "status": "Paused",
+                        "parallel": 4,
+                        "running": 1,
+                        "queued": 1,
+                        "paused": 0,
+                    },
+                    "pytest": {
+                        "status": "Running",
+                        "parallel": 1,
+                        "running": 0,
+                        "queued": 0,
+                        "paused": 0,
+                    },
+                },
                 "jobs": [
                     {
-                        "job_id": "agent-1",
+                        "job_id": 7,
+                        "label": "sinnix:lane:sinnix-1",
                         "kind": "attested-agent",
-                        "project_id": "sinnix",
-                        "created_at": "2026-08-23T10:00:00Z",
-                        "checkout": {"path": "/realm/project/sinnix"},
-                        "contract": {
-                            "backend": "codex",
-                            "model": "fixture",
-                            "effort": "high",
-                        },
-                        "state": {"phase": "running", "terminal": False},
+                        "project": "sinnix",
+                        "operation": "lane:sinnix-1",
+                        "group": "agent",
+                        "phase": "running",
+                        "terminal": False,
+                        "exit_code": None,
+                        "path": "/realm/worktrees/sinnix-feature-packet-sinnix-1",
+                        "enqueued_at": "2026-08-23T10:00:00+00:00",
+                        "started_at": "2026-08-23T10:00:05+00:00",
+                        "ended_at": None,
                     },
                     {
-                        "job_id": "prebuild-1",
+                        "job_id": 8,
+                        "label": "sinex:cache_prebuild",
                         "kind": "declared-operation",
-                        "operation": "sinex_cache_prebuild",
-                        "project_id": "sinnix",
-                        "created_at": "2026-08-23T10:00:00Z",
-                        "state": {"phase": "running", "terminal": False},
+                        "project": "sinex",
+                        "operation": "cache_prebuild",
+                        "group": "bulk",
+                        "phase": "failed",
+                        "terminal": True,
+                        "exit_code": 2,
+                        "path": "/realm/project/sinex",
+                        "enqueued_at": "2026-08-23T09:00:00+00:00",
+                        "started_at": "2026-08-23T09:00:05+00:00",
+                        "ended_at": "2026-08-23T09:10:05+00:00",
                     },
                 ],
                 "truncated": False,
             }
         }
     }
-    html = pages.render("/work/", MANIFEST, snapshot, INVENTORY, "fixture")
-    assert "AgentCTL jobs, recently" in html
-    assert "sinex_cache_prebuild" in html
-    assert "act('interrupt','job_id','agent-1'" in html
-    assert "act('interrupt','job_id','prebuild-1'" not in html
+    lanes = [
+        {
+            "project": "sinnix",
+            "lanes": [
+                {
+                    "lane": "sinnix-feature-packet-sinnix-1",
+                    "branch": "feature/packet/sinnix-1",
+                    "bead": "sinnix-1",
+                    "stage": "agent running",
+                    "next": "the agent publishes",
+                    "elapsed": "5m",
+                    "dirty": False,
+                    "pr": None,
+                }
+            ],
+            "errors": [],
+        }
+    ]
+    html = pages.render(
+        "/work/",
+        MANIFEST,
+        snapshot,
+        INVENTORY,
+        "fixture",
+        lanes_source=lambda: (lanes, ["polylogue: agentctl rejected the request"]),
+    )
+    # The queue card is pueue's groups; a paused group is the backpressure freeze.
+    assert "<code>agent</code>" in html and "paused" in html
+    assert "1 running of 4" in html
+    # Jobs are pueue tasks by label; only a live one can be interrupted.
+    assert "sinnix:lane:sinnix-1" in html
+    assert "sinex:cache_prebuild" in html and "exit 2" in html
+    assert "act('interrupt','job_id','7'" in html
+    assert "act('interrupt','job_id','8'" not in html
+    # Lanes come from agentctl view; a project that refused is named, not hidden.
+    assert "sinnix-feature-packet-sinnix-1" in html and "agent running" in html
+    assert "polylogue: agentctl rejected the request" in html
+    assert "1" in html and "jobs queued or running" in html
+
+
+def test_work_page_renders_without_a_lanes_source() -> None:
+    html = pages.render("/work/", MANIFEST, {"state": {}}, INVENTORY, "fixture")
+    assert "no worktree lanes" in html
+    assert "no pueue tasks" in html

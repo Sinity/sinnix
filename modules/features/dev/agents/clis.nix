@@ -321,7 +321,6 @@ mkFeatureModule {
             home.packages = [
               scriptPkgs.beads
               scriptPkgs.sinnix-agent-control-mcp
-              scriptPkgs.sinnix-attention
               scriptPkgs.sinnix-context-handoff
               scriptPkgs.sinnix-agent-profile-benchmark
             ];
