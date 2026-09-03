@@ -1,4 +1,4 @@
-# Daily read-only artifacts derived from the reactor's event and job stores.
+# Daily read-only artifacts derived from the event spool and job records.
 {
   mkServiceModule,
   config,

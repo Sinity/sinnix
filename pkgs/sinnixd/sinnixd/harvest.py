@@ -1068,9 +1068,9 @@ def _affected_from_job(
 ) -> tuple[str, str]:
     """Read a declared verify_affected job's verdict instead of running one.
 
-    The reactor runs affected verification as a declared job (cached by tree
-    and environment) before the harvest; the job's typed result is the
-    evidence, so the same tree is never verified twice.
+    Affected verification runs as a declared job (cached by tree and
+    environment) before the harvest; the job's typed result is the evidence,
+    so the same tree is never verified twice.
     """
     if not re.fullmatch(
         r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
@@ -1186,8 +1186,8 @@ def authorize(
     if tests == "unavailable":
         if _authorization(context, current_head) is None:
             # Publication needs test evidence at this head or the operator's
-            # recorded decision; the reactor runs verify_affected and harvests
-            # again with its verdict.
+            # recorded decision. `campaign run` dispatches verify_affected and
+            # harvests again with its verdict.
             result = {
                 "outcome": NO_TEST_EVIDENCE,
                 "message": "no test evidence at this head",
@@ -1400,8 +1400,8 @@ def authorize(
                 "merge_error": None,
             },
         )
-        # The reactor owns post-publication merge observation and bead closure.
-        # Returning here releases this job and its admission reservation.
+        # Post-publication merge observation and bead closure belong to the
+        # publication sweep. Returning here releases this job.
         fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
         state = merge_state
         result = {
@@ -1444,8 +1444,8 @@ def publish(
 ) -> dict[str, Any]:
     """Mint a fresh receipt and authorize it in one pass.
 
-    The invocation itself is the review decision: the coordinator (or the
-    reactor's clean-scan route) has decided to publish, so requiring a second
+    The invocation itself is the review decision: the caller has decided to
+    publish, so requiring a second
     job to restate receipt_ref, lane_job_id, bead_id, and publication text
     only re-keys facts the records already hold. Scanner flags are still
     computed and recorded on the receipt for audit.
