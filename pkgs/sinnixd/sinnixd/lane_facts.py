@@ -1,12 +1,18 @@
 """Per-lane facts and the one next action they imply.
 
 Every lane decision follows from facts read fresh: the worktree head, the
-pushed head, who holds the worktree, the newest receipt, the PR the sweep
+pushed head, who holds the worktree, the newest receipt, the PR worktrunk
 sees, and master. ``advance`` is the pure function from those facts to the
 next action; it keeps no dispatch records, because an action already in
 flight is itself a fact (a running job on the checkout). ``collect`` reads
 the facts from the daemon's own state, so `campaign view` and `campaign run`
 cannot disagree about a lane.
+
+GitHub owns the merge decision (required checks + review). PR facts come
+from ``wt list --full`` (mergeable, checks status); review state is not
+published there, so ``collect`` makes the one forge call this module is
+allowed — ``gh pr view --json reviewDecision`` — and only for a lane that
+already has a PR.
 """
 
 from __future__ import annotations
@@ -21,16 +27,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from .worktrunk import Worktree
+
 Run = Callable[..., subprocess.CompletedProcess[str]]
 
 INTEGRATOR_LABELS = frozenset({"integrator", "rebase", "review-fix"})
-# One reviewer round answers the findings; the second confirms the answer
-# held. A third never changed a verdict.
-ANSWERED_ROUNDS_TO_MERGE = 2
 # A workspace whose lane finished longer ago than this, with no open PR, is
 # dormant: advancing it would verify and harvest dozens of abandoned
 # worktrees every tick (the first fact-driven tick did, 2026-09-02 12:19Z).
 DORMANT_AFTER_SECONDS = 3 * 24 * 60 * 60
+REVIEW_DECISION_TIMEOUT_SECONDS = 15
 
 
 @dataclass(frozen=True)
@@ -47,11 +53,12 @@ class Receipt:
 
 @dataclass(frozen=True)
 class Pull:
+    """What ``wt list --full`` publishes for a lane's PR."""
+
     number: int
-    head: str
-    verdict: str
-    findings: int
-    answered_rounds: int = 0
+    url: str
+    mergeable: bool | None
+    checks_status: str | None
 
 
 @dataclass(frozen=True)
@@ -69,6 +76,7 @@ class LaneFacts:
     lane_phase: str | None
     receipt: Receipt | None
     pull: Pull | None
+    review_decision: str | None = None
     lane_job: str | None = None
     integrators_at_head: tuple[str, ...] = ()
     authorization_head: str | None = None
@@ -91,7 +99,7 @@ class Action:
 
 
 # Actions that name work a dispatcher can start; every other action (wait,
-# idle, done, park, await-sweep) is a fact for the status view, not a step.
+# idle, done, park, await-merge) is a fact for the status view, not a step.
 DISPATCHABLE_ACTIONS = frozenset(
     {"verify", "harvest", "publish", "integrate", "rebase", "review-fix", "retry"}
 )
@@ -153,33 +161,23 @@ def advance(facts: LaneFacts, *, now: datetime | None = None) -> Action:
             return Action("harvest", f"verified by {facts.verify_job[0][:8]}")
         return Action("verify", "no receipt at head")
     pull = facts.pull
-    if facts.published_at_head and (pull is None or pull.head != facts.head):
-        return Action("await-sweep", "published; waiting for the sweep to see the head")
-    if pull is not None and pull.head == facts.head:
-        if pull.verdict == "no-test-evidence":
-            if facts.verify_job is None:
-                return Action("verify", "PR published without test evidence")
-            if facts.verify_job[1] != "succeeded":
-                return Action(
-                    "park", f"affected verification {facts.verify_job[1]} at this head"
-                )
-            return Action(
-                "harvest", f"re-publish with verdict {facts.verify_job[0][:8]}"
-            )
-        if pull.verdict == "conflict":
+    if facts.published_at_head and (pull is None or facts.pushed_head != facts.head):
+        return Action("await-merge", "published; waiting for GitHub to see the head")
+    if pull is not None and facts.pushed_head == facts.head:
+        if pull.mergeable is False:
             if any(label == "rebase" for label in facts.integrators_at_head):
                 return Action(
                     "park", "rebase integrator ran at this head and it still conflicts"
                 )
             return Action("rebase", "PR conflicts with master")
-        if pull.verdict == "ci-red":
+        if pull.checks_status == "failed":
             return Action("park", "CI red on the PR")
-        if pull.findings > 0 and pull.answered_rounds < ANSWERED_ROUNDS_TO_MERGE:
+        if facts.review_decision == "CHANGES_REQUESTED":
             if "review-fix" in facts.integrators_at_head:
                 return Action("park", "review-fix ran at this head and findings remain")
-            return Action("review-fix", f"{pull.findings} finding(s)")
-        return Action("await-sweep", pull.verdict)
-    if pull is not None and pull.head != facts.head and facts.pushed_head != facts.head:
+            return Action("review-fix", "review requested changes")
+        return Action("await-merge", pull.checks_status or "checks pending")
+    if pull is not None and facts.pushed_head != facts.head:
         return Action("publish", "head moved past the PR; push and re-mint")
     if receipt.flagged and not receipt.authorized:
         if "integrator" in facts.integrators_at_head:
@@ -251,17 +249,58 @@ def _receipt_from(payload: Mapping[str, Any]) -> Receipt | None:
     )
 
 
+def _pull_from_worktree(worktree: Worktree) -> Pull | None:
+    if worktree.pr is None:
+        return None
+    return Pull(
+        number=worktree.pr.number,
+        url=worktree.pr.url,
+        mergeable=worktree.pr.mergeable,
+        checks_status=worktree.checks.status if worktree.checks else None,
+    )
+
+
+def _review_decision(run: Run, number: int) -> str | None:
+    try:
+        result = run(
+            [
+                "gh",
+                "pr",
+                "view",
+                str(number),
+                "--json",
+                "reviewDecision",
+                "--jq",
+                ".reviewDecision",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=REVIEW_DECISION_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return value or None
+
+
 def collect(
     project: str,
     *,
     state_root: Path,
-    pulls: Sequence[Pull] = (),
+    worktrees: Sequence[Worktree] = (),
     receipt_pulls: Mapping[str, Pull] | None = None,
     run: Run = subprocess.run,
     master_head: str | None = None,
     closed_beads: Sequence[str] = (),
 ) -> list[LaneFacts]:
-    """Read every managed workspace of the project into facts."""
+    """Read every managed workspace of the project into facts.
+
+    ``receipt_pulls`` is accepted only because ``campaign.py``'s dispatcher
+    still supplies it; PR facts come from ``worktrees`` (``wt list --full``).
+    """
     index_path = state_root / "workspaces" / "index.json"
     try:
         records = json.loads(index_path.read_text()).get("workspaces", [])
@@ -361,22 +400,11 @@ def collect(
                         (str(job.get("job_id") or ""), phase),
                     )
         receipt = receipts.get(checkout_id)
-        pull = None
-        if receipt is not None and receipt_pulls:
-            pull = receipt_pulls.get(receipt.packet_id)
-        if pull is None and receipt_pulls:
-            # A PR names the receipt it was opened under; later re-mints at
-            # the same head are still that PR.
-            pull = next(
-                (
-                    item
-                    for item in receipt_pulls.values()
-                    if item.head in {head, pushed}
-                ),
-                None,
-            )
-        if pull is None:
-            pull = next((item for item in pulls if item.head in {head, pushed}), None)
+        wt_item = next((item for item in worktrees if item.branch == branch), None)
+        pull = _pull_from_worktree(wt_item) if wt_item is not None else None
+        review_decision = (
+            _review_decision(run, pull.number) if pull is not None else None
+        )
         authorization_head = _authorization_head(worktree)
         facts.append(
             LaneFacts(
@@ -394,6 +422,7 @@ def collect(
                 lane_job=lane_job,
                 receipt=receipt,
                 pull=pull,
+                review_decision=review_decision,
                 integrators_at_head=tuple(integrators),
                 authorization_head=authorization_head,
                 verify_job=verify_job,
@@ -500,27 +529,6 @@ def _receipts(root: Path) -> dict[str, Receipt]:
         if workspace not in newest or newest[workspace][0] < stamp:
             newest[workspace] = (stamp, receipt)
     return {workspace: receipt for workspace, (_stamp, receipt) in newest.items()}
-
-
-def pulls_from_sweep_actions(actions: Sequence[Mapping[str, Any]]) -> dict[str, Pull]:
-    """PRs keyed by receipt id, from a publication-sweep receipt."""
-    pulls: dict[str, Pull] = {}
-    for action in actions:
-        number = action.get("pr")
-        receipt = action.get("receipt")
-        head = action.get("head")
-        if not isinstance(number, int) or not isinstance(head, str):
-            continue
-        pull = Pull(
-            number=number,
-            head=head,
-            verdict=str(action.get("verdict") or ""),
-            findings=int(action.get("findings") or 0),
-            answered_rounds=int(action.get("answered_rounds") or 0),
-        )
-        if isinstance(receipt, str):
-            pulls[receipt] = pull
-    return pulls
 
 
 _CLOSED_BEADS_TTL_SECONDS = 300.0
@@ -665,28 +673,11 @@ def latest_corpus(state_root: Path, project: str) -> dict[str, Any] | None:
 
 
 def latest_sweep_pulls(state_root: Path) -> dict[str, Pull]:
-    """PRs by receipt id from the newest finished publication-sweep job."""
-    newest: tuple[str, Mapping[str, Any]] | None = None
-    for job in _job_records(state_root / "jobs"):
-        spec = job.get("spec") or {}
-        state = job.get("state") or {}
-        if spec.get("operation") != "publication_sweep" or not state.get("terminal"):
-            continue
-        created = str(job.get("created_at") or "")
-        if newest is None or created > newest[0]:
-            newest = (created, job)
-    if newest is None:
-        return {}
-    artifacts = newest[1].get("artifacts") or {}
-    result_path = artifacts.get("result") if isinstance(artifacts, Mapping) else None
-    if not isinstance(result_path, str):
-        return {}
-    try:
-        value = json.loads(Path(result_path).read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
-    actions = value.get("actions") if isinstance(value, Mapping) else None
-    return pulls_from_sweep_actions(actions if isinstance(actions, list) else [])
+    """No publication sweep runs; ``campaign.py``'s dispatcher still calls this.
+
+    PR facts reach ``collect`` through its ``worktrees`` argument instead.
+    """
+    return {}
 
 
 def lane_view(facts: LaneFacts) -> dict[str, Any]:
@@ -714,9 +705,10 @@ def lane_view(facts: LaneFacts) -> dict[str, Any]:
         "pr": (
             {
                 "number": facts.pull.number,
-                "at_head": facts.pull.head == facts.head,
-                "verdict": facts.pull.verdict,
-                "findings": facts.pull.findings,
+                "url": facts.pull.url,
+                "mergeable": facts.pull.mergeable,
+                "checks_status": facts.pull.checks_status,
+                "review_decision": facts.review_decision,
             }
             if facts.pull
             else None
@@ -738,5 +730,4 @@ __all__ = [
     "derived_checkout_id",
     "lane_view",
     "latest_sweep_pulls",
-    "pulls_from_sweep_actions",
 ]

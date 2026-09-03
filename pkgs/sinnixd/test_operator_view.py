@@ -52,7 +52,7 @@ STATUS = {
             "workspace": "packet-polylogue-a",
             "bead": "polylogue-a",
             "next": {"kind": "park", "reason": "CI red on the PR"},
-            "pr": {"number": 7, "verdict": "ci-red"},
+            "pr": {"number": 7, "checks_status": "failed", "mergeable": True},
             "receipt": {"flags": ["FLAG: x"]},
         },
         {
@@ -105,7 +105,7 @@ def test_overview_orders_lanes_by_urgency_and_hides_idle() -> None:
     text = render_overview(STATUS, [], now=NOW)
     assert text.index("packet-polylogue-a") < text.index("packet-polylogue-b")
     assert "1 idle/done: packet-polylogue-c" in text
-    assert "PR 7 ci-red 1 flags" in text
+    assert "PR 7 failed 1 flags" in text
     ghost = _job("99999999", "harvest", "capacity", "packet-polylogue-old", 60 * 48)
     text = render_overview(STATUS, [ghost], now=NOW)
     assert "0 active, 1 ghosts older than a day" in text

@@ -23,6 +23,9 @@ _LIST_ARGUMENTS = (
     "list",
     "--format=json",
 )
+# --full adds the per-item `pr` and `checks` fields, at the cost of a forge
+# round trip per worktree; only callers that read PR state pay for it.
+_LIST_FULL_ARGUMENTS = (*_LIST_ARGUMENTS, "--full")
 
 # wt's own six-check verdict that a branch's content is present on the default
 # branch, squash-merge patch-id included. It replaces every local reimplementation
@@ -43,6 +46,55 @@ class WorktrunkError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class PullFacts:
+    """A worktree item's ``pr`` field, published only with ``--full``."""
+
+    number: int
+    url: str
+    mergeable: bool | None
+    repo: str | None
+
+
+@dataclass(frozen=True)
+class ChecksFacts:
+    """A worktree item's ``checks`` field, published only with ``--full``."""
+
+    status: str | None
+    source: str | None
+    stale: bool | None
+
+
+def _pull_facts(value: Any) -> PullFacts | None:
+    if not isinstance(value, Mapping):
+        return None
+    number = value.get("number")
+    url = value.get("url")
+    if not isinstance(number, int) or not isinstance(url, str):
+        return None
+    mergeable = value.get("mergeable")
+    repo = value.get("repo")
+    return PullFacts(
+        number=number,
+        url=url,
+        mergeable=mergeable if isinstance(mergeable, bool) else None,
+        repo=repo if isinstance(repo, str) else None,
+    )
+
+
+def _checks_facts(value: Any) -> ChecksFacts | None:
+    if not isinstance(value, Mapping):
+        return None
+    status = value.get("status")
+    source = value.get("source")
+    stale = value.get("stale")
+    return ChecksFacts(
+        status=status if isinstance(status, str) else None,
+        source=source if isinstance(source, str) else None,
+        stale=stale if isinstance(stale, bool) else None,
+    )
+
+
+@dataclass(frozen=True)
 class Worktree:
     """One item of ``wt list --format=json``, reduced to what sinnixd reads."""
 
@@ -54,6 +106,10 @@ class Worktree:
     main: bool
     dirty: bool
     state: str
+    # Present only when the caller asked for ``--full``; absent otherwise or
+    # when the item carries no open PR.
+    pr: PullFacts | None = None
+    checks: ChecksFacts | None = None
 
     @property
     def integrated(self) -> bool:
@@ -84,6 +140,8 @@ class Worktree:
                 )
             ),
             state=str((item.get("display") or {}).get("state") or ""),
+            pr=_pull_facts(item.get("pr")),
+            checks=_checks_facts(item.get("checks")),
         )
 
 
@@ -117,9 +175,14 @@ def _decode(payload: str, what: str) -> Any:
     raise WorktrunkError(f"wt {what} did not print a JSON document")
 
 
-def worktrunk_list(root: Path) -> tuple[Worktree, ...]:
-    """Every worktree of the repository at ``root``, with wt's own state verdict."""
-    document = _decode(_run(root, _LIST_ARGUMENTS), "list")
+def worktrunk_list(root: Path, *, full: bool = False) -> tuple[Worktree, ...]:
+    """Every worktree of the repository at ``root``, with wt's own state verdict.
+
+    ``full=True`` also asks the forge for each item's PR and checks state.
+    """
+    document = _decode(
+        _run(root, _LIST_FULL_ARGUMENTS if full else _LIST_ARGUMENTS), "list"
+    )
     if not isinstance(document, Mapping):
         raise WorktrunkError("wt list did not print an object")
     schema = document.get("schema")

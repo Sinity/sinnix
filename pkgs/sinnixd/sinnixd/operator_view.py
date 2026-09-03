@@ -217,7 +217,7 @@ def render_overview(
         "integrate",
         "rebase",
         "review-fix",
-        "await-sweep",
+        "await-merge",
         "wait",
         "done",
         "idle",
@@ -235,7 +235,12 @@ def render_overview(
         if nxt.get("kind") in {"idle", "done"}:
             continue
         pull = row.get("pr") or {}
-        pr = f"PR {pull.get('number')} {pull.get('verdict')}" if pull else ""
+        pr = (
+            f"PR {pull.get('number')} {pull.get('checks_status') or '?'}"
+            f"{' unmergeable' if pull.get('mergeable') is False else ''}"
+            if pull
+            else ""
+        )
         receipt = row.get("receipt") or {}
         flags = (
             f"{len(receipt.get('flags') or [])} flags" if receipt.get("flags") else ""
@@ -402,21 +407,22 @@ def build_campaign_status(
     lanes_next: list[dict[str, Any]] = []
     master_corpus: dict[str, Any] | None = None
     if state_root is not None:
-        from .lane_facts import (
-            closed_bead_ids,
-            collect,
-            lane_view,
-            latest_corpus,
-            latest_sweep_pulls,
-        )
+        from .lane_facts import closed_bead_ids, collect, lane_view, latest_corpus
+        from .worktrunk import WorktrunkError, worktrunk_list
 
         master_corpus = latest_corpus(state_root, project_id)
+        worktrees: tuple[Any, ...] = ()
+        if project_root is not None:
+            try:
+                worktrees = worktrunk_list(project_root, full=True)
+            except WorktrunkError:
+                worktrees = ()
         lanes_next = [
             lane_view(facts)
             for facts in collect(
                 project_id,
                 state_root=state_root,
-                receipt_pulls=latest_sweep_pulls(state_root),
+                worktrees=worktrees,
                 closed_beads=closed_bead_ids(project_root, wait=False)
                 if project_root is not None
                 else (),

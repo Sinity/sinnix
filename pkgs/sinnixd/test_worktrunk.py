@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 from sinnixd.worktrunk import (
     LIST_SCHEMA_VERSION,
+    ChecksFacts,
+    PullFacts,
     Worktree,
     WorktrunkError,
     worktrunk_create,
@@ -159,6 +161,64 @@ def test_a_detached_or_branch_only_item_is_read_not_refused() -> None:
 def test_an_item_with_neither_branch_nor_path_is_a_typed_refusal() -> None:
     with pytest.raises(WorktrunkError):
         Worktree.from_item({"display": {"state": "ahead"}})
+
+
+FULL_ITEM = {
+    "branch": "feature/reviewed",
+    "head": {"sha": "3b56bb02205963d7edea903e0abfca8f02b6897a"},
+    "display": {"state": "ahead"},
+    "pr": {
+        "number": 4501,
+        "url": "https://github.com/o/r/pull/4501",
+        "mergeable": True,
+        "repo": "o/r",
+    },
+    "checks": {"status": "passed", "source": "hosted", "stale": False},
+}
+
+
+def test_a_full_item_parses_pr_and_checks() -> None:
+    tree = Worktree.from_item(FULL_ITEM)
+    assert tree.pr == PullFacts(
+        number=4501, url="https://github.com/o/r/pull/4501", mergeable=True, repo="o/r"
+    )
+    assert tree.checks == ChecksFacts(status="passed", source="hosted", stale=False)
+
+
+def test_an_item_without_pr_or_checks_leaves_them_absent() -> None:
+    tree = Worktree.from_item(BRANCH_ONLY_ITEM)
+    assert tree.pr is None
+    assert tree.checks is None
+
+
+def test_a_malformed_pr_or_checks_value_is_read_as_absent() -> None:
+    """Defensive parsing: a shape wt has not published yet must not raise."""
+    tree = Worktree.from_item(
+        {**FULL_ITEM, "pr": {"number": "not-an-int"}, "checks": "not-a-mapping"}
+    )
+    assert tree.pr is None
+    assert tree.checks is None
+
+
+def test_worktrunk_list_only_asks_for_full_when_requested(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+    original = subprocess.run
+
+    def spy(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(argv))
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", spy)
+    root = _repository(tmp_path / "repo")
+
+    worktrunk_list(root)
+    assert not any("--full" in call for call in calls)
+    calls.clear()
+
+    worktrunk_list(root, full=True)
+    assert any("--full" in call for call in calls)
 
 
 def test_find_skips_items_that_carry_no_branch(tmp_path: Path) -> None:
