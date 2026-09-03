@@ -140,8 +140,12 @@ def add(
     """Enqueue one command and return the task id pueue assigned it."""
     if not command:
         raise PueueError("pueue add requires a command")
+    # pueue joins the command into one string and runs it through a shell.
+    # --escape quotes every argument so the string re-parses to this exact
+    # argv; without it `sh -c "a; b"` silently becomes three shell words.
     arguments = [
         "add",
+        "--escape",
         "--group",
         group,
         "--label",
@@ -189,7 +193,9 @@ def groups() -> dict[str, int]:
 
 
 def log(task_id: int) -> str:
-    document = _decode(_run(["log", str(task_id), "--json"]), "log")
+    # Without --full, pueue publishes only a tail of the captured output, so a
+    # result parser would read a truncated document as the whole run.
+    document = _decode(_run(["log", str(task_id), "--json", "--full"]), "log")
     if not isinstance(document, Mapping):
         raise PueueError("pueue log did not print an object")
     entry = document.get(str(task_id))
