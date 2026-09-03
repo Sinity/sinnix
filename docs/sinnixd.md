@@ -180,9 +180,9 @@ timers, stops the ones no descriptor declares, and starts the missing ones;
 a changed expression is a new unit. Daily or rarer timers are `Persistent`
 (a missed firing catches up); sub-hourly ones are not.
 
-An opt-in refill timer per project (`sinnix.services.sinnixd.refill.<id> =
-{ limit; onCalendar; }`) runs `agentctl refill <id> --limit N`; it is the only
-timer that starts lanes.
+The opt-in refill timer (`sinnix.services.sinnixd.refill = { enable = true;
+project; limit; onCalendar; }`) runs `agentctl refill <project> --limit N`;
+it is the only timer that starts lanes.
 
 ## Limits
 
@@ -215,7 +215,7 @@ timer that starts lanes.
 `agentctl`, `wt`, `pueue` and `gh` as system packages, persists
 `~/.local/state/sinnixd`, and declares the timers: `sinnixd-backpressure`
 (every minute), `sinnixd-schedule` (every fifteen minutes, and two minutes
-after login), and one `sinnixd-refill-<project>` per opt-in refill entry. pueued itself, its groups, its completion callback and the
+after login), and `sinnixd-refill` when the opt-in refill is enabled. pueued itself, its groups, its completion callback and the
 `sinnixd-work.slice` placement are declared by the CLI feature
 (`modules/features/cli/core.nix`).
 
