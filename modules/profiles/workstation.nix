@@ -133,8 +133,16 @@ in
             # Cadence, not retention: the sweeper's only criterion is whether a
             # live process holds the directory, so a shorter interval reclaims
             # sooner and a longer one never spares a leaked tree.
-            onUnitActiveSec = "15min";
-            onStartupSec = "5min";
+            #
+            # Wall-clock, not unit-relative. OnUnitActiveSec anchors on the
+            # service's ActiveEnterTimestamp, which a Type=oneshot without
+            # RemainAfterExit never records: the next elapse resolves to
+            # infinity and the timer fires exactly once for the life of the
+            # user manager, however the run ended. A calendar schedule is
+            # anchored outside the unit, so no run outcome can end the
+            # cadence; Persistent catches an elapse missed while logged out.
+            onCalendar = "*:0/15";
+            persistent = true;
             description = "Periodic devshell scratch sweep";
           };
         }
