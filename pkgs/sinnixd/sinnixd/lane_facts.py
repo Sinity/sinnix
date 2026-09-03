@@ -123,6 +123,13 @@ def _dormant(facts: LaneFacts, now: datetime | None) -> bool:
     return (moment - finished).total_seconds() > DORMANT_AFTER_SECONDS
 
 
+def _rebase_or_park(facts: LaneFacts, reason: str) -> Action:
+    """One rebase integrator per head; a second conflict at the same head parks."""
+    if any(label == "rebase" for label in facts.integrators_at_head):
+        return Action("park", "rebase integrator ran at this head and it still conflicts")
+    return Action("rebase", reason)
+
+
 def advance(facts: LaneFacts, *, now: datetime | None = None) -> Action:
     """The next action for one lane, from its facts alone.
 
@@ -150,9 +157,16 @@ def advance(facts: LaneFacts, *, now: datetime | None = None) -> Action:
     receipt = facts.receipt
     if receipt is None or receipt.head != facts.head:
         if facts.harvest_at_head is not None:
+            job_id, outcome = facts.harvest_at_head
+            if outcome == "REBASE_CONFLICT":
+                return _rebase_or_park(facts, "harvest could not rebase onto master")
+            if outcome == "HARVEST_ERROR":
+                # A harvest error is a refusal before any mutation (title,
+                # bead, receipt inputs); the next planner run retries it once
+                # the cause is corrected, and the reason names the last job.
+                return Action("harvest", f"retry after harvest error {job_id[:8]}")
             return Action(
-                "park",
-                f"harvest {facts.harvest_at_head[1]} at this head left no receipt",
+                "park", f"harvest {outcome} at this head left no receipt"
             )
         if facts.verify_job is not None and facts.verify_job[1] != "succeeded":
             return Action(
@@ -166,11 +180,7 @@ def advance(facts: LaneFacts, *, now: datetime | None = None) -> Action:
         return Action("await-merge", "published; waiting for GitHub to see the head")
     if pull is not None and facts.pushed_head == facts.head:
         if pull.mergeable is False:
-            if any(label == "rebase" for label in facts.integrators_at_head):
-                return Action(
-                    "park", "rebase integrator ran at this head and it still conflicts"
-                )
-            return Action("rebase", "PR conflicts with master")
+            return _rebase_or_park(facts, "PR conflicts with master")
         if pull.checks_status == "failed":
             return Action("park", "CI red on the PR")
         if facts.review_decision == "CHANGES_REQUESTED":
@@ -183,6 +193,8 @@ def advance(facts: LaneFacts, *, now: datetime | None = None) -> Action:
         return Action("await-merge", pull.checks_status or "checks pending")
     if pull is not None and facts.pushed_head != facts.head:
         return Action("publish", "head moved past the PR; push and re-mint")
+    if facts.harvest_at_head is not None and facts.harvest_at_head[1] == "REBASE_CONFLICT":
+        return _rebase_or_park(facts, "harvest could not rebase onto master")
     if receipt.flagged and not receipt.authorized:
         if "integrator" in facts.integrators_at_head:
             return Action(
@@ -389,7 +401,9 @@ def collect(
                 outcome, result_phase = _harvest_result(job)
                 if result_phase == "published":
                     published_at_head = True
-                elif outcome in {"HARVEST_ERROR", "GATE_RED"} or phase == "failed":
+                elif outcome in {"HARVEST_ERROR", "GATE_RED", "REBASE_CONFLICT"} or (
+                    phase == "failed"
+                ):
                     harvest_at_head = (str(job.get("job_id") or ""), outcome or phase)
             elif (
                 kind == "declared-operation"

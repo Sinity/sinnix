@@ -100,6 +100,34 @@ def test_advance_orders_facts_before_actions() -> None:
         ).kind
         == "park"
     )
+    # A refused harvest is retried once its cause is corrected; a rebase
+    # conflict goes to one rebase integrator, then parks at the same head.
+    assert (
+        advance(
+            _facts(verify_job=("v", "succeeded"), harvest_at_head=("j", "HARVEST_ERROR"))
+        ).kind
+        == "harvest"
+    )
+    conflicted = _facts(
+        verify_job=("v", "succeeded"), harvest_at_head=("j", "REBASE_CONFLICT")
+    )
+    assert advance(conflicted).kind == "rebase"
+    assert (
+        advance(
+            _facts(
+                verify_job=("v", "succeeded"),
+                harvest_at_head=("j", "REBASE_CONFLICT"),
+                integrators_at_head=("rebase",),
+            )
+        ).kind
+        == "park"
+    )
+    assert (
+        advance(
+            _facts(receipt=_receipt(), harvest_at_head=("j", "REBASE_CONFLICT"))
+        ).kind
+        == "rebase"
+    )
     assert (
         advance(_facts(receipt=_receipt(), published_at_head=True)).kind
         == "await-merge"

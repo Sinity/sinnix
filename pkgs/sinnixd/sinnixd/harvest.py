@@ -219,17 +219,19 @@ def _bead_publication_title(bead_id: str | None, run: Run) -> str:
         entries = json.loads(listed.stdout or "[]")
     except json.JSONDecodeError as error:
         raise HarvestError(f"bead {bead_id} did not publish JSON") from error
-    title = ""
+    entry: Mapping[str, Any] = {}
     if isinstance(entries, list) and entries and isinstance(entries[0], Mapping):
-        title = str(entries[0].get("title") or "").strip()
+        entry = entries[0]
     elif isinstance(entries, Mapping):
-        title = str(entries.get("title") or "").strip()
+        entry = entries
+    title = str(entry.get("title") or "").strip()
     if not title:
         raise HarvestError(f"bead {bead_id} has no title to publish under")
-    # The bead's title becomes a permanent squash subject, so it must already
-    # be one. Rewriting it here would publish a name nothing else knows.
-    _require_publication_title(title)
-    return title
+    subject = _conventional_subject(title, str(entry.get("issue_type") or ""))
+    # The subject becomes permanent squash history: the bead's own words under
+    # the type its tracker record declares, never a rewrite.
+    _require_publication_title(subject)
+    return subject
 
 
 def _optional_bead_title(bead_id: str | None, run: Run) -> str:
@@ -788,6 +790,19 @@ def _redflags(
     if lines > 1500:
         flag("very large diff")
     return (1 if flags else 0), [f"diff lines: {lines}", *flags]
+
+
+# Bead types are the tracker's vocabulary; the squash subject speaks
+# conventional commits. Anything that is not a bug or a feature is a chore.
+_SUBJECT_TYPE_BY_BEAD_TYPE = {"bug": "fix", "feature": "feat"}
+
+
+def _conventional_subject(title: str, bead_type: str) -> str:
+    """A bead title as a conventional subject, prefixed by its bead type."""
+    if _CONVENTIONAL_SUBJECT.fullmatch(title) is not None:
+        return title
+    prefix = _SUBJECT_TYPE_BY_BEAD_TYPE.get(bead_type.strip().lower(), "chore")
+    return f"{prefix}: {title[:1].lower()}{title[1:]}"
 
 
 _CONVENTIONAL_SUBJECT = re.compile(
