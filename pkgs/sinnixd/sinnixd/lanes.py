@@ -495,6 +495,25 @@ def lane_sync(
                 }
             )
             continue
+        # One lane that cannot be removed (a locked worktree an agent still
+        # holds, a wt refusal) is reported; the sweep continues past it.
+        try:
+            worktrunk.worktrunk_remove(project.root, tree.branch)
+        except (WorktrunkError, LaneError) as error:
+            remaining.append(
+                {
+                    "branch": tree.branch,
+                    "worktree": str(tree.path) if tree.path else None,
+                    "bead": row.bead,
+                    "state": tree.state,
+                    "dirty": tree.dirty,
+                    "pr": row.pr.get("number") if row.pr else None,
+                    "pr_state": "MERGED",
+                    "reason": str(error),
+                }
+            )
+            continue
+        removed.append(tree.branch)
         if row.bead is not None:
             try:
                 bead = reader.show(row.bead)
@@ -515,8 +534,6 @@ def lane_sync(
                     cwd=project.root,
                 )
                 closed.append(row.bead)
-        worktrunk.worktrunk_remove(project.root, tree.branch)
-        removed.append(tree.branch)
     return {"closed": closed, "removed": removed, "remaining": remaining}
 
 

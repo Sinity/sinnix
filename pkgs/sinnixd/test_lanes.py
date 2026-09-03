@@ -12,7 +12,7 @@ from sinnixd import lanes
 from sinnixd.config import Config
 from sinnixd.lanes import LaneError
 from sinnixd.projects import load_project_adapter
-from sinnixd.worktrunk import Worktree
+from sinnixd.worktrunk import Worktree, WorktrunkError
 
 
 def tree(
@@ -43,6 +43,8 @@ def fake_wt(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return created
 
     def worktrunk_remove(root: Path, branch: str, *, force: bool = False) -> None:
+        if branch in state.get("locked", ()):
+            raise WorktrunkError(f"Cannot remove {branch}, worktree is locked")
         state["removed"].append(branch)
         state["trees"] = [item for item in state["trees"] if item.branch != branch]
 
@@ -406,3 +408,27 @@ def test_refill_starts_ready_beads_without_a_worktree_or_pr_up_to_the_limit(
     done = lanes.refill(config, project, limit=1)
     assert [row["bead"] for row in done["started"]] == ["fx-3"]
     assert fake_pueue.added[0]["label"] == "fixture:lane:fx-3"
+
+
+def test_lane_sync_reports_a_locked_worktree_and_continues(
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    """Anti-vacuity: a sweep that stops at the first wt refusal removes fx-2 only if fx-1 is unlocked."""
+    project = load_project_adapter(project_root)
+    fake_wt["trees"] = [
+        tree("feature/packet/fx-1", tmp_path / "a", state="integrated"),
+        tree("feature/packet/fx-2", tmp_path / "b", state="integrated"),
+    ]
+    fake_wt["locked"] = {"feature/packet/fx-1"}
+
+    synced = lanes.lane_sync(config, project)
+
+    assert synced["removed"] == ["feature/packet/fx-2"]
+    assert synced["closed"] == ["fx-2"]
+    locked = next(row for row in synced["remaining"] if row["branch"].endswith("fx-1"))
+    assert "locked" in locked["reason"]
