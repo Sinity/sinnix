@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
-from uuid import uuid4
 
 from sinnix_mcp import (
     Authority,
@@ -21,11 +19,8 @@ from sinnix_mcp import (
 from . import pueue
 from .campaign import CampaignRunner, WaveDrainedError
 from .contracts import TypedJobContracts
-from .delivery import DeliveryError, GitHubDelivery
-from .delivery_runner import DELIVERY_INPUT_SCHEMA_VERSION, delivery_runner_executable
 from .jobs import (
     GenericJobs,
-    GenericJobSpec,
     GenericJobStore,
     JobRecordError,
     JobResultError,
@@ -47,11 +42,6 @@ class JobAuthorizationError(PermissionError):
     """The caller does not own this job and is not the operator."""
 
 
-# Delivery runs bounded Git/GitHub commands; these ceilings cover the command
-# deadlines in delivery.py. They bound the background job, not a control
-# worker: workspace.publish/land return a job id immediately.
-DELIVERY_TIMEOUT_SECONDS = {"publish": 790, "land": 185}
-
 # An error before a mutating operation starts has no known remote effect. A
 # caller that loses the response after submission must treat that operation as
 # potentially applied; read-only operations can never have a remote effect.
@@ -68,7 +58,6 @@ READ_ONLY_OPERATIONS = frozenset(
         "campaign.status",
         "workspace.list",
         "workspace.get",
-        "workspace.review-status",
         "job.get",
         "job.list",
         "job.wait",
@@ -105,7 +94,6 @@ class SinnixdService:
         "/home/sinity/.config/hermes/skills/agent-runtime/scripts/run_agent_prompt.sh"
     )
     workspaces: GitWorkspaces | None = None
-    delivery: GitHubDelivery | None = None
     plans: ProjectPlanExecutor | None = None
 
     def __post_init__(self) -> None:
@@ -114,13 +102,6 @@ class SinnixdService:
                 self,
                 "workspaces",
                 GitWorkspaces(self.projects, WorkspaceStore(self.jobs.store.root)),
-            )
-        if self.delivery is None:
-            assert self.workspaces is not None
-            object.__setattr__(
-                self,
-                "delivery",
-                GitHubDelivery(self.projects, self.workspaces, self.jobs),
             )
         if self.plans is None:
             assert self.workspaces is not None
@@ -234,7 +215,7 @@ class SinnixdService:
             return self._error(
                 request, owner_name, ErrorCode.OPERATION_FAILED, str(error)
             )
-        except (WorkspaceError, DeliveryError) as error:
+        except WorkspaceError as error:
             return self._error(
                 request, owner_name, ErrorCode.INVALID_ARGUMENT, str(error)
             )
@@ -627,110 +608,6 @@ class SinnixdService:
             recreate=recreate,
         )
 
-    def _op_workspace_publish(
-        self,
-        arguments: Mapping[str, Any],
-        correlation_id: str,
-        principal: str,
-    ) -> dict[str, Any]:
-        if principal not in {"agent-control", "operator"}:
-            raise ValueError(
-                "workspace publication requires agent-control or operator principal"
-            )
-        if set(arguments) - {
-            "workspace_id",
-            "job_id",
-            "packet_job_id",
-            "title",
-            "body",
-        } or not {"workspace_id", "job_id", "title", "body"} <= set(arguments):
-            raise ValueError(
-                "workspace.publish requires workspace_id, job_id, title, and body"
-            )
-        packet_job_id = arguments.get("packet_job_id")
-        return self._start_delivery(
-            "publish",
-            principal,
-            self._workspace_argument(arguments, "workspace.publish"),
-            {
-                "workspace_id": self._workspace_argument(
-                    arguments, "workspace.publish"
-                ),
-                "job_id": self._job_argument(arguments, "job_id"),
-                "title": self._job_argument(arguments, "title"),
-                "body": arguments.get("body")
-                if isinstance(arguments.get("body"), str)
-                else "",
-                **(
-                    {"packet_job_id": packet_job_id}
-                    if isinstance(packet_job_id, str)
-                    else {}
-                ),
-            },
-        )
-
-    def _op_workspace_review_status(
-        self,
-        arguments: Mapping[str, Any],
-        correlation_id: str,
-        principal: str,
-    ) -> dict[str, Any]:
-        assert self.delivery is not None
-        return self.delivery.review_status(
-            self._workspace_argument(arguments, "workspace.review-status")
-        )
-
-    def _op_workspace_land(
-        self,
-        arguments: Mapping[str, Any],
-        correlation_id: str,
-        principal: str,
-    ) -> dict[str, Any]:
-        if (
-            principal not in {"agent-control", "operator"}
-            or set(arguments) - {"workspace_id", "job_id", "packet_job_id"}
-            or not {"workspace_id", "job_id"} <= set(arguments)
-        ):
-            raise ValueError(
-                "workspace.land requires agent-control or operator plus workspace_id and job_id"
-            )
-        packet_job_id = arguments.get("packet_job_id")
-        return self._start_delivery(
-            "land",
-            principal,
-            self._workspace_argument(arguments, "workspace.land"),
-            {
-                "workspace_id": self._workspace_argument(arguments, "workspace.land"),
-                "job_id": self._job_argument(arguments, "job_id"),
-                **(
-                    {"packet_job_id": packet_job_id}
-                    if isinstance(packet_job_id, str)
-                    else {}
-                ),
-            },
-        )
-
-    def _op_workspace_finish(
-        self,
-        arguments: Mapping[str, Any],
-        correlation_id: str,
-        principal: str,
-    ) -> dict[str, Any]:
-        if principal not in {"agent-control", "operator"}:
-            raise ValueError(
-                "workspace finish requires agent-control or operator principal"
-            )
-        assert self.delivery is not None
-        if set(arguments) - {"workspace_id"}:
-            raise ValueError("workspace.finish received unsupported arguments")
-        workspace_id = self._workspace_argument(arguments, "workspace.finish")
-        assert self.workspaces is not None
-        checkout_path = str(self.workspaces.get(workspace_id).get("path") or "")
-        finished = self.delivery.finish(workspace_id)
-        return self._settle_workspace(
-            {**finished, **self._delete_owned_job_records(checkout_path)}, None
-        )
-
     def _op_job_start(
         self,
         arguments: Mapping[str, Any],
@@ -1081,62 +958,6 @@ class SinnixdService:
             timeout_seconds=timeout_seconds,
         )
 
-    def _start_delivery(
-        self,
-        operation: str,
-        principal: str,
-        workspace_id: str,
-        call_arguments: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        """Launch publish/land as a bounded background job and return its id.
-
-        Delivery preconditions are re-verified inside the runner against the
-        durable stores; holding a control worker for the full Git/GitHub
-        conversation starved every other caller of the daemon.
-        """
-        assert self.workspaces is not None
-        workspace = self.workspaces.get(workspace_id)
-        project = self.projects.get(workspace["project_id"])
-        job_id = str(uuid4())
-        input_path = self.jobs.store.root / "inputs" / f"{job_id}.json"
-        private = {
-            "schema_version": DELIVERY_INPUT_SCHEMA_VERSION,
-            "operation": operation,
-            "project_root": str(project.root),
-            "state_dir": str(self.jobs.store.root),
-            "arguments": dict(call_arguments),
-        }
-        self.job_contracts.write_private(
-            input_path,
-            json.dumps(private, sort_keys=True, separators=(",", ":")).encode(),
-        )
-        try:
-            return self.jobs.start(
-                GenericJobSpec(
-                    kind="delivery-operation",
-                    command=(
-                        str(delivery_runner_executable()),
-                        "--input",
-                        str(input_path),
-                    ),
-                    working_directory=str(project.root),
-                    environment=project.environment.values(),
-                    timeout_seconds=DELIVERY_TIMEOUT_SECONDS[operation],
-                    project_id=project.project_id,
-                    operation=f"workspace.{operation}",
-                    principal=principal,
-                    contract={
-                        "operation": f"workspace.{operation}",
-                        "workspace_id": workspace_id,
-                    },
-                    result_kind="json",
-                ),
-                job_id,
-            )
-        except BaseException:
-            input_path.unlink(missing_ok=True)
-            raise
-
     def _settle_workspace(
         self, result: dict[str, Any], target_ref: str | None
     ) -> dict[str, Any]:
@@ -1238,10 +1059,6 @@ _HANDLERS: dict[
     "workspace.drop": SinnixdService._op_workspace_drop,
     "workspace.checkpoint": SinnixdService._op_workspace_checkpoint,
     "workspace.restore": SinnixdService._op_workspace_restore,
-    "workspace.publish": SinnixdService._op_workspace_publish,
-    "workspace.review-status": SinnixdService._op_workspace_review_status,
-    "workspace.land": SinnixdService._op_workspace_land,
-    "workspace.finish": SinnixdService._op_workspace_finish,
     "job.start": SinnixdService._op_job_start,
     "job.fire": SinnixdService._op_job_fire,
     "job.shell.start": SinnixdService._op_job_shell_start,
