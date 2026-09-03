@@ -120,6 +120,8 @@ let
     # every login shell.
     "spotify-refresh-token".exportEnv = false;
     "mail-app-password".exportEnv = false;
+    # Read only by the github-runner-polylogue unit at registration time.
+    "github-runner-polylogue-token".exportEnv = false;
   };
 
   secretSpecs = lib.mapAttrs' (filename: _: {
