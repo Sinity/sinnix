@@ -37,7 +37,6 @@ exec = ["check"]
 pool = "bulk"
 result = "exit"
 
-
 [operations.check_master]
 # Master-boundary watch: sinnix has no CI, so between landings nothing tests
 # master and one red masks the next (three stacked reds cost hours of lane
@@ -77,14 +76,6 @@ exec = ["sinnix-census", "--window-days", "90"]
 pool = "normal"
 result = "exit"
 schedule = "weekly"
-
-[operations.retrospective]
-description = "Review the day's event, harvest, and session evidence and file bounded process-delta proposals"
-exec = ["sinnix-retrospective"]
-pool = "normal"
-result = "json"
-timeout_seconds = 3600
-schedule = "*-*-* 03:15:00"
 
 [conflicts]
 exact_files = ["flake.lock", "flake.nix"]
