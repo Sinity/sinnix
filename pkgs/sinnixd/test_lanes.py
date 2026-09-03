@@ -371,6 +371,7 @@ def test_lane_sync_closes_and_removes_merged_lanes_and_reports_the_rest(
         "bd",
         "close",
         "fx-1",
+        "--force",
         "--actor",
         "agentctl",
         "--reason",
