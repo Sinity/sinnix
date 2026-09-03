@@ -11,12 +11,15 @@
   lib,
   config,
   pkgs,
+  helpers,
   ...
 }:
 let
   cfg = config.sinnix.profiles.workstation;
   runtimeInventory = config.sinnix.runtime.inventory;
   user = config.sinnix.user.name;
+  scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+  userTmpRoot = "/realm/tmp/${user}";
   earlyoomAvoidPattern = runtimeInventory.earlyoomEmergencyAvoidPattern;
   forbiddenEarlyoomAvoidTokens = [
     "bash"
@@ -111,244 +114,281 @@ in
 {
   options.sinnix.profiles.workstation.enable = lib.mkEnableOption "Interactive workstation profile";
 
-  config = lib.mkIf cfg.enable {
-    assertions = [
-      {
-        assertion = lib.all (
-          token: !(lib.hasInfix token earlyoomAvoidPattern)
-        ) forbiddenEarlyoomAvoidTokens;
-        message = "earlyoom must not exempt agents, browsers, language runtimes, or generic shells";
-      }
-      {
-        assertion = lib.hasInfix "start-hyprland" earlyoomAvoidPattern;
-        message = "earlyoom must protect the lowercase Hyprland session launcher used by UWSM";
-      }
-    ];
-
-    sinnix.machine.isDesktop = lib.mkForce true;
-
-    # Tiered swap posture: zram is the fast first tier absorbing bursts at
-    # RAM speed; the NVMe swapfile (hosts/sinnix-prime/storage.nix, priority
-    # 10) is the overflow tier for sustained pressure. Telemetry samples
-    # zram/PSI/refaults so a thrash regression stays visible.
-    zramSwap = {
-      enable = true;
-      algorithm = "zstd";
-      # 12 GiB, sized from a measured 3.6:1 compression ratio under real
-      # load; do not raise further without a zram residue-reset hygiene step
-      # (incompressible worst case approaches 1:1). Disksize changes apply
-      # to /dev/zram0 only on reboot, not on a live switch.
-      memoryMax = 12 * 1024 * 1024 * 1024;
-      priority = 100;
-    };
-
-    systemd.settings.Manager.StatusUnitFormat = "name";
-
-    # No polkit password dialogs for wheel on unit management and power
-    # actions: wheel already has NOPASSWD sudo, so the prompt is friction with
-    # no security boundary behind it. Deliberately scoped to systemd1 and
-    # login1 rather than a blanket YES, so genuinely unusual actions (disk
-    # reformat via udisks, etc.) still surface.
-    security.polkit.extraConfig = ''
-      polkit.addRule(function(action, subject) {
-        if (!subject.isInGroup("wheel")) return undefined;
-        if (action.id.indexOf("org.freedesktop.systemd1.") === 0) {
-          return polkit.Result.YES;
+  config = lib.mkIf cfg.enable (
+    lib.mkMerge [
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "sinnix-tmp-sweep";
+          description = "Remove unheld nix-shell.* scratch directories";
         }
-        if (action.id.indexOf("org.freedesktop.login1.") === 0) {
-          return polkit.Result.YES;
+        {
+          manager = "user";
+          resourceClass = "background-maintenance";
+          execStart = "${scriptPkgs.sinnix-tmp-sweep}/bin/sinnix-tmp-sweep";
+          serviceConfig = {
+            TimeoutStartSec = "5min";
+          };
+          timer = {
+            # Cadence, not retention: the sweeper's only criterion is whether a
+            # live process holds the directory, so a shorter interval reclaims
+            # sooner and a longer one never spares a leaked tree.
+            onUnitActiveSec = "15min";
+            onStartupSec = "5min";
+            description = "Periodic devshell scratch sweep";
+          };
         }
-        return undefined;
-      });
-    '';
+      )
+      {
+        assertions = [
+          {
+            assertion = lib.all (
+              token: !(lib.hasInfix token earlyoomAvoidPattern)
+            ) forbiddenEarlyoomAvoidTokens;
+            message = "earlyoom must not exempt agents, browsers, language runtimes, or generic shells";
+          }
+          {
+            assertion = lib.hasInfix "start-hyprland" earlyoomAvoidPattern;
+            message = "earlyoom must protect the lowercase Hyprland session launcher used by UWSM";
+          }
+        ];
 
-    boot.kernel.sysctl = {
-      # swappiness=10 keeps anon memory resident and lets a brief allocation
-      # burst spill to swap instead of triggering an immediate earlyoom kill;
-      # higher values cause sustained page-cache hoarding.
-      # min_free_kbytes/watermark_scale_factor hold a concrete free-page
-      # reserve against burst-alloc starvation.
-      "vm.swappiness" = 10;
-      "vm.page-cluster" = 0;
-      # Kernel default; do not raise. At 1000 dentries/inodes stay permanently
-      # cold and PID1 alone re-reads hundreds of GiB/day of unit fragments.
-      "vm.vfs_cache_pressure" = 100;
-      "vm.min_free_kbytes" = 1048576;
-      "vm.watermark_scale_factor" = 200;
-      # Keep Btrfs/NVMe writeback from accumulating multi-GiB dirty bursts:
-      # the Crucial P3 /realm drive shows 30s NVMe command timeouts under
-      # mixed build/database writeback, and bounded dirty bytes push back
-      # earlier, making stalls shorter and more attributable.
-      "vm.dirty_background_bytes" = 64 * 1024 * 1024;
-      "vm.dirty_bytes" = 256 * 1024 * 1024;
+        sinnix.machine.isDesktop = lib.mkForce true;
 
-      # Rebuild and Home Manager activation reload a large user unit/D-Bus
-      # surface in bursts. Keep inotify capacity high enough that the bus daemon
-      # and the user manager can attach their watches instead of timing out
-      # during switch activation.
-      "fs.inotify.max_user_watches" = 2097152;
-      "fs.inotify.max_user_instances" = 65536;
-      "fs.inotify.max_queued_events" = 262144;
+        # Tiered swap posture: zram is the fast first tier absorbing bursts at
+        # RAM speed; the NVMe swapfile (hosts/sinnix-prime/storage.nix, priority
+        # 10) is the overflow tier for sustained pressure. Telemetry samples
+        # zram/PSI/refaults so a thrash regression stays visible.
+        zramSwap = {
+          enable = true;
+          algorithm = "zstd";
+          # 12 GiB, sized from a measured 3.6:1 compression ratio under real
+          # load; do not raise further without a zram residue-reset hygiene step
+          # (incompressible worst case approaches 1:1). Disksize changes apply
+          # to /dev/zram0 only on reboot, not on a live switch.
+          memoryMax = 12 * 1024 * 1024 * 1024;
+          priority = 100;
+        };
 
-      # Preserve crash diagnostics without turning ordinary hung-task reports
-      # into automatic workstation reboots.
-      "kernel.hung_task_panic" = 0;
-      "kernel.hung_task_timeout_secs" = 120;
-      "kernel.panic" = 60;
-      "kernel.oops_all_cpu_backtrace" = 1;
-      "kernel.hardlockup_all_cpu_backtrace" = 1;
-      "kernel.softlockup_all_cpu_backtrace" = 1;
-    };
+        systemd.settings.Manager.StatusUnitFormat = "name";
 
-    boot.kernelModules = [ "ramoops" ];
-    boot.kernelParams = [
-      "ramoops.record_size=262144"
-      "ramoops.console_size=262144"
-      "ramoops.ftrace_size=131072"
-      "ramoops.dump_oops=1"
-    ];
+        # No polkit password dialogs for wheel on unit management and power
+        # actions: wheel already has NOPASSWD sudo, so the prompt is friction with
+        # no security boundary behind it. Deliberately scoped to systemd1 and
+        # login1 rather than a blanket YES, so genuinely unusual actions (disk
+        # reformat via udisks, etc.) still surface.
+        security.polkit.extraConfig = ''
+          polkit.addRule(function(action, subject) {
+            if (!subject.isInGroup("wheel")) return undefined;
+            if (action.id.indexOf("org.freedesktop.systemd1.") === 0) {
+              return polkit.Result.YES;
+            }
+            if (action.id.indexOf("org.freedesktop.login1.") === 0) {
+              return polkit.Result.YES;
+            }
+            return undefined;
+          });
+        '';
 
-    systemd.services.panic-log-capture = {
-      description = "Capture previous-boot kernel panic/oops logs from pstore";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "local-fs.target" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        ExecStart = "${panicLogCapture}/bin/panic-log-capture";
-      };
-    };
+        boot.kernel.sysctl = {
+          # swappiness=10 keeps anon memory resident and lets a brief allocation
+          # burst spill to swap instead of triggering an immediate earlyoom kill;
+          # higher values cause sustained page-cache hoarding.
+          # min_free_kbytes/watermark_scale_factor hold a concrete free-page
+          # reserve against burst-alloc starvation.
+          "vm.swappiness" = 10;
+          "vm.page-cluster" = 0;
+          # Kernel default; do not raise. At 1000 dentries/inodes stay permanently
+          # cold and PID1 alone re-reads hundreds of GiB/day of unit fragments.
+          "vm.vfs_cache_pressure" = 100;
+          "vm.min_free_kbytes" = 1048576;
+          "vm.watermark_scale_factor" = 200;
+          # Keep Btrfs/NVMe writeback from accumulating multi-GiB dirty bursts:
+          # the Crucial P3 /realm drive shows 30s NVMe command timeouts under
+          # mixed build/database writeback, and bounded dirty bytes push back
+          # earlier, making stalls shorter and more attributable.
+          "vm.dirty_background_bytes" = 64 * 1024 * 1024;
+          "vm.dirty_bytes" = 256 * 1024 * 1024;
 
-    systemd.services.sinnix-iocost-init = {
-      description = "Activate io.cost on all block devices so IOWeight is honoured";
-      wantedBy = [ "sysinit.target" ];
-      before = [ "sysinit.target" ];
-      unitConfig.DefaultDependencies = false;
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        ExecStart = "${iocostInit}/bin/sinnix-iocost-init";
-      };
-    };
+          # Rebuild and Home Manager activation reload a large user unit/D-Bus
+          # surface in bursts. Keep inotify capacity high enough that the bus daemon
+          # and the user manager can attach their watches instead of timing out
+          # during switch activation.
+          "fs.inotify.max_user_watches" = 2097152;
+          "fs.inotify.max_user_instances" = 65536;
+          "fs.inotify.max_queued_events" = 262144;
 
-    systemd.services.sinnix-cpu-power-limits = {
-      description = "Apply sane Intel CPU package power limits";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "multi-user.target" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        ExecStart = "${applyCpuPowerLimits}/bin/sinnix-apply-cpu-power-limits";
-      };
-    };
+          # Preserve crash diagnostics without turning ordinary hung-task reports
+          # into automatic workstation reboots.
+          "kernel.hung_task_panic" = 0;
+          "kernel.hung_task_timeout_secs" = 120;
+          "kernel.panic" = 60;
+          "kernel.oops_all_cpu_backtrace" = 1;
+          "kernel.hardlockup_all_cpu_backtrace" = 1;
+          "kernel.softlockup_all_cpu_backtrace" = 1;
+        };
 
-    # No periodic cache-drop machinery: kernel LRU reclaim is the cache bound,
-    # and a drop_caches timer manufactures the pressure it claims to relieve
-    # since MemAvailable already counts reclaimable cache.
-    services.earlyoom = {
-      enable = true;
-      enableNotifications = true;
-      # earlyoom acts only when memory AND swap are below threshold AND the
-      # machine is actually stalling (--mem-psi-min, sinnix patch). The
-      # memory gate is a % of physical MemTotal (overlay patch), ~1 GiB
-      # here. -m3 is the emergency floor for true exhaustion, not the first
-      # responder — PSI-scoped oomd (below) and the swap tiers handle
-      # pressure first. As first responder earlyoom produces kill storms.
-      freeMemThreshold = 3;
-      # Free-swap minimum: fire only once swap is genuinely nearly exhausted
-      # (<10% free ≈ 2 GiB of 20 GiB). The former 50 never bound — swap sits
-      # above 50% used for most of any active day, so the intended
-      # memory-AND-swap conjunction had collapsed to a bare free-memory
-      # trigger (2026-08-18 incident taxonomy; 98-day record).
-      freeSwapThreshold = 10;
-      extraArgs = [
-        # No --prefer regex: at the -m3 floor oom_score-based choice is fine,
-        # and slice-scoped oomd handles "kill the runaway build, not the
-        # desktop" at cgroup granularity. Only recovery-critical surfaces are
-        # avoided — agents stay eligible victims, since process-name avoidance
-        # is not a containment boundary (per-scope MemoryHigh/Max is).
-        "--avoid"
-        earlyoomAvoidPattern
-        # At the memory-and-swap emergency floor, sustained full-memory PSI
-        # above 10 already makes the graphical session unreliable.
-        "--mem-psi-min"
-        "10"
-      ];
-    };
+        boot.kernelModules = [ "ramoops" ];
+        boot.kernelParams = [
+          "ramoops.record_size=262144"
+          "ramoops.console_size=262144"
+          "ramoops.ftrace_size=131072"
+          "ramoops.dump_oops=1"
+        ];
 
-    systemd.services.earlyoom = {
-      wants = [ "swap.target" ];
-      after = [ "swap.target" ];
-    };
+        systemd.services.panic-log-capture = {
+          description = "Capture previous-boot kernel panic/oops logs from pstore";
+          wantedBy = [ "multi-user.target" ];
+          after = [ "local-fs.target" ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            ExecStart = "${panicLogCapture}/bin/panic-log-capture";
+          };
+        };
 
-    # systemd-oomd is the first-line kill policy: sacrificial slices
-    # Sacrificial workload slices carry their own pressure policy; earlyoom
-    # remains the global emergency floor at -m3.
-    systemd.oomd.enable = true;
+        systemd.services.sinnix-iocost-init = {
+          description = "Activate io.cost on all block devices so IOWeight is honoured";
+          wantedBy = [ "sysinit.target" ];
+          before = [ "sysinit.target" ];
+          unitConfig.DefaultDependencies = false;
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            ExecStart = "${iocostInit}/bin/sinnix-iocost-init";
+          };
+        };
 
-    # Devshell/agent scratch belongs on /realm NVMe, not the RAM-backed /tmp
-    # tmpfs: per-shell TMPDIR dirs get no cross-session pruning, so heavy test
-    # fixtures accumulate and can pin tmpfs RAM. NVMe contents survive
-    # reboots, which is what makes the age-based cleanup below load-bearing.
-    environment.sessionVariables.TMPDIR = "/realm/tmp/shell";
-    systemd.tmpfiles.rules = [
-      "d /realm/tmp/shell 1777 root root 7d"
-      # Claude Code bypasses TMPDIR for task output captures. Managed Claude
-      # wrappers point CLAUDE_CODE_TMPDIR here so concurrent subagents cannot
-      # fill the shared 6 GiB /tmp tmpfs.
-      "d /realm/tmp/claude-code 0700 ${user} users 7d"
-      # The designated home for ad-hoc session/agent output files (bead work
-      # notes, query dumps, one-off analysis). Root /realm/tmp stays unaged by
-      # operator decision — manual sweeps only — so this aged subdir gives new
-      # litter somewhere to expire instead of accumulating at the root.
-      "d /realm/tmp/work 1777 root root 30d"
-    ];
+        systemd.services.sinnix-cpu-power-limits = {
+          description = "Apply sane Intel CPU package power limits";
+          wantedBy = [ "multi-user.target" ];
+          after = [ "multi-user.target" ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            ExecStart = "${applyCpuPowerLimits}/bin/sinnix-apply-cpu-power-limits";
+          };
+        };
 
-    # nix.slice has no explicit unit: it exists only as the implicit
-    # dash-hierarchy parent systemd creates for nix-build.slice, and with a
-    # single child its own CPUWeight/IOWeight would have no sibling to compete
-    # against.
-    systemd.slices = lib.mapAttrs (_: sliceConfig: {
-      inherit sliceConfig;
-    }) runtimeInventory.slices.system;
+        # No periodic cache-drop machinery: kernel LRU reclaim is the cache bound,
+        # and a drop_caches timer manufactures the pressure it claims to relieve
+        # since MemAvailable already counts reclaimable cache.
+        services.earlyoom = {
+          enable = true;
+          enableNotifications = true;
+          # earlyoom acts only when memory AND swap are below threshold AND the
+          # machine is actually stalling (--mem-psi-min, sinnix patch). The
+          # memory gate is a % of physical MemTotal (overlay patch), ~1 GiB
+          # here. -m3 is the emergency floor for true exhaustion, not the first
+          # responder — PSI-scoped oomd (below) and the swap tiers handle
+          # pressure first. As first responder earlyoom produces kill storms.
+          freeMemThreshold = 3;
+          # Free-swap minimum: fire only once swap is genuinely nearly exhausted
+          # (<10% free ≈ 2 GiB of 20 GiB). The former 50 never bound — swap sits
+          # above 50% used for most of any active day, so the intended
+          # memory-AND-swap conjunction had collapsed to a bare free-memory
+          # trigger (2026-08-18 incident taxonomy; 98-day record).
+          freeSwapThreshold = 10;
+          extraArgs = [
+            # No --prefer regex: at the -m3 floor oom_score-based choice is fine,
+            # and slice-scoped oomd handles "kill the runaway build, not the
+            # desktop" at cgroup granularity. Only recovery-critical surfaces are
+            # avoided — agents stay eligible victims, since process-name avoidance
+            # is not a containment boundary (per-scope MemoryHigh/Max is).
+            "--avoid"
+            earlyoomAvoidPattern
+            # At the memory-and-swap emergency floor, sustained full-memory PSI
+            # above 10 already makes the graphical session unreliable.
+            "--mem-psi-min"
+            "10"
+          ];
+        };
 
-    systemd.user.slices = lib.mapAttrs (_: sliceConfig: {
-      inherit sliceConfig;
-    }) runtimeInventory.slices.user;
+        systemd.services.earlyoom = {
+          wants = [ "swap.target" ];
+          after = [ "swap.target" ];
+        };
 
-    # Shutdown cost of the graphical session is bounded here, once, for every
-    # user unit — Sinnix-owned or not.
-    #
-    # The tty1 login parks `systemctl --user start --wait
-    # wayland-session-envelope@hyprland-uwsm.desktop.target` inside
-    # session-1.scope (uwsm's signal-handler.sh, which on SIGTERM stops that
-    # target and then waits on the same pid). logind stops the session scope
-    # BEFORE the user manager — user@1000.service is ordered
-    # Before=session-1.scope, and ordering reverses on stop — so the scope's
-    # stop job completes only once the envelope target, and therefore every
-    # graphical-session member, has gone inactive. One member that ignores
-    # SIGTERM holds the target for its full stop timeout while the session
-    # scope burns an identical timeout in parallel, and logind offers no
-    # per-scope knob to cap a transient session scope: it inherits the manager
-    # default. Bounding that default is the only lever that reaches the whole
-    # chain.
-    #
-    # Measured, not theorised: the 2026-08-14 reboot cost 91s of dead time
-    # because a single wedged screen recorder sat in graphical-session.target
-    # for the full 90s default. That unit is gone, but the exposure was never
-    # specific to it — 44 of the 47 user services running on this host carry
-    # the 90s default, so any one of them can reproduce the stall.
-    #
-    # 15s is Sinnix's established shutdown-debris cap for ordinary services,
-    # Borg jobs, and Sinex maintenance timers.
-    # A session helper still alive 15s after SIGTERM is wedged; the choice is
-    # not between a clean exit and a kill, it is between killing it now and
-    # killing it 75s later. This is only the *default*, so per-unit
-    # TimeoutStopSec still wins in either direction — the three user services
-    # that already declare their own keep them (uwsm's wayland-wm@ at 10s,
-    # nm-applet and at-spi at 5s) — and the system manager's own 90s default
-    # is deliberately left alone, since daemons with real flush work sit
-    # outside this chain.
-    systemd.user.settings.Manager.DefaultTimeoutStopSec = "15s";
-  };
+        # systemd-oomd is the first-line kill policy: sacrificial slices
+        # Sacrificial workload slices carry their own pressure policy; earlyoom
+        # remains the global emergency floor at -m3.
+        systemd.oomd.enable = true;
+
+        # Devshell/agent scratch belongs on /realm NVMe, not the RAM-backed /tmp
+        # tmpfs: every `nix develop` creates a `nix-shell.*` tree as its TMPDIR
+        # and removes it only on a clean exit, so a killed shell leaks one. On the
+        # 6 GiB /tmp tmpfs that population reaches ENOSPC, which truncates
+        # heredocs and gives EMFILE in unrelated processes. The scratch root is
+        # private to the operator (0700) rather than a shared 1777 tree, so the
+        # sweeper below can decide ownership from the filesystem.
+        #
+        # Three places can start a process, and all three are set:
+        # login sessions (sessionVariables), the systemd user manager
+        # (DefaultEnvironment), and the CI runner unit (its own extraEnvironment,
+        # in modules/services/github-runner-polylogue.nix). System services keep
+        # the default /tmp.
+        environment.sessionVariables.TMPDIR = userTmpRoot;
+        systemd.user.settings.Manager.DefaultEnvironment = "TMPDIR=${userTmpRoot}";
+        systemd.tmpfiles.rules = [
+          "d ${userTmpRoot} 0700 ${user} users -"
+          # Claude Code bypasses TMPDIR for task output captures. Managed Claude
+          # wrappers point CLAUDE_CODE_TMPDIR here so concurrent subagents cannot
+          # fill the shared 6 GiB /tmp tmpfs.
+          "d /realm/tmp/claude-code 0700 ${user} users 7d"
+          # The designated home for ad-hoc session/agent output files (bead work
+          # notes, query dumps, one-off analysis). Root /realm/tmp stays unaged by
+          # operator decision — manual sweeps only — so this aged subdir gives new
+          # litter somewhere to expire instead of accumulating at the root.
+          "d /realm/tmp/work 1777 root root 30d"
+        ];
+
+        # nix.slice has no explicit unit: it exists only as the implicit
+        # dash-hierarchy parent systemd creates for nix-build.slice, and with a
+        # single child its own CPUWeight/IOWeight would have no sibling to compete
+        # against.
+        systemd.slices = lib.mapAttrs (_: sliceConfig: {
+          inherit sliceConfig;
+        }) runtimeInventory.slices.system;
+
+        systemd.user.slices = lib.mapAttrs (_: sliceConfig: {
+          inherit sliceConfig;
+        }) runtimeInventory.slices.user;
+
+        # Shutdown cost of the graphical session is bounded here, once, for every
+        # user unit — Sinnix-owned or not.
+        #
+        # The tty1 login parks `systemctl --user start --wait
+        # wayland-session-envelope@hyprland-uwsm.desktop.target` inside
+        # session-1.scope (uwsm's signal-handler.sh, which on SIGTERM stops that
+        # target and then waits on the same pid). logind stops the session scope
+        # BEFORE the user manager — user@1000.service is ordered
+        # Before=session-1.scope, and ordering reverses on stop — so the scope's
+        # stop job completes only once the envelope target, and therefore every
+        # graphical-session member, has gone inactive. One member that ignores
+        # SIGTERM holds the target for its full stop timeout while the session
+        # scope burns an identical timeout in parallel, and logind offers no
+        # per-scope knob to cap a transient session scope: it inherits the manager
+        # default. Bounding that default is the only lever that reaches the whole
+        # chain.
+        #
+        # Measured, not theorised: the 2026-08-14 reboot cost 91s of dead time
+        # because a single wedged screen recorder sat in graphical-session.target
+        # for the full 90s default. That unit is gone, but the exposure was never
+        # specific to it — 44 of the 47 user services running on this host carry
+        # the 90s default, so any one of them can reproduce the stall.
+        #
+        # 15s is Sinnix's established shutdown-debris cap for ordinary services,
+        # Borg jobs, and Sinex maintenance timers.
+        # A session helper still alive 15s after SIGTERM is wedged; the choice is
+        # not between a clean exit and a kill, it is between killing it now and
+        # killing it 75s later. This is only the *default*, so per-unit
+        # TimeoutStopSec still wins in either direction — the three user services
+        # that already declare their own keep them (uwsm's wayland-wm@ at 10s,
+        # nm-applet and at-spi at 5s) — and the system manager's own 90s default
+        # is deliberately left alone, since daemons with real flush work sit
+        # outside this chain.
+        systemd.user.settings.Manager.DefaultTimeoutStopSec = "15s";
+      }
+    ]
+  );
 }

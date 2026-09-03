@@ -94,7 +94,14 @@ mkServiceModule {
             # probe the live host with; /run/current-system/sw/bin is where
             # they are, and the pages render on request rather than from a
             # timer's PATH.
-            Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
+            Environment = [
+              "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
+              # The user manager's TMPDIR points at the NVMe scratch root,
+              # which ProtectSystem=strict mounts read-only here. PrivateTmp
+              # gives mktemp somewhere to land without widening
+              # ReadWritePaths.
+              "TMPDIR=/tmp"
+            ];
             Restart = "on-failure";
             RestartSec = "2s";
             # sd_notify from the reducer's own loop, so a wedged refresh or a
@@ -106,6 +113,7 @@ mkServiceModule {
             NoNewPrivileges = true;
             ProtectSystem = "strict";
             ProtectHome = "read-only";
+            PrivateTmp = true;
             ReadWritePaths = [
               "%t/sinnix"
               stateDir

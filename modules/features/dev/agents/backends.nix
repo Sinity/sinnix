@@ -15,7 +15,7 @@ let
   claudeTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/claude-code";
   # Mirrors environment.sessionVariables.TMPDIR in profiles/workstation.nix;
   # the wrappers re-assert it because inheritance is not guaranteed.
-  shellTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/shell";
+  shellTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/${user}";
   clodexCredentialHelper = "${scriptPkgs.sinnix-clodex-credential-helper}/bin/sinnix-clodex-credential-helper";
 
   # Shared npm bootstrap prelude — delegates state-dir setup, first-run npm
@@ -39,7 +39,7 @@ let
       # fills the bounded /tmp tmpfs, truncating shell heredocs mid-write.
       if [ -z "''${TMPDIR:-}" ] && [ -d ${lib.escapeShellArg sinnixCfg.paths.realmRoot} ]; then
         export TMPDIR=${lib.escapeShellArg shellTmpRoot}
-        ${pkgs.coreutils}/bin/install -d -m 1777 "$TMPDIR" 2>/dev/null || true
+        ${pkgs.coreutils}/bin/install -d -m 0700 "$TMPDIR" 2>/dev/null || true
       fi
       ${scriptPkgs.sinnix-agent-npm-bootstrap}/bin/sinnix-agent-npm-bootstrap \
         ${lib.escapeShellArg stateDir} \
