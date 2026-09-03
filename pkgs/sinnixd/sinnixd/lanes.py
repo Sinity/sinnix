@@ -521,19 +521,28 @@ def lane_sync(
                 bead = None
             if bead is not None and bead.get("status") not in {"closed"}:
                 pr_ref = f"PR #{row.pr['number']}" if row.pr else "branch integrated"
-                _run(
-                    [
-                        "bd",
-                        "close",
-                        row.bead,
-                        "--actor",
-                        actor,
-                        "--reason",
-                        f"merged ({pr_ref})",
-                    ],
-                    cwd=project.root,
-                )
-                closed.append(row.bead)
+                # The merge is the fact; whoever the bead was assigned to no
+                # longer owns it. A bd refusal is reported, not fatal.
+                try:
+                    _run(
+                        [
+                            "bd",
+                            "close",
+                            row.bead,
+                            "--force",
+                            "--actor",
+                            actor,
+                            "--reason",
+                            f"merged ({pr_ref})",
+                        ],
+                        cwd=project.root,
+                    )
+                except LaneError as error:
+                    remaining.append(
+                        {"branch": tree.branch, "bead": row.bead, "reason": str(error)}
+                    )
+                else:
+                    closed.append(row.bead)
     return {"closed": closed, "removed": removed, "remaining": remaining}
 
 
