@@ -26,16 +26,16 @@ and the opt-in refill timer the only other one.
 
 ## Model selection
 
-| Role                                       | Route                                    | Model            | Effort     |
-| ------------------------------------------ | ---------------------------------------- | ---------------- | ---------- |
-| Specification, review, integration         | this session                             | (session model)  | default    |
-| Context-carrying analysis                  | fork                                     | inherited        | —          |
-| Implementation lane (well-specified beads) | `agentctl lane start … --backend codex`  | gpt-5.6-luna     | medium     |
-| Escalated lane (luna floundered)           | `agentctl lane rebase … --model …`       | gpt-5.6-terra    | high       |
-| Design / debug / adversarial review        | Agent tool or backend claude             | claude-opus-5    | high       |
-| Review alternate (Claude quota tight)      | backend codex                            | gpt-5.6-sol      | high       |
-| Menial coordination (≥3 live lanes)        | Agent tool                               | claude-haiku-4-5 | medium     |
-| Broad read-only sweeps                     | Agent tool                               | sonnet or luna   | low/medium |
+| Role                                       | Route                                   | Model            | Effort     |
+| ------------------------------------------ | --------------------------------------- | ---------------- | ---------- |
+| Specification, review, integration         | this session                            | (session model)  | default    |
+| Context-carrying analysis                  | fork                                    | inherited        | —          |
+| Implementation lane (well-specified beads) | `agentctl lane start … --backend codex` | gpt-5.6-luna     | medium     |
+| Escalated lane (luna floundered)           | `agentctl lane rebase … --model …`      | gpt-5.6-terra    | high       |
+| Design / debug / adversarial review        | Agent tool or backend claude            | claude-opus-5    | high       |
+| Review alternate (Claude quota tight)      | backend codex                           | gpt-5.6-sol      | high       |
+| Menial coordination (≥3 live lanes)        | Agent tool                              | claude-haiku-4-5 | medium     |
+| Broad read-only sweeps                     | Agent tool                              | sonnet or luna   | low/medium |
 
 Every dispatch names backend, model, and effort explicitly; only forks inherit.
 Luna-first is quota-driven (a separate Codex pool) and review-driven

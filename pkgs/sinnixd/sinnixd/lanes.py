@@ -43,9 +43,7 @@ class LaneError(RuntimeError):
     """A lane step agentctl refuses; the external tools' own refusals carry through."""
 
 
-def _run(
-    argv: Sequence[str], *, cwd: Path, timeout: float = GH_TIMEOUT_SECONDS
-) -> str:
+def _run(argv: Sequence[str], *, cwd: Path, timeout: float = GH_TIMEOUT_SECONDS) -> str:
     try:
         completed = subprocess.run(
             list(argv), cwd=cwd, capture_output=True, text=True, timeout=timeout
@@ -87,7 +85,9 @@ def _write_prompt(worktree: Path, name: str, prompt: str) -> Path:
     lane_dir = worktree / ".lane"
     lane_dir.mkdir(mode=0o700, exist_ok=True)
     path = lane_dir / name
-    descriptor = os.open(path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    descriptor = os.open(
+        path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600
+    )
     with os.fdopen(descriptor, "w") as handle:
         handle.write(prompt)
     return path
@@ -249,7 +249,9 @@ def _bead_from_branch(packets: PacketConfig, branch: str) -> str | None:
 
 
 def _project_root_of(worktree: Path) -> Path:
-    common = Path(_git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    common = Path(
+        _git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    )
     return common.parent.resolve()
 
 
@@ -279,7 +281,9 @@ def lane_publish(
     if not (worktree / ".git").exists():
         raise LaneError(f"{worktree} is not a Git worktree")
     dirty = _git(worktree, "status", "--porcelain=v1", "--untracked-files=normal")
-    dirty_paths = [line[3:] for line in dirty.splitlines() if not line[3:].startswith(".lane/")]
+    dirty_paths = [
+        line[3:] for line in dirty.splitlines() if not line[3:].startswith(".lane/")
+    ]
     if dirty_paths:
         raise LaneError(
             "worktree has uncommitted changes that would not be in the PR: "
@@ -296,9 +300,7 @@ def lane_publish(
     bead: Mapping[str, Any] | None = None
     if subject is None:
         if bead_id is None:
-            raise LaneError(
-                f"{branch} does not name a bead; pass --bead or --title"
-            )
+            raise LaneError(f"{branch} does not name a bead; pass --bead or --title")
         bead = SubprocessBdReader(root).show(bead_id)
         subject = bead_subject(bead)
     body_path = body_file or (worktree / ".lane" / "body.md")
@@ -312,10 +314,17 @@ def lane_publish(
         )
     else:
         body = f"{subject}\n"
-    base = (project.workspace.default_base if project.workspace else "origin/master")
+    base = project.workspace.default_base if project.workspace else "origin/master"
     base_branch = base.split("/", 1)[1] if base.startswith("origin/") else base
 
-    _git(worktree, "push", "--set-upstream", "origin", branch, timeout=PUSH_TIMEOUT_SECONDS)
+    _git(
+        worktree,
+        "push",
+        "--set-upstream",
+        "origin",
+        branch,
+        timeout=PUSH_TIMEOUT_SECONDS,
+    )
     pull = _open_pr(worktree, branch)
     created = False
     if pull is None or pull.get("state") == "MERGED":
@@ -390,7 +399,9 @@ def lane_rebase(
     return {"bead": bead_id, "branch": branch, "worktree": str(tree.path), "job": job}
 
 
-def pull_requests(root: Path, *, state: str = "all", limit: int = 300) -> dict[str, dict[str, Any]]:
+def pull_requests(
+    root: Path, *, state: str = "all", limit: int = 300
+) -> dict[str, dict[str, Any]]:
     """Open and recent PRs of the repository at ``root``, keyed by head branch."""
     value = gh_json(
         [
@@ -443,7 +454,9 @@ def lane_rows(project: ProjectAdapter, *, full: bool = False) -> list[LaneRow]:
     return rows
 
 
-def lane_sync(config: Config, project: ProjectAdapter, *, actor: str = "agentctl") -> dict[str, Any]:
+def lane_sync(
+    config: Config, project: ProjectAdapter, *, actor: str = "agentctl"
+) -> dict[str, Any]:
     """Close beads and remove worktrees whose PR merged; report the rest."""
     closed: list[str] = []
     removed: list[str] = []
@@ -452,7 +465,9 @@ def lane_sync(config: Config, project: ProjectAdapter, *, actor: str = "agentctl
     for row in lane_rows(project):
         tree = row.worktree
         assert tree.branch is not None
-        merged = tree.integrated or (row.pr is not None and row.pr.get("state") == "MERGED")
+        merged = tree.integrated or (
+            row.pr is not None and row.pr.get("state") == "MERGED"
+        )
         if not merged:
             remaining.append(
                 {
@@ -488,7 +503,15 @@ def lane_sync(config: Config, project: ProjectAdapter, *, actor: str = "agentctl
             if bead is not None and bead.get("status") not in {"closed"}:
                 pr_ref = f"PR #{row.pr['number']}" if row.pr else "branch integrated"
                 _run(
-                    ["bd", "close", row.bead, "--actor", actor, "--reason", f"merged ({pr_ref})"],
+                    [
+                        "bd",
+                        "close",
+                        row.bead,
+                        "--actor",
+                        actor,
+                        "--reason",
+                        f"merged ({pr_ref})",
+                    ],
                     cwd=project.root,
                 )
                 closed.append(row.bead)
@@ -511,7 +534,9 @@ def refill(
     packets = PacketConfig.load(project.root)
     reader = SubprocessBdReader(project.root)
     ready = reader.ready()
-    taken = {tree.branch for tree in worktrunk.worktrunk_list(project.root) if tree.branch}
+    taken = {
+        tree.branch for tree in worktrunk.worktrunk_list(project.root) if tree.branch
+    }
     taken.update(pull_requests(project.root, state="open"))
     candidates: list[str] = []
     for bead in ready:
@@ -532,7 +557,12 @@ def refill(
             try:
                 started.append(
                     lane_start(
-                        config, project, bead_id, backend=backend, model=model, effort=effort
+                        config,
+                        project,
+                        bead_id,
+                        backend=backend,
+                        model=model,
+                        effort=effort,
                     )
                 )
             except (LaneError, PacketError, WorktrunkError) as error:

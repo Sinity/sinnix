@@ -27,19 +27,19 @@ is a description of its state, not something the CLI will do.
 
 Look for the verb before writing any procedure: `agentctl <verb> --help`.
 
-| Need                                      | Verb                                                              |
-| ----------------------------------------- | ----------------------------------------------------------------- |
-| see the lanes, queue and ready work       | `agentctl view <p>`                                               |
-| watch what happens                        | `agentctl events tail --follow --project <p>`                     |
-| start lanes for ready beads               | `agentctl refill <p> --limit N [--dry-run]`                       |
-| start one lane                            | `agentctl lane start <p> <bead> [--backend B --model M --effort E]` |
-| re-queue an agent into an existing lane   | `agentctl lane rebase <p> <bead> [--model M --effort E]`          |
-| publish a finished lane                   | `agentctl lane publish <worktree>` (or the worker's `lane publish`) |
-| close merged beads, remove their worktrees| `agentctl lane sync <p>`                                          |
-| run a declared operation                  | `agentctl job start <p> <operation> [--workspace <path>] [--wait]` |
-| read a job                                | `agentctl job get\|logs\|result <id>`                             |
-| stop a job                                | `agentctl job cancel <id>`                                        |
-| run it again                              | `agentctl job retry <id>`                                         |
+| Need                                       | Verb                                                                |
+| ------------------------------------------ | ------------------------------------------------------------------- |
+| see the lanes, queue and ready work        | `agentctl view <p>`                                                 |
+| watch what happens                         | `agentctl events tail --follow --project <p>`                       |
+| start lanes for ready beads                | `agentctl refill <p> --limit N [--dry-run]`                         |
+| start one lane                             | `agentctl lane start <p> <bead> [--backend B --model M --effort E]` |
+| re-queue an agent into an existing lane    | `agentctl lane rebase <p> <bead> [--model M --effort E]`            |
+| publish a finished lane                    | `agentctl lane publish <worktree>` (or the worker's `lane publish`) |
+| close merged beads, remove their worktrees | `agentctl lane sync <p>`                                            |
+| run a declared operation                   | `agentctl job start <p> <operation> [--workspace <path>] [--wait]`  |
+| read a job                                 | `agentctl job get\|logs\|result <id>`                               |
+| stop a job                                 | `agentctl job cancel <id>`                                          |
+| run it again                               | `agentctl job retry <id>`                                           |
 
 Task mutations go through `bd` directly; see [[task-backend]].
 

@@ -238,7 +238,9 @@ def _environment(raw: Mapping[str, Any], descriptor: Path) -> ProjectEnvironment
     return ProjectEnvironment(
         kind=kind,
         command=_string_list(environment.get("command"), "environment.command"),
-        inherit=_optional_string_list(environment.get("inherit"), "environment.inherit"),
+        inherit=_optional_string_list(
+            environment.get("inherit"), "environment.inherit"
+        ),
         unset=_optional_string_list(environment.get("unset"), "environment.unset"),
         declared=tuple(sorted(declared_values.items())),
         require=required,
@@ -257,9 +259,13 @@ def _workspace(raw: Mapping[str, Any], descriptor: Path) -> WorkspacePolicy | No
     root = raw_workspace.get("root")
     default_base = raw_workspace.get("default_base")
     if not isinstance(root, str) or not Path(root).is_absolute():
-        raise ProjectConfigError(f"{descriptor} workspace.root must be an absolute path")
+        raise ProjectConfigError(
+            f"{descriptor} workspace.root must be an absolute path"
+        )
     if not isinstance(default_base, str) or not default_base:
-        raise ProjectConfigError(f"{descriptor} workspace.default_base must be non-empty")
+        raise ProjectConfigError(
+            f"{descriptor} workspace.default_base must be non-empty"
+        )
     memory_max = raw_workspace.get("agent_memory_max", AGENT_MEMORY_MAX)
     if not isinstance(memory_max, str) or _MEMORY_SIZE.fullmatch(memory_max) is None:
         raise ProjectConfigError(
@@ -305,7 +311,9 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
         not isinstance(schedule, str)
         or not schedule
         or len(schedule) > MAX_OPERATION_SCHEDULE_LENGTH
-        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in schedule)
+        or any(
+            ord(character) < 0x20 or ord(character) == 0x7F for character in schedule
+        )
     ):
         raise ProjectConfigError(
             f"operations.{name}.schedule must be a non-empty OnCalendar expression"
@@ -332,7 +340,9 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
     try:
         raw = tomllib.loads(raw_bytes.decode())
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
-        raise ProjectConfigError(f"invalid project adapter {descriptor}: {error}") from error
+        raise ProjectConfigError(
+            f"invalid project adapter {descriptor}: {error}"
+        ) from error
     if raw.get("schema") != 1:
         raise ProjectConfigError(f"{descriptor} must declare schema = 1")
     project = raw.get("project")

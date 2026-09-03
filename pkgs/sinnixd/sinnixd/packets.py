@@ -77,7 +77,9 @@ class SubprocessBdReader:
                 timeout=60,
             )
         except (OSError, subprocess.SubprocessError) as error:
-            raise PacketError(f"bd {' '.join(arguments)} failed in {self.root}") from error
+            raise PacketError(
+                f"bd {' '.join(arguments)} failed in {self.root}"
+            ) from error
         try:
             return json.loads(result.stdout)
         except json.JSONDecodeError as error:
@@ -87,14 +89,18 @@ class SubprocessBdReader:
         return _one_bead(self._run(("show", bead_id, "--json")), bead_id)
 
     def list(self) -> Sequence[Mapping[str, Any]]:
-        return _bead_list(self._run(("list", "--all", "--limit", "0", "--json")), "list")
+        return _bead_list(
+            self._run(("list", "--all", "--limit", "0", "--json")), "list"
+        )
 
     def ready(self) -> Sequence[Mapping[str, Any]]:
         return _bead_list(self._run(("ready", "--limit", "0", "--json")), "ready")
 
 
 def _bead_list(value: Any, what: str) -> Sequence[Mapping[str, Any]]:
-    if not isinstance(value, list) or any(not isinstance(item, Mapping) for item in value):
+    if not isinstance(value, list) or any(
+        not isinstance(item, Mapping) for item in value
+    ):
         raise PacketError(f"bd {what} returned an invalid bead list")
     return value
 
@@ -121,7 +127,9 @@ def bead_subject(bead: Mapping[str, Any]) -> str:
     kind = str(bead.get("issue_type") or bead.get("type") or "").lower()
     prefix = _SUBJECT_PREFIXES.get(kind, "chore")
     title = " ".join(str(bead.get("title") or "").split())
-    if re.match(r"^(fix|feat|chore|refactor|docs|test|perf|build|ci)(\([^)]*\))?!?:", title):
+    if re.match(
+        r"^(fix|feat|chore|refactor|docs|test|perf|build|ci)(\([^)]*\))?!?:", title
+    ):
         subject = title
     else:
         subject = f"{prefix}: {title}" if title else prefix
@@ -150,7 +158,9 @@ class PacketConfig:
         try:
             raw = tomllib.loads(descriptor.read_text())
         except (OSError, tomllib.TOMLDecodeError) as error:
-            raise PacketError(f"could not read project descriptor {descriptor}") from error
+            raise PacketError(
+                f"could not read project descriptor {descriptor}"
+            ) from error
         packets = raw.get("packets", {})
         if not isinstance(packets, Mapping):
             raise PacketError("[packets] must be a table")
@@ -410,7 +420,9 @@ def compile_launch_snapshot(
         worker_contract_path=contract_path,
         prompt="",
     )
-    return PacketSnapshot(**{**snapshot.__dict__, "prompt": _render_prompt(snapshot, template)})
+    return PacketSnapshot(
+        **{**snapshot.__dict__, "prompt": _render_prompt(snapshot, template)}
+    )
 
 
 def rebase_prompt(

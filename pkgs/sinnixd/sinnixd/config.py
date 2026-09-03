@@ -91,7 +91,9 @@ def load_config(path: Path | None = None) -> Config:
     return replace(
         config,
         project_roots=_paths(raw.get("project_roots", []), "project_roots"),
-        agent_runner=_path(raw.get("agent_runner"), "agent_runner", config.agent_runner),
+        agent_runner=_path(
+            raw.get("agent_runner"), "agent_runner", config.agent_runner
+        ),
         event_spool=_path(raw.get("event_spool"), "event_spool", config.event_spool),
         state_dir=_path(raw.get("state_dir"), "state_dir", config.state_dir),
         agentctl_executable=str(raw.get("agentctl") or config.agentctl_executable),
@@ -116,7 +118,9 @@ def resolve_project_root(selector: str | None, *, cwd: Path | None = None) -> Pa
     for candidate in candidates:
         if (candidate / ".agentctl" / "project.toml").is_file():
             return candidate
-    raise PacketError(f"could not resolve an AgentCTL project for {selector or current}")
+    raise PacketError(
+        f"could not resolve an AgentCTL project for {selector or current}"
+    )
 
 
 def resolve_project(config: Config, selector: str | None) -> ProjectAdapter:

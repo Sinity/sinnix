@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 from conftest import write_project
 from sinnixd.config import Config, load_config, resolve_project
-from sinnixd.projects import ProjectCatalog, ProjectConfigError, ProjectEnvironmentError, load_project_adapter
+from sinnixd.projects import (
+    ProjectCatalog,
+    ProjectConfigError,
+    ProjectEnvironmentError,
+    load_project_adapter,
+)
 
 
 def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -> None:
@@ -24,10 +29,16 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
     assert nightly.pool == "bulk"
     verify = project.operation("verify")
     assert (verify.result, verify.timeout_seconds) == ("json", 120)
-    assert [operation.name for operation in project.operations] == ["check", "nightly", "verify"]
+    assert [operation.name for operation in project.operations] == [
+        "check",
+        "nightly",
+        "verify",
+    ]
 
 
-def test_retired_tables_are_ignored_but_retired_operation_fields_refuse(tmp_path: Path) -> None:
+def test_retired_tables_are_ignored_but_retired_operation_fields_refuse(
+    tmp_path: Path,
+) -> None:
     """Inert tables must not take a project out of service; an operation
     field agentctl cannot honour must, loudly."""
     root = write_project(tmp_path / "p")
@@ -39,7 +50,8 @@ def test_retired_tables_are_ignored_but_retired_operation_fields_refuse(tmp_path
     assert load_project_adapter(root).project_id == "fixture"
 
     descriptor.write_text(
-        descriptor.read_text() + '\n[operations.check.parameters.apply]\ntype = "bool"\nflag = "--apply"\n'
+        descriptor.read_text()
+        + '\n[operations.check.parameters.apply]\ntype = "bool"\nflag = "--apply"\n'
     )
     with pytest.raises(ProjectConfigError, match="unknown fields: parameters"):
         load_project_adapter(root)
@@ -48,15 +60,32 @@ def test_retired_tables_are_ignored_but_retired_operation_fields_refuse(tmp_path
 @pytest.mark.parametrize(
     ("fragment", "message"),
     [
-        ('[operations.bad]\ndescription = "x"\nexec = ["x"]\npool = "Nope"\n', "pool is invalid"),
-        ('[operations.bad]\ndescription = "x"\nexec = ["x"]\nresult = "last-message"\n', "result is invalid"),
-        ('[operations.bad]\ndescription = "x"\nexec = ["x"]\ntimeout_seconds = 99999\n', "timeout_seconds"),
+        (
+            '[operations.bad]\ndescription = "x"\nexec = ["x"]\npool = "Nope"\n',
+            "pool is invalid",
+        ),
+        (
+            '[operations.bad]\ndescription = "x"\nexec = ["x"]\nresult = "last-message"\n',
+            "result is invalid",
+        ),
+        (
+            '[operations.bad]\ndescription = "x"\nexec = ["x"]\ntimeout_seconds = 99999\n',
+            "timeout_seconds",
+        ),
         ('[operations.bad]\ndescription = "x"\nexec = []\n', "non-empty list"),
-        ('[operations.bad]\ndescription = "x"\nexec = ["x"]\nschedule = ""\n', "OnCalendar"),
-        ('[operations.bad]\ndescription = "x"\nexec = ["x"]\ncheckout = "lane"\n', "checkout is invalid"),
+        (
+            '[operations.bad]\ndescription = "x"\nexec = ["x"]\nschedule = ""\n',
+            "OnCalendar",
+        ),
+        (
+            '[operations.bad]\ndescription = "x"\nexec = ["x"]\ncheckout = "lane"\n',
+            "checkout is invalid",
+        ),
     ],
 )
-def test_malformed_operations_are_typed_refusals(tmp_path: Path, fragment: str, message: str) -> None:
+def test_malformed_operations_are_typed_refusals(
+    tmp_path: Path, fragment: str, message: str
+) -> None:
     root = write_project(tmp_path / "p")
     descriptor = root / ".agentctl" / "project.toml"
     descriptor.write_text(descriptor.read_text() + "\n" + fragment)
@@ -67,14 +96,25 @@ def test_malformed_operations_are_typed_refusals(tmp_path: Path, fragment: str, 
 def test_a_malformed_agent_ceiling_is_a_typed_refusal(tmp_path: Path) -> None:
     root = write_project(tmp_path / "p")
     descriptor = root / ".agentctl" / "project.toml"
-    descriptor.write_text(descriptor.read_text().replace('agent_memory_max = "10G"', 'agent_memory_max = "lots"'))
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'agent_memory_max = "10G"', 'agent_memory_max = "lots"'
+        )
+    )
     with pytest.raises(ProjectConfigError, match="agent_memory_max"):
         load_project_adapter(root)
 
 
-def test_a_required_variable_missing_at_launch_fails_loudly(project_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_required_variable_missing_at_launch_fails_loudly(
+    project_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     descriptor = project_root / ".agentctl" / "project.toml"
-    descriptor.write_text(descriptor.read_text().replace('inherit = ["PATH"]', 'inherit = ["PATH", "FIXTURE_TOKEN"]\nrequire = ["FIXTURE_TOKEN"]'))
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'inherit = ["PATH"]',
+            'inherit = ["PATH", "FIXTURE_TOKEN"]\nrequire = ["FIXTURE_TOKEN"]',
+        )
+    )
     project = load_project_adapter(project_root)
     monkeypatch.delenv("FIXTURE_TOKEN", raising=False)
 
@@ -85,7 +125,9 @@ def test_a_required_variable_missing_at_launch_fails_loudly(project_root: Path, 
     assert project.environment.values()["FIXTURE_TOKEN"] == "t"
 
 
-def test_a_tolerant_catalog_reports_a_broken_root_without_hiding_the_others(tmp_path: Path, project_root: Path) -> None:
+def test_a_tolerant_catalog_reports_a_broken_root_without_hiding_the_others(
+    tmp_path: Path, project_root: Path
+) -> None:
     broken = tmp_path / "broken"
     broken.mkdir()
     (broken / ".agentctl").mkdir()
@@ -101,7 +143,9 @@ def test_a_tolerant_catalog_reports_a_broken_root_without_hiding_the_others(tmp_
         ProjectCatalog([project_root, broken])
 
 
-def test_config_reads_the_host_file_and_resolves_projects_by_id_or_path(tmp_path: Path, project_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_config_reads_the_host_file_and_resolves_projects_by_id_or_path(
+    tmp_path: Path, project_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     location = tmp_path / "agentctl.json"
     location.write_text(
         '{"project_roots": ["%s"], "agent_runner": "/r/run.sh", "event_spool": "/e/events.jsonl", "state_dir": "/s", "agentctl": "/bin/agentctl"}'
@@ -120,7 +164,9 @@ def test_config_reads_the_host_file_and_resolves_projects_by_id_or_path(tmp_path
     assert resolve_project(config, None).root == project_root
 
 
-def test_an_absent_config_file_yields_the_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_absent_config_file_yields_the_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("AGENTCTL_CONFIG", str(tmp_path / "missing.json"))
     config = load_config()
     assert isinstance(config, Config)

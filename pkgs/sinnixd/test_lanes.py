@@ -12,11 +12,15 @@ from sinnixd import lanes
 from sinnixd.config import Config
 from sinnixd.lanes import LaneError
 from sinnixd.projects import load_project_adapter
-from sinnixd.worktrunk import PullFacts, Worktree
+from sinnixd.worktrunk import Worktree
 
 
-def tree(branch: str, path: Path, *, state: str = "ahead", dirty: bool = False) -> Worktree:
-    return Worktree(branch=branch, path=path, head="abc123", main=False, dirty=dirty, state=state)
+def tree(
+    branch: str, path: Path, *, state: str = "ahead", dirty: bool = False
+) -> Worktree:
+    return Worktree(
+        branch=branch, path=path, head="abc123", main=False, dirty=dirty, state=state
+    )
 
 
 @pytest.fixture
@@ -29,7 +33,9 @@ def fake_wt(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     def worktrunk_find(root: Path, branch: str) -> Worktree | None:
         return next((item for item in state["trees"] if item.branch == branch), None)
 
-    def worktrunk_create(root: Path, branch: str, *, path: Path, base: str | None = None) -> Worktree:
+    def worktrunk_create(
+        root: Path, branch: str, *, path: Path, base: str | None = None
+    ) -> Worktree:
         path.mkdir(parents=True)
         created = tree(branch, path)
         state["trees"].append(created)
@@ -102,7 +108,11 @@ def fake_commands(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 def test_lane_start_creates_the_worktree_and_queues_a_bounded_agent_scope(
-    fake_pueue: FakePueue, fake_wt: dict[str, Any], fake_bd: FakeBd, config: Config, project_root: Path
+    fake_pueue: FakePueue,
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
 ) -> None:
     """Breaks if the agent leaves the job plane, loses its memory ceiling, or the
     prompt stops reaching the worktree."""
@@ -140,7 +150,11 @@ def test_lane_start_creates_the_worktree_and_queues_a_bounded_agent_scope(
 
 
 def test_lane_start_refuses_a_bead_that_already_has_a_worktree(
-    fake_pueue: FakePueue, fake_wt: dict[str, Any], fake_bd: FakeBd, config: Config, project_root: Path
+    fake_pueue: FakePueue,
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
 ) -> None:
     project = load_project_adapter(project_root)
     fake_wt["trees"].append(tree("feature/packet/fx-1", project_root.parent / "wt"))
@@ -151,7 +165,11 @@ def test_lane_start_refuses_a_bead_that_already_has_a_worktree(
 
 
 def test_lane_start_refuses_without_an_executable_runner(
-    fake_pueue: FakePueue, fake_wt: dict[str, Any], fake_bd: FakeBd, config: Config, project_root: Path
+    fake_pueue: FakePueue,
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
 ) -> None:
     config.agent_runner.chmod(0o644)
     project = load_project_adapter(project_root)
@@ -161,14 +179,21 @@ def test_lane_start_refuses_without_an_executable_runner(
 
 
 def test_lane_rebase_queues_into_the_existing_worktree(
-    fake_pueue: FakePueue, fake_wt: dict[str, Any], fake_bd: FakeBd, config: Config, project_root: Path, tmp_path: Path
+    fake_pueue: FakePueue,
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
 ) -> None:
     project = load_project_adapter(project_root)
     worktree = tmp_path / "worktrees" / "fixture-feature-packet-fx-2"
     worktree.mkdir(parents=True)
     fake_wt["trees"].append(tree("feature/packet/fx-2", worktree))
 
-    rebased = lanes.lane_rebase(config, project, "fx-2", model="gpt-5.6-terra", effort="high")
+    rebased = lanes.lane_rebase(
+        config, project, "fx-2", model="gpt-5.6-terra", effort="high"
+    )
 
     added = fake_pueue.added[0]
     assert added["label"] == "fixture:rebase:fx-2"
@@ -180,14 +205,20 @@ def test_lane_rebase_queues_into_the_existing_worktree(
 
 
 def test_lane_rebase_refuses_without_a_worktree(
-    fake_pueue: FakePueue, fake_wt: dict[str, Any], fake_bd: FakeBd, config: Config, project_root: Path
+    fake_pueue: FakePueue,
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
 ) -> None:
     project = load_project_adapter(project_root)
     with pytest.raises(LaneError, match="has no worktree"):
         lanes.lane_rebase(config, project, "fx-2")
 
 
-def _git_worktree(monkeypatch: pytest.MonkeyPatch, project_root: Path, branch: str, *, dirty: str = "") -> Path:
+def _git_worktree(
+    monkeypatch: pytest.MonkeyPatch, project_root: Path, branch: str, *, dirty: str = ""
+) -> Path:
     worktree = project_root.parent / "worktrees" / "lane"
     worktree.mkdir(parents=True)
     (worktree / ".git").write_text("gitdir: elsewhere\n")
@@ -208,13 +239,19 @@ def _git_worktree(monkeypatch: pytest.MonkeyPatch, project_root: Path, branch: s
 
 
 def test_lane_publish_pushes_opens_the_pr_under_the_bead_subject_and_arms_auto_merge(
-    fake_commands: dict[str, Any], fake_bd: FakeBd, config: Config, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    fake_commands: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-1")
 
     published = lanes.lane_publish(config, worktree)
 
-    create = next(call for call in fake_commands["calls"] if call[:3] == ["gh", "pr", "create"])
+    create = next(
+        call for call in fake_commands["calls"] if call[:3] == ["gh", "pr", "create"]
+    )
     assert create[create.index("--title") + 1] == "fix: First task"
     assert create[create.index("--base") + 1] == "master"
     assert create[create.index("--head") + 1] == "feature/packet/fx-1"
@@ -224,7 +261,11 @@ def test_lane_publish_pushes_opens_the_pr_under_the_bead_subject_and_arms_auto_m
 
 
 def test_lane_publish_reuses_an_open_pr_and_reads_the_lane_body(
-    fake_commands: dict[str, Any], fake_bd: FakeBd, config: Config, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    fake_commands: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     worktree = _git_worktree(monkeypatch, project_root, "feature/packet/fx-2")
     (worktree / ".lane").mkdir()
@@ -239,17 +280,26 @@ def test_lane_publish_reuses_an_open_pr_and_reads_the_lane_body(
 
     published = lanes.lane_publish(config, worktree)
 
-    assert not any(call[:3] == ["gh", "pr", "create"] for call in fake_commands["calls"])
+    assert not any(
+        call[:3] == ["gh", "pr", "create"] for call in fake_commands["calls"]
+    )
     assert not any(call[:3] == ["gh", "pr", "merge"] for call in fake_commands["calls"])
     assert published["pr"] == 7 and published["created"] is False
 
 
 def test_lane_publish_refuses_a_dirty_worktree_but_ignores_lane_artifacts(
-    fake_commands: dict[str, Any], fake_bd: FakeBd, config: Config, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    fake_commands: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Uncommitted work would be silently absent from the PR."""
     worktree = _git_worktree(
-        monkeypatch, project_root, "feature/packet/fx-1", dirty=" M src/a.py\n?? .lane/prompt.md\n"
+        monkeypatch,
+        project_root,
+        "feature/packet/fx-1",
+        dirty=" M src/a.py\n?? .lane/prompt.md\n",
     )
     with pytest.raises(LaneError, match="src/a.py"):
         lanes.lane_publish(config, worktree)
@@ -257,31 +307,57 @@ def test_lane_publish_refuses_a_dirty_worktree_but_ignores_lane_artifacts(
 
 
 def test_lane_publish_needs_a_bead_or_a_title_for_a_foreign_branch(
-    fake_commands: dict[str, Any], fake_bd: FakeBd, config: Config, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    fake_commands: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     worktree = _git_worktree(monkeypatch, project_root, "wip/anything")
     with pytest.raises(LaneError, match="--bead or --title"):
         lanes.lane_publish(config, worktree)
 
     published = lanes.lane_publish(config, worktree, title="chore: hand-written")
-    create = next(call for call in fake_commands["calls"] if call[:3] == ["gh", "pr", "create"])
+    create = next(
+        call for call in fake_commands["calls"] if call[:3] == ["gh", "pr", "create"]
+    )
     assert create[create.index("--title") + 1] == "chore: hand-written"
     assert published["bead"] is None
 
 
 def test_lane_sync_closes_and_removes_merged_lanes_and_reports_the_rest(
-    fake_commands: dict[str, Any], fake_wt: dict[str, Any], fake_bd: FakeBd, config: Config, project_root: Path, tmp_path: Path
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
 ) -> None:
     project = load_project_adapter(project_root)
     fake_wt["trees"] = [
         tree("feature/packet/fx-1", tmp_path / "a", state="integrated"),
         tree("feature/packet/fx-2", tmp_path / "b", state="ahead", dirty=True),
         tree("feature/packet/fx-3", tmp_path / "c", state="ahead"),
-        Worktree(branch="master", path=project_root, head="m", main=True, dirty=False, state="main"),
+        Worktree(
+            branch="master",
+            path=project_root,
+            head="m",
+            main=True,
+            dirty=False,
+            state="main",
+        ),
     ]
     fake_commands["prs"] = {
-        "feature/packet/fx-2": {"number": 2, "state": "MERGED", "headRefName": "feature/packet/fx-2"},
-        "feature/packet/fx-3": {"number": 3, "state": "OPEN", "headRefName": "feature/packet/fx-3"},
+        "feature/packet/fx-2": {
+            "number": 2,
+            "state": "MERGED",
+            "headRefName": "feature/packet/fx-2",
+        },
+        "feature/packet/fx-3": {
+            "number": 3,
+            "state": "OPEN",
+            "headRefName": "feature/packet/fx-3",
+        },
     }
 
     synced = lanes.lane_sync(config, project)
@@ -289,20 +365,38 @@ def test_lane_sync_closes_and_removes_merged_lanes_and_reports_the_rest(
     assert synced["closed"] == ["fx-1"]
     assert synced["removed"] == ["feature/packet/fx-1"]
     assert fake_wt["removed"] == ["feature/packet/fx-1"]
-    assert ["bd", "close", "fx-1", "--actor", "agentctl", "--reason", "merged (branch integrated)"] in fake_commands["calls"]
+    assert [
+        "bd",
+        "close",
+        "fx-1",
+        "--actor",
+        "agentctl",
+        "--reason",
+        "merged (branch integrated)",
+    ] in fake_commands["calls"]
     remaining = {row["branch"]: row for row in synced["remaining"]}
     assert remaining["feature/packet/fx-2"]["reason"].startswith("merged but")
     assert remaining["feature/packet/fx-3"]["pr_state"] == "OPEN"
 
 
 def test_refill_starts_ready_beads_without_a_worktree_or_pr_up_to_the_limit(
-    fake_pueue: FakePueue, fake_commands: dict[str, Any], fake_wt: dict[str, Any], fake_bd: FakeBd, config: Config, project_root: Path, tmp_path: Path
+    fake_pueue: FakePueue,
+    fake_commands: dict[str, Any],
+    fake_wt: dict[str, Any],
+    fake_bd: FakeBd,
+    config: Config,
+    project_root: Path,
+    tmp_path: Path,
 ) -> None:
     """Epics, beads with a worktree, and beads with an open PR are never re-dispatched."""
     project = load_project_adapter(project_root)
     fake_wt["trees"] = [tree("feature/packet/fx-1", tmp_path / "a")]
     fake_commands["prs"] = {
-        "feature/packet/fx-2": {"number": 2, "state": "OPEN", "headRefName": "feature/packet/fx-2"}
+        "feature/packet/fx-2": {
+            "number": 2,
+            "state": "OPEN",
+            "headRefName": "feature/packet/fx-2",
+        }
     }
 
     planned = lanes.refill(config, project, limit=5, dry_run=True)

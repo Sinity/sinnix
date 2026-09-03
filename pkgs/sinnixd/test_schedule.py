@@ -18,12 +18,17 @@ def fake_systemd(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         argv = list(argv)
         state["calls"].append(argv)
         if argv[:3] == ["systemctl", "--user", "list-units"]:
-            return "".join(f"{unit}.timer loaded active waiting x\n" for unit in sorted(state["units"]))
+            return "".join(
+                f"{unit}.timer loaded active waiting x\n"
+                for unit in sorted(state["units"])
+            )
         if argv[:3] == ["systemctl", "--user", "stop"]:
             state["units"].discard(argv[3][: -len(".timer")])
             return ""
         if argv[0] == "systemd-run":
-            unit = next(item for item in argv if item.startswith("--unit=")).split("=", 1)[1]
+            unit = next(item for item in argv if item.startswith("--unit=")).split(
+                "=", 1
+            )[1]
             state["units"].add(unit)
             return ""
         raise AssertionError(argv)
@@ -46,7 +51,13 @@ def test_apply_starts_declared_timers_that_fire_agentctl_and_stops_retired_ones(
     start = next(call for call in fake_systemd["calls"] if call[0] == "systemd-run")
     assert "--on-calendar=*-*-* 03:17:00" in start
     assert "--timer-property=Persistent=true" in start
-    assert start[start.index("--") + 1 :] == ["/fixture/agentctl", "job", "fire", "fixture", "nightly"]
+    assert start[start.index("--") + 1 :] == [
+        "/fixture/agentctl",
+        "job",
+        "fire",
+        "fixture",
+        "nightly",
+    ]
 
 
 def test_apply_is_idempotent(fake_systemd: dict[str, Any], config: Config) -> None:
@@ -56,7 +67,9 @@ def test_apply_is_idempotent(fake_systemd: dict[str, Any], config: Config) -> No
 
 
 def test_a_changed_expression_is_a_new_unit() -> None:
-    assert schedule.unit_for("p", "op", "hourly") != schedule.unit_for("p", "op", "daily")
+    assert schedule.unit_for("p", "op", "hourly") != schedule.unit_for(
+        "p", "op", "daily"
+    )
 
 
 def test_sub_hourly_timers_do_not_catch_up() -> None:

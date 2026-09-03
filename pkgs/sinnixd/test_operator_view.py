@@ -18,7 +18,15 @@ from sinnixd.worktrunk import Worktree
 NOW = datetime(2026, 9, 3, 9, 0, tzinfo=UTC)
 
 
-def task(task_id: int, label: str, *, status: str = "Running", result: str | None = None, exit_code: int | None = None, group: str = "normal") -> Task:
+def task(
+    task_id: int,
+    label: str,
+    *,
+    status: str = "Running",
+    result: str | None = None,
+    exit_code: int | None = None,
+    group: str = "normal",
+) -> Task:
     return Task(
         task_id=task_id,
         label=label,
@@ -35,22 +43,46 @@ def task(task_id: int, label: str, *, status: str = "Running", result: str | Non
     )
 
 
-def lane(branch: str, bead_id: str, *, pr: dict[str, Any] | None = None, state: str = "ahead", dirty: bool = False) -> LaneRow:
+def lane(
+    branch: str,
+    bead_id: str,
+    *,
+    pr: dict[str, Any] | None = None,
+    state: str = "ahead",
+    dirty: bool = False,
+) -> LaneRow:
     return LaneRow(
-        worktree=Worktree(branch=branch, path=Path("/w") / branch.replace("/", "-"), head="h", main=False, dirty=dirty, state=state),
+        worktree=Worktree(
+            branch=branch,
+            path=Path("/w") / branch.replace("/", "-"),
+            head="h",
+            main=False,
+            dirty=dirty,
+            state=state,
+        ),
         bead=bead_id,
         pr=pr,
     )
 
 
-def pull(number: int, *, mergeable: str = "MERGEABLE", checks: str = "SUCCESS", auto: bool = False, state: str = "OPEN", review: str = "") -> dict[str, Any]:
+def pull(
+    number: int,
+    *,
+    mergeable: str = "MERGEABLE",
+    checks: str = "SUCCESS",
+    auto: bool = False,
+    state: str = "OPEN",
+    review: str = "",
+) -> dict[str, Any]:
     return {
         "number": number,
         "state": state,
         "mergeable": mergeable,
         "reviewDecision": review,
         "autoMergeRequest": {"enabledAt": "x"} if auto else None,
-        "statusCheckRollup": [{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": checks}],
+        "statusCheckRollup": [
+            {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": checks}
+        ],
     }
 
 
@@ -62,12 +94,30 @@ def snapshot(**overrides: Any) -> operator_view.Snapshot:
             task(1, "fixture:verify_all", group="pytest"),
             task(2, "fixture:lane:fx-1", group="agent"),
             task(3, "fixture:check", status="Done", result="Failed", exit_code=2),
-            task(4, "fixture:lane:fx-2", status="Done", result="Success", exit_code=0, group="agent"),
-            task(5, "fixture:lane:fx-4", status="Done", result="Failed", exit_code=1, group="agent"),
+            task(
+                4,
+                "fixture:lane:fx-2",
+                status="Done",
+                result="Success",
+                exit_code=0,
+                group="agent",
+            ),
+            task(
+                5,
+                "fixture:lane:fx-4",
+                status="Done",
+                result="Failed",
+                exit_code=1,
+                group="agent",
+            ),
         ),
         "groups": {"agent": "Running", "normal": "Paused", "pytest": "Running"},
         "lanes": (
-            lane("feature/packet/fx-1", "fx-1", pr=pull(41, mergeable="CONFLICTING", auto=True)),
+            lane(
+                "feature/packet/fx-1",
+                "fx-1",
+                pr=pull(41, mergeable="CONFLICTING", auto=True),
+            ),
             lane("feature/packet/fx-2", "fx-2", pr=pull(42, checks="FAILURE")),
             lane("feature/packet/fx-3", "fx-3", dirty=True),
             lane("feature/packet/fx-4", "fx-4"),
@@ -82,16 +132,26 @@ def snapshot(**overrides: Any) -> operator_view.Snapshot:
 
 def test_stage_and_next_follow_from_pr_then_agent_facts() -> None:
     """Breaks if a conflicting PR, a red check, or a failed agent stops naming its next step."""
-    stages = {row.bead: operator_view.lane_stage(row, operator_view.agents_by_bead(snapshot().tasks).get(row.bead)) for row in snapshot().lanes}
+    stages = {
+        row.bead: operator_view.lane_stage(
+            row, operator_view.agents_by_bead(snapshot().tasks).get(row.bead)
+        )
+        for row in snapshot().lanes
+    }
     assert stages["fx-1"] == ("conflicting", "lane rebase")
     assert stages["fx-2"] == ("checks failing", "fix in lane, push")
     assert stages["fx-3"] == ("idle", "lane rebase or publish")
     assert stages["fx-4"] == ("lane failed", "job logs, then lane rebase")
     assert stages["fx-5"] == ("auto-merge armed", "wait for merge")
     assert stages["fx-6"] == ("merged", "lane sync")
-    running = operator_view.lane_stage(lane("b", "fx-1"), task(2, "fixture:lane:fx-1", group="agent"))
+    running = operator_view.lane_stage(
+        lane("b", "fx-1"), task(2, "fixture:lane:fx-1", group="agent")
+    )
     assert running == ("lane running", "wait")
-    done = operator_view.lane_stage(lane("b", "fx-2"), task(4, "fixture:lane:fx-2", status="Done", result="Success", group="agent"))
+    done = operator_view.lane_stage(
+        lane("b", "fx-2"),
+        task(4, "fixture:lane:fx-2", status="Done", result="Success", group="agent"),
+    )
     assert done == ("unpublished", "lane publish")
 
 
@@ -107,8 +167,15 @@ def test_render_shows_groups_attention_jobs_lanes_with_timing_and_ready() -> Non
     assert "! feature-packet-fx-4 lane failed" in text
     assert "== jobs: 2 active" in text
     assert "== lanes: 6" in text
-    lane_lines = {line.split()[0]: line for line in text.splitlines() if line.strip().startswith("feature-packet-")}
-    assert "lane running" in lane_lines["feature-packet-fx-1"] or "conflicting" in lane_lines["feature-packet-fx-1"]
+    lane_lines = {
+        line.split()[0]: line
+        for line in text.splitlines()
+        if line.strip().startswith("feature-packet-")
+    }
+    assert (
+        "lane running" in lane_lines["feature-packet-fx-1"]
+        or "conflicting" in lane_lines["feature-packet-fx-1"]
+    )
     assert "#2" in lane_lines["feature-packet-fx-1"]
     assert "30m" in lane_lines["feature-packet-fx-1"]
     assert "#41 open checks:pass auto" in lane_lines["feature-packet-fx-1"]
@@ -126,9 +193,31 @@ def test_render_says_nothing_needs_attention_when_nothing_does() -> None:
 
 def test_checks_summary_orders_fail_over_pending_over_pass() -> None:
     assert operator_view._checks({"statusCheckRollup": []}) == "none"
-    assert operator_view._checks({"statusCheckRollup": [{"status": "IN_PROGRESS"}, {"conclusion": "SUCCESS", "status": "COMPLETED"}]}) == "pending"
-    assert operator_view._checks({"statusCheckRollup": [{"status": "IN_PROGRESS"}, {"conclusion": "FAILURE", "status": "COMPLETED"}]}) == "fail"
-    assert operator_view._checks({"statusCheckRollup": [{"state": "SUCCESS"}]}) == "pass"
+    assert (
+        operator_view._checks(
+            {
+                "statusCheckRollup": [
+                    {"status": "IN_PROGRESS"},
+                    {"conclusion": "SUCCESS", "status": "COMPLETED"},
+                ]
+            }
+        )
+        == "pending"
+    )
+    assert (
+        operator_view._checks(
+            {
+                "statusCheckRollup": [
+                    {"status": "IN_PROGRESS"},
+                    {"conclusion": "FAILURE", "status": "COMPLETED"},
+                ]
+            }
+        )
+        == "fail"
+    )
+    assert (
+        operator_view._checks({"statusCheckRollup": [{"state": "SUCCESS"}]}) == "pass"
+    )
 
 
 def test_age_and_local_clock_read_iso_stamps() -> None:
@@ -138,17 +227,40 @@ def test_age_and_local_clock_read_iso_stamps() -> None:
     assert operator_view.age("2026-08-30T06:00:00+00:00", NOW) == "4d"
     assert operator_view.age(None, NOW) == "?"
     assert operator_view.local_clock("2026-09-03T08:30:00Z").count(":") == 1
-    assert operator_view.local_clock("2026-09-03T08:30:00Z", seconds=True).count(":") == 2
+    assert (
+        operator_view.local_clock("2026-09-03T08:30:00Z", seconds=True).count(":") == 2
+    )
 
 
 def test_collect_reads_each_source_and_keeps_going_when_one_is_down(
-    fake_pueue: FakePueue, config: Config, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project = load_project_adapter(project_root)
-    fake_pueue.add(group="normal", label="fixture:check", command=("true",), working_directory=project_root)
-    fake_pueue.add(group="normal", label="other:check", command=("true",), working_directory=project_root)
-    monkeypatch.setattr(operator_view, "lane_rows", lambda project, full=False: [lane("feature/packet/fx-1", "fx-1")])
-    monkeypatch.setattr(operator_view, "SubprocessBdReader", lambda root: FakeBd(beads={"fx-1": bead("fx-1", "One")}))
+    fake_pueue.add(
+        group="normal",
+        label="fixture:check",
+        command=("true",),
+        working_directory=project_root,
+    )
+    fake_pueue.add(
+        group="normal",
+        label="other:check",
+        command=("true",),
+        working_directory=project_root,
+    )
+    monkeypatch.setattr(
+        operator_view,
+        "lane_rows",
+        lambda project, full=False: [lane("feature/packet/fx-1", "fx-1")],
+    )
+    monkeypatch.setattr(
+        operator_view,
+        "SubprocessBdReader",
+        lambda root: FakeBd(beads={"fx-1": bead("fx-1", "One")}),
+    )
 
     collected = operator_view.collect(config, project, now=NOW)
     assert [item.label for item in collected.tasks] == ["fixture:check"]
@@ -166,11 +278,22 @@ def test_collect_reads_each_source_and_keeps_going_when_one_is_down(
 def test_to_dict_carries_stage_next_timing_and_group_counts() -> None:
     payload = snapshot().to_dict()
     assert payload["schema"] == "sinnix.agentctl.view.v2"
-    assert payload["groups"]["normal"] == {"status": "Paused", "running": 0, "queued": 0, "paused": 0}
+    assert payload["groups"]["normal"] == {
+        "status": "Paused",
+        "running": 0,
+        "queued": 0,
+        "paused": 0,
+    }
     assert payload["groups"]["agent"]["running"] == 1
     lanes = {row["bead"]: row for row in payload["lanes"]}
-    assert lanes["fx-1"]["stage"] == "conflicting" and lanes["fx-1"]["next"] == "lane rebase"
-    assert lanes["fx-1"]["elapsed"] == "30m" and lanes["fx-1"]["since"] == "2026-09-03T08:30:00+00:00"
+    assert (
+        lanes["fx-1"]["stage"] == "conflicting"
+        and lanes["fx-1"]["next"] == "lane rebase"
+    )
+    assert (
+        lanes["fx-1"]["elapsed"] == "30m"
+        and lanes["fx-1"]["since"] == "2026-09-03T08:30:00+00:00"
+    )
     assert lanes["fx-1"]["agent"]["job_id"] == 2
     assert lanes["fx-2"]["pr"]["checks"] == "fail"
     assert lanes["fx-3"]["pr"] is None and lanes["fx-3"]["agent"] is None

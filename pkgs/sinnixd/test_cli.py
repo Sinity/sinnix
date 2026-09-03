@@ -12,7 +12,9 @@ from sinnixd.config import Config
 
 
 @pytest.fixture
-def cli_config(tmp_path: Path, config: Config, monkeypatch: pytest.MonkeyPatch) -> Config:
+def cli_config(
+    tmp_path: Path, config: Config, monkeypatch: pytest.MonkeyPatch
+) -> Config:
     location = tmp_path / "agentctl.json"
     location.write_text(
         json.dumps(
@@ -56,7 +58,10 @@ def test_job_start_with_wait_reports_a_failure_in_the_exit_status(
     fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake_pueue.finish_when_waited(1, lambda fake: fake.fail(1, exit_code=3))
-    assert cli.main(["job", "start", "fixture", "check", "--wait"]) == cli.EXIT_JOB_NOT_SUCCEEDED
+    assert (
+        cli.main(["job", "start", "fixture", "check", "--wait"])
+        == cli.EXIT_JOB_NOT_SUCCEEDED
+    )
     assert "failed exit 3" in capsys.readouterr().out
 
 
@@ -71,7 +76,9 @@ def test_errors_are_one_line_on_stderr_and_a_nonzero_status(
     assert "nowhere" in capsys.readouterr().err
 
 
-def test_project_verbs_read_the_catalog(cli_config: Config, capsys: pytest.CaptureFixture[str]) -> None:
+def test_project_verbs_read_the_catalog(
+    cli_config: Config, capsys: pytest.CaptureFixture[str]
+) -> None:
     assert cli.main(["--json", "project", "list"]) == 0
     listed = json.loads(capsys.readouterr().out)
     assert [row["id"] for row in listed["projects"]] == ["fixture"]
@@ -99,16 +106,25 @@ def test_events_tail_prints_the_last_lines_filtered_by_project(
     assert capsys.readouterr().out.strip().startswith('{"kind":"backpressure"')
 
 
-def test_a_missing_spool_is_reported(cli_config: Config, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_missing_spool_is_reported(
+    cli_config: Config, capsys: pytest.CaptureFixture[str]
+) -> None:
     assert cli.main(["events", "tail"]) == 1
     assert "no event spool" in capsys.readouterr().err
 
 
 def test_view_json_is_the_snapshot(
-    fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    fake_pueue: FakePueue,
+    cli_config: Config,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(cli.operator_view, "lane_rows", lambda project, full=False: [])
-    monkeypatch.setattr(cli.operator_view, "SubprocessBdReader", lambda root: type("R", (), {"ready": lambda self: []})())
+    monkeypatch.setattr(
+        cli.operator_view,
+        "SubprocessBdReader",
+        lambda root: type("R", (), {"ready": lambda self: []})(),
+    )
     assert cli.main(["--json", "view", "fixture"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["project"] == "fixture"

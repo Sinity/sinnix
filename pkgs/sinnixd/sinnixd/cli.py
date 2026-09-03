@@ -61,10 +61,16 @@ def parser() -> argparse.ArgumentParser:
         prog="agentctl",
         description="Jobs over pueue, lanes over worktrunk + gh + bd, one operator view.",
     )
-    root.add_argument("--config", type=Path, help="agentctl.json (default /etc/sinnix/agentctl.json)")
-    root.add_argument("--json", action="store_true", help="print the document instead of a table")
+    root.add_argument(
+        "--config", type=Path, help="agentctl.json (default /etc/sinnix/agentctl.json)"
+    )
+    root.add_argument(
+        "--json", action="store_true", help="print the document instead of a table"
+    )
     verbs = root.add_subparsers(dest="verb", required=True)
-    project_help = "project id or path (default: the checkout enclosing the working directory)"
+    project_help = (
+        "project id or path (default: the checkout enclosing the working directory)"
+    )
 
     project = verbs.add_parser("project", help="the configured project descriptors")
     project_verbs = project.add_subparsers(dest="project_verb", required=True)
@@ -78,11 +84,19 @@ def parser() -> argparse.ArgumentParser:
     start = job_verbs.add_parser("start")
     start.add_argument("project", help="project id or path")
     start.add_argument("operation")
-    start.add_argument("--workspace", type=Path, help="run in this worktree instead of the project root")
+    start.add_argument(
+        "--workspace",
+        type=Path,
+        help="run in this worktree instead of the project root",
+    )
     start.add_argument("--wait", action="store_true")
     start.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
-    start.add_argument("extra", nargs="*", help="arguments appended to the declared exec (after --)")
-    fire = job_verbs.add_parser("fire", help="a timer's launch: skipped while the operation is active")
+    start.add_argument(
+        "extra", nargs="*", help="arguments appended to the declared exec (after --)"
+    )
+    fire = job_verbs.add_parser(
+        "fire", help="a timer's launch: skipped while the operation is active"
+    )
     fire.add_argument("project")
     fire.add_argument("operation")
     listing = job_verbs.add_parser("list")
@@ -95,14 +109,22 @@ def parser() -> argparse.ArgumentParser:
     wait.add_argument("job_id", type=int)
     wait.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
 
-    lane = verbs.add_parser("lane", help="a worktree with an agent in it and a PR at the end")
+    lane = verbs.add_parser(
+        "lane", help="a worktree with an agent in it and a PR at the end"
+    )
     lane_verbs = lane.add_subparsers(dest="lane_verb", required=True)
     lane_start = lane_verbs.add_parser("start")
     lane_start.add_argument("project")
     lane_start.add_argument("bead")
     _agent_arguments(lane_start)
     publish = lane_verbs.add_parser("publish")
-    publish.add_argument("path", type=Path, nargs="?", default=Path.cwd(), help="the worktree (default: cwd)")
+    publish.add_argument(
+        "path",
+        type=Path,
+        nargs="?",
+        default=Path.cwd(),
+        help="the worktree (default: cwd)",
+    )
     publish.add_argument("--bead")
     publish.add_argument("--title")
     publish.add_argument("--body-file", type=Path)
@@ -114,7 +136,9 @@ def parser() -> argparse.ArgumentParser:
     sync.add_argument("project", nargs="?", help=project_help)
     sync.add_argument("--actor", default="agentctl")
 
-    refill = verbs.add_parser("refill", help="start lanes for ready beads without a worktree or PR")
+    refill = verbs.add_parser(
+        "refill", help="start lanes for ready beads without a worktree or PR"
+    )
     refill.add_argument("project", nargs="?", help=project_help)
     refill.add_argument("--limit", type=int, default=1)
     refill.add_argument("--dry-run", action="store_true")
@@ -123,7 +147,9 @@ def parser() -> argparse.ArgumentParser:
     view = verbs.add_parser("view", help="the operator screen")
     view.add_argument("project", nargs="?", help=project_help)
 
-    events = verbs.add_parser("events", help="the event spool: started and finished tasks, backpressure")
+    events = verbs.add_parser(
+        "events", help="the event spool: started and finished tasks, backpressure"
+    )
     events_verbs = events.add_subparsers(dest="events_verb", required=True)
     tail = events_verbs.add_parser("tail")
     tail.add_argument("--lines", type=int, default=DEFAULT_EVENT_LINES)
@@ -156,7 +182,9 @@ class Output:
             if ended
             else f"since {local_clock(started)} ({age(started, self.now)})"
         )
-        exit_text = f" exit {job['exit_code']}" if job.get("exit_code") not in (None, 0) else ""
+        exit_text = (
+            f" exit {job['exit_code']}" if job.get("exit_code") not in (None, 0) else ""
+        )
         return f"job {job['job_id']} {job['label']} {job['phase']}{exit_text} {when}"
 
     def jobs_table(self, rows: Sequence[Mapping[str, Any]]) -> str:
@@ -195,10 +223,16 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             extra_argv=tuple(arguments.extra),
         )
         if arguments.wait:
-            started = launch.wait(started["job_id"], timeout_seconds=arguments.timeout_seconds)
+            started = launch.wait(
+                started["job_id"], timeout_seconds=arguments.timeout_seconds
+            )
         out.emit(started, out.job_line(started))
         if started.get("terminal"):
-            return EXIT_OK if started.get("phase") == "succeeded" else EXIT_JOB_NOT_SUCCEEDED
+            return (
+                EXIT_OK
+                if started.get("phase") == "succeeded"
+                else EXIT_JOB_NOT_SUCCEEDED
+            )
         return EXIT_OK
     if verb == "fire":
         project = resolve_project(config, arguments.project)
@@ -229,7 +263,11 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         text = (
             out.job_line(result)
             if result.get("kind") == "exit"
-            else (value if isinstance(value, str) else json.dumps(value, indent=2, sort_keys=True))
+            else (
+                value
+                if isinstance(value, str)
+                else json.dumps(value, indent=2, sort_keys=True)
+            )
         )
         out.emit(result, text)
         return EXIT_OK
@@ -242,8 +280,14 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.emit(job, out.job_line(job))
         return EXIT_OK
     if verb == "wait":
-        waited = launch.wait(arguments.job_id, timeout_seconds=arguments.timeout_seconds)
-        out.emit(waited, out.job_line(waited) + (" (wait timed out)" if waited.get("wait_timed_out") else ""))
+        waited = launch.wait(
+            arguments.job_id, timeout_seconds=arguments.timeout_seconds
+        )
+        out.emit(
+            waited,
+            out.job_line(waited)
+            + (" (wait timed out)" if waited.get("wait_timed_out") else ""),
+        )
         return EXIT_OK if waited.get("phase") == "succeeded" else EXIT_JOB_NOT_SUCCEEDED
     raise AssertionError(verb)
 
@@ -291,7 +335,10 @@ def _lane(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             model=arguments.model,
             effort=arguments.effort,
         )
-        out.emit(rebased, f"rebase {rebased['bead']} in {rebased['worktree']}: {out.job_line(rebased['job'])}")
+        out.emit(
+            rebased,
+            f"rebase {rebased['bead']} in {rebased['worktree']}: {out.job_line(rebased['job'])}",
+        )
         return EXIT_OK
     if verb == "sync":
         project = resolve_project(config, arguments.project)
@@ -336,7 +383,8 @@ def _event_line(event: Mapping[str, Any]) -> str:
     detail = " ".join(
         f"{key}={value}"
         for key, value in sorted(event.items())
-        if key not in {"kind", "emitted_at", "schema_version"} and not isinstance(value, (dict, list))
+        if key not in {"kind", "emitted_at", "schema_version"}
+        and not isinstance(value, (dict, list))
     )
     return f"{stamp} {kind} {detail}"
 
@@ -346,7 +394,11 @@ def _events(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     project = arguments.project
 
     def wanted(line: str) -> bool:
-        return project is None or f'"{project}:' in line or f'"project":"{project}"' in line
+        return (
+            project is None
+            or f'"{project}:' in line
+            or f'"project":"{project}"' in line
+        )
 
     def show(line: str) -> None:
         line = line.rstrip("\n")
@@ -394,7 +446,10 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
                 ],
             }
             lines = [f"{row['id']:14} {row['root']}" for row in document["projects"]]
-            lines.extend(f"{'(out of service)':14} {row['root']}: {row['reason']}" for row in document["unavailable"])
+            lines.extend(
+                f"{'(out of service)':14} {row['root']}: {row['reason']}"
+                for row in document["unavailable"]
+            )
             out.emit(document, "\n".join(lines) or "(no projects configured)")
             return EXIT_OK
         project = resolve_project(config, arguments.project)
@@ -405,7 +460,14 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
             out.emit(
                 rows,
                 table(
-                    ("operation", "pool", "result", "timeout", "schedule", "description"),
+                    (
+                        "operation",
+                        "pool",
+                        "result",
+                        "timeout",
+                        "schedule",
+                        "description",
+                    ),
                     [
                         (
                             row["name"],
@@ -445,7 +507,9 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
             f"started {row['bead']} on {row['branch']}: {out.job_line(row['job'])}"
             for row in refilled["started"]
         )
-        lines.extend(f"failed {row['bead']}: {row['error']}" for row in refilled["failed"])
+        lines.extend(
+            f"failed {row['bead']}: {row['error']}" for row in refilled["failed"]
+        )
         out.emit(refilled, "\n".join(lines))
         return EXIT_REFUSED if refilled["failed"] else EXIT_OK
     if verb == "view":
@@ -461,8 +525,13 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
             f"{row['unit']}.timer {row['project']}:{row['operation']} {row['schedule']}"
             for row in applied["timers"]
         ]
-        lines.append(f"started {len(applied['started'])}, stopped {len(applied['stopped'])}")
-        lines.extend(f"(out of service) {row['root']}: {row['reason']}" for row in applied["unavailable"])
+        lines.append(
+            f"started {len(applied['started'])}, stopped {len(applied['stopped'])}"
+        )
+        lines.extend(
+            f"(out of service) {row['root']}: {row['reason']}"
+            for row in applied["unavailable"]
+        )
         out.emit(applied, "\n".join(lines))
         return EXIT_OK
     raise AssertionError(verb)
@@ -475,7 +544,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(arguments.config)
         return _dispatch(arguments, config, out)
     except _ERRORS as error:
-        message = error.args[0] if isinstance(error, KeyError) and error.args else str(error)
+        message = (
+            error.args[0] if isinstance(error, KeyError) and error.args else str(error)
+        )
         print(f"agentctl: {message}", file=sys.stderr)
         return EXIT_REFUSED
 

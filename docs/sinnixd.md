@@ -3,13 +3,13 @@
 `agentctl` is an in-process CLI. There is no daemon and no socket. Four
 external tools own the state it reads and writes:
 
-| Authority | Owns                                                                | Read through                          |
-| --------- | ------------------------------------------------------------------- | ------------------------------------- |
-| pueue     | the queue, its groups (pools), every process, its terminal result   | `pueue status --json`, `pueue log`    |
-| worktrunk | worktree creation, provisioning (`.config/wt.toml` hooks), removal  | `wt list --format=json` (schema 2)    |
-| GitHub    | PRs, review, required checks, merge                                 | `gh pr list/view/create/merge`        |
-| Beads     | tasks                                                               | `bd ready/show/close --json`          |
-| systemd   | only the calendar wake-up a declared `schedule` needs               | transient user timers                 |
+| Authority | Owns                                                               | Read through                       |
+| --------- | ------------------------------------------------------------------ | ---------------------------------- |
+| pueue     | the queue, its groups (pools), every process, its terminal result  | `pueue status --json`, `pueue log` |
+| worktrunk | worktree creation, provisioning (`.config/wt.toml` hooks), removal | `wt list --format=json` (schema 2) |
+| GitHub    | PRs, review, required checks, merge                                | `gh pr list/view/create/merge`     |
+| Beads     | tasks                                                              | `bd ready/show/close --json`       |
+| systemd   | only the calendar wake-up a declared `schedule` needs              | transient user timers              |
 
 What agentctl owns outright: the project descriptors, the prompt compiled
 from a bead, the launch-input and result-artifact contract of a queued
@@ -17,21 +17,21 @@ command, and one operator screen.
 
 ## Verbs
 
-| Verb                                                             | Does                                                                                                                                                                       |
-| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `project list \| get <p> \| operations <p>`                      | the configured descriptors (`/etc/sinnix/agentctl.json` lists the roots)                                                                                                   |
-| `job start <p> <op> [--workspace <path>] [--wait] [-- args…]`   | `pueue add` in the operation's pool, label `<p>:<op>`, running `sinnixd-queue-run <launch.json>`; extra arguments are appended to the declared `exec`                     |
-| `job fire <p> <op>`                                              | what a schedule timer runs: `job start` on the main checkout, skipped while the same label is queued or running                                                            |
-| `job list [--project p] [--active]`                              | `pueue status --json` reduced to job rows                                                                                                                                  |
-| `job get \| logs \| result \| cancel \| retry \| wait <id>`      | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` kills the task and its process group, `retry` is `pueue restart --in-place`     |
-| `lane start <p> <bead> [--backend --model --effort]`            | compile the prompt, `wt switch --create feature/packet/<bead>`, queue the agent in group `agent` (label `<p>:lane:<bead>`)                                                  |
-| `lane publish [<worktree>] [--bead --title --body-file]`        | push, `gh pr create` under the bead's type-prefixed subject, `gh pr merge --auto --squash`; refuses a dirty worktree; the worktree defaults to cwd                        |
-| `lane rebase <p> <bead>`                                         | queue an agent with the rebase prompt into the bead's existing worktree (label `<p>:rebase:<bead>`)                                                                        |
-| `lane sync <p>`                                                  | worktrees whose PR merged (or `wt` reports integrated): `bd close`, `wt remove`; the rest are reported                                                                     |
-| `refill <p> --limit N [--dry-run]`                               | `bd ready` minus beads that already have a worktree or an open PR, minus epics → `lane start`                                                                              |
-| `view [<p>]`                                                     | queue groups (running/queued/paused), what needs attention, active jobs with start and elapsed, every lane with bead, stage, since/elapsed, agent job, PR and what follows, ready beads |
-| `events tail [--lines N] [--follow] [--project p]`               | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                     |
-| `schedule apply`                                                 | make the transient timer set equal the declared schedules                                                                                                                  |
+| Verb                                                          | Does                                                                                                                                                                                    |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project list \| get <p> \| operations <p>`                   | the configured descriptors (`/etc/sinnix/agentctl.json` lists the roots)                                                                                                                |
+| `job start <p> <op> [--workspace <path>] [--wait] [-- args…]` | `pueue add` in the operation's pool, label `<p>:<op>`, running `sinnixd-queue-run <launch.json>`; extra arguments are appended to the declared `exec`                                   |
+| `job fire <p> <op>`                                           | what a schedule timer runs: `job start` on the main checkout, skipped while the same label is queued or running                                                                         |
+| `job list [--project p] [--active]`                           | `pueue status --json` reduced to job rows                                                                                                                                               |
+| `job get \| logs \| result \| cancel \| retry \| wait <id>`   | one task by pueue id; `logs` reads the bounded log, `result` the typed artifact, `cancel` kills the task and its process group, `retry` is `pueue restart --in-place`                   |
+| `lane start <p> <bead> [--backend --model --effort]`          | compile the prompt, `wt switch --create feature/packet/<bead>`, queue the agent in group `agent` (label `<p>:lane:<bead>`)                                                              |
+| `lane publish [<worktree>] [--bead --title --body-file]`      | push, `gh pr create` under the bead's type-prefixed subject, `gh pr merge --auto --squash`; refuses a dirty worktree; the worktree defaults to cwd                                      |
+| `lane rebase <p> <bead>`                                      | queue an agent with the rebase prompt into the bead's existing worktree (label `<p>:rebase:<bead>`)                                                                                     |
+| `lane sync <p>`                                               | worktrees whose PR merged (or `wt` reports integrated): `bd close`, `wt remove`; the rest are reported                                                                                  |
+| `refill <p> --limit N [--dry-run]`                            | `bd ready` minus beads that already have a worktree or an open PR, minus epics → `lane start`                                                                                           |
+| `view [<p>]`                                                  | queue groups (running/queued/paused), what needs attention, active jobs with start and elapsed, every lane with bead, stage, since/elapsed, agent job, PR and what follows, ready beads |
+| `events tail [--lines N] [--follow] [--project p]`            | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                                  |
+| `schedule apply`                                              | make the transient timer set equal the declared schedules                                                                                                                               |
 
 Reads print tables in local time; `agentctl --json <verb>` prints the
 document. A project argument defaults to the checkout enclosing the working
@@ -186,27 +186,27 @@ it is the only timer that starts lanes.
 
 ## Limits
 
-| constant                                   | origin                                                                  | stands for                                                       |
-| ------------------------------------------ | ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `limits.DEFAULT_TIMEOUT_SECONDS` (3,600)   | arbitrary bound                                                         | the job timeout when an operation declares none                  |
-| `limits.MAX_AGENT_TIMEOUT_SECONDS` (14,400)| measurement (a 1h ceiling forced serial re-launch rounds on real lanes) | the agent job timeout                                            |
-| `limits.MAX_DECLARED_OPERATION_TIMEOUT_SECONDS` (28,800) | arbitrary bound                                           | the ceiling on a declared `timeout_seconds`                      |
-| `limits.AGENT_MEMORY_MAX` (10G)            | half of the job plane's MemoryHigh                                      | the hard ceiling of one agent's scope                            |
-| `pueue.CALL_TIMEOUT_SECONDS` (60)          | arbitrary bound (a minute distinguishes a wedged daemon from a slow one) | max time for one `pueue` round trip                              |
-| `worktrunk.LIST_SCHEMA_VERSION` (2)        | external tool's contract                                                | the `wt list` JSON schema this module parses                     |
-| `worktrunk.CALL_TIMEOUT_SECONDS` (60)      | arbitrary bound (covers one cold forge round trip)                      | max time for one `wt` round trip                                 |
-| `queue_run.MAX_LOG_BYTES` / `MAX_RESULT_BYTES` (64,000) | arbitrary bound                                            | caps on the captured log and typed result                        |
-| `queue_run.TIMEOUT_EXIT_CODE` (124)        | external tool's contract (`timeout(1)`)                                 | the wrapper enforced the declared timeout                        |
-| `queue_run.REFUSED_EXIT_CODE` (125)        | arbitrary bound                                                         | a pre-run refusal (vanished working directory, unreadable input) |
-| `lanes.PUSH_TIMEOUT_SECONDS` (2,400)       | arbitrary bound (the push runs the repository's pre-push gate)          | timeout for `git push` during publication                        |
-| `lanes.GH_TIMEOUT_SECONDS` (60)            | arbitrary bound                                                         | timeout for one `gh`/`git` call                                  |
-| `packets.MAX_PROMPT_BYTES` (200,000)       | arbitrary bound                                                         | cap on a compiled prompt                                         |
-| `packets.MAX_SUBJECT_LENGTH` (72)          | repository commit convention                                            | cap on a PR subject                                              |
-| `backpressure.IO_FULL_FREEZE` (25%)        | measurement (io full avg10 reached 76% under eight normal-pool jobs)    | the IO stall that freezes a group                                |
-| `backpressure.MEMORY_FULL_FREEZE` (25%)    | half of systemd-oomd's kill threshold                                   | the memory stall that freezes a group                            |
-| `backpressure.RESUME_BELOW` (10%)          | arbitrary bound                                                         | both stalls must fall below this before a group thaws            |
-| `schedule.SYSTEMCTL_TIMEOUT_SECONDS` (10)  | arbitrary bound                                                         | timeout for one `systemctl`/`systemd-run` call                   |
-| `operator_view.MAX_READY_SHOWN` (8) / `MAX_FAILED_SHOWN` (6) | arbitrary bound                                       | rows the screen shows                                            |
+| constant                                                     | origin                                                                   | stands for                                                       |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `limits.DEFAULT_TIMEOUT_SECONDS` (3,600)                     | arbitrary bound                                                          | the job timeout when an operation declares none                  |
+| `limits.MAX_AGENT_TIMEOUT_SECONDS` (14,400)                  | measurement (a 1h ceiling forced serial re-launch rounds on real lanes)  | the agent job timeout                                            |
+| `limits.MAX_DECLARED_OPERATION_TIMEOUT_SECONDS` (28,800)     | arbitrary bound                                                          | the ceiling on a declared `timeout_seconds`                      |
+| `limits.AGENT_MEMORY_MAX` (10G)                              | half of the job plane's MemoryHigh                                       | the hard ceiling of one agent's scope                            |
+| `pueue.CALL_TIMEOUT_SECONDS` (60)                            | arbitrary bound (a minute distinguishes a wedged daemon from a slow one) | max time for one `pueue` round trip                              |
+| `worktrunk.LIST_SCHEMA_VERSION` (2)                          | external tool's contract                                                 | the `wt list` JSON schema this module parses                     |
+| `worktrunk.CALL_TIMEOUT_SECONDS` (60)                        | arbitrary bound (covers one cold forge round trip)                       | max time for one `wt` round trip                                 |
+| `queue_run.MAX_LOG_BYTES` / `MAX_RESULT_BYTES` (64,000)      | arbitrary bound                                                          | caps on the captured log and typed result                        |
+| `queue_run.TIMEOUT_EXIT_CODE` (124)                          | external tool's contract (`timeout(1)`)                                  | the wrapper enforced the declared timeout                        |
+| `queue_run.REFUSED_EXIT_CODE` (125)                          | arbitrary bound                                                          | a pre-run refusal (vanished working directory, unreadable input) |
+| `lanes.PUSH_TIMEOUT_SECONDS` (2,400)                         | arbitrary bound (the push runs the repository's pre-push gate)           | timeout for `git push` during publication                        |
+| `lanes.GH_TIMEOUT_SECONDS` (60)                              | arbitrary bound                                                          | timeout for one `gh`/`git` call                                  |
+| `packets.MAX_PROMPT_BYTES` (200,000)                         | arbitrary bound                                                          | cap on a compiled prompt                                         |
+| `packets.MAX_SUBJECT_LENGTH` (72)                            | repository commit convention                                             | cap on a PR subject                                              |
+| `backpressure.IO_FULL_FREEZE` (25%)                          | measurement (io full avg10 reached 76% under eight normal-pool jobs)     | the IO stall that freezes a group                                |
+| `backpressure.MEMORY_FULL_FREEZE` (25%)                      | half of systemd-oomd's kill threshold                                    | the memory stall that freezes a group                            |
+| `backpressure.RESUME_BELOW` (10%)                            | arbitrary bound                                                          | both stalls must fall below this before a group thaws            |
+| `schedule.SYSTEMCTL_TIMEOUT_SECONDS` (10)                    | arbitrary bound                                                          | timeout for one `systemctl`/`systemd-run` call                   |
+| `operator_view.MAX_READY_SHOWN` (8) / `MAX_FAILED_SHOWN` (6) | arbitrary bound                                                          | rows the screen shows                                            |
 
 ## Host wiring
 

@@ -83,7 +83,9 @@ def test_agentctl_failure_degrades_only_the_job_source(tmp_path: Path) -> None:
 
 
 def test_agentctl_jobs_survive_into_reducer_state(tmp_path: Path) -> None:
-    jobs = [{"job_id": number, "label": "p:op", "phase": "running"} for number in range(100)]
+    jobs = [
+        {"job_id": number, "label": "p:op", "phase": "running"} for number in range(100)
+    ]
     reducer = Reducer(
         tmp_path / "status.json",
         tmp_path / "token",

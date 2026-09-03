@@ -26,7 +26,10 @@ class TimerError(RuntimeError):
 def _run(argv: Sequence[str]) -> str:
     try:
         completed = subprocess.run(
-            list(argv), capture_output=True, text=True, timeout=SYSTEMCTL_TIMEOUT_SECONDS
+            list(argv),
+            capture_output=True,
+            text=True,
+            timeout=SYSTEMCTL_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise TimerError(f"{argv[0]} failed: {error}") from error

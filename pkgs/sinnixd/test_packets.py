@@ -74,9 +74,7 @@ def test_snapshot_carries_beads_dimensions_branch_atlas_and_the_contract(
     # No sheet matches the affected top-level tokens, so every sheet is offered.
     assert snapshot.atlas_refs == ("atlas/core.md",)
     assert snapshot.worker_contract_path == "contract.md"
-    payload = json.loads(
-        snapshot.prompt.split("```json\n", 1)[1].split("\n```", 1)[0]
-    )
+    payload = json.loads(snapshot.prompt.split("```json\n", 1)[1].split("\n```", 1)[0])
     assert payload["bead_ids"] == ["fx-lead", "fx-member"]
     assert "Commit by path, push, never merge." in snapshot.prompt
 
@@ -107,16 +105,27 @@ def test_a_prompt_over_budget_is_refused(project_root: Path) -> None:
     big.beads["fx-solo"]["description"] = "x" * MAX_PROMPT_BYTES
 
     with pytest.raises(PacketError, match="over the"):
-        compile_launch_snapshot("fx-solo", project_id="fixture", reader=big, config=config)
+        compile_launch_snapshot(
+            "fx-solo", project_id="fixture", reader=big, config=config
+        )
 
 
 def test_subject_is_type_prefixed_and_bounded() -> None:
     assert bead_subject(bead("a", "Archive reads refuse drift", issue_type="bug")) == (
         "fix: Archive reads refuse drift"
     )
-    assert bead_subject(bead("a", "Add lane sync", issue_type="feature")) == "feat: Add lane sync"
-    assert bead_subject(bead("a", "Migrate  the\nthing", issue_type="task")) == "chore: Migrate the thing"
-    assert bead_subject(bead("a", "feat(cli): already conventional")) == "feat(cli): already conventional"
+    assert (
+        bead_subject(bead("a", "Add lane sync", issue_type="feature"))
+        == "feat: Add lane sync"
+    )
+    assert (
+        bead_subject(bead("a", "Migrate  the\nthing", issue_type="task"))
+        == "chore: Migrate the thing"
+    )
+    assert (
+        bead_subject(bead("a", "feat(cli): already conventional"))
+        == "feat(cli): already conventional"
+    )
     long = bead_subject(bead("a", "word " * 40, issue_type="bug"))
     assert len(long) <= MAX_SUBJECT_LENGTH
 
@@ -143,4 +152,6 @@ def test_a_missing_worker_contract_is_a_typed_refusal(project_root: Path) -> Non
     config.template_path.unlink()
 
     with pytest.raises(PacketError, match="worker-contract template"):
-        compile_launch_snapshot("fx-solo", project_id="fixture", reader=reader(), config=config)
+        compile_launch_snapshot(
+            "fx-solo", project_id="fixture", reader=reader(), config=config
+        )

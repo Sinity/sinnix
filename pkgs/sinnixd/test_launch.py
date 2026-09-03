@@ -126,7 +126,14 @@ def test_phases_come_from_pueue_results_and_the_wrapper_exit_codes(
 
     phases = [launch.get_job(task_id)["phase"] for task_id in ids]
 
-    assert phases == ["succeeded", "failed", "timed-out", "refused", "cancelled", "queued"]
+    assert phases == [
+        "succeeded",
+        "failed",
+        "timed-out",
+        "refused",
+        "cancelled",
+        "queued",
+    ]
 
 
 def test_logs_and_result_are_read_by_the_reference_in_the_task_command(
@@ -164,7 +171,10 @@ def test_result_of_an_exit_operation_is_the_status_alone(
 
 
 def test_cancel_kills_the_task_and_signals_the_recorded_process_group(
-    fake_pueue: FakePueue, config: Config, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """pueue's SIGKILL cannot be caught; the wrapper's recorded group is what gets reaped."""
     project = load_project_adapter(project_root)
@@ -174,7 +184,9 @@ def test_cancel_kills_the_task_and_signals_the_recorded_process_group(
     group_path.parent.mkdir(parents=True, exist_ok=True)
     group_path.write_text("424242")
     signalled: list[tuple[int, int]] = []
-    monkeypatch.setattr(launch.os, "killpg", lambda pgid, sig: signalled.append((pgid, sig)))
+    monkeypatch.setattr(
+        launch.os, "killpg", lambda pgid, sig: signalled.append((pgid, sig))
+    )
 
     cancelled = launch.cancel(config, started["job_id"])
 
@@ -220,7 +232,10 @@ def test_list_filters_by_project_prefix(
     project = load_project_adapter(project_root)
     launch.start_operation(config, project, project.operation("check"))
     fake_pueue.add(
-        group="normal", label="other:check", command=("true",), working_directory=project_root
+        group="normal",
+        label="other:check",
+        command=("true",),
+        working_directory=project_root,
     )
 
     assert [row["label"] for row in launch.list_jobs("fixture")] == ["fixture:check"]

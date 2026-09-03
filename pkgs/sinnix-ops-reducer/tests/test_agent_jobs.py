@@ -18,7 +18,9 @@ def response(value: object) -> subprocess.CompletedProcess[str]:
 
 def test_list_keeps_the_newest_bounded_page_in_queue_order() -> None:
     calls: list[list[str]] = []
-    jobs = [{"job_id": number, "label": "p:op"} for number in range(MAX_SNAPSHOT_JOBS + 5)]
+    jobs = [
+        {"job_id": number, "label": "p:op"} for number in range(MAX_SNAPSHOT_JOBS + 5)
+    ]
 
     def runner(command, **_kwargs):
         calls.append(command)
