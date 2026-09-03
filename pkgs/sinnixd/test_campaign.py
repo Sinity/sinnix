@@ -110,7 +110,7 @@ def test_a_wave_drained_by_provisioning_names_provisioning() -> None:
     runner._submit_plan = submit  # type: ignore[method-assign]
 
     with pytest.raises(WaveDrainedError) as raised:
-        runner._submit_tolerating_conflicts(
+        runner._submit_tolerating_provisioning_failures(
             schedule, "fixture", lambda **_kwargs: "job", "wave-1"
         )
 

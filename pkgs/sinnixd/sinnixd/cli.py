@@ -33,7 +33,6 @@ from .jobs import (
     GenericJobStore,
     UserSystemdJobs,
     default_state_dir,
-    host_pressure,
 )
 from .limits import DEFAULT_TIMEOUT_SECONDS, MAX_AGENT_TIMEOUT_SECONDS
 from .packets import (
@@ -416,10 +415,6 @@ def parser() -> argparse.ArgumentParser:
     job_result.add_argument("--max-bytes", type=int, default=64_000)
     cancel = job_subcommands.add_parser("cancel")
     cancel.add_argument("job_id")
-    admission = job_subcommands.add_parser(
-        "admission", help="Show admission queue, claims, and blocking arithmetic."
-    )
-    admission.add_argument("--project")
     plan = subcommands.add_parser("plan")
     plan_subcommands = plan.add_subparsers(dest="plan_command", required=True)
     plan_submit = plan_subcommands.add_parser("submit")
@@ -1354,7 +1349,6 @@ def main() -> int:
                         },
                         "dimensions": runtime_dimensions(snapshot.dimensions),
                         "exclusive_keys": list(snapshot.dimensions.conflict_keys),
-                        "reject_conflicts": True,
                     },
                     "agent-control",
                 )
@@ -1494,12 +1488,6 @@ def main() -> int:
             "systemd-jobs",
             {"job_id": arguments.job_id, "max_bytes": arguments.max_bytes},
         )
-    elif arguments.command == "job" and arguments.job_command == "admission":
-        request = _request(
-            "job.admission",
-            "systemd-jobs",
-            {"project_id": arguments.project} if arguments.project else {},
-        )
     elif arguments.command == "job":
         request = _request("job.cancel", "systemd-jobs", {"job_id": arguments.job_id})
     else:
@@ -1624,23 +1612,22 @@ def daemon_main() -> None:
         jobs=GenericJobs(
             UserSystemdJobs(),
             GenericJobStore(arguments.state_dir),
-            pressure_probe=host_pressure,
             notify_socket=arguments.socket,
             event_spool_path=arguments.event_spool,
         ),
         native_runner=arguments.native_runner,
     )
 
-    def schedule_admission() -> None:
+    def schedule_reconcile() -> None:
         try:
-            service.jobs.run_admission_scheduler(stop_event)
+            service.jobs.run_schedule_reconciler(stop_event)
         except BaseException as error:
             scheduler_errors.append(error)
             stop_event.set()
 
     scheduler = Thread(
-        target=schedule_admission,
-        name="sinnixd-admission",
+        target=schedule_reconcile,
+        name="sinnixd-schedule-reconciler",
         daemon=True,
     )
     scheduler.start()

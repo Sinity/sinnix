@@ -331,7 +331,6 @@ def test_launch_creates_then_dispatches_with_dimensions(
         "area:parser",
         "area:storage",
     ]
-    assert calls[1].arguments["reject_conflicts"] is True
     assert calls[1].arguments["dimensions"]["conflict_keys"] == (
         "area:parser;area:storage"
     )

@@ -483,7 +483,6 @@ class CampaignRunner:
                 dimensions=payload["runtime_dimensions"],
                 dependency_job_ids=dependency_job_ids,
                 exclusive_keys=tuple(payload["dimensions"]["conflict_keys"]),
-                reject_conflicts=True,
             )
             job_id = str(response["job_id"])
             unclaimed = claim_beads(project.root, [str(b) for b in payload["bead_ids"]])
@@ -499,7 +498,7 @@ class CampaignRunner:
             )
             return job_id
 
-        plan = self._submit_tolerating_conflicts(
+        plan = self._submit_tolerating_provisioning_failures(
             schedule,
             project_id,
             launch,
@@ -509,21 +508,18 @@ class CampaignRunner:
         result["schedule"] = schedule.to_dict()
         return result
 
-    def _submit_tolerating_conflicts(
+    def _submit_tolerating_provisioning_failures(
         self,
         schedule: CampaignSchedule,
         project_id: str,
         launch: Any,
         wave_id: str,
     ) -> dict[str, Any]:
-        self._wave_id = wave_id
-        """Drop a lane an admission race refuses, then submit the rest.
+        """Drop a lane whose workspace fails to provision, then submit the rest.
 
-        The reactor refills on its own schedule, so no pre-check can be exact:
-        a key can go active between scheduling and launching. Refusing the
-        whole wave for one raced lane would make concurrent scheduling useless.
+        A workspace that will not provision costs one lane, not the wave.
         """
-        from .jobs import AdmissionConflictError
+        self._wave_id = wave_id
         from .workspaces import WorkspaceError
 
         lanes = list(schedule.lanes)
@@ -532,8 +528,7 @@ class CampaignRunner:
             try:
                 return self._submit_plan(lanes, schedule, project_id, launch)
             except WorkspaceError as error:
-                # A workspace that will not provision costs one lane, not the
-                # wave. The lane being provisioned is the one that raised.
+                # The lane being provisioned is the one that raised.
                 failed = self._provisioning
                 remaining = [lane for lane in lanes if lane.group != failed]
                 if failed is None or len(remaining) == len(lanes):
@@ -549,27 +544,6 @@ class CampaignRunner:
                     }
                 )
                 last_deferral = f"{failed}: {error}"
-                lanes = remaining
-                continue
-            except AdmissionConflictError as error:
-                blocked = set(error.conflicts)
-                remaining = [
-                    lane
-                    for lane in lanes
-                    if not blocked.intersection(lane.conflict_keys)
-                ]
-                if len(remaining) == len(lanes):
-                    raise
-                self.jobs.spool_event(
-                    {
-                        "kind": "campaign",
-                        "transition": "lane deferred",
-                        "wave_id": wave_id,
-                        "project": project_id,
-                        "reason": str(error),
-                    }
-                )
-                last_deferral = str(error)
                 lanes = remaining
         # Every lane was deferred. Reporting that as a conflict names the wrong
         # cause when the real one was provisioning, so the last reason is what

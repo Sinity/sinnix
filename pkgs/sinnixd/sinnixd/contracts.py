@@ -122,7 +122,6 @@ class TypedJobContracts:
         dimensions: Mapping[str, Any] | None = None,
         dependency_job_ids: Sequence[str] = (),
         exclusive_keys: Sequence[str] = (),
-        reject_conflicts: bool = False,
         coordinator_label: str | None = None,
     ) -> dict[str, Any]:
         if principal not in {"agent-control", "operator"}:
@@ -148,8 +147,6 @@ class TypedJobContracts:
             or len(set(exclusive_keys)) != len(exclusive_keys)
         ):
             raise ContractError("agent exclusive keys must be unique strings")
-        if not isinstance(reject_conflicts, bool):
-            raise ContractError("agent reject_conflicts must be boolean")
         if result != "last-message":
             raise ContractError("attested agent jobs require a last-message result")
         if coordinator_label is not None and (
@@ -244,7 +241,6 @@ class TypedJobContracts:
                 dimensions=dimensions,
                 dependency_job_ids=dependency_job_ids,
                 exclusive_keys=exclusive_keys,
-                reject_conflicts=reject_conflicts,
             )
         except BaseException:
             prompt_path.unlink(missing_ok=True)
@@ -264,7 +260,6 @@ class TypedJobContracts:
         dimensions: Mapping[str, Any] | None = None,
         dependency_job_ids: Sequence[str] = (),
         exclusive_keys: Sequence[str] = (),
-        reject_conflicts: bool = False,
     ) -> dict[str, Any]:
         maximum_timeout = maximum_timeout_seconds(kind)
         if not valid_timeout_seconds(timeout_seconds, kind=kind):
@@ -323,7 +318,6 @@ class TypedJobContracts:
                     dimensions=dimensions or {},
                 ),
                 job_id,
-                reject_conflicts=reject_conflicts,
             )
         except BaseException:
             input_path.unlink(missing_ok=True)

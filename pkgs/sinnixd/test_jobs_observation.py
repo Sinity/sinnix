@@ -373,54 +373,6 @@ def test_natural_success_requires_a_loaded_systemd_result(
     assert terminal["state"]["terminal"]
 
 
-def test_list_reconciles_queued_job_with_disposed_checkout(
-    tmp_path: Path,
-) -> None:
-    """A disposed checkout is one terminal row, not a failed job-list query."""
-    systemd = FakeSystemdJobs()
-    jobs = generic_jobs(tmp_path, systemd)
-    missing_checkout = {
-        "project_id": "fixture",
-        "project_path": str(tmp_path / "project"),
-        "checkout_id": "worktree-disposed",
-        "path": str(tmp_path / "disposed"),
-        "git_common_dir": str(tmp_path / "project" / ".git"),
-        "head": "a" * 40,
-    }
-    record = jobs.store.create(
-        GenericJobSpec(
-            kind="declared-operation",
-            command=("fixture",),
-            working_directory=missing_checkout["path"],
-            environment={},
-            project_id="fixture",
-            operation="check",
-            parameter_digest="0" * 64,
-            checkout=missing_checkout,
-        ),
-        "00000000-0000-4000-8000-000000000001",
-    )
-    jobs.store.write_declared_launch(record.job_id, record.spec.command, {})
-    jobs.store.save(
-        jobs._with_state(
-            record,
-            {"phase": "queued", "terminal": False, "observed_at": "now"},
-        )
-    )
-
-    listed = jobs.list(project_id="fixture")
-
-    assert len(listed["jobs"]) == 1
-    job = listed["jobs"][0]
-    assert job["state"]["phase"] == "checkout-missing"
-    assert job["state"]["terminal"]
-    assert job["checkout_status"] == {
-        "state": "missing",
-        "path": missing_checkout["path"],
-    }
-    assert jobs.store.load(record.job_id).state["phase"] == "checkout-missing"
-
-
 @pytest.mark.parametrize(
     ("content", "completed", "expected"),
     [
@@ -716,27 +668,6 @@ def test_terminal_capture_records_resources_at_the_observed_cgroup(
         "io_write_bytes": 9012,
         "memory_pressure": "some avg10=1.00 avg60=2.00\n",
     }
-
-
-def test_host_pressure_reads_the_nested_managed_work_slice(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    uid = jobs_module.os.getuid()
-    managed = (
-        tmp_path
-        / "user.slice"
-        / f"user-{uid}.slice"
-        / f"user@{uid}.service"
-        / "sinnixd.slice"
-        / "sinnixd-work.slice"
-    )
-    managed.mkdir(parents=True)
-    (managed / "memory.current").write_text("123456\n")
-    monkeypatch.setattr(jobs_module, "CGROUP_ROOT", tmp_path)
-
-    pressure = jobs_module.host_pressure()
-
-    assert pressure["managed_memory_bytes"] == 123456.0
 
 
 def test_terminal_capture_records_explicit_backend_usage_fields(

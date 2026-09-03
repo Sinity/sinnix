@@ -60,7 +60,6 @@ CONTROL_OPERATION_RESPONSE_TIMEOUT_SECONDS = {
     "job.fire": 60.0,
     "job.shell.start": 60.0,
     "job.agent.start": 60.0,
-    "job.admission": DEFAULT_RESPONSE_BUDGET_SECONDS,
     # Get and list reconcile live systemd state per non-terminal record; at
     # fleet scale a short budget times the client out mid-response and the
     # daemon logs a broken pipe for every retry (sinnix-16in evidence).
