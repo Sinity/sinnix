@@ -72,9 +72,10 @@ prompt), `references/coordinator-contract.md` (stateless takeover),
   decision for the current head.
 - Observation: ONE persistent watch on `agentctl events tail --follow`.
   Completion events are authoritative; no per-job wait loops.
-- Heavy host operations run as declared operations so admission sees them.
-  Session subagents are not admitted: bound them explicitly (one pytest at a
-  time, `-n 2`) or route the heavy step through `agentctl job start`.
+- Heavy host operations run as declared operations so pueue's per-group
+  parallelism bounds them. Session subagents bypass pueue entirely: bound
+  them explicitly (one pytest at a time, `-n 2`) or route the heavy step
+  through `agentctl job start`.
 - The coordinator's judgment surface: scope-drift flags, schema flags,
   adversarial review of risky lanes, and oracle authorship — a read-only probe
   against real state that gates authorize. Fixture-green alone is not evidence
@@ -124,15 +125,13 @@ Claim the highest-value ready cluster via [[task-backend]] → dispatch lane →
 review → integrate → complete with verification evidence → repeat. At most 6
 concurrent implementation lanes and one merge-ready train.
 
-## Target architecture (not yet migrated)
+## Runtime architecture
 
-Installed and configured, dispatching nothing yet:
-
-- **pueue** — groups `agent`, `pytest`, `bulk`; `pueue pause -g <group>` is the
-  freeze.
-- **worktrunk** — `wt switch --create <name>`, `wt list --format=json`,
-  `wt remove --reap`.
-
-A GitHub runner and merge queue come later. The current lane mechanism is
-`agentctl workspace` / `packet launch` / `campaign run`. Do not write
-procedures against pueue or worktrunk until the migration lands.
+pueue executes and observes every job: it owns the queue, the process, the
+terminal result, and cancellation (`pueue pause -g <group>` freezes a group).
+worktrunk owns worktree creation and removal and publishes the PR/check state
+`agentctl` reads. Publication is `gh pr create` plus `gh pr merge --squash
+--auto`; GitHub owns review, required checks, and merge. Systemd owns only
+calendar-timer wake-ups for declared `schedule` operations. Nothing
+dispatches without `agentctl job start`, `campaign run`, or `packet launch` —
+a declared `schedule` is the one autonomous driver a project can choose.

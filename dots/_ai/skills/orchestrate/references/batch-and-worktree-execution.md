@@ -54,11 +54,11 @@ agents report patches or commit only by explicit instruction.
    `agentctl workspace get <workspace-id>`.
 2. Checkpoint dirty work before recovery or integration; do not copy changes
    between checkouts as a substitute for preserving their Git identity.
-3. Use the publish/land path for delivery; dependent histories rebase onto
-   their parent branch by hand.
-4. After merge, use `agentctl workspace finish <workspace-id>`; for abandoned
-   work use `workspace drop` once its checkpoint and divergence evidence is
-   resolved.
+3. Use `agentctl lane publish <workspace-id> [--close]` for delivery;
+   dependent histories rebase onto their parent branch by hand.
+4. After GitHub merges the PR, use `agentctl workspace drop <workspace-id>`;
+   for abandoned work drop with `--force` once its checkpoint and divergence
+   evidence is resolved.
 
 ### Foreground-only execution
 

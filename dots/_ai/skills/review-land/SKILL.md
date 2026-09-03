@@ -51,15 +51,16 @@ five means the change should be split).
 - Stage by path, never `git add -A` on significant changes. Never
   `--no-verify` unbidden; a hook failure means fix the cause in a new
   commit. From a linked worktree, use `git -C /abs/path`.
-- AgentCTL workspace flow where registered: `workspace publish --job
-<verify-job>` → `review-status` → `land --job <verify-job>` → `finish` (or
-  `drop --target <ref>` for an already-integrated branch) — exact-head results,
-  no parallel merge-ledger protocols.
-- Lane publication goes through `agentctl lane publish <ws>`. It refuses with
-  `NO_TEST_EVIDENCE` unless a succeeded `verify_affected` job covers the exact
-  head or the operator recorded `agentctl lane authorize <ws>` for it; the
-  publication sweep reports the same state as the verdict `no-test-evidence`
-  and merges nothing on it.
+- AgentCTL workspace flow where registered: `agentctl lane publish <ws>
+[--close]` pushes the branch, opens the PR, mints and authorizes the receipt,
+  and requests `gh pr merge --squash --auto`; GitHub owns review, required
+  checks, and merge. `agentctl workspace drop <ws>` removes an already-
+  integrated or abandoned workspace — exact-head results, no parallel
+  merge-ledger protocols.
+- It refuses with `NO_TEST_EVIDENCE` unless a succeeded `verify_affected` job
+  covers the exact head or the operator recorded `agentctl lane authorize
+<ws>` for it; harvest reports this as the verdict `no-test-evidence` and
+  merges nothing on it.
 - A green hosted check is not test evidence where CI skips the heavy suite
   (recorded polylogue gotcha) — verify locally with the focused selector
   and say which tier ran. `devtools verify` selects from the checkout's one
@@ -84,6 +85,6 @@ markers — grep for them before continuing.
 ## After landing
 
 Complete the beads with PR + merge SHA, delete the integrated workspace
-(`workspace finish`), clean transient artifacts you created, and carry any
+(`workspace drop`), clean transient artifacts you created, and carry any
 deferred scope into named successors — landing is not done while the
 tracker lies about what happened.
