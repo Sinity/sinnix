@@ -117,9 +117,10 @@ mkServiceModule {
 
           extraEnvironment = {
             # The pueue client resolves its socket and configuration from
-            # these two; %h and %U are systemd specifiers for the User= above.
-            HOME = "%h";
-            XDG_RUNTIME_DIR = "/run/user/%U";
+            # these two. Specifiers would name the manager's user (root), not
+            # User=, so the paths are literal.
+            HOME = "/home/${userName}";
+            XDG_RUNTIME_DIR = "/run/user/${toString config.users.users.${userName}.uid}";
             SSL_CERT_FILE = "/etc/ssl/certs/ca-certificates.crt";
             NIX_SSL_CERT_FILE = "/etc/ssl/certs/ca-certificates.crt";
           };
