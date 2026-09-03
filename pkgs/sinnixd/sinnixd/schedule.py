@@ -23,7 +23,7 @@ class TimerError(RuntimeError):
     """systemd could not register, list, or stop a timer."""
 
 
-def _run(argv: Sequence[str]) -> str:
+def _run(argv: Sequence[str], *, check: bool = True) -> str:
     try:
         completed = subprocess.run(
             list(argv),
@@ -33,7 +33,7 @@ def _run(argv: Sequence[str]) -> str:
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise TimerError(f"{argv[0]} failed: {error}") from error
-    if completed.returncode != 0:
+    if check and completed.returncode != 0:
         raise TimerError(completed.stderr.strip() or f"{' '.join(argv[:3])} failed")
     return completed.stdout
 
@@ -84,7 +84,10 @@ def apply(config: Config) -> dict[str, Any]:
     present = existing_units()
     stopped = sorted(present - set(desired))
     for unit in stopped:
-        _run(["systemctl", "--user", "stop", f"{unit}.timer", f"{unit}.service"])
+        # A transient timer's service unit exists only while it is running;
+        # stopping the timer alone is the whole retirement when it is not.
+        _run(["systemctl", "--user", "stop", f"{unit}.timer"])
+        _run(["systemctl", "--user", "stop", "--no-block", f"{unit}.service"], check=False)
     started: list[str] = []
     for unit, entry in sorted(desired.items()):
         if unit in present:
