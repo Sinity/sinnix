@@ -36,9 +36,6 @@ description = "Run default Sinnix checks"
 exec = ["check"]
 pool = "bulk"
 result = "exit"
-exclusive_keys = ["sinnix:nix-store-pressure"]
-estimate_memory_bytes = 6442450944
-scratch = "nvme"
 
 
 [operations.check_master]
@@ -52,10 +49,6 @@ exec = ["bash", "-c", "set -euo pipefail; ref='git+file:///realm/project/sinnix?
 pool = "bulk"
 result = "exit"
 # One hourly check at a time: a later firing subsumes an earlier queued one.
-supersede = "queued"
-exclusive_keys = ["sinnix:nix-store-pressure"]
-estimate_memory_bytes = 6442450944
-scratch = "nvme"
 timeout_seconds = 7200
 schedule = "hourly"
 
@@ -64,27 +57,18 @@ description = "Run maintained Nix and shell linters"
 exec = ["lint"]
 pool = "normal"
 result = "exit"
-estimate_memory_bytes = 536870912
-scratch = "tmpfs"
 
 [operations.switch]
 description = "Build and activate the workstation configuration"
 exec = ["switch"]
 pool = "bulk"
 result = "exit"
-exclusive_keys = ["host:nixos-switch", "sinnix:nix-store-pressure"]
-estimate_memory_bytes = 6442450944
-scratch = "nvme"
 
 [operations.sinex_cache_prebuild]
 description = "Build and cache the pinned Sinex revision after an input move"
 exec = ["sinnix-sinex-cache-prebuild", "--flake-dir", "/realm/project/sinnix", "--system", "x86_64-linux"]
 pool = "bulk"
 result = "exit"
-exclusive_keys = ["sinnix:nix-store-pressure", "sinex:cache-prebuild"]
-estimate_memory_bytes = 12884901888
-supersede = "queued"
-scratch = "nvme"
 timeout_seconds = 7200
 
 [operations.census]
@@ -92,8 +76,6 @@ description = "Run the evidence-joined usage census"
 exec = ["sinnix-census", "--window-days", "90"]
 pool = "normal"
 result = "exit"
-exclusive_keys = ["sinnix:usage-census"]
-estimate_memory_bytes = 536870912
 schedule = "weekly"
 
 [operations.retrospective]
@@ -101,9 +83,6 @@ description = "Review the day's event, harvest, and session evidence and file bo
 exec = ["sinnix-retrospective"]
 pool = "normal"
 result = "json"
-exclusive_keys = ["sinnix:process-retrospective"]
-estimate_memory_bytes = 536870912
-scratch = "tmpfs"
 timeout_seconds = 3600
 schedule = "*-*-* 03:15:00"
 
