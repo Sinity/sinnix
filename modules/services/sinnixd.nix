@@ -10,6 +10,7 @@ let
   userName = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   taskStateRoot = "${config.sinnix.paths.stateRoot}/tasks";
+  eventSpool = "${config.sinnix.paths.stateRoot}/agentctl/events.jsonl";
 in
 mkServiceModule {
   name = "sinnixd";
@@ -48,60 +49,87 @@ mkServiceModule {
         root: "--project-root ${lib.escapeShellArg root}"
       ) cfg.projectRoots;
     in
-    {
-      # Declared owner adapters run under env -i with the daemon's system PATH.
-      # Keep their fixed packaged entrypoints in that PATH rather than relying
-      # on an interactive Home Manager profile.
-      environment.systemPackages = [
-        scriptPkgs.sinnixd
-        scriptPkgs.polylogue-cli
-        # The worktree and queue planes the daemon shells out to. They must be
-        # system packages: a Home Manager profile is not on the env -i PATH.
-        pkgs.worktrunk
-        pkgs.pueue
-      ];
-      systemd.tmpfiles.rules = [ "d ${taskStateRoot} 0700 ${userName} users -" ];
-      sinnix.persistence.home.directories = [ ".local/state/sinnixd" ];
-      sinnix.runtime.surfaces.sinnixd-jobs = {
-        unit = "sinnixd-job-.service";
-        manager = "user";
-        kind = "service";
-        dynamic = true;
-        resourceClass = "managed-runtime-work";
-        observe.enable = true;
-        workload = {
-          class = "sacrificial";
-          rationale = "Transient work yields to interactive slices and is killed as a cgroup under sustained host exhaustion.";
-          processMatchers = [ "sinnixd-job-" ];
-        };
-        captures = [
-          {
-            name = "sinnixd-job-records";
-            path = "/home/${userName}/.local/state/sinnixd/jobs";
-            eventDriven = true;
-          }
-        ];
-      };
-
-      home-manager.users.${userName}.systemd.user.services.sinnixd = {
-        Unit = {
-          Description = "Sinnix local runtime daemon";
-          After = [ "graphical-session.target" ];
-        };
-        Service =
-          (lib.sinnix.mkRuntimeServiceConfig {
-            runtimeInventory = config.sinnix.runtime.inventory;
-            unit = "sinnixd.service";
-          })
-          // {
-            Type = "simple";
-            ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd --socket %t/sinnixd.sock --state-dir %S/sinnixd ${projectRootArgs} --native-runner ${lib.escapeShellArg cfg.agentRunner}";
-            Restart = "on-failure";
-            RestartSec = "2s";
-            UMask = "0077";
-            Environment = [ "SINNIXD_TASK_STATE_ROOT=${taskStateRoot}" ];
+    lib.mkMerge [
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "sinnixd-backpressure";
+          description = "Freeze the job queue while the host is stalled";
+        }
+        {
+          manager = "user";
+          resourceClass = "background-maintenance";
+          execStart = "${scriptPkgs.sinnixd}/bin/sinnixd-backpressure --event-spool ${lib.escapeShellArg eventSpool}";
+          serviceConfig = {
+            TimeoutStartSec = "30s";
+            ReadWritePaths = [ (builtins.dirOf eventSpool) ];
           };
-        Install.WantedBy = [ "default.target" ];
-      };
-    };
+          timer = {
+            # Full-stall averages are 60-second means, so sampling faster reads
+            # the same number twice. One group is frozen or thawed per tick, so
+            # freezing agent, normal and bulk takes three minutes: the queue
+            # backs off in steps rather than stopping the host at once.
+            onUnitActiveSec = 60;
+            onBootSec = 60;
+            description = "Freeze the job queue while the host is stalled";
+          };
+        }
+      )
+      {
+        # Declared owner adapters run under env -i with the daemon's system PATH.
+        # Keep their fixed packaged entrypoints in that PATH rather than relying
+        # on an interactive Home Manager profile.
+        environment.systemPackages = [
+          scriptPkgs.sinnixd
+          scriptPkgs.polylogue-cli
+          # The worktree and queue planes the daemon shells out to. They must be
+          # system packages: a Home Manager profile is not on the env -i PATH.
+          pkgs.worktrunk
+          pkgs.pueue
+        ];
+        systemd.tmpfiles.rules = [ "d ${taskStateRoot} 0700 ${userName} users -" ];
+        sinnix.persistence.home.directories = [ ".local/state/sinnixd" ];
+        sinnix.runtime.surfaces.sinnixd-jobs = {
+          unit = "sinnixd-job-.service";
+          manager = "user";
+          kind = "service";
+          dynamic = true;
+          resourceClass = "managed-runtime-work";
+          observe.enable = true;
+          workload = {
+            class = "sacrificial";
+            rationale = "Transient work yields to interactive slices and is killed as a cgroup under sustained host exhaustion.";
+            processMatchers = [ "sinnixd-job-" ];
+          };
+          captures = [
+            {
+              name = "sinnixd-job-records";
+              path = "/home/${userName}/.local/state/sinnixd/jobs";
+              eventDriven = true;
+            }
+          ];
+        };
+
+        home-manager.users.${userName}.systemd.user.services.sinnixd = {
+          Unit = {
+            Description = "Sinnix local runtime daemon";
+            After = [ "graphical-session.target" ];
+          };
+          Service =
+            (lib.sinnix.mkRuntimeServiceConfig {
+              runtimeInventory = config.sinnix.runtime.inventory;
+              unit = "sinnixd.service";
+            })
+            // {
+              Type = "simple";
+              ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd --socket %t/sinnixd.sock --state-dir %S/sinnixd ${projectRootArgs} --native-runner ${lib.escapeShellArg cfg.agentRunner}";
+              Restart = "on-failure";
+              RestartSec = "2s";
+              UMask = "0077";
+              Environment = [ "SINNIXD_TASK_STATE_ROOT=${taskStateRoot}" ];
+            };
+          Install.WantedBy = [ "default.target" ];
+        };
+      }
+    ];
 } args

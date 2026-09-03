@@ -130,7 +130,8 @@ runtime/workspace operations and `orchestrate` before multi-agent work.
 - Don't duplicate a heavy job; attach to the identical active operation.
 - Every agent dispatch names backend, model, and effort explicitly.
 - Checkpoint a workspace before risky integration, compaction, or recovery.
-- Authority map: Git = commits/worktrees; systemd = live processes; GitHub =
+- Authority map: Git/worktrunk = commits/worktrees; pueue = live processes
+  and terminal results; systemd = only calendar-timer wake-ups; GitHub =
   PR/review/merge; the external task backend (`bd`, Beads per
   project under `/realm/state/tasks/`) = task state. Reconcile disagreements;
   never invent a second truth. Feature branches never carry task state.
@@ -204,9 +205,9 @@ memory, or the owning CLAUDE.md) instead of re-deriving next session.
 - Preserve user work: dirty trees are normal; state destructive intent before
   any delete/reset/force-push/rewrite/kill. Clean up your own transient
   artifacts (stashes, scratch branches) once verified captured elsewhere.
-- Publish/land through `agentctl workspace publish|land` where the project
-  adapter provides them; never bypass hosted checks or protected-branch policy.
-  Load `review-land` for adversarial review + publication procedure.
+- Publish through `agentctl lane publish` where the project adapter provides
+  it; never bypass hosted checks or protected-branch policy. Load
+  `review-land` for adversarial review + publication procedure.
 
 ## Verification
 

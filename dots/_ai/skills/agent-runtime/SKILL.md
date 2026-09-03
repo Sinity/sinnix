@@ -5,10 +5,12 @@ description: Operate or recover AgentCTL workspaces and jobs, including checkpoi
 
 # Agent runtime
 
-AgentCTL is the lifecycle authority for registered work. Systemd owns process
-state and cgroups, Git owns workspace state, hosted Git owns review state,
-Beads owns tasks, and sinnixd schedules work and records bounded results. Do
-not add a parallel ledger for any of them.
+AgentCTL is the lifecycle authority for registered work. pueue owns process
+state, the queue, and terminal results; worktrunk owns worktrees and
+publishes PR/check state; GitHub owns review, required checks, and merge;
+Beads owns tasks; systemd owns only calendar-timer wake-ups; and sinnixd
+schedules work and records bounded results. Do not add a parallel ledger for
+any of them.
 
 Verbs: `status`, `shell`, `agent`, `project`, `workspace`, `events`, `lane`,
 `packet`, `campaign`, `job`, `plan`. `agentctl <verb> --help` is the surface;
@@ -16,8 +18,7 @@ Verbs: `status`, `shell`, `agent`, `project`, `workspace`, `events`, `lane`,
 
 ## Workspaces
 
-`list`, `get`, `create`, `drop`, `checkpoint`, `restore`, `publish`,
-`review-status`, `land`, `finish`.
+`list`, `get`, `create`, `drop`, `checkpoint`, `restore`.
 
 - Inspect with `agentctl workspace list` and `workspace get` before mutation.
   Git is authoritative for HEAD, branch, membership, and dirty state.
@@ -31,8 +32,10 @@ Verbs: `status`, `shell`, `agent`, `project`, `workspace`, `events`, `lane`,
   requires the same branch and HEAD and a clean workspace; `--recreate`
   rebuilds a missing worktree from its branch first.
 - Publish only after an exact-head declared verifier succeeds:
-  `workspace publish --job <verify-job> --title T [--body F] [--wait]`, then
-  `review-status`, `land --job <verify-job>`, `finish`.
+  `agentctl lane publish <workspace> [--close]` pushes the branch, opens the
+  PR, mints and authorizes the receipt in one pass, and requests
+  `gh pr merge --squash --auto`. `agentctl lane authorize <workspace>` records
+  the operator's decision without publishing.
 - `workspace drop <id>` deletes the worktree, its branch, and every job record
   and artifact bound to that checkout. It proves the content is published
   first: contained in the declared base, or carrying worktrunk's `integrated`
@@ -61,8 +64,7 @@ Verbs: `status`, `shell`, `agent`, `project`, `workspace`, `events`, `lane`,
 A job record and its artifacts live exactly as long as the thing they served.
 Ownership deletes them, never a clock:
 
-- `workspace drop` / `workspace finish` deletes every record bound to that
-  checkout.
+- `workspace drop` deletes every record bound to that checkout.
 - A plan owns its nodes' records; they die with the plan.
 - The next terminal run of the same operation on the same checkout supersedes
   the previous record. Read a result before re-running the operation that
@@ -100,8 +102,8 @@ Attested workers have `lane` on PATH:
 
 ## Failures
 
-- Wedged job: read `job get` and `job logs`, cancel once, confirm the unit and
-  record are terminal before restarting.
+- Wedged job: read `job get` and `job logs`, cancel once, confirm the pueue
+  task and record are terminal before restarting.
 - Dead worker: checkpoint its workspace, record the result and residuals on the
   bead, then release or reassign the claim.
 - "sinnixd is unavailable" is a client timeout string with no diagnostic

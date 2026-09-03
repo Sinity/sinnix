@@ -23,6 +23,7 @@ class FakePueue:
     killed: list[int] = field(default_factory=list)
     removed: list[int] = field(default_factory=list)
     waited: list[int] = field(default_factory=list)
+    _logs: dict[int, str] = field(default_factory=dict)
     _on_wait: dict[int, Callable[["FakePueue"], None]] = field(default_factory=dict)
     groups: dict[str, int] = field(
         # The groups the deployed pueued creates. A pool outside this set is
@@ -150,6 +151,12 @@ class FakePueue:
     def kill_directly(self, task_id: int) -> None:
         self._set(task_id, status="Done", result="Killed")
 
+    def set_log(self, task_id: int, output: str) -> None:
+        self._logs[task_id] = output
+
+    def log(self, task_id: int) -> str:
+        return self._logs.get(task_id, "")
+
     def _propagate_dependency_failure(self, task_id: int) -> None:
         """pueued fails every task whose `--after` edge did not succeed."""
         for candidate in list(self._tasks.values()):
@@ -172,4 +179,5 @@ def fake_pueue(monkeypatch: pytest.MonkeyPatch) -> FakePueue:
     monkeypatch.setattr(pueue_module, "remove", fake.remove)
     monkeypatch.setattr(pueue_module, "wait", fake.wait)
     monkeypatch.setattr(pueue_module, "groups", lambda: dict(fake.groups))
+    monkeypatch.setattr(pueue_module, "log", fake.log)
     return fake

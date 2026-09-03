@@ -5993,7 +5993,6 @@ def test_cancelling_a_queued_task_removes_it_from_the_queue(
 
     assert response["cancel_requested"] is True
     assert fake_pueue.removed == [task_id]
-    assert fake_pueue.killed == []
     assert fake_pueue.task(task_id) is None
     assert response["state"]["phase"] == "cancelled"
     assert response["state"]["terminal"] is True
@@ -6014,5 +6013,31 @@ def test_cancelling_a_running_task_kills_it_rather_than_dequeueing(
 
     jobs.cancel(started["job_id"], reason="operator")
 
+    # Killing stops the process group; removing takes the slot back. A running
+    # task needs both, or its slot stays claimed by a task that is gone.
     assert fake_pueue.killed == [task_id]
-    assert fake_pueue.removed == []
+    assert fake_pueue.removed == [task_id]
+
+
+def test_a_killed_job_still_reads_its_output_from_pueue(
+    tmp_path: Path, fake_pueue: FakePueue
+) -> None:
+    """A timeout or cancel must leave readable evidence.
+
+    Anti-vacuity: the wrapper is SIGKILLed, so its own artifact can be empty;
+    without the fallback `job logs` raises and the failure has no account.
+    """
+    jobs = generic_jobs(tmp_path)
+    started = jobs.start_foreground(
+        command=("fixture",),
+        working_directory=str(tmp_path),
+        environment={"PATH": ""},
+    )
+    task_id = fake_task_id(jobs, started["job_id"])
+    record = jobs.store.load(started["job_id"])
+    record.log_path.write_bytes(b"")
+    fake_pueue.set_log(task_id, "partial output before the kill\n")
+    fake_pueue.fail(task_id, exit_code=queue_run.TIMEOUT_EXIT_CODE)
+
+    assert jobs.get(started["job_id"])["state"]["phase"] == "timeout"
+    assert "partial output" in jobs.logs(started["job_id"])["content"]
