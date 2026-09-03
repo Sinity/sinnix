@@ -240,6 +240,68 @@ def _lane_artifact(context: HarvestContext, name: str) -> str | None:
     return text or None
 
 
+def _colliding_pull_request(
+    context: HarvestContext, run: Run, *, title: str
+) -> str | None:
+    """An open pull request on another branch already using this exact title.
+
+    Two lanes that write the same `.lane/title` publish two pull requests with
+    one subject, and the squash subjects on the protected branch then name the
+    same change twice. GitHub does not refuse it, so this does.
+    """
+    try:
+        branch = _command(
+            run,
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=context.worktree,
+            timeout=30,
+        )
+        if branch.returncode != 0:
+            return None
+        head = branch.stdout.strip()
+        listed = _command(
+            run,
+            [
+                "gh",
+                "pr",
+                "list",
+                "--state",
+                "open",
+                "--search",
+                f"{title} in:title",
+                "--json",
+                "number,title,headRefName",
+            ],
+            cwd=context.worktree,
+            timeout=120,
+        )
+    except HarvestError:
+        # The forge or git is unavailable here; that is not evidence of a
+        # clash and must not refuse a publication.
+        return None
+    if listed.returncode != 0:
+        # The forge is the authority on open pull requests. Without an answer
+        # the publication proceeds; a duplicate subject is worse than a
+        # refusal, but a refusal on no evidence is worse than both.
+        return None
+    try:
+        entries = json.loads(listed.stdout or "[]")
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(entries, list):
+        return None
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        # --search is a full-text match; only an exact subject collides.
+        if str(entry.get("title", "")).strip() != title:
+            continue
+        other = str(entry.get("headRefName", ""))
+        if other and other != head:
+            return f"#{entry.get('number')} on {other}"
+    return None
+
+
 def _adopt_open_pull_request(
     context: HarvestContext,
     run: Run,
@@ -1329,6 +1391,20 @@ def authorize(
                     {"kind": "harvest", **result, "job_id": context.job_id},
                 )
                 return result
+        collision = _colliding_pull_request(context, run, title=title)
+        if collision is not None:
+            result = {
+                "outcome": HARVEST_ERROR,
+                "reason": "title-collision",
+                "message": (
+                    f"publication title is already the subject of {collision}; "
+                    "derive it from this lane's own bead"
+                ),
+            }
+            _append_event(
+                context.spool, {"kind": "harvest", **result, "job_id": context.job_id}
+            )
+            return result
         _require_success(
             _command(
                 run,

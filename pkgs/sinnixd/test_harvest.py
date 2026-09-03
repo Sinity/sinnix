@@ -1013,3 +1013,129 @@ def test_redflags_catches_ignored_paths_committed() -> None:
     )
     assert status == 1
     assert "FLAG: ignored paths committed: .lane/title" in flags
+
+
+# Recorded from `gh pr list --state open --search "<subject> in:title"
+# --json number,title,headRefName` on 2026-09-03, when lanes a74ru and 3af3o
+# both published "refactor(test): make corpus manifests canonical".
+COLLIDING_PR_LIST = json.dumps(
+    [
+        {
+            "number": 4586,
+            "title": "refactor(test): make corpus manifests canonical",
+            "headRefName": "feature/packet/polylogue-a74ru",
+        },
+        {
+            "number": 4590,
+            "title": "refactor(test): make corpus manifests canonical everywhere",
+            "headRefName": "feature/packet/polylogue-other",
+        },
+    ]
+)
+
+
+def _gh_run(pr_list: str, *, branch: str, returncode: int = 0):  # type: ignore[no-untyped-def]
+    """A `run` that answers the branch query and the pull-request search."""
+
+    def run(argv, **kwargs):  # type: ignore[no-untyped-def]
+        if argv[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(argv, 0, f"{branch}\n", "")
+        if argv[:3] == ["gh", "pr", "list"]:
+            return subprocess.CompletedProcess(argv, returncode, pr_list, "")
+        raise AssertionError(f"unexpected command: {argv}")
+
+    return run
+
+
+def test_a_title_already_open_on_another_branch_is_a_collision(tmp_path: Path) -> None:
+    """Anti-vacuity: without this, two lanes publish one subject twice.
+
+    The recorded search also returns a longer title containing the same words;
+    matching that one would refuse every lane whose subject is a prefix.
+    """
+    context = _context(tmp_path, tmp_path / "state")
+
+    collision = harvest._colliding_pull_request(
+        context,
+        _gh_run(COLLIDING_PR_LIST, branch="feature/packet/polylogue-3af3o"),
+        title="refactor(test): make corpus manifests canonical",
+    )
+
+    assert collision == "#4586 on feature/packet/polylogue-a74ru"
+
+
+def test_this_branch_reusing_its_own_title_is_not_a_collision(tmp_path: Path) -> None:
+    """Re-publishing a lane adopts its own pull request; that is not a clash."""
+    context = _context(tmp_path, tmp_path / "state")
+
+    collision = harvest._colliding_pull_request(
+        context,
+        _gh_run(COLLIDING_PR_LIST, branch="feature/packet/polylogue-a74ru"),
+        title="refactor(test): make corpus manifests canonical",
+    )
+
+    assert collision is None
+
+
+def test_an_unanswered_search_does_not_refuse_the_publication(tmp_path: Path) -> None:
+    """A refusal needs evidence; the forge being unreachable is not evidence."""
+    context = _context(tmp_path, tmp_path / "state")
+
+    collision = harvest._colliding_pull_request(
+        context,
+        _gh_run("", branch="feature/packet/polylogue-3af3o", returncode=1),
+        title="refactor(test): make corpus manifests canonical",
+    )
+
+    assert collision is None
+
+
+def test_a_colliding_title_refuses_before_pushing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal is typed and reaches the spool, and nothing is published.
+
+    Anti-vacuity: refusing after the push would leave the duplicate branch on
+    the remote, so the assertion below is that no push or create ran at all.
+    """
+    root, _remote = _repository(tmp_path)
+    state = tmp_path / "state"
+    context = _context(root, state, "collision-job")
+    packet = harvest.compile_packet(context)["receipt_ref"]
+    monkeypatch.setattr(harvest, "LOCK_PATH", tmp_path / "harvest.lock")
+    title = "refactor(test): make corpus manifests canonical"
+    attempted: list[str] = []
+
+    def run(argv, **kwargs):
+        if argv[:2] == ["devtools", "verify"] and len(argv) == 2:
+            return subprocess.CompletedProcess(argv, 0, "affected passed", "")
+        if argv[:3] == ["devtools", "verify", "--quick"]:
+            return subprocess.CompletedProcess(argv, 0, "quick gate passed", "")
+        if argv[:3] == ["gh", "pr", "list"]:
+            return subprocess.CompletedProcess(argv, 0, COLLIDING_PR_LIST, "")
+        if argv[0] == "gh" or argv[:2] == ["git", "push"]:
+            attempted.append(" ".join(argv[:3]))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.run(argv, **kwargs)
+
+    _run_git(root, "switch", "-c", "feature/packet/polylogue-3af3o")
+    verified = _verified_job(root, state, context)
+    result = harvest.authorize(
+        context,
+        receipt_ref=packet,
+        title=title,
+        body="Reviewed packet.",
+        run=run,
+        affected_job=verified,
+    )
+
+    assert result["outcome"] == harvest.HARVEST_ERROR
+    assert result["reason"] == "title-collision"
+    assert "#4586" in result["message"]
+    assert attempted == []
+    spooled = [
+        json.loads(line)
+        for line in (state / "events.jsonl").read_text().splitlines()
+        if '"title-collision"' in line
+    ]
+    assert spooled and spooled[-1]["job_id"] == "collision-job"
