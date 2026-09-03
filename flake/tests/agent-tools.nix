@@ -334,7 +334,7 @@ in
           && managedWork.ManagedOOMMemoryPressureLimit == "50%"
           && managedWork.ManagedOOMMemoryPressureDurationSec == "30s"
           && userSlices.app.MemoryLow == "6G"
-          && userSlices.session.MemoryLow == "6G"
+          && userSlices.session.MemoryLow == "5G"
         ) "sinnixd work must yield to protected interactive slices without a hard CPU or memory cap";
         pkgs.runCommand "sinnix-agent-resource-policy-check" { } ''
           touch "$out"
