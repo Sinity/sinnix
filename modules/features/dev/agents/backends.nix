@@ -61,7 +61,7 @@ let
     case "$(< /proc/self/cgroup)" in
       *"/agent.slice/"*|*"/sinnixd-work.slice/"*) ;;
       *)
-        exec ${pkgs.systemd}/bin/systemd-run --user --scope --quiet --wait \
+        exec ${pkgs.systemd}/bin/systemd-run --user --scope --quiet \
           --slice=agent.slice -- "$0" "$@"
         ;;
     esac
