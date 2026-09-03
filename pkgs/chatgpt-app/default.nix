@@ -141,6 +141,13 @@ stdenv.mkDerivation rec {
     runHook postInstall
   '';
 
+  preFixup = ''
+    gappsWrapperArgs+=(
+      --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ stdenv.cc.cc ]}
+      --add-flags --ozone-platform=wayland
+    )
+  '';
+
   postInstall = ''
     asar extract "$out/lib/chatgpt/resources/app.asar" app-asar
 
