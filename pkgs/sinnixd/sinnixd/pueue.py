@@ -210,6 +210,18 @@ def groups() -> dict[str, int]:
     }
 
 
+def groups_status() -> dict[str, str]:
+    """Each group's run state: `Running` or `Paused`. Pausing is the freeze."""
+    document = _decode(_run(["group", "--json"]), "group")
+    if not isinstance(document, Mapping):
+        raise PueueError("pueue group did not print an object")
+    return {
+        str(name): str(detail.get("status") or "")
+        for name, detail in document.items()
+        if isinstance(detail, Mapping)
+    }
+
+
 def log(task_id: int) -> str:
     # Without --full, pueue publishes only a tail of the captured output, so a
     # result parser would read a truncated document as the whole run.

@@ -332,3 +332,65 @@ def test_the_adapter_drives_a_real_daemon_end_to_end(
     pueue.remove([dependent])
     assert pueue.task(dependent) is None
     assert pueue.task(failing) is not None
+
+
+def test_kill_reaches_the_whole_process_tree(live_pueue: str, tmp_path: Path) -> None:
+    """Whether `pueue kill` stops a task's descendants decides how cancel works.
+
+    Anti-vacuity: if the grandchild survives, cancelling a job leaves work
+    running with nothing left to reap it.
+    """
+    marker = tmp_path / "survivor"
+    task_id = pueue.add(
+        group="default",
+        label="fixture:tree:job",
+        command=("sh", "-c", f"(sleep 6; touch {marker}) & sleep 6"),
+        working_directory=tmp_path,
+    )
+    deadline = time.monotonic() + 20
+    while (task := pueue.task(task_id)) is None or task.status != "Running":
+        assert time.monotonic() < deadline, "task never started"
+        time.sleep(0.1)
+
+    pueue.kill(task_id)
+    pueue.wait(task_id, timeout_seconds=30)
+    time.sleep(8)
+
+    assert not marker.exists(), (
+        "pueue kill left a descendant running; cancel must reach the group itself"
+    )
+
+
+def test_kill_is_not_catchable_so_a_wrapper_cannot_clean_up(
+    live_pueue: str, tmp_path: Path
+) -> None:
+    """`pueue kill` is not catchable, which is why the wrapper records a pgid.
+
+    Anti-vacuity: if pueue ever delivered a catchable signal, a wrapper could
+    clean up its own detached session and sinnixd's reaping would be dead
+    weight. This turns red the day that changes.
+    """
+    caught = tmp_path / "caught"
+    task_id = pueue.add(
+        group="default",
+        label="fixture:signal:job",
+        command=(
+            "sh",
+            "-c",
+            f"trap 'echo TERM > {caught}; exit 0' TERM; sleep 6; echo NONE > {caught}",
+        ),
+        working_directory=tmp_path,
+    )
+    deadline = time.monotonic() + 20
+    while (task := pueue.task(task_id)) is None or task.status != "Running":
+        assert time.monotonic() < deadline, "task never started"
+        time.sleep(0.1)
+    time.sleep(0.5)
+
+    pueue.kill(task_id)
+    pueue.wait(task_id, timeout_seconds=30)
+    time.sleep(1)
+
+    assert not caught.exists(), (
+        "pueue delivered a catchable signal; the wrapper could clean up itself"
+    )

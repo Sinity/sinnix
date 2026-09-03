@@ -8,6 +8,7 @@ JSON. This module is the only place that shells out to it.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +40,17 @@ _REMOVE_ARGUMENTS = ("--reap", "--foreground", "-y", "--format", "json")
 # wt answers from local Git plus, for --prs, the forge. A minute covers a cold
 # forge call; longer means wt is wedged, not slow.
 CALL_TIMEOUT_SECONDS = 60
+
+
+def _read_only_git_environment() -> dict[str, str]:
+    """Git that reports without taking `.git/index.lock`.
+
+    `git status` refreshes the index and holds that lock. wt statuses every
+    worktree including the primary checkout, and a call killed at the timeout
+    below leaves the lock behind, blocking every later write in a repository
+    sinnixd does not own. Reading is all this module does.
+    """
+    return {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
 
 
 class WorktrunkError(RuntimeError):
@@ -152,6 +164,7 @@ def _run(root: Path, arguments: Sequence[str]) -> str:
             capture_output=True,
             text=True,
             timeout=CALL_TIMEOUT_SECONDS,
+            env=_read_only_git_environment(),
         )
     except FileNotFoundError as error:
         raise WorktrunkError("wt is not installed") from error
