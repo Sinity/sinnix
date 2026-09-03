@@ -152,6 +152,7 @@ mkFeatureModule {
             # A daemon restart marks every running task Killed and pauses
             # groups with queued tasks; a switch must not do that.
             Unit.X-RestartIfChanged = false;
+            Unit.X-StopIfChanged = false;
             # Groups live in daemon state, not in the config file.
             Service.ExecStartPost = "${pkgs.writeShellScript "sinnix-pueue-groups" ''
               set -u
