@@ -174,7 +174,10 @@ def advance(facts: LaneFacts, *, now: datetime | None = None) -> Action:
             return Action("park", "CI red on the PR")
         if facts.review_decision == "CHANGES_REQUESTED":
             if "review-fix" in facts.integrators_at_head:
-                return Action("park", "review-fix ran at this head and findings remain")
+                return Action(
+                    "park",
+                    "review-fix ran at this head and changes are still requested",
+                )
             return Action("review-fix", "review requested changes")
         return Action("await-merge", pull.checks_status or "checks pending")
     if pull is not None and facts.pushed_head != facts.head:
@@ -291,15 +294,14 @@ def collect(
     *,
     state_root: Path,
     worktrees: Sequence[Worktree] = (),
-    receipt_pulls: Mapping[str, Pull] | None = None,
     run: Run = subprocess.run,
     master_head: str | None = None,
     closed_beads: Sequence[str] = (),
 ) -> list[LaneFacts]:
     """Read every managed workspace of the project into facts.
 
-    ``receipt_pulls`` is accepted only because ``campaign.py``'s dispatcher
-    still supplies it; PR facts come from ``worktrees`` (``wt list --full``).
+    PR number, check status and mergeability come from ``worktrees``
+    (``wt list --format=json --full``), matched to a lane by branch.
     """
     index_path = state_root / "workspaces" / "index.json"
     try:
@@ -672,14 +674,6 @@ def latest_corpus(state_root: Path, project: str) -> dict[str, Any] | None:
     }
 
 
-def latest_sweep_pulls(state_root: Path) -> dict[str, Pull]:
-    """No publication sweep runs; ``campaign.py``'s dispatcher still calls this.
-
-    PR facts reach ``collect`` through its ``worktrees`` argument instead.
-    """
-    return {}
-
-
 def lane_view(facts: LaneFacts) -> dict[str, Any]:
     """One status row: the facts and the action they imply."""
     action = advance(facts)
@@ -729,5 +723,4 @@ __all__ = [
     "latest_corpus",
     "derived_checkout_id",
     "lane_view",
-    "latest_sweep_pulls",
 ]

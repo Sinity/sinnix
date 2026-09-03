@@ -256,7 +256,6 @@ def test_advance_dispatches_each_lanes_next_action(tmp_path, monkeypatch) -> Non
     )
     monkeypatch.setattr(runner, "_repo_slug", staticmethod(lambda root: "o/r"))
     monkeypatch.setattr("sinnixd.lane_facts.closed_bead_ids", lambda root, **k: ())
-    monkeypatch.setattr("sinnixd.lane_facts.latest_sweep_pulls", lambda root: {})
 
     scenarios = [
         (_lane_facts(), ("verify_affected", "packet-p-9")),
@@ -302,7 +301,6 @@ def test_advance_reports_undispatchable_actions_as_skipped(
     routing it through `_dispatch` would raise for lack of a matching branch."""
     runner = _runner(tmp_path)
     monkeypatch.setattr("sinnixd.lane_facts.closed_bead_ids", lambda root, **k: ())
-    monkeypatch.setattr("sinnixd.lane_facts.latest_sweep_pulls", lambda root: {})
     monkeypatch.setattr(
         "sinnixd.lane_facts.collect",
         lambda *a, **k: [_lane_facts(holder="integrator", clean_receipt=True)],
@@ -325,7 +323,6 @@ def test_a_dispatch_refusal_is_reported_not_raised(tmp_path, monkeypatch) -> Non
     abort every other lane's turn in the same call."""
     runner = _runner(tmp_path)
     monkeypatch.setattr("sinnixd.lane_facts.closed_bead_ids", lambda root, **k: ())
-    monkeypatch.setattr("sinnixd.lane_facts.latest_sweep_pulls", lambda root: {})
     monkeypatch.setattr("sinnixd.lane_facts.collect", lambda *a, **k: [_lane_facts()])
 
     def refuse(*args: object, **kwargs: object) -> str | None:
@@ -396,3 +393,56 @@ def test_launch_claims_beads_and_reports_the_ones_it_could_not() -> None:
 
     assert failed == ["p-bad"]
     assert calls[0][:6] == ["bd", "update", "p-ok", "-s", "in_progress", "-a"]
+
+
+def test_advance_reads_pr_facts_from_worktrunk(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The planner must see PRs, or every PR-dependent action is unreachable.
+
+    Anti-vacuity: dropping the `worktrees=` argument makes `facts.pull` always
+    None, which silently disables publish, review-fix and integrate. The
+    recorded call below is what proves the facts reach `collect`.
+    """
+    runner = _runner(tmp_path)
+    listed: list[tuple[object, bool]] = []
+    seen: dict[str, object] = {}
+
+    def fake_list(root, *, full=False):  # type: ignore[no-untyped-def]
+        listed.append((root, full))
+        return ("worktree-fact",)
+
+    def fake_collect(project, **kwargs):  # type: ignore[no-untyped-def]
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr("sinnixd.worktrunk.worktrunk_list", fake_list)
+    monkeypatch.setattr("sinnixd.lane_facts.collect", fake_collect)
+
+    runner.advance("polylogue")
+
+    assert listed and listed[0][1] is True, "the planner must ask for --full"
+    assert seen["worktrees"] == ("worktree-fact",)
+
+
+def test_advance_without_worktrunk_still_advances_the_rest(
+    tmp_path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """A wt failure must not stop every lane whose action needs no PR."""
+    from sinnixd.worktrunk import WorktrunkError
+
+    runner = _runner(tmp_path)
+    seen: dict[str, object] = {}
+
+    def fake_collect(project, **kwargs):  # type: ignore[no-untyped-def]
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(
+        "sinnixd.worktrunk.worktrunk_list",
+        lambda root, *, full=False: (_ for _ in ()).throw(WorktrunkError("no wt")),
+    )
+    monkeypatch.setattr("sinnixd.lane_facts.collect", fake_collect)
+
+    result = runner.advance("polylogue")
+
+    assert seen["worktrees"] == ()
+    assert result["dispatched"] == []
