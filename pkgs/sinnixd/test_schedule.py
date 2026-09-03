@@ -14,7 +14,7 @@ from sinnixd.config import Config
 def fake_systemd(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     state: dict[str, Any] = {"units": set(), "calls": []}
 
-    def run(argv: Any) -> str:
+    def run(argv: Any, *, check: bool = True) -> str:
         argv = list(argv)
         state["calls"].append(argv)
         if argv[:3] == ["systemctl", "--user", "list-units"]:
@@ -23,7 +23,13 @@ def fake_systemd(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
                 for unit in sorted(state["units"])
             )
         if argv[:3] == ["systemctl", "--user", "stop"]:
-            state["units"].discard(argv[3][: -len(".timer")])
+            for item in argv[3:]:
+                if item.endswith(".timer"):
+                    state["units"].discard(item[: -len(".timer")])
+                elif item.endswith(".service"):
+                    # A transient timer's service is not loaded while idle;
+                    # systemctl exits non-zero and apply must not fail on it.
+                    assert not check, "stopping the service must tolerate 'not loaded'"
             return ""
         if argv[0] == "systemd-run":
             unit = next(item for item in argv if item.startswith("--unit=")).split(
