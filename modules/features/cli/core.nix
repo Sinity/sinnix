@@ -149,6 +149,9 @@ mkFeatureModule {
             # state.json carries every task's full client environment; an
             # interactive `pueue add` writes the shell's API keys into it.
             Service.UMask = "0077";
+            # A selected verify with eight xdist workers plus testmon fingerprinting
+            # exhausted 65,536 descriptors; tasks inherit this limit.
+            Service.LimitNOFILE = 524288;
             # A daemon restart marks every running task Killed and pauses
             # groups with queued tasks; a switch must not do that.
             Unit.X-RestartIfChanged = false;
