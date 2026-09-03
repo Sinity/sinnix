@@ -1,7 +1,9 @@
-"""Pure scheduling helpers for one ready-Beads packet campaign wave."""
+"""Scheduling and dispatch for one ready-Beads packet campaign, one shot at a time."""
 
 from __future__ import annotations
 
+import json
+import re
 import subprocess
 import uuid
 from dataclasses import dataclass
@@ -44,7 +46,7 @@ def claim_beads(
     """Mark a launched lane's beads in_progress so no later wave relaunches them.
 
     A claimed bead leaves the ready frontier until the sweep closes it at
-    merge or the reactor releases it when the lane is interrupted. Returns
+    merge; an interrupted lane's claim is released by the operator. Returns
     the beads whose claim failed; a failed claim is reported, not fatal.
     """
     failed: list[str] = []
@@ -266,6 +268,11 @@ class CampaignRunner:
     workspaces: "GitWorkspaces"
     plans: "ProjectPlanExecutor"
     native_runner: Any
+    integrator_backend: str = "codex"
+    # Workers default to luna, so the integrator is a sibling rather than the
+    # same model judging its own family's output.
+    integrator_model: str = "gpt-5.6-terra"
+    integrator_effort: str = "high"
     _provisioning: str | None = None
 
     def run(
@@ -507,6 +514,289 @@ class CampaignRunner:
         result["plan"] = plan
         result["schedule"] = schedule.to_dict()
         return result
+
+    def advance(self, project_id: str) -> dict[str, Any]:
+        """Dispatch each managed lane's next action once, from fresh facts.
+
+        Reads exactly what ``campaign.status`` reads (``lane_facts.collect``
+        and ``advance``), so a dispatched action and the reason a lane shows
+        there never disagree. A lane whose action is not dispatchable
+        (wait/idle/done/park/await-sweep) or whose dispatch this call refused
+        is reported in ``skipped`` and left for the next invocation to
+        decide again — nothing is recorded between calls.
+        """
+        from .lane_facts import (
+            DISPATCHABLE_ACTIONS,
+            closed_bead_ids,
+            collect,
+            latest_sweep_pulls,
+        )
+        from .lane_facts import advance as next_action
+
+        project = self.projects.get(project_id)
+        state_root = self.jobs.store.root
+        lanes = collect(
+            project_id,
+            state_root=state_root,
+            receipt_pulls=latest_sweep_pulls(state_root),
+            closed_beads=closed_bead_ids(project.root),
+        )
+        dispatched: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for facts in lanes:
+            action = next_action(facts)
+            job_id: str | None = None
+            reason = action.reason
+            if action.kind in DISPATCHABLE_ACTIONS:
+                try:
+                    job_id = self._dispatch(project_id, project, facts, action)
+                except (ValueError, KeyError, OSError) as error:
+                    reason = str(error)
+            if job_id is None:
+                skipped.append(
+                    {"workspace": facts.name, "action": action.kind, "reason": reason}
+                )
+            else:
+                dispatched.append(
+                    {"workspace": facts.name, "action": action.kind, "job_id": job_id}
+                )
+        return {"project_id": project_id, "dispatched": dispatched, "skipped": skipped}
+
+    def _dispatch(
+        self, project_id: str, project: Any, facts: Any, action: Any
+    ) -> str | None:
+        if action.kind == "verify":
+            return self._dispatch_declared(
+                project_id, project, facts, "verify_affected", {}
+            )
+        if action.kind == "harvest":
+            verify_job = facts.verify_job[0] if facts.verify_job else ""
+            parameters = {"affected_job": verify_job} if verify_job else {}
+            return self._dispatch_declared(
+                project_id, project, facts, "harvest", parameters
+            )
+        if action.kind == "publish":
+            return self._dispatch_publish(project_id, project, facts)
+        if action.kind == "retry":
+            return self._dispatch_retry(facts)
+        if action.kind == "integrate":
+            return self._dispatch_integrate(project_id, project, facts)
+        if action.kind == "rebase":
+            return self._dispatch_rebase(project_id, facts)
+        return self._dispatch_review_fix(project_id, project, facts)
+
+    def _dispatch_declared(
+        self,
+        project_id: str,
+        project: Any,
+        facts: Any,
+        operation: str,
+        parameters: Mapping[str, Any],
+    ) -> str | None:
+        response = self.jobs.start_declared(
+            project=project,
+            operation=project.operation(operation),
+            correlation_id=str(uuid.uuid4()),
+            principal="agent-control",
+            parameters=parameters,
+            checkout=self.workspaces.resolve_checkout(project_id, facts.name),
+        )
+        job_id = response.get("job_id")
+        return str(job_id) if job_id else None
+
+    def _dispatch_publish(
+        self, project_id: str, project: Any, facts: Any
+    ) -> str | None:
+        """Publish a lane whose scan is clean, using the text the lane wrote."""
+        receipt = facts.receipt.packet_id if facts.receipt else ""
+        if not receipt:
+            return None
+        worktree = Path("/realm/worktrees") / facts.name
+        title = worktree / ".lane/title"
+        body = worktree / ".lane/body.md"
+        if not title.is_file() or not body.is_file():
+            # The worker contract requires the lane to write its own
+            # publication text; a lane that skipped it is left for the
+            # operator, not published under text nobody wrote.
+            return None
+        parameters: dict[str, Any] = {
+            "authorize": True,
+            "receipt_ref": receipt.rsplit("/", 1)[-1],
+            "title_file": str(title),
+            "body_file": str(body),
+        }
+        if facts.verify_job and facts.verify_job[1] == "succeeded":
+            parameters["affected_job"] = facts.verify_job[0]
+        return self._dispatch_declared(
+            project_id, project, facts, "harvest", parameters
+        )
+
+    def _dispatch_retry(self, facts: Any) -> str | None:
+        if not facts.lane_job:
+            return None
+        response = self._job_contracts.retry_agent(job_id=facts.lane_job)
+        job_id = response.get("job_id") or facts.lane_job
+        return str(job_id)
+
+    def _launch_agent(
+        self, project_id: str, facts: Any, prompt: str, *, label: str
+    ) -> str | None:
+        checkout = self.workspaces.resolve_checkout(project_id, facts.name)
+        response = self._job_contracts.start_agent(
+            principal="agent-control",
+            project_id=project_id,
+            checkout_id=checkout.checkout_id,
+            prompt=prompt,
+            backend=self.integrator_backend,
+            model=self.integrator_model,
+            effort=self.integrator_effort,
+            credential_profile="subscription",
+            timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS,
+            result="last-message",
+            coordinator_label=label,
+        )
+        job_id = response.get("job_id")
+        return str(job_id) if job_id else None
+
+    def _dispatch_integrate(
+        self, project_id: str, project: Any, facts: Any
+    ) -> str | None:
+        packet = (
+            self._receipt_payload(facts.receipt.packet_id) if facts.receipt else None
+        )
+        verified = (
+            facts.verify_job[0]
+            if facts.verify_job and facts.verify_job[1] == "succeeded"
+            else ""
+        )
+        event = {
+            "project": project_id,
+            "packet": packet,
+            "receipt_ref": facts.receipt.packet_id if facts.receipt else "",
+            "affected_job": verified,
+        }
+        return self._launch_agent(
+            project_id,
+            facts,
+            self._integration_prompt(project.root, event, facts.name),
+            label="integrator",
+        )
+
+    def _dispatch_rebase(self, project_id: str, facts: Any) -> str | None:
+        refusal = (
+            "rebasing onto origin/master conflicts"
+            if facts.pull is not None
+            else "its branch predates master's verification harness, so affected selection refuses"
+        )
+        prompt = (
+            f"You are an integrator in /realm/worktrees/{facts.name}. Publication of this "
+            f"lane was refused: {refusal}. Fetch origin, rebase "
+            "the branch onto origin/master, resolve every conflict preserving the lane's "
+            "intent and master's, run the project's quick gate (devtools verify --quick) "
+            "and affected verification (devtools verify), fix what they surface, commit, and "
+            "stop. Do not publish; the harvest runs again on your commit. Report the "
+            "machine trailer (LANE-BRANCH/COMMIT/QUICK/CLASSIFICATION).\n"
+        )
+        return self._launch_agent(project_id, facts, prompt, label="rebase")
+
+    def _dispatch_review_fix(
+        self, project_id: str, project: Any, facts: Any
+    ) -> str | None:
+        repo = self._repo_slug(project.root)
+        pull = facts.pull
+        if not repo or pull is None:
+            return None
+        return self._launch_agent(
+            project_id,
+            facts,
+            self._review_fix_prompt(repo, str(pull.number), facts.name, pull.findings),
+            label="review-fix",
+        )
+
+    @staticmethod
+    def _integration_prompt(
+        root: Path, event: Mapping[str, Any], workspace: str
+    ) -> str:
+        contract = (
+            root / "dots/_ai/skills/orchestrate/references/integrator-contract.md"
+        )
+        try:
+            body = contract.read_text()
+        except OSError:
+            body = ""
+        packet = event.get("packet")
+        summary = (
+            json.dumps(packet, indent=1, sort_keys=True)[:20_000]
+            if isinstance(packet, Mapping)
+            else ""
+        )
+        receipt = str(event.get("receipt_ref") or "")
+        return (
+            "# Integration packet\n\n"
+            f"project: {event.get('project')}\n"
+            f"workspace: {workspace}\n"
+            f"worktree: /realm/worktrees/{workspace}\n"
+            f"receipt_ref: {receipt.rsplit('/', 1)[-1]}\n"
+            f"affected_job: {event.get('affected_job') or ''}\n\n"
+            "## Review receipt\n\n"
+            f"```json\n{summary}\n```\n\n"
+            f"## Operating rules\n\n{body}\n"
+        )
+
+    @staticmethod
+    def _review_fix_prompt(repo: str, pr: str, workspace: str, findings: int) -> str:
+        return (
+            f"You are a review-fix lane in /realm/worktrees/{workspace} "
+            f"(open PR #{pr} on {repo}). The hosted reviewer left "
+            f"{findings} inline finding(s) on the PR. Read them with: "
+            f"gh api repos/{repo}/pulls/{pr}/comments (the open ones are the "
+            "top-level comments by chatgpt-codex-connector[bot] from its latest "
+            "review round, newer than its last +1 reaction; earlier rounds were "
+            "superseded). For each: confirm against the code and fix with a focused "
+            "test, or refute with concrete evidence. Post a threaded reply on every "
+            f"open finding (gh api repos/{repo}/pulls/{pr}/comments/<comment_id>/replies "
+            "-f body='...'), disposition style: \"Fixed in <sha> - one line.\" or "
+            '"Refuted: <evidence>." with "[review-fix lane]" appended. Verify with '
+            "the project's devtools (devtools test <selection>; devtools verify "
+            "--quick); rebase onto origin/master; push the branch. Then request "
+            f're-review by commenting exactly "@codex review" on the PR '
+            f'(gh pr comment {pr} --repo {repo} --body "@codex review"). Update '
+            ".lane/body.md's disposition table (uncommitted). Report per-finding "
+            "dispositions with the machine trailer "
+            "(LANE-BRANCH/COMMIT/QUICK/CLASSIFICATION).\n"
+        )
+
+    @staticmethod
+    def _repo_slug(root: Path) -> str:
+        try:
+            url = subprocess.run(
+                ["git", "-C", str(root), "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        match = re.search(r"github\.com[:/]([^/]+/[^/.]+)", url)
+        return match.group(1) if match else ""
+
+    @staticmethod
+    def _receipt_payload(receipt: str) -> Mapping[str, Any] | None:
+        """The harvest receipt an integrate action names.
+
+        The lane fact carries the packet id only; the receipt file holds what
+        the integrator reads (scan flags, lane trailer, verification evidence).
+        """
+        packet_root = Path.home() / ".local/state/sinnixd/harvest-packets"
+        name = receipt.rsplit("/", 1)[-1]
+        if not re.fullmatch(r"harvest-[0-9a-f]{32}", name):
+            return None
+        try:
+            payload = json.loads((packet_root / f"{name}.json").read_text())
+        except (OSError, json.JSONDecodeError):
+            return None
+        return payload if isinstance(payload, Mapping) else None
 
     def _submit_tolerating_provisioning_failures(
         self,

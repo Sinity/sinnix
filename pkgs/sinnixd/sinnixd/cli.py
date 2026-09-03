@@ -297,7 +297,7 @@ def parser() -> argparse.ArgumentParser:
     lane_publish.add_argument("--timeout-seconds", type=int, default=7200)
     lane_authorize = lane_subcommands.add_parser(
         "authorize",
-        help="Record the operator's decision for a workspace's current head; the reactor publishes past the scanner on it.",
+        help="Record the operator's decision for a workspace's current head; `campaign run` publishes past the scanner on it.",
     )
     lane_authorize.add_argument("workspace")
     lane_authorize.add_argument("--reason", default="")
@@ -578,22 +578,7 @@ def _operator_view(arguments: argparse.Namespace) -> int:
     if arguments.campaign_command == "log":
         print(render_lane_log(arguments.workspace, status, jobs, DEFAULT_SPOOL))
         return 0
-    active = subprocess.run(
-        ["systemctl", "--user", "is-active", "sinnixd-reactor"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    from .operator_view import _reactor_last_dispatch
-
-    print(
-        render_overview(
-            status,
-            jobs,
-            reactor_active=active.stdout.strip() == "active",
-            last_dispatch=_reactor_last_dispatch(DEFAULT_SPOOL),
-        )
-    )
+    print(render_overview(status, jobs))
     return 0
 
 

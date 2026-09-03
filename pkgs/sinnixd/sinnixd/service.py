@@ -40,7 +40,6 @@ from .operator_view import build_campaign_status
 from .project_plans import PlanStore, ProjectPlanExecutor
 from .projects import ProjectCatalog
 from .pueue import PueueError
-from .reactor import CampaignBoard
 from .workspaces import GitWorkspaces, WorkspaceError, WorkspaceStore
 
 
@@ -108,7 +107,6 @@ class SinnixdService:
     workspaces: GitWorkspaces | None = None
     delivery: GitHubDelivery | None = None
     plans: ProjectPlanExecutor | None = None
-    campaign_board_path: Path = Path("/realm/tmp/work/campaign-board.json")
 
     def __post_init__(self) -> None:
         if self.workspaces is None:
@@ -427,13 +425,18 @@ class SinnixdService:
         ):
             raise ValueError("campaign.run launch arguments are invalid")
         assert self.workspaces is not None and self.plans is not None
-        return CampaignRunner(
+        runner = CampaignRunner(
             self.projects,
             self.jobs,
             self.workspaces,
             self.plans,
             self.native_runner,
-        ).run(
+        )
+        if bead_ids is None:
+            # No beads named: advance every managed lane one step instead of
+            # launching new ones.
+            return runner.advance(arguments["project_id"])
+        return runner.run(
             arguments["project_id"],
             limit=limit,
             bead_ids=bead_ids,
@@ -461,11 +464,9 @@ class SinnixdService:
         label = arguments.get("coordinator_label")
         if label is not None and (not isinstance(label, str) or not label):
             raise ValueError("campaign.status coordinator_label must be a string")
-        board = CampaignBoard.load(self.campaign_board_path)
         return build_campaign_status(
             project_id,
             self.jobs.store.list(),
-            board,
             coordinator_label=label,
             state_root=self.jobs.store.root,
             project_root=self.projects.get(project_id).root,

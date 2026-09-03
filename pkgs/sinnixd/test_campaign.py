@@ -153,6 +153,228 @@ def test_frontier_orders_by_priority_before_id() -> None:
     # ids and never reaches the P0 work.
 
 
+def _lane_facts(**overrides: object):
+    from sinnixd.lane_facts import LaneFacts, Receipt
+
+    base: dict[str, object] = {
+        "name": "packet-p-9",
+        "checkout_id": "worktree-abc",
+        "project": "polylogue",
+        "branch": "feature/packet/polylogue-9",
+        "bead": "polylogue-9",
+        "head": "h" * 40,
+        "pushed_head": "h" * 40,
+        "master_head": "m" * 40,
+        "holder": None,
+        "running_ops": (),
+        "lane_phase": "succeeded",
+        "receipt": None,
+        "pull": None,
+    }
+    if overrides.pop("clean_receipt", False):
+        base["receipt"] = Receipt(
+            packet_id="harvest-" + "0" * 32,
+            head="h" * 40,
+            flags=(),
+            flagged=False,
+            authorized=False,
+            verification="from-job",
+            bead="polylogue-9",
+            created_at="",
+        )
+    if overrides.pop("flagged_receipt", False):
+        base["receipt"] = Receipt(
+            packet_id="harvest-" + "1" * 32,
+            head="h" * 40,
+            flags=("FLAG: production definitions removed: f",),
+            flagged=True,
+            authorized=False,
+            verification="from-job",
+            bead="polylogue-9",
+            created_at="",
+        )
+    base.update(overrides)
+    return LaneFacts(**base)  # type: ignore[arg-type]
+
+
+def _runner(tmp_path):  # type: ignore[no-untyped-def]
+    from types import SimpleNamespace
+
+    from sinnixd.campaign import CampaignRunner
+
+    class Projects:
+        def get(self, project_id: str) -> object:
+            return SimpleNamespace(root=tmp_path, project_id=project_id)
+
+    class Jobs:
+        store = SimpleNamespace(root=tmp_path)
+
+    return CampaignRunner(
+        projects=Projects(),
+        jobs=Jobs(),
+        workspaces=None,
+        plans=None,
+        native_runner=None,
+    )
+
+
+def test_advance_dispatches_each_lanes_next_action(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """One call per lane, from the same facts `campaign view` reads.
+
+    Anti-vacuity: dropping a branch of `_dispatch` leaves that scenario's
+    lane out of `dispatched`, caught by the per-scenario assertion below.
+    """
+    from sinnixd.lane_facts import Pull
+
+    runner = _runner(tmp_path)
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        runner,
+        "_dispatch_declared",
+        lambda project_id, project, facts, operation, parameters: (
+            calls.append((operation, facts.name)) or "job-1"
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_dispatch_publish",
+        lambda project_id, project, facts: (
+            calls.append(("publish", facts.name)) or "job-1"
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_launch_agent",
+        lambda project_id, facts, prompt, *, label: (
+            calls.append((label, facts.name)) or "job-1"
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_dispatch_retry",
+        lambda facts: calls.append(("retry", facts.name)) or "job-1",
+    )
+    monkeypatch.setattr(runner, "_repo_slug", staticmethod(lambda root: "o/r"))
+    monkeypatch.setattr("sinnixd.lane_facts.closed_bead_ids", lambda root, **k: ())
+    monkeypatch.setattr("sinnixd.lane_facts.latest_sweep_pulls", lambda root: {})
+
+    scenarios = [
+        (_lane_facts(), ("verify_affected", "packet-p-9")),
+        (
+            _lane_facts(verify_job=("vvvvvvvv-1", "succeeded")),
+            ("harvest", "packet-p-9"),
+        ),
+        (_lane_facts(flagged_receipt=True), ("integrator", "packet-p-9")),
+        (
+            _lane_facts(
+                clean_receipt=True,
+                pull=Pull(number=7, head="h" * 40, verdict="conflict", findings=0),
+            ),
+            ("rebase", "packet-p-9"),
+        ),
+        (
+            _lane_facts(
+                clean_receipt=True,
+                pull=Pull(number=7, head="h" * 40, verdict="findings", findings=2),
+            ),
+            ("review-fix", "packet-p-9"),
+        ),
+        (
+            _lane_facts(lane_phase="timed_out", receipt=None, lane_job="job-77"),
+            ("retry", "packet-p-9"),
+        ),
+    ]
+    for facts, expected in scenarios:
+        calls.clear()
+        monkeypatch.setattr(
+            "sinnixd.lane_facts.collect", lambda *a, _facts=facts, **k: [_facts]
+        )
+        result = runner.advance("polylogue")
+        assert calls == [expected], expected
+        assert len(result["dispatched"]) == 1
+        assert result["dispatched"][0]["workspace"] == "packet-p-9"
+        assert result["dispatched"][0]["job_id"] == "job-1"
+        assert result["skipped"] == []
+
+
+def test_advance_reports_undispatchable_actions_as_skipped(
+    tmp_path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """Anti-vacuity: a wait/idle/park action must never reach a dispatcher —
+    routing it through `_dispatch` would raise for lack of a matching branch."""
+    runner = _runner(tmp_path)
+    monkeypatch.setattr("sinnixd.lane_facts.closed_bead_ids", lambda root, **k: ())
+    monkeypatch.setattr("sinnixd.lane_facts.latest_sweep_pulls", lambda root: {})
+    monkeypatch.setattr(
+        "sinnixd.lane_facts.collect",
+        lambda *a, **k: [_lane_facts(holder="integrator", clean_receipt=True)],
+    )
+
+    result = runner.advance("polylogue")
+
+    assert result["dispatched"] == []
+    assert result["skipped"] == [
+        {
+            "workspace": "packet-p-9",
+            "action": "wait",
+            "reason": "held by integrator",
+        }
+    ]
+
+
+def test_a_dispatch_refusal_is_reported_not_raised(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Anti-vacuity: without the catch, one lane's refused dispatch would
+    abort every other lane's turn in the same call."""
+    runner = _runner(tmp_path)
+    monkeypatch.setattr("sinnixd.lane_facts.closed_bead_ids", lambda root, **k: ())
+    monkeypatch.setattr("sinnixd.lane_facts.latest_sweep_pulls", lambda root: {})
+    monkeypatch.setattr("sinnixd.lane_facts.collect", lambda *a, **k: [_lane_facts()])
+
+    def refuse(*args: object, **kwargs: object) -> str | None:
+        raise ValueError("no matching workspace registered")
+
+    monkeypatch.setattr(runner, "_dispatch_declared", refuse)
+
+    result = runner.advance("polylogue")
+
+    assert result["dispatched"] == []
+    assert result["skipped"] == [
+        {
+            "workspace": "packet-p-9",
+            "action": "verify",
+            "reason": "no matching workspace registered",
+        }
+    ]
+
+
+def test_dispatch_retry_needs_a_lane_job() -> None:
+    """Anti-vacuity: without the guard a lane with no job to retry raises
+    inside `retry_agent` instead of reporting nothing to dispatch."""
+    from sinnixd.campaign import CampaignRunner
+
+    runner = CampaignRunner(
+        projects=None, jobs=None, workspaces=None, plans=None, native_runner=None
+    )
+    assert runner._dispatch_retry(_lane_facts(lane_job=None)) is None
+
+
+def test_dispatch_publish_requires_lane_publication_text(tmp_path) -> None:
+    """The worker contract requires the lane to write its own publication
+    text; a lane that skipped it must not be published under text nobody
+    wrote.
+
+    Anti-vacuity: removing the file check publishes an unstaffed worktree's
+    stale `.lane/title`.
+    """
+    from sinnixd.campaign import CampaignRunner
+
+    runner = CampaignRunner(
+        projects=None, jobs=None, workspaces=None, plans=None, native_runner=None
+    )
+    facts = _lane_facts(clean_receipt=True)
+    assert runner._dispatch_publish("polylogue", None, facts) is None
+
+
 def test_launch_claims_beads_and_reports_the_ones_it_could_not() -> None:
     """A launched lane's bead leaves the frontier until merge or release.
 
