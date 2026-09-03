@@ -76,7 +76,6 @@ from sinnixd.runner import (
     _require_environment,
     _revalidate_checkout,
     _run_agent,
-    _run_declared,
     _seal_packet_result,
 )
 from sinnixd.service import SUPPORTED_OPERATIONS, SinnixdService
@@ -3521,10 +3520,15 @@ def test_seal_output_composes_through_exact_head_into_delivery_validation(
         )
 
 
-def test_declared_runner_revalidates_bound_checkout_at_payload_exec_boundary(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_the_queued_command_refuses_a_checkout_that_moved_after_dispatch(
+    tmp_path: Path, fake_pueue: FakePueue
 ) -> None:
-    """A checkout mutation after admission cannot reach the project payload."""
+    """A checkout mutation after dispatch cannot reach the project payload.
+
+    Anti-vacuity: the binding is frozen when the job is queued, so without the
+    wrapper's revalidation the command would run against a different tree than
+    the one the caller verified.
+    """
     write_adapter(tmp_path)
     initialize_git_checkout(tmp_path)
     jobs = generic_jobs(tmp_path)
@@ -3539,7 +3543,7 @@ def test_declared_runner_revalidates_bound_checkout_at_payload_exec_boundary(
         checkout=checkout,
     )
     record = jobs.store.load(started["job_id"])
-    _, launch_environment = jobs.store.declared_launch(record.job_id)
+    launch = queue_launch_input(jobs, record.job_id)
     subprocess.run(
         [
             "git",
@@ -3558,16 +3562,10 @@ def test_declared_runner_revalidates_bound_checkout_at_payload_exec_boundary(
         capture_output=True,
         text=True,
     )
-    for key in (
-        "SINNIXD_JOB_ID",
-        "SINNIXD_PROJECT_ID",
-        "SINNIXD_OPERATION",
-        "SINNIXD_CHECKOUT_ID",
-        "SINNIXD_CHECKOUT_HEAD",
-    ):
-        monkeypatch.setenv(key, launch_environment[key])
-    with pytest.raises(RunnerError, match="registered Git worktree"):
-        _run_declared(jobs.store.root, record.job_id, record.unit)
+
+    assert queue_run.run(launch) == queue_run.REFUSED_EXIT_CODE
+
+    assert "checkout revalidation failed" in Path(launch["log_path"]).read_text()
 
 
 def test_exact_head_verified_workspace_publishes_lands_and_finishes_without_a_pr_ledger(

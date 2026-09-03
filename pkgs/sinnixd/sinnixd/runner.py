@@ -9,8 +9,6 @@ from typing import Any, Mapping, Sequence
 
 from .jobs import (
     MAX_RESULT_BYTES,
-    GenericJobStore,
-    JobRecordError,
     _open_preallocated_private_artifact,
 )
 from .limits import valid_timeout_seconds
@@ -99,39 +97,6 @@ def _require_environment(job_id: str, unit: str, value: Mapping[str, Any]) -> No
         raise RunnerError("typed-job environment contains an untrusted SINNIX identity")
     if unit != f"sinnixd-job-{job_id}.service":
         raise RunnerError("typed-job unit identity is invalid")
-
-
-def _run_declared(state_root: Path, job_id: str, unit: str) -> None:
-    """Revalidate a bound checkout at the unit's check-to-exec boundary."""
-    try:
-        store = GenericJobStore(state_root.resolve(strict=True))
-        record = store.load(job_id)
-        command, environment = store.declared_launch(job_id)
-    except (OSError, JobRecordError) as error:
-        raise RunnerError("declared-job launch input is invalid") from error
-    checkout = record.spec.checkout
-    if (
-        record.unit != unit
-        or record.spec.kind != "declared-operation"
-        or not isinstance(checkout, Mapping)
-        or record.spec.working_directory != checkout.get("path")
-    ):
-        raise RunnerError("declared-job identity is invalid")
-    expected = {
-        "SINNIXD_JOB_ID": job_id,
-        "SINNIXD_PROJECT_ID": record.spec.project_id,
-        "SINNIXD_OPERATION": record.spec.operation,
-        "SINNIXD_CHECKOUT_ID": checkout.get("checkout_id"),
-        "SINNIXD_CHECKOUT_HEAD": checkout.get("head"),
-    }
-    if any(
-        not isinstance(value, str) or os.environ.get(key) != value
-        for key, value in expected.items()
-    ):
-        raise RunnerError("declared-job environment identity is invalid")
-    checkout_path = _revalidate_checkout(checkout)
-    os.chdir(checkout_path)
-    os.execvpe(command[0], command, {**os.environ, **environment})
 
 
 def _exec_shell(value: Mapping[str, Any], checkout: Path) -> None:
@@ -338,17 +303,12 @@ def _seal_packet_result(
 def main(arguments: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sinnixd-contract-runner")
     parser.add_argument("--input", type=Path)
-    parser.add_argument("--declared", action="store_true")
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--unit", required=True)
     parser.add_argument("--native-runner", type=Path)
     parser.add_argument("--state-root", type=Path, required=True)
     args = parser.parse_args(arguments)
     try:
-        if args.declared:
-            if args.input is not None or args.native_runner is not None:
-                raise RunnerError("declared-job runner arguments are invalid")
-            _run_declared(args.state_root, args.job_id, args.unit)
         if args.input is None or args.native_runner is None:
             raise RunnerError("typed-job runner arguments are invalid")
         value = _load(args.input, args.job_id)
