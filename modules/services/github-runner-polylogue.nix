@@ -103,6 +103,9 @@ mkServiceModule {
           # `nix develop` provides the rest; these are what the runner itself
           # and the checkout/artifact actions need on PATH.
           extraPackages = with pkgs; [
+            # devtools submits pytest to the user pueue slot from inside
+            # `nix develop`, which inherits this PATH.
+            pueue
             uv
             cacert
             openssh

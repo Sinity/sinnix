@@ -290,6 +290,8 @@ in
     users.groups.${cfg.user.name} = { };
     users.users.${cfg.user.name} = {
       isNormalUser = true;
+      # Fixed so units may name the user runtime directory (/run/user/<uid>).
+      uid = 1000;
       group = cfg.user.name;
       extraGroups = [
         "networkmanager"
