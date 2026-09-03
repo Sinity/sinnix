@@ -87,7 +87,10 @@ def apply(config: Config) -> dict[str, Any]:
         # A transient timer's service unit exists only while it is running;
         # stopping the timer alone is the whole retirement when it is not.
         _run(["systemctl", "--user", "stop", f"{unit}.timer"])
-        _run(["systemctl", "--user", "stop", "--no-block", f"{unit}.service"], check=False)
+        _run(
+            ["systemctl", "--user", "stop", "--no-block", f"{unit}.service"],
+            check=False,
+        )
     started: list[str] = []
     for unit, entry in sorted(desired.items()):
         if unit in present:
