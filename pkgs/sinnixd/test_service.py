@@ -4690,6 +4690,15 @@ def test_environment_builder_keeps_empty_values_distinct_from_unset() -> None:
             "timeout",
         ),
         (lambda pueue, task_id: pueue.fail(task_id, exit_code=1), "failed"),
+        (
+            lambda pueue, task_id: pueue.fail(
+                task_id, exit_code=queue_run.REFUSED_EXIT_CODE
+            ),
+            "launch-failed",
+        ),
+        (lambda pueue, task_id: pueue.dependency_fail(task_id), "launch-failed"),
+        (lambda pueue, task_id: pueue.fail_to_spawn(task_id), "launch-failed"),
+        (lambda pueue, task_id: pueue.kill_directly(task_id), "cancelled"),
     ],
 )
 def test_terminal_result_classification_comes_from_pueue(
