@@ -2,66 +2,37 @@ from __future__ import annotations
 
 import json
 import subprocess
-from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
 from sinnix_mcp import RequestEnvelope
-from sinnixd.jobs import GenericJobs, GenericJobStore, _completion_marker_path
+from sinnixd.jobs import GenericJobs, GenericJobStore, UserSystemdJobs
 from sinnixd.project_plans import PlanStore, ProjectPlanError, ProjectPlanExecutor
 from sinnixd.projects import ProjectCatalog
 from sinnixd.service import SinnixdService
 
+if TYPE_CHECKING:
+    from conftest import FakePueue
 
-@dataclass
-class PlanSystemd:
-    started: list[dict[str, object]] = field(default_factory=list)
-    properties: dict[str, dict[str, str]] = field(default_factory=dict)
 
-    def start(self, **kwargs: object) -> None:
-        unit = str(kwargs["unit"])
-        self.started.append(dict(kwargs))
-        self.properties.setdefault(
-            unit,
-            {
-                "LoadState": "loaded",
-                "ActiveState": "active",
-                "Result": "success",
-                "ExecMainStatus": "0",
-                "InvocationID": unit,
-            },
-        )
-
-    def show(self, unit: str, *, timeout_seconds: float = 0.25) -> dict[str, str]:
-        return dict(self.properties.get(unit, {"LoadState": "not-found"}))
-
-    def stop(self, unit: str) -> None:
-        self.properties[unit] = {
-            "LoadState": "loaded",
-            "ActiveState": "inactive",
-            "Result": "signal",
-            "ExecMainStatus": "15",
-            "InvocationID": unit,
-        }
-
-    def finish(self, job_id: str, jobs: GenericJobs, *, success: bool = True) -> None:
-        record = jobs.store.load(job_id)
-        self.properties[record.unit] = {
-            "LoadState": "loaded",
-            "ActiveState": "inactive",
-            "Result": "success" if success else "exit-code",
-            "ExecMainStatus": "0" if success else "1",
-            "InvocationID": record.unit,
-        }
-        _completion_marker_path(record.log_path).write_text("done\n")
-        if record.result_path is not None:
-            record.result_path.write_text(json.dumps({"job": job_id, "ok": success}))
+def finish(
+    fake_pueue: FakePueue, job_id: str, jobs: GenericJobs, *, success: bool = True
+) -> None:
+    record = jobs.store.load(job_id)
+    assert record.queue_task_id is not None
+    if success:
+        fake_pueue.succeed(record.queue_task_id)
+    else:
+        fake_pueue.fail(record.queue_task_id, exit_code=1)
+    if record.result_path is not None:
+        record.result_path.write_text(json.dumps({"job": job_id, "ok": success}))
 
 
 def plan_fixture(
-    tmp_path: Path,
-) -> tuple[ProjectPlanExecutor, PlanSystemd, GenericJobs]:
+    tmp_path: Path, fake_pueue: FakePueue
+) -> tuple[ProjectPlanExecutor, FakePueue, GenericJobs]:
     root = tmp_path / "project"
     root.mkdir()
     (root / "tracked").write_text("fixture\n")
@@ -114,12 +85,11 @@ max_length = 32
         check=True,
     )
     catalog = ProjectCatalog([root])
-    systemd = PlanSystemd()
-    jobs = GenericJobs(systemd, GenericJobStore(tmp_path / "state"))
+    jobs = GenericJobs(UserSystemdJobs(), GenericJobStore(tmp_path / "state"))
     plans = ProjectPlanExecutor(
         catalog, jobs, PlanStore(jobs.store.root), workspaces=None
     )
-    return plans, systemd, jobs
+    return plans, fake_pueue, jobs
 
 
 def submit(
@@ -136,8 +106,10 @@ def submit(
     )
 
 
-def test_plan_rejects_cycles_and_validates_payload_schema(tmp_path: Path) -> None:
-    plans, _, _ = plan_fixture(tmp_path)
+def test_plan_rejects_cycles_and_validates_payload_schema(
+    tmp_path: Path, fake_pueue: FakePueue
+) -> None:
+    plans, _, _ = plan_fixture(tmp_path, fake_pueue)
     with pytest.raises(ProjectPlanError, match="cycle"):
         submit(
             plans,
@@ -156,9 +128,9 @@ def test_plan_rejects_cycles_and_validates_payload_schema(tmp_path: Path) -> Non
 
 
 def test_ready_nodes_run_concurrently_and_keep_dependency_job_ids(
-    tmp_path: Path,
+    tmp_path: Path, fake_pueue: FakePueue
 ) -> None:
-    plans, systemd, jobs = plan_fixture(tmp_path)
+    plans, fake_pueue, jobs = plan_fixture(tmp_path, fake_pueue)
     result = submit(
         plans,
         [
@@ -167,15 +139,17 @@ def test_ready_nodes_run_concurrently_and_keep_dependency_job_ids(
             {"id": "c", "operation": "prepare", "depends_on": ["a", "b"]},
         ],
     )
-    assert len(systemd.started) == 2
+    assert len(fake_pueue.added) == 2
     nodes = {node["node_id"]: node for node in result["nodes"]}
     child = jobs.store.load(nodes["c"]["job_id"])
     assert child.spec.dependency_job_ids == (nodes["a"]["job_id"], nodes["b"]["job_id"])
     assert child.spec.exclusive_keys == ()
 
 
-def test_plan_accepts_nodes_before_their_dependencies(tmp_path: Path) -> None:
-    plans, systemd, jobs = plan_fixture(tmp_path)
+def test_plan_accepts_nodes_before_their_dependencies(
+    tmp_path: Path, fake_pueue: FakePueue
+) -> None:
+    plans, fake_pueue, jobs = plan_fixture(tmp_path, fake_pueue)
     result = submit(
         plans,
         [
@@ -186,11 +160,13 @@ def test_plan_accepts_nodes_before_their_dependencies(tmp_path: Path) -> None:
     nodes = {node["node_id"]: node for node in result["nodes"]}
     child = jobs.store.load(nodes["child"]["job_id"])
     assert child.spec.dependency_job_ids == (nodes["parent"]["job_id"],)
-    assert [item["unit"] for item in systemd.started]
+    assert [item["label"] for item in fake_pueue.added]
 
 
-def test_dependency_failure_blocks_downstream_node(tmp_path: Path) -> None:
-    plans, systemd, jobs = plan_fixture(tmp_path)
+def test_dependency_failure_blocks_downstream_node(
+    tmp_path: Path, fake_pueue: FakePueue
+) -> None:
+    plans, fake_pueue, jobs = plan_fixture(tmp_path, fake_pueue)
     result = submit(
         plans,
         [
@@ -199,15 +175,17 @@ def test_dependency_failure_blocks_downstream_node(tmp_path: Path) -> None:
         ],
     )
     a = next(node for node in result["nodes"] if node["node_id"] == "a")
-    systemd.finish(a["job_id"], jobs, success=False)
+    finish(fake_pueue, a["job_id"], jobs, success=False)
     aggregate = plans.get(result["plan_id"])
     states = {node["node_id"]: node["state"]["phase"] for node in aggregate["nodes"]}
     assert states == {"a": "failed", "b": "dependency-failed"}
     assert aggregate["state"]["phase"] == "failed"
 
 
-def test_interrupted_manifest_reconciles_to_existing_node_job(tmp_path: Path) -> None:
-    plans, _, _ = plan_fixture(tmp_path)
+def test_interrupted_manifest_reconciles_to_existing_node_job(
+    tmp_path: Path, fake_pueue: FakePueue
+) -> None:
+    plans, _, _ = plan_fixture(tmp_path, fake_pueue)
     result = submit(plans, [{"id": "n", "operation": "prepare"}])
     stored = plans.store.load(result["plan_id"])
     job_id = stored["nodes"][0]["job_id"]
@@ -220,9 +198,9 @@ def test_interrupted_manifest_reconciles_to_existing_node_job(tmp_path: Path) ->
 
 
 def test_node_operation_payloads_and_aggregate_results_are_bounded(
-    tmp_path: Path,
+    tmp_path: Path, fake_pueue: FakePueue
 ) -> None:
-    plans, systemd, jobs = plan_fixture(tmp_path)
+    plans, fake_pueue, jobs = plan_fixture(tmp_path, fake_pueue)
     result = plans.submit(
         {
             "project_id": "fixture",
@@ -236,13 +214,13 @@ def test_node_operation_payloads_and_aggregate_results_are_bounded(
         principal="operator",
     )
     first_job = result["nodes"][0]["job_id"]
-    systemd.finish(first_job, jobs)
+    finish(fake_pueue, first_job, jobs)
     plans.get(result["plan_id"])
-    assert len(systemd.started) == 2
+    assert len(fake_pueue.added) == 2
     second_job = next(
         node["job_id"] for node in result["nodes"] if node["job_id"] != first_job
     )
-    systemd.finish(second_job, jobs)
+    finish(fake_pueue, second_job, jobs)
     aggregate = plans.get(result["plan_id"])
     encoded = json.dumps(aggregate["result"], separators=(",", ":")).encode()
     assert len(encoded) <= 64_000
@@ -252,8 +230,10 @@ def test_node_operation_payloads_and_aggregate_results_are_bounded(
     ]
 
 
-def test_plan_service_routes_preserve_typed_owner_surface(tmp_path: Path) -> None:
-    plans, _, jobs = plan_fixture(tmp_path)
+def test_plan_service_routes_preserve_typed_owner_surface(
+    tmp_path: Path, fake_pueue: FakePueue
+) -> None:
+    plans, _, jobs = plan_fixture(tmp_path, fake_pueue)
     service = SinnixdService(plans.projects, jobs=jobs)
     response = service.dispatch(
         RequestEnvelope(
