@@ -6849,3 +6849,49 @@ def test_status_names_every_declared_pool_pueue_cannot_provide(
     assert [entry["pool"] for entry in missing] == ["normal"]
     assert missing[0]["repair"] == "pueue group add normal"
     assert missing[0]["declared_by"]
+
+
+def test_cancelling_a_queued_task_removes_it_from_the_queue(
+    tmp_path: Path, fake_pueue: FakePueue
+) -> None:
+    """Anti-vacuity: pueue kill does nothing to a task that has not started.
+
+    Without the removal the task keeps its slot and runs after its cancellation
+    was reported, which is how seventeen verify_affected jobs ran post-cancel.
+    """
+    jobs = generic_jobs(tmp_path)
+    started = jobs.start_foreground(
+        command=("fixture",),
+        working_directory=str(tmp_path),
+        environment={"PATH": ""},
+    )
+    task_id = fake_task_id(jobs, started["job_id"])
+    fake_pueue.queue(task_id)
+
+    response = jobs.cancel(started["job_id"], reason="operator")
+
+    assert response["cancel_requested"] is True
+    assert fake_pueue.removed == [task_id]
+    assert fake_pueue.killed == []
+    assert fake_pueue.task(task_id) is None
+    assert response["state"]["phase"] == "cancelled"
+    assert response["state"]["terminal"] is True
+    assert jobs.get(started["job_id"])["state"]["phase"] == "cancelled"
+
+
+def test_cancelling_a_running_task_kills_it_rather_than_dequeueing(
+    tmp_path: Path, fake_pueue: FakePueue
+) -> None:
+    jobs = generic_jobs(tmp_path)
+    started = jobs.start_foreground(
+        command=("fixture",),
+        working_directory=str(tmp_path),
+        environment={"PATH": ""},
+    )
+    task_id = fake_task_id(jobs, started["job_id"])
+    fake_pueue.running(task_id)
+
+    jobs.cancel(started["job_id"], reason="operator")
+
+    assert fake_pueue.killed == [task_id]
+    assert fake_pueue.removed == []

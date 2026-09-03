@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -2357,10 +2358,7 @@ class GenericJobs:
                     cancel_requested_at=record.cancel_requested_at or _timestamp(),
                 )
                 self.store.save(intent)
-                try:
-                    pueue.kill(record.queue_task_id)
-                except PueueError:
-                    pass
+                self._stop_queue_task(record.queue_task_id)
                 response = {
                     **self._get_locked(job_id),
                     "cancel_requested": True,
@@ -2567,6 +2565,30 @@ class GenericJobs:
         self.store.save(updated)
         return self._public(updated, state)
 
+    @staticmethod
+    def _stop_queue_task(task_id: int) -> None:
+        """Stop a task whether or not it has started.
+
+        `kill` signals a running process and does nothing to a task still
+        waiting for a slot, which then runs after its cancellation was
+        reported. A task that has not started is removed from the queue
+        instead; the removal races the scheduler, so a task that started in
+        between is killed.
+        """
+        try:
+            current = pueue.task(task_id)
+        except PueueError:
+            current = None
+        if current is not None and current.status == "Running":
+            with contextlib.suppress(PueueError):
+                pueue.kill(task_id)
+            return
+        try:
+            pueue.remove([task_id])
+        except PueueError:
+            with contextlib.suppress(PueueError):
+                pueue.kill(task_id)
+
     def _refuse_dependency(
         self, record: GenericJobRecord, message: str
     ) -> dict[str, Any]:
@@ -2633,6 +2655,17 @@ class GenericJobs:
                         else {}
                     ),
                     "terminal": bool(record.state.get("terminal")),
+                    "observed_at": _timestamp(),
+                }
+            if record.cancel_requested_at is not None:
+                # Cancelling an unstarted task removes it from the queue, so
+                # pueue has nothing left to report. The recorded intent is the
+                # outcome; without this the job reads as vanished.
+                return {
+                    **forensic,
+                    "phase": "cancelled",
+                    "terminal": True,
+                    "launch_evidence": "not-started",
                     "observed_at": _timestamp(),
                 }
             return {

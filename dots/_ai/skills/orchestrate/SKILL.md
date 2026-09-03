@@ -17,6 +17,10 @@ execute self-sufficiently; mechanics route through AgentCTL.
    per lane.
 3. Read the result, decide, dispatch the next wave.
 
+Nothing dispatches without you: every job starts at an explicit `job start`,
+`campaign run`, or `packet launch`, and a declared `schedule` in a project
+descriptor is the only autonomous driver.
+
 `campaign run` is a one-shot planner: each invocation dispatches every
 managed lane's next action once and exits. The operator or the coordinating
 agent steers: `campaign view`, `campaign log`, `campaign run`, `packet
