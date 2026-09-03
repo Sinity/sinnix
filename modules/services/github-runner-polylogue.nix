@@ -132,6 +132,9 @@ mkServiceModule {
             # The job plane's slice. The ceiling that matters is the one the
             # pueue task inherits; this placement governs CPU and IO weight.
             Slice = "sinnixd-work.slice";
+            # A selected verify opens the seeded archives of every xdist worker at
+            # once; the default 1024 gave EMFILE on the first real run.
+            LimitNOFILE = 65536;
 
             DynamicUser = false;
             # A CI runner needs the user's caches, the nix daemon socket, the
