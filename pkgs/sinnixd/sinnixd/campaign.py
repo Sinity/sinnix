@@ -515,8 +515,14 @@ class CampaignRunner:
         result["schedule"] = schedule.to_dict()
         return result
 
-    def advance(self, project_id: str, *, dry_run: bool = False) -> dict[str, Any]:
+    def advance(
+        self, project_id: str, *, dry_run: bool = False, limit: int | None = None
+    ) -> dict[str, Any]:
         """Dispatch each managed lane's next action once, from fresh facts.
+
+        ``limit`` bounds the dispatchable actions this call takes; the rest are
+        reported in ``skipped`` with reason ``wave limit reached`` and left for
+        the next invocation.
 
         ``dry_run`` plans and returns without any side effect: no job record,
         no queued task, no agent launch, no workspace mutation. Its lanes are
@@ -534,6 +540,8 @@ class CampaignRunner:
         from .lane_facts import advance as next_action
         from .worktrunk import WorktrunkError, worktrunk_list
 
+        if limit is not None and (isinstance(limit, bool) or limit < 1):
+            raise ValueError("campaign limit must be positive")
         project = self.projects.get(project_id)
         state_root = self.jobs.store.root
         try:
@@ -560,6 +568,9 @@ class CampaignRunner:
             }
             if action.kind not in DISPATCHABLE_ACTIONS:
                 skipped.append(entry)
+                continue
+            if limit is not None and len(dispatched) + len(planned) >= limit:
+                skipped.append({**entry, "reason": "wave limit reached"})
                 continue
             if dry_run:
                 planned.append(entry)

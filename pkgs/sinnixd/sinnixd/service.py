@@ -416,7 +416,9 @@ class SinnixdService:
         if bead_ids is None:
             # No beads named: advance every managed lane one step instead of
             # launching new ones.
-            return runner.advance(arguments["project_id"], dry_run=dry_run)
+            return runner.advance(
+                arguments["project_id"], dry_run=dry_run, limit=limit
+            )
         return runner.run(
             arguments["project_id"],
             limit=limit,
