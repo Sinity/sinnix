@@ -59,7 +59,6 @@ pool = "normal"
 result = "json"
 cache = "none"
 plan_node = true
-exclusive_keys = ["fixture:promotion"]
 [operations.node.parameters.value]
 type = "string"
 flag = "--value"
