@@ -356,31 +356,6 @@ rec {
         CPUWeight = 100;
         IOWeight = 100;
       };
-      sinnixd-work-interactive = {
-        IOAccounting = true;
-        CPUWeight = 400;
-        IOWeight = 400;
-      };
-      sinnixd-work-agent = {
-        IOAccounting = true;
-        CPUWeight = 100;
-        IOWeight = 100;
-      };
-      sinnixd-work-normal = {
-        IOAccounting = true;
-        CPUWeight = 50;
-        IOWeight = 50;
-      };
-      sinnixd-work-pytest = {
-        IOAccounting = true;
-        CPUWeight = 50;
-        IOWeight = 50;
-      };
-      sinnixd-work-bulk = {
-        IOAccounting = true;
-        CPUWeight = 10;
-        IOWeight = 10;
-      };
       gpu-runtime = {
         IOAccounting = true;
         CPUWeight = 20;

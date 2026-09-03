@@ -138,15 +138,24 @@ class FakePueue:
 
     def fail(self, task_id: int, *, exit_code: int) -> None:
         self._set(task_id, status="Done", result="Failed", exit_code=exit_code)
+        self._propagate_dependency_failure(task_id)
 
     def dependency_fail(self, task_id: int) -> None:
         self._set(task_id, status="Done", result="DependencyFailed")
+        self._propagate_dependency_failure(task_id)
 
     def fail_to_spawn(self, task_id: int) -> None:
         self._set(task_id, status="Done", result="FailedToSpawn")
 
     def kill_directly(self, task_id: int) -> None:
         self._set(task_id, status="Done", result="Killed")
+
+    def _propagate_dependency_failure(self, task_id: int) -> None:
+        """pueued fails every task whose `--after` edge did not succeed."""
+        for candidate in list(self._tasks.values()):
+            if candidate.terminal or task_id not in candidate.dependencies:
+                continue
+            self._set(candidate.task_id, status="Done", result="DependencyFailed")
 
     def _set(self, task_id: int, **fields: Any) -> None:
         self._tasks[task_id] = replace(self._tasks[task_id], **fields)

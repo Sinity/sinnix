@@ -4698,7 +4698,7 @@ def test_environment_builder_keeps_empty_values_distinct_from_unset() -> None:
             ),
             "launch-failed",
         ),
-        (lambda pueue, task_id: pueue.dependency_fail(task_id), "launch-failed"),
+        (lambda pueue, task_id: pueue.dependency_fail(task_id), "dependency-failed"),
         (lambda pueue, task_id: pueue.fail_to_spawn(task_id), "launch-failed"),
         (lambda pueue, task_id: pueue.kill_directly(task_id), "cancelled"),
     ],

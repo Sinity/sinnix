@@ -72,6 +72,14 @@ def scheduled_timer_unit(schedule_id: str) -> str:
     return SCHEDULE_UNIT_PREFIX + hashlib.sha256(schedule_id.encode()).hexdigest()[:24]
 
 
+class DependencyNotQueuedError(ValueError):
+    """A dependency never reached the queue, so its edge cannot be expressed."""
+
+    def __init__(self, dependency_job_id: str) -> None:
+        self.dependency_job_id = dependency_job_id
+        super().__init__(f"dependency {dependency_job_id} never reached the queue")
+
+
 class JobRecordError(ValueError):
     """Raised when a persisted job record cannot be reconstructed safely."""
 
@@ -1809,20 +1817,22 @@ class GenericJobs:
         return f"{spec.project_id}:{spec.operation}:{job_id}"
 
     def _dependency_task_ids(self, dependency_job_ids: Sequence[str]) -> list[int]:
-        """Task ids for a job's already-terminal dependencies, where known.
+        """The queue edges that make a job wait for its dependencies.
 
-        Dependencies are resolved by `_dependency_block` before `_launch` ever
-        runs, so `after=` is a redundant structural guard, not the mechanism
-        that makes launch wait for them.
+        pueue holds a task until every task it names has succeeded and fails it
+        when one does not, so these edges are the whole waiting mechanism.
+        A dependency with no task never reached the queue and its edge cannot
+        be expressed, which is a dependency failure, not something to drop.
         """
         task_ids: list[int] = []
         for dependency_id in dependency_job_ids:
             try:
                 dependency = self.store.load(dependency_id)
-            except JobRecordError:
-                continue
-            if dependency.queue_task_id is not None:
-                task_ids.append(dependency.queue_task_id)
+            except JobRecordError as error:
+                raise DependencyNotQueuedError(dependency_id) from error
+            if dependency.queue_task_id is None:
+                raise DependencyNotQueuedError(dependency_id)
+            task_ids.append(dependency.queue_task_id)
         return task_ids
 
     def _launch(
@@ -1862,6 +1872,8 @@ class GenericJobs:
                 working_directory=Path(spec.working_directory),
                 after=self._dependency_task_ids(spec.dependency_job_ids),
             )
+        except DependencyNotQueuedError as error:
+            return self._refuse_dependency(record, str(error))
         except PueueGroupError as error:
             return self._refuse_launch(record, str(error))
         except PueueError:
@@ -1952,53 +1964,12 @@ class GenericJobs:
             return self._public(terminal, terminal.state)
         return self._launch(record, spec, command=command, environment=environment)
 
-    def _dependency_block(self, spec: GenericJobSpec) -> Mapping[str, Any] | None:
-        """Return the blocking state a job with unmet dependencies must carry.
-
-        `None` means every dependency has succeeded. Only declared-operation
-        and attested-agent jobs may hold a non-terminal block (`waiting-
-        dependencies`); every other kind is a caller error, not a queue.
-        """
-        for job_id in spec.dependency_job_ids:
-            try:
-                with self.store.locked(job_id):
-                    dependency = self._get_locked(job_id)
-            except JobRecordError:
-                return {
-                    "phase": "dependency-failed",
-                    "terminal": True,
-                    "launch_evidence": "not-started",
-                    "observed_at": _timestamp(),
-                }
-            if (
-                dependency["state"].get("terminal")
-                and dependency["state"].get("phase") != "succeeded"
-            ):
-                return {
-                    "phase": "dependency-failed",
-                    "terminal": True,
-                    "launch_evidence": "not-started",
-                    "observed_at": _timestamp(),
-                    "dependencies": list(spec.dependency_job_ids),
-                }
-            if not dependency["state"].get("terminal"):
-                return {
-                    "phase": "waiting-dependencies",
-                    "terminal": False,
-                    "observed_at": _timestamp(),
-                    "dependencies": list(spec.dependency_job_ids),
-                }
-        return None
-
     def start(
         self,
         spec: GenericJobSpec,
         job_id: str | None = None,
     ) -> dict[str, Any]:
         candidate = job_id or str(uuid4())
-        # Dependency observations acquire their own job locks; do them before
-        # the candidate lock so a dependency chain never nests job locks.
-        blocked = self._dependency_block(spec) if spec.dependency_job_ids else None
         with self.store.locked(candidate):
             record = self.store.create(spec, candidate)
             if spec.kind == "attested-agent":
@@ -2007,20 +1978,6 @@ class GenericJobs:
                     self.store.write_agent_launch(
                         candidate, spec.command, spec.environment
                     )
-            if blocked is not None:
-                if not blocked.get("terminal") and spec.kind not in {
-                    "declared-operation",
-                    "attested-agent",
-                }:
-                    raise ValueError(
-                        "immediate job dependencies are not terminal; "
-                        "use a queued job kind for dependency waiting"
-                    )
-                blocked_record = self._with_state(record, blocked)
-                self.store.save(blocked_record)
-                if blocked.get("terminal"):
-                    self._finalize_terminal(blocked_record)
-                return self._public(blocked_record, blocked_record.state)
             return self._launch(record, spec)
 
     def start_declared(
@@ -2101,13 +2058,6 @@ class GenericJobs:
         except BaseException:
             self.store.cleanup_scratch(record)
             raise
-        blocked = self._dependency_block(spec) if spec.dependency_job_ids else None
-        if blocked is not None:
-            blocked_record = self._with_state(record, blocked)
-            self.store.save(blocked_record)
-            if blocked.get("terminal"):
-                self._finalize_terminal(blocked_record)
-            return self._public(blocked_record, blocked_record.state)
         return self._launch_declared(record, spec)
 
     SCHEDULE_RECONCILE_INTERVAL_SECONDS = 300.0
@@ -2373,9 +2323,7 @@ class GenericJobs:
                 return {**status, "cancel_requested": False, "already_terminal": True}
             record = self.store.load(job_id)
             if record.queue_task_id is None:
-                # Never reached pueue: blocked on dependencies, or a launch
-                # attempt whose task id has not yet been observed. There is
-                # no queued process to kill.
+                # Never reached pueue, so there is no queued process to kill.
                 cancelled = self._with_state(
                     record,
                     {
@@ -2560,17 +2508,6 @@ class GenericJobs:
             record = self._prepare_capacity_retry(record)
             if record.state.get("phase") == "capacity":
                 return self._public(record, record.state)
-        if record.state.get("phase") == "waiting-dependencies":
-            blocked = self._dependency_block(record.spec)
-            if blocked is None:
-                if record.spec.kind == "declared-operation":
-                    return self._launch_declared(record, record.spec)
-                return self._launch(record, record.spec)
-            if blocked.get("terminal"):
-                record = self._with_state(record, blocked)
-                self.store.save(record)
-                self._finalize_terminal(record)
-            return self._public(record, record.state)
         if record.state.get("terminal"):
             self._terminal_cleanup(record)
             return self._public(record, record.state)
@@ -2632,6 +2569,24 @@ class GenericJobs:
         }
         updated = self._with_state(record, state)
         self.store.save(updated)
+        return self._public(updated, state)
+
+    def _refuse_dependency(
+        self, record: GenericJobRecord, message: str
+    ) -> dict[str, Any]:
+        """Terminalize a job whose dependency never reached the queue."""
+        self.store.cleanup_queue_launch(record.job_id)
+        state = {
+            "phase": "dependency-failed",
+            "error": {"code": QUEUE_CONFIGURATION_ERROR_CODE, "message": message},
+            "terminal": True,
+            "launch_evidence": "not-started",
+            "observed_at": _timestamp(),
+            "dependencies": list(record.spec.dependency_job_ids),
+        }
+        updated = self._with_state(record, state)
+        self.store.save(updated)
+        self._finalize_terminal(updated)
         return self._public(updated, state)
 
     def _refuse_launch(self, record: GenericJobRecord, message: str) -> dict[str, Any]:
@@ -2766,7 +2721,11 @@ class GenericJobs:
                     )
         elif task.result == "Killed":
             phase = "cancelled"
-        else:  # DependencyFailed, FailedToSpawn, or an unrecognized result
+        elif task.result == "DependencyFailed":
+            # pueue refuses a task whose `--after` edge did not succeed. That is
+            # the dependency verdict plan.submit reads, not a launch defect.
+            phase = "dependency-failed"
+        else:  # FailedToSpawn or an unrecognized result
             phase = "launch-failed"
         terminal = True
         if capacity_reason is not None:
