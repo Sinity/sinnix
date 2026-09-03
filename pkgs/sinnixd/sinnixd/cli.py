@@ -243,30 +243,6 @@ def parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Recreate the worktree from the branch when its path is gone.",
     )
-    workspace_publish = workspace_subcommands.add_parser("publish")
-    workspace_publish.add_argument("workspace_id")
-    workspace_publish.add_argument("--job", required=True)
-    workspace_publish.add_argument("--packet-job")
-    workspace_publish.add_argument("--title", required=True)
-    workspace_publish.add_argument("--body", default="")
-    workspace_publish.add_argument(
-        "--wait",
-        action="store_true",
-        help="Block on the delivery job and print its receipt instead of the job id.",
-    )
-    workspace_review = workspace_subcommands.add_parser("review-status")
-    workspace_review.add_argument("workspace_id")
-    workspace_land = workspace_subcommands.add_parser("land")
-    workspace_land.add_argument("workspace_id")
-    workspace_land.add_argument("--job", required=True)
-    workspace_land.add_argument("--packet-job")
-    workspace_land.add_argument(
-        "--wait",
-        action="store_true",
-        help="Block on the delivery job and print its receipt instead of the job id.",
-    )
-    workspace_finish = workspace_subcommands.add_parser("finish")
-    workspace_finish.add_argument("workspace_id")
     events = subcommands.add_parser("events")
     events_subcommands = events.add_subparsers(dest="events_command", required=True)
     events_tail = events_subcommands.add_parser(
@@ -348,20 +324,6 @@ def parser() -> argparse.ArgumentParser:
     )
     campaign_log.add_argument("--project", required=True)
     campaign_log.add_argument("--workspace", required=True)
-    campaign_integrate = campaign_subcommands.add_parser(
-        "integrate",
-        help="Group lane branches holding unintegrated content into batches.",
-    )
-    campaign_integrate.add_argument("--project", required=True)
-    campaign_integrate.add_argument("--base", default="origin/master")
-    campaign_integrate.add_argument("--max-units", type=int, default=8)
-    campaign_integrate.add_argument(
-        "--assemble",
-        metavar="INDEX",
-        type=int,
-        help="Merge one batch onto a fresh branch instead of listing batches.",
-    )
-    campaign_integrate.add_argument("--name", default="batch")
     job = subcommands.add_parser("job")
     job_subcommands = job.add_subparsers(dest="job_command", required=True)
     start = job_subcommands.add_parser("start")
@@ -546,7 +508,6 @@ def _operator_view(arguments: argparse.Namespace) -> int:
     """`campaign view` / `campaign log`: the status payload plus local job and spool reads, rendered for a person."""
     from .jobs import default_state_dir
     from .operator_view import load_jobs, render_lane_log, render_overview
-    from .publication_sweep import DEFAULT_SPOOL
 
     label = getattr(arguments, "coordinator_label", None)
     request = _request(
@@ -576,7 +537,14 @@ def _operator_view(arguments: argparse.Namespace) -> int:
         return 0
     jobs = load_jobs(default_state_dir() / "jobs", arguments.project)
     if arguments.campaign_command == "log":
-        print(render_lane_log(arguments.workspace, status, jobs, DEFAULT_SPOOL))
+        print(
+            render_lane_log(
+                arguments.workspace,
+                status,
+                jobs,
+                Path("/realm/state/agentctl/events.jsonl"),
+            )
+        )
         return 0
     print(render_overview(status, jobs))
     return 0
@@ -798,54 +766,6 @@ def main() -> int:
                 "checkpoint_id": arguments.checkpoint_id,
                 **({"recreate": True} if arguments.recreate else {}),
             },
-            "agent-control",
-        )
-    elif arguments.command == "workspace" and arguments.workspace_command == "publish":
-        request = _request(
-            "workspace.publish",
-            "git-workspaces",
-            {
-                "workspace_id": arguments.workspace_id,
-                "job_id": arguments.job,
-                "title": arguments.title,
-                "body": arguments.body,
-                **(
-                    {"packet_job_id": arguments.packet_job}
-                    if arguments.packet_job
-                    else {}
-                ),
-            },
-            "agent-control",
-        )
-    elif (
-        arguments.command == "workspace"
-        and arguments.workspace_command == "review-status"
-    ):
-        request = _request(
-            "workspace.review-status",
-            "git-workspaces",
-            {"workspace_id": arguments.workspace_id},
-        )
-    elif arguments.command == "workspace" and arguments.workspace_command == "land":
-        request = _request(
-            "workspace.land",
-            "git-workspaces",
-            {
-                "workspace_id": arguments.workspace_id,
-                "job_id": arguments.job,
-                **(
-                    {"packet_job_id": arguments.packet_job}
-                    if arguments.packet_job
-                    else {}
-                ),
-            },
-            "agent-control",
-        )
-    elif arguments.command == "workspace" and arguments.workspace_command == "finish":
-        request = _request(
-            "workspace.finish",
-            "git-workspaces",
-            {"workspace_id": arguments.workspace_id},
             "agent-control",
         )
     elif arguments.command == "events" and arguments.events_command == "tail":
@@ -1150,40 +1070,6 @@ def main() -> int:
             )
         )
         return 0 if ok else 1
-    elif arguments.command == "campaign" and arguments.campaign_command == "integrate":
-        from .integration import assemble, discover_units, pack
-
-        root = resolve_project_root(arguments.project)
-        common = Path(
-            subprocess.run(
-                ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                cwd=root,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            ).stdout.strip()
-        )
-        units = discover_units(Path("/realm/worktrees"), common, arguments.base)
-        batches = pack(units, arguments.max_units)
-        if arguments.assemble is None:
-            payload = {
-                "project_id": arguments.project,
-                "units": len(units),
-                "batches": [batch.to_dict() for batch in batches],
-            }
-        else:
-            if not 0 <= arguments.assemble < len(batches):
-                parser().error(f"no batch at index {arguments.assemble}")
-            batch = batches[arguments.assemble]
-            payload = assemble(
-                batch,
-                repo=root,
-                worktree=Path("/realm/worktrees") / arguments.name,
-                branch=f"integration/{arguments.name}",
-                base=arguments.base,
-            )
-        print(json.dumps(payload, indent=2, sort_keys=True))
-        return 0
     elif arguments.command == "campaign" and arguments.campaign_command == "run":
         request = _request(
             "campaign.run",

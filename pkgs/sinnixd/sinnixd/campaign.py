@@ -525,20 +525,22 @@ class CampaignRunner:
         is reported in ``skipped`` and left for the next invocation to
         decide again — nothing is recorded between calls.
         """
-        from .lane_facts import (
-            DISPATCHABLE_ACTIONS,
-            closed_bead_ids,
-            collect,
-            latest_sweep_pulls,
-        )
+        from .lane_facts import DISPATCHABLE_ACTIONS, closed_bead_ids, collect
         from .lane_facts import advance as next_action
+        from .worktrunk import WorktrunkError, worktrunk_list
 
         project = self.projects.get(project_id)
         state_root = self.jobs.store.root
+        try:
+            worktrees = worktrunk_list(project.root, full=True)
+        except WorktrunkError:
+            # Without wt the planner still advances every lane whose action
+            # needs no PR; a lane that needs one is reported as skipped.
+            worktrees = ()
         lanes = collect(
             project_id,
             state_root=state_root,
-            receipt_pulls=latest_sweep_pulls(state_root),
+            worktrees=worktrees,
             closed_beads=closed_bead_ids(project.root),
         )
         dispatched: list[dict[str, Any]] = []
@@ -709,7 +711,7 @@ class CampaignRunner:
         return self._launch_agent(
             project_id,
             facts,
-            self._review_fix_prompt(repo, str(pull.number), facts.name, pull.findings),
+            self._review_fix_prompt(repo, str(pull.number), facts.name),
             label="review-fix",
         )
 
@@ -744,11 +746,11 @@ class CampaignRunner:
         )
 
     @staticmethod
-    def _review_fix_prompt(repo: str, pr: str, workspace: str, findings: int) -> str:
+    def _review_fix_prompt(repo: str, pr: str, workspace: str) -> str:
         return (
             f"You are a review-fix lane in /realm/worktrees/{workspace} "
-            f"(open PR #{pr} on {repo}). The hosted reviewer left "
-            f"{findings} inline finding(s) on the PR. Read them with: "
+            f"(open PR #{pr} on {repo}). The hosted reviewer requested "
+            "changes. Read the findings with: "
             f"gh api repos/{repo}/pulls/{pr}/comments (the open ones are the "
             "top-level comments by chatgpt-codex-connector[bot] from its latest "
             "review round, newer than its last +1 reaction; earlier rounds were "

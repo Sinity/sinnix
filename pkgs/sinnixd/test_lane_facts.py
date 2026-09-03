@@ -13,8 +13,8 @@ from sinnixd.lane_facts import (
     derived_checkout_id,
     lane_view,
     latest_corpus,
-    pulls_from_sweep_actions,
 )
+from sinnixd.worktrunk import ChecksFacts, PullFacts, Worktree
 
 
 def _facts(**overrides: object) -> LaneFacts:
@@ -65,9 +65,14 @@ def test_dormant_workspaces_are_left_alone() -> None:
     with_pull = _facts(
         lane_finished_at="2026-08-20T00:00:00+00:00",
         receipt=_receipt(),
-        pull=Pull(number=1, head="h" * 40, verdict="wait", findings=0),
+        pull=Pull(
+            number=1,
+            url="https://github.test/pull/1",
+            mergeable=True,
+            checks_status="passed",
+        ),
     )
-    assert advance(with_pull, now=now).kind == "await-sweep"
+    assert advance(with_pull, now=now).kind == "await-merge"
 
 
 def test_advance_orders_facts_before_actions() -> None:
@@ -97,7 +102,7 @@ def test_advance_orders_facts_before_actions() -> None:
     )
     assert (
         advance(_facts(receipt=_receipt(), published_at_head=True)).kind
-        == "await-sweep"
+        == "await-merge"
     )
     # A red quick gate at this head parks instead of publishing every tick.
     assert advance(_facts(receipt=_receipt(head="x" * 40))).kind == "verify"
@@ -117,23 +122,63 @@ def test_advance_orders_facts_before_actions() -> None:
         advance(_facts(receipt=static, verify_job=("v1", "succeeded"))).kind
         == "harvest"
     )
-    pull = Pull(number=7, head="h" * 40, verdict="conflict", findings=0)
-    assert advance(_facts(receipt=_receipt(), pull=pull)).kind == "rebase"
+    conflict = Pull(
+        number=7, url="https://github.test/pull/7", mergeable=False, checks_status=None
+    )
+    assert advance(_facts(receipt=_receipt(), pull=conflict)).kind == "rebase"
     assert (
         advance(
-            _facts(receipt=_receipt(), pull=pull, integrators_at_head=("rebase",))
+            _facts(receipt=_receipt(), pull=conflict, integrators_at_head=("rebase",))
         ).kind
         == "park"
     )
-    findings = Pull(number=7, head="h" * 40, verdict="findings", findings=2)
-    assert advance(_facts(receipt=_receipt(), pull=findings)).kind == "review-fix"
-    answered = Pull(
-        number=7, head="h" * 40, verdict="findings", findings=2, answered_rounds=2
+    ci_red = Pull(
+        number=7,
+        url="https://github.test/pull/7",
+        mergeable=True,
+        checks_status="failed",
     )
-    assert advance(_facts(receipt=_receipt(), pull=answered)).kind == "await-sweep"
-    clean = Pull(number=7, head="h" * 40, verdict="wait", findings=0)
-    assert advance(_facts(receipt=_receipt(), pull=clean)).kind == "await-sweep"
-    moved = Pull(number=7, head="o" * 40, verdict="findings", findings=1)
+    assert advance(_facts(receipt=_receipt(), pull=ci_red)).kind == "park"
+    changes_requested = Pull(
+        number=7,
+        url="https://github.test/pull/7",
+        mergeable=True,
+        checks_status="passed",
+    )
+    assert (
+        advance(
+            _facts(
+                receipt=_receipt(),
+                pull=changes_requested,
+                review_decision="CHANGES_REQUESTED",
+            )
+        ).kind
+        == "review-fix"
+    )
+    assert (
+        advance(
+            _facts(
+                receipt=_receipt(),
+                pull=changes_requested,
+                review_decision="CHANGES_REQUESTED",
+                integrators_at_head=("review-fix",),
+            )
+        ).kind
+        == "park"
+    )
+    clean = Pull(
+        number=7,
+        url="https://github.test/pull/7",
+        mergeable=True,
+        checks_status="passed",
+    )
+    assert advance(_facts(receipt=_receipt(), pull=clean)).kind == "await-merge"
+    moved = Pull(
+        number=7,
+        url="https://github.test/pull/7",
+        mergeable=True,
+        checks_status="passed",
+    )
     assert (
         advance(_facts(receipt=_receipt(), pull=moved, pushed_head="o" * 40)).kind
         == "publish"
@@ -267,36 +312,12 @@ def test_collect_reads_the_daemon_state(tmp_path: Path) -> None:
     assert view["next"] == {"kind": "wait", "reason": "running: harvest"}
 
 
-def test_pulls_from_sweep_actions_key_on_receipt() -> None:
-    pulls = pulls_from_sweep_actions(
-        [
-            {
-                "pr": 41,
-                "head": "h" * 40,
-                "verdict": "findings",
-                "findings": 2,
-                "receipt": "harvest-" + "0" * 32,
-            },
-            {"pr": 42, "head": "x"},
-        ]
-    )
-    assert pulls == {
-        "harvest-" + "0" * 32: Pull(
-            number=41, head="h" * 40, verdict="findings", findings=2
-        )
-    }
-
-
-def test_a_pr_opened_under_an_older_receipt_still_counts_at_the_same_head(
-    tmp_path: Path,
-) -> None:
-    """Anti-vacuity: keying PRs by receipt id alone re-published 26 lanes
-    whose PR bodies named an earlier receipt (2026-09-02 12:48Z)."""
+def test_collect_matches_pr_facts_to_the_lane_by_branch(tmp_path: Path) -> None:
     state = tmp_path / "state"
-    worktree = tmp_path / "packet-p-1"
+    worktree = tmp_path / "packet-p-2"
     worktree.mkdir()
     subprocess.run(
-        ["git", "init", "-q", "-b", "feature/packet/polylogue-1", str(worktree)],
+        ["git", "init", "-q", "-b", "feature/packet/polylogue-2", str(worktree)],
         check=True,
     )
     subprocess.run(
@@ -316,51 +337,72 @@ def test_a_pr_opened_under_an_older_receipt_still_counts_at_the_same_head(
         ],
         check=True,
     )
-    head = subprocess.run(
-        ["git", "-C", str(worktree), "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    checkout_id = derived_checkout_id(str(worktree))
     (state / "workspaces").mkdir(parents=True)
     (state / "workspaces" / "index.json").write_text(
         json.dumps(
             {
                 "workspaces": [
                     {
-                        "name": "packet-p-1",
+                        "name": "packet-p-2",
                         "path": str(worktree),
                         "project_id": "polylogue",
-                        "branch": "feature/packet/polylogue-1",
+                        "branch": "feature/packet/polylogue-2",
                     }
                 ]
             }
         )
     )
     (state / "jobs").mkdir()
-    (state / "harvest-packets").mkdir()
-    (state / "harvest-packets" / ("harvest-" + "2" * 32 + ".json")).write_text(
-        json.dumps(
-            {
-                "packet_id": "harvest-" + "2" * 32,
-                "workspace_id": checkout_id,
-                "head": head,
-                "redflags": [],
-                "redflag_status": 0,
-            }
-        )
+
+    matching = Worktree(
+        branch="feature/packet/polylogue-2",
+        path=worktree,
+        head="",
+        main=False,
+        dirty=False,
+        state="ahead",
+        pr=PullFacts(
+            number=41, url="https://github.test/pull/41", mergeable=True, repo="o/r"
+        ),
+        checks=ChecksFacts(status="passed", source="hosted", stale=False),
     )
-    older = Pull(number=41, head=head, verdict="wait", findings=0)
+    other = Worktree(
+        branch="feature/unrelated",
+        path=None,
+        head="",
+        main=False,
+        dirty=False,
+        state="ahead",
+        pr=PullFacts(
+            number=99, url="https://github.test/pull/99", mergeable=False, repo="o/r"
+        ),
+        checks=None,
+    )
+
+    calls: list[list[str]] = []
+
+    def run(argv, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(list(argv))
+        if argv[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(argv, 0, "APPROVED\n", "")
+        return subprocess.run(argv, **kwargs)
 
     facts = collect(
         "polylogue",
         state_root=state,
         master_head="m" * 40,
-        receipt_pulls={"harvest-" + "1" * 32: older},
+        worktrees=(matching, other),
+        run=run,
     )
 
-    assert facts[0].pull == older
+    assert len(facts) == 1
+    pull = facts[0].pull
+    assert pull is not None
+    assert pull.number == 41
+    assert pull.mergeable is True
+    assert pull.checks_status == "passed"
+    assert facts[0].review_decision == "APPROVED"
+    assert any(call[:3] == ["gh", "pr", "view"] and call[3] == "41" for call in calls)
 
 
 def test_latest_corpus_reads_the_newest_complete_run(tmp_path: Path) -> None:
@@ -410,18 +452,3 @@ def test_latest_corpus_reads_the_newest_complete_run(tmp_path: Path) -> None:
     )
     assert corpus["green"] is False and corpus["head"] == "abcdef012345"
     assert latest_corpus(tmp_path, "other") is None
-
-
-def test_a_pr_without_test_evidence_is_verified_then_republished() -> None:
-    pull = Pull(number=7, head=_facts().head, verdict="no-test-evidence", findings=0)
-    assert advance(_facts(receipt=_receipt(), pull=pull)).kind == "verify"
-    assert (
-        advance(_facts(receipt=_receipt(), pull=pull, verify_job=("v", "failed"))).kind
-        == "park"
-    )
-    assert (
-        advance(
-            _facts(receipt=_receipt(), pull=pull, verify_job=("v", "succeeded"))
-        ).kind
-        == "harvest"
-    )
