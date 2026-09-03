@@ -446,3 +446,51 @@ def test_advance_without_worktrunk_still_advances_the_rest(
 
     assert seen["worktrees"] == ()
     assert result["dispatched"] == []
+
+
+def test_a_dry_run_plans_without_touching_the_queue_or_the_job_store(  # type: ignore[no-untyped-def]
+    tmp_path, monkeypatch, fake_pueue
+) -> None:
+    """A dry run must be a plan, not a rehearsal that runs.
+
+    Anti-vacuity: the deployed planner ignored the flag and queued twenty
+    verify_affected tasks, harvest publishes and an agent lane while reporting
+    them as `dispatched`. The three assertions below — no pueue add, no new
+    job record, nothing under `dispatched` — each turn red if the flag stops
+    being honoured.
+    """
+    from sinnixd.lane_facts import Pull
+
+    runner = _runner(tmp_path)
+    monkeypatch.setattr(runner, "_repo_slug", staticmethod(lambda root: "o/r"))
+    monkeypatch.setattr("sinnixd.lane_facts.closed_bead_ids", lambda root, **k: ())
+    lanes = [
+        _lane_facts(),
+        _lane_facts(verify_job=("vvvvvvvv-1", "succeeded")),
+        _lane_facts(
+            clean_receipt=True,
+            pull=Pull(
+                number=7,
+                url="https://github.test/pull/7",
+                mergeable=False,
+                checks_status=None,
+            ),
+        ),
+    ]
+    monkeypatch.setattr("sinnixd.lane_facts.collect", lambda *a, **k: lanes)
+    before = sorted(path.name for path in runner.jobs.store.root.rglob("*.json"))
+
+    result = runner.advance("polylogue", dry_run=True)
+
+    assert result["dry_run"] is True
+    assert result["dispatched"] == []
+    assert [entry["action"] for entry in result["planned"]] == [
+        "verify",
+        "harvest",
+        "rebase",
+    ]
+    assert all(entry["reason"] for entry in result["planned"])
+    assert fake_pueue.added == []
+    assert (
+        sorted(path.name for path in runner.jobs.store.root.rglob("*.json")) == before
+    )
