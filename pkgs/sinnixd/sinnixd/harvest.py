@@ -197,6 +197,49 @@ def _lane_bead(contract: Mapping[str, Any]) -> str | None:
     return group if isinstance(group, str) and group else None
 
 
+def _bead_publication_title(bead_id: str | None, run: Run) -> str:
+    """The publication subject, from the lane's own bead.
+
+    `.lane/title` is not tracked, so a lane branched after it was untracked
+    inherits whatever the last tracked copy said and several lanes publish one
+    subject. The bead a lane was launched for is the only per-lane name that
+    cannot be inherited from history.
+    """
+    if not bead_id:
+        raise HarvestError(
+            "harvest cannot derive a publication title: this lane names no bead"
+        )
+    listed = _command(run, ["bd", "show", bead_id, "--json"], cwd=None, timeout=60)
+    if listed.returncode != 0:
+        raise HarvestError(
+            f"harvest could not read bead {bead_id}: "
+            f"{listed.stderr.strip() or 'bd show failed'}"
+        )
+    try:
+        entries = json.loads(listed.stdout or "[]")
+    except json.JSONDecodeError as error:
+        raise HarvestError(f"bead {bead_id} did not publish JSON") from error
+    title = ""
+    if isinstance(entries, list) and entries and isinstance(entries[0], Mapping):
+        title = str(entries[0].get("title") or "").strip()
+    elif isinstance(entries, Mapping):
+        title = str(entries.get("title") or "").strip()
+    if not title:
+        raise HarvestError(f"bead {bead_id} has no title to publish under")
+    # The bead's title becomes a permanent squash subject, so it must already
+    # be one. Rewriting it here would publish a name nothing else knows.
+    _require_publication_title(title)
+    return title
+
+
+def _optional_bead_title(bead_id: str | None, run: Run) -> str:
+    """The lane's bead title where one is derivable, for the receipt binding."""
+    try:
+        return _bead_publication_title(bead_id, run)
+    except HarvestError:
+        return ""
+
+
 def _read_text(path: Path, description: str) -> str:
     try:
         return path.read_text()
@@ -338,15 +381,17 @@ def _adopt_open_pull_request(
 
 
 def _resolve_publication_text(
-    parsed: argparse.Namespace, context: HarvestContext
+    parsed: argparse.Namespace,
+    context: HarvestContext,
+    run: Run = subprocess.run,
 ) -> tuple[str, str, str | None]:
-    """Resolve the publication text: a named file, else what the lane wrote."""
+    """Resolve the publication text: a named file, else the lane's own bead."""
     # The receipt binds the stripped artifact text; a file read here must
     # normalize the same way or its trailing newline fails the binding.
     title = (
         _read_text(parsed.title_file, "publication title file").strip()
         if parsed.title_file is not None
-        else (_lane_artifact(context, "title") or "")
+        else _bead_publication_title(getattr(parsed, "bead_id", None), run)
     )
     body = (
         _read_text(parsed.body_file, "publication body file").strip()
@@ -896,7 +941,10 @@ def compile_packet(
         # .lane/ files are untracked, so HEAD equality alone would let text
         # change between review and publication (sinnix-3ynh).
         "publication_text": {
-            "title_sha256": _digest(_lane_artifact(context, "title") or ""),
+            # A packet is compiled for review before anything is published,
+            # including for a lane that names no bead and will never publish.
+            # The binding records the title when there is one.
+            "title_sha256": _digest(_optional_bead_title(bead_id, run)),
             "body_sha256": _digest(_lane_artifact(context, "body.md") or ""),
         },
         "bead_id": bead_id,
@@ -1543,13 +1591,15 @@ def publish(
     )
     if packet.get("outcome") != HARVEST_OK:
         return packet
-    title = _lane_artifact(context, "title") or ""
     body = _lane_artifact(context, "body.md") or ""
     close_reason = _lane_artifact(context, "close-reason.md") if close else None
     if close and not close_reason:
         raise HarvestError(
             "publish --close requires .lane/close-reason.md in the worktree"
         )
+    # Local artifacts first: reading the bead shells out, and a missing file
+    # is answerable without it.
+    title = _bead_publication_title(bead_id, run)
     return authorize(
         context,
         receipt_ref=packet["packet"]["packet_id"],
