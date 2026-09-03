@@ -165,8 +165,12 @@ def run(launch: Mapping[str, Any]) -> int:
     append_event(
         spool_path,
         {
+            # pueue's completion callback spools `queue-task` finish events;
+            # the start carries the same kind so one lane's timeline pairs.
+            "kind": "queue-task",
             "job_id": launch["job_id"],
-            "kind": launch.get("kind", "declared-operation"),
+            "label": launch.get("label", ""),
+            "job_kind": launch.get("kind", "declared-operation"),
             "project": launch["project_id"],
             "operation": launch["operation"],
             "phase": "started",
@@ -199,6 +203,15 @@ def run(launch: Mapping[str, Any]) -> int:
                 result_file.close()
             log.write(f"could not start the command: {error}\n".encode())
             return REFUSED_EXIT_CODE
+
+        # `pueue kill` sends SIGKILL, so no handler here can ever run and the
+        # command's own session would outlive a cancel. Record the group the
+        # command leads; the daemon reaps it after asking pueue to kill.
+        group_path = Path(f"{log_path}.pgid")
+        try:
+            group_path.write_text(str(os.getpgid(process.pid)))
+        except OSError:
+            pass
         try:
             returncode = process.wait(timeout=launch["timeout_seconds"])
         except subprocess.TimeoutExpired:
@@ -206,6 +219,7 @@ def run(launch: Mapping[str, Any]) -> int:
             log.write(f"timed out after {launch['timeout_seconds']} seconds\n".encode())
             returncode = TIMEOUT_EXIT_CODE
         finally:
+            group_path.unlink(missing_ok=True)
             if result_file is not None:
                 result_file.close()
 

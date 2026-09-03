@@ -25,6 +25,7 @@ def write_launch(tmp_path: Path, **overrides: Any) -> Path:
         "working_directory": str(tmp_path),
         "timeout_seconds": 30,
         "result_kind": "exit",
+        "label": "fixture:check:job-a",
         "log_path": str(tmp_path / "log"),
         "event_spool_path": str(tmp_path / "events.jsonl"),
     }
@@ -52,8 +53,13 @@ def test_a_successful_command_spools_its_start_and_reports_its_status(
 
     log = (tmp_path / "log").read_text()
     assert "out" in log and "err" in log
-    assert [event["phase"] for event in events(tmp_path)] == ["started"]
-    assert events(tmp_path)[0]["job_id"] == "job-a"
+    started = events(tmp_path)
+    assert [event["phase"] for event in started] == ["started"]
+    # The callback spools `queue-task` finish events; the start must carry the
+    # same kind or a lane's timeline shows only its endings.
+    assert started[0]["kind"] == "queue-task"
+    assert started[0]["job_id"] == "job-a"
+    assert started[0]["label"] == "fixture:check:job-a"
     # The private input carries a resolved environment and must not outlive it.
     assert not launch.exists()
 
@@ -191,3 +197,39 @@ def test_a_checkout_that_no_longer_matches_its_binding_refuses(
 
     assert "checkout revalidation failed" in (tmp_path / "log").read_text()
     assert events(tmp_path) == []
+
+
+def test_the_wrapper_records_the_group_its_command_leads(tmp_path: Path) -> None:
+    """Cancel reaps that group; without the file the process tree survives.
+
+    Anti-vacuity: `pueue kill` sends SIGKILL to its own group, which the
+    command left, so this file is the only handle on what it started.
+    """
+    import os
+    import signal
+    import threading
+    import time
+
+    marker = tmp_path / "survivor"
+    launch = write_launch(
+        tmp_path,
+        argv=["sh", "-c", f"(sleep 5; touch {marker}) & sleep 5"],
+        timeout_seconds=60,
+    )
+    group_path = Path(str(tmp_path / "log") + ".pgid")
+    result: list[int] = []
+    worker = threading.Thread(target=lambda: result.append(main([str(launch)])))
+    worker.start()
+    deadline = time.monotonic() + 10
+    while not group_path.exists():
+        assert time.monotonic() < deadline, "the wrapper never recorded a group"
+        time.sleep(0.05)
+
+    pgid = int(group_path.read_text().strip())
+    assert pgid != os.getpgrp(), "the command must lead its own group"
+    os.killpg(pgid, signal.SIGKILL)
+    worker.join(timeout=20)
+
+    time.sleep(4)
+    assert not marker.exists()
+    assert not group_path.exists(), "a finished job leaves no stale group file"

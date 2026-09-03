@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import threading
 import time
@@ -211,6 +212,7 @@ def _git(run: Run, cwd: Path, *args: str) -> str:
     try:
         result = run(
             ["git", "-C", str(cwd), *args],
+            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
             capture_output=True,
             text=True,
             timeout=30,
