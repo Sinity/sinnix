@@ -14,7 +14,6 @@ import anyio
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from sinnix_mcp import ErrorCode, RequestEnvelope
 from sinnix_mcp.execution import ExecutionProfile, OwnerDiagnosticError, OwnerExecution
-from sinnixd.api import SinnixdClient, SinnixdClientError
 
 from .artifacts import ArtifactService
 from .audit import AuditService
@@ -35,6 +34,7 @@ from .contexts import (
 from .contracts import ActionSpec, EffectMode
 from .desktop import DesktopService
 from .events import EventCursorError, NormalizedEventService
+from .execution import LocalJobs
 from .files import HostFileService
 from .legacy_manifest import LEGACY_MANIFEST
 from .machine_actions import MachineActionService
@@ -185,7 +185,7 @@ class Runtime:
     artifacts: ArtifactService
     audit: AuditService
     results: ResultService
-    sinnixd: SinnixdClient
+    sinnixd: LocalJobs
     observe: ObserveService
     machine_actions: MachineActionService
     desktop: DesktopService
@@ -221,7 +221,7 @@ class Runtime:
             artifacts=artifacts,
             audit=AuditService(config, principal),
             results=ResultService(config, principal, artifacts),
-            sinnixd=SinnixdClient(config.sinnixd_socket),
+            sinnixd=LocalJobs(),
             observe=ObserveService(config, principal, artifacts),
             machine_actions=MachineActionService(config, principal),
             desktop=DesktopService(config, principal, artifacts),
@@ -452,10 +452,7 @@ class Runtime:
             principal=principal or self.principal.name,
             arguments=dict(arguments),
         )
-        try:
-            response = self.sinnixd.dispatch(request)
-        except SinnixdClientError as exc:
-            raise ProtocolError("unavailable", str(exc)) from exc
+        response = self.sinnixd.dispatch(request)
         if response.owner != "systemd-jobs":
             raise ProtocolError(
                 "owner_failed", "sinnixd response violates the job-owner contract"

@@ -188,9 +188,12 @@ def launch_reference(task: Task) -> str | None:
 
 def job_view(task: Task) -> dict[str, Any]:
     project, _, operation = task.label.partition(":")
+    # Agent labels are <project>:lane:<bead> or <project>:rebase:<bead>.
+    agent = operation.split(":", 1)[0] in {"lane", "rebase"} and ":" in operation
     return {
         "job_id": task.task_id,
         "label": task.label,
+        "kind": "attested-agent" if agent else "declared-operation",
         "project": project,
         "operation": operation,
         "group": task.group,

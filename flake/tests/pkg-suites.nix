@@ -99,10 +99,9 @@
         # exercises its bounded subprocess contract at its package boundary.
         sinnix-mcp-suite = scriptRegistry.packageSet.sinnix-mcp;
 
-        # Provably fails when: a persisted job record stops reconciling its
-        # lifecycle from the systemd status adapter. The package suite enters
-        # the generic-job store plus systemd seam and asserts the missing-unit
-        # state is preserved as visible evidence.
+        # Provably fails when: the launch input stops carrying the descriptor's
+        # argv, pool, label or artifact paths, or the pueue adapter misreads
+        # the daemon's JSON. The suite drives a private pueued end to end.
         sinnixd-suite = scriptRegistry.packageSet.sinnixd;
       };
     };

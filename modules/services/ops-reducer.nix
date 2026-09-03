@@ -28,10 +28,6 @@ mkServiceModule {
           assertion = cfg.intervalSeconds >= 5;
           message = "sinnix.services.ops-reducer.intervalSeconds must not poll collectors faster than 5 seconds";
         }
-        {
-          assertion = config.sinnix.services.sinnixd.enable;
-          message = "sinnix.services.ops-reducer requires sinnix.services.sinnixd.enable for typed AgentCTL job lifecycle";
-        }
       ];
       environment.systemPackages = [
         reducer
@@ -79,11 +75,7 @@ mkServiceModule {
         systemd.user.services.sinnix-ops-reducer = {
           Unit = {
             Description = "Sinnix operator current-state reducer and bounded actions";
-            After = [
-              "sinnix-ops-reducer.socket"
-              "sinnixd.service"
-            ];
-            Requires = [ "sinnixd.service" ];
+            After = [ "sinnix-ops-reducer.socket" ];
           };
           Service = {
             Type = "simple";

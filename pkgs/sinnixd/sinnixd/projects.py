@@ -18,6 +18,7 @@ import tomllib
 
 from .environment import build_environment
 from .limits import (
+    AGENT_MEMORY_MAX,
     DEFAULT_TIMEOUT_SECONDS,
     MAX_DECLARED_OPERATION_TIMEOUT_SECONDS,
     valid_timeout_seconds,
@@ -37,7 +38,10 @@ RESULT_KINDS = frozenset({"exit", "json", "pytest"})
 # Retired descriptor tables still present in deployed descriptors. They are
 # inert here and ignored rather than taking the project out of service.
 _IGNORED_TABLES = frozenset({"conflicts", "owner_adapters", "packets"})
-_WORKSPACE_FIELDS = frozenset({"root", "default_base"})
+_WORKSPACE_FIELDS = frozenset({"root", "default_base", "agent_memory_max"})
+# systemd's size grammar for MemoryMax: an integer with an optional K/M/G/T
+# suffix.
+_MEMORY_SIZE = re.compile(r"[1-9][0-9]*[KMGT]?\Z")
 _IGNORED_WORKSPACE_FIELDS = frozenset(
     {
         "provider",
@@ -110,9 +114,16 @@ class ProjectEnvironment:
 class WorkspacePolicy:
     root: Path
     default_base: str
+    # The hard MemoryMax of one agent's scope; the descriptor's only say in
+    # an agent's resources.
+    agent_memory_max: str = AGENT_MEMORY_MAX
 
     def catalog_row(self) -> dict[str, Any]:
-        return {"root": str(self.root), "default_base": self.default_base}
+        return {
+            "root": str(self.root),
+            "default_base": self.default_base,
+            "agent_memory_max": self.agent_memory_max,
+        }
 
 
 @dataclass(frozen=True)
@@ -249,7 +260,14 @@ def _workspace(raw: Mapping[str, Any], descriptor: Path) -> WorkspacePolicy | No
         raise ProjectConfigError(f"{descriptor} workspace.root must be an absolute path")
     if not isinstance(default_base, str) or not default_base:
         raise ProjectConfigError(f"{descriptor} workspace.default_base must be non-empty")
-    return WorkspacePolicy(root=Path(root), default_base=default_base)
+    memory_max = raw_workspace.get("agent_memory_max", AGENT_MEMORY_MAX)
+    if not isinstance(memory_max, str) or _MEMORY_SIZE.fullmatch(memory_max) is None:
+        raise ProjectConfigError(
+            f"{descriptor} workspace.agent_memory_max must be a systemd size such as 10G"
+        )
+    return WorkspacePolicy(
+        root=Path(root), default_base=default_base, agent_memory_max=memory_max
+    )
 
 
 def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation:

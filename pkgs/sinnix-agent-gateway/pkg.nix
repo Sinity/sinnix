@@ -10,6 +10,7 @@
   gzip,
   coreutils,
   sinnix-mcp,
+  sinnix-lib,
   sinnixd,
   ...
 }:
@@ -121,6 +122,7 @@ python3Packages.buildPythonApplication {
   dependencies = [
     mcp-sdk
     sinnix-mcp
+    sinnix-lib
     sinnixd
   ];
 

@@ -56,7 +56,6 @@ def runtime_with_daemon(
     project.mkdir()
     config = GatewayConfig(
         state_dir=tmp_path / "state",
-        sinnixd_socket=tmp_path / "sinnixd.sock",
         projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
         max_result_bytes=max_result_bytes,
     )

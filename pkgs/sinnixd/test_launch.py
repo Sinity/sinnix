@@ -41,6 +41,7 @@ def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
     assert started["phase"] == "running"
     assert started["project"] == "fixture"
     assert started["operation"] == "verify"
+    assert started["kind"] == "declared-operation"
 
 
 def test_extra_argv_is_appended_after_the_declared_exec(

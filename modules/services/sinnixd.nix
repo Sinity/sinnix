@@ -14,7 +14,7 @@ let
 in
 mkServiceModule {
   name = "sinnixd";
-  description = "Local Sinnix runtime daemon for agentctl and MCP frontends";
+  description = "agentctl: jobs over pueue, lanes over worktrunk, gh and bd, and their timers";
   extraOptions.projectRoots = lib.mkOption {
     type = lib.types.nonEmptyListOf lib.types.str;
     default = map (project: project.path) (lib.attrValues config.sinnix.projects.entries);
@@ -26,29 +26,37 @@ mkServiceModule {
         roots
       else
         throw "sinnix.services.sinnixd.projectRoots must contain unique absolute project roots";
-    description = "Explicit project roots whose .agentctl/project.toml descriptors Sinnixd loads; no parent directory is scanned.";
+    description = "Explicit project roots whose .agentctl/project.toml descriptors agentctl reads; no parent directory is scanned.";
+  };
+  extraOptions.refill = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule {
+        options = {
+          limit = lib.mkOption {
+            type = lib.types.ints.positive;
+            default = 1;
+            description = "Lanes started per firing.";
+          };
+          onCalendar = lib.mkOption {
+            type = lib.types.str;
+            default = "hourly";
+            description = "OnCalendar expression of the refill timer.";
+          };
+        };
+      }
+    );
+    default = { };
+    description = "Opt-in refill timers by project id: each firing runs `agentctl refill <project> --limit N`.";
   };
   extraOptions.agentRunner = lib.mkOption {
     type = lib.types.str;
     default = "${config.sinnix.paths.dotsRoot}/_ai/skills/agent-runtime/scripts/run_agent_prompt.sh";
-    description = "Native attested-agent execution backend; Sinnixd retains systemd lifecycle authority.";
+    description = "The backend adapter `agentctl lane start` queues; it turns a prompt file into one backend invocation.";
   };
-  surface = {
-    unit = "sinnixd.service";
-    manager = "user";
-    resourceClass = "interactive-agent";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
-  };
+  # No runtime surface: the job plane is pueued (declared by the CLI feature)
+  # inside the sinnixd slice hierarchy, and the units here are two timers.
   configFn =
     { cfg, ... }:
-    let
-      projectRootArgs = lib.concatMapStringsSep " " (
-        root: "--project-root ${lib.escapeShellArg root}"
-      ) cfg.projectRoots;
-    in
     lib.mkMerge [
       (lib.sinnix.mkScheduledJob
         {
@@ -75,61 +83,71 @@ mkServiceModule {
           };
         }
       )
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "sinnixd-schedule";
+          description = "Reconcile the calendar timers declared by project descriptors";
+        }
+        {
+          manager = "user";
+          resourceClass = "background-maintenance";
+          # Each declared `schedule` becomes one transient timer running
+          # `agentctl job fire`; a changed or removed declaration is stopped.
+          execStart = "${scriptPkgs.sinnixd}/bin/agentctl schedule apply";
+          serviceConfig = {
+            TimeoutStartSec = "60s";
+          };
+          timer = {
+            onUnitActiveSec = 900;
+            onBootSec = 120;
+            description = "Reconcile the calendar timers declared by project descriptors";
+          };
+        }
+      )
+      (lib.mkMerge (
+        lib.mapAttrsToList (
+          project: refill:
+          lib.sinnix.mkScheduledJob
+            {
+              inherit config;
+              unitName = "sinnixd-refill-${project}";
+              description = "Start lanes for ready ${project} beads";
+            }
+            {
+              manager = "user";
+              resourceClass = "background-maintenance";
+              execStart = "${scriptPkgs.sinnixd}/bin/agentctl refill ${lib.escapeShellArg project} --limit ${toString refill.limit}";
+              serviceConfig = {
+                TimeoutStartSec = "10min";
+              };
+              timer = {
+                onCalendar = refill.onCalendar;
+                description = "Start lanes for ready ${project} beads";
+              };
+            }
+        ) cfg.refill
+      ))
       {
-        # Declared owner adapters run under env -i with the daemon's system PATH.
-        # Keep their fixed packaged entrypoints in that PATH rather than relying
-        # on an interactive Home Manager profile.
+        environment.etc."sinnix/agentctl.json".text = builtins.toJSON {
+          project_roots = cfg.projectRoots;
+          agent_runner = cfg.agentRunner;
+          event_spool = eventSpool;
+          agentctl = "${scriptPkgs.sinnixd}/bin/agentctl";
+        };
+        # Queued commands and the timers run with the system PATH, not an
+        # interactive profile, so the tools agentctl shells out to must be
+        # system packages.
         environment.systemPackages = [
           scriptPkgs.sinnixd
           scriptPkgs.polylogue-cli
-          # The worktree and queue planes the daemon shells out to. They must be
-          # system packages: a Home Manager profile is not on the env -i PATH.
           pkgs.worktrunk
           pkgs.pueue
+          pkgs.gh
         ];
         systemd.tmpfiles.rules = [ "d ${taskStateRoot} 0700 ${userName} users -" ];
+        # Launch inputs, bounded logs and typed results of queued jobs.
         sinnix.persistence.home.directories = [ ".local/state/sinnixd" ];
-        sinnix.runtime.surfaces.sinnixd-jobs = {
-          unit = "sinnixd-job-.service";
-          manager = "user";
-          kind = "service";
-          dynamic = true;
-          resourceClass = "managed-runtime-work";
-          observe.enable = true;
-          workload = {
-            class = "sacrificial";
-            rationale = "Transient work yields to interactive slices and is killed as a cgroup under sustained host exhaustion.";
-            processMatchers = [ "sinnixd-job-" ];
-          };
-          captures = [
-            {
-              name = "sinnixd-job-records";
-              path = "/home/${userName}/.local/state/sinnixd/jobs";
-              eventDriven = true;
-            }
-          ];
-        };
-
-        home-manager.users.${userName}.systemd.user.services.sinnixd = {
-          Unit = {
-            Description = "Sinnix local runtime daemon";
-            After = [ "graphical-session.target" ];
-          };
-          Service =
-            (lib.sinnix.mkRuntimeServiceConfig {
-              runtimeInventory = config.sinnix.runtime.inventory;
-              unit = "sinnixd.service";
-            })
-            // {
-              Type = "simple";
-              ExecStart = "${scriptPkgs.sinnixd}/bin/sinnixd --socket %t/sinnixd.sock --state-dir %S/sinnixd ${projectRootArgs} --native-runner ${lib.escapeShellArg cfg.agentRunner}";
-              Restart = "on-failure";
-              RestartSec = "2s";
-              UMask = "0077";
-              Environment = [ "SINNIXD_TASK_STATE_ROOT=${taskStateRoot}" ];
-            };
-          Install.WantedBy = [ "default.target" ];
-        };
       }
     ];
 } args

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Run read-only reboot and switch safety checks before changing generations
-# runtimeInputs: bash coreutils findutils gawk gnugrep procps systemd util-linux jq
+# runtimeInputs: bash coreutils findutils gawk gnugrep procps systemd util-linux jq pueue
 set -euo pipefail
 
 mode="${1:-}"
@@ -135,8 +135,8 @@ check_flake() {
 
 check_work() {
   local jobs leases
-  jobs="$(systemctl --user list-units --state=active --no-legend 2>/dev/null | awk '$1 ~ /^sinnixd-job-.*\.service$/ {n++} END {print n+0}' || true)"
-  leases="$(systemctl --user list-units --state=active --no-legend 2>/dev/null | awk '$1 ~ /sinnix-(build|agent|borg)/ && $1 !~ /^sinnixd-job-/ {n++} END {print n+0}' || true)"
+  jobs="$(pueue status --json 2>/dev/null | jq '[.tasks[] | select(.status == "Running" or (.status | type == "object" and has("Running")))] | length' 2>/dev/null || echo 0)"
+  leases="$(systemctl --user list-units --state=active --no-legend 2>/dev/null | awk '$1 ~ /sinnix-(build|agent|borg)/ {n++} END {print n+0}' || true)"
   if [ "$jobs" -gt 0 ] || [ "$leases" -gt 0 ]; then
     report 1 live-work "agentctl_jobs=${jobs}, active_work_units=${leases}"
   else

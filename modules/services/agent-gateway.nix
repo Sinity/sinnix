@@ -349,12 +349,8 @@ mkServiceModule {
           lib.nameValuePair "sinnix-agent-gateway-${name}" {
             Unit = {
               Description = "OpenAI Secure MCP endpoint ${name} for Sinnix ${endpoint.principal} gateway";
-              After = [
-                "network-online.target"
-                "sinnixd.service"
-              ];
+              After = [ "network-online.target" ];
               Wants = [ "network-online.target" ];
-              Requires = [ "sinnixd.service" ];
               ConditionPathExists = endpoint.runtimeKeyFile;
               StartLimitIntervalSec = 300;
               StartLimitBurst = 8;
