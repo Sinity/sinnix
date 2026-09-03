@@ -232,12 +232,6 @@ dependencies = ["prepare"]
 exclusive_keys = ["fixture:store"]
 scratch = "nvme"
 estimate_memory_bytes = 1048576
-[operations.check.service]
-readiness = "project-command"
-lifetime = "job"
-[operations.check.service.ports.http]
-environment = "FIXTURE_HTTP_PORT"
-range = [41000, 41001]
 """)
     check = load_project_adapter(root).operation("check")
     assert check.dependencies == ("prepare",)
@@ -248,10 +242,10 @@ range = [41000, 41001]
 def test_a_descriptor_declaring_retired_memory_fields_still_loads(
     tmp_path: Path,
 ) -> None:
-    """The daemon stopped reading estimate_memory_bytes and readiness.
+    """The daemon stopped reading estimate_memory_bytes.
 
-    A descriptor written for the older daemon must keep working: those keys
-    are ignored, not rejected. Anti-vacuity: rejecting them takes the whole
+    A descriptor written for the older daemon must keep working: that key
+    is ignored, not rejected. Anti-vacuity: rejecting it takes the whole
     project out of service, which is what the previous key-set check did.
     """
     root = tmp_path / "retired"
@@ -273,18 +267,11 @@ exec = ["serve"]
 pool = "bulk"
 result = "exit"
 estimate_memory_bytes = 12884901888
-[operations.serve.service]
-readiness = "project-command"
-lifetime = "job"
-[operations.serve.service.ports.http]
-environment = "FIXTURE_HTTP_PORT"
-range = [41000, 41001]
 """)
 
     serve = load_project_adapter(root).operation("serve")
 
     assert not hasattr(serve, "estimate_memory_bytes")
-    assert serve.service is not None and serve.service.lifetime == "job"
 
 
 def test_admission_counts_workers_and_never_meters_memory(tmp_path: Path) -> None:
