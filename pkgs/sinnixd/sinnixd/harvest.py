@@ -1364,13 +1364,20 @@ def authorize(
         pr = pr_url.rsplit("/", 1)[-1]
         if not pr.isdecimal():
             raise HarvestError("GitHub pull request number is malformed")
-        # The publication sweep owns the merge decision (hosted review
-        # verdict + CI), so nothing is armed here: the PR carries its
-        # Receipt/Bead trailers and the sweep converges it to merged.
-        merge_state = "SWEEP-PENDING"
+        # GitHub owns the merge decision (required checks + review). Auto-merge
+        # hands it the merge once those pass; a refusal (auto-merge disabled on
+        # the repository) leaves the PR open rather than merging directly here.
+        auto_merge_result = _command(
+            run,
+            ["gh", "pr", "merge", "--squash", "--auto", pr_url],
+            cwd=context.worktree,
+            timeout=60,
+        )
+        auto_merge = auto_merge_result.returncode == 0
+        merge_state = "AUTO-MERGE-ARMED" if auto_merge else "AUTO-MERGE-REFUSED"
+        merge_error = None if auto_merge else auto_merge_result.stderr.strip()
         opened_at = _timestamp()
         check_states: list[str] = []
-        auto_merge = False
         decision_receipt = (
             {
                 "receipt_id": receipt["packet_id"],
@@ -1397,11 +1404,11 @@ def authorize(
                 "auto_merge": auto_merge,
                 "decision_receipt": decision_receipt,
                 "job_id": context.job_id,
-                "merge_error": None,
+                "merge_error": merge_error,
             },
         )
-        # Post-publication merge observation and bead closure belong to the
-        # publication sweep. Returning here releases this job.
+        # GitHub merges the PR once its required checks and reviews pass.
+        # Returning here releases this job.
         fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
         state = merge_state
         result = {

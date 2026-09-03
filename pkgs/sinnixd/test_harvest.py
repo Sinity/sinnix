@@ -202,7 +202,7 @@ def test_authorize_requires_receipt_and_runs_publish_pipeline(
         "phase": "published",
         "pr": "42",
         "pr_url": "https://github.test/pull/42",
-        "merge_state": "SWEEP-PENDING",
+        "merge_state": "AUTO-MERGE-ARMED",
         "bead_id": None,
         "affected_tests": "passed",
     }
@@ -261,7 +261,7 @@ def test_cancelled_harvest_restores_rebased_workspace(
     assert not (root / ".git" / "rebase-merge").exists()
 
 
-def test_authorize_returns_after_pr_creation_and_emits_merge_handoff(
+def test_authorize_arms_auto_merge_after_pr_creation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root, _remote = _repository(tmp_path)
@@ -271,10 +271,9 @@ def test_authorize_returns_after_pr_creation_and_emits_merge_handoff(
         context, bead_id="sinnix-handoff", close_reason="merged by reactor"
     )["receipt_ref"]
     monkeypatch.setattr(harvest, "LOCK_PATH", tmp_path / "harvest.lock")
-    viewed = False
+    merged: list[list[str]] = []
 
     def run(argv, **kwargs):
-        nonlocal viewed
         if argv[:2] == ["devtools", "verify"] and len(argv) == 2:
             return subprocess.CompletedProcess(
                 argv, 0, "affected verification passed", ""
@@ -286,9 +285,8 @@ def test_authorize_returns_after_pr_creation_and_emits_merge_handoff(
                 argv, 0, "https://github.test/pull/43\n", ""
             )
         if argv[:3] == ["gh", "pr", "merge"]:
-            raise AssertionError("authorize must not merge; the sweep owns it")
-        if argv[:3] == ["gh", "pr", "view"]:
-            viewed = True
+            merged.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, "", "")
         return subprocess.run(argv, **kwargs)
 
     result = harvest.authorize(
@@ -300,19 +298,67 @@ def test_authorize_returns_after_pr_creation_and_emits_merge_handoff(
         run=run,
     )
 
-    assert result["merge_state"] == "SWEEP-PENDING"
-    assert viewed is False
+    assert result["merge_state"] == "AUTO-MERGE-ARMED"
+    assert merged == [
+        ["gh", "pr", "merge", "--squash", "--auto", "https://github.test/pull/43"]
+    ]
+
+
+def test_authorize_records_refused_auto_merge_and_leaves_pr_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Auto-merge disabled on the repository must not fall back to a direct merge."""
+    root, _remote = _repository(tmp_path)
+    state = tmp_path / "state"
+    context = _context(root, state, "refused-job")
+    receipt = harvest.compile_packet(
+        context, bead_id="sinnix-refused", close_reason="merged by reactor"
+    )["receipt_ref"]
+    monkeypatch.setattr(harvest, "LOCK_PATH", tmp_path / "harvest.lock")
+
+    def run(argv, **kwargs):
+        if argv[:2] == ["devtools", "verify"] and len(argv) == 2:
+            return subprocess.CompletedProcess(
+                argv, 0, "affected verification passed", ""
+            )
+        if argv[:3] == ["devtools", "verify", "--quick"]:
+            return subprocess.CompletedProcess(argv, 0, "quick gate passed", "")
+        if argv[:3] == ["gh", "pr", "create"]:
+            return subprocess.CompletedProcess(
+                argv, 0, "https://github.test/pull/44\n", ""
+            )
+        if argv[:3] == ["gh", "pr", "merge"]:
+            return subprocess.CompletedProcess(
+                argv, 1, "", "auto-merge is not enabled for this repository"
+            )
+        return subprocess.run(argv, **kwargs)
+
+    result = harvest.authorize(
+        context,
+        affected_job=_verified_job(root, state, context),
+        receipt_ref=receipt,
+        title="fix: publish the harvested lane branch",
+        body="Reviewed packet.",
+        run=run,
+    )
+
+    assert result["merge_state"] == "AUTO-MERGE-REFUSED"
+    assert any(
+        row.get("kind") == "needs-merge"
+        and row.get("merge_error") == "auto-merge is not enabled for this repository"
+        for row in map(json.loads, (state / "events.jsonl").read_text().splitlines())
+    )
     events = [
         json.loads(row) for row in (state / "events.jsonl").read_text().splitlines()
     ]
     handoff = next(event for event in events if event["kind"] == "needs-merge")
-    assert handoff["pr"] == "43"
+    assert handoff["pr"] == "44"
     packet_id = receipt.rsplit("/", 1)[-1]
     assert handoff["decision_receipt"] == {
         "receipt_id": json.loads(
             (state / "harvest-packets" / f"{packet_id}.json").read_text()
         )["packet_id"],
-        "bead_id": "sinnix-handoff",
+        "bead_id": "sinnix-refused",
         "reason": "merged by reactor",
     }
 
